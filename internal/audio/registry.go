@@ -277,6 +277,67 @@ func transcriptionProviderDefinitions(base []ProviderDefinition) []ProviderDefin
 	return out
 }
 
+func openAITranscriptionModel(id, name string) ModelInfo {
+	fields := []FieldSchema{
+		stringField("language", "Language", "Optional ISO language hint", false, "", 10),
+		stringField("prompt", "Prompt", "Optional prompt to guide transcription", false, "", 20),
+		enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "text"}, 30),
+	}
+	return ModelInfo{
+		ID:           id,
+		Name:         name,
+		Description:  "OpenAI transcription model",
+		ConfigSchema: ConfigSchema{Fields: fields},
+		Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: fields}},
+	}
+}
+
+func openAIGPTTranscribeModel() ModelInfo {
+	fields := []FieldSchema{
+		stringField("language", "Language", "Optional ISO language hint", false, "", 10),
+		stringField("prompt", "Prompt", "Optional prompt to guide transcription", false, "", 20),
+		numberField("temperature", "Temperature", "Sampling temperature", false, 0, 30),
+		enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "text", "srt", "verbose_json", "vtt"}, 40),
+	}
+	return ModelInfo{
+		ID:           "gpt-transcribe",
+		Name:         "GPT Transcribe",
+		Description:  "OpenAI high-accuracy transcription model",
+		ConfigSchema: ConfigSchema{Fields: fields},
+		Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: fields}},
+	}
+}
+
+func openAITranscriptionDiarizeModel() ModelInfo {
+	fields := []FieldSchema{
+		stringField("language", "Language", "Optional ISO language hint", false, "", 10),
+		enumField("response_format", "Response Format", "Diarized transcription response format", false, []string{"json", "text", "diarized_json"}, 20),
+	}
+	return ModelInfo{
+		ID:           "gpt-4o-transcribe-diarize",
+		Name:         "GPT-4o Transcribe Diarize",
+		Description:  "OpenAI transcription model with speaker labels",
+		ConfigSchema: ConfigSchema{Fields: fields},
+		Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: fields}},
+	}
+}
+
+func openAIWhisperModel() ModelInfo {
+	fields := []FieldSchema{
+		stringField("language", "Language", "Optional ISO language hint", false, "", 10),
+		stringField("prompt", "Prompt", "Optional keyword prompt", false, "", 20),
+		numberField("temperature", "Temperature", "Sampling temperature", false, 0, 30),
+		enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "verbose_json", "text", "srt", "vtt"}, 40),
+	}
+	return ModelInfo{
+		ID:           "whisper-1",
+		Name:         "Whisper",
+		Description:  "OpenAI Whisper transcription model",
+		ConfigSchema: ConfigSchema{Fields: fields},
+		Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: fields}},
+	}
+}
+
 func defaultProviderDefinitions() []ProviderDefinition {
 	edgeVoices := make([]VoiceInfo, 0)
 	for lang, ids := range edgespeech.EdgeTTSVoices {
@@ -369,23 +430,14 @@ func defaultProviderDefinitions() []ProviderDefinition {
 					Formats: []string{"mp3", "opus", "pcm", "wav"},
 				},
 			}},
-			TranscriptionModels: []ModelInfo{{
-				ID:          "gpt-4o-mini-transcribe",
-				Name:        "gpt-4o-mini-transcribe",
-				Description: "Default OpenAI transcription model",
-				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language", "Language", "Optional ISO language hint", false, "", 10),
-					stringField("prompt", "Prompt", "Optional prompt to guide transcription", false, "", 20),
-					numberField("temperature", "Temperature", "Sampling temperature", false, 0, 30),
-					enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "verbose_json", "text", "srt", "vtt"}, 40),
-				}},
-				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language", "Language", "Optional ISO language hint", false, "", 10),
-					stringField("prompt", "Prompt", "Optional prompt to guide transcription", false, "", 20),
-					numberField("temperature", "Temperature", "Sampling temperature", false, 0, 30),
-					enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "verbose_json", "text", "srt", "vtt"}, 40),
-				}}},
-			}},
+			TranscriptionModels: []ModelInfo{
+				openAIGPTTranscribeModel(),
+				openAITranscriptionModel("gpt-4o-transcribe", "GPT-4o Transcribe"),
+				openAITranscriptionModel("gpt-4o-mini-transcribe", "GPT-4o Mini Transcribe"),
+				openAITranscriptionModel("gpt-4o-mini-transcribe-2025-12-15", "GPT-4o Mini Transcribe (2025-12-15)"),
+				openAITranscriptionDiarizeModel(),
+				openAIWhisperModel(),
+			},
 			Factory: func(config map[string]any) (sdk.SpeechProvider, error) {
 				opts := []openaispeech.Option{}
 				if v := configString(config, "api_key"); v != "" {

@@ -1,6 +1,7 @@
 name: OpenRouter Speech
 client_type: openrouter-speech
 icon: openrouter
+base_url: https://openrouter.ai/api/v1
 
 models:
   - model_id: openrouter-tts

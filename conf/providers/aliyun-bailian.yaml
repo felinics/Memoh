@@ -1,9 +1,78 @@
-name: Aliyun Bailian
+name: Alibaba Cloud Model Studio
 client_type: openai-completions
 icon: qwen-color
 base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
+# Alibaba Cloud Model Studio's OpenAI-compatible catalog includes Qwen and
+# selected third-party providers (for example Kimi, MiniMax, DeepSeek, and GLM).
+
 models:
+  - model_id: qwen3.8-max
+    name: Qwen3.8 Max
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+
+  - model_id: qwen3.8-flash
+    name: Qwen3.8 Flash
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+
+  - model_id: qwen3.7-plus
+    name: Qwen3.7 Plus
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+
+  - model_id: deepseek-v4-pro-0813
+    name: DeepSeek V4 Pro
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+
+  - model_id: deepseek-v4-flash-0731
+    name: DeepSeek V4 Flash
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+
+  - model_id: kimi-k3
+    name: Kimi K3
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+
+  - model_id: MiniMax-M3
+    name: MiniMax M3
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 204800
+
+  - model_id: glm-5.3
+    name: GLM-5.3
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+
   - model_id: kimi-k2.5
     name: Kimi K2.5
     type: chat

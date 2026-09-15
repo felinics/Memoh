@@ -38,7 +38,7 @@ const defaultLitellmURL = "https://raw.githubusercontent.com/BerriAI/litellm/mai
 // unreliable.
 var firstPartyProviders = []string{
 	"anthropic", "openai", "google", "xai",
-	"deepseek", "mistral", "moonshot", "qwen", "minimax",
+	"deepseek", "mistral", "moonshot", "aliyun-bailian", "minimax",
 	"openrouter",
 	"azure-openai", "cerebras", "cloudflare", "fireworks",
 	"perplexity", "together", "zai",

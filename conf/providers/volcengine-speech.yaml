@@ -1,6 +1,7 @@
 name: Volcengine Speech
 client_type: volcengine-speech
 icon: volcengine-color
+base_url: https://sami.bytedance.com
 
 models:
   - model_id: sami-tts

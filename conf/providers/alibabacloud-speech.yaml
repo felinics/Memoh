@@ -1,6 +1,7 @@
 name: Alibaba Cloud Speech
 client_type: alibabacloud-speech
 icon: bailian-color
+base_url: wss://dashscope.aliyuncs.com/api-ws/v1/inference/
 
 models:
   - model_id: cosyvoice-tts

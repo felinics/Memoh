@@ -3,7 +3,68 @@ client_type: anthropic-messages
 icon: anthropic
 base_url: https://api.anthropic.com
 
+# Active/recommended Claude API models as of 2026-09-15.
 models:
+  - model_id: claude-fable-5-1
+    name: Claude Fable 5.1
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: adaptive
+      reasoning_off_support: rejected
+      reasoning_efforts: [low, medium, high, max]
+
+  - model_id: claude-opus-5
+    name: Claude Opus 5
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: adaptive
+      reasoning_off_support: low_effort_only
+      reasoning_efforts: [low, medium, high, max]
+
+  - model_id: claude-sonnet-5
+    name: Claude Sonnet 5
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: adaptive
+      reasoning_off_support: accepted
+      reasoning_efforts: [low, medium, high, max]
+
+  - model_id: claude-fable-5
+    name: Claude Fable 5
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: adaptive
+      reasoning_off_support: rejected
+      reasoning_efforts: [low, medium, high, max]
+
+  - model_id: claude-opus-4-8
+    name: Claude Opus 4.8
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: adaptive
+      reasoning_off_support: accepted
+      reasoning_efforts: [low, medium, high, max]
+
+  - model_id: claude-opus-4-7
+    name: Claude Opus 4.7
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: adaptive
+      reasoning_off_support: accepted
+      reasoning_efforts: [low, medium, high, max]
+
   - model_id: claude-opus-4-6
     name: Claude Opus 4.6
     type: chat
@@ -11,22 +72,6 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1000000
       thinking_mode: adaptive
-      # 4.6 defaults to thinking off and accepts thinking{type:"disabled"}, per
-      # Anthropic's per-model table. Declared because nothing about the mode or the
-      # tier list distinguishes it from Fable 5, which rejects the same shape.
-      reasoning_off_support: accepted
-      reasoning_efforts: [low, medium, high, max]
-
-  - model_id: claude-sonnet-4-6
-    name: Claude Sonnet 4.6
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: adaptive
-      # 4.6 defaults to thinking off and accepts thinking{type:"disabled"}, per
-      # Anthropic's per-model table. Declared because nothing about the mode or the
-      # tier list distinguishes it from Fable 5, which rejects the same shape.
       reasoning_off_support: accepted
       reasoning_efforts: [low, medium, high, max]
 
@@ -38,6 +83,16 @@ models:
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
+
+  - model_id: claude-sonnet-4-6
+    name: Claude Sonnet 4.6
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: adaptive
+      reasoning_off_support: accepted
+      reasoning_efforts: [low, medium, high, max]
 
   - model_id: claude-sonnet-4-5-20250929
     name: Claude Sonnet 4.5
@@ -56,37 +111,3 @@ models:
       context_window: 200000
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
-
-  - model_id: claude-opus-4-1-20250805
-    name: Claude Opus 4.1
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: claude-opus-4-20250514
-    name: Claude Opus 4
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: claude-sonnet-4-20250514
-    name: Claude Sonnet 4
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: claude-3-haiku-20240307
-    name: Claude 3 Haiku
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 200000

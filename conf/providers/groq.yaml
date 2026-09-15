@@ -3,17 +3,20 @@ client_type: openai-completions
 icon: groq
 base_url: https://api.groq.com/openai/v1
 
+# Groq production model catalog as of 2026-09-15.
 models:
   - model_id: groq/compound
-    name: Compound
+    name: Groq Compound
     type: chat
     config:
+      compatibilities: [tool-call]
       context_window: 131072
 
   - model_id: groq/compound-mini
-    name: Compound Mini
+    name: Groq Compound Mini
     type: chat
     config:
+      compatibilities: [tool-call]
       context_window: 131072
 
   - model_id: openai/gpt-oss-120b
@@ -30,54 +33,25 @@ models:
       compatibilities: [tool-call, reasoning]
       context_window: 131072
 
-  - model_id: moonshotai/kimi-k2-instruct-0905
-    name: Kimi K2 0905
+  # Non-deprecated preview models are kept available for evaluation; Groq
+  # warns that preview models can be discontinued at short notice.
+  - model_id: minimaxai/minimax-m2.7
+    name: MiniMax M2.7
     type: chat
     config:
-      compatibilities: [tool-call]
-      context_window: 262144
+      compatibilities: [tool-call, reasoning]
+      context_window: 196608
 
-  - model_id: meta-llama/llama-4-scout-17b-16e-instruct
-    name: Llama 4 Scout (17Bx16E)
+  - model_id: qwen/qwen3.8-27b
+    name: Qwen3.8 27B
     type: chat
     config:
+      compatibilities: [tool-call, reasoning]
       context_window: 131072
 
-  - model_id: qwen/qwen3-32b
-    name: Qwen3 32B
+  - model_id: openai/gpt-oss-safeguard-20b
+    name: GPT OSS Safeguard 20B
     type: chat
     config:
       compatibilities: [reasoning]
       context_window: 131072
-
-  - model_id: llama-3.1-8b-instant
-    name: Llama 3.1 8B Instant
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-
-  - model_id: llama-3.3-70b-versatile
-    name: Llama 3.3 70B Versatile
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-
-  - model_id: meta-llama/llama-guard-4-12b
-    name: Llama Guard 4 12B
-    type: chat
-    config:
-      context_window: 131072
-
-  - model_id: meta-llama/llama-prompt-guard-2-22m
-    name: Llama Prompt Guard 2 22M
-    type: chat
-    config:
-      context_window: 512
-
-  - model_id: meta-llama/llama-prompt-guard-2-86m
-    name: Llama Prompt Guard 2 86M
-    type: chat
-    config:
-      context_window: 512

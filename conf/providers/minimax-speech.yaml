@@ -1,6 +1,7 @@
 name: MiniMax Speech
 client_type: minimax-speech
 icon: minimax-color
+base_url: https://api.minimax.io
 
 models:
   - model_id: minimax-tts

@@ -3,6 +3,7 @@ client_type: openai-completions
 icon: "cloudflare"
 base_url: "https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1"
 
+# Model availability depends on the configured Cloudflare account and plan.
 models:
   - model_id: "@cf/aisingapore/gemma-sea-lion-v4-27b-it"
     name: "Gemma Sea Lion V4 27b It"

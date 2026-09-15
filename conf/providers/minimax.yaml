@@ -5,6 +5,7 @@ base_url: https://api.minimaxi.com/v1
 config:
   chat_completions_compat: minimax
 
+# Current MiniMax text models from the OpenAI-compatible API catalog.
 models:
   - model_id: MiniMax-M2.7
     name: MiniMax M2.7
@@ -30,14 +31,13 @@ models:
       context_window: 204800
       thinking_mode: always
 
-  - model_id: MiniMax-M2.5-Lightning
-    name: MiniMax M2.5 Lightning
+  - model_id: MiniMax-M2.5-highspeed
+    name: MiniMax M2.5 Highspeed
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      thinking_mode: always
 
   - model_id: MiniMax-M2.1
     name: MiniMax M2.1
@@ -47,14 +47,13 @@ models:
       context_window: 204800
       thinking_mode: always
 
-  - model_id: MiniMax-M2.1-Lightning
-    name: MiniMax M2.1 Lightning
+  - model_id: MiniMax-M2.1-highspeed
+    name: MiniMax M2.1 Highspeed
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      thinking_mode: always
 
   - model_id: MiniMax-M2
     name: MiniMax M2
@@ -63,26 +62,3 @@ models:
       compatibilities: [tool-call, reasoning]
       context_window: 204800
       thinking_mode: always
-
-  - model_id: MiniMax-M2-Stable
-    name: MiniMax M2 Stable
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 204800
-      thinking_mode: always
-
-  - model_id: MiniMax-M1
-    name: MiniMax M1
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 1000192
-      thinking_mode: always
-
-  - model_id: MiniMax-Text-01
-    name: MiniMax Text 01
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 1000192

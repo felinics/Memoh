@@ -3,524 +3,1060 @@ client_type: openai-completions
 icon: openrouter
 base_url: https://openrouter.ai/api/v1
 
+# Generated from OpenRouter GET /api/v1/models on 2026-09-15. The endpoint
+# returns the active catalog; entries are ordered by its published created timestamp.
 models:
-  - model_id: openrouter/auto
-    name: Auto (best for prompt)
+  - model_id: "~deepseek/deepseek-pro-latest"
+    name: "DeepSeek: DeepSeek Pro Latest"
     type: chat
     config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "~deepseek/deepseek-flash-latest"
+    name: "DeepSeek: DeepSeek Flash Latest"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "inference-net/schematron-v2-turbo"
+    name: "Inference.net: Schematron V2 Turbo"
+    type: chat
+    config:
+      context_window: 128000
+  - model_id: "inference-net/schematron-v2-small"
+    name: "Inference.net: Schematron V2 Small"
+    type: chat
+    config:
+      context_window: 128000
+  - model_id: "~openai/gpt-astra-latest"
+    name: "OpenAI: GPT Astra Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "~openai/gpt-sol-latest"
+    name: "OpenAI: GPT Sol Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "~openai/gpt-terra-latest"
+    name: "OpenAI: GPT Terra Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "~openai/gpt-luna-latest"
+    name: "OpenAI: GPT Luna Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "sakana/fugu-ultra-v2"
+    name: "Sakana: Fugu Ultra v2"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high]
+  - model_id: "sakana/fugu-max"
+    name: "Sakana: Fugu Max"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high]
+  - model_id: "inclusionai/ling-3.0-flash-vl:free"
+    name: "inclusionAI: Ling 3.0 Flash VL (free)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "inclusionai/ling-3.0-flash-vl"
+    name: "inclusionAI: Ling 3.0 Flash VL"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "deepseek/deepseek-v4.1-flash"
+    name: "DeepSeek: DeepSeek V4.1 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "inception/mercury-2.5"
+    name: "Inception: Mercury 2.5"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 260000
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low]
+  - model_id: "nex-agi/nex-n2.5-mini:free"
+    name: "Nex AGI: Nex-N2.5-Mini (free)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium]
+  - model_id: "nex-agi/nex-n2.5-pro:free"
+    name: "Nex AGI: Nex-N2.5-Pro (free)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium]
+  - model_id: "openai/gpt-6-astra:batch"
+    name: "OpenAI: GPT-6 Astra (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-6-astra"
+    name: "OpenAI: GPT-6 Astra"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-6-astra-pro:batch"
+    name: "OpenAI: GPT-6 Astra Pro (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-6-astra-pro"
+    name: "OpenAI: GPT-6 Astra Pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "inclusionai/ling-3.0-flash-sante:free"
+    name: "inclusionAI: Ling 3.0 Flash Sante (free)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.8-max-0902"
+    name: "Qwen: Qwen3.8 Max (0902)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low, minimal]
+  - model_id: "meta/muse-spark-1.3-contributor"
+    name: "Meta: Muse Spark 1.3 Contributor"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low, minimal]
+  - model_id: "meta/muse-spark-1.3"
+    name: "Meta: Muse Spark 1.3"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low, minimal]
+  - model_id: "google/gemini-3.8-flash:batch"
+    name: "Google: Gemini 3.8 Flash (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "google/gemini-3.8-flash"
+    name: "Google: Gemini 3.8 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "anthropic/claude-fable-5.1:batch"
+    name: "Anthropic: Claude Fable 5.1 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "anthropic/claude-fable-5.1"
+    name: "Anthropic: Claude Fable 5.1"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "ibm-granite/granite-4.2-8b"
+    name: "IBM: Granite 4.2 8B"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+      reasoning_efforts: [high, low]
+  - model_id: "tencent/hy4-preview"
+    name: "Tencent: Hy4 preview"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [high, low]
+  - model_id: "inclusionai/ling-3.0-flash-fin:free"
+    name: "inclusionAI: Ling 3.0 Flash Fin (free)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "inclusionai/ling-3.0-flash-fin"
+    name: "inclusionAI: Ling 3.0 Flash Fin"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "~z-ai/glm-flash-latest"
+    name: "Z.ai: GLM Flash Latest"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1310720
+      thinking_mode: always
+      reasoning_efforts: [max, high, low]
+  - model_id: "qwen/qwen3.8-flash"
+    name: "Qwen: Qwen3.8 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "z-ai/glm-5.3-flash:batch"
+    name: "Z.ai: GLM 5.3 Flash (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [max, high, low]
+  - model_id: "z-ai/glm-5.3-flash"
+    name: "Z.ai: GLM 5.3 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1310720
+      thinking_mode: always
+      reasoning_efforts: [max, high, low]
+  - model_id: "meta/muse-spark-1.2-contributor"
+    name: "Meta: Muse Spark 1.2 Contributor"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low, minimal]
+  - model_id: "deepseek/deepseek-v4-flash-vision-exp:batch"
+    name: "DeepSeek: DeepSeek V4 Flash Vision Exp (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "deepseek/deepseek-v4-flash-vision-exp"
+    name: "DeepSeek: DeepSeek V4 Flash Vision Exp"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "tencent/hy-mt2-1.8b"
+    name: "Tencent: Hy-MT2-1.8B"
+    type: chat
+    config:
+      context_window: 8192
+  - model_id: "tencent/hy-mt2-30b-a3b"
+    name: "Tencent: Hy-MT2-30B-A3B"
+    type: chat
+    config:
+      context_window: 8192
+  - model_id: "~z-ai/glm-latest"
+    name: "Z.ai: GLM Latest"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1310720
+      thinking_mode: always
+      reasoning_efforts: [max, high, low]
+  - model_id: "tencent/hy-mt2-7b"
+    name: "Tencent: Hy-MT2-7B"
+    type: chat
+    config:
+      context_window: 8192
+  - model_id: "z-ai/glm-5.3:batch"
+    name: "Z.ai: GLM 5.3 (batch)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [max, high, low]
+  - model_id: "z-ai/glm-5.3"
+    name: "Z.ai: GLM 5.3"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1310720
+      thinking_mode: always
+      reasoning_efforts: [max, high, low]
+  - model_id: "qwen/qwen3.8-27b"
+    name: "Qwen: Qwen3.8 27B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, medium, low]
+  - model_id: "dots-studio/dots-3-note-preview:free"
+    name: "Dots Studio: Dots3-Note Preview (free)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 512000
+      thinking_mode: toggle
+  - model_id: "google/gemini-3.7-flash:batch"
+    name: "Google: Gemini 3.7 Flash (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "google/gemini-3.7-flash"
+    name: "Google: Gemini 3.7 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "bytedance-seed/seed-2-1-turbo"
+    name: "ByteDance Seed: Seed 2.1 Turbo"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.8-2.4t-a95b:batch"
+    name: "Qwen: Qwen3.8 2.4T A95B (batch)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1010000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, medium, low]
+  - model_id: "qwen/qwen3.8-2.4t-a95b"
+    name: "Qwen: Qwen3.8 2.4T A95B"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [xhigh, medium, low]
+  - model_id: "bytedance-seed/seed-2.0-code"
+    name: "ByteDance Seed: Seed-2.0-Code"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low]
+  - model_id: "deepseek/deepseek-v4-pro-0813:batch"
+    name: "DeepSeek: DeepSeek V4 Pro 0813 (batch)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "deepseek/deepseek-v4-pro-0813"
+    name: "DeepSeek: DeepSeek V4 Pro 0813"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "x-ai/grok-4.6"
+    name: "SpaceXAI: Grok 4.6"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 500000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "liquid/lfm-2.5-2.6b:free"
+    name: "LiquidAI: LFM2.5-2.6B (free)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 65536
+      thinking_mode: always
+  - model_id: "nvidia/nemotron-3.5-lightning:free"
+    name: "NVIDIA: Nemotron 3.5 Lightning (free)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "nvidia/nemotron-3.5-lightning"
+    name: "NVIDIA: Nemotron 3.5 Lightning"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "sakana/sakana-namazu"
+    name: "Sakana: Sakana Namazu"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high]
+  - model_id: "upstage/solar-pro4"
+    name: "Upstage: Solar Pro 4"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 524288
+      thinking_mode: toggle
+  - model_id: "meta/muse-glimmer-30b:batch"
+    name: "Meta: Muse Glimmer 30B (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "meta/muse-glimmer-30b"
+    name: "Meta: Muse Glimmer 30B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "meta/muse-spark-1.2"
+    name: "Meta: Muse Spark 1.2"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low, minimal]
+  - model_id: "~deepseek/deepseek-v4-flash-latest"
+    name: "DeepSeek: DeepSeek V4 Flash Latest"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1310720
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "deepseek/deepseek-v4-flash-0731:batch"
+    name: "DeepSeek: DeepSeek V4 Flash 0731 (batch)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "deepseek/deepseek-v4-flash-0731"
+    name: "DeepSeek: DeepSeek V4 Flash 0731"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1310720
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "thinkingmachines/inkling-small:free"
+    name: "Thinking Machines: Inkling Small (free)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low, minimal]
+  - model_id: "thinkingmachines/inkling-small:batch"
+    name: "Thinking Machines: Inkling Small (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 524288
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low, minimal]
+  - model_id: "thinkingmachines/inkling-small"
+    name: "Thinking Machines: Inkling Small"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low, minimal]
+  - model_id: "qwen/qwen3.7-flash"
+    name: "Qwen: Qwen3.7 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-opus-5:batch"
+    name: "Claude Opus 5 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "anthropic/claude-opus-5"
+    name: "Claude Opus 5"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "inclusionai/ling-3.0-flash"
+    name: "inclusionAI: Ling 3.0 Flash"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "poolside/laguna-s-2.1:free"
+    name: "Poolside: Laguna S 2.1 (free)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "poolside/laguna-s-2.1"
+    name: "Poolside: Laguna S 2.1"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+  - model_id: "google/gemini-3.6-flash:batch"
+    name: "Google: Gemini 3.6 Flash (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "google/gemini-3.6-flash"
+    name: "Google: Gemini 3.6 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "google/gemini-3.5-flash-lite:batch"
+    name: "Google: Gemini 3.5 Flash Lite (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "google/gemini-3.5-flash-lite"
+    name: "Google: Gemini 3.5 Flash Lite"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "meituan/longcat-2.0"
+    name: "Meituan: LongCat 2.0"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048756
+      thinking_mode: toggle
+  - model_id: "thinkingmachines/inkling:free"
+    name: "Thinking Machines: Inkling (free)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low, minimal]
+  - model_id: "thinkingmachines/inkling:batch"
+    name: "Thinking Machines: Inkling (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 524288
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low, minimal]
+  - model_id: "thinkingmachines/inkling"
+    name: "Thinking Machines: Inkling"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low, minimal]
+  - model_id: "openrouter/auto-beta"
+    name: "Auto Router (Beta)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, image-output, tool-call, reasoning]
       context_window: 2000000
-  - model_id: "ai21/jamba-large-1.7"
-    name: "AI21: Jamba Large 1.7"
+      thinking_mode: toggle
+  - model_id: "moonshotai/kimi-k3:batch"
+    name: "MoonshotAI: Kimi K3 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "moonshotai/kimi-k3"
+    name: "MoonshotAI: Kimi K3"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "meta/muse-spark-1.1"
+    name: "Meta: Muse Spark 1.1"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low, minimal]
+  - model_id: "kwaipilot/kat-coder-pro-v2.5"
+    name: "Kwaipilot: KAT-Coder-Pro V2.5"
     type: chat
     config:
       compatibilities: [tool-call]
-      context_window: 256000
-  - model_id: "aion-labs/aion-1.0"
-    name: "AionLabs: Aion-1.0"
+      context_window: 262144
+  - model_id: "openai/gpt-5.6-luna-pro:batch"
+    name: "OpenAI: GPT-5.6 Luna Pro (batch)"
     type: chat
     config:
-      compatibilities: [reasoning]
-      context_window: 131072
-  - model_id: "aion-labs/aion-1.0-mini"
-    name: "AionLabs: Aion-1.0-Mini"
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-luna-pro"
+    name: "OpenAI: GPT-5.6 Luna Pro"
     type: chat
     config:
-      compatibilities: [reasoning]
-      context_window: 131072
-  - model_id: "aion-labs/aion-2.0"
-    name: "AionLabs: Aion-2.0"
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-luna:batch"
+    name: "OpenAI: GPT-5.6 Luna (batch)"
     type: chat
     config:
-      compatibilities: [reasoning]
-      context_window: 131072
-  - model_id: "aion-labs/aion-rp-llama-3.1-8b"
-    name: "AionLabs: Aion-RP 1.0 (8B)"
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-luna"
+    name: "OpenAI: GPT-5.6 Luna"
     type: chat
     config:
-      context_window: 32768
-  - model_id: "alfredpros/codellama-7b-instruct-solidity"
-    name: "AlfredPros: CodeLLaMa 7B Instruct Solidity"
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-terra-pro:batch"
+    name: "OpenAI: GPT-5.6 Terra Pro (batch)"
     type: chat
     config:
-      context_window: 4096
-  - model_id: "alibaba/tongyi-deepresearch-30b-a3b"
-    name: "Tongyi DeepResearch 30B A3B"
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-terra-pro"
+    name: "OpenAI: GPT-5.6 Terra Pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-terra:batch"
+    name: "OpenAI: GPT-5.6 Terra (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-terra"
+    name: "OpenAI: GPT-5.6 Terra"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-sol-pro:batch"
+    name: "OpenAI: GPT-5.6 Sol Pro (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-sol-pro"
+    name: "OpenAI: GPT-5.6 Sol Pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-sol:batch"
+    name: "OpenAI: GPT-5.6 Sol (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.6-sol"
+    name: "OpenAI: GPT-5.6 Sol"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "x-ai/grok-4.5"
+    name: "SpaceXAI: Grok 4.5"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 500000
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "~x-ai/grok-latest"
+    name: "xAI: Grok Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 500000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "aion-labs/aion-3.0-mini"
+    name: "AionLabs: Aion-3.0-Mini"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 131072
-  - model_id: "allenai/olmo-3-32b-think"
-    name: "AllenAI: Olmo 3 32B Think"
+      thinking_mode: always
+  - model_id: "aion-labs/aion-3.0"
+    name: "AionLabs: Aion-3.0"
     type: chat
     config:
-      compatibilities: [reasoning]
-      context_window: 65536
-  - model_id: "alpindale/goliath-120b"
-    name: "Goliath 120B"
-    type: chat
-    config:
-      context_window: 6144
-  - model_id: "amazon/nova-2-lite-v1"
-    name: "Amazon: Nova 2 Lite"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "amazon/nova-lite-v1"
-    name: "Amazon: Nova Lite 1.0"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 300000
-  - model_id: "amazon/nova-micro-v1"
-    name: "Amazon: Nova Micro 1.0"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: "amazon/nova-premier-v1"
-    name: "Amazon: Nova Premier 1.0"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 1000000
-  - model_id: "amazon/nova-pro-v1"
-    name: "Amazon: Nova Pro 1.0"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 300000
-  - model_id: "anthracite-org/magnum-v4-72b"
-    name: "Magnum v4 72B"
-    type: chat
-    config:
-      context_window: 16384
-  - model_id: "anthropic/claude-3-haiku"
-    name: "Anthropic: Claude 3 Haiku"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 200000
-  - model_id: "anthropic/claude-3.5-haiku"
-    name: "Anthropic: Claude 3.5 Haiku"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 200000
-  - model_id: "anthropic/claude-3.7-sonnet"
-    name: "Anthropic: Claude 3.7 Sonnet"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "anthropic/claude-3.7-sonnet:thinking"
-    name: "Anthropic: Claude 3.7 Sonnet (thinking)"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 200000
-  - model_id: "anthropic/claude-haiku-4.5"
-    name: "Anthropic: Claude Haiku 4.5"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "anthropic/claude-opus-4"
-    name: "Anthropic: Claude Opus 4"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "anthropic/claude-opus-4.1"
-    name: "Anthropic: Claude Opus 4.1"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "anthropic/claude-opus-4.5"
-    name: "Anthropic: Claude Opus 4.5"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "anthropic/claude-opus-4.6"
-    name: "Anthropic: Claude Opus 4.6"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: adaptive
-      reasoning_efforts: [low, medium, high, max]
-  - model_id: "anthropic/claude-opus-4.6-fast"
-    name: "Anthropic: Claude Opus 4.6 (Fast)"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "anthropic/claude-opus-4.7"
-    name: "Anthropic: Claude Opus 4.7"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: adaptive
-      reasoning_efforts: [low, medium, high, xhigh, max]
-  - model_id: "anthropic/claude-sonnet-4"
-    name: "Anthropic: Claude Sonnet 4"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "anthropic/claude-sonnet-4.5"
-    name: "Anthropic: Claude Sonnet 4.5"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "anthropic/claude-sonnet-4.6"
-    name: "Anthropic: Claude Sonnet 4.6"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: adaptive
-      reasoning_efforts: [low, medium, high, max]
-  - model_id: "arcee-ai/coder-large"
-    name: "Arcee AI: Coder Large"
-    type: chat
-    config:
-      context_window: 32768
-  - model_id: "arcee-ai/maestro-reasoning"
-    name: "Arcee AI: Maestro Reasoning"
-    type: chat
-    config:
+      compatibilities: [tool-call, reasoning]
       context_window: 131072
-  - model_id: "arcee-ai/spotlight"
-    name: "Arcee AI: Spotlight"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 131072
-  - model_id: "arcee-ai/trinity-large-preview"
-    name: "Arcee AI: Trinity Large Preview"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131000
-  - model_id: "arcee-ai/trinity-large-thinking"
-    name: "Arcee AI: Trinity Large Thinking"
+      thinking_mode: always
+  - model_id: "tencent/hy3"
+    name: "Tencent: Hy3"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 262144
-  - model_id: "arcee-ai/trinity-mini"
-    name: "Arcee AI: Trinity Mini"
+      thinking_mode: toggle
+      reasoning_efforts: [high, low]
+  - model_id: "poolside/laguna-xs-2.1:free"
+    name: "Poolside: Laguna XS 2.1 (free)"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "arcee-ai/virtuoso-large"
-    name: "Arcee AI: Virtuoso Large"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "baidu/cobuddy:free"
-    name: "Baidu Qianfan: CoBuddy (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "baidu/ernie-4.5-21b-a3b"
-    name: "Baidu: ERNIE 4.5 21B A3B"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 120000
-  - model_id: "baidu/ernie-4.5-21b-a3b-thinking"
-    name: "Baidu: ERNIE 4.5 21B A3B Thinking"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 131072
-  - model_id: "baidu/ernie-4.5-300b-a47b"
-    name: "Baidu: ERNIE 4.5 300B A47B "
-    type: chat
-    config:
-      context_window: 123000
-  - model_id: "baidu/ernie-4.5-vl-28b-a3b"
-    name: "Baidu: ERNIE 4.5 VL 28B A3B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 30000
-  - model_id: "baidu/ernie-4.5-vl-424b-a47b"
-    name: "Baidu: ERNIE 4.5 VL 424B A47B "
-    type: chat
-    config:
-      compatibilities: [vision, reasoning]
-      context_window: 123000
-  - model_id: "baidu/qianfan-ocr-fast:free"
-    name: "Baidu: Qianfan-OCR-Fast (free)"
-    type: chat
-    config:
-      compatibilities: [vision, reasoning]
-      context_window: 65536
-  - model_id: "bytedance-seed/seed-1.6"
-    name: "ByteDance Seed: Seed 1.6"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
-  - model_id: "bytedance-seed/seed-1.6-flash"
-    name: "ByteDance Seed: Seed 1.6 Flash"
+      thinking_mode: toggle
+  - model_id: "poolside/laguna-xs-2.1"
+    name: "Poolside: Laguna XS 2.1"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [tool-call, reasoning]
       context_window: 262144
-  - model_id: "bytedance-seed/seed-2.0-lite"
-    name: "ByteDance Seed: Seed-2.0-Lite"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "bytedance-seed/seed-2.0-mini"
-    name: "ByteDance Seed: Seed-2.0-Mini"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "bytedance/ui-tars-1.5-7b"
-    name: "ByteDance: UI-TARS 7B "
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 128000
-  - model_id: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
-    name: "Venice: Uncensored (free)"
-    type: chat
-    config:
-      context_window: 32768
-  - model_id: "cohere/command-a"
-    name: "Cohere: Command A"
-    type: chat
-    config:
-      context_window: 256000
-  - model_id: "cohere/command-r-08-2024"
-    name: "Cohere: Command R (08-2024)"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: "cohere/command-r-plus-08-2024"
-    name: "Cohere: Command R+ (08-2024)"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: "cohere/command-r7b-12-2024"
-    name: "Cohere: Command R7B (12-2024)"
-    type: chat
-    config:
-      context_window: 128000
-  - model_id: "deepcogito/cogito-v2.1-671b"
-    name: "Deep Cogito: Cogito v2.1 671B"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 128000
-  - model_id: "deepseek/deepseek-chat"
-    name: "DeepSeek: DeepSeek V3"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 163840
-  - model_id: "deepseek/deepseek-chat-v3-0324"
-    name: "DeepSeek: DeepSeek V3 0324"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 163840
-  - model_id: "deepseek/deepseek-chat-v3.1"
-    name: "DeepSeek: DeepSeek V3.1"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 32768
-  - model_id: "deepseek/deepseek-r1"
-    name: "DeepSeek: R1"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 64000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "deepseek/deepseek-r1-0528"
-    name: "DeepSeek: R1 0528"
+  - model_id: "anthropic/claude-sonnet-5:batch"
+    name: "Anthropic: Claude Sonnet 5 (batch)"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 163840
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "deepseek/deepseek-r1-distill-llama-70b"
-    name: "DeepSeek: R1 Distill Llama 70B"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 131072
-  - model_id: "deepseek/deepseek-r1-distill-qwen-32b"
-    name: "DeepSeek: R1 Distill Qwen 32B"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 32768
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "deepseek/deepseek-v3.1-terminus"
-    name: "DeepSeek: DeepSeek V3.1 Terminus"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 163840
-  - model_id: "deepseek/deepseek-v3.2"
-    name: "DeepSeek: DeepSeek V3.2"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "deepseek/deepseek-v3.2-exp"
-    name: "DeepSeek: DeepSeek V3.2 Exp"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 163840
-  - model_id: "deepseek/deepseek-v3.2-speciale"
-    name: "DeepSeek: DeepSeek V3.2 Speciale"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 163840
-  - model_id: "deepseek/deepseek-v4-flash"
-    name: "DeepSeek: DeepSeek V4 Flash"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "deepseek/deepseek-v4-pro"
-    name: "DeepSeek: DeepSeek V4 Pro"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "essentialai/rnj-1-instruct"
-    name: "EssentialAI: Rnj 1 Instruct"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 32768
-  - model_id: "google/gemini-2.0-flash-001"
-    name: "Google: Gemini 2.0 Flash"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1000000
-  - model_id: "google/gemini-2.0-flash-lite-001"
-    name: "Google: Gemini 2.0 Flash Lite"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 1048576
-  - model_id: "google/gemini-2.5-flash"
-    name: "Google: Gemini 2.5 Flash"
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "anthropic/claude-sonnet-5"
+    name: "Anthropic: Claude Sonnet 5"
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
+      context_window: 1000000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemini-2.5-flash-image"
-    name: "Google: Nano Banana (Gemini 2.5 Flash Image)"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, image-output]
-      context_window: 32768
-  - model_id: "google/gemini-2.5-flash-lite"
-    name: "Google: Gemini 2.5 Flash Lite"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemini-2.5-flash-lite-preview-09-2025"
-    name: "Google: Gemini 2.5 Flash Lite Preview 09-2025"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemini-2.5-pro"
-    name: "Google: Gemini 2.5 Pro"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemini-2.5-pro-preview"
-    name: "Google: Gemini 2.5 Pro Preview 06-05"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1048576
-  - model_id: "google/gemini-2.5-pro-preview-05-06"
-    name: "Google: Gemini 2.5 Pro Preview 05-06"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1048576
-  - model_id: "google/gemini-3-flash-preview"
-    name: "Google: Gemini 3 Flash Preview"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemini-3-pro-image-preview"
-    name: "Google: Nano Banana Pro (Gemini 3 Pro Image Preview)"
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "google/gemini-3.1-flash-lite-image"
+    name: "Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)"
     type: chat
     config:
       compatibilities: [vision, image-output, reasoning]
       context_window: 65536
-  - model_id: "google/gemini-3.1-flash-image-preview"
-    name: "Google: Nano Banana 2 (Gemini 3.1 Flash Image Preview)"
+      thinking_mode: toggle
+      reasoning_efforts: [high, minimal]
+  - model_id: "sakana/fugu-ultra"
+    name: "Sakana: Fugu Ultra"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high]
+  - model_id: "google/gemini-3.1-flash-image"
+    name: "Google: Nano Banana 2 (Gemini 3.1 Flash Image)"
     type: chat
     config:
       compatibilities: [vision, image-output, reasoning]
-      context_window: 65536
+      context_window: 131072
+      thinking_mode: toggle
+      reasoning_efforts: [high, minimal]
+  - model_id: "google/gemini-3-pro-image"
+    name: "Google: Nano Banana Pro (Gemini 3 Pro Image)"
+    type: chat
+    config:
+      compatibilities: [vision, image-output, tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: always
+  - model_id: "cohere/north-mini-code:free"
+    name: "Cohere: North Mini Code (free)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 256000
+      thinking_mode: toggle
+  - model_id: "z-ai/glm-5.2:batch"
+    name: "Z.ai: GLM 5.2 (batch)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high]
+  - model_id: "z-ai/glm-5.2"
+    name: "Z.ai: GLM 5.2"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high]
+  - model_id: "openrouter/fusion"
+    name: "OpenRouter: Fusion"
+    type: chat
+    config:
+      context_window: 1000000
+  - model_id: "moonshotai/kimi-k2.7-code"
+    name: "MoonshotAI: Kimi K2.7 Code"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: always
+  - model_id: "~anthropic/claude-fable-latest"
+    name: "Anthropic: Claude Fable Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "anthropic/claude-fable-5:batch"
+    name: "Anthropic: Claude Fable 5 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "anthropic/claude-fable-5"
+    name: "Anthropic: Claude Fable 5"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: always
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "nvidia/nemotron-3.5-content-safety:free"
+    name: "NVIDIA: Nemotron 3.5 Content Safety (free)"
+    type: chat
+    config:
+      compatibilities: [vision, reasoning]
+      context_window: 128000
+      thinking_mode: toggle
+  - model_id: "nvidia/nemotron-3.5-content-safety"
+    name: "NVIDIA: Nemotron 3.5 Content Safety"
+    type: chat
+    config:
+      compatibilities: [vision, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "nvidia/nemotron-3-ultra-550b-a55b:free"
+    name: "NVIDIA: Nemotron 3 Ultra (free)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium]
+  - model_id: "nvidia/nemotron-3-ultra-550b-a55b"
+    name: "NVIDIA: Nemotron 3 Ultra"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium]
+  - model_id: "qwen/qwen3.7-plus"
+    name: "Qwen: Qwen3.7 Plus"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "minimax/minimax-m3:batch"
+    name: "MiniMax: MiniMax M3 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 524288
+      thinking_mode: toggle
+  - model_id: "minimax/minimax-m3"
+    name: "MiniMax: MiniMax M3"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+  - model_id: "stepfun/step-3.7-flash"
+    name: "StepFun: Step 3.7 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "anthropic/claude-opus-4.8:batch"
+    name: "Anthropic: Claude Opus 4.8 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "anthropic/claude-opus-4.8"
+    name: "Anthropic: Claude Opus 4.8"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "qwen/qwen3.7-max"
+    name: "Qwen: Qwen3.7 Max"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "x-ai/grok-build-0.1"
+    name: "SpaceXAI: Grok Build 0.1"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 256000
+      thinking_mode: always
+  - model_id: "google/gemini-3.5-flash:batch"
+    name: "Google: Gemini 3.5 Flash (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "google/gemini-3.5-flash"
+    name: "Google: Gemini 3.5 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "perceptron/perceptron-mk1"
+    name: "Perceptron: Perceptron Mk1"
+    type: chat
+    config:
+      compatibilities: [vision, reasoning]
+      context_window: 32768
+      thinking_mode: toggle
+  - model_id: "google/gemini-3.1-flash-lite:batch"
+    name: "Google: Gemini 3.1 Flash Lite (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low, minimal]
   - model_id: "google/gemini-3.1-flash-lite"
     name: "Google: Gemini 3.1 Flash Lite"
     type: chat
@@ -528,912 +1064,158 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1048576
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemini-3.1-flash-lite-preview"
-    name: "Google: Gemini 3.1 Flash Lite Preview"
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "openai/gpt-chat-latest"
+    name: "OpenAI: GPT Chat Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 400000
+  - model_id: "x-ai/grok-4.3:batch"
+    name: "SpaceXAI: Grok 4.3 (batch)"
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemini-3.1-pro-preview"
-    name: "Google: Gemini 3.1 Pro Preview"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemini-3.1-pro-preview-customtools"
-    name: "Google: Gemini 3.1 Pro Preview Custom Tools"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemma-2-27b-it"
-    name: "Google: Gemma 2 27B"
-    type: chat
-    config:
-      context_window: 8192
-  - model_id: "google/gemma-3-12b-it"
-    name: "Google: Gemma 3 12B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-  - model_id: "google/gemma-3-27b-it"
-    name: "Google: Gemma 3 27B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-  - model_id: "google/gemma-3-4b-it"
-    name: "Google: Gemma 3 4B"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 131072
-  - model_id: "google/gemma-3n-e4b-it"
-    name: "Google: Gemma 3n 4B"
-    type: chat
-    config:
-      context_window: 32768
-  - model_id: "google/gemma-4-26b-a4b-it"
-    name: "Google: Gemma 4 26B A4B "
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemma-4-26b-a4b-it:free"
-    name: "Google: Gemma 4 26B A4B  (free)"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "google/gemma-4-31b-it"
-    name: "Google: Gemma 4 31B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "google/gemma-4-31b-it:free"
-    name: "Google: Gemma 4 31B (free)"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "google/lyria-3-clip-preview"
-    name: "Google: Lyria 3 Clip Preview"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 1048576
-  - model_id: "google/lyria-3-pro-preview"
-    name: "Google: Lyria 3 Pro Preview"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 1048576
-  - model_id: "gryphe/mythomax-l2-13b"
-    name: "MythoMax 13B"
-    type: chat
-    config:
-      context_window: 4096
-  - model_id: "ibm-granite/granite-4.0-h-micro"
-    name: "IBM: Granite 4.0 Micro"
-    type: chat
-    config:
-      context_window: 131000
-  - model_id: "ibm-granite/granite-4.1-8b"
-    name: "IBM: Granite 4.1 8B"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "inception/mercury-2"
-    name: "Inception: Mercury 2"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 128000
-  - model_id: "inclusionai/ling-2.6-1t"
-    name: "inclusionAI: Ling-2.6-1T"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 262144
-  - model_id: "inclusionai/ling-2.6-flash"
-    name: "inclusionAI: Ling-2.6-flash"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 262144
-  - model_id: "inclusionai/ring-2.6-1t:free"
-    name: "inclusionAI: Ring-2.6-1T (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "inflection/inflection-3-pi"
-    name: "Inflection: Inflection 3 Pi"
-    type: chat
-    config:
-      context_window: 8000
-  - model_id: "inflection/inflection-3-productivity"
-    name: "Inflection: Inflection 3 Productivity"
-    type: chat
-    config:
-      context_window: 8000
-  - model_id: "kwaipilot/kat-coder-pro-v2"
-    name: "Kwaipilot: KAT-Coder-Pro V2"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 256000
-  - model_id: "liquid/lfm-2-24b-a2b"
-    name: "LiquidAI: LFM2-24B-A2B"
-    type: chat
-    config:
-      context_window: 32768
-  - model_id: "liquid/lfm-2.5-1.2b-instruct:free"
-    name: "LiquidAI: LFM2.5-1.2B-Instruct (free)"
-    type: chat
-    config:
-      context_window: 32768
-  - model_id: "liquid/lfm-2.5-1.2b-thinking:free"
-    name: "LiquidAI: LFM2.5-1.2B-Thinking (free)"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 32768
-  - model_id: "mancer/weaver"
-    name: "Mancer: Weaver (alpha)"
-    type: chat
-    config:
-      context_window: 8000
-  - model_id: "meta-llama/llama-3-70b-instruct"
-    name: "Meta: Llama 3 70B Instruct"
-    type: chat
-    config:
-      context_window: 8192
-  - model_id: "meta-llama/llama-3-8b-instruct"
-    name: "Meta: Llama 3 8B Instruct"
-    type: chat
-    config:
-      context_window: 8192
-  - model_id: "meta-llama/llama-3.1-70b-instruct"
-    name: "Meta: Llama 3.1 70B Instruct"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "meta-llama/llama-3.1-8b-instruct"
-    name: "Meta: Llama 3.1 8B Instruct"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 16384
-  - model_id: "meta-llama/llama-3.2-11b-vision-instruct"
-    name: "Meta: Llama 3.2 11B Vision Instruct"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 131072
-  - model_id: "meta-llama/llama-3.2-1b-instruct"
-    name: "Meta: Llama 3.2 1B Instruct"
-    type: chat
-    config:
-      context_window: 60000
-  - model_id: "meta-llama/llama-3.2-3b-instruct"
-    name: "Meta: Llama 3.2 3B Instruct"
-    type: chat
-    config:
-      context_window: 80000
-  - model_id: "meta-llama/llama-3.2-3b-instruct:free"
-    name: "Meta: Llama 3.2 3B Instruct (free)"
-    type: chat
-    config:
-      context_window: 131072
-  - model_id: "meta-llama/llama-3.3-70b-instruct"
-    name: "Meta: Llama 3.3 70B Instruct"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "meta-llama/llama-3.3-70b-instruct:free"
-    name: "Meta: Llama 3.3 70B Instruct (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 65536
-  - model_id: "meta-llama/llama-4-maverick"
-    name: "Meta: Llama 4 Maverick"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 1048576
-  - model_id: "meta-llama/llama-4-scout"
-    name: "Meta: Llama 4 Scout"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 327680
-  - model_id: "meta-llama/llama-guard-3-8b"
-    name: "Llama Guard 3 8B"
-    type: chat
-    config:
-      context_window: 131072
-  - model_id: "meta-llama/llama-guard-4-12b"
-    name: "Meta: Llama Guard 4 12B"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 163840
-  - model_id: "microsoft/phi-4"
-    name: "Microsoft: Phi 4"
-    type: chat
-    config:
-      context_window: 16384
-  - model_id: "microsoft/phi-4-mini-instruct"
-    name: "Microsoft: Phi 4 Mini Instruct"
-    type: chat
-    config:
-      context_window: 128000
-  - model_id: "microsoft/wizardlm-2-8x22b"
-    name: "WizardLM-2 8x22B"
-    type: chat
-    config:
-      context_window: 65535
-  - model_id: "minimax/minimax-01"
-    name: "MiniMax: MiniMax-01"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 1000192
-  - model_id: "minimax/minimax-m1"
-    name: "MiniMax: MiniMax M1"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
       context_window: 1000000
-  - model_id: "minimax/minimax-m2"
-    name: "MiniMax: MiniMax M2"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 196608
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "minimax/minimax-m2-her"
-    name: "MiniMax: MiniMax M2-her"
+      reasoning_efforts: [high, medium, low]
+  - model_id: "x-ai/grok-4.3"
+    name: "SpaceXAI: Grok 4.3"
     type: chat
     config:
-      context_window: 65536
-  - model_id: "minimax/minimax-m2.1"
-    name: "MiniMax: MiniMax M2.1"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 196608
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "minimax/minimax-m2.5"
-    name: "MiniMax: MiniMax M2.5"
+      reasoning_efforts: [high, medium, low]
+  - model_id: "mistralai/mistral-medium-3-5:batch"
+    name: "Mistral: Mistral Medium 3.5 (batch)"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 196608
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 262144
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "minimax/minimax-m2.5:free"
-    name: "MiniMax: MiniMax M2.5 (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 196608
-  - model_id: "minimax/minimax-m2.7"
-    name: "MiniMax: MiniMax M2.7"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 196608
-      thinking_mode: none
-  - model_id: "mistralai/codestral-2508"
-    name: "Mistral: Codestral 2508"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 256000
-  - model_id: "mistralai/devstral-2512"
-    name: "Mistral: Devstral 2 2512"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 262144
-  - model_id: "mistralai/devstral-medium"
-    name: "Mistral: Devstral Medium"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "mistralai/devstral-small"
-    name: "Mistral: Devstral Small 1.1"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "mistralai/ministral-14b-2512"
-    name: "Mistral: Ministral 3 14B 2512"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 262144
-  - model_id: "mistralai/ministral-3b-2512"
-    name: "Mistral: Ministral 3 3B 2512"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-  - model_id: "mistralai/ministral-8b-2512"
-    name: "Mistral: Ministral 3 8B 2512"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 262144
-  - model_id: "mistralai/mistral-7b-instruct-v0.1"
-    name: "Mistral: Mistral 7B Instruct v0.1"
-    type: chat
-    config:
-      context_window: 2824
-  - model_id: "mistralai/mistral-large"
-    name: "Mistral Large"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: "mistralai/mistral-large-2407"
-    name: "Mistral Large 2407"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "mistralai/mistral-large-2411"
-    name: "Mistral Large 2411"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "mistralai/mistral-large-2512"
-    name: "Mistral: Mistral Large 3 2512"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 262144
-  - model_id: "mistralai/mistral-medium-3"
-    name: "Mistral: Mistral Medium 3"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      reasoning_efforts: [high]
   - model_id: "mistralai/mistral-medium-3-5"
     name: "Mistral: Mistral Medium 3.5"
     type: chat
     config:
-      compatibilities: [vision, tool-call, reasoning]
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 262144
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "mistralai/mistral-medium-3.1"
-    name: "Mistral: Mistral Medium 3.1"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-  - model_id: "mistralai/mistral-nemo"
-    name: "Mistral: Mistral Nemo"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "mistralai/mistral-saba"
-    name: "Mistral: Saba"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 32768
-  - model_id: "mistralai/mistral-small-24b-instruct-2501"
-    name: "Mistral: Mistral Small 3"
-    type: chat
-    config:
-      context_window: 32768
-  - model_id: "mistralai/mistral-small-2603"
-    name: "Mistral: Mistral Small 4"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "mistralai/mistral-small-3.1-24b-instruct"
-    name: "Mistral: Mistral Small 3.1 24B"
-    type: chat
-    config:
-      compatibilities: [vision]
-      context_window: 128000
-  - model_id: "mistralai/mistral-small-3.2-24b-instruct"
-    name: "Mistral: Mistral Small 3.2 24B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 128000
-  - model_id: "mistralai/mixtral-8x22b-instruct"
-    name: "Mistral: Mixtral 8x22B Instruct"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 65536
-  - model_id: "mistralai/pixtral-large-2411"
-    name: "Mistral: Pixtral Large 2411"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-  - model_id: "mistralai/voxtral-small-24b-2507"
-    name: "Mistral: Voxtral Small 24B 2507"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 32000
-  - model_id: "moonshotai/kimi-k2"
-    name: "MoonshotAI: Kimi K2 0711"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "moonshotai/kimi-k2-0905"
-    name: "MoonshotAI: Kimi K2 0905"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 262144
-  - model_id: "moonshotai/kimi-k2-thinking"
-    name: "MoonshotAI: Kimi K2 Thinking"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "moonshotai/kimi-k2.5"
-    name: "MoonshotAI: Kimi K2.5"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "moonshotai/kimi-k2.6"
-    name: "MoonshotAI: Kimi K2.6"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "morph/morph-v3-fast"
-    name: "Morph: Morph V3 Fast"
-    type: chat
-    config:
-      context_window: 81920
-  - model_id: "morph/morph-v3-large"
-    name: "Morph: Morph V3 Large"
-    type: chat
-    config:
-      context_window: 262144
-  - model_id: "nex-agi/deepseek-v3.1-nex-n1"
-    name: "Nex AGI: DeepSeek V3.1 Nex N1"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "nousresearch/hermes-2-pro-llama-3-8b"
-    name: "NousResearch: Hermes 2 Pro - Llama-3 8B"
-    type: chat
-    config:
-      context_window: 8192
-  - model_id: "nousresearch/hermes-3-llama-3.1-405b"
-    name: "Nous: Hermes 3 405B Instruct"
-    type: chat
-    config:
-      context_window: 131072
-  - model_id: "nousresearch/hermes-3-llama-3.1-405b:free"
-    name: "Nous: Hermes 3 405B Instruct (free)"
-    type: chat
-    config:
-      context_window: 131072
-  - model_id: "nousresearch/hermes-3-llama-3.1-70b"
-    name: "Nous: Hermes 3 70B Instruct"
-    type: chat
-    config:
-      context_window: 131072
-  - model_id: "nousresearch/hermes-4-405b"
-    name: "Nous: Hermes 4 405B"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 131072
-  - model_id: "nousresearch/hermes-4-70b"
-    name: "Nous: Hermes 4 70B"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 131072
-  - model_id: "nvidia/llama-3.3-nemotron-super-49b-v1.5"
-    name: "NVIDIA: Llama 3.3 Nemotron Super 49B V1.5"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "nvidia/nemotron-3-nano-30b-a3b"
-    name: "NVIDIA: Nemotron 3 Nano 30B A3B"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "nvidia/nemotron-3-nano-30b-a3b:free"
-    name: "NVIDIA: Nemotron 3 Nano 30B A3B (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 256000
+      reasoning_efforts: [high]
   - model_id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
     name: "NVIDIA: Nemotron 3 Nano Omni (free)"
     type: chat
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 256000
-  - model_id: "nvidia/nemotron-3-super-120b-a12b"
-    name: "NVIDIA: Nemotron 3 Super"
+      thinking_mode: toggle
+  - model_id: "~anthropic/claude-haiku-latest"
+    name: "Anthropic: Claude Haiku Latest"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "nvidia/nemotron-3-super-120b-a12b:free"
-    name: "NVIDIA: Nemotron 3 Super (free)"
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "~openai/gpt-mini-latest"
+    name: "OpenAI: GPT Mini Latest"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "nvidia/nemotron-nano-12b-v2-vl:free"
-    name: "NVIDIA: Nemotron Nano 12B 2 VL (free)"
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "~google/gemini-pro-latest"
+    name: "Google: Gemini Pro Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "~moonshotai/kimi-latest"
+    name: "MoonshotAI: Kimi Latest"
     type: chat
     config:
       compatibilities: [vision, tool-call, reasoning]
-      context_window: 128000
-  - model_id: "nvidia/nemotron-nano-9b-v2"
-    name: "NVIDIA: Nemotron Nano 9B V2"
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, low]
+  - model_id: "~google/gemini-flash-latest"
+    name: "Google: Gemini Flash Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "~anthropic/claude-sonnet-latest"
+    name: "Anthropic: Claude Sonnet Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "qwen/qwen3.5-plus-20260420"
+    name: "Qwen: Qwen3.5 Plus 2026-04-20"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.6-flash"
+    name: "Qwen: Qwen3.6 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.6-35b-a3b"
+    name: "Qwen: Qwen3.6 35B A3B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.6-max-preview"
+    name: "Qwen: Qwen3.6 Max Preview"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "nvidia/nemotron-nano-9b-v2:free"
-    name: "NVIDIA: Nemotron Nano 9B V2 (free)"
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.6-27b"
+    name: "Qwen: Qwen3.6 27B"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 128000
-  - model_id: "openai/gpt-3.5-turbo"
-    name: "OpenAI: GPT-3.5 Turbo"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 16385
-  - model_id: "openai/gpt-3.5-turbo-0613"
-    name: "OpenAI: GPT-3.5 Turbo (older v0613)"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 4095
-  - model_id: "openai/gpt-3.5-turbo-16k"
-    name: "OpenAI: GPT-3.5 Turbo 16k"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 16385
-  - model_id: "openai/gpt-3.5-turbo-instruct"
-    name: "OpenAI: GPT-3.5 Turbo Instruct"
-    type: chat
-    config:
-      context_window: 4095
-  - model_id: "openai/gpt-4"
-    name: "OpenAI: GPT-4"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 8191
-  - model_id: "openai/gpt-4-0314"
-    name: "OpenAI: GPT-4 (older v0314)"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 8191
-  - model_id: "openai/gpt-4-1106-preview"
-    name: "OpenAI: GPT-4 Turbo (older v1106)"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4-turbo"
-    name: "OpenAI: GPT-4 Turbo"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4-turbo-preview"
-    name: "OpenAI: GPT-4 Turbo Preview"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4.1"
-    name: "OpenAI: GPT-4.1"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 1047576
-  - model_id: "openai/gpt-4.1-mini"
-    name: "OpenAI: GPT-4.1 Mini"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 1047576
-  - model_id: "openai/gpt-4.1-nano"
-    name: "OpenAI: GPT-4.1 Nano"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 1047576
-  - model_id: "openai/gpt-4o"
-    name: "OpenAI: GPT-4o"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4o-2024-05-13"
-    name: "OpenAI: GPT-4o (2024-05-13)"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4o-2024-08-06"
-    name: "OpenAI: GPT-4o (2024-08-06)"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4o-2024-11-20"
-    name: "OpenAI: GPT-4o (2024-11-20)"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4o-audio-preview"
-    name: "OpenAI: GPT-4o Audio"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4o-mini"
-    name: "OpenAI: GPT-4o-mini"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4o-mini-2024-07-18"
-    name: "OpenAI: GPT-4o-mini (2024-07-18)"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-4o-mini-search-preview"
-    name: "OpenAI: GPT-4o-mini Search Preview"
-    type: chat
-    config:
-      context_window: 128000
-  - model_id: "openai/gpt-4o-search-preview"
-    name: "OpenAI: GPT-4o Search Preview"
-    type: chat
-    config:
-      context_window: 128000
-  - model_id: "openai/gpt-5"
-    name: "OpenAI: GPT-5"
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "openai/gpt-5.5-pro:batch"
+    name: "OpenAI: GPT-5.5 Pro (batch)"
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5-chat"
-    name: "OpenAI: GPT-5 Chat"
-    type: chat
-    config:
-      compatibilities: [vision, file-input]
-      context_window: 128000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5-codex"
-    name: "OpenAI: GPT-5 Codex"
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium]
+  - model_id: "openai/gpt-5.5-pro"
+    name: "OpenAI: GPT-5.5 Pro"
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5-image"
-    name: "OpenAI: GPT-5 Image"
-    type: chat
-    config:
-      compatibilities: [vision, image-output, reasoning]
-      context_window: 400000
-  - model_id: "openai/gpt-5-image-mini"
-    name: "OpenAI: GPT-5 Image Mini"
-    type: chat
-    config:
-      compatibilities: [vision, image-output, reasoning]
-      context_window: 400000
-  - model_id: "openai/gpt-5-mini"
-    name: "OpenAI: GPT-5 Mini"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5-nano"
-    name: "OpenAI: GPT-5 Nano"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5-pro"
-    name: "OpenAI: GPT-5 Pro"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5.1"
-    name: "OpenAI: GPT-5.1"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, disable, low, medium, high]
-  - model_id: "openai/gpt-5.1-chat"
-    name: "OpenAI: GPT-5.1 Chat"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-5.1-codex"
-    name: "OpenAI: GPT-5.1-Codex"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5.1-codex-max"
-    name: "OpenAI: GPT-5.1-Codex-Max"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high, xhigh]
-  - model_id: "openai/gpt-5.1-codex-mini"
-    name: "OpenAI: GPT-5.1-Codex-Mini"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5.2"
-    name: "OpenAI: GPT-5.2"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, disable, low, medium, high, xhigh]
-  - model_id: "openai/gpt-5.2-chat"
-    name: "OpenAI: GPT-5.2 Chat"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-5.2-codex"
-    name: "OpenAI: GPT-5.2-Codex"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high, xhigh]
-  - model_id: "openai/gpt-5.2-pro"
-    name: "OpenAI: GPT-5.2 Pro"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high, xhigh]
-  - model_id: "openai/gpt-5.3-chat"
-    name: "OpenAI: GPT-5.3 Chat"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 128000
-  - model_id: "openai/gpt-5.3-codex"
-    name: "OpenAI: GPT-5.3-Codex"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high]
-  - model_id: "openai/gpt-5.4"
-    name: "OpenAI: GPT-5.4"
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium]
+  - model_id: "openai/gpt-5.5:batch"
+    name: "OpenAI: GPT-5.5 (batch)"
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [minimal, disable, low, medium, high, xhigh]
-  - model_id: "openai/gpt-5.4-image-2"
-    name: "OpenAI: GPT-5.4 Image 2"
-    type: chat
-    config:
-      compatibilities: [vision, image-output, reasoning]
-      context_window: 272000
-  - model_id: "openai/gpt-5.4-mini"
-    name: "OpenAI: GPT-5.4 Mini"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [disable, low, medium, high, xhigh]
-  - model_id: "openai/gpt-5.4-nano"
-    name: "OpenAI: GPT-5.4 Nano"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 400000
-      thinking_mode: toggle
-      reasoning_efforts: [disable, low, medium, high, xhigh]
-  - model_id: "openai/gpt-5.4-pro"
-    name: "OpenAI: GPT-5.4 Pro"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1050000
-      thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high, xhigh]
+      reasoning_efforts: [xhigh, high, medium, low]
   - model_id: "openai/gpt-5.5"
     name: "OpenAI: GPT-5.5"
     type: chat
@@ -1441,15 +1223,534 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [disable, low, medium, high, xhigh]
-  - model_id: "openai/gpt-5.5-pro"
-    name: "OpenAI: GPT-5.5 Pro"
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "deepseek/deepseek-v4-pro"
+    name: "DeepSeek: DeepSeek V4 Pro 0423"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high]
+  - model_id: "deepseek/deepseek-v4-flash"
+    name: "DeepSeek: DeepSeek V4 Flash 0423"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high]
+  - model_id: "tencent/hy3-preview"
+    name: "Tencent: Hy3 preview"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high, low]
+  - model_id: "xiaomi/mimo-v2.5-pro"
+    name: "Xiaomi: MiMo-V2.5-Pro"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+  - model_id: "xiaomi/mimo-v2.5"
+    name: "Xiaomi: MiMo-V2.5"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+  - model_id: "openai/gpt-5.4-image-2"
+    name: "OpenAI: GPT-5.4 Image 2"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, image-output, reasoning]
+      context_window: 272000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "~anthropic/claude-opus-latest"
+    name: "Anthropic: Claude Opus Latest"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "openrouter/pareto-code"
+    name: "Pareto Code Router"
+    type: chat
+    config:
+      context_window: 2000000
+  - model_id: "moonshotai/kimi-k2.6"
+    name: "MoonshotAI: Kimi K2.6"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-opus-4.7:batch"
+    name: "Anthropic: Claude Opus 4.7 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "anthropic/claude-opus-4.7"
+    name: "Anthropic: Claude Opus 4.7"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, xhigh, high, medium, low]
+  - model_id: "z-ai/glm-5.1"
+    name: "Z.ai: GLM 5.1"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 204800
+      thinking_mode: toggle
+  - model_id: "google/gemma-4-26b-a4b-it:free"
+    name: "Google: Gemma 4 26B A4B  (free)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "google/gemma-4-26b-a4b-it"
+    name: "Google: Gemma 4 26B A4B "
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "google/gemma-4-31b-it:free"
+    name: "Google: Gemma 4 31B (free)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "google/gemma-4-31b-it:batch"
+    name: "Google: Gemma 4 31B (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "google/gemma-4-31b-it"
+    name: "Google: Gemma 4 31B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.6-plus"
+    name: "Qwen: Qwen3.6 Plus"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "z-ai/glm-5v-turbo"
+    name: "Z.ai: GLM 5V Turbo"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+  - model_id: "arcee-ai/trinity-large-thinking"
+    name: "Arcee AI: Trinity Large Thinking"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: always
+  - model_id: "x-ai/grok-4.20-multi-agent"
+    name: "SpaceXAI: Grok 4.20 Multi-Agent"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, reasoning]
+      context_window: 2000000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "x-ai/grok-4.20"
+    name: "SpaceXAI: Grok 4.20"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 2000000
+      thinking_mode: toggle
+  - model_id: "google/lyria-3-pro-preview"
+    name: "Google: Lyria 3 Pro Preview"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 1048576
+  - model_id: "google/lyria-3-clip-preview"
+    name: "Google: Lyria 3 Clip Preview"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 1048576
+  - model_id: "kwaipilot/kat-coder-pro-v2"
+    name: "Kwaipilot: KAT-Coder-Pro V2"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 262144
+  - model_id: "rekaai/reka-edge"
+    name: "Reka Edge"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 16384
+      thinking_mode: toggle
+  - model_id: "minimax/minimax-m2.7"
+    name: "MiniMax: MiniMax M2.7"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 204800
+      thinking_mode: always
+  - model_id: "openai/gpt-5.4-nano:batch"
+    name: "OpenAI: GPT-5.4 Nano (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.4-nano"
+    name: "OpenAI: GPT-5.4 Nano"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.4-mini:batch"
+    name: "OpenAI: GPT-5.4 Mini (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.4-mini"
+    name: "OpenAI: GPT-5.4 Mini"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "mistralai/mistral-small-2603:batch"
+    name: "Mistral: Mistral Small 4 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high]
+  - model_id: "mistralai/mistral-small-2603"
+    name: "Mistral: Mistral Small 4"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high]
+  - model_id: "z-ai/glm-5-turbo"
+    name: "Z.ai: GLM 5 Turbo"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+  - model_id: "nvidia/nemotron-3-super-120b-a12b:free"
+    name: "NVIDIA: Nemotron 3 Super (free)"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [medium, low]
+  - model_id: "nvidia/nemotron-3-super-120b-a12b"
+    name: "NVIDIA: Nemotron 3 Super"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [medium, low]
+  - model_id: "bytedance-seed/seed-2.0-lite"
+    name: "ByteDance Seed: Seed-2.0-Lite"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "qwen/qwen3.5-9b:batch"
+    name: "Qwen: Qwen3.5-9B (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.5-9b"
+    name: "Qwen: Qwen3.5-9B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "openai/gpt-5.4-pro:batch"
+    name: "OpenAI: GPT-5.4 Pro (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium]
+  - model_id: "openai/gpt-5.4-pro"
+    name: "OpenAI: GPT-5.4 Pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium]
+  - model_id: "openai/gpt-5.4:batch"
+    name: "OpenAI: GPT-5.4 (batch)"
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1050000
       thinking_mode: toggle
-      reasoning_efforts: [medium, high, xhigh]
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.4"
+    name: "OpenAI: GPT-5.4"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1050000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "inception/mercury-2"
+    name: "Inception: Mercury 2"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 128000
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low]
+  - model_id: "google/gemini-3.1-flash-lite-preview"
+    name: "Google: Gemini 3.1 Flash Lite Preview"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "bytedance-seed/seed-2.0-mini"
+    name: "ByteDance Seed: Seed-2.0-Mini"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "google/gemini-3.1-flash-image-preview"
+    name: "Google: Nano Banana 2 (Gemini 3.1 Flash Image Preview)"
+    type: chat
+    config:
+      compatibilities: [vision, image-output, reasoning]
+      context_window: 65536
+      thinking_mode: toggle
+      reasoning_efforts: [high, minimal]
+  - model_id: "qwen/qwen3.5-35b-a3b"
+    name: "Qwen: Qwen3.5-35B-A3B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.5-27b"
+    name: "Qwen: Qwen3.5-27B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.5-122b-a10b"
+    name: "Qwen: Qwen3.5-122B-A10B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.5-flash-02-23"
+    name: "Qwen: Qwen3.5-Flash"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "google/gemini-3.1-pro-preview-customtools"
+    name: "Google: Gemini 3.1 Pro Preview Custom Tools"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "openai/gpt-5.3-codex"
+    name: "OpenAI: GPT-5.3-Codex"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "aion-labs/aion-2.0"
+    name: "AionLabs: Aion-2.0"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: always
+  - model_id: "google/gemini-3.1-pro-preview:batch"
+    name: "Google: Gemini 3.1 Pro Preview (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "google/gemini-3.1-pro-preview"
+    name: "Google: Gemini 3.1 Pro Preview"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "anthropic/claude-sonnet-4.6:batch"
+    name: "Anthropic: Claude Sonnet 4.6 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low]
+  - model_id: "anthropic/claude-sonnet-4.6"
+    name: "Anthropic: Claude Sonnet 4.6"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low]
+  - model_id: "qwen/qwen3.5-plus-02-15"
+    name: "Qwen: Qwen3.5 Plus 2026-02-15"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3.5-397b-a17b"
+    name: "Qwen: Qwen3.5 397B A17B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "minimax/minimax-m2.5"
+    name: "MiniMax: MiniMax M2.5"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 204800
+      thinking_mode: always
+  - model_id: "z-ai/glm-5"
+    name: "Z.ai: GLM 5"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 204800
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-max-thinking"
+    name: "Qwen: Qwen3 Max Thinking"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-opus-4.6:batch"
+    name: "Anthropic: Claude Opus 4.6 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low]
+  - model_id: "anthropic/claude-opus-4.6"
+    name: "Anthropic: Claude Opus 4.6"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+      reasoning_efforts: [max, high, medium, low]
+  - model_id: "qwen/qwen3-coder-next"
+    name: "Qwen: Qwen3 Coder Next"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 262144
+  - model_id: "openrouter/free"
+    name: "Free Models Router"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "stepfun/step-3.5-flash"
+    name: "StepFun: Step 3.5 Flash"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: always
+  - model_id: "moonshotai/kimi-k2.5"
+    name: "MoonshotAI: Kimi K2.5"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "upstage/solar-pro-3"
+    name: "Upstage: Solar Pro 3"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "minimax/minimax-m2-her"
+    name: "MiniMax: MiniMax M2-her"
+    type: chat
+    config:
+      context_window: 65536
+  - model_id: "writer/palmyra-x5"
+    name: "Writer: Palmyra X5"
+    type: chat
+    config:
+      context_window: 1040000
   - model_id: "openai/gpt-audio"
     name: "OpenAI: GPT Audio"
     type: chat
@@ -1462,305 +1763,471 @@ models:
     config:
       compatibilities: [tool-call]
       context_window: 128000
-  - model_id: "openai/gpt-chat-latest"
-    name: "OpenAI: GPT Chat Latest"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 400000
-  - model_id: "openai/gpt-oss-120b"
-    name: "OpenAI: gpt-oss-120b"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/gpt-oss-120b:free"
-    name: "OpenAI: gpt-oss-120b (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "openai/gpt-oss-20b"
-    name: "OpenAI: gpt-oss-20b"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "openai/gpt-oss-20b:free"
-    name: "OpenAI: gpt-oss-20b (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "openai/gpt-oss-safeguard-20b"
-    name: "OpenAI: gpt-oss-safeguard-20b"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "openai/o1"
-    name: "OpenAI: o1"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/o1-pro"
-    name: "OpenAI: o1-pro"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/o3"
-    name: "OpenAI: o3"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/o3-deep-research"
-    name: "OpenAI: o3 Deep Research"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/o3-mini"
-    name: "OpenAI: o3 Mini"
+  - model_id: "z-ai/glm-4.7-flash"
+    name: "Z.ai: GLM 4.7 Flash"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 200000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/o3-mini-high"
-    name: "OpenAI: o3 Mini High"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 200000
-  - model_id: "openai/o3-pro"
-    name: "OpenAI: o3 Pro"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/o4-mini"
-    name: "OpenAI: o4 Mini"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/o4-mini-deep-research"
-    name: "OpenAI: o4 Mini Deep Research"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "openai/o4-mini-high"
-    name: "OpenAI: o4 Mini High"
+  - model_id: "openai/gpt-5.2-codex"
+    name: "OpenAI: GPT-5.2-Codex"
     type: chat
     config:
       compatibilities: [vision, tool-call, reasoning]
-      context_window: 200000
-  - model_id: "openrouter/auto"
-    name: "Auto Router"
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "bytedance-seed/seed-1.6-flash"
+    name: "ByteDance Seed: Seed 1.6 Flash"
     type: chat
     config:
-      compatibilities: [vision, tool-call, image-output, reasoning]
-      context_window: 2000000
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "bytedance-seed/seed-1.6"
+    name: "ByteDance Seed: Seed 1.6"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "minimax/minimax-m2.1"
+    name: "MiniMax: MiniMax M2.1"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 204800
+      thinking_mode: always
+  - model_id: "z-ai/glm-4.7"
+    name: "Z.ai: GLM 4.7"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 204800
+      thinking_mode: toggle
+  - model_id: "google/gemini-3-flash-preview:batch"
+    name: "Google: Gemini 3 Flash Preview (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "google/gemini-3-flash-preview"
+    name: "Google: Gemini 3 Flash Preview"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "nvidia/nemotron-3-nano-30b-a3b"
+    name: "NVIDIA: Nemotron 3 Nano 30B A3B"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "openai/gpt-5.2-chat"
+    name: "OpenAI: GPT-5.2 Chat"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "openai/gpt-5.2-pro:batch"
+    name: "OpenAI: GPT-5.2 Pro (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium]
+  - model_id: "openai/gpt-5.2-pro"
+    name: "OpenAI: GPT-5.2 Pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium]
+  - model_id: "openai/gpt-5.2:batch"
+    name: "OpenAI: GPT-5.2 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "openai/gpt-5.2"
+    name: "OpenAI: GPT-5.2"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "mistralai/devstral-2512"
+    name: "Mistral: Devstral 2 2512"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call]
+      context_window: 262144
+  - model_id: "relace/relace-search"
+    name: "Relace: Relace Search"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 256000
+  - model_id: "z-ai/glm-4.6v"
+    name: "Z.ai: GLM 4.6V"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
   - model_id: "openrouter/bodybuilder"
     name: "Body Builder (beta)"
     type: chat
     config:
       context_window: 128000
-  - model_id: "openrouter/free"
-    name: "Free Models Router"
+  - model_id: "openai/gpt-5.1-codex-max"
+    name: "OpenAI: GPT-5.1-Codex-Max"
     type: chat
     config:
       compatibilities: [vision, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [xhigh, high, medium, low]
+  - model_id: "amazon/nova-2-lite-v1"
+    name: "Amazon: Nova 2 Lite"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "mistralai/ministral-14b-2512"
+    name: "Mistral: Ministral 3 14B 2512"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 262144
+  - model_id: "mistralai/ministral-8b-2512:batch"
+    name: "Mistral: Ministral 3 8B 2512 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 262144
+  - model_id: "mistralai/ministral-8b-2512"
+    name: "Mistral: Ministral 3 8B 2512"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 262144
+  - model_id: "mistralai/ministral-3b-2512"
+    name: "Mistral: Ministral 3 3B 2512"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 131072
+  - model_id: "mistralai/mistral-large-2512:batch"
+    name: "Mistral: Mistral Large 3 2512 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 262144
+  - model_id: "mistralai/mistral-large-2512"
+    name: "Mistral: Mistral Large 3 2512"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 262144
+  - model_id: "deepseek/deepseek-v3.2"
+    name: "DeepSeek: DeepSeek V3.2"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 163840
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-opus-4.5:batch"
+    name: "Anthropic: Claude Opus 4.5 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
-  - model_id: "openrouter/owl-alpha"
-    name: "Owl Alpha"
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-opus-4.5"
+    name: "Anthropic: Claude Opus 4.5"
     type: chat
     config:
-      compatibilities: [tool-call]
-      context_window: 1048756
-  - model_id: "openrouter/pareto-code"
-    name: "Pareto Code Router"
-    type: chat
-    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 200000
-  - model_id: "perplexity/sonar"
-    name: "Perplexity: Sonar"
+      thinking_mode: toggle
+  - model_id: "google/gemini-3-pro-image-preview"
+    name: "Google: Nano Banana Pro (Gemini 3 Pro Image Preview)"
     type: chat
     config:
-      compatibilities: [vision]
-      context_window: 127072
-  - model_id: "perplexity/sonar-deep-research"
-    name: "Perplexity: Sonar Deep Research"
+      compatibilities: [vision, image-output, reasoning]
+      context_window: 65536
+      thinking_mode: always
+  - model_id: "openai/gpt-5.1:batch"
+    name: "OpenAI: GPT-5.1 (batch)"
     type: chat
     config:
-      compatibilities: [reasoning]
-      context_window: 128000
-  - model_id: "perplexity/sonar-pro"
-    name: "Perplexity: Sonar Pro"
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low]
+  - model_id: "openai/gpt-5.1"
+    name: "OpenAI: GPT-5.1"
     type: chat
     config:
-      compatibilities: [vision]
-      context_window: 200000
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low]
+  - model_id: "openai/gpt-5.1-codex"
+    name: "OpenAI: GPT-5.1-Codex"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "openai/gpt-5.1-codex-mini"
+    name: "OpenAI: GPT-5.1-Codex-Mini"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [high, medium, low]
+  - model_id: "moonshotai/kimi-k2-thinking"
+    name: "MoonshotAI: Kimi K2 Thinking"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: always
+  - model_id: "amazon/nova-premier-v1"
+    name: "Amazon: Nova Premier 1.0"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 1000000
   - model_id: "perplexity/sonar-pro-search"
     name: "Perplexity: Sonar Pro Search"
     type: chat
     config:
       compatibilities: [vision, reasoning]
       context_window: 200000
-  - model_id: "perplexity/sonar-reasoning-pro"
-    name: "Perplexity: Sonar Reasoning Pro"
+      thinking_mode: always
+  - model_id: "mistralai/voxtral-small-24b-2507"
+    name: "Mistral: Voxtral Small 24B 2507"
     type: chat
     config:
-      compatibilities: [vision, reasoning]
-      context_window: 128000
-  - model_id: "poolside/laguna-m.1:free"
-    name: "Poolside: Laguna M.1 (free)"
+      compatibilities: [file-input, tool-call]
+      context_window: 32768
+  - model_id: "openai/gpt-oss-safeguard-20b"
+    name: "OpenAI: gpt-oss-safeguard-20b"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 131072
-  - model_id: "poolside/laguna-xs.2:free"
-    name: "Poolside: Laguna XS.2 (free)"
+      thinking_mode: always
+  - model_id: "minimax/minimax-m2"
+    name: "MiniMax: MiniMax M2"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "prime-intellect/intellect-3"
-    name: "Prime Intellect: INTELLECT-3"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "qwen/qwen-2.5-72b-instruct"
-    name: "Qwen2.5 72B Instruct"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 32768
-  - model_id: "qwen/qwen-2.5-7b-instruct"
-    name: "Qwen: Qwen2.5 7B Instruct"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 32768
-  - model_id: "qwen/qwen-2.5-coder-32b-instruct"
-    name: "Qwen2.5 Coder 32B Instruct"
-    type: chat
-    config:
-      context_window: 32768
-  - model_id: "qwen/qwen-max"
-    name: "Qwen: Qwen-Max "
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 32768
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen-plus"
-    name: "Qwen: Qwen-Plus"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 1000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen-plus-2025-07-28"
-    name: "Qwen: Qwen Plus 0728"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 1000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen-plus-2025-07-28:thinking"
-    name: "Qwen: Qwen Plus 0728 (thinking)"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "qwen/qwen-turbo"
-    name: "Qwen: Qwen-Turbo"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen-vl-max"
-    name: "Qwen: Qwen VL Max"
+      context_window: 204800
+      thinking_mode: always
+  - model_id: "qwen/qwen3-vl-32b-instruct"
+    name: "Qwen: Qwen3 VL 32B Instruct"
     type: chat
     config:
       compatibilities: [vision, tool-call]
       context_window: 131072
-  - model_id: "qwen/qwen-vl-plus"
-    name: "Qwen: Qwen VL Plus"
+  - model_id: "ibm-granite/granite-4.0-h-micro"
+    name: "IBM: Granite 4.0 Micro"
     type: chat
     config:
-      compatibilities: [vision]
+      context_window: 131000
+  - model_id: "openai/gpt-5-image-mini"
+    name: "OpenAI: GPT-5 Image Mini"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, image-output, reasoning]
+      context_window: 400000
+      thinking_mode: always
+  - model_id: "anthropic/claude-haiku-4.5:batch"
+    name: "Anthropic: Claude Haiku 4.5 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-haiku-4.5"
+    name: "Anthropic: Claude Haiku 4.5"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-vl-8b-thinking"
+    name: "Qwen: Qwen3 VL 8B Thinking"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
       context_window: 131072
-  - model_id: "qwen/qwen2.5-vl-72b-instruct"
-    name: "Qwen: Qwen2.5 VL 72B Instruct"
+      thinking_mode: always
+  - model_id: "qwen/qwen3-vl-8b-instruct"
+    name: "Qwen: Qwen3 VL 8B Instruct"
     type: chat
     config:
-      compatibilities: [vision]
-      context_window: 32000
-  - model_id: "qwen/qwen3-14b"
-    name: "Qwen: Qwen3 14B"
+      compatibilities: [vision, tool-call]
+      context_window: 262144
+  - model_id: "openai/gpt-5-image"
+    name: "OpenAI: GPT-5 Image"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, image-output, reasoning]
+      context_window: 400000
+      thinking_mode: always
+  - model_id: "google/gemini-2.5-flash-image"
+    name: "Google: Nano Banana (Gemini 2.5 Flash Image)"
+    type: chat
+    config:
+      compatibilities: [vision, image-output]
+      context_window: 32768
+  - model_id: "qwen/qwen3-vl-30b-a3b-thinking"
+    name: "Qwen: Qwen3 VL 30B A3B Thinking"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: always
+  - model_id: "qwen/qwen3-vl-30b-a3b-instruct"
+    name: "Qwen: Qwen3 VL 30B A3B Instruct"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 262144
+  - model_id: "openai/gpt-5-pro:batch"
+    name: "OpenAI: GPT-5 Pro (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high]
+  - model_id: "openai/gpt-5-pro"
+    name: "OpenAI: GPT-5 Pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high]
+  - model_id: "z-ai/glm-4.6"
+    name: "Z.ai: GLM 4.6"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
-      context_window: 40960
-  - model_id: "qwen/qwen3-235b-a22b"
-    name: "Qwen: Qwen3 235B A22B"
+      context_window: 204800
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-sonnet-4.5:batch"
+    name: "Anthropic: Claude Sonnet 4.5 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-sonnet-4.5"
+    name: "Anthropic: Claude Sonnet 4.5"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "deepseek/deepseek-v3.2-exp"
+    name: "DeepSeek: DeepSeek V3.2 Exp"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
+      context_window: 163840
+      thinking_mode: toggle
+  - model_id: "thedrummer/cydonia-24b-v4.1"
+    name: "TheDrummer: Cydonia 24B V4.1"
+    type: chat
+    config:
       context_window: 131072
-  - model_id: "qwen/qwen3-235b-a22b-2507"
-    name: "Qwen: Qwen3 235B A22B Instruct 2507"
+  - model_id: "relace/relace-apply-3"
+    name: "Relace: Relace Apply 3"
+    type: chat
+    config:
+      context_window: 256000
+  - model_id: "qwen/qwen3-vl-235b-a22b-thinking"
+    name: "Qwen: Qwen3 VL 235B A22B Thinking"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: always
+  - model_id: "qwen/qwen3-vl-235b-a22b-instruct"
+    name: "Qwen: Qwen3 VL 235B A22B Instruct"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 262144
+  - model_id: "qwen/qwen3-max"
+    name: "Qwen: Qwen3 Max"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-coder-plus"
+    name: "Qwen: Qwen3 Coder Plus"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 1000000
+  - model_id: "deepseek/deepseek-v3.1-terminus"
+    name: "DeepSeek: DeepSeek V3.1 Terminus"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 163840
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-coder-flash"
+    name: "Qwen: Qwen3 Coder Flash"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 1000000
+  - model_id: "qwen/qwen3-next-80b-a3b-thinking"
+    name: "Qwen: Qwen3 Next 80B A3B Thinking"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 262144
+      thinking_mode: always
+  - model_id: "qwen/qwen3-next-80b-a3b-instruct"
+    name: "Qwen: Qwen3 Next 80B A3B Instruct"
     type: chat
     config:
       compatibilities: [tool-call]
       context_window: 262144
-  - model_id: "qwen/qwen3-235b-a22b-thinking-2507"
-    name: "Qwen: Qwen3 235B A22B Thinking 2507"
+  - model_id: "qwen/qwen-plus-2025-07-28"
+    name: "Qwen: Qwen Plus 0728"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
-      context_window: 131072
+      context_window: 1000000
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3-30b-a3b"
-    name: "Qwen: Qwen3 30B A3B"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 40960
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3-30b-a3b-instruct-2507"
-    name: "Qwen: Qwen3 30B A3B Instruct 2507"
+  - model_id: "moonshotai/kimi-k2-0905"
+    name: "MoonshotAI: Kimi K2 0905"
     type: chat
     config:
       compatibilities: [tool-call]
@@ -1770,308 +2237,670 @@ models:
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
+      context_window: 81920
+      thinking_mode: always
+  - model_id: "nousresearch/hermes-4-405b"
+    name: "Nous: Hermes 4 405B"
+    type: chat
+    config:
+      compatibilities: [reasoning]
       context_window: 131072
-  - model_id: "qwen/qwen3-32b"
-    name: "Qwen: Qwen3 32B"
+      thinking_mode: toggle
+  - model_id: "deepseek/deepseek-chat-v3.1"
+    name: "DeepSeek: DeepSeek V3.1"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
-      context_window: 40960
-  - model_id: "qwen/qwen3-8b"
-    name: "Qwen: Qwen3 8B"
+      context_window: 163840
+      thinking_mode: toggle
+  - model_id: "mistralai/mistral-medium-3.1:batch"
+    name: "Mistral: Mistral Medium 3.1 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 131072
+  - model_id: "mistralai/mistral-medium-3.1"
+    name: "Mistral: Mistral Medium 3.1"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 131072
+  - model_id: "z-ai/glm-4.5v"
+    name: "Z.ai: GLM 4.5V"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call, reasoning]
+      context_window: 65536
+      thinking_mode: toggle
+  - model_id: "openai/gpt-5:batch"
+    name: "OpenAI: GPT-5 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "openai/gpt-5"
+    name: "OpenAI: GPT-5"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "openai/gpt-5-mini:batch"
+    name: "OpenAI: GPT-5 Mini (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "openai/gpt-5-mini"
+    name: "OpenAI: GPT-5 Mini"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "openai/gpt-5-nano:batch"
+    name: "OpenAI: GPT-5 Nano (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "openai/gpt-5-nano"
+    name: "OpenAI: GPT-5 Nano"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 400000
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low, minimal]
+  - model_id: "openai/gpt-oss-120b:batch"
+    name: "OpenAI: gpt-oss-120b (batch)"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
-      context_window: 40960
+      context_window: 131072
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "openai/gpt-oss-120b"
+    name: "OpenAI: gpt-oss-120b"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "openai/gpt-oss-20b:batch"
+    name: "OpenAI: gpt-oss-20b (batch)"
+    type: chat
+    config:
+      compatibilities: [reasoning]
+      context_window: 131072
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "openai/gpt-oss-20b"
+    name: "OpenAI: gpt-oss-20b"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: always
+      reasoning_efforts: [high, medium, low]
+  - model_id: "anthropic/claude-opus-4.1:batch"
+    name: "Anthropic: Claude Opus 4.1 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-opus-4.1"
+    name: "Anthropic: Claude Opus 4.1"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "mistralai/codestral-2508:batch"
+    name: "Mistral: Codestral 2508 (batch)"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call]
+      context_window: 256000
+  - model_id: "mistralai/codestral-2508"
+    name: "Mistral: Codestral 2508"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call]
+      context_window: 256000
+  - model_id: "qwen/qwen3-coder-30b-a3b-instruct"
+    name: "Qwen: Qwen3 Coder 30B A3B Instruct"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 262144
+  - model_id: "qwen/qwen3-30b-a3b-instruct-2507"
+    name: "Qwen: Qwen3 30B A3B Instruct 2507"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 262144
+  - model_id: "z-ai/glm-4.5"
+    name: "Z.ai: GLM 4.5"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "z-ai/glm-4.5-air"
+    name: "Z.ai: GLM 4.5 Air"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-235b-a22b-thinking-2507"
+    name: "Qwen: Qwen3 235B A22B Thinking 2507"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: always
   - model_id: "qwen/qwen3-coder"
     name: "Qwen: Qwen3 Coder 480B A35B"
     type: chat
     config:
       compatibilities: [tool-call]
       context_window: 262144
-  - model_id: "qwen/qwen3-coder-30b-a3b-instruct"
-    name: "Qwen: Qwen3 Coder 30B A3B Instruct"
+  - model_id: "bytedance/ui-tars-1.5-7b"
+    name: "ByteDance: UI-TARS 7B "
     type: chat
     config:
-      compatibilities: [tool-call]
-      context_window: 160000
-  - model_id: "qwen/qwen3-coder-flash"
-    name: "Qwen: Qwen3 Coder Flash"
+      compatibilities: [vision]
+      context_window: 128000
+  - model_id: "google/gemini-2.5-flash-lite:batch"
+    name: "Google: Gemini 2.5 Flash Lite (batch)"
     type: chat
     config:
-      compatibilities: [tool-call]
-      context_window: 1000000
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3-coder-next"
-    name: "Qwen: Qwen3 Coder Next"
+  - model_id: "google/gemini-2.5-flash-lite"
+    name: "Google: Gemini 2.5 Flash Lite"
     type: chat
     config:
-      compatibilities: [tool-call]
-      context_window: 262144
-  - model_id: "qwen/qwen3-coder-plus"
-    name: "Qwen: Qwen3 Coder Plus"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 1000000
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
       thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3-coder:free"
-    name: "Qwen: Qwen3 Coder 480B A35B (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 262000
-  - model_id: "qwen/qwen3-max"
-    name: "Qwen: Qwen3 Max"
+  - model_id: "qwen/qwen3-235b-a22b-2507"
+    name: "Qwen: Qwen3 235B A22B Instruct 2507"
     type: chat
     config:
       compatibilities: [tool-call]
       context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3-max-thinking"
-    name: "Qwen: Qwen3 Max Thinking"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "qwen/qwen3-next-80b-a3b-instruct"
-    name: "Qwen: Qwen3 Next 80B A3B Instruct"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 262144
-  - model_id: "qwen/qwen3-next-80b-a3b-instruct:free"
-    name: "Qwen: Qwen3 Next 80B A3B Instruct (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 262144
-  - model_id: "qwen/qwen3-next-80b-a3b-thinking"
-    name: "Qwen: Qwen3 Next 80B A3B Thinking"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3-vl-235b-a22b-instruct"
-    name: "Qwen: Qwen3 VL 235B A22B Instruct"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 262144
-  - model_id: "qwen/qwen3-vl-235b-a22b-thinking"
-    name: "Qwen: Qwen3 VL 235B A22B Thinking"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3-vl-30b-a3b-instruct"
-    name: "Qwen: Qwen3 VL 30B A3B Instruct"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-  - model_id: "qwen/qwen3-vl-30b-a3b-thinking"
-    name: "Qwen: Qwen3 VL 30B A3B Thinking"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 131072
-  - model_id: "qwen/qwen3-vl-32b-instruct"
-    name: "Qwen: Qwen3 VL 32B Instruct"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-  - model_id: "qwen/qwen3-vl-8b-instruct"
-    name: "Qwen: Qwen3 VL 8B Instruct"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 131072
-  - model_id: "qwen/qwen3-vl-8b-thinking"
-    name: "Qwen: Qwen3 VL 8B Thinking"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 131072
-  - model_id: "qwen/qwen3.5-122b-a10b"
-    name: "Qwen: Qwen3.5-122B-A10B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "qwen/qwen3.5-27b"
-    name: "Qwen: Qwen3.5-27B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "qwen/qwen3.5-35b-a3b"
-    name: "Qwen: Qwen3.5-35B-A3B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3.5-397b-a17b"
-    name: "Qwen: Qwen3.5 397B A17B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3.5-9b"
-    name: "Qwen: Qwen3.5-9B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "qwen/qwen3.5-flash-02-23"
-    name: "Qwen: Qwen3.5-Flash"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "qwen/qwen3.5-plus-02-15"
-    name: "Qwen: Qwen3.5 Plus 2026-02-15"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "qwen/qwen3.5-plus-20260420"
-    name: "Qwen: Qwen3.5 Plus 2026-04-20"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "qwen/qwen3.6-27b"
-    name: "Qwen: Qwen3.6 27B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "qwen/qwen3.6-35b-a3b"
-    name: "Qwen: Qwen3.6 35B A3B"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "qwen/qwen3.6-flash"
-    name: "Qwen: Qwen3.6 Flash"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "qwen/qwen3.6-max-preview"
-    name: "Qwen: Qwen3.6 Max Preview"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "qwen/qwen3.6-plus"
-    name: "Qwen: Qwen3.6 Plus"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "rekaai/reka-edge"
-    name: "Reka Edge"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call]
-      context_window: 16384
-  - model_id: "rekaai/reka-flash-3"
-    name: "Reka Flash 3"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 65536
-  - model_id: "relace/relace-apply-3"
-    name: "Relace: Relace Apply 3"
-    type: chat
-    config:
-      context_window: 256000
-  - model_id: "relace/relace-search"
-    name: "Relace: Relace Search"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 256000
-  - model_id: "sao10k/l3-euryale-70b"
-    name: "Sao10k: Llama 3 Euryale 70B v2.1"
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 8192
-  - model_id: "sao10k/l3-lunaris-8b"
-    name: "Sao10K: Llama 3 8B Lunaris"
-    type: chat
-    config:
-      context_window: 8192
-  - model_id: "sao10k/l3.1-70b-hanami-x1"
-    name: "Sao10K: Llama 3.1 70B Hanami x1"
-    type: chat
-    config:
-      context_window: 16000
-  - model_id: "sao10k/l3.1-euryale-70b"
-    name: "Sao10K: Llama 3.1 Euryale 70B v2.2"
+  - model_id: "moonshotai/kimi-k2"
+    name: "MoonshotAI: Kimi K2 0711"
     type: chat
     config:
       compatibilities: [tool-call]
       context_window: 131072
-  - model_id: "sao10k/l3.3-euryale-70b"
-    name: "Sao10K: Llama 3.3 Euryale 70B"
+  - model_id: "cognitivecomputations/dolphin-mistral-24b-venice-edition"
+    name: "Venice: Uncensored"
     type: chat
     config:
-      context_window: 131072
-  - model_id: "stepfun/step-3.5-flash"
-    name: "StepFun: Step 3.5 Flash"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "switchpoint/router"
-    name: "Switchpoint Router"
-    type: chat
-    config:
-      compatibilities: [reasoning]
-      context_window: 131072
+      context_window: 128000
   - model_id: "tencent/hunyuan-a13b-instruct"
     name: "Tencent: Hunyuan A13B Instruct"
     type: chat
     config:
       compatibilities: [reasoning]
       context_window: 131072
-  - model_id: "tencent/hy3-preview"
-    name: "Tencent: Hy3 preview"
+      thinking_mode: toggle
+  - model_id: "morph/morph-v3-large"
+    name: "Morph: Morph V3 Large"
+    type: chat
+    config:
+      context_window: 262144
+  - model_id: "morph/morph-v3-fast"
+    name: "Morph: Morph V3 Fast"
+    type: chat
+    config:
+      context_window: 81920
+  - model_id: "baidu/ernie-4.5-vl-424b-a47b"
+    name: "Baidu: ERNIE 4.5 VL 424B A47B "
+    type: chat
+    config:
+      compatibilities: [vision, reasoning]
+      context_window: 123000
+      thinking_mode: toggle
+  - model_id: "mistralai/mistral-small-3.2-24b-instruct"
+    name: "Mistral: Mistral Small 3.2 24B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 256000
+  - model_id: "minimax/minimax-m1"
+    name: "MiniMax: MiniMax M1"
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "thedrummer/cydonia-24b-v4.1"
-    name: "TheDrummer: Cydonia 24B V4.1"
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "google/gemini-2.5-flash:batch"
+    name: "Google: Gemini 2.5 Flash (batch)"
     type: chat
     config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+  - model_id: "google/gemini-2.5-flash"
+    name: "Google: Gemini 2.5 Flash"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: toggle
+  - model_id: "google/gemini-2.5-pro:batch"
+    name: "Google: Gemini 2.5 Pro (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+  - model_id: "google/gemini-2.5-pro"
+    name: "Google: Gemini 2.5 Pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+  - model_id: "openai/o3-pro"
+    name: "OpenAI: o3 Pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "google/gemini-2.5-pro-preview"
+    name: "Google: Gemini 2.5 Pro Preview 06-05"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1048576
+      thinking_mode: always
+  - model_id: "deepseek/deepseek-r1-0528"
+    name: "DeepSeek: R1 0528"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 163840
+      thinking_mode: always
+  - model_id: "anthropic/claude-opus-4"
+    name: "Anthropic: Claude Opus 4"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "anthropic/claude-sonnet-4"
+    name: "Anthropic: Claude Sonnet 4"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1000000
+      thinking_mode: toggle
+  - model_id: "mistralai/mistral-medium-3"
+    name: "Mistral: Mistral Medium 3"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
       context_window: 131072
-  - model_id: "thedrummer/rocinante-12b"
-    name: "TheDrummer: Rocinante 12B"
+  - model_id: "meta-llama/llama-guard-4-12b"
+    name: "Meta: Llama Guard 4 12B"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 163840
+  - model_id: "qwen/qwen3-30b-a3b"
+    name: "Qwen: Qwen3 30B A3B"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-8b"
+    name: "Qwen: Qwen3 8B"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-14b"
+    name: "Qwen: Qwen3 14B"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-32b"
+    name: "Qwen: Qwen3 32B"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "qwen/qwen3-235b-a22b"
+    name: "Qwen: Qwen3 235B A22B"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 131072
+      thinking_mode: toggle
+  - model_id: "openai/o4-mini-high"
+    name: "OpenAI: o4 Mini High"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: always
+      reasoning_efforts: [high]
+  - model_id: "openai/o3:batch"
+    name: "OpenAI: o3 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "openai/o3"
+    name: "OpenAI: o3"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "openai/o4-mini:batch"
+    name: "OpenAI: o4 Mini (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "openai/o4-mini"
+    name: "OpenAI: o4 Mini"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "openai/gpt-4.1:batch"
+    name: "OpenAI: GPT-4.1 (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 1047576
+  - model_id: "openai/gpt-4.1"
+    name: "OpenAI: GPT-4.1"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 1047576
+  - model_id: "openai/gpt-4.1-mini:batch"
+    name: "OpenAI: GPT-4.1 Mini (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 1047576
+  - model_id: "openai/gpt-4.1-mini"
+    name: "OpenAI: GPT-4.1 Mini"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 1047576
+  - model_id: "openai/gpt-4.1-nano:batch"
+    name: "OpenAI: GPT-4.1 Nano (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 1047576
+  - model_id: "openai/gpt-4.1-nano"
+    name: "OpenAI: GPT-4.1 Nano"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 1047576
+  - model_id: "meta-llama/llama-4-maverick"
+    name: "Meta: Llama 4 Maverick"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 1048576
+  - model_id: "meta-llama/llama-4-scout"
+    name: "Meta: Llama 4 Scout"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 1310720
+  - model_id: "deepseek/deepseek-chat-v3-0324"
+    name: "DeepSeek: DeepSeek V3 0324"
     type: chat
     config:
       compatibilities: [tool-call]
-      context_window: 32768
+      context_window: 163840
+  - model_id: "openai/o1-pro"
+    name: "OpenAI: o1-pro"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "mistralai/mistral-small-3.1-24b-instruct"
+    name: "Mistral: Mistral Small 3.1 24B"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 128000
+  - model_id: "google/gemma-3-4b-it"
+    name: "Google: Gemma 3 4B"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 131072
+  - model_id: "google/gemma-3-12b-it"
+    name: "Google: Gemma 3 12B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 131072
+  - model_id: "cohere/command-a"
+    name: "Cohere: Command A"
+    type: chat
+    config:
+      context_window: 256000
+  - model_id: "rekaai/reka-flash-3"
+    name: "Reka Flash 3"
+    type: chat
+    config:
+      compatibilities: [reasoning]
+      context_window: 65536
+      thinking_mode: always
+  - model_id: "google/gemma-3-27b-it"
+    name: "Google: Gemma 3 27B"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 131072
   - model_id: "thedrummer/skyfall-36b-v2"
     name: "TheDrummer: Skyfall 36B V2"
+    type: chat
+    config:
+      context_window: 32768
+  - model_id: "perplexity/sonar-reasoning-pro"
+    name: "Perplexity: Sonar Reasoning Pro"
+    type: chat
+    config:
+      compatibilities: [vision, reasoning]
+      context_window: 128000
+      thinking_mode: toggle
+  - model_id: "perplexity/sonar-pro"
+    name: "Perplexity: Sonar Pro"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 200000
+  - model_id: "perplexity/sonar-deep-research"
+    name: "Perplexity: Sonar Deep Research"
+    type: chat
+    config:
+      compatibilities: [reasoning]
+      context_window: 128000
+      thinking_mode: toggle
+  - model_id: "mistralai/mistral-saba"
+    name: "Mistral: Saba"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call]
+      context_window: 32768
+  - model_id: "openai/o3-mini-high"
+    name: "OpenAI: o3 Mini High"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: always
+      reasoning_efforts: [high]
+  - model_id: "aion-labs/aion-rp-llama-3.1-8b"
+    name: "AionLabs: Aion-RP 1.0 (8B)"
+    type: chat
+    config:
+      context_window: 32768
+  - model_id: "qwen/qwen2.5-vl-72b-instruct"
+    name: "Qwen: Qwen2.5 VL 72B Instruct"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 128000
+  - model_id: "qwen/qwen-plus"
+    name: "Qwen: Qwen-Plus"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 1000000
+  - model_id: "openai/o3-mini:batch"
+    name: "OpenAI: o3 Mini (batch)"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "openai/o3-mini"
+    name: "OpenAI: o3 Mini"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "mistralai/mistral-small-24b-instruct-2501"
+    name: "Mistral: Mistral Small 3"
+    type: chat
+    config:
+      context_window: 32768
+  - model_id: "perplexity/sonar"
+    name: "Perplexity: Sonar"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 127072
+  - model_id: "deepseek/deepseek-r1-distill-llama-70b"
+    name: "DeepSeek: R1 Distill Llama 70B"
+    type: chat
+    config:
+      compatibilities: [reasoning]
+      context_window: 8192
+      thinking_mode: toggle
+  - model_id: "deepseek/deepseek-r1"
+    name: "DeepSeek: R1"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 64000
+      thinking_mode: always
+  - model_id: "minimax/minimax-01"
+    name: "MiniMax: MiniMax-01"
+    type: chat
+    config:
+      compatibilities: [vision]
+      context_window: 1000192
+  - model_id: "microsoft/phi-4"
+    name: "Microsoft: Phi 4"
+    type: chat
+    config:
+      context_window: 16384
+  - model_id: "deepseek/deepseek-chat"
+    name: "DeepSeek: DeepSeek V3"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 163840
+  - model_id: "sao10k/l3.3-euryale-70b"
+    name: "Sao10K: Llama 3.3 Euryale 70B"
+    type: chat
+    config:
+      context_window: 131072
+  - model_id: "openai/o1"
+    name: "OpenAI: o1"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 200000
+      thinking_mode: toggle
+  - model_id: "cohere/command-r7b-12-2024"
+    name: "Cohere: Command R7B (12-2024)"
+    type: chat
+    config:
+      context_window: 128000
+  - model_id: "meta-llama/llama-3.3-70b-instruct"
+    name: "Meta: Llama 3.3 70B Instruct"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 131072
+  - model_id: "amazon/nova-lite-v1"
+    name: "Amazon: Nova Lite 1.0"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 300000
+  - model_id: "amazon/nova-micro-v1"
+    name: "Amazon: Nova Micro 1.0"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 128000
+  - model_id: "amazon/nova-pro-v1"
+    name: "Amazon: Nova Pro 1.0"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 300000
+  - model_id: "openai/gpt-4o-2024-11-20"
+    name: "OpenAI: GPT-4o (2024-11-20)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "mistralai/mistral-large-2407"
+    name: "Mistral Large 2407"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call]
+      context_window: 131072
+  - model_id: "qwen/qwen-2.5-coder-32b-instruct"
+    name: "Qwen2.5 Coder 32B Instruct"
     type: chat
     config:
       context_window: 32768
@@ -2080,268 +2909,221 @@ models:
     type: chat
     config:
       compatibilities: [tool-call]
+      context_window: 1024000
+  - model_id: "anthracite-org/magnum-v4-72b"
+    name: "Magnum v4 72B"
+    type: chat
+    config:
       context_window: 32768
+  - model_id: "qwen/qwen-2.5-7b-instruct"
+    name: "Qwen: Qwen2.5 7B Instruct"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 32768
+  - model_id: "meta-llama/llama-3.2-3b-instruct"
+    name: "Meta: Llama 3.2 3B Instruct"
+    type: chat
+    config:
+      context_window: 131072
+  - model_id: "meta-llama/llama-3.2-1b-instruct"
+    name: "Meta: Llama 3.2 1B Instruct"
+    type: chat
+    config:
+      context_window: 60000
+  - model_id: "qwen/qwen-2.5-72b-instruct"
+    name: "Qwen2.5 72B Instruct"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 32768
+  - model_id: "cohere/command-r-plus-08-2024"
+    name: "Cohere: Command R+ (08-2024)"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 128000
+  - model_id: "cohere/command-r-08-2024"
+    name: "Cohere: Command R (08-2024)"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 128000
+  - model_id: "sao10k/l3.1-euryale-70b"
+    name: "Sao10K: Llama 3.1 Euryale 70B v2.2"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 131072
+  - model_id: "nousresearch/hermes-3-llama-3.1-70b"
+    name: "Nous: Hermes 3 70B Instruct"
+    type: chat
+    config:
+      context_window: 131072
+  - model_id: "nousresearch/hermes-3-llama-3.1-405b"
+    name: "Nous: Hermes 3 405B Instruct"
+    type: chat
+    config:
+      context_window: 131072
+  - model_id: "sao10k/l3-lunaris-8b"
+    name: "Sao10K: Llama 3 8B Lunaris"
+    type: chat
+    config:
+      context_window: 8192
+  - model_id: "openai/gpt-4o-2024-08-06"
+    name: "OpenAI: GPT-4o (2024-08-06)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "meta-llama/llama-3.1-8b-instruct"
+    name: "Meta: Llama 3.1 8B Instruct"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 131072
+  - model_id: "meta-llama/llama-3.1-70b-instruct"
+    name: "Meta: Llama 3.1 70B Instruct"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 131072
+  - model_id: "mistralai/mistral-nemo"
+    name: "Mistral: Mistral Nemo"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 131072
+  - model_id: "openai/gpt-4o-mini:batch"
+    name: "OpenAI: GPT-4o-mini (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "openai/gpt-4o-mini-2024-07-18"
+    name: "OpenAI: GPT-4o-mini (2024-07-18)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "openai/gpt-4o-mini"
+    name: "OpenAI: GPT-4o-mini"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "google/gemma-2-27b-it"
+    name: "Google: Gemma 2 27B"
+    type: chat
+    config:
+      context_window: 8192
+  - model_id: "openai/gpt-4o:batch"
+    name: "OpenAI: GPT-4o (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "openai/gpt-4o-2024-05-13"
+    name: "OpenAI: GPT-4o (2024-05-13)"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "openai/gpt-4o"
+    name: "OpenAI: GPT-4o"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call]
+      context_window: 128000
+  - model_id: "mistralai/mixtral-8x22b-instruct"
+    name: "Mistral: Mixtral 8x22B Instruct"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call]
+      context_window: 65536
+  - model_id: "microsoft/wizardlm-2-8x22b"
+    name: "WizardLM-2 8x22B"
+    type: chat
+    config:
+      context_window: 65535
+  - model_id: "openai/gpt-4-turbo:batch"
+    name: "OpenAI: GPT-4 Turbo (batch)"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 128000
+  - model_id: "openai/gpt-4-turbo"
+    name: "OpenAI: GPT-4 Turbo"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 128000
+  - model_id: "anthropic/claude-3-haiku"
+    name: "Anthropic: Claude 3 Haiku"
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 200000
+  - model_id: "mistralai/mistral-large"
+    name: "Mistral Large"
+    type: chat
+    config:
+      compatibilities: [file-input, tool-call]
+      context_window: 128000
+  - model_id: "openai/gpt-3.5-turbo-0613"
+    name: "OpenAI: GPT-3.5 Turbo (older v0613)"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 4095
+  - model_id: "openrouter/auto"
+    name: "Auto Router"
+    type: chat
+    config:
+      compatibilities: [vision, file-input, image-output, tool-call, reasoning]
+      context_window: 2000000
+      thinking_mode: toggle
+  - model_id: "openai/gpt-3.5-turbo-instruct"
+    name: "OpenAI: GPT-3.5 Turbo Instruct"
+    type: chat
+    config:
+      context_window: 4095
+  - model_id: "openai/gpt-3.5-turbo-16k"
+    name: "OpenAI: GPT-3.5 Turbo 16k"
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 16385
+  - model_id: "mancer/weaver"
+    name: "Mancer: Weaver (alpha)"
+    type: chat
+    config:
+      context_window: 8000
   - model_id: "undi95/remm-slerp-l2-13b"
     name: "ReMM SLERP 13B"
     type: chat
     config:
       context_window: 6144
-  - model_id: "upstage/solar-pro-3"
-    name: "Upstage: Solar Pro 3"
+  - model_id: "gryphe/mythomax-l2-13b"
+    name: "MythoMax 13B"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 128000
-  - model_id: "writer/palmyra-x5"
-    name: "Writer: Palmyra X5"
-    type: chat
-    config:
-      context_window: 1040000
-  - model_id: "x-ai/grok-3"
-    name: "xAI: Grok 3"
+      context_window: 8192
+  - model_id: "openai/gpt-4"
+    name: "OpenAI: GPT-4"
     type: chat
     config:
       compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "x-ai/grok-3-beta"
-    name: "xAI: Grok 3 Beta"
+      context_window: 8191
+  - model_id: "openai/gpt-3.5-turbo:batch"
+    name: "OpenAI: GPT-3.5 Turbo (batch)"
     type: chat
     config:
       compatibilities: [tool-call]
-      context_window: 131072
-  - model_id: "x-ai/grok-3-mini"
-    name: "xAI: Grok 3 Mini"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "x-ai/grok-3-mini-beta"
-    name: "xAI: Grok 3 Mini Beta"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "x-ai/grok-4"
-    name: "xAI: Grok 4"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 256000
-  - model_id: "x-ai/grok-4-fast"
-    name: "xAI: Grok 4 Fast"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 2000000
-  - model_id: "x-ai/grok-4.1-fast"
-    name: "xAI: Grok 4.1 Fast"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 2000000
-  - model_id: "x-ai/grok-4.20"
-    name: "xAI: Grok 4.20"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 2000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "x-ai/grok-4.20-multi-agent"
-    name: "xAI: Grok 4.20 Multi-Agent"
-    type: chat
-    config:
-      compatibilities: [vision, reasoning]
-      context_window: 2000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "x-ai/grok-4.3"
-    name: "xAI: Grok 4.3"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "x-ai/grok-code-fast-1"
-    name: "xAI: Grok Code Fast 1"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 256000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "xiaomi/mimo-v2-flash"
-    name: "Xiaomi: MiMo-V2-Flash"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 262144
-  - model_id: "xiaomi/mimo-v2-omni"
-    name: "Xiaomi: MiMo-V2-Omni"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "xiaomi/mimo-v2-pro"
-    name: "Xiaomi: MiMo-V2-Pro"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 1048576
-  - model_id: "xiaomi/mimo-v2.5"
-    name: "Xiaomi: MiMo-V2.5"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1048576
-  - model_id: "xiaomi/mimo-v2.5-pro"
-    name: "Xiaomi: MiMo-V2.5-Pro"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 1048576
-  - model_id: "z-ai/glm-4-32b"
-    name: "Z.ai: GLM 4 32B "
+      context_window: 16385
+  - model_id: "openai/gpt-3.5-turbo"
+    name: "OpenAI: GPT-3.5 Turbo"
     type: chat
     config:
       compatibilities: [tool-call]
-      context_window: 128000
-  - model_id: "z-ai/glm-4.5"
-    name: "Z.ai: GLM 4.5"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "z-ai/glm-4.5-air"
-    name: "Z.ai: GLM 4.5 Air"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "z-ai/glm-4.5-air:free"
-    name: "Z.ai: GLM 4.5 Air (free)"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 131072
-  - model_id: "z-ai/glm-4.5v"
-    name: "Z.ai: GLM 4.5V"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 65536
-  - model_id: "z-ai/glm-4.6"
-    name: "Z.ai: GLM 4.6"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 204800
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "z-ai/glm-4.6v"
-    name: "Z.ai: GLM 4.6V"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 131072
-  - model_id: "z-ai/glm-4.7"
-    name: "Z.ai: GLM 4.7"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 202752
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "z-ai/glm-4.7-flash"
-    name: "Z.ai: GLM 4.7 Flash"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 202752
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "z-ai/glm-5"
-    name: "Z.ai: GLM 5"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 202752
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "z-ai/glm-5-turbo"
-    name: "Z.ai: GLM 5 Turbo"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 202752
-  - model_id: "z-ai/glm-5.1"
-    name: "Z.ai: GLM 5.1"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 202752
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "z-ai/glm-5v-turbo"
-    name: "Z.ai: GLM 5V Turbo"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 202752
-  - model_id: "~anthropic/claude-haiku-latest"
-    name: "Anthropic Claude Haiku Latest"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 200000
-  - model_id: "~anthropic/claude-opus-latest"
-    name: "Anthropic: Claude Opus Latest"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "~anthropic/claude-sonnet-latest"
-    name: "Anthropic Claude Sonnet Latest"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1000000
-  - model_id: "~google/gemini-flash-latest"
-    name: "Google Gemini Flash Latest"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "~google/gemini-pro-latest"
-    name: "Google Gemini Pro Latest"
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1048576
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "~moonshotai/kimi-latest"
-    name: "MoonshotAI Kimi Latest"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 262144
-  - model_id: "~openai/gpt-latest"
-    name: "OpenAI GPT Latest"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 1050000
-  - model_id: "~openai/gpt-mini-latest"
-    name: "OpenAI GPT Mini Latest"
-    type: chat
-    config:
-      compatibilities: [vision, tool-call, reasoning]
-      context_window: 400000
+      context_window: 16385
