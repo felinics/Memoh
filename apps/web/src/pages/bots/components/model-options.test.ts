@@ -68,6 +68,7 @@ vi.mock('@/components/model-description-tooltip/index.vue', () => ({
     setup(props, { emit, slots }) {
       return () => h('div', {
         'data-model-tooltip': '',
+        'data-description': props.description ?? '',
         'data-open': String(props.open),
         onPointerenter: () => emit('update:open', true),
       }, slots.default?.())
@@ -129,6 +130,20 @@ describe('ModelOptions', () => {
     listbox!.dispatchEvent(new Event('scroll'))
     await nextTick()
     expect(tooltip!.dataset.open).toBe('false')
+  })
+
+  it('passes the configured description to the tooltip', async () => {
+    const el = await mountPicker()
+    expect(el.querySelector<HTMLElement>('[data-model-tooltip]')?.dataset.description).toBe('Model description')
+  })
+
+  it('does not fall back to the label when a model has no description', async () => {
+    // No tooltip at all for undescribed models — repeating the visible label in
+    // a tooltip is noise, the tooltip component renders nothing for empty text.
+    const el = await mountPicker({
+      models: [{ id: 'model-1', model_id: 'model-1', name: 'Model 1', provider_id: '', type: 'chat', config: {} }],
+    })
+    expect(el.querySelector<HTMLElement>('[data-model-tooltip]')?.dataset.description).toBe('')
   })
 
   it('renders and emits agent-provided reasoning options without guessing fixed levels', async () => {

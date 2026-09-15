@@ -65,7 +65,7 @@
 
           <ModelDescriptionTooltip
             v-else
-            :description="vRow.row.option.description || vRow.row.option.label"
+            :description="vRow.row.option.description"
             side="right"
             :side-offset="12"
             :open="openDescriptionTooltipKey === vRow.row.key"
