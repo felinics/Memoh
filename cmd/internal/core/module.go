@@ -78,6 +78,8 @@ func ServerModule() fx.Option {
 			provideUserRuntimeStore,
 			provideBotRemoteRuntimeBindingStore,
 			provideBotWorkdirStore,
+			provideStickerSightingStore,
+			provideStickerLibrary,
 			provideUserRuntimeHub,
 			userruntime.NewService,
 			workspace.NewRemoteWorkspaceService,

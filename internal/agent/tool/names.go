@@ -60,6 +60,9 @@ func ToolGenerateVideo() ToolName   { return toolname.ToolGenerateVideo() }
 func ToolTranscribeAudio() ToolName { return toolname.ToolTranscribeAudio() }
 func ToolAskUser() ToolName         { return toolname.ToolAskUser() }
 
+func ToolSearchStickers() ToolName { return toolname.ToolSearchStickers() }
+func ToolSaveSticker() ToolName    { return toolname.ToolSaveSticker() }
+
 func ToolListEmailAccounts() ToolName { return toolname.ToolListEmailAccounts() }
 func ToolSendEmail() ToolName         { return toolname.ToolSendEmail() }
 func ToolListEmail() ToolName         { return toolname.ToolListEmail() }

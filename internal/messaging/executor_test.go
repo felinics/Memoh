@@ -345,7 +345,7 @@ func TestSendDirectInvalidAttachmentObjectReturnsError(t *testing.T) {
 			args: map[string]any{
 				"message": map[string]any{"text": "see attachment"},
 				"attachments": []any{
-					map[string]any{"type": "sticker", "url": "https://example.com/file.png"},
+					map[string]any{"type": "hologram", "url": "https://example.com/file.png"},
 				},
 			},
 			want: "unsupported attachment type",
@@ -529,7 +529,7 @@ func TestParseOutboundMessageRichPartsValidation(t *testing.T) {
 			name: "unknown nested attachment type",
 			raw: map[string]any{"message": map[string]any{
 				"text":        "see attachment",
-				"attachments": []any{map[string]any{"type": "sticker", "url": "https://example.com/file.png"}},
+				"attachments": []any{map[string]any{"type": "hologram", "url": "https://example.com/file.png"}},
 			}},
 			want: "unsupported attachment type",
 		},

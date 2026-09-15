@@ -92,6 +92,7 @@ import (
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/searchproviders"
 	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/sticker"
 	"github.com/felinics/memoh/internal/storage/providers/containerfs"
 	"github.com/felinics/memoh/internal/storage/providers/fallback"
 	"github.com/felinics/memoh/internal/storage/providers/localfs"
@@ -225,6 +226,17 @@ func provideBotWorkdirStore(postgresStore *postgresstore.Store) (dbstore.BotWork
 		return nil, errors.New("postgres bot workdir store not configured")
 	}
 	return postgresStore, nil
+}
+
+func provideStickerSightingStore(postgresStore *postgresstore.Store) (dbstore.StickerSightingStore, error) {
+	if postgresStore == nil {
+		return nil, errors.New("postgres sticker sighting store not configured")
+	}
+	return postgresStore, nil
+}
+
+func provideStickerLibrary(log *slog.Logger, provider bridge.Provider) *sticker.Service {
+	return sticker.New(log, provider)
 }
 
 func provideUserRuntimeHub(lc fx.Lifecycle, log *slog.Logger) *userruntime.Hub {
@@ -977,7 +989,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, stickerLibrary *sticker.Service, stickerSightings dbstore.StickerSightingStore, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -991,6 +1003,7 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewContactsProvider(log, channelcontactadapter.NewSource(routeService)),
 		agenttools.NewScheduleProvider(log, scheduleService),
 		agenttools.NewWorkdirProvider(log, workdirService),
+		agenttools.NewStickerProvider(log, stickerLibrary, stickerSightings),
 		agenttools.NewACPAgentsProvider(log, &acpRuntimePoolAdapter{pool: acpPool}, queries),
 		agenttools.NewMemoryProvider(log, memoryRegistry, settingsService, historySessions),
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),

@@ -77,6 +77,9 @@ func ToolGenerateVideo() Name   { return newName("generate_video") }
 func ToolTranscribeAudio() Name { return newName("transcribe_audio") }
 func ToolAskUser() Name         { return newName(userinput.ToolNameAskUser) }
 
+func ToolSearchStickers() Name { return newName("search_stickers") }
+func ToolSaveSticker() Name    { return newName("save_sticker") }
+
 func ToolListEmailAccounts() Name { return newName("list_email_accounts") }
 func ToolSendEmail() Name         { return newName("send_email") }
 func ToolListEmail() Name         { return newName("list_email") }
@@ -90,6 +93,7 @@ var all = []Name{
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
 	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),
 	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolGenerateVideo(), ToolTranscribeAudio(), ToolAskUser(),
+	ToolSearchStickers(), ToolSaveSticker(),
 	ToolListEmailAccounts(), ToolSendEmail(), ToolListEmail(), ToolReadEmail(),
 }
 

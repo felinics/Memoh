@@ -13,6 +13,7 @@ import (
 
 	tele "gopkg.in/telebot.v4"
 
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/command"
 )
@@ -2036,5 +2037,182 @@ func TestCollectTelegramStickerCarriesEmojiInName(t *testing.T) {
 	})
 	if len(without) != 1 || without[0].Name != "sticker" {
 		t.Fatalf("attachment = %+v, want a plain sticker name", without)
+	}
+}
+
+// 贴纸库要发的是贴纸本身。视频贴纸存进媒体库的字节是缩略图，此时 PlatformKey
+// 指向那张预览，贴纸自己的 file id 只能从 sticker_file_id 拿。
+func TestCollectTelegramStickerRecordsLibraryIdentity(t *testing.T) {
+	adapter := &TelegramAdapter{}
+	thumb := &tele.Photo{File: tele.File{FileID: "thumb-file"}, Width: 320, Height: 320}
+	atts := adapter.collectTelegramAttachments(nil, &tele.Message{
+		Sticker: &tele.Sticker{
+			File:      tele.File{FileID: "webm-file", UniqueID: "unique-1"},
+			Video:     true,
+			Width:     512,
+			Height:    512,
+			Emoji:     "🎉",
+			SetName:   "KleePack",
+			Thumbnail: thumb,
+		},
+	})
+	if len(atts) != 1 {
+		t.Fatalf("collectTelegramAttachments() = %d attachments, want 1", len(atts))
+	}
+	metadata := atts[0].Metadata
+	if atts[0].PlatformKey != "thumb-file" {
+		t.Fatalf("platform key = %q, want the stored preview", atts[0].PlatformKey)
+	}
+	if metadata[attachmentpkg.MetadataKeyStickerFileID] != "webm-file" {
+		t.Fatalf("metadata = %+v, want the original sticker file id", metadata)
+	}
+	if metadata[attachmentpkg.MetadataKeyStickerUniqueID] != "unique-1" {
+		t.Fatalf("metadata = %+v, want the stable unique id", metadata)
+	}
+	if metadata[attachmentpkg.MetadataKeyStickerSet] != "KleePack" {
+		t.Fatalf("metadata = %+v, want the pack name", metadata)
+	}
+	if metadata[attachmentpkg.MetadataKeyStickerEmoji] != "🎉" {
+		t.Fatalf("metadata = %+v, want the emoji the library searches on", metadata)
+	}
+	if metadata[attachmentpkg.MetadataKeyStickerKind] != channel.StickerKindVideo {
+		t.Fatalf("metadata = %+v, want the video kind", metadata)
+	}
+}
+
+// 没有发生预览替换时（静态和动画贴纸），附件本身就是贴纸，sticker_file_id 按
+// #1239 的收窄不写——贴纸库此时从 file_id 取可发送引用，靠 sticker_unique_id
+// 认出这是一张贴纸。
+func TestCollectTelegramStickerWithoutPreviewIsItsOwnReference(t *testing.T) {
+	adapter := &TelegramAdapter{}
+	for _, tc := range []struct {
+		name     string
+		sticker  *tele.Sticker
+		wantKind string
+	}{
+		{
+			name:     "静态贴纸",
+			sticker:  &tele.Sticker{File: tele.File{FileID: "static-file", UniqueID: "unique-2"}, Width: 512, Height: 512},
+			wantKind: channel.StickerKindStatic,
+		},
+		{
+			name:     "动画贴纸保留 Lottie",
+			sticker:  &tele.Sticker{File: tele.File{FileID: "tgs-file", UniqueID: "unique-3"}, Animated: true, Width: 512, Height: 512},
+			wantKind: channel.StickerKindAnimated,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			atts := adapter.collectTelegramAttachments(nil, &tele.Message{Sticker: tc.sticker})
+			if len(atts) != 1 {
+				t.Fatalf("collectTelegramAttachments() = %d attachments, want 1", len(atts))
+			}
+			metadata := atts[0].Metadata
+			if _, ok := metadata[attachmentpkg.MetadataKeyStickerFileID]; ok {
+				t.Fatalf("metadata = %+v, want no preview handle when the sticker itself was stored", metadata)
+			}
+			if atts[0].PlatformKey != tc.sticker.FileID || metadata["file_id"] != tc.sticker.FileID {
+				t.Fatalf("attachment = %+v, want the sticker as its own reference", atts[0])
+			}
+			if metadata[attachmentpkg.MetadataKeyStickerUniqueID] != tc.sticker.UniqueID {
+				t.Fatalf("metadata = %+v, want the stable unique id", metadata)
+			}
+			if metadata[attachmentpkg.MetadataKeyStickerKind] != tc.wantKind {
+				t.Fatalf("metadata = %+v, want kind %q", metadata, tc.wantKind)
+			}
+		})
+	}
+}
+
+func TestSendTelegramAttachment_StickerUsesSendSticker(t *testing.T) {
+	var paths []string
+	var stickerBody string
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		body, _ := io.ReadAll(req.Body)
+		if strings.HasSuffix(req.URL.Path, "/sendSticker") {
+			stickerBody = string(body)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":7,"chat":{"id":123},"sticker":{"file_id":"sticker-file-id","file_unique_id":"u1","width":512,"height":512}}}`)),
+		}, nil
+	}))
+
+	att := channel.PreparedAttachment{
+		Kind:      channel.PreparedAttachmentNativeRef,
+		NativeRef: "sticker-file-id",
+		Logical: channel.Attachment{
+			Type:           channel.AttachmentSticker,
+			PlatformKey:    "sticker-file-id",
+			SourcePlatform: Type.String(),
+		},
+	}
+	// 贴纸的 file_id 走 sendPhoto 会被 Telegram 拒掉，所以必须走 sendSticker。
+	if err := sendTelegramAttachmentImpl(context.Background(), bot, "123", att, "", 0, "", nil); err != nil {
+		t.Fatalf("sendTelegramAttachmentImpl: %v", err)
+	}
+	if len(paths) != 1 || !strings.HasSuffix(paths[0], "/sendSticker") {
+		t.Fatalf("paths = %v, want only sendSticker", paths)
+	}
+	if !strings.Contains(stickerBody, "sticker-file-id") {
+		t.Fatalf("sendSticker body = %s, want the native reference", stickerBody)
+	}
+}
+
+func TestSendTelegramAttachment_StickerCaptionFollowsAsMessage(t *testing.T) {
+	var paths []string
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		paths = append(paths, req.URL.Path)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":{"message_id":7,"chat":{"id":123},"sticker":{"file_id":"sticker-file-id","file_unique_id":"u1","width":512,"height":512}}}`)),
+		}, nil
+	}))
+
+	att := channel.PreparedAttachment{
+		Kind:      channel.PreparedAttachmentNativeRef,
+		NativeRef: "sticker-file-id",
+		Logical: channel.Attachment{
+			Type:           channel.AttachmentSticker,
+			PlatformKey:    "sticker-file-id",
+			SourcePlatform: Type.String(),
+			Caption:        "接着说的话",
+		},
+	}
+	// sendSticker 不接受 caption，配文只能另发一条，不能静悄悄丢掉。
+	if err := sendTelegramAttachmentImpl(context.Background(), bot, "123", att, "", 0, "", nil); err != nil {
+		t.Fatalf("sendTelegramAttachmentImpl: %v", err)
+	}
+	if len(paths) != 2 || !strings.HasSuffix(paths[0], "/sendSticker") || !strings.HasSuffix(paths[1], "/sendMessage") {
+		t.Fatalf("paths = %v, want sendSticker then sendMessage", paths)
+	}
+}
+
+func TestPrepareTelegramStickerKeepsNativeReference(t *testing.T) {
+	prepared, err := channel.PrepareStreamEvent(context.Background(), nil, channel.ChannelConfig{
+		BotID:       "bot-test",
+		ChannelType: Type,
+	}, channel.StreamEvent{
+		Type: channel.StreamEventAttachment,
+		Attachments: []channel.Attachment{{
+			Type:        channel.AttachmentSticker,
+			PlatformKey: "sticker-file-id",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("PrepareStreamEvent: %v", err)
+	}
+	if len(prepared.Attachments) != 1 {
+		t.Fatalf("prepared %d attachments, want 1", len(prepared.Attachments))
+	}
+	att := prepared.Attachments[0]
+	// 贴纸库存的是 file_id，重新上传既多余又发不出动态贴纸，必须保持原生引用。
+	if att.Kind != channel.PreparedAttachmentNativeRef || att.NativeRef != "sticker-file-id" {
+		t.Fatalf("prepared attachment = %+v, want a native reference", att)
+	}
+	if att.Logical.Type != channel.AttachmentSticker {
+		t.Fatalf("logical type = %q, want sticker", att.Logical.Type)
 	}
 }

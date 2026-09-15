@@ -993,6 +993,8 @@
       "list_skills": "List skills",
       "list_models": "List models",
       "list_workdirs": "List workdirs",
+      "search_stickers": "Search stickers",
+      "save_sticker": "Save sticker",
       "list_acp_agents": "List ACP agents",
       "list_acp_agents_one": "Inspect ACP agent",
       "browser_action": "Browser {action}",

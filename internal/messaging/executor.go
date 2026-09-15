@@ -416,7 +416,7 @@ func validateOutboundAttachmentObject(location string, raw map[string]any) error
 		}
 		attType = strings.TrimSpace(attType)
 		switch AttachmentType(attType) {
-		case "", AttachmentImage, AttachmentAudio, AttachmentVideo, AttachmentVoice, AttachmentFile, AttachmentGIF:
+		case "", AttachmentImage, AttachmentAudio, AttachmentVideo, AttachmentVoice, AttachmentFile, AttachmentGIF, AttachmentSticker:
 			raw["type"] = attType
 		default:
 			return fmt.Errorf("unsupported attachment type %q%s", attType, location)
