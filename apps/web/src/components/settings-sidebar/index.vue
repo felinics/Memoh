@@ -111,7 +111,7 @@ import { ComputerIcon } from '@memohai/icon/ui'
 import { computed, inject, onBeforeUnmount, ref, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
-import { useRouter, useRoute, isNavigationFailure, NavigationFailureType } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   AudioLines,
@@ -233,11 +233,7 @@ function navigate(name: string): void {
     .then(() => {
       if (pendingNav.value === name) pendingNav.value = null
     })
-    .catch((err) => {
-      // A duplicated push (double-click on a slow item) rejects instantly while
-      // the FIRST push is still loading its chunk — keep the pending highlight
-      // for that in-flight one instead of dropping it back to the old item.
-      if (isNavigationFailure(err, NavigationFailureType.duplicated)) return
+    .catch(() => {
       if (pendingNav.value === name) pendingNav.value = null
     })
 }
