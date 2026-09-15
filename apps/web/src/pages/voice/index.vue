@@ -7,6 +7,7 @@ import type { AudioSpeechProviderResponse, ProvidersGetResponse, Providertemplat
 import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
+import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import SpeechSetting from '@/pages/speech/components/provider-setting.vue'
@@ -185,6 +186,13 @@ const addProviderNames = computed(() => [
   ...catalogTranscriptionProviders.value.map((p) => ({ name: p.name })),
 ])
 
+// First-load gate per section: hold each grid back until BOTH its sources
+// resolve so the first painted grid is final — providers render before template
+// drafts and enabled ones first, so a late-arriving list would prepend cards
+// under the pointer.
+const speechListLoading = computed(() => speechLoading.value || speechTemplatesLoading.value)
+const transcriptionListLoading = computed(() => transcriptionLoading.value || transcriptionTemplatesLoading.value)
+
 function getInitials(name: string | undefined) {
   const label = name?.trim() ?? ''
   return label ? label.slice(0, 2).toUpperCase() : '?'
@@ -258,8 +266,13 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
             </Button>
           </template>
 
+          <BackendCardGridSkeleton
+            v-if="speechListLoading"
+            :count="2"
+          />
+
           <div
-            v-if="catalogSpeechProviders.length + speechTemplateDrafts.length > 0"
+            v-else-if="catalogSpeechProviders.length + speechTemplateDrafts.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
@@ -332,8 +345,13 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
             </Button>
           </template>
 
+          <BackendCardGridSkeleton
+            v-if="transcriptionListLoading"
+            :count="2"
+          />
+
           <div
-            v-if="catalogTranscriptionProviders.length + transcriptionTemplateDrafts.length > 0"
+            v-else-if="catalogTranscriptionProviders.length + transcriptionTemplateDrafts.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard

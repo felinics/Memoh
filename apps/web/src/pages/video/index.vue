@@ -7,6 +7,7 @@ import type { ProvidersGetResponse, ProvidertemplatesGetResponse, VideoProviderR
 import { Plus } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import AddProvider from '@/components/add-provider/index.vue'
+import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import VideoProviderSetting from './provider-setting.vue'
@@ -84,6 +85,11 @@ const {
 
 const addProviderNames = computed(() => catalogProviders.value.map((p) => ({ name: p.name })))
 
+// First-load gate: hold the grid back until BOTH sources resolve so the first
+// painted grid is final — providers render before template drafts and enabled
+// ones first, so a late-arriving list would prepend cards under the pointer.
+const listLoading = computed(() => providersLoading.value || templatesLoading.value)
+
 function getInitials(name: string | undefined) {
   const label = name?.trim() ?? ''
   return label ? label.slice(0, 2).toUpperCase() : '?'
@@ -138,8 +144,10 @@ watch(() => openStatus.addOpen, (isOpen, wasOpen) => {
         </Button>
       </template>
 
+      <BackendCardGridSkeleton v-if="listLoading" />
+
       <div
-        v-if="catalogProviders.length + templateDrafts.length > 0"
+        v-else-if="catalogProviders.length + templateDrafts.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard

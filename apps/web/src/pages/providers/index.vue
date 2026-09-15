@@ -19,6 +19,7 @@ import { Boxes, Box, ChevronRight, Plus, Search } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { BackendCard, DetailPane, PageShell, SwapTransition } from '@felinic/ui'
 import AddProvider from '@/components/add-provider/index.vue'
+import BackendCardGridSkeleton from '@/components/backend-card-grid-skeleton/index.vue'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import { useRoutedViewSwap } from '@/composables/useViewSwap'
 import { avatarInitials } from '@/composables/useAvatarInitials'
@@ -140,6 +141,11 @@ const modelCountByProvider = computed(() => {
   return counts
 })
 
+// First-load gate: hold the grid back until BOTH sources resolve so the first
+// painted grid is final — providers render before template drafts and enabled
+// ones first, so a late-arriving list would prepend cards under the pointer.
+const listLoading = computed(() => providersLoading.value || templatesLoading.value)
+
 // Always offer search once there's anything to filter — a hidden-then-appearing
 // box read as inconsistent (some providers showed it, some didn't).
 const showSearch = computed(() => catalogProviders.value.length + availableTemplates.value.length > 0)
@@ -231,8 +237,10 @@ function openAddProvider(templateId?: string) {
         </Button>
       </template>
 
+      <BackendCardGridSkeleton v-if="listLoading" />
+
       <div
-        v-if="catalogProviders.length + availableTemplates.length > 0"
+        v-else-if="catalogProviders.length + availableTemplates.length > 0"
         class="grid grid-cols-1 gap-3 sm:grid-cols-2"
       >
         <BackendCard
