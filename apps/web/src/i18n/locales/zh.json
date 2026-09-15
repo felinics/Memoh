@@ -350,10 +350,10 @@
     },
     "session": "会话列表",
     "chat": "对话",
-    "bots": "智能体",
+    "bots": "Bot",
     "runtimes": "电脑",
     "providers": "模型服务商",
-    "settings": "系统设置",
+    "settings": "设置",
     "webSearch": "搜索引擎",
     "memory": "记忆管理",
     "group": {
@@ -377,8 +377,8 @@
     "supermarket": "应用市场",
     "about": "关于",
     "userMenu": "账号菜单",
-    "switchBot": "切换智能体",
-    "manageBots": "管理智能体"
+    "switchBot": "切换 Bot",
+    "manageBots": "管理 Bot"
   },
   "runtimes": {
     "title": "电脑",
