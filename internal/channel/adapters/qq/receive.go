@@ -137,7 +137,10 @@ func (a *QQAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, hand
 }
 
 func (a *QQAdapter) runReceiver(ctx context.Context, cfg channel.ChannelConfig, parsed Config, handler channel.InboundHandler) {
-	backoffs := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
+	// Cap at 5 minutes: gateway/token endpoints rate-limit aggressively
+	// (400 接口调用超过频率限制), and persistent failures like an IP
+	// whitelist 401 are resolved out-of-band, so fast retries only burn quota.
+	backoffs := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second, time.Minute, 5 * time.Minute}
 	attempt := 0
 	for ctx.Err() == nil {
 		healthySession, err := a.serveConnection(ctx, cfg, parsed, handler)

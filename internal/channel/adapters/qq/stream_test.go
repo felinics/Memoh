@@ -2,9 +2,11 @@ package qq
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/redact"
@@ -230,5 +232,176 @@ func TestQQOutboundStreamErrorRedactsRegisteredTokenFragments(t *testing.T) {
 	}
 	if got := sent[0].Message.PlainText(); strings.Contains(got, prefixHalf) {
 		t.Fatalf("expected redacted token fragment, got %q", got)
+	}
+}
+
+func TestQQOutboundStreamC2CStreamsCumulativeShards(t *testing.T) {
+	t.Parallel()
+
+	var shards []qqStreamShardRequest
+	var sent []channel.OutboundMessage
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: 0,
+		now:            time.Now,
+		send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
+			sent = append(sent, msg.LogicalMessage())
+			return nil
+		},
+		streamSend: func(_ context.Context, req qqStreamShardRequest) (qqStreamShardResponse, error) {
+			shards = append(shards, req)
+			return qqStreamShardResponse{ID: "sm-1"}, nil
+		},
+	}
+
+	ctx := context.Background()
+	for _, delta := range []string{"你好", "，世界"} {
+		if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: delta})); err != nil {
+			t.Fatalf("push delta: %v", err)
+		}
+	}
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{}})); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+
+	if len(sent) != 0 {
+		t.Fatalf("expected no legacy sends, got %d", len(sent))
+	}
+	if len(shards) != 3 {
+		t.Fatalf("expected 3 shards, got %d", len(shards))
+	}
+	if shards[0].StreamMsgID != "" || shards[0].Index != 0 || shards[0].InputState != qqStreamInputGenerating {
+		t.Fatalf("unexpected first shard: %+v", shards[0])
+	}
+	if shards[0].ContentRaw != "你好" || shards[1].ContentRaw != "你好，世界" {
+		t.Fatalf("shards must carry cumulative text: %+v", shards)
+	}
+	for i, shard := range shards {
+		if shard.Index != i {
+			t.Fatalf("shard %d index = %d", i, shard.Index)
+		}
+		if i > 0 && shard.StreamMsgID != "sm-1" {
+			t.Fatalf("shard %d must reuse server stream id: %+v", i, shard)
+		}
+	}
+	if shards[2].InputState != qqStreamInputDone {
+		t.Fatalf("final shard state = %d", shards[2].InputState)
+	}
+}
+
+func TestQQOutboundStreamC2CShardFailureFallsBackToLegacySend(t *testing.T) {
+	t.Parallel()
+
+	var sent []channel.OutboundMessage
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: 0,
+		now:            time.Now,
+		send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
+			sent = append(sent, msg.LogicalMessage())
+			return nil
+		},
+		streamSend: func(context.Context, qqStreamShardRequest) (qqStreamShardResponse, error) {
+			return qqStreamShardResponse{}, errors.New("boom")
+		},
+	}
+
+	ctx := context.Background()
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "完整回复"})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{}})); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+
+	if len(sent) != 1 {
+		t.Fatalf("expected one legacy send, got %d", len(sent))
+	}
+	if got := sent[0].Message.PlainText(); got != "完整回复" {
+		t.Fatalf("unexpected text: %q", got)
+	}
+}
+
+func TestQQOutboundStreamC2CSingleShardForShortReply(t *testing.T) {
+	t.Parallel()
+
+	var shards []qqStreamShardRequest
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: time.Hour,
+		now:            time.Now,
+		send: func(context.Context, channel.PreparedOutboundMessage) error {
+			t.Fatal("legacy send must not run")
+			return nil
+		},
+		streamSend: func(_ context.Context, req qqStreamShardRequest) (qqStreamShardResponse, error) {
+			shards = append(shards, req)
+			return qqStreamShardResponse{ID: "sm-9"}, nil
+		},
+	}
+
+	ctx := context.Background()
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "短回复"})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{}})); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+
+	if len(shards) != 2 {
+		t.Fatalf("expected 2 shards (immediate + final), got %d", len(shards))
+	}
+	if shards[0].InputState != qqStreamInputGenerating || shards[0].ContentRaw != "短回复" {
+		t.Fatalf("unexpected first shard: %+v", shards[0])
+	}
+	if shards[1].InputState != qqStreamInputDone || shards[1].ContentRaw != "短回复" {
+		t.Fatalf("unexpected final shard: %+v", shards[1])
+	}
+}
+
+func TestQQOutboundStreamC2CThrottlesMiddleShards(t *testing.T) {
+	t.Parallel()
+
+	var shards []qqStreamShardRequest
+	base := time.Now()
+	current := base
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: time.Second,
+		now:            func() time.Time { return current },
+		send: func(context.Context, channel.PreparedOutboundMessage) error {
+			t.Fatal("legacy send must not run")
+			return nil
+		},
+		streamSend: func(_ context.Context, req qqStreamShardRequest) (qqStreamShardResponse, error) {
+			shards = append(shards, req)
+			return qqStreamShardResponse{ID: "sm-1"}, nil
+		},
+	}
+
+	ctx := context.Background()
+	push := func(delta string) {
+		t.Helper()
+		if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: delta})); err != nil {
+			t.Fatalf("push delta: %v", err)
+		}
+	}
+	push("一")
+	push("二") // within interval: dropped
+	current = base.Add(2 * time.Second)
+	push("三")
+	push("四") // within interval: dropped
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{}})); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+
+	if len(shards) != 3 {
+		t.Fatalf("expected 3 shards, got %d", len(shards))
+	}
+	if shards[1].ContentRaw != "一二三" {
+		t.Fatalf("second shard must carry cumulative text: %q", shards[1].ContentRaw)
+	}
+	if shards[2].InputState != qqStreamInputDone || shards[2].ContentRaw != "一二三四" {
+		t.Fatalf("final shard must complete full text: %+v", shards[2])
 	}
 }
