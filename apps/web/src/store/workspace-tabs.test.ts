@@ -969,6 +969,57 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
   })
 
+  it('re-derives system tab titles persisted under another language', async () => {
+    localStorage.setItem('workspace-layout', JSON.stringify({
+      'bot-1': {
+        layout: {
+          panels: {
+            // Persisted while the UI ran under another locale ("New Chat" was a
+            // previous English draft label); draft titles are never user content.
+            'chat:1': {
+              id: 'chat:1',
+              contentComponent: 'chat',
+              title: 'New Chat',
+              params: { sessionId: null },
+            },
+            // Session tabs keep their title — only drafts are system-titled.
+            'chat:2': {
+              id: 'chat:2',
+              contentComponent: 'chat',
+              title: 'Issue Triage',
+              params: { sessionId: 'session-1' },
+            },
+            'schedule:new:1': {
+              id: 'schedule:new:1',
+              contentComponent: 'schedule',
+              title: '',
+              params: {},
+            },
+            // Saved-schedule tabs carry the schedule name; never re-derived.
+            'schedule:job-1': {
+              id: 'schedule:job-1',
+              contentComponent: 'schedule',
+              title: 'Nightly sync',
+              params: { scheduleId: 'job-1' },
+            },
+          },
+        },
+        scheduleCounter: 1,
+        ephemeralIds: [],
+      },
+    }))
+
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    await nextTick()
+
+    expect(dock.getPanel('chat:1')?.title).toBe('New Session')
+    expect(dock.getPanel('chat:2')?.title).toBe('Issue Triage')
+    expect(dock.getPanel('schedule:new:1')?.title).toBe('Schedule')
+    expect(dock.getPanel('schedule:job-1')?.title).toBe('Nightly sync')
+  })
+
   it('updates only the intended terminal title and ignores invalid or repeated events', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()

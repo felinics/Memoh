@@ -1380,6 +1380,10 @@
       "closeAll": "Close all"
     },
     "tabClose": "Close tab",
+    "tabs": {
+      "browser": "Browser",
+      "schedule": "Schedule"
+    },
     "unsaved": {
       "title": "Do you want to save the changes you made to {name}?",
       "description": "Your changes will be lost if you don't save them.",

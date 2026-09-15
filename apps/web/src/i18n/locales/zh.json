@@ -1392,6 +1392,10 @@
       "closeAll": "关闭全部"
     },
     "tabClose": "关闭标签页",
+    "tabs": {
+      "browser": "浏览器",
+      "schedule": "日程"
+    },
     "unsaved": {
       "title": "是否保存对 {name} 的更改？",
       "description": "如果不保存，你的更改将会丢失。",

@@ -1358,6 +1358,10 @@
       "closeAll": "すべて閉じる"
     },
     "tabClose": "タブを閉じる",
+    "tabs": {
+      "browser": "ブラウザ",
+      "schedule": "スケジュール"
+    },
     "unsaved": {
       "title": "{name} に加えた変更を保存しますか?",
       "description": "変更を保存しないと、変更は失われます。",

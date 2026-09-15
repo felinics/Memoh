@@ -304,10 +304,24 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return numberedFallbackTitle(prefix, id)
   }
 
-  // Per-session chat title fallback (English; the sidebar callers pass localized
-  // strings, and syncChatTitles overlays the server title once known).
+  // System-titled panels always label from the current locale; the English
+  // constants are only guards against a missing key.
+  function defaultChatTitle(): string {
+    return i18n.global.t('chat.newSession').trim() || DEFAULT_CHAT_TITLE
+  }
+
+  function browserTabTitle(): string {
+    return i18n.global.t('chat.tabs.browser').trim() || 'Browser'
+  }
+
+  function scheduleTabTitle(): string {
+    return i18n.global.t('chat.tabs.schedule').trim() || 'Schedule'
+  }
+
+  // Per-session chat title fallback (syncChatTitles overlays the server title
+  // once known). Draft tabs (no session) are system-titled.
   function chatTitleFallbackFor(sid: string | null): string {
-    if (!sid) return DEFAULT_CHAT_TITLE
+    if (!sid) return defaultChatTitle()
     const session = chatStore.knownSessionSummary(sid)
     return (session?.title ?? '').trim() || routeConversationLabel(session) || i18n.global.t('chat.untitledSession')
   }
@@ -331,30 +345,61 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         const address = params.address
         return typeof address === 'string' && address.trim()
           ? address.trim()
-          : numberedFallbackTitle('Browser', panel.id)
+          : numberedFallbackTitle(browserTabTitle(), panel.id)
       }
       case 'display':
-        return numberedFallbackTitle('Desktop', panel.id)
+        // Creation (openDisplay) titles the singleton panel chat.display.title;
+        // the repair fallback must match.
+        return i18n.global.t('chat.display.title')
       case 'schedule':
-        return 'Schedule'
+        return scheduleTabTitle()
       default:
         return panel.id
     }
   }
 
-  function repairEmptyPanelTitles(): boolean {
+  // Beyond filling empty titles, regenerate system-titled panels (draft chat,
+  // unsaved schedule, terminal/browser/display fallbacks) from the current
+  // locale: titles are persisted in the layout, so a workspace saved under
+  // another language would otherwise keep stale foreign titles forever.
+  function repairPanelTitles(): boolean {
     const dock = api.value
     if (!dock) return false
     let repaired = false
     for (const panel of dock.panels) {
-      const title = (panel.api.title ?? '').trim()
-      const isLegacyTerminalTitle = panelComponentOf(panel.id) === 'terminal'
-        && title.toLowerCase() === LEGACY_TERMINAL_TITLE
-      if (title && !isLegacyTerminalTitle) continue
-      panel.api.setTitle(panelTitleFallback(panel))
+      const next = repairedPanelTitle(panel)
+      if (next === null || next === (panel.api.title ?? '').trim()) continue
+      panel.api.setTitle(next)
       repaired = true
     }
     return repaired
+  }
+
+  // The title this panel should have after restore, or null to keep the
+  // persisted one (sessions, files, user-named schedules, live terminal titles).
+  function repairedPanelTitle(panel: { id: string, api: { title?: string }, params?: Record<string, unknown> }): string | null {
+    const title = (panel.api.title ?? '').trim()
+    const component = panelComponentOf(panel.id)
+    // Draft chat and unsaved schedule tabs never carry user content, so their
+    // titles are always re-derived — this is what migrates a draft persisted
+    // under another locale.
+    if (component === 'chat' && panelSessionId(panel) === null) return defaultChatTitle()
+    if (component === 'schedule' && panel.id.startsWith('schedule:new:')) return scheduleTabTitle()
+    if (!title) return panelTitleFallback(panel)
+    // Pre-localization builds persisted English fallback titles; recognize those
+    // exact shapes so old layouts migrate. A live page or shell reporting
+    // exactly "Browser 2"-style text is negligible.
+    if (component === 'terminal'
+      && (title.toLowerCase() === LEGACY_TERMINAL_TITLE || /^Terminal( \d+)?$/.test(title))) {
+      return terminalTitleFallback(panel.id)
+    }
+    if (component === 'browser' && /^Browser( \d+)?$/.test(title)) {
+      return numberedFallbackTitle(browserTabTitle(), panel.id)
+    }
+    if (component === 'display' && /^Desktop( \d+)?$/.test(title)) {
+      return i18n.global.t('chat.display.title')
+    }
+    return null
   }
 
   function updateTerminalTitle(panelId: string, title: unknown) {
@@ -405,7 +450,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       ephemeralPanels.value = nextEphemeral
       activePanelId.value = dock.activePanel?.id ?? null
-      repairedEmptyTitles = repairEmptyPanelTitles()
+      repairedEmptyTitles = repairPanelTitles()
       dockEmptyAfterRestore = dock.panels.length === 0
     } finally {
       suppressPersist = false
@@ -775,7 +820,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function resetDeletedChatPanelToDraft(panel: { id: string, api: { updateParameters(params: Record<string, unknown>): void, setTitle(title: string): void } }) {
     const explicitSelection = chatStore.hasExplicitSessionSelection === true
     panel.api.updateParameters({ sessionId: null, explicitSelection })
-    panel.api.setTitle(DEFAULT_CHAT_TITLE)
+    panel.api.setTitle(defaultChatTitle())
     markEphemeral(panel.id)
     if (api.value?.activePanel?.id === panel.id) {
       chatStore.selectDraft({ explicitSelection })
@@ -1004,7 +1049,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     openEphemeral({
       id,
       component: 'chat',
-      title: opts?.title?.trim() || DEFAULT_CHAT_TITLE,
+      title: opts?.title?.trim() || defaultChatTitle(),
       params: { sessionId: null, explicitSelection: opts?.explicitSelection === true },
       groupId: opts?.groupId,
     })
@@ -1171,7 +1216,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       // Untitled sessions (channel/discuss ones) derive their tab title from the
       // fallback chain (conversation name → untitled): this refreshes a persisted
       // "Untitled Session" placeholder after upgrade and follows a group rename —
-      // repairEmptyPanelTitles skips non-empty titles, so without this both stay stale.
+      // repairPanelTitles skips non-empty session titles, so without this both stay stale.
       const next = (session.title ?? '').trim() || chatTitleFallbackFor(sid)
       if (panel.api.title !== next) panel.api.setTitle(next)
     }
@@ -1295,7 +1340,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     dock.addPanel({
       id,
       component: 'chat',
-      title: DEFAULT_CHAT_TITLE,
+      title: defaultChatTitle(),
       params: { sessionId: null, explicitSelection },
       renderer: 'always',
       ...(target ? { position: target } : {}),
@@ -1504,9 +1549,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   // Create a fresh browser panel at `address`. Shared by the manual "+ New
-  // Browser" entry (always-new, default "Browser N" title) and the link-click
-  // path (after a dedup miss, titled with the address). Returns false when there
-  // is no dock/bot layout.
+  // Browser" entry (always-new, default localized "Browser N" title) and the
+  // link-click path (after a dedup miss, titled with the address). Returns false
+  // when there is no dock/bot layout.
   function addBrowserPanel(address: string, title: string | undefined, groupId?: string): boolean {
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
@@ -1516,7 +1561,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     focusOrAdd({
       id: `browser:${next}`,
       component: 'browser',
-      title: title ?? `Browser ${next}`,
+      title: title ?? `${browserTabTitle()} ${next}`,
       params: { address },
       groupId,
     })
@@ -1745,7 +1790,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         dock.addPanel({
           id: `browser:${next}`,
           component: 'browser',
-          title: title || `Browser ${next}`,
+          title: title || `${browserTabTitle()} ${next}`,
           params: { address: (params?.address as string | undefined) ?? DEFAULT_BROWSER_ADDRESS },
           renderer: 'always',
           position,
@@ -1788,7 +1833,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!hasCurrentPermission('manage')) return
     const bid = (currentBotId.value ?? '').trim()
     if (!bid) return
-    const panelTitle = title?.trim() || 'Schedule'
+    const panelTitle = title?.trim() || scheduleTabTitle()
     const state = ensureBotLayout(bid)
     if (!state) return
     const panelId = scheduleId
@@ -2168,7 +2213,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         sessionId: null,
         explicitSelection: request.explicitSelection,
       })
-      panel.api.setTitle(DEFAULT_CHAT_TITLE)
+      panel.api.setTitle(defaultChatTitle())
       return
     }
 
@@ -2178,7 +2223,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     if (!openEphemeral({
       id,
       component: 'chat',
-      title: DEFAULT_CHAT_TITLE,
+      title: defaultChatTitle(),
       params: {
         sessionId: null,
         explicitSelection: request.explicitSelection,
