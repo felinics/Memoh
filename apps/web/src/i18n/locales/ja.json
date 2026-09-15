@@ -123,7 +123,8 @@
       "unavailable": "この Agent は新しい会話では利用できません。"
     },
     "channel": {
-      "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。"
+      "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。",
+      "verification_failed": "プラットフォーム設定を検証できませんでした。認証情報を確認して、もう一度お試しください。"
     },
     "compaction": {
       "model_unavailable": "圧縮Modelを利用できません。有効でコンテキストウィンドウが宣言されたチャットModelを選択してください。"

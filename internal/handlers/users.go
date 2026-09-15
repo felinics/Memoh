@@ -1045,7 +1045,7 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 502 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id}/channel/{platform} [put].
@@ -1102,7 +1102,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 // @Failure 400 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 502 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Failure 500 {object} ErrorResponse
 // @Router /bots/{id}/channel/{platform}/status [patch].
@@ -1354,6 +1354,9 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 func mapChannelRuntimeError(err error) error {
 	if errors.Is(err, runtimeRpc.ErrUnavailable) {
 		return apperror.Wrap(apperror.CodeChannelRuntimeUnavailable, err, nil)
+	}
+	if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
+		return apperror.Wrap(apperror.CodeChannelVerificationFailed, err, nil)
 	}
 	return nil
 }

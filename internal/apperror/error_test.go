@@ -288,3 +288,18 @@ func TestWorkspaceDependencyErrorCatalog(t *testing.T) {
 		}
 	}
 }
+
+func TestChannelVerificationErrorCatalog(t *testing.T) {
+	t.Parallel()
+
+	definition, ok := Lookup(CodeChannelVerificationFailed)
+	if !ok {
+		t.Fatal("channel.verification_failed missing from catalog")
+	}
+	if definition.HTTPStatus != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", definition.HTTPStatus, http.StatusBadGateway)
+	}
+	if definition.Detail != "The channel configuration could not be verified. Check the credentials, then try again." {
+		t.Fatalf("detail = %q", definition.Detail)
+	}
+}

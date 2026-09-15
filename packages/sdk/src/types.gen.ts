@@ -14091,7 +14091,7 @@ export type PutBotsByIdChannelByPlatformErrors = {
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -14258,7 +14258,7 @@ export type PatchBotsByIdChannelByPlatformStatusErrors = {
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
     /**
      * Service Unavailable
      */

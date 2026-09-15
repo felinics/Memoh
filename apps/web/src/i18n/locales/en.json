@@ -126,7 +126,8 @@
       "unavailable": "This Agent is unavailable for new conversations."
     },
     "channel": {
-      "runtime_unavailable": "The channel service could not be reached. Please try again shortly."
+      "runtime_unavailable": "The channel service could not be reached. Please try again shortly.",
+      "verification_failed": "The channel configuration could not be verified. Check the credentials, then try again."
     },
     "compaction": {
       "model_unavailable": "The compaction model is unavailable. Pick an enabled chat model with a declared context window."

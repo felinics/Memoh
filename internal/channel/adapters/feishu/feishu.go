@@ -33,7 +33,10 @@ type FeishuAdapter struct {
 	assets assetOpener
 }
 
-const processingBusyReactionType = "Typing"
+const (
+	processingBusyReactionType = "Typing"
+	feishuDiscoveryTimeout     = 15 * time.Second
+)
 
 type messageReactionAPI interface {
 	Create(ctx context.Context, req *larkim.CreateMessageReactionReq, options ...larkcore.RequestOptionFunc) (*larkim.CreateMessageReactionResp, error)
@@ -188,6 +191,19 @@ func (*FeishuAdapter) Descriptor() channel.Descriptor {
 	}
 }
 
+// SelfIdentityPolicy requires an enabled Feishu configuration to prove its
+// credentials against the bot info API before it is persisted. This keeps the
+// configured/enabled state from getting ahead of the actual platform state.
+func (*FeishuAdapter) SelfIdentityPolicy() channel.SelfIdentityPolicy {
+	return channel.SelfIdentityPolicy{
+		RefreshOnCredentialsChange: true,
+		RequireDiscoveryOnEnable:   true,
+		RequiredSelfIdentityKey:    "open_id",
+		DiscoveryErrorMessage:      "feishu bot identity discovery failed",
+		MissingIdentityMessage:     "feishu bot identity discovery returned no open id",
+	}
+}
+
 // ProcessingStarted adds a transient reaction to indicate the inbound message is being processed.
 func (a *FeishuAdapter) ProcessingStarted(ctx context.Context, cfg channel.ChannelConfig, _ channel.InboundMessage, info channel.ProcessingStatusInfo) (channel.ProcessingStatusHandle, error) {
 	messageID := strings.TrimSpace(info.SourceMessageID)
@@ -293,8 +309,10 @@ func (*FeishuAdapter) DiscoverSelf(ctx context.Context, credentials map[string]a
 	if err != nil {
 		return nil, "", err
 	}
+	callCtx, cancel := context.WithTimeout(ctx, feishuDiscoveryTimeout)
+	defer cancel()
 	client := cfg.newClient()
-	resp, err := client.Get(ctx, "/open-apis/bot/v3/info", nil, larkcore.AccessTokenTypeTenant)
+	resp, err := client.Get(callCtx, "/open-apis/bot/v3/info", nil, larkcore.AccessTokenTypeTenant)
 	if err != nil {
 		return nil, "", fmt.Errorf("feishu discover self: %w", err)
 	}

@@ -126,7 +126,8 @@
       "unavailable": "这个 Agent 已不能用于新对话。"
     },
     "channel": {
-      "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。"
+      "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。",
+      "verification_failed": "无法验证平台配置，请检查凭据后重试。"
     },
     "compaction": {
       "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"

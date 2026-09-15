@@ -1,6 +1,30 @@
 package feishu
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestSelfIdentityPolicyRequiresVerificationBeforeEnable(t *testing.T) {
+	t.Parallel()
+
+	policy := (&FeishuAdapter{}).SelfIdentityPolicy()
+	if !policy.RequireDiscoveryOnEnable {
+		t.Fatal("expected Feishu to require identity discovery before enable")
+	}
+	if !policy.RefreshOnCredentialsChange {
+		t.Fatal("expected Feishu to refresh identity after credentials change")
+	}
+	if policy.RequiredSelfIdentityKey != "open_id" {
+		t.Fatalf("required identity key = %q, want open_id", policy.RequiredSelfIdentityKey)
+	}
+	if policy.DiscoveryErrorMessage == "" || policy.MissingIdentityMessage == "" {
+		t.Fatal("expected stable Feishu discovery failure messages")
+	}
+	if feishuDiscoveryTimeout <= 0 || feishuDiscoveryTimeout > 30*time.Second {
+		t.Fatalf("discovery timeout = %v, want a bounded user-facing verification", feishuDiscoveryTimeout)
+	}
+}
 
 func TestNormalizeConfig(t *testing.T) {
 	t.Parallel()

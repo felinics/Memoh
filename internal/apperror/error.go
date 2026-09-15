@@ -23,6 +23,7 @@ const (
 	CodeBotAgentDefaultInUse                     Code = "bot_agent.default_in_use"
 	CodeBotAgentUnavailable                      Code = "bot_agent.unavailable"
 	CodeChannelRuntimeUnavailable                Code = "channel.runtime_unavailable"
+	CodeChannelVerificationFailed                Code = "channel.verification_failed"
 	CodeCompactionModelUnavailable               Code = "compaction.model_unavailable"
 	CodeSettingsReasoningEffortInvalid           Code = "settings.reasoning_effort_invalid"
 	CodeSettingsReasoningUnavailable             Code = "settings.reasoning_options_unavailable"
@@ -235,6 +236,10 @@ var catalog = map[Code]Definition{
 	CodeChannelRuntimeUnavailable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The channel service could not be reached.",
+	},
+	CodeChannelVerificationFailed: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The channel configuration could not be verified. Check the credentials, then try again.",
 	},
 	CodeCompactionModelUnavailable: {
 		HTTPStatus:  http.StatusBadRequest,

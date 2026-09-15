@@ -217,6 +217,20 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
+    ['en', 'The channel configuration could not be verified. Check the credentials, then try again.'],
+    ['zh', '无法验证平台配置，请检查凭据后重试。'],
+    ['ja', 'プラットフォーム設定を検証できませんでした。認証情報を確認して、もう一度お試しください。'],
+  ])('localizes channel.verification_failed for %s', (language, expected) => {
+    locale = language
+
+    expect(resolveApiErrorMessage({
+      code: 'channel.verification_failed',
+      args: {},
+      detail: 'backend platform error',
+    }, 'fallback')).toBe(expected)
+  })
+
+  it.each([
     ['context.budget_unsatisfied', 'en', 'The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.'],
     ['context.budget_unsatisfied', 'zh', '模型上下文窗口不足，无法处理当前请求。可尝试 /compact 压缩较早的历史、缩短请求，或改用上下文窗口更大的模型。'],
     ['context.budget_unsatisfied', 'ja', 'モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。/compact で古い履歴を要約するか、リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。'],
