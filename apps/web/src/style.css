@@ -52,6 +52,27 @@
   font-weight: 550;
 }
 
+/* Welcome degradation tiers — keyed on the welcome column's OWN height
+   (data-welcome-column in chat-pane.vue is a named size container whose
+   height tracks the pane, not the content). A split pane degrades by tier
+   instead of clipping at the group's overflow-hidden edge: the 28% anchor
+   spacer collapses to 0 first, then the context row yields (≤16rem), then
+   the greeting yields (≤11rem) — the composer is the last thing left, and
+   the last thing that may clip. Nothing SCALES here: chrome only steps out
+   of the way, text never morphs size with the pane. Docked mode is
+   untouched: it has no data-welcome-column ancestor. */
+@container welcome-col (max-height: 16rem) {
+  [data-composer-context-row] {
+    display: none;
+  }
+}
+
+@container welcome-col (max-height: 11rem) {
+  [data-welcome-heading] {
+    display: none;
+  }
+}
+
 /* ── Workspace surface planes ──────────────────────────────────────────────────────────
  * The editor workspace (dock group view, tabs, file editor, chat, previews)
  * collapses to exactly TWO planes so the SELECTED tab reads as continuous with

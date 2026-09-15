@@ -213,7 +213,7 @@
         class="pointer-events-none absolute z-(--z-panel)"
         :class="[
           isWelcome
-            ? 'inset-0 flex flex-col items-center justify-start pt-[28dvh]'
+            ? 'inset-0 flex flex-col items-center justify-start'
             : 'inset-x-0 bottom-0 pt-2',
           { invisible: composerPlacementPending },
         ]"
@@ -234,10 +234,39 @@
           :style="{ height: dockMaskHeight }"
         />
         <!-- welcome: top-anchored column — the greeting and the composer's top
-             edge stay pinned at the shared viewport anchor, so a growing composer
-             (text or attachments) only extends downward and never pushes the
-             greeting up; normal: display:contents removes this from layout. -->
-        <div :class="isWelcome ? 'flex w-full flex-col items-center gap-8 md:-translate-x-3' : 'contents'">
+             edge stay pinned at the spacer's pane-relative anchor, so a growing
+             composer (text or attachments) only extends downward and never
+             pushes the greeting up; normal: display:contents removes this from
+             layout. The welcome arm is ALSO the size container the height-keyed
+             degradation tiers query (style.css, [data-welcome-column]): flex-1
+             min-h-0 makes its height track the space actually left to it, and
+             container-type:size lets descendants read that height — without
+             min-h-0 the box would stay content-sized and the queries would
+             measure the content, never the pane. -->
+        <div
+          :class="isWelcome
+            ? 'flex w-full flex-1 min-h-0 flex-col items-center gap-8 md:-translate-x-3 [container-type:size] [container-name:welcome-col]'
+            : 'contents'"
+          :data-welcome-column="isWelcome ? '' : undefined"
+        >
+          <!-- Anchor spacer: together with the wrapper's gap-8 it parks the
+               greeting's top edge at 28% of the column's height (= the
+               pane's), capped at 16rem, collapsible to 0. It is the FIRST
+               thing that yields when the pane gets short — the greeting +
+               composer rise to the top before anything clips; the degradation
+               tiers (style.css) take over below that. Must not become a
+               vh/dvh padding again: viewport units ignore the pane's own
+               height, and in short panes (vertical splits) the offset alone
+               can push the composer past the group's overflow-hidden edge,
+               where the next pane's tab strip reads as covering it. No floor
+               either: a minimum offset would push content out of a tiny
+               pane. (h- + default shrink, not flex-none + basis: the flex
+               shorthand would reset flex-basis to auto.) -->
+          <div
+            v-if="isWelcome"
+            aria-hidden="true"
+            class="h-[clamp(0rem,calc(28%_-_2rem),16rem)] w-px"
+          />
           <div
             v-if="isWelcome"
             class="mx-auto w-full max-w-[44rem] px-4 text-left sm:px-6 lg:px-10"
