@@ -11,6 +11,7 @@ import BotHooks from './bot-hooks.vue'
 import BotDesktop from './bot-desktop.vue'
 import BotNetwork from './bot-network.vue'
 import BotCompaction from './bot-compaction.vue'
+import BotDiscussProbe from './bot-discuss-probe.vue'
 
 const props = defineProps<{
   botId: string
@@ -79,6 +80,9 @@ watch(() => [route.query.tab, route.query.section, props.botId, hasContainer.val
       />
       <div data-advanced-section="compaction">
         <BotCompaction :bot-id="botId" />
+      </div>
+      <div data-advanced-section="discuss-probe">
+        <BotDiscussProbe :bot-id="botId" />
       </div>
     </div>
     <Dialog

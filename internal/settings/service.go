@@ -319,6 +319,17 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			compactionModelUUID = modelID
 		}
 	}
+	discussProbeModelUUID := pgtype.UUID{}
+	discussProbeModelIDSet := req.DiscussProbeModelID != nil
+	if req.DiscussProbeModelID != nil {
+		if value := strings.TrimSpace(*req.DiscussProbeModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			discussProbeModelUUID = modelID
+		}
+	}
 	imageModelUUID := pgtype.UUID{}
 	imageModelIDSet := req.ImageModelID != nil
 	if req.ImageModelID != nil {
@@ -452,6 +463,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		ChatAcpProjectMode:         current.ChatACPProjectMode,
 		CompactionModelIDSet:       compactionModelIDSet,
 		CompactionModelID:          compactionModelUUID,
+		DiscussProbeModelIDSet:     discussProbeModelIDSet,
+		DiscussProbeModelID:        discussProbeModelUUID,
 		ImageModelID:               imageModelUUID,
 		ImageModelIDSet:            imageModelIDSet,
 		SearchProviderID:           searchProviderUUID,
@@ -693,6 +706,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
 		row.CompactionModelID,
+		row.DiscussProbeModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
 		row.FetchProviderID,
@@ -726,6 +740,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
 		row.CompactionModelID,
+		row.DiscussProbeModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
 		row.FetchProviderID,
@@ -758,6 +773,7 @@ func normalizeBotSettingsFields(
 	chatACPProjectPath string,
 	chatACPProjectMode string,
 	compactionModelID pgtype.UUID,
+	discussProbeModelID pgtype.UUID,
 	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	fetchProviderID pgtype.UUID,
@@ -807,6 +823,9 @@ func normalizeBotSettingsFields(
 	}
 	if compactionModelID.Valid {
 		settings.CompactionModelID = uuid.UUID(compactionModelID.Bytes).String()
+	}
+	if discussProbeModelID.Valid {
+		settings.DiscussProbeModelID = uuid.UUID(discussProbeModelID.Bytes).String()
 	}
 	if imageModelID.Valid {
 		settings.ImageModelID = uuid.UUID(imageModelID.Bytes).String()
