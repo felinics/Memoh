@@ -29,10 +29,12 @@ const connections = useQuery({
   query: async () => (await getBotsByBotIdConnectors({ path: { bot_id: props.botId }, throwOnError: true })).data.items ?? [],
   enabled: () => open.value && !!props.botId,
 })
+// Connected rows lead the list (Array.sort is stable, so catalog order is
+// kept within each group).
 const rows = computed(() => (catalog.data.value ?? []).filter(item => item.type).map(item => ({
   ...item,
   connected: (connections.data.value ?? []).some(connection => connection.connector_type === item.type && connection.enabled && connection.status === 'active'),
-})))
+})).sort((a, b) => Number(b.connected) - Number(a.connected)))
 const loading = computed(() => catalog.isLoading.value || connections.isLoading.value)
 const failed = computed(() => catalog.error.value || connections.error.value)
 function goToSettings() {
@@ -77,10 +79,17 @@ function goToSettings() {
             <ConnectorIcon />
           </ProviderIcon>
           <span class="min-w-0 truncate">{{ item.name || item.type }}</span>
+          <!-- "已连接" is a status and stays visible; only the "Connect"
+               action uses the hover-revealed hint chrome. -->
           <span
+            v-if="item.connected"
+            class="ml-2 text-muted-foreground"
+          >{{ t('connectors.status.active') }}</span>
+          <span
+            v-else
             data-menu-item-hint
             class="ml-2 text-muted-foreground"
-          >{{ item.connected ? t('connectors.status.active') : t('connectors.connect') }}</span>
+          >{{ t('connectors.connect') }}</span>
         </DropdownMenuItem>
       </template>
       <DropdownMenuItem @select="goToSettings">
