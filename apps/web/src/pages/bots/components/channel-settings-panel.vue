@@ -222,6 +222,7 @@ import ChannelField from './channel-field.vue'
 import WeixinQrLogin from './weixin-qr-login.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useServerSyncedRecord } from '@/composables/use-server-synced-form'
 import { useLineWebhookPublicBase } from '../composables/use-line-webhook-public-base'
 
 export interface BotChannelItem {
@@ -253,7 +254,6 @@ const isEditMode = computed(() => props.channelItem.configured)
 const lastSavedConfigId = ref('')
 
 const form = reactive<{ credentials: Record<string, unknown>; disabled: boolean }>({ credentials: {}, disabled: false })
-const initialCredentialsString = ref('')
 const isAdvancedExpanded = ref(false)
 
 const { mutateAsync: upsertChannel } = useMutation({
@@ -314,36 +314,37 @@ const webhookCallbackUrl = computed(() => {
   return webhookConfigId.value ? buildWebhookCallbackUrl(webhookConfigId.value) : ''
 })
 
-function initForm() {
-  const schema = props.channelItem.meta.config_schema?.fields ?? {}
-  const existingCredentials = props.channelItem.config?.credentials ?? {}
-  const creds: Record<string, unknown> = {}
-
-  for (const [key, field] of Object.entries(schema)) {
-    if (existingCredentials[key] !== undefined) {
-      creds[key] = existingCredentials[key]
-    } else {
-      creds[key] = field.type === 'bool' ? undefined : ''
+// Two writers share this form: the user's draft and the server snapshot that
+// colada's refetchOnWindowFocus can replace at any moment with a fresh object
+// identity. useServerSyncedRecord reconciles them — hard reset on subject
+// switch, per-field guard on background refresh (see the composable header).
+const { synced: syncedCredentials, markClean: markCredentialsClean } = useServerSyncedRecord(form.credentials, {
+  source: () => props.channelItem,
+  identity: () => `${props.botId}:${platformType.value}`,
+  server: (item) => {
+    const schema = item.meta.config_schema?.fields ?? {}
+    const existing = item.config?.credentials ?? {}
+    const server: Record<string, unknown> = {}
+    for (const [key, field] of Object.entries(schema)) {
+      server[key] = existing[key] !== undefined ? existing[key] : (field.type === 'bool' ? undefined : '')
     }
-  }
-  form.credentials = creds
-  form.disabled = props.channelItem.config?.disabled ?? false
-  lastSavedConfigId.value = String(props.channelItem.config?.id || '').trim()
-  initialCredentialsString.value = JSON.stringify(creds)
-
-  // NOTE: the old inline expand auto-opened when an optional field was already
-  // filled, so configured values never sat hidden. The optional surface is now
-  // a DIALOG — auto-popping a modal on init would be hostile; the
-  // always-visible ActionCard entry keeps the facet discoverable.
-  isAdvancedExpanded.value = false
-  emit('update:dirty', false)
-}
-
-watch(() => props.channelItem, initForm, { immediate: true })
+    return server
+  },
+  onSync: (hardReset, synced) => {
+    form.disabled = props.channelItem.config?.disabled ?? false
+    lastSavedConfigId.value = String(props.channelItem.config?.id || '').trim()
+    // The optional-fields dialog resets only on a real subject switch — a
+    // background refetch must not slam it shut while the user is editing
+    // inside it. It also never auto-opens: popping a modal on init would be
+    // hostile, and the always-visible ActionCard entry keeps it discoverable.
+    if (hardReset) isAdvancedExpanded.value = false
+    emit('update:dirty', JSON.stringify(form.credentials) !== JSON.stringify(synced))
+  },
+})
 
 // Stringify the reactive proxy (not toRaw) so the computed actually tracks nested
 // credential edits — otherwise Save never re-enables after a field changes.
-const isFormDirty = computed(() => JSON.stringify(form.credentials) !== initialCredentialsString.value)
+const isFormDirty = computed(() => JSON.stringify(form.credentials) !== JSON.stringify(syncedCredentials.value))
 watch(isFormDirty, (val) => emit('update:dirty', val))
 
 function validateRequired(): boolean {
@@ -370,7 +371,7 @@ async function handleSave() {
     const cleanCreds = Object.fromEntries(Object.entries(form.credentials).filter(([k, v]) => k !== 'status' && k !== 'disabled' && v !== '' && v !== undefined && v !== null))
     const result = await upsertChannel({ platform: platformType.value, data: { credentials: cleanCreds, disabled: form.disabled } })
     lastSavedConfigId.value = String(result?.id || lastSavedConfigId.value || '').trim()
-    initialCredentialsString.value = JSON.stringify(form.credentials)
+    markCredentialsClean()
     toast.success(t('bots.channels.saveSuccess'))
     emit('update:dirty', false)
     emit('saved')

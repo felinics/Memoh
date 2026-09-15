@@ -26,7 +26,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
+import { useServerSyncedScalar } from '@/composables/use-server-synced-form'
 import { SectionGroup, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
@@ -77,10 +78,17 @@ const hasChanges = computed(() => {
   return embeddingModelId.value.trim() !== savedEmbeddingModelId.value
 })
 
-watch(() => props.provider, (provider) => {
-  const config = (provider?.config ?? {}) as Record<string, unknown>
-  embeddingModelId.value = typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
-}, { immediate: true })
+// embeddingModelId is shared between the user's draft and the server snapshot
+// that colada's refetchOnWindowFocus can replace at any moment — the
+// composable reconciles them (hard reset on provider switch, guard otherwise).
+useServerSyncedScalar(embeddingModelId, {
+  source: () => props.provider,
+  identity: provider => String(provider?.id ?? 'builtin-template'),
+  server: (provider) => {
+    const config = (provider?.config ?? {}) as Record<string, unknown>
+    return typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
+  },
+})
 
 async function handleSave() {
   saveLoading.value = true

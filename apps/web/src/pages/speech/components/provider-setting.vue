@@ -223,7 +223,8 @@ import {
 } from '@felinic/ui'
 import ModelConfigEditor from './model-config-editor.vue'
 import { Eye, EyeOff } from 'lucide-vue-next'
-import { computed, inject, reactive, ref, watch } from 'vue'
+import { computed, inject, reactive, ref } from 'vue'
+import { useServerSyncedRecord, useServerSyncedScalar } from '@/composables/use-server-synced-form'
 import { ModelListRow, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
@@ -356,11 +357,26 @@ const providerModels = computed<AudioSpeechModelResponse[]>(() => {
   }))
 })
 
-watch(() => providerDetail.value, (provider) => {
-  providerName.value = provider?.name ?? curProvider.value?.name ?? ''
-  Object.keys(providerConfig).forEach((key) => delete providerConfig[key])
-  Object.assign(providerConfig, { ...(provider?.config ?? curProvider.value?.config ?? {}) })
-}, { immediate: true, deep: true })
+// providerName/providerConfig are shared between the user's draft and the
+// server snapshot that colada's refetchOnWindowFocus can replace at any
+// moment — the composables reconcile them (hard reset on provider switch,
+// per-field guard on background refresh). The detail pane is NOT keyed by
+// provider, so the identity function must cover id / template / client_type.
+const providerIdentity = (provider: typeof providerDetail.value) =>
+  String(provider?.id ?? curProvider.value?.id ?? curProvider.value?.provider_template_id ?? curProvider.value?.client_type ?? '')
+
+useServerSyncedScalar(providerName, {
+  source: () => providerDetail.value,
+  identity: providerIdentity,
+  server: provider => provider?.name ?? curProvider.value?.name ?? '',
+  deep: true,
+})
+useServerSyncedRecord(providerConfig, {
+  source: () => providerDetail.value,
+  identity: providerIdentity,
+  server: provider => ({ ...(provider?.config ?? curProvider.value?.config ?? {}) } as Record<string, unknown>),
+  deep: true,
+})
 
 function getModelMeta(modelID: string): SpeechModelMeta | null {
   const models = currentMeta.value?.synthesis_models ?? currentMeta.value?.models ?? []
