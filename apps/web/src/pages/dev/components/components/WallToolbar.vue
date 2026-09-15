@@ -2,7 +2,6 @@
 // Wall toolbar: theme + color-scheme switching (reusing the app's settings
 // store, zero new state). Flipping either restyles every specimen and swatch
 // live.
-import { computed, inject } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Moon, Sun, Palette } from 'lucide-vue-next'
 import {
@@ -15,7 +14,7 @@ import {
 } from '@felinic/ui'
 import { useSettingsStore } from '@/store/settings'
 import { colorSchemes, type ColorSchemeId } from '@/constants/color-schemes'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 
 const settings = useSettingsStore()
 const { theme, colorScheme } = storeToRefs(settings)
@@ -24,12 +23,7 @@ const { setTheme, setColorScheme } = settings
 // In the Electron desktop shell the titlebar is hidden, so this toolbar is the
 // only chrome at the top of the window. Make its empty space a drag handle and
 // clear the macOS traffic lights so they don't overlap the brand label.
-const desktopShell = inject(DesktopShellKey, false)
-const macTopInset = computed(() =>
-  desktopShell
-  && typeof navigator !== 'undefined'
-  && navigator.platform.toLowerCase().includes('mac'),
-)
+const macTopInset = useMacTrafficReserve()
 </script>
 
 <template>

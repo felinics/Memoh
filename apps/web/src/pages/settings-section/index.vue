@@ -126,6 +126,7 @@ import MainLayout from '@/layout/main-layout/index.vue'
 import SettingsSidebar from '@/components/settings-sidebar/index.vue'
 import MobileTopBar from './components/mobile-top-bar.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { usePreviousRoute } from '@/composables/useBackOr'
 import { useBackToChatRoute } from '@/composables/useBackToChat'
@@ -140,12 +141,7 @@ const backToChatRoute = useBackToChatRoute()
 
 // macOS desktop only: the settings sidebar now runs to the very top of the window
 // (the old full-width topbar is gone), so its header must clear the traffic lights.
-// Mirrors main-section's computation.
-const macTrafficReserve = computed(() =>
-  desktopShell
-  && typeof navigator !== 'undefined'
-  && navigator.platform.toLowerCase().includes('mac'),
-)
+const macTrafficReserve = useMacTrafficReserve()
 
 // On a single bot's detail page the bot's own nav owns the left column, so we
 // drop the settings nav here to avoid two stacked sidebars (the "three-column"

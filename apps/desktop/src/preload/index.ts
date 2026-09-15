@@ -74,6 +74,14 @@ const api = {
     // that can produce this list.
     setTrayBots: (bots: Array<{ id: string, displayName: string }>): Promise<void> =>
       ipcRenderer.invoke('desktop:set-tray-bots', bots),
+    // macOS fullscreen hides the traffic lights; layouts reserving the
+    // traffic-light strip subscribe here to drop the reserve in time.
+    isFullScreen: (): Promise<boolean> => ipcRenderer.invoke('desktop:is-fullscreen'),
+    onFullScreenChanged: (cb: (fullScreen: boolean) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, fullScreen: boolean) => cb(fullScreen)
+      ipcRenderer.on('desktop:fullscreen-changed', listener)
+      return () => ipcRenderer.removeListener('desktop:fullscreen-changed', listener)
+    },
     // Subscribe to invalidation events forwarded from sibling renderers.
     // Listener lives for the entire renderer lifetime.
     onInvalidate: (cb: (payload: RendererInvalidatePayload) => void): void => {

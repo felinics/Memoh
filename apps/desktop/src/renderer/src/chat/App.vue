@@ -6,12 +6,18 @@ import {
   DesktopRuntimeKey,
   DesktopShellKey,
   DesktopUpdatesKey,
+  DesktopWindowKey,
   type DesktopRuntimeBridge,
   type DesktopUpdateBridge,
+  type DesktopWindowBridge,
 } from '@memohai/web/lib/desktop-shell'
 import MainSection from '@memohai/web/pages/main-section/index.vue'
 
 provide(DesktopShellKey, true)
+provide(DesktopWindowKey, {
+  isFullScreen: window.api.desktop.isFullScreen,
+  onFullScreenChanged: window.api.desktop.onFullScreenChanged,
+} satisfies DesktopWindowBridge)
 provide(DesktopRuntimeKey, {
   runtimeState: window.api.desktop.runtimeState,
   configureRuntime: window.api.desktop.configureRuntime,

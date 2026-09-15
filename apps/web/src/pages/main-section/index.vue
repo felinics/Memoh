@@ -38,10 +38,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import SideBar from '@/components/sidebar/index.vue'
 import MainContainer from '@/components/main-container/index.vue'
 import MobileTopBar from './components/mobile-top-bar.vue'
@@ -74,12 +74,7 @@ const { active: baseDropActive, bounds: baseDropBounds, handlers: baseDropHandle
   measureTarget: () => getChatFileDropTarget()?.hostEl() ?? null,
 })
 
-const desktopShell = inject(DesktopShellKey, false)
-const macTrafficReserve = computed(() =>
-  desktopShell
-  && typeof navigator !== 'undefined'
-  && navigator.platform.toLowerCase().includes('mac'),
-)
+const macTrafficReserve = useMacTrafficReserve()
 
 const shouldAnimateEntry = safeSessionGet(ONBOARDING_KEYS.entryAnimation) === '1'
 if (shouldAnimateEntry) {

@@ -41,7 +41,7 @@ import '@/styles/dockview-theme.css'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { openInFileManagerKey, openAssetPreviewKey } from '../composables/useFileManagerProvider'
 import { normalizeFileManagerPath } from './file-manager-path'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { DesktopShellKey, DesktopWindowKey } from '@/lib/desktop-shell'
 import PanelChat from './dockview/panel-chat.vue'
 import PanelFile from './dockview/panel-file.vue'
 import PanelPreview from './dockview/panel-preview.vue'
@@ -189,6 +189,11 @@ function onReady(event: DockviewReadyEvent) {
 // Re-inject + re-provide so the value survives the dockview mount boundary.
 const desktopShell = inject(DesktopShellKey, false)
 provide(DesktopShellKey, desktopShell)
+// Same boundary for the fullscreen bridge: without re-providing, the dock's
+// header-actions read no DesktopWindowKey and keep the traffic-light gutter
+// in fullscreen (see useMacTrafficReserve).
+const desktopWindow = inject(DesktopWindowKey, undefined)
+provide(DesktopWindowKey, desktopWindow)
 
 provide(openInFileManagerKey, (path: string, isDir = false) => {
   const normalizedPath = normalizeFileManagerPath(path)

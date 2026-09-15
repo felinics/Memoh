@@ -30,6 +30,16 @@ export interface DesktopRuntimeBridge {
 
 export const DesktopRuntimeKey: InjectionKey<DesktopRuntimeBridge | undefined> = Symbol('memohai:desktop-runtime')
 
+// Window chrome state the renderer cannot observe on its own. Fullscreen
+// matters on macOS: the traffic lights hide in fullscreen, so layouts that
+// reserve the traffic-light strip must drop the reserve while fullscreen.
+export interface DesktopWindowBridge {
+  isFullScreen(): Promise<boolean>
+  onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
+}
+
+export const DesktopWindowKey: InjectionKey<DesktopWindowBridge | undefined> = Symbol('memohai:desktop-window')
+
 export type DesktopUpdateStatus =
   | 'idle'
   | 'checking'

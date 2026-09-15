@@ -273,7 +273,7 @@ import {
   Bot as BotIcon, ChevronLeft, Laptop, Package as App
 } from 'lucide-vue-next'
 import { SettingsIcon as Settings } from '@memohai/icon/ui'
-import { computed, ref, watch, onMounted, toValue, nextTick, inject, type Ref } from 'vue'
+import { computed, ref, watch, onMounted, toValue, nextTick, type Ref } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { BadgeCount, NavItem, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
@@ -312,7 +312,7 @@ import { useIsMobile } from '@/composables/useIsMobile'
 import { registerBotBreadcrumbName } from '@/lib/bot-breadcrumb'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import { resolveBotWorkspaceBackend } from '@/utils/bot-workspace'
 import { filterBotDetailsTabs, type BotDetailsTabRule } from '@/utils/bot-detail-tabs'
 import { appNeedsAttention, useBotAppsQuery } from '@/composables/api/useApps'
@@ -327,13 +327,9 @@ const isMobile = useIsMobile()
 
 // macOS desktop: this page renders its own full-height sidebar (no full-width
 // topbar above it), so the sidebar header clears the traffic lights and the
-// detail pane gets its own top drag strip. Same computation as settings-section.
-const desktopShell = inject(DesktopShellKey, false)
-const macTrafficReserve = computed(() =>
-  desktopShell
-  && typeof navigator !== 'undefined'
-  && navigator.platform.toLowerCase().includes('mac'),
-)
+// detail pane gets its own top drag strip. Drops out in fullscreen (lights
+// hidden) — see useMacTrafficReserve.
+const macTrafficReserve = useMacTrafficReserve()
 
 // Back follows real navigation history (router.back) and only falls back to the
 // bots list on a cold load — so entering a bot from Scheduled Jobs, a chat, or

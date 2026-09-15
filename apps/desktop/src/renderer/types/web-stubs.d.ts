@@ -271,6 +271,11 @@ declare module '@memohai/web/lib/desktop-shell' {
     onRuntimeStateChanged(listener: (state: DesktopRuntimeState) => void): () => void
   }
   export const DesktopRuntimeKey: InjectionKey<DesktopRuntimeBridge | undefined>
+  export interface DesktopWindowBridge {
+    isFullScreen(): Promise<boolean>
+    onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
+  }
+  export const DesktopWindowKey: InjectionKey<DesktopWindowBridge | undefined>
   export type DesktopUpdateStatus =
     | 'idle'
     | 'checking'

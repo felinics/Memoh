@@ -62,7 +62,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -70,7 +70,7 @@ import { BackIcon, ForwardIcon, SidebarCloseIcon, SidebarOpenIcon } from '@memoh
 import { Button } from '@felinic/ui'
 import type { DockviewApi, DockviewGroupPanelApi, IDockviewGroupPanel } from 'dockview-vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 
 const props = defineProps<{
   params: {
@@ -107,12 +107,7 @@ onBeforeUnmount(() => {
 const isFirstGroup = computed(() => props.params.group.id === firstGroupId.value)
 
 // macOS traffic light reserve (only when sidebar is closed on desktop mac)
-const desktopShell = inject(DesktopShellKey, false)
-const macTrafficReserve = computed(() =>
-  desktopShell
-  && typeof navigator !== 'undefined'
-  && navigator.platform.toLowerCase().includes('mac'),
-)
+const macTrafficReserve = useMacTrafficReserve()
 const shouldReserveTrafficLight = computed(() =>
   macTrafficReserve.value && !workbenchOpen.value,
 )
