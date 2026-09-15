@@ -3,37 +3,86 @@ client_type: google-generative-ai
 icon: google-color
 base_url: https://generativelanguage.googleapis.com/v1beta
 
+# Curated from Google's current Gemini API catalog on 2026-09-15.
 models:
-  - model_id: gemini-pro-latest
-    name: Gemini Pro Latest
+  - model_id: gemini-3.8-flash
+    name: Gemini 3.8 Flash
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      # The latest aliases resolve to 3.x today, which takes a named level.
       reasoning_dialect: tier
       reasoning_efforts: [minimal, low, medium, high]
 
-  - model_id: gemini-flash-latest
-    name: Gemini Flash Latest
+  - model_id: gemini-3.7-flash
+    name: Gemini 3.7 Flash
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      # The latest aliases resolve to 3.x today, which takes a named level.
       reasoning_dialect: tier
       reasoning_efforts: [minimal, low, medium, high]
 
-  - model_id: gemini-flash-lite-latest
-    name: Gemini Flash-Lite Latest
+  - model_id: gemini-3.6-flash
+    name: Gemini 3.6 Flash
     type: chat
     config:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      # The latest aliases resolve to 3.x today, which takes a named level.
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
+
+  - model_id: gemini-3.5-flash
+    name: Gemini 3.5 Flash
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1114112
+      thinking_mode: toggle
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
+
+  - model_id: gemini-3.5-flash-lite
+    name: Gemini 3.5 Flash-Lite
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1114112
+      thinking_mode: toggle
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
+
+  - model_id: gemini-3.1-flash-lite
+    name: Gemini 3.1 Flash-Lite
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1114112
+      thinking_mode: toggle
+      reasoning_dialect: tier
+      reasoning_efforts: [minimal, low, medium, high]
+
+  - model_id: gemini-3.1-pro-preview
+    name: Gemini 3.1 Pro Preview
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1114112
+      thinking_mode: toggle
+      reasoning_dialect: tier
+      reasoning_off_support: rejected
+      reasoning_efforts: [low, medium, high]
+
+  - model_id: gemini-3-flash-preview
+    name: Gemini 3 Flash Preview
+    type: chat
+    config:
+      compatibilities: [vision, file-input, tool-call, reasoning]
+      context_window: 1114112
+      thinking_mode: toggle
       reasoning_dialect: tier
       reasoning_efforts: [minimal, low, medium, high]
 
@@ -47,40 +96,6 @@ models:
       reasoning_dialect: tier
       reasoning_off_support: rejected
       reasoning_efforts: [minimal, high]
-
-  - model_id: gemini-3.1-pro-preview
-    name: Gemini 3.1 Pro Preview
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1114112
-      thinking_mode: toggle
-      # Gemini 3.1 Pro rejects minimal and cannot be turned off.
-      reasoning_dialect: tier
-      reasoning_off_support: rejected
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: gemini-3.1-flash-lite
-    name: Gemini 3.1 Flash-Lite
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1114112
-      thinking_mode: toggle
-      # 3.x takes a named level; minimal is the floor, so there is no off.
-      reasoning_dialect: tier
-      reasoning_efforts: [minimal, low, medium, high]
-
-  - model_id: gemini-3-flash-preview
-    name: Gemini 3 Flash Preview
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1114112
-      thinking_mode: toggle
-      # 3.x takes a named level; minimal is the floor, so there is no off.
-      reasoning_dialect: tier
-      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gemini-3-pro-image
     name: Nano Banana Pro
@@ -97,8 +112,6 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      # 2.5 controls thinking with a token budget; its floor is positive, so this
-      # model cannot be turned off and does not advertise the disable token.
       reasoning_dialect: budget
       reasoning_off_support: rejected
       thinking_budget_min: 128
@@ -112,136 +125,8 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 1114112
       thinking_mode: toggle
-      # Flash allows a zero budget, so off is reachable here where it is not on Pro.
       reasoning_dialect: budget
       reasoning_off_support: accepted
       thinking_budget_min: 0
       thinking_budget_max: 24576
       reasoning_efforts: [disable, low, medium, high]
-
-  - model_id: gemini-2.5-flash-image
-    name: Nano Banana
-    type: chat
-    config:
-      compatibilities: [vision, file-input, image-output]
-      context_window: 98304
-
-  - model_id: gemini-2.5-flash-lite
-    name: Gemini 2.5 Flash-Lite
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1114112
-      thinking_mode: toggle
-      reasoning_dialect: budget
-      # The active range starts at 512, but 0 is a separate disable sentinel.
-      reasoning_off_support: accepted
-      thinking_budget_min: 512
-      thinking_budget_max: 24576
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: gemini-2.5-flash-lite-preview-09-2025
-    name: Gemini 2.5 Flash-Lite Preview Sep 2025
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call, reasoning]
-      context_window: 1114112
-      thinking_mode: toggle
-      reasoning_dialect: budget
-      # The active range starts at 512, but 0 is a separate disable sentinel.
-      reasoning_off_support: accepted
-      thinking_budget_min: 512
-      thinking_budget_max: 24576
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: gemini-2.0-flash
-    name: Gemini 2.0 Flash
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 1056768
-
-  - model_id: gemini-2.0-flash-001
-    name: Gemini 2.0 Flash 001
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 1056768
-
-  - model_id: gemini-2.0-flash-exp-image-generation
-    name: Gemini 2.0 Flash (Image Generation) Experimental
-    type: chat
-    config:
-      compatibilities: [vision, file-input, image-output]
-      context_window: 1056768
-
-  - model_id: gemini-2.0-flash-lite
-    name: Gemini 2.0 Flash-Lite
-    type: chat
-    config:
-      compatibilities: [vision, file-input]
-      context_window: 1056768
-
-  - model_id: gemini-2.0-flash-lite-001
-    name: Gemini 2.0 Flash-Lite 001
-    type: chat
-    config:
-      compatibilities: [vision, file-input]
-      context_window: 1056768
-
-  - model_id: gemini-1.5-flash-002
-    name: Gemini 1.5 Flash 002
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 1008192
-
-  - model_id: gemini-1.5-pro-002
-    name: Gemini 1.5 Pro 002
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 2008192
-
-  - model_id: gemini-1.5-flash-8b-latest
-    name: Gemini 1.5 Flash 8B
-    type: chat
-    config:
-      compatibilities: [vision, file-input, tool-call]
-      context_window: 1008192
-
-  - model_id: gemma-3-1b-it
-    name: Gemma 3 1B
-    type: chat
-    config:
-      context_window: 40960
-
-  - model_id: gemma-3-4b-it
-    name: Gemma 3 4B
-    type: chat
-    config:
-      context_window: 40960
-
-  - model_id: gemma-3-12b-it
-    name: Gemma 3 12B
-    type: chat
-    config:
-      context_window: 40960
-
-  - model_id: gemma-3-27b-it
-    name: Gemma 3 27B
-    type: chat
-    config:
-      context_window: 139264
-
-  - model_id: gemma-3n-e2b-it
-    name: Gemma 3n E2B
-    type: chat
-    config:
-      context_window: 10240
-
-  - model_id: gemma-3n-e4b-it
-    name: Gemma 3n E4B
-    type: chat
-    config:
-      context_window: 10240

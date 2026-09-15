@@ -1,6 +1,7 @@
 name: ElevenLabs Speech
 client_type: elevenlabs-speech
 icon: elevenlabs
+base_url: https://api.elevenlabs.io
 
 models:
   - model_id: elevenlabs-tts

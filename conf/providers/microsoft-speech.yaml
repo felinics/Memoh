@@ -2,6 +2,10 @@ name: Microsoft Speech
 client_type: microsoft-speech
 icon: azure-color
 
+# Azure's REST endpoint is region-specific (https://<region>.tts.speech.microsoft.com/
+# cognitiveservices/v1), so base_url is intentionally omitted; configure region
+# in the model settings or provide a full endpoint override there.
+
 models:
   - model_id: microsoft-tts
     name: Microsoft TTS

@@ -1,6 +1,7 @@
 name: Edge
 client_type: edge-speech
 icon: microsoft
+base_url: wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1
 
 models:
   - model_id: edge-read-aloud

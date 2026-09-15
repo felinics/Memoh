@@ -162,12 +162,12 @@ export const providerPresets: ProviderPreset[] = [
     source: 'mistral.yaml',
   },
   {
-    id: 'qwen',
-    name: 'Aliyun Bailian',
+    id: 'aliyun-bailian',
+    name: 'Alibaba Cloud Model Studio',
     clientType: 'openai-completions',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     icon: 'qwen-color',
-    source: 'qwen.yaml',
+    source: 'aliyun-bailian.yaml',
   },
   {
     id: 'huggingface',

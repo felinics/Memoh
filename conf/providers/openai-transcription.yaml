@@ -4,6 +4,26 @@ icon: openai
 base_url: https://api.openai.com/v1
 
 models:
+  - model_id: gpt-transcribe
+    name: GPT Transcribe
+    type: transcription
+
+  - model_id: gpt-4o-transcribe
+    name: GPT-4o Transcribe
+    type: transcription
+
   - model_id: gpt-4o-mini-transcribe
     name: GPT-4o Mini Transcribe
+    type: transcription
+
+  - model_id: gpt-4o-mini-transcribe-2025-12-15
+    name: GPT-4o Mini Transcribe (2025-12-15)
+    type: transcription
+
+  - model_id: gpt-4o-transcribe-diarize
+    name: GPT-4o Transcribe Diarize
+    type: transcription
+
+  - model_id: whisper-1
+    name: Whisper
     type: transcription

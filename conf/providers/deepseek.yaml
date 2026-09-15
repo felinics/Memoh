@@ -5,17 +5,16 @@ base_url: https://api.deepseek.com/v1
 config:
   chat_completions_compat: deepseek
 
+# Current DeepSeek API models as of 2026-09-15. The legacy V4 Flash IDs
+# are retired; use deepseek-flash for the current V4.1 Flash service.
 models:
-  - model_id: deepseek-v4-flash
-    name: DeepSeek V4 Flash
+  - model_id: deepseek-flash
+    name: DeepSeek V4.1 Flash
     type: chat
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 1000000
       thinking_mode: toggle
-      # disable is hand-maintained: LiteLLM has no off signal for DeepSeek, but the
-      # chat_completions_compat layer maps a disabled toggle onto thinking-off
-      # (models.dev and OpenRouter both confirm V4 can be turned off).
       reasoning_efforts: [disable, low, medium, high]
 
   - model_id: deepseek-v4-pro
@@ -26,19 +25,3 @@ models:
       context_window: 1000000
       thinking_mode: toggle
       reasoning_efforts: [disable, low, medium, high]
-
-  - model_id: deepseek-chat
-    name: DeepSeek V4 Flash (legacy non-thinking)
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 1000000
-
-  - model_id: deepseek-reasoner
-    name: DeepSeek V4 Flash Thinking (legacy)
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 1000000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]

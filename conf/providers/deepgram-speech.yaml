@@ -1,6 +1,7 @@
 name: Deepgram Speech
 client_type: deepgram-speech
 icon: deepgram
+base_url: https://api.deepgram.com
 
 models:
   - model_id: deepgram-tts

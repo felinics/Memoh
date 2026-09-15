@@ -4,107 +4,78 @@ icon: mistral-color
 base_url: https://api.mistral.ai/v1
 
 models:
-  - model_id: devstral-2512
-    name: Devstral 2
+  - model_id: mistral-medium-3-5
+    name: Mistral Medium 3.5
     type: chat
     config:
-      compatibilities: [tool-call]
+      compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
 
-  - model_id: labs-devstral-small-2512
-    name: Devstral Small 2
+  - model_id: mistral-small-2603
+    name: Mistral Small 4
     type: chat
     config:
-      compatibilities: [tool-call]
+      compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
-
-  - model_id: mistral-medium-latest
-    name: Mistral Medium 3.1
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
       thinking_mode: toggle
       reasoning_efforts: [low, medium, high]
 
-  - model_id: magistral-medium-latest
-    name: Magistral Medium 1.2
-    type: chat
-    config:
-      compatibilities: [vision, reasoning]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: magistral-small-2509
-    name: Magistral Small 1.2
-    type: chat
-    config:
-      compatibilities: [vision, reasoning]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: open-mistral-nemo
-    name: Mistral Nemo
+  - model_id: mistral-large-2512
+    name: Mistral Large 3
     type: chat
     config:
       compatibilities: [vision, tool-call]
-      context_window: 131072
+      context_window: 262144
 
-  - model_id: mistral-small-latest
-    name: Mistral Small 3.2
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: mistral-large-latest
-    name: Mistral Large 2.1
+  - model_id: ministral-14b-2512
+    name: Ministral 3 14B
     type: chat
     config:
       compatibilities: [vision, tool-call]
-      context_window: 131072
+      context_window: 256000
 
-  - model_id: codestral-latest
+  - model_id: ministral-8b-2512
+    name: Ministral 3 8B
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 256000
+
+  - model_id: ministral-3b-2512
+    name: Ministral 3 3B
+    type: chat
+    config:
+      compatibilities: [vision, tool-call]
+      context_window: 256000
+
+  - model_id: leanstral-2603
+    name: Leanstral 1.5
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 256000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+
+  - model_id: codestral-2508
     name: Codestral 2508
     type: chat
     config:
       compatibilities: [tool-call]
       context_window: 256000
 
-  - model_id: pixtral-large-latest
-    name: Pixtral Large
+  - model_id: voxtral-small-2507
+    name: Voxtral Small
     type: chat
     config:
       compatibilities: [vision, tool-call]
-      context_window: 131072
+      context_window: 32768
 
-  - model_id: pixtral-12b-2409
-    name: Pixtral 12B
+  - model_id: voxtral-mini-2507
+    name: Voxtral Mini
     type: chat
     config:
       compatibilities: [vision, tool-call]
-      context_window: 131072
-
-  - model_id: ministral-3b-latest
-    name: Ministral 3B
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-
-  - model_id: ministral-8b-latest
-    name: Ministral 8B
-    type: chat
-    config:
-      compatibilities: [tool-call]
-      context_window: 131072
-
-  - model_id: open-codestral-mamba
-    name: Codestral Mamba
-    type: chat
-    config:
-      context_window: 256000
+      context_window: 32768

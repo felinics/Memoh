@@ -3,6 +3,8 @@ client_type: openai-completions
 icon: "fireworks-color"
 base_url: "https://api.fireworks.ai/inference/v1"
 
+# Fireworks' model library is account/region dependent; refresh from the
+# provider API when an API key is configured.
 models:
   - model_id: "accounts/fireworks/models/chronos-hermes-13b-v2"
     name: "Chronos Hermes 13b V2"
