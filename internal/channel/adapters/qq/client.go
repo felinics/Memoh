@@ -388,6 +388,51 @@ func (c *qqClient) sendMedia(ctx context.Context, target qqTarget, fileInfo, rep
 	}
 }
 
+const (
+	qqStreamInputGenerating = 1
+	qqStreamInputDone       = 10
+)
+
+type qqStreamShardRequest struct {
+	StreamMsgID string
+	Index       int
+	InputState  int
+	ContentRaw  string
+}
+
+type qqStreamShardResponse struct {
+	ID           string `json:"id"`
+	RemainMsgLen int    `json:"remain_msg_len"`
+}
+
+// sendStreamShard posts one chunk of a C2C streaming message.
+// All shards use input_mode=replace with the cumulative text so far: the
+// payload always starts with whatever prefix the server has already
+// delivered, so silently dropped middle shards (observed on QQ clients)
+// never corrupt the final content.
+func (c *qqClient) sendStreamShard(ctx context.Context, openID, replyTo string, shard qqStreamShardRequest) (qqStreamShardResponse, error) {
+	body := map[string]any{
+		"input_mode":   "replace",
+		"input_state":  shard.InputState,
+		"index":        shard.Index,
+		"content_type": "markdown",
+		"content_raw":  shard.ContentRaw,
+		"msg_seq":      c.nextMsgSeq(replyTo),
+	}
+	if strings.TrimSpace(shard.StreamMsgID) != "" {
+		body["stream_msg_id"] = strings.TrimSpace(shard.StreamMsgID)
+	}
+	if strings.TrimSpace(replyTo) != "" {
+		body["msg_id"] = strings.TrimSpace(replyTo)
+	}
+
+	var result qqStreamShardResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/v2/users/"+openID+"/stream_messages", body, &result); err != nil {
+		return qqStreamShardResponse{}, err
+	}
+	return result, nil
+}
+
 func isLocalhost(host string) bool {
 	host = strings.ToLower(host)
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
