@@ -41,15 +41,15 @@ export function buildRuntimeConnectCommand(
     enrollArgs.push('--insecure-localhost')
   }
   enrollArgs.push('--replace')
-  // One command per line, not a `&&` chain: pasting the block runs the lines
-  // sequentially in bash/zsh/cmd, and PowerShell 5.1 (the default Windows
-  // shell) rejects `&&` outright.
+  // Single `&&` chain: one paste, and a failed step stops the rest. The
+  // exception is Windows PowerShell 5.1 (no `&&` support) — there the user
+  // runs the lines one by one; cmd and PowerShell 7+ are fine.
   return [
     `npm install -g ${npmPackage}`,
     enrollArgs.join(' '),
     `${bin} service install`,
     `${bin} service start`,
-  ].join('\n')
+  ].join(' && ')
 }
 
 function isInsecureLocalhost(serverUrl: string): boolean {
