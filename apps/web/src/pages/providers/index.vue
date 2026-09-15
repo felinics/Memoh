@@ -141,10 +141,12 @@ const modelCountByProvider = computed(() => {
   return counts
 })
 
-// First-load gate: hold the grid back until BOTH sources resolve so the first
-// painted grid is final — providers render before template drafts and enabled
-// ones first, so a late-arriving list would prepend cards under the pointer.
-const listLoading = computed(() => providersLoading.value || templatesLoading.value)
+// Keep cached cards mounted during background refreshes. Only unresolved
+// queries still fetching need a skeleton; failed queries must leave loading.
+const listLoading = computed(() =>
+  (providerData.value === undefined && providersLoading.value)
+  || (templateData.value === undefined && templatesLoading.value),
+)
 
 // Always offer search once there's anything to filter — a hidden-then-appearing
 // box read as inconsistent (some providers showed it, some didn't).

@@ -167,6 +167,54 @@ describe('provider route state', () => {
     document.body.innerHTML = ''
   })
 
+  it.each(['providers', 'templates'] as const)('keeps cached cards mounted while %s refresh', async (source) => {
+    const { app, root } = await mountPage()
+    const cards = [...root.querySelectorAll('[data-provider]')]
+    expect(cards).toHaveLength(2)
+
+    const loading = source === 'providers' ? mocks.providersLoading : mocks.templatesLoading
+    loading.value = true
+    await nextTick()
+
+    expect([...root.querySelectorAll('[data-provider]')]).toEqual(cards)
+    expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
+    loading.value = false
+    await nextTick()
+    expect([...root.querySelectorAll('[data-provider]')]).toEqual(cards)
+    app.unmount()
+  })
+
+  it.each(['providers', 'templates'] as const)('waits for unresolved %s before showing cards', async (source) => {
+    const data = source === 'providers' ? mocks.providerData : mocks.templateData
+    const loading = source === 'providers' ? mocks.providersLoading : mocks.templatesLoading
+    data.value = undefined
+    loading.value = true
+    const { app, root } = await mountPage()
+
+    expect(root.querySelector('[data-slot="skeleton"]')).not.toBeNull()
+    expect(root.querySelector('[data-provider]')).toBeNull()
+    data.value = [{ id: 'loaded', name: 'Loaded' }]
+    loading.value = false
+    await nextTick()
+    expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
+    expect(root.querySelector('[data-provider]')).not.toBeNull()
+    app.unmount()
+  })
+
+  it('leaves the skeleton when an initial request fails without data', async () => {
+    mocks.templateData.value = undefined
+    mocks.templatesLoading.value = true
+    const { app, root } = await mountPage()
+    expect(root.querySelector('[data-slot="skeleton"]')).not.toBeNull()
+
+    // A rejected query returns to idle and keeps its data undefined.
+    mocks.templatesLoading.value = false
+    await nextTick()
+    expect(root.querySelector('[data-slot="skeleton"]')).toBeNull()
+    expect(root.querySelectorAll('[data-provider]')).toHaveLength(2)
+    app.unmount()
+  })
+
   it('shows a detail skeleton while the URL provider is still loading', async () => {
     mocks.route.query = { provider: 'provider-two' }
     mocks.providerData.value = undefined

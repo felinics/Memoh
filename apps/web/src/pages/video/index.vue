@@ -85,10 +85,12 @@ const {
 
 const addProviderNames = computed(() => catalogProviders.value.map((p) => ({ name: p.name })))
 
-// First-load gate: hold the grid back until BOTH sources resolve so the first
-// painted grid is final — providers render before template drafts and enabled
-// ones first, so a late-arriving list would prepend cards under the pointer.
-const listLoading = computed(() => providersLoading.value || templatesLoading.value)
+// Keep cached cards mounted during background refreshes. Only unresolved
+// queries still fetching need a skeleton; failed queries must leave loading.
+const listLoading = computed(() =>
+  (providersData.value === undefined && providersLoading.value)
+  || (templateData.value === undefined && templatesLoading.value),
+)
 
 function getInitials(name: string | undefined) {
   const label = name?.trim() ?? ''

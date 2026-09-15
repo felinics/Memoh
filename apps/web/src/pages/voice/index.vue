@@ -186,12 +186,16 @@ const addProviderNames = computed(() => [
   ...catalogTranscriptionProviders.value.map((p) => ({ name: p.name })),
 ])
 
-// First-load gate per section: hold each grid back until BOTH its sources
-// resolve so the first painted grid is final — providers render before template
-// drafts and enabled ones first, so a late-arriving list would prepend cards
-// under the pointer.
-const speechListLoading = computed(() => speechLoading.value || speechTemplatesLoading.value)
-const transcriptionListLoading = computed(() => transcriptionLoading.value || transcriptionTemplatesLoading.value)
+// Keep cached cards mounted during background refreshes. Only unresolved
+// queries still fetching need a skeleton; failed queries must leave loading.
+const speechListLoading = computed(() =>
+  (speechData.value === undefined && speechLoading.value)
+  || (speechTemplateData.value === undefined && speechTemplatesLoading.value),
+)
+const transcriptionListLoading = computed(() =>
+  (transcriptionData.value === undefined && transcriptionLoading.value)
+  || (transcriptionTemplateData.value === undefined && transcriptionTemplatesLoading.value),
+)
 
 function getInitials(name: string | undefined) {
   const label = name?.trim() ?? ''
