@@ -5,13 +5,17 @@ import {
 import { useUserStore } from '@/store/user'
 import { ensureOnboarding } from '@/router-guards/onboarding'
 import { installBackHistory } from '@/composables/useBackOr'
-import { createAppRoutes } from './routes'
+import { createAppRoutes, prefetchSettingsPages } from './routes'
 
 
 const router = createRouter({
   history: createWebHistory(),
   routes: createAppRoutes('web'),
 })
+
+// After the initial navigation settles (entry chunks had bandwidth priority),
+// warm the settings pages so first-time sidebar clicks don't wait on a chunk.
+void router.isReady().then(() => prefetchSettingsPages())
 
 // Track the previous route so history-following back affordances work the same
 // on web and on the desktop shell's memory-history router. See useBackOr.

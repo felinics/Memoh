@@ -68,7 +68,7 @@
                     :key="item.name"
                   >
                     <NavItem
-                      :active="isItemActive(item.name)"
+                      :active="isItemVisuallyActive(item.name)"
                       :aria-current="isItemActive(item.name) ? 'page' : undefined"
                       @click="navigate(item.name)"
                     >
@@ -220,8 +220,20 @@ const { userInfo } = storeToRefs(userStore)
 
 const backToChatRoute = useBackToChatRoute()
 
+// Instant selection feedback: the router only navigates once the target page's
+// chunk arrives (lazy routes), which leaves the OLD item reading active while
+// the click hangs. Move the highlight to the clicked item immediately; the real
+// route takes over when push settles. aria-current stays on the real route —
+// pending is visual only.
+const pendingNav = ref<string | null>(null)
+
 function navigate(name: string): void {
-  router.push({ name } as Parameters<typeof router.push>[0]).catch(() => {})
+  pendingNav.value = name
+  router.push({ name } as Parameters<typeof router.push>[0])
+    .catch(() => {})
+    .finally(() => {
+      if (pendingNav.value === name) pendingNav.value = null
+    })
 }
 
 function isItemActive(name: string): boolean {
@@ -232,6 +244,11 @@ function isItemActive(name: string): boolean {
     return route.path.startsWith('/settings/supermarket')
   }
   return route.name === name
+}
+
+function isItemVisuallyActive(name: string): boolean {
+  if (pendingNav.value) return pendingNav.value === name
+  return isItemActive(name)
 }
 
 type NavItem = { title: string; name: string; icon: Component; flipX?: boolean; adminOnly?: boolean }

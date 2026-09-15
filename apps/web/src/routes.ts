@@ -3,6 +3,61 @@ import { RouterView, type RouteLocationNormalized, type RouteRecordRaw } from 'v
 import { i18nRef } from './i18n'
 import { getBotBreadcrumbName } from './lib/bot-breadcrumb'
 
+// ── Settings page loaders ────────────────────────────────────────────────────
+// Named consts instead of inline arrows so prefetchSettingsPages warms EXACTLY
+// the functions the routes reference — one copy of each import path, no drift.
+const pageSettings = () => import('@/pages/settings-section/index.vue')
+const pageBots = () => import('@/pages/bots/index.vue')
+const pageBotNew = () => import('@/pages/bots/new.vue')
+const pageBotCreateProgress = () => import('@/pages/bots/new-progress.vue')
+const pageBotDetail = () => import('@/pages/bots/detail.vue')
+const pageProviders = () => import('@/pages/providers/index.vue')
+const pageRuntimes = () => import('@/pages/runtimes/index.vue')
+const pageWebSearch = () => import('@/pages/web-search/index.vue')
+const pageMemory = () => import('@/pages/memory/index.vue')
+const pageVoice = () => import('@/pages/voice/index.vue')
+const pageVideo = () => import('@/pages/video/index.vue')
+const pageEmail = () => import('@/pages/email/index.vue')
+const pageUsage = () => import('@/pages/usage/index.vue')
+const pagePeople = () => import('@/pages/people/index.vue')
+const pageAppearance = () => import('@/pages/appearance/index.vue')
+const pageKeyboard = () => import('@/pages/keyboard-shortcuts/index.vue')
+const pageProfile = () => import('@/pages/profile/index.vue')
+const pageSupermarket = () => import('@/pages/supermarket/index.vue')
+const pageSupermarketCategory = () => import('@/pages/supermarket/category.vue')
+const pageSupermarketAppDetail = () => import('@/pages/supermarket/app-detail.vue')
+const pageAbout = () => import('@/pages/about/index.vue')
+
+/**
+ * Warm the settings page chunks during browser idle time.
+ *
+ * Every settings page is a lazy route chunk, and vue-router only starts
+ * loading one AFTER the nav click — the URL and the page both wait on the
+ * download, so on a slow connection a first-time click reads as a dead click
+ * (measured ~0.6-0.7s on Slow 4G). Warming during idle makes first clicks hit
+ * the module cache instead (ES module requests dedupe by URL, so the later
+ * real navigation costs nothing). Skipped under Save-Data; failures are
+ * swallowed — a cold click then just pays the normal lazy-load cost.
+ */
+export function prefetchSettingsPages(): void {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+  if (connection?.saveData) return
+
+  const loaders = [
+    pageSettings,
+    pageBots, pageBotNew, pageBotCreateProgress, pageBotDetail,
+    pageProviders, pageRuntimes, pageWebSearch, pageMemory, pageVoice, pageVideo,
+    pageEmail, pageUsage, pagePeople, pageAppearance, pageKeyboard, pageProfile,
+    pageSupermarket, pageSupermarketCategory, pageSupermarketAppDetail, pageAbout,
+  ]
+  const warm = () => {
+    for (const load of loaders) void load().catch(() => {})
+  }
+  const w = window as Window & { requestIdleCallback?: (cb: () => void) => number }
+  if (w.requestIdleCallback) w.requestIdleCallback(warm)
+  else setTimeout(warm, 2000)
+}
+
 /** Shared page routes; each host owns its router, history, and navigation guards. */
 export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
   const desktop = platform === 'desktop'
@@ -52,7 +107,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
     },
     {
       path: '/settings',
-      component: () => import('@/pages/settings-section/index.vue'),
+      component: pageSettings,
       // Web needs bare /settings for the mobile navigation list.
       ...(desktop ? { redirect: '/settings/bots' } : {}),
       children: [
@@ -66,12 +121,12 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
             {
               name: 'bots',
               path: '',
-              component: () => import('@/pages/bots/index.vue'),
+              component: pageBots,
             },
             {
               name: 'bot-new',
               path: 'new',
-              component: () => import('@/pages/bots/new.vue'),
+              component: pageBotNew,
               meta: {
                 breadcrumb: i18nRef('bots.createBot'),
               },
@@ -79,7 +134,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
             {
               name: 'bot-create-progress',
               path: 'new/progress',
-              component: () => import('@/pages/bots/new-progress.vue'),
+              component: pageBotCreateProgress,
               meta: {
                 breadcrumb: i18nRef('bots.createBot'),
               },
@@ -87,7 +142,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
             {
               name: 'bot-detail',
               path: ':botName',
-              component: () => import('@/pages/bots/detail.vue'),
+              component: pageBotDetail,
               meta: {
                 // Resolve the bot's display name from the registry the detail page
                 // populates; never echo the raw `bot-<uuid>` route param. Unknown
@@ -101,7 +156,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'providers',
           path: 'providers',
-          component: () => import('@/pages/providers/index.vue'),
+          component: pageProviders,
           meta: {
             breadcrumb: i18nRef('sidebar.providers'),
           },
@@ -109,7 +164,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'runtimes',
           path: 'runtimes',
-          component: () => import('@/pages/runtimes/index.vue'),
+          component: pageRuntimes,
           meta: {
             breadcrumb: i18nRef('sidebar.runtimes'),
           },
@@ -117,7 +172,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'web-search',
           path: 'web-search',
-          component: () => import('@/pages/web-search/index.vue'),
+          component: pageWebSearch,
           meta: {
             breadcrumb: i18nRef('sidebar.webSearch'),
           },
@@ -125,7 +180,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'memory',
           path: 'memory',
-          component: () => import('@/pages/memory/index.vue'),
+          component: pageMemory,
           meta: {
             breadcrumb: i18nRef('sidebar.memory'),
           },
@@ -133,7 +188,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'voice',
           path: 'voice',
-          component: () => import('@/pages/voice/index.vue'),
+          component: pageVoice,
           meta: {
             breadcrumb: i18nRef('sidebar.voice'),
           },
@@ -141,7 +196,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'video',
           path: 'video',
-          component: () => import('@/pages/video/index.vue'),
+          component: pageVideo,
           meta: {
             breadcrumb: i18nRef('sidebar.video'),
           },
@@ -159,7 +214,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'email',
           path: 'email',
-          component: () => import('@/pages/email/index.vue'),
+          component: pageEmail,
           meta: {
             breadcrumb: i18nRef('sidebar.email'),
           },
@@ -167,7 +222,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'usage',
           path: 'usage',
-          component: () => import('@/pages/usage/index.vue'),
+          component: pageUsage,
           meta: {
             breadcrumb: i18nRef('sidebar.usage'),
           },
@@ -175,7 +230,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'people',
           path: 'people',
-          component: () => import('@/pages/people/index.vue'),
+          component: pagePeople,
           meta: {
             breadcrumb: i18nRef('sidebar.people'),
             adminOnly: true,
@@ -184,7 +239,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'appearance',
           path: 'appearance',
-          component: () => import('@/pages/appearance/index.vue'),
+          component: pageAppearance,
           meta: {
             breadcrumb: i18nRef('sidebar.appearance'),
           },
@@ -192,7 +247,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'keyboard',
           path: 'keyboard',
-          component: () => import('@/pages/keyboard-shortcuts/index.vue'),
+          component: pageKeyboard,
           meta: {
             breadcrumb: i18nRef('sidebar.keyboard'),
           },
@@ -200,7 +255,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'profile',
           path: 'profile',
-          component: () => import('@/pages/profile/index.vue'),
+          component: pageProfile,
           meta: {
             breadcrumb: i18nRef('sidebar.settings'),
           },
@@ -215,12 +270,12 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
             {
               name: 'supermarket',
               path: '',
-              component: () => import('@/pages/supermarket/index.vue'),
+              component: pageSupermarket,
             },
             {
               name: 'supermarket-category',
               path: 'category/:categoryId',
-              component: () => import('@/pages/supermarket/category.vue'),
+              component: pageSupermarketCategory,
               meta: {
                 breadcrumb: (route: RouteLocationNormalized) => route.params.categoryId,
               },
@@ -228,7 +283,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
             {
               name: 'supermarket-app-detail',
               path: ':registryId/:appId',
-              component: () => import('@/pages/supermarket/app-detail.vue'),
+              component: pageSupermarketAppDetail,
               meta: {
                 breadcrumb: (route: RouteLocationNormalized) => route.params.appId,
               },
@@ -238,7 +293,7 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           name: 'about',
           path: 'about',
-          component: () => import('@/pages/about/index.vue'),
+          component: pageAbout,
           meta: {
             breadcrumb: i18nRef('sidebar.about'),
           },
