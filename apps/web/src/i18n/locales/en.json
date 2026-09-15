@@ -2976,13 +2976,9 @@
     "settings": {
       "blocks": {
         "context": "Context & Memory",
-        "contextDescription": "Configure how this bot remembers and processes information.",
         "global": "Global Settings",
-        "globalDescription": "Core preferences for this bot.",
         "interaction": "Interaction",
-        "interactionDescription": "Choose the chat model and configure how the bot engages in conversations.",
         "multimedia": "Multimedia",
-        "multimediaDescription": "Configure voice and image generation models.",
         "acp": "Agent"
       },
       "chatLanguage": "Language",
@@ -3010,10 +3006,8 @@
       "transcriptionModel": "Transcription Model",
       "transcriptionModelPlaceholder": "Select transcription model",
       "imageModel": "Image Generation Model",
-      "imageModelDescription": "Model used for the generate_image tool. Must support image-output compatibility.",
       "imageModelPlaceholder": "Select image model (optional)",
       "videoModel": "Video Generation Model",
-      "videoModelDescription": "Model used for the generate_video tool.",
       "videoModelPlaceholder": "Select video model (optional)",
       "language": "Language",
       "compactionEnabled": "Enable Context Compaction",

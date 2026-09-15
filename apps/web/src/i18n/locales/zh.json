@@ -2976,13 +2976,9 @@
     "settings": {
       "blocks": {
         "context": "上下文与记忆",
-        "contextDescription": "配置该 Bot 记忆和处理信息的方式。",
         "global": "全局设置",
-        "globalDescription": "Bot 的核心偏好配置。",
         "interaction": "交互方式",
-        "interactionDescription": "选择对话模型，并配置 Bot 在对话中的行为习惯。",
         "multimedia": "多媒体",
-        "multimediaDescription": "配置语音与图片生成等相关模型。",
         "acp": "Agent"
       },
       "chatLanguage": "语言",
@@ -3010,10 +3006,8 @@
       "transcriptionModel": "转写模型",
       "transcriptionModelPlaceholder": "选择语音转写模型",
       "imageModel": "图片生成模型",
-      "imageModelDescription": "用于 generate_image 工具的模型，必须支持 image-output 兼容性。",
       "imageModelPlaceholder": "选择图片模型（可选）",
       "videoModel": "视频生成模型",
-      "videoModelDescription": "用于 generate_video 工具的模型。",
       "videoModelPlaceholder": "选择视频模型（可选）",
       "language": "语言",
       "compactionEnabled": "启用上下文压缩",

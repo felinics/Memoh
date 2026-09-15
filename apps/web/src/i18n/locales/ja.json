@@ -2982,15 +2982,10 @@
     "settings": {
       "blocks": {
         "context": "コンテキストとMemory",
-        "contextDescription": "このBotが情報を記憶し、処理する方法を構成します。",
         "global": "グローバル設定",
-        "globalDescription": "このBotの中心的な設定。",
         "interaction": "交流",
-        "interactionDescription": "チャットModelを選択し、Botが会話に参加する方法を構成します。",
         "multimedia": "マルチメディア",
-        "multimediaDescription": "音声と画像の生成Modelを構成します。",
-        "acp": "エージェント",
-        "acpDescription": "この Bot で利用するコーディング Agent を選択します。"
+        "acp": "エージェント"
       },
       "chatLanguage": "言語",
       "chatLanguagePlaceholder": "例: 英語、zh-CN",
@@ -3017,10 +3012,8 @@
       "transcriptionModel": "転写Model",
       "transcriptionModelPlaceholder": "転写Modelの選択",
       "imageModel": "画像生成Model",
-      "imageModelDescription": "generate_image Toolに使用されるModel。画像出力の互換性をサポートする必要があります。",
       "imageModelPlaceholder": "画像Modelの選択 (オプション)",
       "videoModel": "動画生成Model",
-      "videoModelDescription": "generate_video Toolに使用するModelです。",
       "videoModelPlaceholder": "動画Modelを選択 (オプション)",
       "language": "language",
       "compactionEnabled": "コンテキスト圧縮を有効にする",

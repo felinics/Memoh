@@ -28,10 +28,10 @@ import SearchableSelectPopover from '@/components/searchable-select-popover/inde
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'
 
 interface MemoryProviderItem {
-  id: string
-  name: string
-  provider: string
-  config?: Record<string, string>
+  id?: string
+  name?: string
+  provider?: string
+  config?: Record<string, unknown>
 }
 
 const props = defineProps<{
@@ -48,18 +48,21 @@ const options = computed<SearchableSelectOption[]>(() => {
     label: t('common.none'),
     keywords: [t('common.none')],
   }
-  const providerOptions = props.providers.map((provider) => ({
-	    value: provider.id || '',
-	    label: provider.name || provider.id || '',
-	    description: provider.provider === 'builtin'
-	      ? t(`memory.modeNames.${provider.config?.memory_mode || 'graph'}`)
-	      : provider.provider,
-    keywords: [
-      provider.name ?? '',
-      provider.provider ?? '',
-      provider.config?.memory_mode ?? '',
-    ],
-  }))
+  const providerOptions = props.providers.map((provider) => {
+    const memoryMode = typeof provider.config?.memory_mode === 'string' ? provider.config.memory_mode : ''
+    return {
+      value: provider.id || '',
+      label: provider.name || provider.id || '',
+      description: provider.provider === 'builtin'
+        ? t(`memory.modeNames.${memoryMode || 'graph'}`)
+        : provider.provider,
+      keywords: [
+        provider.name ?? '',
+        provider.provider ?? '',
+        memoryMode,
+      ],
+    }
+  })
   return [noneOption, ...providerOptions]
 })
 </script>
