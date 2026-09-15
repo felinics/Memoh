@@ -3025,7 +3025,6 @@
       "compactionThresholdDescription": "入力Token数。0 = モデルのコンテキストウィンドウが50%に達したら自動実行。",
       "compactionTargetPercent": "圧縮後に保持するコンテキスト（%）",
       "compactionTargetPercentDescription": "圧縮後に保持するモデルのコンテキストウィンドウの割合です。空欄の場合は40%を使用します。",
-      "compactionTargetPercentInvalid": "1から99までの整数を入力するか、空欄にしてください。",
       "compactionModel": "圧縮Model",
       "compactionModelDescription": "要約するModelを選択します。設定されていない場合、デフォルトでBotのチャット Modelが使用されます。",
       "compactionModelPlaceholder": "チャット Modelを使用する (デフォルト)",

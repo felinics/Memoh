@@ -74,13 +74,13 @@
         </SelectContent>
       </Select>
 
-      <Input
+      <NumberField
         v-else-if="field.type === 'number'"
         :id="fieldId"
-        :model-value="stringValue"
-        type="number"
+        :model-value="numberValue"
         :placeholder="placeholder"
-        class="w-full tabular-nums"
+        class="w-full"
+        disable-wheel-change
         @update:model-value="onNumber"
       />
 
@@ -101,7 +101,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Input, Label, Switch,
+  Input, Label, NumberField, Switch,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   InputGroup, InputGroupInput, InputGroupAddon, InputGroupButton,
 } from '@felinic/ui'
@@ -128,14 +128,11 @@ const stringValue = computed(() => {
   const v = props.modelValue
   return typeof v === 'string' || typeof v === 'number' ? String(v) : ''
 })
+const numberValue = computed(() => (typeof props.modelValue === 'number' ? props.modelValue : undefined))
 
-// Mirror the panel's old number handling: empty clears to '', non-numeric is dropped.
-function onNumber(v: string | number) {
-  if (v === '') {
-    emit('update:modelValue', '')
-    return
-  }
-  const n = typeof v === 'number' ? v : Number(v)
-  emit('update:modelValue', Number.isNaN(n) ? '' : n)
+// Mirror the panel's old number handling: empty clears to ''; NumberField only
+// commits a parsed number or undefined (emptied), so non-numeric can't arrive.
+function onNumber(v: number | undefined) {
+  emit('update:modelValue', v ?? '')
 }
 </script>

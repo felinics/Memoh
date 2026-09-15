@@ -91,12 +91,13 @@
                 :model-value="!!providerConfig[field.key]"
                 @update:model-value="(val) => providerConfig[field.key] = !!val"
               />
-              <Input
+              <NumberField
                 v-else-if="field.type === 'number'"
                 :id="`transcription-provider-${field.key}`"
-                v-model.number="providerConfig[field.key] as number"
-                type="number"
+                :model-value="providerConfig[field.key] as number"
                 class="w-full sm:w-80"
+                disable-wheel-change
+                @update:model-value="(value) => providerConfig[field.key] = value"
               />
               <Select
                 v-else-if="field.type === 'enum' && field.enum"
@@ -234,7 +235,7 @@ import type {
   ProvidersGetResponse,
 } from '@memohai/sdk'
 import { Eye, EyeOff } from 'lucide-vue-next'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@felinic/ui'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, Input, NumberField, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@felinic/ui'
 import ProviderIcon from '@/components/provider-icon/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import ModelConfigEditor from '@/pages/speech/components/model-config-editor.vue'

@@ -37,20 +37,21 @@
     :label="$t('common.timeoutSeconds')"
     stack="sm"
   >
-    <Input
+    <NumberField
       id="cloudflare-timeout-seconds"
-      v-model.number="localConfig.timeout_seconds"
-      type="number"
-      class="w-full sm:w-40"
+      :model-value="localConfig.timeout_seconds"
       :min="1"
+      class="w-full sm:w-40"
       :aria-label="$t('common.timeoutSeconds')"
+      disable-wheel-change
+      @update:model-value="(value) => localConfig.timeout_seconds = value"
     />
   </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, SettingsRow } from '@felinic/ui'
+import { Input, NumberField, SettingsRow } from '@felinic/ui'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>
@@ -64,7 +65,9 @@ const localConfig = reactive({
   account_id: '',
   api_token: '',
   base_url: 'https://api.cloudflare.com/client/v4',
-  timeout_seconds: 30,
+  // NumberField commits undefined for an emptied field; the key drops out of
+  // the emitted config and hydration restores the default on the next load.
+  timeout_seconds: 30 as number | undefined,
 })
 
 watch(

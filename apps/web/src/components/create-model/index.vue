@@ -127,9 +127,10 @@
               for="create-model-dimensions"
             >
               <FormControl>
-                <Input
+                <NumberField
                   id="create-model-dimensions"
-                  type="number"
+                  :min="1"
+                  disable-wheel-change
                   :placeholder="$t('models.dimensionsPlaceholder')"
                   v-bind="componentField"
                 />
@@ -171,9 +172,10 @@
                 </Label>
               </template>
               <FormControl>
-                <Input
+                <NumberField
                   id="create-model-context-window"
-                  type="number"
+                  :min="1"
+                  disable-wheel-change
                   :placeholder="$t('models.contextWindowPlaceholder')"
                   v-bind="componentField"
                 />
@@ -200,6 +202,7 @@ import {
   SelectValue,
   Checkbox,
   Label,
+  NumberField,
   Textarea,
 } from '@felinic/ui'
 import type { ButtonVariants } from '@felinic/ui'

@@ -40,12 +40,13 @@
           @update:model-value="(val) => configData[field.key] = !!val"
         />
 
-        <Input
+        <NumberField
           v-else-if="field.type === 'number'"
           :id="`tts-field-${field.key}`"
-          v-model.number="configData[field.key] as number"
-          type="number"
+          :model-value="configData[field.key] as number"
           :placeholder="field.example ? String(field.example) : ''"
+          disable-wheel-change
+          @update:model-value="(value) => configData[field.key] = value"
         />
 
         <SearchableSelectPopover
@@ -141,12 +142,13 @@
                   @update:model-value="(val) => configData[field.key] = !!val"
                 />
 
-                <Input
+                <NumberField
                   v-else-if="field.type === 'number'"
                   :id="`tts-field-${field.key}`"
-                  v-model.number="configData[field.key] as number"
-                  type="number"
+                  :model-value="configData[field.key] as number"
                   :placeholder="field.example ? String(field.example) : ''"
+                  disable-wheel-change
+                  @update:model-value="(value) => configData[field.key] = value"
                 />
 
                 <SearchableSelectPopover
@@ -278,6 +280,7 @@
 import {
   DialogFooter,
   Input,
+  NumberField,
   Label,
   Switch,
   Textarea,

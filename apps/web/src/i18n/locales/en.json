@@ -3018,7 +3018,6 @@
       "compactionThresholdDescription": "Input tokens; 0 = automatic at 50% of the model context window.",
       "compactionTargetPercent": "Context Kept After Compaction (%)",
       "compactionTargetPercentDescription": "Percentage of the model context window to keep after compaction. Leave empty to use 40%.",
-      "compactionTargetPercentInvalid": "Enter a whole number from 1 to 99, or leave the field empty.",
       "compactionModel": "Compaction Model",
       "compactionModelDescription": "Select a model for summarization. Defaults to the bot's chat model if not set.",
       "compactionModelPlaceholder": "Use chat model (default)",

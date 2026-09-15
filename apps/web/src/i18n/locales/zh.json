@@ -3018,7 +3018,6 @@
       "compactionThresholdDescription": "输入 Token 数；0 表示在模型上下文窗口达到 50% 时自动压缩。",
       "compactionTargetPercent": "压缩后保留的上下文（%）",
       "compactionTargetPercentDescription": "压缩后保留的模型上下文窗口比例。留空时使用 40%。",
-      "compactionTargetPercentInvalid": "请输入 1 到 99 之间的整数，或将此字段留空。",
       "compactionModel": "压缩模型",
       "compactionModelDescription": "选择用于摘要的模型，未设置时默认使用聊天模型。",
       "compactionModelPlaceholder": "使用聊天模型（默认）",

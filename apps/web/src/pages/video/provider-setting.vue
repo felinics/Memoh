@@ -71,13 +71,14 @@
                 :model-value="!!providerConfig[field.key]"
                 @update:model-value="(val) => providerConfig[field.key] = !!val"
               />
-              <Input
+              <NumberField
                 v-else-if="field.type === 'number'"
                 :id="`video-provider-${field.key}`"
-                v-model.number="providerConfig[field.key] as number"
-                type="number"
+                :model-value="providerConfig[field.key] as number"
                 class="w-full sm:w-80"
                 :placeholder="field.example ? String(field.example) : ''"
+                disable-wheel-change
+                @update:model-value="(value) => providerConfig[field.key] = value"
               />
               <Select
                 v-else-if="field.type === 'enum' && field.enum"
@@ -240,6 +241,7 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
+  NumberField,
   Select,
   SelectContent,
   SelectItem,

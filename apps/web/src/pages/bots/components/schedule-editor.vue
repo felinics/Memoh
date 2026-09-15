@@ -86,26 +86,26 @@
             </Select>
 
             <template v-if="patternState.mode === 'minutes'">
-              <Input
-                type="number"
+              <NumberField
                 :min="1"
                 :max="59"
                 :model-value="patternState.intervalMinutes"
-                class="w-20 text-center"
-                @update:model-value="v => patchState({ intervalMinutes: clampInt(v, 1, 59, 1) })"
+                class="w-28"
+                disable-wheel-change
+                @update:model-value="v => patchState({ intervalMinutes: v ?? 1 })"
               />
               <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.minutes') }}</span>
             </template>
 
             <template v-else-if="patternState.mode === 'hourly'">
               <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.atMinute') }}</span>
-              <Input
-                type="number"
+              <NumberField
                 :min="0"
                 :max="59"
                 :model-value="patternState.minute"
-                class="w-20 text-center"
-                @update:model-value="v => patchState({ minute: clampInt(v, 0, 59, 0) })"
+                class="w-28"
+                disable-wheel-change
+                @update:model-value="v => patchState({ minute: v ?? 0 })"
               />
             </template>
 
@@ -127,13 +127,13 @@
 
             <template v-else-if="patternState.mode === 'monthly'">
               <span class="text-sm text-muted-foreground">{{ t('bots.schedule.picker.day') }}</span>
-              <Input
-                type="number"
+              <NumberField
                 :min="1"
                 :max="31"
                 :model-value="patternState.monthDays[0] ?? 1"
-                class="w-16 text-center"
-                @update:model-value="v => patchState({ monthDays: [clampInt(v, 1, 31, 1)] })"
+                class="w-28"
+                disable-wheel-change
+                @update:model-value="v => patchState({ monthDays: [v ?? 1] })"
               />
               <TimeInput
                 :hour="patternState.hours[0] ?? 9"
@@ -297,6 +297,7 @@ import {
   Button,
   DialogFooter,
   Input,
+  NumberField,
   SectionGroup,
   Select,
   SelectContent,
@@ -382,12 +383,6 @@ const effectiveTimezone = computed(() => {
   if (tz) return tz
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
 })
-
-function clampInt(value: unknown, min: number, max: number, fallback: number): number {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return fallback
-  return Math.max(min, Math.min(max, Math.round(n)))
-}
 
 function patchState(patch: Partial<ScheduleFormState>) {
   patternState.value = { ...patternState.value, ...patch }

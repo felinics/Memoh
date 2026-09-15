@@ -26,20 +26,21 @@
     label="Timeout (seconds)"
     stack="sm"
   >
-    <Input
+    <NumberField
       id="bocha-timeout-seconds"
-      v-model.number="localConfig.timeout_seconds"
-      type="number"
+      :model-value="localConfig.timeout_seconds"
       :min="1"
       class="w-full sm:w-80"
       aria-label="Timeout (seconds)"
+      disable-wheel-change
+      @update:model-value="(value) => localConfig.timeout_seconds = value"
     />
   </SettingsRow>
 </template>
 
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
-import { Input, SettingsRow } from '@felinic/ui'
+import { Input, NumberField, SettingsRow } from '@felinic/ui'
 
 const props = defineProps<{
   modelValue: Record<string, unknown>
@@ -52,7 +53,9 @@ const emit = defineEmits<{
 const localConfig = reactive({
   api_key: '',
   base_url: 'https://api.bochaai.com/v1/web-search',
-  timeout_seconds: 15,
+  // NumberField commits undefined for an emptied field; the key drops out of
+  // the emitted config and hydration restores the default on the next load.
+  timeout_seconds: 15 as number | undefined,
 })
 
 watch(

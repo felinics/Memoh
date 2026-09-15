@@ -100,13 +100,14 @@
                 @update:model-value="(val) => configData[field.key!] = !!val"
               />
 
-              <Input
+              <NumberField
                 v-else-if="field.type === 'number'"
                 :id="`email-field-${field.key}`"
-                v-model.number="configData[field.key!] as string"
-                type="number"
+                :model-value="configData[field.key!] as number"
                 class="w-40"
                 :placeholder="field.example ? String(field.example) : ''"
+                disable-wheel-change
+                @update:model-value="(value) => configData[field.key!] = value"
               />
 
               <Select
@@ -215,6 +216,7 @@
 <script setup lang="ts">
 import {
   Input,
+  NumberField,
   Button,
   FormControl,
   FormField,

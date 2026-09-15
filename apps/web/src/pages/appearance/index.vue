@@ -95,19 +95,20 @@
           :label="t('settings.appearance.uiFontSize')"
           :description="t('settings.appearance.uiFontSizeDescription')"
         >
-          <Input
+          <!-- NumberField emits only on commit (blur/Enter/stepper); reka
+               clamps to min/max first. An emptied field commits undefined,
+               which the setters normalize back to the default size. -->
+          <NumberField
             id="ui-font-size"
-            type="number"
-            min="12"
-            max="20"
-            step="1"
-            :model-value="uiFontSizeDraft"
+            :model-value="uiFontSizePx"
+            :min="12"
+            :max="20"
+            :step="1"
             :placeholder="String(DEFAULT_UI_FONT_SIZE_PX)"
-            class="h-8 w-20 tabular-nums"
-            @update:model-value="(value) => updateUiFontSizeDraft(value)"
-            @change="commitUiFontSizeDraft"
-            @blur="commitUiFontSizeDraft"
-            @keydown.enter="commitUiFontSizeDraft"
+            size="sm"
+            disable-wheel-change
+            class="w-32"
+            @update:model-value="(value) => setUiFontSizePx(value ?? '')"
           />
         </SettingsRow>
 
@@ -115,19 +116,17 @@
           :label="t('settings.appearance.codeFontSize')"
           :description="t('settings.appearance.codeFontSizeDescription')"
         >
-          <Input
+          <NumberField
             id="code-font-size"
-            type="number"
-            min="11"
-            max="20"
-            step="1"
-            :model-value="codeFontSizeDraft"
+            :model-value="codeFontSizePx"
+            :min="11"
+            :max="20"
+            :step="1"
             :placeholder="String(DEFAULT_CODE_FONT_SIZE_PX)"
-            class="h-8 w-20 tabular-nums"
-            @update:model-value="(value) => updateCodeFontSizeDraft(value)"
-            @change="commitCodeFontSizeDraft"
-            @blur="commitCodeFontSizeDraft"
-            @keydown.enter="commitCodeFontSizeDraft"
+            size="sm"
+            disable-wheel-change
+            class="w-32"
+            @update:model-value="(value) => setCodeFontSizePx(value ?? '')"
           />
         </SettingsRow>
 
@@ -356,6 +355,7 @@ import {
   DialogPanel,
   DialogTitle,
   Input,
+  NumberField,
   SegmentedControl,
   type SegmentedItem,
   Select,
@@ -380,7 +380,7 @@ import { colorSchemes, type ColorSchemeId, type ColorSchemeOption } from '@/cons
 import { MERMAID_THEMES, type MermaidTheme, useSettingsStore, type ThemePreference } from '@/store/settings'
 import { isMermaidTheme } from '@/store/settings/mermaid'
 import { listBundledShikiThemes } from '@/store/settings/shiki-theme'
-import { cssCodeFontFamilyStyleValue, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX, normalizeCodeFontSizePx } from '@/store/settings/typography'
+import { cssCodeFontFamilyStyleValue, DEFAULT_CODE_FONT_SIZE_PX, DEFAULT_UI_FONT_SIZE_PX } from '@/store/settings/typography'
 
 enableMermaid()
 setCustomComponents({ mermaid: ThemedMermaidBlock })
@@ -472,8 +472,6 @@ const themeIcons: Record<ThemePreference, Component> = {
   dark: Moon,
 }
 
-const uiFontSizeDraft = ref(String(uiFontSizePx.value))
-const codeFontSizeDraft = ref(String(codeFontSizePx.value))
 const uiFontFamilyDraft = ref(uiFontFamily.value)
 const codeFontFamilyDraft = ref(codeFontFamily.value)
 // Each variant renders in its own highlighter against its picked theme, so
@@ -489,7 +487,7 @@ const codeFontPreviewLightHtml = computed(() => codeFontPreviewLight.html.value 
 const codeFontPreviewDarkHtml = computed(() => codeFontPreviewDark.html.value || codeFontPreviewFallback)
 const codeFontPreviewStyle = computed(() => ({
   '--typography-code-preview-font-family': cssCodeFontFamilyStyleValue(codeFontFamilyDraft.value),
-  '--typography-code-preview-font-size': `${normalizeCodeFontSizePx(codeFontSizeDraft.value)}px`,
+  '--typography-code-preview-font-size': `${codeFontSizePx.value}px`,
 }))
 
 function renderCodeFontPreview() {
@@ -512,36 +510,12 @@ onMounted(() => {
   renderCodeFontPreview()
 })
 
-watch(uiFontSizePx, (value) => { uiFontSizeDraft.value = String(value) })
-watch(codeFontSizePx, (value) => { codeFontSizeDraft.value = String(value) })
 watch(uiFontFamily, (value) => { uiFontFamilyDraft.value = value })
 watch(codeFontFamily, (value) => { codeFontFamilyDraft.value = value })
 watch([shikiThemeLight, shikiThemeDark], () => { renderCodeFontPreview() })
 
-function updateUiFontSizeDraft(value: string | number) { uiFontSizeDraft.value = String(value) }
-function updateCodeFontSizeDraft(value: string | number) { codeFontSizeDraft.value = String(value) }
 function updateUiFontFamilyDraft(value: string | number) { uiFontFamilyDraft.value = String(value) }
 function updateCodeFontFamilyDraft(value: string | number) { codeFontFamilyDraft.value = String(value) }
-
-function commitUiFontSizeDraft() {
-  const draft = uiFontSizeDraft.value.trim()
-  if (draft === '' || !Number.isFinite(Number(draft))) {
-    uiFontSizeDraft.value = String(uiFontSizePx.value)
-    return
-  }
-  setUiFontSizePx(draft)
-  uiFontSizeDraft.value = String(uiFontSizePx.value)
-}
-
-function commitCodeFontSizeDraft() {
-  const draft = codeFontSizeDraft.value.trim()
-  if (draft === '' || !Number.isFinite(Number(draft))) {
-    codeFontSizeDraft.value = String(codeFontSizePx.value)
-    return
-  }
-  setCodeFontSizePx(draft)
-  codeFontSizeDraft.value = String(codeFontSizePx.value)
-}
 
 function commitUiFontFamilyDraft() {
   setUiFontFamily(uiFontFamilyDraft.value)

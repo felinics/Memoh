@@ -4,17 +4,13 @@ import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, InlineLoadingRow, SectionGroup, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import {
   Button, Badge, Dialog, DialogBody, DialogHeader, DialogPanel, DialogTitle,
-  Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Input,
+  Empty, EmptyDescription, EmptyHeader, EmptyTitle, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, NumberField,
   Pagination, PaginationContent, PaginationEllipsis,
   PaginationFirst, PaginationItem, PaginationLast,
   PaginationNext, PaginationPrevious,
 } from '@felinic/ui'
 import ModelSelect from './model-select.vue'
 import { filterCompactionModels } from './compaction-models'
-import {
-  compactionTargetPercentAfterToggle,
-  isCompactionTargetPercentInvalid,
-} from './compaction-target'
 import {
   getBotsByBotIdSettings, putBotsByBotIdSettings,
   getBotsByBotIdCompactionLogs, deleteBotsByBotIdCompactionLogs,
@@ -71,10 +67,10 @@ const compactionModels = computed(() => filterCompactionModels(models.value, pro
 
 // ---- Settings (autosaved) ----
 // No Save button by design (web skill §8); same autosave contract as
-// bot-settings.vue. Number inputs are free-typing drafts committed on
-// blur/Enter so autosave fires once per edit, never per keystroke; an invalid
-// draft never enters `form` (it reverts on commit), which replaces the old
-// "Save button stays disabled while invalid" gate.
+// bot-settings.vue. The NumberFields only emit on a COMMIT (blur, Enter,
+// stepper, arrow keys) — reka clamps to min/max, snaps to step and reverts an
+// invalid draft before emitting — so autosave fires once per edit, never per
+// keystroke, and an out-of-range value can never enter `form`.
 // A type alias (not interface) so the record satisfies the queue's
 // Record<string, unknown> constraint.
 type CompactionForm = {
@@ -111,69 +107,9 @@ watch(settings, (val: SettingsSettings | undefined) => {
   }
 }, { immediate: true })
 
-// Threshold draft: commits on blur/Enter; non-integer or negative reverts.
-const thresholdDraft = ref(String(form.compaction_threshold))
-const thresholdFocused = ref(false)
-
-watch(() => form.compaction_threshold, (value) => {
-  if (!thresholdFocused.value) thresholdDraft.value = String(value)
-})
-
-function commitThresholdDraft() {
-  const parsed = Number(thresholdDraft.value.trim())
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    thresholdDraft.value = String(form.compaction_threshold)
-    return
-  }
-  form.compaction_threshold = parsed
-  thresholdDraft.value = String(form.compaction_threshold)
-}
-
-// Target-percent draft: '' means "use the default" (null → backend clears the
-// override). The inline error is live typing feedback; the value only reaches
-// `form` via commit, so an invalid draft can never be saved.
-const percentDraft = ref(form.compaction_target_percent === null ? '' : String(form.compaction_target_percent))
-const percentFocused = ref(false)
-
-watch(() => form.compaction_target_percent, (value) => {
-  if (!percentFocused.value) percentDraft.value = value === null ? '' : String(value)
-})
-
-const parsedPercentDraft = computed(() => {
-  const raw = percentDraft.value.trim()
-  if (raw === '') return null
-  const parsed = Number(raw)
-  return Number.isNaN(parsed) ? null : parsed
-})
-
-const compactionTargetPercentInvalid = computed(() => {
-  if (percentDraft.value.trim() === '') return false
-  const parsed = Number(percentDraft.value.trim())
-  return Number.isNaN(parsed) || isCompactionTargetPercentInvalid(parsed)
-})
-
-function commitPercentDraft() {
-  if (compactionTargetPercentInvalid.value) {
-    percentDraft.value = form.compaction_target_percent === null ? '' : String(form.compaction_target_percent)
-    return
-  }
-  form.compaction_target_percent = parsedPercentDraft.value
-  percentDraft.value = form.compaction_target_percent === null ? '' : String(form.compaction_target_percent)
-}
-
 // Logs context follows the SAVED state, not an in-flight edit: the panel must
 // describe what is actually running.
 const savedEnabled = computed(() => synced.compaction_enabled)
-
-function updateCompactionEnabled(value: boolean) {
-  // Toggling off drops an invalid in-progress draft (helper returns the saved
-  // value); a valid draft is kept so the toggle doesn't eat typing.
-  const kept = compactionTargetPercentAfterToggle(value, parsedPercentDraft.value, form.compaction_target_percent)
-  if (kept !== parsedPercentDraft.value) {
-    percentDraft.value = kept === null ? '' : String(kept)
-  }
-  form.compaction_enabled = value
-}
 
 function buildJobs(changed: (keyof CompactionForm)[]): AutosaveJob<CompactionForm>[] {
   const payload: SettingsUpsertRequest = {}
@@ -344,7 +280,7 @@ onBeforeUnmount(() => {
         >
           <Switch
             :model-value="form.compaction_enabled"
-            @update:model-value="updateCompactionEnabled"
+            @update:model-value="(value) => form.compaction_enabled = value"
           />
         </SettingsRow>
 
@@ -364,21 +300,17 @@ onBeforeUnmount(() => {
                 {{ $t('bots.settings.compactionThresholdDescription') }}
               </p>
             </template>
-            <Input
+            <NumberField
               id="compaction-threshold"
               aria-describedby="compaction-threshold-description"
-              :model-value="thresholdDraft"
-              type="number"
+              :model-value="form.compaction_threshold"
               :min="0"
               :step="1"
               placeholder="0"
               size="sm"
-              class="w-32 tabular-nums"
-              @update:model-value="(value) => thresholdDraft = String(value ?? '')"
-              @focus="thresholdFocused = true"
-              @change="commitThresholdDraft"
-              @blur="thresholdFocused = false; commitThresholdDraft()"
-              @keydown.enter="commitThresholdDraft"
+              disable-wheel-change
+              class="w-32"
+              @update:model-value="(value) => form.compaction_threshold = value ?? 0"
             />
           </SettingsRow>
 
@@ -398,33 +330,21 @@ onBeforeUnmount(() => {
               >
                 {{ $t('bots.settings.compactionTargetPercentDescription') }}
               </p>
-              <p
-                v-if="compactionTargetPercentInvalid"
-                id="compaction-target-percent-error"
-                class="mt-1 text-body text-destructive"
-              >
-                {{ $t('bots.settings.compactionTargetPercentInvalid') }}
-              </p>
             </template>
-            <Input
+            <!-- Empty means "use the default" (null → backend clears the
+                 override); reka commits undefined for an empty field. -->
+            <NumberField
               id="compaction-target-percent"
-              :model-value="percentDraft"
-              type="number"
+              aria-describedby="compaction-target-percent-description"
+              :model-value="form.compaction_target_percent"
               :min="1"
               :max="99"
               :step="1"
               placeholder="40"
               size="sm"
-              class="w-32 tabular-nums"
-              :aria-describedby="compactionTargetPercentInvalid
-                ? 'compaction-target-percent-description compaction-target-percent-error'
-                : 'compaction-target-percent-description'"
-              :aria-invalid="compactionTargetPercentInvalid"
-              @update:model-value="(value) => percentDraft = String(value ?? '')"
-              @focus="percentFocused = true"
-              @change="commitPercentDraft"
-              @blur="percentFocused = false; commitPercentDraft()"
-              @keydown.enter="commitPercentDraft"
+              disable-wheel-change
+              class="w-32"
+              @update:model-value="(value) => form.compaction_target_percent = value ?? null"
             />
           </SettingsRow>
         </template>
