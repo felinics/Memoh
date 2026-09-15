@@ -143,6 +143,7 @@ import {
   ArrowUpDown, Check, MoreHorizontal, Pencil, Plus, Trash2,
 } from 'lucide-vue-next'
 import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import {
   Button,
@@ -162,6 +163,7 @@ import type { ScheduleSchedule } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { formatCalendarTime } from '@/utils/date-time'
 import { describeCron, nextRuns } from '@/utils/cron-pattern'
+import { useChatStore } from '@/store/chat-list'
 import ScheduleEditor from './schedule-editor.vue'
 
 const props = defineProps<{
@@ -170,6 +172,8 @@ const props = defineProps<{
 }>()
 
 const { t, locale } = useI18n()
+const chatStore = useChatStore()
+const { scheduleActivityRevisions } = storeToRefs(chatStore)
 
 const isLoading = ref(false)
 const schedules = ref<ScheduleSchedule[]>([])
@@ -351,6 +355,13 @@ watch(
   () => {
     consumedInitialScheduleId.value = undefined
     openInitialScheduleIfNeeded()
+  },
+)
+
+watch(
+  () => scheduleActivityRevisions.value[props.botId] ?? 0,
+  (revision, previous) => {
+    if (revision !== previous) void fetchSchedules()
   },
 )
 </script>

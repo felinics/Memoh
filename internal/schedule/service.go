@@ -18,10 +18,12 @@ import (
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/boot"
 	"github.com/felinics/memoh/internal/botagents"
+	messageevent "github.com/felinics/memoh/internal/chat/event"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/runtimekind"
+	memtimezone "github.com/felinics/memoh/internal/timezone"
 	"github.com/felinics/memoh/internal/workdir"
 )
 
@@ -67,6 +69,7 @@ type Service struct {
 	sessionCreator  SessionCreator
 	workdirs        WorkdirValidator
 	botAgents       *botagents.Service
+	events          messageevent.Publisher
 	jwtSecret       string
 	logger          *slog.Logger
 	defaultLocation *time.Location
@@ -76,6 +79,11 @@ type Service struct {
 
 func (s *Service) SetBotAgents(service *botagents.Service) {
 	s.botAgents = service
+}
+
+// SetEventPublisher wires bot-scoped schedule snapshot invalidations.
+func (s *Service) SetEventPublisher(publisher messageevent.Publisher) {
+	s.events = publisher
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, sessionCreator SessionCreator, workdirService *workdir.Service, runtimeConfig *boot.RuntimeConfig) *Service {
@@ -171,6 +179,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	if err != nil {
 		return Schedule{}, err
 	}
+	s.publishChanged(row.BotID.String(), row.ID.String())
 	if row.Enabled {
 		if err := s.scheduleJob(ctx, row); err != nil {
 			return Schedule{}, err
@@ -288,6 +297,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	if err != nil {
 		return Schedule{}, err
 	}
+	s.publishChanged(updated.BotID.String(), updated.ID.String())
 	if err := s.rescheduleJob(ctx, updated); err != nil {
 		return Schedule{}, fmt.Errorf("reschedule job: %w", err)
 	}
@@ -299,10 +309,15 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	existing, err := s.queries.GetScheduleByID(ctx, pgID)
+	if err != nil {
+		return err
+	}
 	if err := s.queries.DeleteSchedule(ctx, pgID); err != nil {
 		return err
 	}
 	s.removeJob(id)
+	s.publishChanged(existing.BotID.String(), id)
 	return nil
 }
 
@@ -348,6 +363,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	if err != nil {
 		return err
 	}
+	s.publishChanged(updated.BotID.String(), updated.ID.String())
 	if !updated.Enabled {
 		s.removeJob(sched.ID)
 	}
@@ -474,13 +490,19 @@ func (s *Service) resolveRunSession(ctx context.Context, sched Schedule, ownerUs
 // disableGoneSchedule turns off a schedule whose target session vanished and
 // unhooks its cron job.
 func (s *Service) disableGoneSchedule(ctx context.Context, scheduleID string) {
-	if _, err := s.queries.DisableSchedule(ctx, toUUID(scheduleID)); err != nil {
+	updated, err := s.queries.DisableSchedule(ctx, toUUID(scheduleID))
+	if err != nil {
 		s.logger.Error("disable schedule with deleted target session failed",
 			slog.String("schedule_id", scheduleID), slog.Any("error", err))
 		return
 	}
 	s.removeJob(scheduleID)
+	s.publishChanged(updated.BotID.String(), scheduleID)
 	s.logger.Warn("schedule disabled: target session was deleted", slog.String("schedule_id", scheduleID))
+}
+
+func (s *Service) publishChanged(botID, scheduleID string) {
+	messageevent.NotifyScheduleChanged(s.events, botID, scheduleID)
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte, modelID pgtype.UUID) {
@@ -766,9 +788,8 @@ func toUUID(id string) pgtype.UUID {
 	return pgID
 }
 
-// resolveBotLocation returns the bot's configured timezone location, falling
-// back to the system default when the bot has no timezone set or the value is
-// invalid.
+// resolveBotLocation uses the same timezone priority as agent turns:
+// bot timezone, bot owner timezone, then the system default.
 func (s *Service) resolveBotLocation(ctx context.Context, botID pgtype.UUID) *time.Location {
 	if s.queries == nil || !botID.Valid {
 		return s.defaultLocation
@@ -777,23 +798,40 @@ func (s *Service) resolveBotLocation(ctx context.Context, botID pgtype.UUID) *ti
 	if err != nil {
 		return s.defaultLocation
 	}
-	if !row.Timezone.Valid {
-		return s.defaultLocation
+	if row.Timezone.Valid {
+		tz := strings.TrimSpace(row.Timezone.String)
+		if tz != "" {
+			loc, _, loadErr := memtimezone.Resolve(tz)
+			if loadErr == nil {
+				return loc
+			}
+			s.logger.Warn("invalid bot timezone for schedule",
+				slog.String("bot_id", botID.String()),
+				slog.String("timezone", tz),
+				slog.Any("error", loadErr),
+			)
+		}
 	}
-	tz := strings.TrimSpace(row.Timezone.String)
-	if tz == "" {
-		return s.defaultLocation
+
+	if row.OwnerUserID.Valid {
+		owner, ownerErr := s.queries.GetUserByID(ctx, row.OwnerUserID)
+		if ownerErr == nil {
+			tz := strings.TrimSpace(owner.Timezone)
+			if tz != "" {
+				loc, _, loadErr := memtimezone.Resolve(tz)
+				if loadErr == nil {
+					return loc
+				}
+				s.logger.Warn("invalid bot owner timezone for schedule",
+					slog.String("bot_id", botID.String()),
+					slog.String("user_id", row.OwnerUserID.String()),
+					slog.String("timezone", tz),
+					slog.Any("error", loadErr),
+				)
+			}
+		}
 	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		s.logger.Warn("invalid bot timezone for schedule, using default",
-			slog.String("bot_id", botID.String()),
-			slog.String("timezone", tz),
-			slog.Any("error", err),
-		)
-		return s.defaultLocation
-	}
-	return loc
+	return s.defaultLocation
 }
 
 // locationSchedule wraps a cron.Schedule to evaluate Next() in a specific

@@ -261,7 +261,7 @@ export function createSessionList({ currentBotId, sessionId, messages }: Session
 
   function isRecentsSession(session: SessionSummary): boolean {
     const type = (session.type ?? 'chat').trim()
-    return type === 'chat' || type === 'discuss' || type === 'acp_agent'
+    return type === 'chat' || type === 'discuss' || type === 'acp_agent' || type === 'schedule'
   }
 
   // patchSessionInList applies a partial update to one session in BOTH the

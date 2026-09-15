@@ -35,6 +35,9 @@ const (
 	// EventTypeSessionInvalidated marks cached transcripts stale when runtime
 	// admission changes them, or after history is cleared without a new message.
 	EventTypeSessionInvalidated EventType = "session_invalidated"
+	// EventTypeScheduleChanged invalidates a bot's schedule-list snapshot after
+	// a task is created, updated, deleted, or advances its run counters.
+	EventTypeScheduleChanged EventType = "schedule_changed"
 )
 
 // SessionInvalidation contains only an address. An empty SessionID invalidates
@@ -43,12 +46,27 @@ type SessionInvalidation struct {
 	SessionID string `json:"session_id"`
 }
 
+// ScheduleChange contains only the changed task identity. Consumers re-read
+// the authorized bot-scoped schedule snapshot instead of trusting event data.
+type ScheduleChange struct {
+	ScheduleID string `json:"schedule_id"`
+}
+
 func InvalidateSession(publisher Publisher, botID, sessionID string) {
 	if publisher == nil {
 		return
 	}
 	payload, _ := json.Marshal(SessionInvalidation{SessionID: strings.TrimSpace(sessionID)})
 	publisher.Publish(Event{Type: EventTypeSessionInvalidated, BotID: strings.TrimSpace(botID), Data: payload})
+}
+
+// NotifyScheduleChanged broadcasts a best-effort bot-scoped invalidation.
+func NotifyScheduleChanged(publisher Publisher, botID, scheduleID string) {
+	if publisher == nil {
+		return
+	}
+	payload, _ := json.Marshal(ScheduleChange{ScheduleID: strings.TrimSpace(scheduleID)})
+	publisher.Publish(Event{Type: EventTypeScheduleChanged, BotID: strings.TrimSpace(botID), Data: payload})
 }
 
 // Event is the normalized payload emitted by the in-process message event hub.

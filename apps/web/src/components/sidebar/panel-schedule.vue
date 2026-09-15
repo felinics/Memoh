@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, reactive } from 'vue'
+import { ref, watch, computed, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { Plus } from 'lucide-vue-next'
@@ -126,7 +126,7 @@ import '@/styles/sidebar-scroll.css'
 
 const { t, locale } = useI18n()
 const chatStore = useChatStore()
-const { currentBotId } = storeToRefs(chatStore)
+const { currentBotId, scheduleActivityRevisions } = storeToRefs(chatStore)
 const workspaceTabs = useWorkspaceTabsStore()
 const { sidebarView } = storeToRefs(workspaceTabs)
 
@@ -240,13 +240,21 @@ async function fetchSchedules() {
   }
 }
 
-// Refresh when user switches TO the schedule tab
-watch(sidebarView, (view) => {
-  if (view === 'schedule') void fetchSchedules()
+const currentScheduleRevision = computed(() => {
+  const botId = currentBotId.value
+  return botId ? scheduleActivityRevisions.value[botId] ?? 0 : 0
 })
 
-// Refresh when active bot changes
-watch(currentBotId, () => void fetchSchedules())
+// The panel stays mounted while Chat is selected. A single watcher covers its
+// three snapshot boundaries: opening Schedule, switching bots, and receiving a
+// server-side change from an agent tool or schedule run.
+watch([currentBotId, sidebarView, currentScheduleRevision], ([botId, view]) => {
+  if (!botId) {
+    schedules.value = []
+    return
+  }
+  if (view === 'schedule') void fetchSchedules()
+}, { immediate: true })
 
 async function confirmDelete() {
   const item = deleteTarget.value
@@ -298,5 +306,4 @@ function handleOpenTask(item: ScheduleSchedule) {
   workspaceTabs.openSchedule(item.id, item.name)
 }
 
-onMounted(() => void fetchSchedules())
 </script>

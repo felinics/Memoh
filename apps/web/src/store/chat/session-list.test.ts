@@ -102,6 +102,7 @@ describe('session list registry', () => {
     const { registry } = makeRegistry()
     registry.replaceSessions([session('listed')])
     registry.rememberSession(session('remembered', { type: 'acp_agent' }))
+    registry.rememberSession(session('scheduled', { type: 'schedule' }))
 
     const listed = registry.touchKnownSession('listed', '2026-01-03T00:00:00.000Z')
     expect(listed).toMatchObject({ source: 'listed', visibleInRecents: true })
@@ -110,6 +111,11 @@ describe('session list registry', () => {
     const remembered = registry.touchKnownSession('remembered', '2026-01-01T00:00:00.000Z')
     expect(remembered).toMatchObject({ source: 'remembered', visibleInRecents: true })
     expect(remembered.session?.updated_at).toBe('2026-01-02T00:00:00.000Z')
+
+    expect(registry.touchKnownSession('scheduled')).toMatchObject({
+      source: 'remembered',
+      visibleInRecents: true,
+    })
 
     expect(registry.touchKnownSession('missing')).toEqual({
       source: 'unknown',

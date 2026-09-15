@@ -49,6 +49,8 @@ func (*ScheduleProvider) Usage(_ context.Context, _ SessionContext, available Av
 	if createRef, ok := available.Ref(ToolCreateSchedule()); ok {
 		parts = append(parts, "You can create and manage scheduled tasks via cron.")
 		parts = append(parts, "Use "+createRef+" to create a new task — fill `command` with natural language.")
+		parts = append(parts, "Interpret the cron `pattern` in the effective timezone stated in the system context; do not convert part of it to UTC.")
+		parts = append(parts, "After creation succeeds, immediately confirm the scheduled task to the user and end the turn; do not wait for it to fire or poll schedules or messages.")
 		parts = append(parts, "When the cron pattern fires, you will receive a message with your `command`; "+delivery+".")
 		var execHints []string
 		if ref, ok := available.Ref(ToolListModels()); ok {

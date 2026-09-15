@@ -145,6 +145,7 @@ func ServerModule() fx.Option {
 			injectBotContainerLifecycle,
 			configureMemoryProviderRegistry,
 			injectScheduleBotAgents,
+			injectScheduleEvents,
 			startProviderTemplateSync,
 			startScheduleService,
 			startContainerReconciliation,

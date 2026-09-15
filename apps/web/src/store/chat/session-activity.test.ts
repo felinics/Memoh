@@ -4,15 +4,21 @@ import { createSessionActivity } from './session-activity'
 
 vi.mock('@/composables/api/useChat', () => ({ fetchSession: vi.fn(), fetchSessions: vi.fn() }))
 
-function activity(refreshSessionMessages = vi.fn(async (_botId: string, _sessionId: string) => {})) {
+function activity(options: {
+  currentBotId?: string | null
+  sessionId?: string | null
+  knownSession?: (sessionId: string) => { id: string, bot_id: string, title: string, type?: string } | null
+  refreshSessionMessages?: (botId: string, sessionId: string) => Promise<void>
+} = {}) {
   return createSessionActivity({
-    currentBotId: ref('bot-1'), sessionId: ref('session-1'),
+    currentBotId: ref(options.currentBotId === undefined ? 'bot-1' : options.currentBotId),
+    sessionId: ref(options.sessionId === undefined ? 'session-1' : options.sessionId),
     userScopeGeneration: () => 0, currentSessionListRevision: () => 0, currentSelectRequest: () => 0,
-    knownSession: () => null, rememberSession: vi.fn(), sessionsCursor: ref(null),
+    knownSession: options.knownSession ?? (() => null), rememberSession: vi.fn(), sessionsCursor: ref(null),
     hasMoreSessions: ref(false), loadingMoreSessions: ref(false), appendSessions: vi.fn(),
     hasListedSession: () => false, touchKnownSession: () => ({ source: 'listed' }),
     updateKnownSessionTitle: vi.fn(), refreshSessionsList: vi.fn(async () => {}),
-    refreshSessionMessages,
+    refreshSessionMessages: options.refreshSessionMessages ?? vi.fn(async () => {}),
   })
 }
 
@@ -69,7 +75,7 @@ describe('persisted background notifications', () => {
         displayed.push(snapshot!)
         if (snapshot === 'Installed') resolve()
       })
-      const state = activity(refresh)
+      const state = activity({ refreshSessionMessages: refresh })
       state.handleActivity('bot-1', { type: 'session_touched', session_id: 'session-1' })
       expect(displayed).toEqual([])
       expect(snapshots).toHaveLength(2)
@@ -79,6 +85,59 @@ describe('persisted background notifications', () => {
     })
     await refreshed
     expect(displayed).toEqual(['Installing', 'Installed'])
+  })
+})
+
+describe('schedule activity', () => {
+  function scheduleSession(id: string) {
+    return { id, bot_id: 'bot-1', title: 'Scheduled run', type: 'schedule' }
+  }
+
+  it('invalidates the bot schedule snapshot on changes and dropped frames', () => {
+    const state = activity()
+    state.handleActivity('bot-1', { type: 'schedule_changed', schedule_id: 'schedule-1', session_id: '' })
+    expect(state.scheduleActivityRevisions.value).toEqual({ 'bot-1': 1 })
+
+    state.handleActivity('bot-2', { type: 'schedule_changed', schedule_id: 'schedule-2', session_id: '' })
+    state.handleActivity('bot-1', { type: 'dropped', count: 1 })
+    expect(state.scheduleActivityRevisions.value).toEqual({ 'bot-1': 2, 'bot-2': 1 })
+
+    state.reset()
+    expect(state.scheduleActivityRevisions.value).toEqual({})
+  })
+
+  it('refreshes persisted messages when the active schedule session is touched', () => {
+    const refreshSessionMessages = vi.fn(async () => {})
+    const state = activity({
+      knownSession: id => id === 'session-1' ? scheduleSession(id) : null,
+      refreshSessionMessages,
+    })
+
+    state.handleActivity('bot-1', { type: 'session_touched', session_id: 'session-1' })
+    expect(refreshSessionMessages).toHaveBeenCalledWith('bot-1', 'session-1')
+  })
+
+  it('does not immediately refresh a schedule session that is not active', () => {
+    const refreshSessionMessages = vi.fn(async () => {})
+    const state = activity({
+      sessionId: 'session-1',
+      knownSession: id => id === 'session-2' ? scheduleSession(id) : null,
+      refreshSessionMessages,
+    })
+
+    state.handleActivity('bot-1', { type: 'session_touched', session_id: 'session-2' })
+    expect(refreshSessionMessages).not.toHaveBeenCalled()
+  })
+
+  it('does not immediately refresh an ordinary active chat session', () => {
+    const refreshSessionMessages = vi.fn(async () => {})
+    const state = activity({
+      knownSession: id => ({ ...scheduleSession(id), type: 'chat' }),
+      refreshSessionMessages,
+    })
+
+    state.handleActivity('bot-1', { type: 'session_touched', session_id: 'session-1' })
+    expect(refreshSessionMessages).not.toHaveBeenCalled()
   })
 })
 

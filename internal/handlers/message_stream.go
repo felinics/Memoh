@@ -30,8 +30,8 @@ const sseHeartbeatInterval = 20 * time.Second
 // @Summary Stream bot-wide sessions activity
 // @Description Lightweight SSE for sidebar live-sort. Carries only session
 // @Description identifiers and minimal metadata (touched timestamps, titles).
-// @Description Never includes message bodies. Filters out internal session
-// @Description types such as schedule and subagent.
+// @Description Never includes message bodies. Filters out sessions with
+// @Description internal visibility, such as managed subagent work.
 // @Tags messages
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
@@ -201,10 +201,6 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 				if sessionID == "" {
 					continue
 				}
-				typ, _ := payload["type"].(string)
-				if !session.IsUserFacingType(typ) {
-					continue
-				}
 				if !canDeliverSessionActivity(c.Request().Context(), channelIdentityID, botID, perms, cache, sessionID) {
 					continue
 				}
@@ -219,6 +215,28 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 					out["created_at"] = createdAt
 				}
 				if err := writeSSEJSON(writer, flusher, out); err != nil {
+					return nil
+				}
+			case messageevent.EventTypeScheduleChanged:
+				var change messageevent.ScheduleChange
+				if err := json.Unmarshal(event.Data, &change); err != nil {
+					h.logger.Warn("activity stream: decode schedule_changed event failed",
+						slog.String("bot_id", botID),
+						slog.Any("error", err),
+					)
+					continue
+				}
+				scheduleID := strings.TrimSpace(change.ScheduleID)
+				if scheduleID == "" {
+					continue
+				}
+				if err := writeSSEJSON(writer, flusher, map[string]any{
+					"type":        "schedule_changed",
+					"schedule_id": scheduleID,
+					// Older clients treat unknown activity types as session-created
+					// notifications and trim session_id unconditionally.
+					"session_id": "",
+				}); err != nil {
 					return nil
 				}
 			}
@@ -266,7 +284,7 @@ func (h *MessageHandler) visibleCompactingSessions(ctx context.Context, userID, 
 }
 
 // canDeliverSessionActivity returns true when the subscriber may see an
-// activity event for sessionID: the session must be a user-facing type AND
+// activity event for sessionID: the session must have user visibility AND
 // the subscriber must have read access to it. The session row is loaded
 // at most once per stream — both the user-facing and access checks read
 // from the cached value.
@@ -279,7 +297,7 @@ func canDeliverSessionActivity(ctx context.Context, channelIdentityID, botID str
 	if !ok {
 		return false
 	}
-	if !session.IsUserFacingType(sess.Type) {
+	if sess.Visibility != session.VisibilityUser {
 		return false
 	}
 	return canReadMessageSessionFromCache(sess, channelIdentityID, botID, perms)
@@ -321,13 +339,12 @@ func beginSSEResponse(c echo.Context) (io.Writer, http.Flusher, error) {
 
 // sessionCache memoizes the session row for the lifetime of one activity
 // stream. Without it every delivered event would issue two DB reads — one
-// for the user-facing-type check and one for the access check. Both checks
+// for the visibility check and one for the access check. Both checks
 // now read the same cached value, so the first event for a session pays a
 // single Get and subsequent events for that session are DB-free.
 //
 // Caching the full row is safe because the only mutable bit either check
-// reads is `Type`, which IsUserFacingType doesn't filter on for an already
-// admitted session, and CreatedByUserID, which is immutable.
+// reads is Visibility or CreatedByUserID, both immutable after creation.
 //
 // The cache is stream-local and consulted only from the single goroutine
 // that drives the SSE writer loop, so no synchronization is needed.

@@ -31,6 +31,7 @@ func activityTestHandler() (*MessageHandler, *messageevent.Hub) {
 		bot: testBotRow(activityTestBotID, nil),
 		session: sqlc.BotSession{
 			ID: testUUID(activityTestSessionID), BotID: testUUID(activityTestBotID), Type: session.TypeChat,
+			SessionMode: session.TypeChat, Visibility: string(session.VisibilityUser),
 		},
 	}
 	return NewMessageHandler(slog.Default(), nil, session.NewService(nil, queries, hub),
@@ -44,6 +45,27 @@ type admissionOnSubscribe struct{ hub *messageevent.Hub }
 func (s admissionOnSubscribe) Subscribe(botID string, buffer int) (*messageevent.Subscription, func()) {
 	sub, cancel := s.hub.Subscribe(botID, buffer)
 	messageevent.InvalidateSession(s.hub, botID, activityTestSessionID)
+	return sub, cancel
+}
+
+type scheduleChangeOnSubscribe struct{ hub *messageevent.Hub }
+
+func (s scheduleChangeOnSubscribe) Subscribe(botID string, buffer int) (*messageevent.Subscription, func()) {
+	sub, cancel := s.hub.Subscribe(botID, buffer)
+	messageevent.NotifyScheduleChanged(s.hub, botID, "33333333-3333-3333-3333-333333333333")
+	return sub, cancel
+}
+
+type scheduleSessionOnSubscribe struct{ hub *messageevent.Hub }
+
+func (s scheduleSessionOnSubscribe) Subscribe(botID string, buffer int) (*messageevent.Subscription, func()) {
+	sub, cancel := s.hub.Subscribe(botID, buffer)
+	payload, _ := json.Marshal(map[string]any{
+		"session_id": activityTestSessionID,
+		"type":       session.TypeSchedule,
+		"title":      "Scheduled run",
+	})
+	s.hub.Publish(messageevent.Event{Type: messageevent.EventTypeSessionCreated, BotID: botID, Data: payload})
 	return sub, cancel
 }
 
@@ -93,6 +115,65 @@ func TestSessionActivitySendsReadyThenQueuedInvalidation(t *testing.T) {
 				t.Fatalf("queued admission invalidation missing: %+v", payload)
 			}
 		}
+	}
+}
+
+func TestSessionActivityForwardsScheduleChanges(t *testing.T) {
+	h, hub := activityTestHandler()
+	h.messageEvents = scheduleChangeOnSubscribe{hub}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	rec := &activityResponseRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+activityTestBotID+"/sessions/events", nil).WithContext(ctx)
+	c := testAuthContext(echo.New(), req, rec, "user-1")
+	c.SetParamNames("bot_id")
+	c.SetParamValues(activityTestBotID)
+	if err := h.StreamSessionsActivityEvents(c); err != nil {
+		t.Fatal(err)
+	}
+	frames := strings.Split(strings.TrimSpace(rec.Body.String()), "\n\n")
+	if len(frames) != 2 {
+		t.Fatalf("expected ready and schedule change, got %q", rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(frames[1], "data: ")), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["type"] != "schedule_changed" || payload["schedule_id"] != "33333333-3333-3333-3333-333333333333" || payload["session_id"] != "" {
+		t.Fatalf("unexpected schedule change frame: %+v", payload)
+	}
+}
+
+func TestSessionActivityForwardsUserVisibleScheduleSession(t *testing.T) {
+	h, hub := activityTestHandler()
+	h.messageEvents = scheduleSessionOnSubscribe{hub}
+	h.sessionService = session.NewService(nil, &sessionDeleteQueries{
+		bot: testBotRow(activityTestBotID, nil),
+		session: sqlc.BotSession{
+			ID: testUUID(activityTestSessionID), BotID: testUUID(activityTestBotID), Type: session.TypeSchedule,
+			SessionMode: session.TypeSchedule, Visibility: string(session.VisibilityUser), Title: "Scheduled run",
+		},
+	}, hub)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	rec := &activityResponseRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+	req := httptest.NewRequest(http.MethodGet, "/bots/"+activityTestBotID+"/sessions/events", nil).WithContext(ctx)
+	c := testAuthContext(echo.New(), req, rec, "user-1")
+	c.SetParamNames("bot_id")
+	c.SetParamValues(activityTestBotID)
+	if err := h.StreamSessionsActivityEvents(c); err != nil {
+		t.Fatal(err)
+	}
+	frames := strings.Split(strings.TrimSpace(rec.Body.String()), "\n\n")
+	if len(frames) != 2 {
+		t.Fatalf("expected ready and schedule session, got %q", rec.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(frames[1], "data: ")), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["type"] != "session_created" || payload["session_id"] != activityTestSessionID || payload["title"] != "Scheduled run" {
+		t.Fatalf("unexpected schedule session frame: %+v", payload)
 	}
 }
 

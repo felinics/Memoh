@@ -47,10 +47,17 @@ export interface SessionTitleChangedEvent {
 export interface SessionCreatedEvent {
   type: 'session_created'
   session_id: string
-  // `type` here is the session kind (chat | discuss | acp_agent), already
-  // filtered server-side to user-facing types.
+  // `type` here is the session kind (chat | discuss | schedule | acp_agent),
+  // already filtered server-side to user-visible sessions.
   session_type?: string
   title?: string
+}
+
+export interface ScheduleChangedEvent {
+  type: 'schedule_changed'
+  schedule_id: string
+  /** Kept empty by the server for compatibility with older activity clients. */
+  session_id?: string
 }
 
 export interface BotSessionActivityDroppedEvent {
@@ -74,6 +81,7 @@ export type BotSessionActivityEvent =
   | SessionTouchedEvent
   | SessionTitleChangedEvent
   | SessionCreatedEvent
+  | ScheduleChangedEvent
   | BotSessionActivityDroppedEvent
   | BotSessionActivityPingEvent
   | SessionCompactionEvent

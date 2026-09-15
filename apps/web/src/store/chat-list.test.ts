@@ -1796,6 +1796,43 @@ describe('chat-list store', () => {
       expect(store.sessions.map(session => session.id)).toEqual(['session-hidden', 'session-visible'])
     })
 
+  it('refreshes the active schedule transcript when persisted activity arrives', async () => {
+      api.fetchSessions.mockResolvedValueOnce({ items: [
+        { id: 'session-schedule', bot_id: 'bot-1', title: 'Shower reminder', type: 'schedule' },
+      ], nextCursor: null })
+      api.fetchMessagesUI
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{
+          id: 'assistant-schedule',
+          role: 'assistant',
+          messages: [{ id: 1, type: 'text', content: 'Time to take a shower.' }],
+          timestamp: '2026-09-16T10:01:00.000Z',
+        }])
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      expect(store.sessionId).toBe('session-schedule')
+      expect(store.messages).toEqual([])
+
+      h.sessionsActivityHandler?.({
+        type: 'session_touched',
+        session_id: 'session-schedule',
+        updated_at: '2026-09-16T10:01:00.000Z',
+      })
+      await flushPromises()
+
+      expect(api.fetchMessagesUI).toHaveBeenLastCalledWith(
+        'bot-1',
+        'session-schedule',
+        { limit: 30 },
+      )
+      expect(store.messages).toHaveLength(1)
+      expect(store.messages[0]).toMatchObject({
+        id: 'assistant-schedule',
+        role: 'assistant',
+      })
+    })
+
   it('deduplicates concurrent ACP runtime ensure calls', async () => {
       api.fetchSessions.mockResolvedValueOnce({ items: [
         { id: 'acp-session-1', bot_id: 'bot-1', title: '', type: 'acp_agent' },
@@ -4675,7 +4712,7 @@ describe('chat-list store', () => {
       // would be incomplete).
       api.fetchSessions.mockResolvedValueOnce({
         items: [
-          { id: 'session-2', bot_id: 'bot-1', title: 'New', type: 'discuss' },
+          { id: 'session-2', bot_id: 'bot-1', title: 'Scheduled run', type: 'schedule' },
           { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
         ],
         nextCursor: null,
@@ -4683,8 +4720,8 @@ describe('chat-list store', () => {
       h.sessionsActivityHandler?.({
         type: 'session_created',
         session_id: 'session-2',
-        session_type: 'discuss',
-        title: 'New',
+        session_type: 'schedule',
+        title: 'Scheduled run',
       })
       await flushPromises()
 

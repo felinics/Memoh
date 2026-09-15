@@ -1157,6 +1157,10 @@ func injectScheduleBotAgents(scheduleService *schedule.Service, botAgentsService
 	scheduleService.SetBotAgents(botAgentsService)
 }
 
+func injectScheduleEvents(scheduleService *schedule.Service, eventHub *event.Hub) {
+	scheduleService.SetEventPublisher(eventHub)
+}
+
 func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _ *handlers.ContainerdHandler, _ *mcp.ToolGatewayService) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
