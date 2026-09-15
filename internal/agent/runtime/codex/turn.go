@@ -674,6 +674,7 @@ func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
 		out.RuntimeMetadata = map[string]any{}
 		if newThreadID != "" {
 			out.RuntimeMetadata[metadataThreadIDKey] = newThreadID
+			out.RuntimeMetadata[metadataCheckpointRequiredKey] = true
 		}
 		// Context-occupancy data for the session UI: the thread's cumulative
 		// token count against its model context window.

@@ -43,6 +43,8 @@ type appServer struct {
 	// resuming an already-loaded thread is a no-op server-side but tracking
 	// avoids redundant calls.
 	loadedThreads  map[string]bool
+	checkpoints    map[string]checkpointHandle
+	threadClosed   map[string]chan struct{}
 	threadSettings map[string]protocol.Settings
 	// toollessThreads marks threads whose start-time config carried no Memoh
 	// tool gateway; the driver re-emits a notice for them every turn.
@@ -305,6 +307,10 @@ func (s *appServer) HandleNotification(_ context.Context, note *protocol.Inbound
 		return
 	}
 	s.cacheControlNotification(decoded)
+	if closed, ok := decoded.(*protocol.ThreadClosedNotification); ok {
+		s.forgetThread(closed.ThreadID)
+		return
+	}
 	threadID := notificationThreadID(decoded)
 	if threadID == "" {
 		s.handleGlobalNotification(note.Method, decoded)
