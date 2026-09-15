@@ -29,6 +29,9 @@ export function buildRuntimeConnectCommand(
   if (!key) return ''
 
   const bin = runtimeCliBin(npmPackage)
+  // --replace: every wizard session issues a fresh key, so a re-run always
+  // differs from the saved enrollment and enroll would refuse without it.
+  // Re-binding the machine to the new credential is exactly the intent.
   const enrollArgs = [bin, 'enroll', '--server', serverUrl, '--key', key]
   const teamId = credential?.team_id?.trim()
   if (teamId) {
@@ -37,12 +40,16 @@ export function buildRuntimeConnectCommand(
   if (isInsecureLocalhost(serverUrl)) {
     enrollArgs.push('--insecure-localhost')
   }
+  enrollArgs.push('--replace')
+  // One command per line, not a `&&` chain: pasting the block runs the lines
+  // sequentially in bash/zsh/cmd, and PowerShell 5.1 (the default Windows
+  // shell) rejects `&&` outright.
   return [
     `npm install -g ${npmPackage}`,
     enrollArgs.join(' '),
     `${bin} service install`,
     `${bin} service start`,
-  ].join(' && ')
+  ].join('\n')
 }
 
 function isInsecureLocalhost(serverUrl: string): boolean {

@@ -11,14 +11,14 @@ describe('buildRuntimeConnectCommand', () => {
       key,
       team_id: teamId,
     })).toBe(
-      `npm install -g @memohai/runtime && memoh-runtime enroll --server https://memoh.example/api --key ${key} --team-id ${teamId} && memoh-runtime service install && memoh-runtime service start`,
+      `npm install -g @memohai/runtime\nmemoh-runtime enroll --server https://memoh.example/api --key ${key} --team-id ${teamId} --replace\nmemoh-runtime service install\nmemoh-runtime service start`,
     )
   })
 
   it('keeps credentials from older self-hosted servers usable', () => {
     expect(buildRuntimeConnectCommand('https://memoh.example/api', { key }))
       .toBe(
-        `npm install -g @memohai/runtime && memoh-runtime enroll --server https://memoh.example/api --key ${key} && memoh-runtime service install && memoh-runtime service start`,
+        `npm install -g @memohai/runtime\nmemoh-runtime enroll --server https://memoh.example/api --key ${key} --replace\nmemoh-runtime service install\nmemoh-runtime service start`,
       )
   })
 
@@ -27,13 +27,23 @@ describe('buildRuntimeConnectCommand', () => {
       key,
       team_id: teamId,
     })).toBe(
-      `npm install -g @memohai/runtime && memoh-runtime enroll --server http://127.0.0.1:18080 --key ${key} --team-id ${teamId} --insecure-localhost && memoh-runtime service install && memoh-runtime service start`,
+      `npm install -g @memohai/runtime\nmemoh-runtime enroll --server http://127.0.0.1:18080 --key ${key} --team-id ${teamId} --insecure-localhost --replace\nmemoh-runtime service install\nmemoh-runtime service start`,
     )
+  })
+
+  it('avoids `&&` so the default Windows PowerShell 5.1 can run the paste', () => {
+    expect(buildRuntimeConnectCommand('https://memoh.example/api', { key }))
+      .not.toContain('&&')
+  })
+
+  it('always replaces the saved enrollment: every wizard session issues a new key', () => {
+    expect(buildRuntimeConnectCommand('https://memoh.example/api', { key }))
+      .toContain('--replace')
   })
 
   it('derives the hosted CLI bin from the hosted package name', () => {
     expect(buildRuntimeConnectCommand('https://memoh.example/api', { key }, '@memohai/cloud-runtime'))
-      .toContain('npm install -g @memohai/cloud-runtime && memoh-cloud-runtime enroll')
+      .toContain('npm install -g @memohai/cloud-runtime\nmemoh-cloud-runtime enroll')
   })
 })
 
