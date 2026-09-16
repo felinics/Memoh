@@ -22,6 +22,7 @@ SELECT
   video_models.id AS video_model_id,
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
+  bots.reuse_tool_call_message_in_im,
   bots.tool_approval_config,
   bots.display_enabled,
   bots.overlay_provider,
@@ -98,6 +99,7 @@ WITH updated AS (
       END,
       persist_full_tool_results = sqlc.arg(persist_full_tool_results),
       show_tool_calls_in_im = sqlc.arg(show_tool_calls_in_im),
+      reuse_tool_call_message_in_im = sqlc.arg(reuse_tool_call_message_in_im),
       tool_approval_config = sqlc.arg(tool_approval_config),
       display_enabled = sqlc.arg(display_enabled),
       overlay_provider = sqlc.arg(overlay_provider),
@@ -106,7 +108,7 @@ WITH updated AS (
       command_ui_language = sqlc.arg(command_ui_language),
       updated_at = now()
   WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = sqlc.arg(id)
-  RETURNING bots.id, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  RETURNING bots.id, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.reuse_tool_call_message_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -131,6 +133,7 @@ SELECT
   video_models.id AS video_model_id,
   updated.persist_full_tool_results,
   updated.show_tool_calls_in_im,
+  updated.reuse_tool_call_message_in_im,
   updated.tool_approval_config,
   updated.display_enabled,
   updated.overlay_provider,
@@ -171,6 +174,7 @@ SET command_ui_language = 'auto',
     video_model_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
+    reuse_tool_call_message_in_im = false,
     tool_approval_config = '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
     display_enabled = true,
     overlay_provider = '',

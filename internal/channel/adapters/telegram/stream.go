@@ -48,6 +48,14 @@ type telegramOutboundStream struct {
 	// dropping final-only responses.
 	draftPermanentSent bool
 	toolMessages       map[string]telegramToolCallMessage
+	// With reuseToolCallMessage set, ordinary tool calls share one status
+	// message per uninterrupted batch, tracked by toolStatus: a draft preview in
+	// private chats and an edited message in groups. toolStatus is only touched
+	// by Push and Close; the intervals are fields so tests can shorten them.
+	reuseToolCallMessage bool
+	toolStatus           *channel.ToolCallStatusTracker
+	toolStatusInterval   time.Duration
+	toolStatusKeepAlive  time.Duration
 }
 
 // telegramToolCallMessage tracks the message posted for a tool call's
@@ -399,6 +407,13 @@ func (s *telegramOutboundStream) deliverFinalTextWithActions(ctx context.Context
 }
 
 func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context, tc *channel.StreamToolCall) error {
+	s.flushBufferedText(ctx)
+	return s.sendToolCallMessage(ctx, tc, channel.BuildToolCallStart(tc))
+}
+
+// flushBufferedText commits streamed text before tool calls take over and
+// resets the text stream, so the next text starts a new message below them.
+func (s *telegramOutboundStream) flushBufferedText(ctx context.Context) {
 	s.mu.Lock()
 	bufText := strings.TrimSpace(s.buf.String())
 	hasMsg := s.streamMsgID != 0
@@ -419,7 +434,6 @@ func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context, tc *chan
 		_ = s.editStreamMessageFinal(ctx, bufText)
 	}
 	s.resetStreamState()
-	return s.sendToolCallMessage(ctx, tc, channel.BuildToolCallStart(tc))
 }
 
 func (s *telegramOutboundStream) pushToolCallEnd(ctx context.Context, tc *channel.StreamToolCall) error {
@@ -554,7 +568,10 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 			s.adapter.logger.WarnContext(ctx, "telegram: ask_user prompt message bind failed", slog.Any("error", err))
 		}
 	}
-	if isTelegramToolCallStartStatus(p.Status) && callID != "" {
+	// A card posted fresh for an approval (its call had no running card, as when
+	// tool calls share a status message) is tracked too, so the call's end
+	// replaces the buttons with the result.
+	if (isTelegramToolCallStartStatus(p.Status) || p.Status == channel.ToolCallStatusApprovalRequired) && callID != "" {
 		s.storeToolCallMessage(callID, telegramToolCallMessage{chatID: chatID, msgID: msgID, hasActions: len(actions) > 0})
 	}
 	return nil
@@ -936,10 +953,19 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.Prepare
 		return ctx.Err()
 	default:
 	}
+	if channel.EndsToolCallBatch(event) {
+		s.toolStatus.EndBatch(ctx)
+	}
 	switch event.Type {
 	case channel.StreamEventToolCallStart:
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
+		}
 		return s.pushToolCallStart(ctx, event.ToolCall)
 	case channel.StreamEventToolCallEnd:
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
+		}
 		return s.pushToolCallEnd(ctx, event.ToolCall)
 	case channel.StreamEventAttachment:
 		return s.pushAttachment(ctx, event)
@@ -976,6 +1002,8 @@ func (s *telegramOutboundStream) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	// Finish first so background status updates stop even when ctx is done.
+	s.toolStatus.EndBatch(ctx)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

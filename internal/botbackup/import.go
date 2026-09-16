@@ -960,6 +960,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.CompactionTargetPercent = current.CompactionTargetPercent
 				eff.PersistFullToolResults = current.PersistFullToolResults
 				eff.ShowToolCallsInIM = current.ShowToolCallsInIM
+				eff.ReuseToolCallMessageInIM = current.ReuseToolCallMessageInIM
 				eff.ToolApprovalConfig = current.ToolApprovalConfig
 				eff.DisplayEnabled = current.DisplayEnabled
 				eff.OverlayEnabled = current.OverlayEnabled
@@ -988,38 +989,40 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	}
 	persistFullToolResults := eff.PersistFullToolResults
 	showToolCalls := eff.ShowToolCallsInIM
+	reuseToolCallMessage := eff.ReuseToolCallMessageInIM
 	toolApproval := eff.ToolApprovalConfig
 	displayEnabled := eff.DisplayEnabled
 	overlayEnabled := eff.OverlayEnabled
 	overlayProvider := eff.OverlayProvider
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
-		ChatModelID:             ptrStringAllowEmpty(modelID(eff.ChatModelID, deps.models)),
-		ChatRuntime:             ptrStringAllowEmpty(eff.ChatRuntime),
-		ChatACPAgentID:          ptrStringAllowEmpty(eff.ChatACPAgentID),
-		ChatACPProjectPath:      ptrStringAllowEmpty(eff.ChatACPProjectPath),
-		ChatACPProjectMode:      ptrStringAllowEmpty(eff.ChatACPProjectMode),
-		ImageModelID:            ptrStringAllowEmpty(modelID(eff.ImageModelID, deps.models)),
-		SearchProviderID:        ptrStringAllowEmpty(modelID(eff.SearchProviderID, deps.searchProviders)),
-		FetchProviderID:         &fetchProviderID,
-		MemoryProviderID:        ptrStringAllowEmpty(modelID(eff.MemoryProviderID, deps.memoryProviders)),
-		TtsModelID:              ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
-		TranscriptionModelID:    ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
-		AclDefaultEffect:        eff.AclDefaultEffect,
-		Timezone:                &timezone,
-		ReasoningEffort:         &reasoningEffort,
-		CompactionEnabled:       &compactionEnabled,
-		CompactionThreshold:     &compactionThreshold,
-		CompactionTargetPercent: &compactionTargetPercent,
-		CompactionModelID:       ptrString(modelID(eff.CompactionModelID, deps.models)),
-		DiscussProbeModelID:     modelID(eff.DiscussProbeModelID, deps.models),
-		PersistFullToolResults:  &persistFullToolResults,
-		ShowToolCallsInIM:       &showToolCalls,
-		ToolApprovalConfig:      &toolApproval,
-		DisplayEnabled:          &displayEnabled,
-		OverlayEnabled:          &overlayEnabled,
-		OverlayProvider:         &overlayProvider,
-		OverlayConfig:           eff.OverlayConfig,
+		ChatModelID:              ptrStringAllowEmpty(modelID(eff.ChatModelID, deps.models)),
+		ChatRuntime:              ptrStringAllowEmpty(eff.ChatRuntime),
+		ChatACPAgentID:           ptrStringAllowEmpty(eff.ChatACPAgentID),
+		ChatACPProjectPath:       ptrStringAllowEmpty(eff.ChatACPProjectPath),
+		ChatACPProjectMode:       ptrStringAllowEmpty(eff.ChatACPProjectMode),
+		ImageModelID:             ptrStringAllowEmpty(modelID(eff.ImageModelID, deps.models)),
+		SearchProviderID:         ptrStringAllowEmpty(modelID(eff.SearchProviderID, deps.searchProviders)),
+		FetchProviderID:          &fetchProviderID,
+		MemoryProviderID:         ptrStringAllowEmpty(modelID(eff.MemoryProviderID, deps.memoryProviders)),
+		TtsModelID:               ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
+		TranscriptionModelID:     ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
+		AclDefaultEffect:         eff.AclDefaultEffect,
+		Timezone:                 &timezone,
+		ReasoningEffort:          &reasoningEffort,
+		CompactionEnabled:        &compactionEnabled,
+		CompactionThreshold:      &compactionThreshold,
+		CompactionTargetPercent:  &compactionTargetPercent,
+		CompactionModelID:        ptrString(modelID(eff.CompactionModelID, deps.models)),
+		DiscussProbeModelID:      modelID(eff.DiscussProbeModelID, deps.models),
+		PersistFullToolResults:   &persistFullToolResults,
+		ShowToolCallsInIM:        &showToolCalls,
+		ReuseToolCallMessageInIM: &reuseToolCallMessage,
+		ToolApprovalConfig:       &toolApproval,
+		DisplayEnabled:           &displayEnabled,
+		OverlayEnabled:           &overlayEnabled,
+		OverlayProvider:          &overlayProvider,
+		OverlayConfig:            eff.OverlayConfig,
 	})
 	return err
 }

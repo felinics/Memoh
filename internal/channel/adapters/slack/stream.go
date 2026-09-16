@@ -36,6 +36,12 @@ type slackOutboundStream struct {
 	lastUpdate   time.Time
 	nextUpdate   time.Time
 	toolMessages map[string]string
+	// With reuseToolCallMessage set, ordinary tool calls share one edited
+	// message per uninterrupted batch, tracked by toolStatus. toolStatus is only
+	// touched by Push and Close; the interval is a field so tests can shorten it.
+	reuseToolCallMessage bool
+	toolStatus           *channel.ToolCallStatusTracker
+	toolStatusInterval   time.Duration
 }
 
 var _ channel.PreparedOutboundStream = (*slackOutboundStream)(nil)
@@ -52,6 +58,10 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+	}
+
+	if channel.EndsToolCallBatch(event) {
+		s.toolStatus.EndBatch(ctx)
 	}
 
 	switch event.Type {
@@ -122,19 +132,14 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		return nil
 
 	case channel.StreamEventToolCallStart:
-		s.mu.Lock()
-		bufText := strings.TrimSpace(s.buffer.String())
-		s.mu.Unlock()
-		if bufText != "" {
-			if err := s.finalizeMessage(ctx, bufText, nil); err != nil {
-				return err
-			}
-		} else if err := s.clearPlaceholder(ctx); err != nil {
-			return err
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
 		}
-		s.resetStreamState()
-		return s.sendToolCallMessage(ctx, event.ToolCall, channel.BuildToolCallStart(event.ToolCall))
+		return s.pushToolCallStart(ctx, event.ToolCall)
 	case channel.StreamEventToolCallEnd:
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
+		}
 		return s.sendToolCallMessage(ctx, event.ToolCall, channel.BuildToolCallEnd(event.ToolCall))
 
 	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd,
@@ -153,12 +158,38 @@ func (s *slackOutboundStream) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	// Finish first so background status updates stop even when ctx is done.
+	s.toolStatus.EndBatch(ctx)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 	s.closed.Store(true)
+	return nil
+}
+
+func (s *slackOutboundStream) pushToolCallStart(ctx context.Context, tc *channel.StreamToolCall) error {
+	if err := s.flushBufferedText(ctx); err != nil {
+		return err
+	}
+	return s.sendToolCallMessage(ctx, tc, channel.BuildToolCallStart(tc))
+}
+
+// flushBufferedText commits streamed text, or removes the unused placeholder,
+// before tool calls take over, so the next text starts a new message below them.
+func (s *slackOutboundStream) flushBufferedText(ctx context.Context) error {
+	s.mu.Lock()
+	bufText := strings.TrimSpace(s.buffer.String())
+	s.mu.Unlock()
+	if bufText != "" {
+		if err := s.finalizeMessage(ctx, bufText, nil); err != nil {
+			return err
+		}
+	} else if err := s.clearPlaceholder(ctx); err != nil {
+		return err
+	}
+	s.resetStreamState()
 	return nil
 }
 

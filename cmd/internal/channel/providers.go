@@ -497,12 +497,15 @@ type settingsIMDisplayOptions struct {
 	settings channelSettings
 }
 
-func (r *settingsIMDisplayOptions) ShowToolCallsInIM(ctx context.Context, botID string) (bool, error) {
+func (r *settingsIMDisplayOptions) IMDisplayOptions(ctx context.Context, botID string) (inbound.IMDisplayOptions, error) {
 	s, err := r.settings.GetBot(ctx, botID)
 	if err != nil {
-		return false, err
+		return inbound.IMDisplayOptions{}, err
 	}
-	return s.ShowToolCallsInIM, nil
+	return inbound.IMDisplayOptions{
+		ShowToolCalls:        s.ShowToolCallsInIM,
+		ReuseToolCallMessage: s.ReuseToolCallMessageInIM,
+	}, nil
 }
 
 type settingsDefaultChatRuntime struct {

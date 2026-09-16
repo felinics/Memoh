@@ -42,6 +42,19 @@ vi.mock('@felinic/ui', async () => {
       return () => h('div', { 'data-option-value': props.value }, slots.default?.())
     },
   })
+  const Switch = defineComponent({
+    props: {
+      modelValue: { type: Boolean, default: false },
+    },
+    emits: ['update:modelValue'],
+    setup(props, { emit }) {
+      return () => h('button', {
+        type: 'button',
+        'data-switch-value': String(props.modelValue),
+        onClick: () => emit('update:modelValue', !props.modelValue),
+      })
+    },
+  })
   const SettingsSection = defineComponent({
     setup(_props, { slots }) {
       return () => h('section', slots.default?.())
@@ -66,7 +79,7 @@ vi.mock('@felinic/ui', async () => {
     SelectItem,
     SelectTrigger: Passthrough,
     SelectValue: Passthrough,
-    Switch: Passthrough,
+    Switch,
     SettingsSection,
     SettingsRow,
   }
@@ -121,6 +134,7 @@ function createForm(overrides: Record<string, unknown> = {}) {
     reasoning_enabled: false,
     reasoning_effort: 'medium',
     show_tool_calls_in_im: false,
+    reuse_tool_call_message_in_im: false,
     ...overrides,
   })
 }
@@ -277,6 +291,48 @@ describe('settings interaction default Agent selector', () => {
 
     expect(root.querySelector('[data-option-value="agent:agent-custom"]')).not.toBeNull()
     expect(root.querySelector('[data-option-value="agent:agent-codex"]')).toBeNull()
+
+    app.unmount()
+  })
+})
+
+describe('settings interaction IM tool call display', () => {
+  const showLabel = 'bots.settings.showToolCallsInIM'
+  const reuseLabel = 'bots.settings.reuseToolCallMessageInIM'
+
+  function switchFor(root: HTMLElement, label: string) {
+    return root.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+  }
+
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('offers one message for tool calls only while tool calls are shown', async () => {
+    const form = createForm()
+    const { app, root } = await mountCard(form)
+
+    expect(switchFor(root, reuseLabel)).toBeNull()
+
+    switchFor(root, showLabel)!.click()
+    await nextTick()
+    expect(form.show_tool_calls_in_im).toBe(true)
+
+    switchFor(root, reuseLabel)!.click()
+    await nextTick()
+    expect(form.reuse_tool_call_message_in_im).toBe(true)
+    expect(switchFor(root, reuseLabel)!.dataset.switchValue).toBe('true')
+
+    switchFor(root, showLabel)!.click()
+    await nextTick()
+    expect(form.show_tool_calls_in_im).toBe(false)
+    expect(switchFor(root, reuseLabel)).toBeNull()
+    // Hiding the row keeps the saved choice for when tool calls are shown again.
+    expect(form.reuse_tool_call_message_in_im).toBe(true)
 
     app.unmount()
   })

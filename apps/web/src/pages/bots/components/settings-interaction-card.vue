@@ -85,7 +85,22 @@
     >
       <Switch
         :model-value="form.show_tool_calls_in_im"
+        :aria-label="$t('bots.settings.showToolCallsInIM')"
         @update:model-value="(val) => form.show_tool_calls_in_im = !!val"
+      />
+    </SettingsRow>
+
+    <!-- Reuse only changes how shown tool calls are delivered, so the row
+         exists only while they are shown. -->
+    <SettingsRow
+      v-if="form.show_tool_calls_in_im"
+      :label="$t('bots.settings.reuseToolCallMessageInIM')"
+      :description="$t('bots.settings.reuseToolCallMessageInIMDescription')"
+    >
+      <Switch
+        :model-value="form.reuse_tool_call_message_in_im"
+        :aria-label="$t('bots.settings.reuseToolCallMessageInIM')"
+        @update:model-value="(val) => form.reuse_tool_call_message_in_im = !!val"
       />
     </SettingsRow>
   </SettingsSection>

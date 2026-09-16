@@ -4048,6 +4048,12 @@ export type SettingsSettings = {
      * models.ReasoningEffortDisable means no reasoning, any other value is a tier.
      */
     reasoning_effort?: string;
+    /**
+     * ReuseToolCallMessageInIM folds consecutive tool calls into one live IM
+     * message on platforms that can edit messages. It only applies while
+     * ShowToolCallsInIM is on.
+     */
+    reuse_tool_call_message_in_im?: boolean;
     search_provider_id?: string;
     show_tool_calls_in_im?: boolean;
     timezone?: string;
@@ -4112,6 +4118,7 @@ export type SettingsUpsertRequest = {
     overlay_provider?: string;
     persist_full_tool_results?: boolean;
     reasoning_effort?: string;
+    reuse_tool_call_message_in_im?: boolean;
     search_provider_id?: string;
     show_tool_calls_in_im?: boolean;
     timezone?: string;

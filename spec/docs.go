@@ -27575,6 +27575,10 @@ const docTemplate = `{
                     "description": "ReasoningEffort is the single on/off source for reasoning:\nmodels.ReasoningEffortDisable means no reasoning, any other value is a tier.",
                     "type": "string"
                 },
+                "reuse_tool_call_message_in_im": {
+                    "description": "ReuseToolCallMessageInIM folds consecutive tool calls into one live IM\nmessage on platforms that can edit messages. It only applies while\nShowToolCallsInIM is on.",
+                    "type": "boolean"
+                },
                 "search_provider_id": {
                     "type": "string"
                 },
@@ -27744,6 +27748,9 @@ const docTemplate = `{
                 },
                 "reasoning_effort": {
                     "type": "string"
+                },
+                "reuse_tool_call_message_in_im": {
+                    "type": "boolean"
                 },
                 "search_provider_id": {
                     "type": "string"

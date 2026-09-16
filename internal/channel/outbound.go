@@ -753,8 +753,9 @@ func (s *managerReplySender) OpenStream(ctx context.Context, target string, opts
 		},
 		reopen: func(ctx context.Context) (PreparedOutboundStream, error) {
 			return s.streamSender.OpenStream(ctx, s.config, target, StreamOptions{
-				SourceMessageID: opts.SourceMessageID,
-				Metadata:        opts.Metadata,
+				SourceMessageID:      opts.SourceMessageID,
+				Metadata:             opts.Metadata,
+				ReuseToolCallMessage: opts.ReuseToolCallMessage,
 			})
 		},
 	}, nil

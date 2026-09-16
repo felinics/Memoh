@@ -715,14 +715,16 @@ func (a *FeishuAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfi
 	default:
 	}
 	return &feishuOutboundStream{
-		adapter:       a,
-		cfg:           cfg,
-		target:        target,
-		reply:         opts.Reply,
-		client:        client,
-		receiveID:     receiveID,
-		receiveType:   receiveType,
-		patchInterval: feishuStreamPatchInterval,
+		adapter:              a,
+		cfg:                  cfg,
+		target:               target,
+		reply:                opts.Reply,
+		client:               client,
+		receiveID:            receiveID,
+		receiveType:          receiveType,
+		patchInterval:        feishuStreamPatchInterval,
+		reuseToolCallMessage: opts.ReuseToolCallMessage,
+		toolStatusInterval:   feishuStreamPatchInterval,
 	}, nil
 }
 
