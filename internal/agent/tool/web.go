@@ -470,6 +470,12 @@ func callSearXNGSearch(ctx context.Context, configJSON []byte, query string, cou
 	client := &http.Client{Timeout: timeout}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
 	req.Header.Set("Accept", "application/json")
+	for name, value := range stringMapValue(cfg["headers"]) {
+		if value == "" {
+			continue
+		}
+		req.Header.Set(name, value)
+	}
 	resp, err := client.Do(req) //nolint:gosec
 	if err != nil {
 		return nil, err
@@ -722,6 +728,7 @@ func buildSearchHTTPError(statusCode int, body []byte) error {
 	if detail == "" {
 		detail = strings.TrimSpace(string(body))
 	}
+	detail = redact.Text(detail)
 	if len(detail) > 200 {
 		detail = detail[:200] + "..."
 	}
@@ -790,6 +797,20 @@ func stringValue(raw any) string {
 	return ""
 }
 
+func stringMapValue(raw any) map[string]string {
+	values, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, len(values))
+	for key, rawValue := range values {
+		if value, ok := rawValue.(string); ok {
+			result[key] = value
+		}
+	}
+	return result
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -820,9 +841,26 @@ func registerSearchProviderSecrets(provider sqlc.SearchProvider) {
 			secrets = append(secrets, v)
 		}
 	}
+	if provider.Provider == string(searchproviders.ProviderSearXNG) {
+		for name, value := range stringMapValue(cfg["headers"]) {
+			if value != "" {
+				secrets = append(secrets, searchHeaderSecrets(name, value)...)
+			}
+		}
+	}
 	if len(secrets) > 0 {
 		redact.SetSecrets("search:"+provider.ID.String(), secrets...)
 	}
+}
+
+func searchHeaderSecrets(name, value string) []string {
+	secrets := []string{value}
+	if strings.EqualFold(name, "Authorization") {
+		if _, credential, ok := strings.Cut(value, " "); ok && strings.TrimSpace(credential) != "" {
+			secrets = append(secrets, strings.TrimSpace(credential))
+		}
+	}
+	return secrets
 }
 
 var (
