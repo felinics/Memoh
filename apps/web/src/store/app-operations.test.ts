@@ -86,3 +86,47 @@ describe('remove operation recovery after a lost stream', () => {
     expect(mocks.success).toHaveBeenCalledWith('apps.background.removed', expect.anything())
   })
 })
+
+describe('confirmed App dependency retry', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: 'error', code: 'workspace_dependency_install_failed', message: 'Installation failed' }
+    })
+  })
+  afterEach(() => { useAppOperationsStore().reset() })
+
+  it('keeps exact release, dependency version and recipe even when the caller changes its selection', async () => {
+    const update = { release: true, dependencies: ['node'], releaseRevision: 'app-revision-1' }
+    const confirmation = {
+      dependency_id: 'node', action: 'update' as const, version: '22.1.0', definition_revision: 'recipe-1',
+      registry_id: 'memoh', source_url: 'https://example.org/registry', manifest_digest: 'digest-1',
+    }
+    const store = useAppOperationsStore()
+    const result = store.start({ ...target, action: 'update', update, dependencyConfirmations: [confirmation] })
+    if (result.kind !== 'started') throw new Error('operation did not start')
+    store.view(result.operation.key, 'test')
+    await vi.waitFor(() => expect(result.operation.status).toBe('error'))
+
+    update.dependencies.push('python')
+    update.releaseRevision = 'app-revision-2'
+    confirmation.version = '23.0.0'
+    confirmation.definition_revision = 'recipe-2'
+    expect(store.retry(result.operation.key)).toBe(true)
+    expect(mocks.stream).toHaveBeenLastCalledWith(expect.objectContaining({
+      update: { release: true, dependencies: ['node'], releaseRevision: 'app-revision-1' },
+      dependencyConfirmations: [expect.objectContaining({ version: '22.1.0', definition_revision: 'recipe-1' })],
+    }))
+  })
+
+  it('retries resume on the reviewed App revision and exact dependency confirmation', async () => {
+    const store = useAppOperationsStore()
+    const result = store.start({ ...target, action: 'resume', resumeRevision: 'app-revision-1', dependencyConfirmations: [] })
+    if (result.kind !== 'started') throw new Error('operation did not start')
+    store.view(result.operation.key, 'test')
+    await vi.waitFor(() => expect(result.operation.status).toBe('error'))
+    expect(store.retry(result.operation.key)).toBe(true)
+    expect(mocks.stream).toHaveBeenLastCalledWith(expect.objectContaining({ resumeRevision: 'app-revision-1', dependencyConfirmations: [] }))
+  })
+})

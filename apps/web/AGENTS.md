@@ -100,7 +100,7 @@ src/
 │   │   ├── useChat.ws.test.ts #     WebSocket tests
 │   │   ├── useChat.content.ts #     Message content parsing (tool calls, text, reasoning)
 │   │   ├── useContainerStream.ts  # Container creation SSE stream
-│   │   ├── useWorkspaceDependencies.ts  # Workspace dependency list query, preflight / rollback / check-updates / script calls
+│   │   ├── useWorkspaceDependencies.ts  # Workspace dependency list query, preflight / check-updates / script calls
 │   │   ├── useWorkspaceDependencyStream.ts  # Dependency install / update / reinstall / remove SSE stream
 │   │   └── usePlatform.ts     #     Platform list query + create mutation
 │   ├── useDialogMutation.ts   #   Mutation wrapper with toast error handling
@@ -198,7 +198,6 @@ src/
 │   │       ├── dependency-confirm-dialog.vue # Confirm install / update / align / reinstall of a workspace dependency
 │   │       ├── dependency-progress-dialog.vue # Live SSE log of a dependency operation (copy log, retry, no auto-close)
 │   │       ├── dependency-script-dialog.vue # Preview of the exact script a dependency action runs
-│   │       ├── dependency-rollback-dialog.vue # Confirm rolling a dependency back to its previous version
 │   │       └── weixin-qr-login.vue          # WeChat QR login
 │   ├── providers/             #   LLM provider & model management
 │   ├── web-search/            #   Web search provider management

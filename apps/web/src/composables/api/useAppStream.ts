@@ -11,6 +11,7 @@ import {
   normalizeSSEFailure,
   type SSEErrorEvent,
 } from './sse-error'
+import type { AppDependencyConfirmation } from './useApps'
 
 // codesync(app-stream): keep these manual SSE payload types in sync with
 // internal/handlers/apps.go (AppStreamEvent). The generated
@@ -32,14 +33,14 @@ export interface AppInstallTarget {
   registryId: string
   appId: string
   revision: string
-  /** Omitted → the Server uses the bot's current target. */
 }
 
 /** What an update touches: the release, the dependencies, or both. */
 export interface AppUpdateSelection {
   release: boolean
   dependencies: string[]
-  /** Omitted → the Server uses the bot's current target. */
+  /** The exact App release returned by preparation. */
+  releaseRevision: string
 }
 
 export interface AppStreamOptions {
@@ -47,12 +48,16 @@ export interface AppStreamOptions {
   action: AppOperationAction
   /** Required by resume and remove. */
   installationId?: string
+  /** Resume must stay on the App release reviewed during preparation. */
+  resumeRevision?: string
   /** Required by install. */
   install?: AppInstallTarget
   /** Required by update, together with registryId and appId. */
   update?: AppUpdateSelection
   registryId?: string
   appId?: string
+  /** Exact dependency versions and recipes accepted in the confirmation dialog. */
+  dependencyConfirmations?: AppDependencyConfirmation[]
   /** Remove: also drop auto-installed Apps that lose their last reference. */
   removeUnreferencedRequired?: boolean
   /**
@@ -126,6 +131,7 @@ export async function* streamAppOperation(
           registry_id: install.registryId,
           app_id: install.appId,
           revision: install.revision,
+          dependency_confirmations: options.dependencyConfirmations ?? [],
         },
       })
       break
@@ -141,14 +147,18 @@ export async function* streamAppOperation(
           app_id: options.appId,
           release: update.release,
           dependencies: update.dependencies,
+          release_revision: update.releaseRevision,
+          dependency_confirmations: options.dependencyConfirmations ?? [],
         },
       })
       break
     }
     case 'resume':
+      if (!options.resumeRevision) throw new Error('confirmed App revision is required')
       result = await postBotsByBotIdAppsByInstallationIdResume({
         ...common,
         path: { bot_id: options.botId, installation_id: requireInstallation(options) },
+        body: { revision: options.resumeRevision, dependency_confirmations: options.dependencyConfirmations ?? [] },
       })
       break
     default:

@@ -315,11 +315,15 @@ func (f *fakePublisher) RemoveSkills(_ context.Context, _, _, appID, _ string) (
 }
 
 type fakeDeps struct {
-	present    map[string]workspacedeps.Entry
-	installErr map[string]error
-	installed  []string
-	updated    []string
-	removed    []string
+	present         map[string]workspacedeps.Entry
+	installErr      map[string]error
+	installed       []string
+	updated         []string
+	removed         []string
+	prepared        []workspacedeps.PreparedInstall
+	prepareVersions []string
+	installVersions []string
+	updateVersions  []string
 }
 
 func (f *fakeDeps) list() workspacedeps.ListResult {
@@ -342,7 +346,20 @@ func (f *fakeDeps) CheckUpdates(context.Context, string) (workspacedeps.ListResu
 	return f.list(), nil
 }
 
-func (f *fakeDeps) Install(_ context.Context, _, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
+func (f *fakeDeps) PrepareInstall(_ context.Context, _, depID string, action catalog.Action, version string) (workspacedeps.PreparedInstall, error) {
+	f.prepareVersions = append(f.prepareVersions, version)
+	if version == "" {
+		version = "1.0.0"
+		if action == catalog.ActionUpdate {
+			version = "2.0.0"
+		}
+	}
+	prepared := workspacedeps.PreparedInstall{DependencyID: depID, Action: action, Version: version, DefinitionRevision: strings.Repeat("a", 64), SourceURL: "https://registry.example", RegistryID: "memoh", ManifestDigest: strings.Repeat("b", 64)}
+	f.prepared = append(f.prepared, prepared)
+	return prepared, nil
+}
+
+func (f *fakeDeps) Install(_ context.Context, _, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
 	if err := f.installErr[depID]; err != nil {
 		return workspacedeps.OperationResult{}, err
 	}
@@ -350,6 +367,7 @@ func (f *fakeDeps) Install(_ context.Context, _, depID, _ string, sink workspace
 		sink.Log("stdout", "installing "+depID)
 	}
 	f.installed = append(f.installed, depID)
+	f.installVersions = append(f.installVersions, version)
 	entry := f.present[depID]
 	entry.Dependency.ID = depID
 	entry.Observed = workspacedeps.Observed{DepID: depID, Present: true, Source: workspacedeps.SourceManaged, Version: "1.0.0"}
@@ -359,7 +377,7 @@ func (f *fakeDeps) Install(_ context.Context, _, depID, _ string, sink workspace
 	return workspacedeps.OperationResult{DependencyID: depID, Version: "1.0.0"}, nil
 }
 
-func (f *fakeDeps) Update(_ context.Context, _, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
+func (f *fakeDeps) Update(_ context.Context, _, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
 	if err := f.installErr[depID]; err != nil {
 		return workspacedeps.OperationResult{}, err
 	}
@@ -367,6 +385,7 @@ func (f *fakeDeps) Update(_ context.Context, _, depID, _ string, sink workspaced
 		sink.Log("stdout", "updating "+depID)
 	}
 	f.updated = append(f.updated, depID)
+	f.updateVersions = append(f.updateVersions, version)
 	entry := f.present[depID]
 	entry.Observed.Version = "2.0.0"
 	entry.InstalledVersion = "2.0.0"
@@ -510,7 +529,11 @@ func (h *harness) publish(pkg supermarket.AppDescriptor) {
 func (h *harness) install(t *testing.T, pkg supermarket.AppDescriptor) (OperationResult, *recorder) {
 	t.Helper()
 	rec := &recorder{}
-	result, err := h.service.Install(context.Background(), testBotID, InstallRequest{RegistryID: pkg.RegistryID, AppID: pkg.AppID, Revision: pkg.Revision}, rec)
+	prepared, err := h.service.Prepare(t.Context(), testBotID, PrepareRequest{Action: "install", RegistryID: pkg.RegistryID, AppID: pkg.AppID, Revision: pkg.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := h.service.Install(context.Background(), testBotID, InstallRequest{RegistryID: pkg.RegistryID, AppID: pkg.AppID, Revision: pkg.Revision, DependencyConfirmations: prepared.Dependencies}, rec)
 	if err != nil {
 		t.Fatalf("Install(%s): %v", pkg.AppID, err)
 	}
@@ -559,7 +582,7 @@ func TestInstallIsPartialWhenADependencyFailsAndResumeCompletesIt(t *testing.T) 
 	h.publish(pkg)
 
 	result, rec := h.install(t, pkg)
-	if result.Installation.Status != StatusPartial || !strings.Contains(result.Installation.LastError, "npm exploded") {
+	if result.Installation.Status != StatusPartial || strings.Contains(result.Installation.LastError, "npm exploded") {
 		t.Fatalf("installation = %+v", result.Installation)
 	}
 	if !strings.Contains(rec.types(), "step_done:dependency:codex=failed") || !strings.HasSuffix(rec.types(), "done=partial") {
@@ -567,7 +590,11 @@ func TestInstallIsPartialWhenADependencyFailsAndResumeCompletesIt(t *testing.T) 
 	}
 
 	delete(h.deps.installErr, "codex")
-	resumed, err := h.service.Resume(context.Background(), testBotID, result.Installation.ID, nil)
+	prepared, err := h.service.Prepare(t.Context(), testBotID, PrepareRequest{Action: "resume", InstallationID: result.Installation.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := h.service.Resume(context.Background(), testBotID, result.Installation.ID, ResumeRequest{Revision: prepared.Revision, DependencyConfirmations: prepared.Dependencies}, nil)
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
@@ -767,7 +794,7 @@ func TestCheckUpdatesRecordsNewerRevisionAndUpdatePrunesDroppedReferences(t *tes
 	}
 
 	rec := &recorder{}
-	updated, err := h.service.Update(context.Background(), testBotID, result.Installation.ID, rec)
+	updated, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "python", Release: true, ReleaseRevision: v2.Revision}, rec)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -785,7 +812,7 @@ func TestCheckUpdatesRecordsNewerRevisionAndUpdatePrunesDroppedReferences(t *tes
 		t.Fatalf("events = %s", rec.types())
 	}
 	// A second update is a no-op.
-	again, err := h.service.Update(context.Background(), testBotID, result.Installation.ID, nil)
+	again, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "python", Release: true, ReleaseRevision: v2.Revision}, nil)
 	if err != nil || len(again.Steps) != 0 {
 		t.Fatalf("no-op update = %+v, %v", again, err)
 	}
@@ -799,7 +826,11 @@ func TestRemoveUnreferencedRequiredApps(t *testing.T) {
 	h.publish(node)
 	h.publish(app)
 	nodeRec := &recorder{}
-	if _, err := h.service.Install(context.Background(), testBotID, InstallRequest{RegistryID: "memoh", AppID: "node", Revision: node.Revision, Reason: ReasonRequired}, nodeRec); err != nil {
+	prepared, err := h.service.Prepare(t.Context(), testBotID, PrepareRequest{Action: "install", RegistryID: "memoh", AppID: "node", Revision: node.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.Install(context.Background(), testBotID, InstallRequest{RegistryID: "memoh", AppID: "node", Revision: node.Revision, Reason: ReasonRequired, DependencyConfirmations: prepared.Dependencies}, nodeRec); err != nil {
 		t.Fatalf("install node: %v", err)
 	}
 	appResult, _ := h.install(t, app)
@@ -832,7 +863,7 @@ func TestUpdateSelectionUpdatesOnlyTheReferencedDependencies(t *testing.T) {
 	h.install(t, pkg)
 
 	rec := &recorder{}
-	result, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "codex", Dependencies: []string{"node", "node"}}, rec)
+	result, err := h.service.UpdateSelection(context.Background(), testBotID, h.confirmUpdate(t, UpdateRequest{RegistryID: "memoh", AppID: "codex", Dependencies: []string{"node", "node"}}), rec)
 	if err != nil {
 		t.Fatalf("UpdateSelection: %v", err)
 	}
@@ -866,7 +897,7 @@ func TestUpdateSelectionUpdatesTheDependencyOfADiscoveredApp(t *testing.T) {
 	h.deps.present["uv"] = presentDep("uv", workspacedeps.SourceToolkit)
 
 	rec := &recorder{}
-	_, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "uv", Dependencies: []string{"uv"}}, rec)
+	_, err := h.service.UpdateSelection(context.Background(), testBotID, h.confirmUpdate(t, UpdateRequest{RegistryID: "memoh", AppID: "uv", Dependencies: []string{"uv"}}), rec)
 	if err != nil {
 		t.Fatalf("UpdateSelection: %v", err)
 	}
@@ -893,7 +924,7 @@ func TestUpdateSelectionRunsDependenciesBeforeTheRelease(t *testing.T) {
 	h.publish(v2)
 
 	rec := &recorder{}
-	result, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "codex", Release: true, Dependencies: []string{"node"}}, rec)
+	result, err := h.service.UpdateSelection(context.Background(), testBotID, h.confirmUpdate(t, UpdateRequest{RegistryID: "memoh", AppID: "codex", Release: true, Dependencies: []string{"node"}}), rec)
 	if err != nil {
 		t.Fatalf("UpdateSelection: %v", err)
 	}
@@ -910,4 +941,15 @@ func TestUpdateSelectionRunsDependenciesBeforeTheRelease(t *testing.T) {
 	if !strings.HasSuffix(types, "done=installed") {
 		t.Fatalf("events = %s", types)
 	}
+}
+
+func (h *harness) confirmUpdate(t *testing.T, req UpdateRequest) UpdateRequest {
+	t.Helper()
+	prepared, err := h.service.Prepare(t.Context(), testBotID, PrepareRequest{Action: "update", RegistryID: req.RegistryID, AppID: req.AppID, Release: req.Release, Dependencies: req.Dependencies})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.ReleaseRevision = prepared.Revision
+	req.DependencyConfirmations = prepared.Dependencies
+	return req
 }

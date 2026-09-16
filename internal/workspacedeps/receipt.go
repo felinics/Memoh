@@ -21,20 +21,30 @@ import (
 // accepted mutation after a Server or stream failure. Result and completion
 // are read from files written by the workspace process under its kernel lock.
 type OperationReceipt struct {
-	ID                 string         `json:"id"`
-	DependencyID       string         `json:"dependency_id"`
-	Action             catalog.Action `json:"action"`
-	SourceURL          string         `json:"source_url,omitempty"`
-	RegistryID         string         `json:"registry_id,omitempty"`
-	DefinitionRevision string         `json:"definition_revision,omitempty"`
-	ManifestDigest     string         `json:"manifest_digest,omitempty"`
-	RequestedVersion   string         `json:"requested_version,omitempty"`
-	StartedAt          time.Time      `json:"started_at"`
-	Previous           *State         `json:"previous,omitempty"`
-	Directory          string         `json:"-"`
-	Result             Result         `json:"-"`
-	ExitCode           int            `json:"-"`
-	Completed          bool           `json:"-"`
+	ControlProtocol       string         `json:"control_protocol,omitempty"`
+	ControlMigrationEpoch string         `json:"control_migration_epoch,omitempty"`
+	RestorePayloadPath    string         `json:"restore_payload_path,omitempty"`
+	RestoreInstallationID string         `json:"restore_installation_id,omitempty"`
+	InstallationID        string         `json:"installation_id,omitempty"`
+	StoreRoot             string         `json:"store_root,omitempty"`
+	PayloadPath           string         `json:"payload_path,omitempty"`
+	DesiredRevision       string         `json:"desired_revision,omitempty"`
+	Repair                bool           `json:"repair,omitempty"`
+	AuthorizedByActor     string         `json:"authorized_by_actor,omitempty"`
+	ID                    string         `json:"id"`
+	DependencyID          string         `json:"dependency_id"`
+	Action                catalog.Action `json:"action"`
+	SourceURL             string         `json:"source_url,omitempty"`
+	RegistryID            string         `json:"registry_id,omitempty"`
+	DefinitionRevision    string         `json:"definition_revision,omitempty"`
+	ManifestDigest        string         `json:"manifest_digest,omitempty"`
+	RequestedVersion      string         `json:"requested_version,omitempty"`
+	StartedAt             time.Time      `json:"started_at"`
+	Previous              *State         `json:"previous,omitempty"`
+	Directory             string         `json:"-"`
+	Result                Result         `json:"-"`
+	ExitCode              int            `json:"-"`
+	Completed             bool           `json:"-"`
 }
 
 func operationRoot(home, depID string) string {
@@ -184,4 +194,46 @@ func readOperationReceipt(ctx context.Context, client *bridge.Client, home, depI
 // receipt identity before publishing state or shims.
 func ReadOperationReceipt(ctx context.Context, client *bridge.Client, home, depID string) (*OperationReceipt, error) {
 	return readOperationReceipt(ctx, client, home, depID)
+}
+
+// newOperationIntent is persisted in the database before the workspace may run
+// a script. Workspace files can report results, but cannot grant authority.
+func newOperationIntent(op *operation, action catalog.Action) *OperationReceipt {
+	version := op.version
+	if action == catalog.ActionRemove {
+		version = ""
+	}
+	payload := ""
+	if op.dep.StorageLayout == "isolated" {
+		payload = path.Join(op.storeRoot, op.dep.ID, "installs", op.operationID)
+		if op.restorePayloadPath != "" {
+			payload = op.restorePayloadPath
+		}
+	}
+	return &OperationReceipt{
+		ControlProtocol: controlProtocol,
+		ID:              op.operationID, DependencyID: op.dep.ID, Action: action, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID,
+		DefinitionRevision: op.dep.Revision, ManifestDigest: op.dep.ManifestDigest, RequestedVersion: version,
+		StartedAt: op.startedAt, Previous: op.previous, InstallationID: op.operationID, StoreRoot: op.storeRoot, PayloadPath: payload,
+		DesiredRevision: op.desiredRevision, Repair: op.repair, AuthorizedByActor: op.authorizedByActor,
+		RestorePayloadPath: op.restorePayloadPath, RestoreInstallationID: op.restoreInstallationID,
+	}
+}
+
+// A different kernel lock location cannot fence a process using the old lock.
+// Persist this identity before admitting work so recovery knows which lock owns it.
+const controlProtocol = "linux-run-v1"
+
+func receiptIntentMatches(intent, receipt *OperationReceipt) bool {
+	if intent == nil || receipt == nil {
+		return false
+	}
+	// JSON excludes runtime result/exit/directory; it includes every immutable
+	// intent field, including any future field added to the receipt schema.
+	trusted, err := json.Marshal(intent)
+	if err != nil {
+		return false
+	}
+	observed, err := json.Marshal(receipt)
+	return err == nil && string(trusted) == string(observed)
 }

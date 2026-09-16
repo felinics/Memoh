@@ -2,6 +2,7 @@ package workspacedeps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -103,13 +104,38 @@ func (s *postgresStore) ClaimOperation(ctx context.Context, in UpsertInstallatio
 	if err != nil {
 		return Installation{}, err
 	}
+	intent, err := encodeOperationIntent(in.OperationIntent)
+	if err != nil {
+		return Installation{}, err
+	}
 	row, err := s.q.ClaimBotDependencyOperation(ctx, dbsqlc.ClaimBotDependencyOperationParams{
 		BotID: botID, DependencyID: in.DependencyID,
 		Source: in.Source, Status: string(in.Status), InstalledVersion: in.InstalledVersion,
 		ManifestDigest: in.ManifestDigest, SourceUrl: in.SourceURL, RegistryID: in.RegistryID,
-		DefinitionRevision: in.DefinitionRevision, OperationID: operationID,
+		DefinitionRevision: in.DefinitionRevision, OperationID: operationID, Actor: in.AuthorizedByActor, OperationIntent: intent,
 	})
 	return operationResult(row, err)
+}
+
+func (s *postgresStore) EnrollLegacyOperationEpoch(ctx context.Context, key InstallationKey, operationID, epoch string) (string, error) {
+	if epoch == "" {
+		return "", errors.New("workspace dependency store: empty workspace epoch")
+	}
+	q, ok := s.q.(interface {
+		EnrollLegacyDependencyOperationEpoch(context.Context, dbsqlc.EnrollLegacyDependencyOperationEpochParams) (string, error)
+	})
+	if !ok {
+		return "", errors.New("workspace dependency store: legacy epoch query unavailable")
+	}
+	botID, err := parseBotID(key.BotID)
+	if err != nil {
+		return "", err
+	}
+	stored, err := q.EnrollLegacyDependencyOperationEpoch(ctx, dbsqlc.EnrollLegacyDependencyOperationEpochParams{BotID: botID, DependencyID: key.DependencyID, OperationID: operationID, Epoch: epoch})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrBusy
+	}
+	return stored, err
 }
 
 // FinishOperation is the only terminal write for a claimed operation. A stale
@@ -246,9 +272,10 @@ func installationsResult(rows []dbsqlc.BotDependencyInstallation, err error) ([]
 
 func installationFromRow(row dbsqlc.BotDependencyInstallation) Installation {
 	inst := Installation{
-		ID:          uuidString(row.ID),
-		OperationID: row.OperationID,
-		BotID:       uuidString(row.BotID),
+		ID:              uuidString(row.ID),
+		OperationID:     row.OperationID,
+		LastOperationID: row.LastOperationID,
+		BotID:           uuidString(row.BotID),
 
 		DependencyID:     row.DependencyID,
 		Source:           row.Source,
@@ -261,11 +288,28 @@ func installationFromRow(row dbsqlc.BotDependencyInstallation) Installation {
 		CreatedAt: db.TimeFromPg(row.CreatedAt),
 		UpdatedAt: db.TimeFromPg(row.UpdatedAt),
 	}
+	if len(row.OperationIntent) > 0 {
+		var intent OperationReceipt
+		if json.Unmarshal(row.OperationIntent, &intent) == nil {
+			inst.OperationIntent = &intent
+		}
+	}
 	if row.LastCheckedAt.Valid {
 		checked := row.LastCheckedAt.Time
 		inst.LastCheckedAt = &checked
 	}
 	return inst
+}
+
+func encodeOperationIntent(intent *OperationReceipt) ([]byte, error) {
+	if intent == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(intent)
+	if err != nil {
+		return nil, fmt.Errorf("encode dependency operation intent: %w", err)
+	}
+	return data, nil
 }
 
 func uuidString(id pgtype.UUID) string {

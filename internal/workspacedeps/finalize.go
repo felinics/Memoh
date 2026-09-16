@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/controlpath"
+	"github.com/felinics/memoh/internal/workspace/payloadlease"
 )
 
 // isPlainFileName rejects names that would escape the target directory.
@@ -38,6 +40,23 @@ func (s *Service) finalizeFilesystem(ctx context.Context, op *operation, state, 
 	}
 	obsolete := shimNames(op.dep, previous)
 	if state != nil {
+		if state.PayloadPath != "" {
+			for _, entrypoint := range state.Entrypoints {
+				fmt.Fprintf(&script, "test -x %s\n", shellQuote(entrypoint))
+			}
+			if op.dep.StorageLayout == "isolated" {
+				for directory := state.PayloadPath; directory != "/"; directory = path.Dir(directory) {
+					fmt.Fprintf(&script, "[ ! -L %s ] || exit 77\n", shellQuote(directory))
+				}
+				link := CurrentDir(op.home) + "." + op.operationID + ".tmp"
+				fmt.Fprintf(&script, "ln -sfn %s %s\n", shellQuote(state.PayloadPath), shellQuote(link))
+				if op.platform.OS == "darwin" {
+					fmt.Fprintf(&script, "mv -fh %s %s\n", shellQuote(link), shellQuote(CurrentDir(op.home)))
+				} else {
+					fmt.Fprintf(&script, "mv -Tf %s %s\n", shellQuote(link), shellQuote(CurrentDir(op.home)))
+				}
+			}
+		}
 		data, err := json.Marshal(state)
 		if err != nil {
 			return errors.Join(errInvalidResult, err)
@@ -54,7 +73,7 @@ func (s *Service) finalizeFilesystem(ctx context.Context, op *operation, state, 
 		for _, name := range names {
 			target := path.Join(op.shimDir, name)
 			tmp := path.Join(op.shimDir, "."+name+"."+op.operationID+".tmp")
-			fmt.Fprintf(&script, "printf '%%s' %s > %s\nchmod 0755 %s\nmv -f %s %s\n", shellQuote(ShimScript(state.Entrypoints[name], op.dep.IsAgent())), shellQuote(tmp), shellQuote(tmp), shellQuote(tmp), shellQuote(target))
+			fmt.Fprintf(&script, "printf '%%s' %s > %s\nchmod 0755 %s\nmv -f %s %s\n", shellQuote(LeasedShimScript(state.Entrypoints[name], op.dep.IsAgent(), payloadlease.EntrypointLockPath(op.dataRoot, op.dep.ID, state.Entrypoints[name]))), shellQuote(tmp), shellQuote(tmp), shellQuote(tmp), shellQuote(target))
 		}
 		stateTmp := StatePath(op.home) + "." + op.operationID + ".tmp"
 		fmt.Fprintf(&script, "printf '%%s' %s > %s\nchmod 0600 %s\nmv -f %s %s\n", shellQuote(string(data)), shellQuote(stateTmp), shellQuote(stateTmp), shellQuote(stateTmp), shellQuote(StatePath(op.home)))
@@ -69,6 +88,16 @@ func (s *Service) finalizeFilesystem(ctx context.Context, op *operation, state, 
 			fmt.Fprintf(&script, "rm -f %s\n", shellQuote(path.Join(op.shimDir, name)))
 		}
 	}
+	if state == nil {
+		fmt.Fprintf(&script, "rm -f -- %s %s\n", shellQuote(StatePath(op.home)), shellQuote(CurrentDir(op.home)))
+	}
+	if previous != nil && (state == nil || previous.PayloadPath != state.PayloadPath) {
+		cleanup, err := s.queueCleanupScript(ctx, op, previous, false)
+		if err != nil {
+			return err
+		}
+		script.WriteString(cleanup)
+	}
 	return runFilesystemScript(ctx, op.client, op.home, op.dep.ID, script.String())
 }
 
@@ -77,6 +106,7 @@ func (s *Service) finalizeFilesystem(ctx context.Context, op *operation, state, 
 func runFilesystemScript(ctx context.Context, client *bridge.Client, home, depID, script string) error {
 	stream, err := client.ExecStreamWithOptions(ctx, scriptExecCommand, defaultWorkDir, 15, bridge.ExecOptions{Env: []string{
 		"MEMOH_DEP_HOME=" + home, "MEMOH_DEP_ID=" + depID,
+		"MEMOH_DEP_CONTROL_ROOT=" + controlpath.Directory(path.Dir(home)),
 	}})
 	if err != nil {
 		return errors.Join(ErrOperationUncertain, err)

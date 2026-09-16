@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { reactive, unref } from 'vue'
 import { useQueryCache } from '@pinia/colada'
+import { getBotsByBotIdDependencies } from '@memohai/sdk'
 import { toast } from '@felinic/ui'
 import i18n from '@/i18n'
 import { useRouter } from 'vue-router'
@@ -13,6 +14,7 @@ import {
   type DependencyStatus,
 } from '@/composables/api/useWorkspaceDependencies'
 import { streamDependencyOperation } from '@/composables/api/useWorkspaceDependencyStream'
+import type { AppListResponse } from '@/composables/api/useApps'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { apiErrorStatus, isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
@@ -43,6 +45,8 @@ import {
 
 export interface DependencyOperation {
   definitionRevision: string
+  operationId: string
+  reconciling: boolean
   /** `operationKey(botId, depId)`. */
   key: string
   botId: string
@@ -50,7 +54,7 @@ export interface DependencyOperation {
   sessionId?: string
   item: DependencyItem
   action: DependencyOperationAction
-  /** Version the user asked for; empty means the latest. Replayed by retry. */
+  /** Exact version the user confirmed. Replayed unchanged by retry. */
   version: string
   status: DependencyProgressStatus
   lines: DependencyLogLine[]
@@ -92,6 +96,8 @@ const MAX_LOG_LINES = 2000
 
 /** Toasts carrying an action stay a little longer than a plain confirmation. */
 const ACTIONABLE_TOAST_MS = 8000
+const RECONCILE_POLL_MS = 3000
+const RECONCILE_MAX_MS = 10 * 60_000
 
 export function operationKey(botId: string, depId: string): string {
   return `${botId}/${depId}`
@@ -170,11 +176,25 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
     const queryCache = useQueryCache()
     const key = botDependenciesQueryKey(operation.botId)
     const current = queryCache.getQueryData<DependencyListResponse>(key)
-    if (!current?.items) return
-    queryCache.setQueryData<DependencyListResponse>(key, {
-      ...current,
-      items: current.items.map(entry => (entry.id === operation.item.id ? { ...entry, status } : entry)),
-    })
+    if (current?.items) {
+      queryCache.setQueryData<DependencyListResponse>(key, {
+        ...current,
+        items: current.items.map(entry => (entry.id === operation.item.id ? { ...entry, status } : entry)),
+      })
+    }
+    const appsKey = ['bot-apps', operation.botId]
+    const apps = queryCache.getQueryData<AppListResponse>(appsKey)
+    if (apps?.items) {
+      queryCache.setQueryData<AppListResponse>(appsKey, {
+        ...apps,
+        items: apps.items.map(app => ({
+          ...app,
+          dependencies: app.dependencies?.map(dep => dep.dependency?.id === operation.item.id
+            ? { ...dep, dependency: { ...dep.dependency, status } }
+            : dep),
+        })),
+      })
+    }
   }
 
   function pushLine(operation: DependencyOperation, stream: DependencyLogLine['stream'], data: string) {
@@ -242,12 +262,74 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
   function settle(operation: DependencyOperation) {
     const queryCache = useQueryCache()
     void invalidateBotDependencies(queryCache, operation.botId)
+    void queryCache.invalidateQueries({ key: ['bot-apps', operation.botId] })
     if (operation.item.category === 'agent') {
       void queryCache.invalidateQueries({ key: ['bot-agents', operation.botId] })
     }
     if (!isViewed(operation.key)) {
       notifyBackground(operation)
       forget(operation.key)
+    }
+  }
+
+  function delay(ms: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      const finish = () => {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', finish)
+        resolve()
+      }
+      const timer = setTimeout(finish, ms)
+      signal.addEventListener('abort', finish, { once: true })
+      if (signal.aborted) finish()
+    })
+  }
+
+  /** Only the recorded terminal result of this admitted operation is evidence. */
+  async function reconcile(operation: DependencyOperation, signal: AbortSignal): Promise<boolean> {
+    if (!operation.operationId) return false
+    operation.status = 'running'
+    operation.reconciling = true
+    const deadline = Date.now() + RECONCILE_MAX_MS
+    try {
+      while (!signal.aborted && Date.now() < deadline) {
+        try {
+          const { data } = await getBotsByBotIdDependencies({
+            path: { bot_id: operation.botId },
+            query: { refresh: true },
+            signal: AbortSignal.any([signal, AbortSignal.timeout(Math.min(15_000, deadline - Date.now()))]),
+            throwOnError: true,
+          })
+          if (signal.aborted) return false
+          useQueryCache().setQueryData(botDependenciesQueryKey(operation.botId), data)
+          const item = data.items?.find(item => item.id === operation.item.id)
+          if (item?.last_operation_id === operation.operationId && !item.operation_id) {
+            if (item.status === 'failed') {
+              operation.status = 'error'
+              operation.error = item.last_error_code
+                ? resolveApiErrorMessage({ code: item.last_error_code }, t('bots.dependencies.progress.failedTitle'))
+                : t('bots.dependencies.progress.failedTitle')
+              return true
+            }
+            if (item.status === 'installed'
+              && formatDependencyVersion(item.installed_version) === formatDependencyVersion(operation.version)) {
+              operation.status = 'done'
+              operation.resultVersion = formatDependencyVersion(item.installed_version)
+              operation.error = ''
+              return true
+            }
+          }
+          // A newer terminal operation cannot confirm the result of this one.
+          if (item?.last_operation_id && item.last_operation_id !== operation.operationId && !item.operation_id) return false
+        } catch (error) {
+          if (signal.aborted) return false
+          if (apiErrorStatus(error) === 401 || apiErrorStatus(error) === 403) return false
+        }
+        await delay(RECONCILE_POLL_MS, signal)
+      }
+      return false
+    } finally {
+      operation.reconciling = false
     }
   }
 
@@ -263,6 +345,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
         if (signal.aborted) return
         switch (event.type) {
           case 'started':
+            operation.operationId = event.operation_id ?? ''
             operation.definitionRevision = event.definition_revision ?? operation.definitionRevision
             break
           case 'log':
@@ -284,17 +367,21 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
         }
       }
       // Losing the observation stream is not evidence that the script stopped.
-      if (operation.status === 'running') {
+      if ((operation.status === 'running' || operation.status === 'unknown') && !(await reconcile(operation, signal))) {
         operation.status = 'unknown'
         operation.error = t('bots.dependencies.progress.unknownHint')
       }
     } catch (error) {
       if (signal.aborted) return
       if (operation.status !== 'running') return
-      operation.status = isApiErrorCode(error, 'workspace_dependency_operation_unknown') || !apiErrorStatus(error) ? 'unknown' : 'error'
-      operation.error = operation.status === 'unknown'
-        ? t('bots.dependencies.progress.unknownHint')
-        : resolveApiErrorMessage(error, t('bots.dependencies.progress.failedTitle'))
+      const uncertain = isApiErrorCode(error, 'workspace_dependency_operation_unknown') || !apiErrorStatus(error)
+      if (!uncertain) {
+        operation.status = 'error'
+        operation.error = resolveApiErrorMessage(error, t('bots.dependencies.progress.failedTitle'))
+      } else if (!(await reconcile(operation, signal))) {
+        operation.status = 'unknown'
+        operation.error = t('bots.dependencies.progress.unknownHint')
+      }
     } finally {
       if (!signal.aborted) settle(operation)
     }
@@ -305,6 +392,8 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
     const controller = new AbortController()
     controllers.set(operation.key, controller)
     operation.status = 'running'
+    operation.operationId = ''
+    operation.reconciling = false
     operation.lines = []
     operation.error = ''
     operation.resultVersion = ''
@@ -336,6 +425,8 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
 
     const operation = reactive<DependencyOperation>({
       key,
+      operationId: '',
+      reconciling: false,
       botId: input.botId,
       sessionId: input.sessionId,
       item: input.item,

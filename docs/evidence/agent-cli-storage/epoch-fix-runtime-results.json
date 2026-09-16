@@ -1,0 +1,14 @@
+{
+  "initialize_seconds": 0.337102583,
+  "user_agent": "memoh_storage_lease_qa/0.154.0 (Debian 12.0.0; aarch64) unknown (memoh_storage_lease_qa; 1)",
+  "old_server_responded_after_reinstall": true,
+  "old_server_response_seconds": 0.0111345,
+  "retained_while_running": true,
+  "retained_after_exit_before_restart": true,
+  "old_payload_collected_after_restart": true,
+  "launcher_after_restart": "codex-cli 0.154.0",
+  "old_installation_id": "f00934aab00eb4794b64e48d23ac2e9f",
+  "new_installation_id": "6b4095175e2fab647b00de9cc3a4562e",
+  "date": "2026-09-15",
+  "authenticated_turn": false
+}

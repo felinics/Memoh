@@ -2,7 +2,7 @@
 // The page of one App on the bot, laid out like the Supermarket detail
 // page: the icon box and title with the actions beside them, the
 // description, then its components. The back row belongs to DetailPane. Skills are read-only; dependency rows reuse
-// the dependency row (update / reinstall / rollback / script); connector rows
+// the dependency row (update / reinstall / script); connector rows
 // offer authorization and the enabled switch. Nothing here starts an
 // operation — every choice is emitted and the panel owns confirmation and
 // streaming.
@@ -54,6 +54,7 @@ export type AppConnectorAction = 'authorize' | 'reauthorize' | 'disconnect'
 
 const props = withDefaults(defineProps<{
   item: AppItem
+  canManage?: boolean
   workspaceState?: DependencyWorkspaceState
   /** Another operation is streaming for this bot: nothing else may start. */
   busy?: boolean
@@ -68,6 +69,7 @@ const props = withDefaults(defineProps<{
   connectorPending?: Set<string>
 }>(), {
   workspaceState: undefined,
+  canManage: false,
   busy: false,
   ownsStream: false,
   dependencyOwnsStream: () => false,
@@ -308,7 +310,7 @@ function dependencyName(dep: AppDependencyItem): string {
         {{ t('apps.sections.dependencies') }}
         <span class="ml-1.5 font-normal text-muted-foreground">{{ dependencies.length }}</span>
       </h3>
-      <div class="divide-y divide-border rounded-lg border border-border bg-background">
+      <SettingsSection>
         <template
           v-for="dep in dependencies"
           :key="dep.id"
@@ -320,6 +322,7 @@ function dependencyName(dep: AppDependencyItem): string {
             :busy="busy"
             :owns-stream="dependencyOwnsStream(dep.id ?? '')"
             :shared="dep.shared"
+            :can-manage="canManage"
             @primary="emit('dependencyPrimary', dep.dependency, $event)"
             @menu="emit('dependencyMenu', dep.dependency, $event)"
           />
@@ -332,7 +335,7 @@ function dependencyName(dep: AppDependencyItem): string {
             <span class="text-caption">{{ t('apps.dependency.unknown') }}</span>
           </div>
         </template>
-      </div>
+      </SettingsSection>
     </section>
 
     <section

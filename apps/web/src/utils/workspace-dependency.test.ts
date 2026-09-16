@@ -129,6 +129,19 @@ describe('dependencyPrimaryAction', () => {
     expect(dependencyPrimaryAction(item({ status: 'failed', actions: [] }), running)).toBeNull()
   })
 
+  it('retries the authorized recovery target instead of offering an unrelated newer release', () => {
+    const recovering = item({
+      status: 'failed',
+      installed_version: '1.0.0',
+      latest_version: '2.0.0',
+      actions: ['update', 'reinstall', 'retry_repair'],
+      desired: { version: '1.0.0', repair_status: 'manual_required' },
+    })
+    expect(dependencyPrimaryAction(recovering, 'running')).toMatchObject({ kind: 'retryRepair' })
+    expect(dependencyPrimaryAction(recovering, 'running')?.operation).toBeUndefined()
+    expect(dependencyStatusBadge(recovering)).toMatchObject({ key: 'bots.dependencies.repair.status.manual_required', spinner: false })
+  })
+
   it('updates any installed row with a newer version through the update operation', () => {
     const updatable: Partial<DependencyItem> = {
       status: 'installed',
@@ -186,17 +199,6 @@ describe('dependencyPrimaryAction', () => {
 })
 
 describe('dependencyMenuActions', () => {
-  it('lists reinstall, rollback and script for an installed managed row', () => {
-    const actions = dependencyMenuActions(item({
-      status: 'installed',
-      previous_version: 'v0.147.0',
-      actions: ['update', 'reinstall', 'remove', 'rollback'],
-    }), 'running')
-    expect(actions.map(action => action.kind)).toEqual(['reinstall', 'rollback', 'viewScript'])
-    expect(actions[1]).toMatchObject({ args: { version: '0.147.0' }, disabled: false })
-    expect(actions[2]).toMatchObject({ separatorBefore: true, disabled: false })
-  })
-
   it('reinstalls a preinstalled copy through install, including when an update is available', () => {
     const actions = dependencyMenuActions(imageCopy(), 'running')
     expect(actions.map(action => action.kind)).toEqual(['reinstall', 'viewScript'])
@@ -224,8 +226,7 @@ describe('dependencyMenuActions', () => {
   it('keeps only the script preview clickable while the workspace is read-only', () => {
     const actions = dependencyMenuActions(item({
       status: 'installed',
-      previous_version: '0.1.0',
-      actions: ['update', 'reinstall', 'remove', 'rollback'],
+      actions: ['update', 'reinstall', 'remove'],
     }), 'not_running')
     expect(actions.filter(action => !action.disabled).map(action => action.kind)).toEqual(['viewScript'])
     expect(dependencyMenuActions(imageCopy(), 'not_running').filter(action => !action.disabled).map(action => action.kind)).toEqual(['viewScript'])
@@ -239,12 +240,6 @@ describe('dependencyMenuActions', () => {
 
   it('keeps the script preview while an operation empties the action list', () => {
     expect(dependencyMenuActions(item({ status: 'installing', actions: [] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
-  })
-
-  it('hides rollback until the Server lists it, even with a previous version recorded', () => {
-    const kinds = dependencyMenuActions(item({ status: 'installed', previous_version: '0.1.0', actions: ['update', 'reinstall', 'remove'] }), 'running')
-      .map(action => action.kind)
-    expect(kinds).toEqual(['reinstall', 'viewScript'])
   })
 
   it('has no menu at all when the Server lists no scripted action', () => {

@@ -17,25 +17,17 @@ import (
 // State is the on-disk state.json of a managed dependency. It is
 // the source of truth for what the Server installed.
 type State struct {
-	SourceURL          string                `json:"source_url,omitempty"`
-	RegistryID         string                `json:"registry_id,omitempty"`
-	DefinitionRevision string                `json:"definition_revision,omitempty"`
-	Previous           *PreviousInstallation `json:"previous,omitempty"`
-	DependencyID       string                `json:"dependency_id"`
-	Version            string                `json:"version"`
-	InstalledAt        time.Time             `json:"installed_at"`
-	ManifestDigest     string                `json:"manifest_digest"`
-	Entrypoints        map[string]string     `json:"entrypoints"`
-	PreviousVersion    string                `json:"previous_version,omitempty"`
-}
-
-// PreviousInstallation binds the rollback binary to its own publication and
-// command entries. It does not authorize fetching or executing a script.
-type PreviousInstallation struct {
-	Version            string            `json:"version"`
+	FormatVersion      int               `json:"format_version,omitempty"`
+	InstallationID     string            `json:"installation_id,omitempty"`
+	PayloadPath        string            `json:"payload_path,omitempty"`
+	StoreRoot          string            `json:"store_root,omitempty"`
+	DesiredRevision    string            `json:"desired_revision,omitempty"`
 	SourceURL          string            `json:"source_url,omitempty"`
 	RegistryID         string            `json:"registry_id,omitempty"`
 	DefinitionRevision string            `json:"definition_revision,omitempty"`
+	DependencyID       string            `json:"dependency_id"`
+	Version            string            `json:"version"`
+	InstalledAt        time.Time         `json:"installed_at"`
 	ManifestDigest     string            `json:"manifest_digest"`
 	Entrypoints        map[string]string `json:"entrypoints"`
 }
@@ -143,7 +135,7 @@ const discoveryPreamble = lockProbeHelpers + `memoh_resolve() {
 //
 // Unknown dependency ids are an error; everything else is reported per
 // dependency through Observed.Err.
-func Discover(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, dataRoot string, depIDs []string, _ Platform) (map[string]Observed, error) {
+func Discover(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, dataRoot string, depIDs []string, platform Platform) (map[string]Observed, error) {
 	if client == nil {
 		return nil, errors.New("workspacedeps: bridge client is nil")
 	}
@@ -165,7 +157,7 @@ func Discover(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, 
 
 	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
-	script := buildDiscoveryScript(dataRoot, deps)
+	script := buildDiscoveryScript(dataRoot, deps, platform.OS)
 	result, err := client.ExecWithOptions(ctx, "exec sh -s", defaultWorkDir, int32(discoveryTimeout/time.Second), []byte(script), bridge.ExecOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("workspacedeps: discovery exec: %w", err)
@@ -209,13 +201,17 @@ func Discover(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, 
 }
 
 // buildDiscoveryScript renders the sh text for one Discover call.
-func buildDiscoveryScript(dataRoot string, deps []catalog.Dependency) string {
+func buildDiscoveryScript(dataRoot string, deps []catalog.Dependency, operatingSystems ...string) string {
+	osName := ""
+	if len(operatingSystems) > 0 {
+		osName = operatingSystems[0]
+	}
 	var b strings.Builder
 	b.WriteString(discoveryPreamble)
 	shimDir := ShimDir(dataRoot)
 	for _, dep := range deps {
 		home := Home(dataRoot, dep.ID)
-		writeDependencyProbe(&b, dep, StatePath(home), lockPath(home, dep.ID), shimDir)
+		writeDependencyProbe(&b, dep, StatePath(home), executionLockPath(home, dep.ID, osName), shimDir)
 	}
 	b.WriteString("printf '" + markerEnd + "\\n'\n")
 	return b.String()

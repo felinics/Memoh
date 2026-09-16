@@ -10,7 +10,7 @@ import (
 
 func TestStartReaperRunsImmediatelyAndOnInterval(t *testing.T) {
 	f := newServiceFixture(t)
-	f.store.seed(Installation{BotID: "b1", DependencyID: "agent-x", Status: StatusInstalling, OperationID: strings.Repeat("a", 32), UpdatedAt: f.now.Add(-2 * time.Minute)})
+	f.store.seed(Installation{BotID: "b1", DependencyID: "agent-x", Status: StatusInstalling, OperationID: strings.Repeat("a", 32), OperationIntent: &OperationReceipt{ControlProtocol: controlProtocol}, UpdatedAt: f.now.Add(-2 * time.Minute)})
 	ticks := make(chan time.Time)
 	type passResult struct {
 		count int
@@ -40,7 +40,7 @@ func TestStartReaperRunsImmediatelyAndOnInterval(t *testing.T) {
 
 	// This reachable workspace is added after the initial pass. Only an
 	// explicit tick can schedule the next recovery round.
-	f.store.seed(Installation{BotID: "b2", DependencyID: "agent-x", Status: StatusUpdating, OperationID: strings.Repeat("b", 32), UpdatedAt: f.now.Add(-2 * time.Minute)})
+	f.store.seed(Installation{BotID: "b2", DependencyID: "agent-x", Status: StatusUpdating, OperationID: strings.Repeat("b", 32), OperationIntent: &OperationReceipt{ControlProtocol: controlProtocol}, UpdatedAt: f.now.Add(-2 * time.Minute)})
 	ticks <- f.now
 	assertPass("b2")
 }

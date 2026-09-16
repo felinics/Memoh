@@ -3233,6 +3233,26 @@ definitions:
     required:
     - auth_method
     type: object
+  handlers.AppDependencyConfirmation:
+    properties:
+      action:
+        enum:
+        - install
+        - update
+        type: string
+      definition_revision:
+        type: string
+      dependency_id:
+        type: string
+      manifest_digest:
+        type: string
+      registry_id:
+        type: string
+      source_url:
+        type: string
+      version:
+        type: string
+    type: object
   handlers.AppDependencyItem:
     properties:
       dependency:
@@ -3249,6 +3269,10 @@ definitions:
     properties:
       app_id:
         type: string
+      dependency_confirmations:
+        items:
+          $ref: '#/definitions/handlers.AppDependencyConfirmation'
+        type: array
       registry_id:
         type: string
       revision:
@@ -3359,6 +3383,42 @@ definitions:
         - missing
         type: string
     type: object
+  handlers.AppPrepareRequest:
+    properties:
+      action:
+        enum:
+        - install
+        - resume
+        - update
+        type: string
+      app_id:
+        type: string
+      dependencies:
+        items:
+          type: string
+        type: array
+      installation_id:
+        type: string
+      registry_id:
+        type: string
+      release:
+        type: boolean
+      revision:
+        type: string
+    type: object
+  handlers.AppPrepareResponse:
+    properties:
+      app_id:
+        type: string
+      dependencies:
+        items:
+          $ref: '#/definitions/handlers.AppDependencyConfirmation'
+        type: array
+      registry_id:
+        type: string
+      revision:
+        type: string
+    type: object
   handlers.AppRemovalPreviewApp:
     properties:
       app_id:
@@ -3419,6 +3479,17 @@ definitions:
         items:
           $ref: '#/definitions/handlers.AppRemovalPreviewApp'
         type: array
+    type: object
+  handlers.AppResumeRequest:
+    properties:
+      dependency_confirmations:
+        items:
+          $ref: '#/definitions/handlers.AppDependencyConfirmation'
+        type: array
+      revision:
+        type: string
+    required:
+    - revision
     type: object
   handlers.AppSkillItem:
     properties:
@@ -3482,15 +3553,22 @@ definitions:
       app_id:
         type: string
       dependencies:
-        description: Dependencies are updated to their latest version.
+        description: Dependencies are updated to their confirmed version.
         items:
           type: string
+        type: array
+      dependency_confirmations:
+        items:
+          $ref: '#/definitions/handlers.AppDependencyConfirmation'
         type: array
       registry_id:
         type: string
       release:
-        description: Release moves the installation to the registry's current release.
+        description: Release moves the installation to the prepared release_revision.
         type: boolean
+      release_revision:
+        description: ReleaseRevision is the immutable App release returned by prepare.
+        type: string
     required:
     - app_id
     - registry_id
@@ -5006,6 +5084,39 @@ definitions:
           $ref: '#/definitions/handlers.WorkspaceDependencyCatalogItem'
         type: array
     type: object
+  handlers.WorkspaceDependencyDesired:
+    properties:
+      auto_repair_authorized_at:
+        type: string
+      definition_revision:
+        type: string
+      manifest_digest:
+        type: string
+      registry_id:
+        type: string
+      repair_attempts:
+        type: integer
+      repair_last_error_code:
+        type: string
+      repair_next_attempt_at:
+        type: string
+      repair_operation_id:
+        type: string
+      repair_status:
+        enum:
+        - ready
+        - queued
+        - installing
+        - backoff
+        - manual_required
+        type: string
+      revision:
+        type: string
+      source_url:
+        type: string
+      version:
+        type: string
+    type: object
   handlers.WorkspaceDependencyInstallRequest:
     properties:
       definition_revision:
@@ -5016,9 +5127,8 @@ definitions:
         type: string
       version:
         description: |-
-          Version to install. Empty (or no body) installs the latest version the
-          catalog script resolves, or the manifest pin when the dependency has
-          one. The version recorded afterwards is the one the script reports.
+          Version is the exact target returned by preparation; mutable aliases
+          and empty values are rejected before an operation is admitted.
         type: string
     type: object
   handlers.WorkspaceDependencyItem:
@@ -5031,8 +5141,9 @@ definitions:
           - update
           - reinstall
           - remove
-          - rollback
           - check_update
+          - authorize_repair
+          - retry_repair
           type: string
         type: array
       category:
@@ -5046,6 +5157,8 @@ definitions:
         type: string
       description:
         type: string
+      desired:
+        $ref: '#/definitions/handlers.WorkspaceDependencyDesired'
       icon:
         type: string
       icon_url:
@@ -5075,12 +5188,16 @@ definitions:
         type: string
       last_error_code:
         type: string
+      last_operation_id:
+        type: string
       latest_version:
         description: |-
           LatestVersion is the last upstream check result, omitted until a check
           ran.
         type: string
       name:
+        type: string
+      operation_id:
         type: string
       overlay:
         description: |-
@@ -5096,9 +5213,6 @@ definitions:
           PlatformSupported is false when the probed workspace platform is not
           listed by the catalog manifest; PlatformReason then says why.
         type: boolean
-      previous_version:
-        description: PreviousVersion is the version rollback would switch back to.
-        type: string
       provides:
         description: Provides lists the commands the dependency makes available.
         items:
@@ -5164,23 +5278,6 @@ definitions:
         - missing
         type: string
     type: object
-  handlers.WorkspaceDependencyOperationResponse:
-    properties:
-      action:
-        type: string
-      definition_revision:
-        type: string
-      dependency_id:
-        type: string
-      entrypoints:
-        additionalProperties:
-          type: string
-        type: object
-      status:
-        type: string
-      version:
-        type: string
-    type: object
   handlers.WorkspaceDependencyPlatform:
     properties:
       arch:
@@ -5226,6 +5323,43 @@ definitions:
         - missing
         type: string
     type: object
+  handlers.WorkspaceDependencyPrepareRequest:
+    properties:
+      action:
+        enum:
+        - install
+        - update
+        - reinstall
+        type: string
+      definition_revision:
+        type: string
+      version:
+        type: string
+    type: object
+  handlers.WorkspaceDependencyPreparedResponse:
+    properties:
+      action:
+        type: string
+      definition_revision:
+        type: string
+      dependency_id:
+        type: string
+      manifest_digest:
+        type: string
+      registry_id:
+        type: string
+      source_url:
+        type: string
+      version:
+        type: string
+    type: object
+  handlers.WorkspaceDependencyRepairRequest:
+    properties:
+      definition_revision:
+        type: string
+      version:
+        type: string
+    type: object
   handlers.WorkspaceDependencyScriptEnv:
     properties:
       key:
@@ -5244,7 +5378,6 @@ definitions:
         - update
         - remove
         - reinstall
-        - rollback
         type: string
       definition_revision:
         type: string
@@ -5284,6 +5417,8 @@ definitions:
           type: string
         type: object
       message:
+        type: string
+      operation_id:
         type: string
       request_id:
         type: string
@@ -9197,6 +9332,8 @@ paths:
       - apps
   /bots/{bot_id}/apps/{installation_id}/resume:
     post:
+      consumes:
+      - application/json
       description: 'Installs dependencies that are still missing, reconciles the Skills
         and links connectors that were authorized since. Events: started, step, log,
         step_done, done, error.'
@@ -9211,6 +9348,12 @@ paths:
         name: installation_id
         required: true
         type: string
+      - description: Confirmed dependency targets
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AppResumeRequest'
       produces:
       - text/event-stream
       responses:
@@ -9261,14 +9404,64 @@ paths:
       summary: Check installed Apps for newer releases
       tags:
       - apps
+  /bots/{bot_id}/apps/prepare:
+    post:
+      consumes:
+      - application/json
+      description: Resolves the immutable App release and exact dependency versions.
+        It may start the workspace and run version checks, but never installs dependencies
+        or grants automatic repair authority. Confirm the returned dependencies before
+        install, resume or update.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App operation to prepare
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AppPrepareRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AppPrepareResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Prepare an App operation for confirmation
+      tags:
+      - apps
   /bots/{bot_id}/apps/update:
     post:
       consumes:
       - application/json
-      description: 'Updates the selected dependencies to their latest version and,
-        when release is set, moves the installation to the registry''s current release,
-        streaming progress. A discovered App may update its own dependency. Events:
-        started, step, log, step_done, done, error.'
+      description: 'Updates the selected dependencies to their confirmed exact versions
+        and, when release is set, moves the installation to release_revision, streaming
+        progress. A discovered App may update its own dependency. Events: started,
+        step, log, step_done, done, error.'
       parameters:
       - description: Bot ID
         in: path
@@ -10999,9 +11192,10 @@ paths:
         name: dep_id
         required: true
         type: string
-      - description: Version to install (optional)
+      - description: Confirmed exact version and recipe
         in: body
         name: payload
+        required: true
         schema:
           $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
       produces:
@@ -11034,13 +11228,13 @@ paths:
       summary: Install or reinstall a referenced workspace dependency
       tags:
       - containerd
-  /bots/{bot_id}/dependencies/{dep_id}/reinstall:
+  /bots/{bot_id}/dependencies/{dep_id}/prepare:
     post:
       consumes:
       - application/json
-      description: Runs the catalog reinstall script, or remove followed by install,
-        and streams the output. The optional body names the version to install; without
-        one the script picks the latest version (or the manifest pin).
+      description: Requires Manage. Freezes a recipe revision and exact version before
+        confirmation. An unspecified version runs only the frozen recipe's upstream
+        version check; it never installs a dependency.
       parameters:
       - description: Bot ID
         in: path
@@ -11052,9 +11246,60 @@ paths:
         name: dep_id
         required: true
         type: string
-      - description: Version to install (optional)
+      - description: Target to prepare
         in: body
         name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyPrepareRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyPreparedResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Prepare an exact workspace dependency installation
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/reinstall:
+    post:
+      consumes:
+      - application/json
+      description: Prepares a fresh candidate for the confirmed target and streams
+        the output. The body must confirm the exact version and frozen recipe revision
+        returned by preparation.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Confirmed exact version and recipe
+        in: body
+        name: payload
+        required: true
         schema:
           $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
       produces:
@@ -11087,10 +11332,109 @@ paths:
       summary: Reinstall a workspace dependency
       tags:
       - containerd
-  /bots/{bot_id}/dependencies/{dep_id}/rollback:
+  /bots/{bot_id}/dependencies/{dep_id}/repair/authorize:
     post:
-      description: 'Switches the dependency back to the previous version kept in the
-        workspace. A pure data operation: nothing is downloaded and no log is streamed.'
+      consumes:
+      - application/json
+      description: Requires Manage and an exact version with a frozen recipe revision.
+        Successful installation authorizes restoring that same target after payload
+        loss. Disconnecting observation does not cancel the admitted installation.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Confirmed target
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyRepairRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyDesired'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Reinstall a confirmed dependency and authorize recovery
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/repair/prepare:
+    post:
+      consumes:
+      - application/json
+      description: Requires Manage. Returns the exact version and frozen recipe to
+        confirm before reinstalling and enabling automatic recovery.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Target to prepare
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyRepairRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyPreparedResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Prepare authorization to restore a workspace dependency
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/repair/retry:
+    post:
+      description: Requires Manage. Requests recovery of the existing frozen target
+        without changing its version or authorization.
       parameters:
       - description: Bot ID
         in: path
@@ -11108,7 +11452,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.WorkspaceDependencyOperationResponse'
+            $ref: '#/definitions/handlers.WorkspaceDependencyDesired'
         "400":
           description: Bad Request
           schema:
@@ -11116,28 +11460,16 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
             $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "422":
-          description: Unprocessable Entity
-          schema:
-            $ref: '#/definitions/apperror.Problem'
-        "500":
-          description: Internal Server Error
           schema:
             $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
             $ref: '#/definitions/apperror.Problem'
-      summary: Roll a workspace dependency back to its previous version
+      summary: Retry recovery of the current authorized dependency target
       tags:
       - containerd
   /bots/{bot_id}/dependencies/{dep_id}/script:
@@ -11163,7 +11495,6 @@ paths:
         - update
         - remove
         - reinstall
-        - rollback
         in: query
         name: action
         type: string
@@ -11206,9 +11537,8 @@ paths:
       consumes:
       - application/json
       description: Runs the catalog update script (or the install script when the
-        manifest has none) and streams its output. The optional body names the version
-        to update to; without one the script picks the latest version (or the manifest
-        pin). The previous version is kept for rollback.
+        manifest has none) and streams its output. The body must confirm the exact
+        version and frozen recipe revision returned by preparation.
       parameters:
       - description: Bot ID
         in: path
@@ -11220,9 +11550,10 @@ paths:
         name: dep_id
         required: true
         type: string
-      - description: Version to update to (optional)
+      - description: Confirmed exact version and recipe
         in: body
         name: payload
+        required: true
         schema:
           $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
       produces:

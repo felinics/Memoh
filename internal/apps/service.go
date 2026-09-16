@@ -16,6 +16,7 @@ import (
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
+	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 // DependencyRegistryID is the only registry whose Apps may reference
@@ -59,6 +60,7 @@ type SkillPublisher interface {
 
 // DependencyManager is the slice of *workspacedeps.Service the service uses.
 type DependencyManager interface {
+	PrepareInstall(ctx context.Context, botID, depID string, action catalog.Action, version string) (workspacedeps.PreparedInstall, error)
 	List(ctx context.Context, botID string) (workspacedeps.ListResult, error)
 	Refresh(ctx context.Context, botID string) (workspacedeps.ListResult, error)
 	CheckUpdates(ctx context.Context, botID string) (workspacedeps.ListResult, error)
@@ -129,9 +131,10 @@ func NewService(opts Options) *Service {
 
 // InstallRequest names one immutable App release to install.
 type InstallRequest struct {
-	RegistryID string
-	AppID      string
-	Revision   string
+	RegistryID              string
+	AppID                   string
+	Revision                string
+	DependencyConfirmations []DependencyConfirmation
 
 	// Reason defaults to ReasonUser.
 	Reason Reason
@@ -165,13 +168,19 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest,
 		return OperationResult{}, err
 	}
 	defer unlock()
-	return s.materialize(ctx, botID, release, reason, StatusInstalling, sink, false)
+	return s.materialize(ctx, botID, release, reason, StatusInstalling, sink, false, req.DependencyConfirmations)
+}
+
+// ResumeRequest binds a retry to the release and dependency targets shown during preparation.
+type ResumeRequest struct {
+	Revision                string
+	DependencyConfirmations []DependencyConfirmation
 }
 
 // Resume continues a partial installation: dependencies that are still
 // missing are installed again, Skills are reconciled and connectors are
 // linked when a connection appeared since.
-func (s *Service) Resume(ctx context.Context, botID, installationID string, sink EventSink) (OperationResult, error) {
+func (s *Service) Resume(ctx context.Context, botID, installationID string, req ResumeRequest, sink EventSink) (OperationResult, error) {
 	inst, err := s.store.GetByID(ctx, botID, installationID)
 	if err != nil {
 		return OperationResult{}, err
@@ -185,7 +194,14 @@ func (s *Service) Resume(ctx context.Context, botID, installationID string, sink
 		return OperationResult{}, err
 	}
 	defer unlock()
-	return s.materialize(ctx, botID, release, inst.Reason, StatusInstalling, sink, false)
+	current, err := s.store.GetByID(ctx, botID, installationID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if !supermarket.IsCanonicalSHA256(req.Revision) || req.Revision != current.Revision || inst.Revision != current.Revision {
+		return OperationResult{}, ErrInvalidRequest
+	}
+	return s.materialize(ctx, botID, release, inst.Reason, StatusInstalling, sink, false, req.DependencyConfirmations)
 }
 
 func validateReferences(release supermarket.AppDescriptor) error {
@@ -235,9 +251,21 @@ func normalizeRelease(release supermarket.AppDescriptor) supermarket.AppDescript
 
 // materialize is the shared body of Install, Resume and Update. announced
 // is set when the caller already sent the started event.
-func (s *Service) materialize(ctx context.Context, botID string, release supermarket.AppDescriptor, reason Reason, transient Status, sink EventSink, announced bool) (OperationResult, error) {
+func (s *Service) materialize(ctx context.Context, botID string, release supermarket.AppDescriptor, reason Reason, transient Status, sink EventSink, announced bool, confirmations []DependencyConfirmation) (OperationResult, error) {
 	sink = nonNilSink(sink)
 	release = normalizeRelease(release)
+	states := map[string]workspacedeps.Entry{}
+	var err error
+	if len(release.Dependencies) > 0 {
+		states, err = s.dependencyStates(ctx, botID)
+	}
+	if err != nil {
+		return OperationResult{}, err
+	}
+	confirmed, err := s.validateDependencyConfirmations(ctx, botID, release.Dependencies, nil, states, confirmations)
+	if err != nil {
+		return OperationResult{}, err
+	}
 	releaseBytes, err := json.Marshal(release)
 	if err != nil {
 		return OperationResult{}, fmt.Errorf("apps: encode release: %w", err)
@@ -276,26 +304,25 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 	}
 
 	// 1. Dependencies: link present ones, install missing ones.
-	states, statesErr := s.dependencyStates(ctx, botID)
 	for _, depID := range release.Dependencies {
 		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
 		if err := s.store.AddDependencyRef(ctx, inst.ID, depID); err != nil {
 			return result, s.failInstallation(ctx, inst, fail("record dependency reference "+depID, err))
 		}
-		switch {
-		case s.dependencies == nil:
+		switch s.dependencies {
+		case nil:
 			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: ErrDependenciesUnavailable.Error()})
-		case statesErr != nil:
-			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: publicCause(statesErr)})
 		default:
 			entry, known := states[depID]
 			if known && dependencyPresent(entry) {
 				record(StepResult{Kind: KindDependency, ID: depID, Status: StepLinked, Version: entry.InstalledVersion})
 				continue
 			}
-			res, err := s.dependencies.Install(ctx, botID, depID, "", logSink(sink, KindDependency, depID))
+			target := confirmed[depID]
+			res, err := s.dependencies.Install(workspacedeps.WithDefinitionRevision(ctx, target.DefinitionRevision), botID, depID, target.Version, logSink(sink, KindDependency, depID))
 			if err != nil {
-				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: err.Error()})
+				s.logger.Warn("App dependency installation failed", slog.String("dependency_id", depID), slog.Any("error", err))
+				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: publicCause(err)})
 				continue
 			}
 			record(StepResult{Kind: KindDependency, ID: depID, Status: StepInstalled, Version: res.Version})
@@ -383,6 +410,9 @@ func (s *Service) dependencyStates(ctx context.Context, botID string) (map[strin
 	result, err := s.dependencies.List(ctx, botID)
 	if err != nil {
 		return nil, err
+	}
+	if result.DiscoveryError != "" {
+		return nil, fail("discover dependencies", errors.New(result.DiscoveryError))
 	}
 	return indexEntries(result), nil
 }

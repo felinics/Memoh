@@ -210,7 +210,7 @@ func TestUpdateCleanupReadFailuresPreserveSharedResources(t *testing.T) {
 			f.install(t, other)
 			f.storeFaults.failure = failure
 			rec := &recorder{}
-			_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec)
+			_, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec)
 			assertCleanupFailed(t, f, rec, err)
 			if !errors.Is(err, errCleanupProbe) || len(f.deps.removed) != 0 || len(f.connectors.deleted) != 0 {
 				t.Fatalf("query failure authorized deletion: %v, %v, %v", err, f.deps.removed, f.connectors.deleted)
@@ -223,7 +223,7 @@ func TestUpdateCleanupReadFailuresPreserveSharedResources(t *testing.T) {
 			f.storeFaults.failure = ""
 			f.restartService()
 			rec = &recorder{}
-			if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec); err != nil {
+			if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec); err != nil {
 				t.Fatal(err)
 			}
 			assertCleanupDone(t, f, rec)
@@ -244,7 +244,7 @@ func TestUpdateCleanupMutationFailuresRemainRetryable(t *testing.T) {
 				f.storeFaults.failure = failure
 			}
 			rec := &recorder{}
-			_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec)
+			_, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec)
 			assertCleanupFailed(t, f, rec, err)
 			if !errors.Is(err, errCleanupProbe) {
 				t.Fatalf("lost cause: %v", err)
@@ -262,7 +262,7 @@ func TestUpdateCleanupMutationFailuresRemainRetryable(t *testing.T) {
 			f.depFaults.removeErr, f.storeFaults.failure = nil, ""
 			f.restartService()
 			rec = &recorder{}
-			if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true}, rec); err != nil {
+			if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec); err != nil {
 				t.Fatal(err)
 			}
 			assertCleanupDone(t, f, rec)
@@ -293,7 +293,7 @@ func TestCleanupRejectsIncompleteDependencyDiscovery(t *testing.T) {
 			}
 			f.depFaults.view = &view
 			rec := &recorder{}
-			_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec)
+			_, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec)
 			assertCleanupFailed(t, f, rec, err)
 			if len(f.deps.removed) != 0 || len(f.connectors.deleted) != 0 {
 				t.Fatal("incomplete discovery must not authorize cleanup")
@@ -301,7 +301,7 @@ func TestCleanupRejectsIncompleteDependencyDiscovery(t *testing.T) {
 			f.depFaults.view, f.depFaults.listErr, f.depFaults.ensureErr = nil, nil, nil
 			f.restartService()
 			rec = &recorder{}
-			if _, err := f.service.Resume(t.Context(), testBotID, f.inst.ID, rec); err != nil {
+			if _, err := f.service.Resume(t.Context(), testBotID, f.inst.ID, ResumeRequest{Revision: f.installation(t).Revision}, rec); err != nil {
 				t.Fatal(err)
 			}
 			assertCleanupDone(t, f, rec)
@@ -315,7 +315,7 @@ func TestCleanupStartsStoppedNativeWorkspace(t *testing.T) {
 	view.Workspace = workspacedeps.WorkspaceNotRunning
 	f.depFaults.view = &view
 	rec := &recorder{}
-	if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec); err != nil {
+	if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec); err != nil {
 		t.Fatalf("a stopped workspace must be started, not reported: %v", err)
 	}
 	assertCleanupDone(t, f, rec)
@@ -330,7 +330,7 @@ func TestCleanupDropsReferencesToDependenciesTheCatalogNoLongerLists(t *testing.
 	view.Entries = nil
 	f.depFaults.view = &view
 	rec := &recorder{}
-	if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec); err != nil {
+	if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec); err != nil {
 		t.Fatalf("an unlisted dependency has nothing to remove: %v", err)
 	}
 	assertCleanupDone(t, f, rec)
@@ -342,7 +342,7 @@ func TestCleanupDropsReferencesToDependenciesTheCatalogNoLongerLists(t *testing.
 func TestUpdateUnlinksConnectorButKeepsConnection(t *testing.T) {
 	f := newCleanupFixture(t)
 	rec := &recorder{}
-	if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec); err != nil {
+	if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec); err != nil {
 		t.Fatal(err)
 	}
 	assertCleanupDone(t, f, rec)
@@ -359,7 +359,7 @@ func TestMatchingReleaseStillCleansRetainedReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := &recorder{}
-	if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec); err != nil {
+	if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec); err != nil {
 		t.Fatal(err)
 	}
 	assertCleanupDone(t, f, rec)
@@ -377,7 +377,7 @@ func TestSameRevisionUpdateOfPartialInstallationDoesNotRepublish(t *testing.T) {
 		t.Fatalf("status = %s, want partial", installed.Installation.Status)
 	}
 	rec := &recorder{}
-	result, err := h.service.Update(t.Context(), testBotID, installed.Installation.ID, rec)
+	result, err := h.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: v1.Revision}, rec)
 	if err != nil || len(result.Steps) != 0 || len(h.publisher.published) != 1 {
 		t.Fatalf("partial installation at the current release must be a no-op: err=%v steps=%v published=%v", err, result.Steps, h.publisher.published)
 	}
@@ -390,7 +390,7 @@ func TestFailedPublicationDoesNotSkipSameRevisionRetry(t *testing.T) {
 	f := newCleanupFixture(t)
 	f.publisher.publishErr = errCleanupProbe
 	rec := &recorder{}
-	_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec)
+	_, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec)
 	assertCleanupFailed(t, f, rec, err)
 	if got := f.installation(t).LastError; got != "publish Skills: "+genericPublicCause {
 		t.Fatalf("last_error = %q", got)
@@ -398,7 +398,7 @@ func TestFailedPublicationDoesNotSkipSameRevisionRetry(t *testing.T) {
 	f.publisher.publishErr = nil
 	f.restartService()
 	rec = &recorder{}
-	if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true}, rec); err != nil {
+	if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, rec); err != nil {
 		t.Fatal(err)
 	}
 	assertCleanupDone(t, f, rec)
@@ -411,7 +411,7 @@ func TestFailedCleanupPersistsPublicMessageOnly(t *testing.T) {
 	t.Run("store error is generic", func(t *testing.T) {
 		f := newCleanupFixture(t)
 		f.storeFaults.failure = "dependency_refs"
-		_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{})
+		_, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, &recorder{})
 		if err == nil || !strings.Contains(err.Error(), errCleanupProbe.Error()) {
 			t.Fatalf("callers keep the cause: %v", err)
 		}
@@ -422,7 +422,7 @@ func TestFailedCleanupPersistsPublicMessageOnly(t *testing.T) {
 	t.Run("sentinel keeps its text", func(t *testing.T) {
 		f := newCleanupFixture(t)
 		f.depFaults.removeErr = workspacedeps.ErrBusy
-		if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{}); !errors.Is(err, workspacedeps.ErrBusy) {
+		if _, err := f.service.UpdateSelection(t.Context(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "editor", Release: true, ReleaseRevision: f.v2.Revision}, &recorder{}); !errors.Is(err, workspacedeps.ErrBusy) {
 			t.Fatalf("err = %v", err)
 		}
 		if got := f.installation(t).LastError; got != "remove dependency node: "+workspacedeps.ErrBusy.Error() {

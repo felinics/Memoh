@@ -72,8 +72,6 @@ function actionLabel(action: ScriptAction): string {
       return t('bots.dependencies.action.remove')
     case 'reinstall':
       return t('bots.dependencies.action.reinstall')
-    case 'rollback':
-      return t('bots.dependencies.action.rollbackPlain')
     default:
       return t('bots.dependencies.action.install')
   }

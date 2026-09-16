@@ -52,7 +52,7 @@ func (f *runFixture) spec(depID, script string) RunSpec {
 }
 
 func (f *runFixture) lockDir(depID string) string {
-	return filepath.Join(LocksDir(f.dataRoot), depID+lockFileSuffix)
+	return executionLockPath(Home(f.dataRoot, depID), depID, f.platform.OS)
 }
 
 func (f *runFixture) assertNoLeftovers(t *testing.T, depID string) {
@@ -120,7 +120,7 @@ func TestRunForwardsLogsAndReadsResult(t *testing.T) {
 	if !sink.has(StreamStderr, wantEnv) {
 		t.Errorf("stderr lines = %q, want %q", sink.get(StreamStderr), wantEnv)
 	}
-	for _, dir := range []string{Home(f.dataRoot, "demo"), VersionsDir(Home(f.dataRoot, "demo")), ShimDir(f.dataRoot)} {
+	for _, dir := range []string{Home(f.dataRoot, "demo"), ShimDir(f.dataRoot)} {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Errorf("expected directory %s to exist (err = %v)", dir, err)
 		}
@@ -588,10 +588,7 @@ func TestCancelledClaimCannotExecuteAfterNewOperation(t *testing.T) {
 	// The old Server has claimed its ID but has not started Run. The reaper
 	// fences that ID under the kernel lock before making room for a new claim.
 	fenceScript := "mkdir -p " + shellQuote(root) + "\n: > " + shellQuote(marker) + "\n"
-	fenced, err := f.client.ExecWithOptions(ctx, scriptExecCommand, defaultWorkDir, 5, []byte(fenceScript), bridge.ExecOptions{Env: []string{
-		"MEMOH_DEP_HOME=" + old.Home, "MEMOH_DEP_ID=" + old.DepID,
-	}})
-	if err != nil || fenced.ExitCode != 0 {
+	if err := runFilesystemScript(ctx, f.client, old.Home, old.DepID, fenceScript); err != nil {
 		t.Fatalf("reaper did not establish its fence: %v", err)
 	}
 	current := f.spec(old.DepID, "printf new > "+shellQuote(effect)+"\ndep_result '{\"version\":\"2.0.0\"}'\n")

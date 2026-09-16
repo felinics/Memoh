@@ -40,6 +40,7 @@ const props = withDefaults(defineProps<{
   action?: DependencyOperationAction
   lines: DependencyLogLine[]
   status: DependencyProgressStatus
+  reconciling?: boolean
   /** Localized failure summary; the raw log stays visible underneath. */
   error?: string
   /** From the `done` event. */
@@ -52,6 +53,7 @@ const props = withDefaults(defineProps<{
   doneLabel?: string
 }>(), {
   action: 'install',
+  reconciling: false,
   error: '',
   resultVersion: '',
   entrypoint: '',
@@ -73,6 +75,7 @@ const running = computed(() => props.status === 'running')
 // The subtitle states the phase, never a log line: scripts print long
 // unbroken warnings that would otherwise become the dialog's widest row.
 const subtitle = computed(() => {
+  if (props.reconciling) return t('bots.dependencies.progress.reconciling')
   if (props.status === 'done') return t('bots.dependencies.progress.doneTitle')
   if (props.status === 'error') return t('bots.dependencies.progress.failedTitle')
   if (props.status === 'unknown') return t('bots.dependencies.progress.unknownTitle')
@@ -162,7 +165,7 @@ function finish() {
             v-if="lines.length === 0"
             class="text-muted-foreground"
           >
-            {{ t('bots.dependencies.progress.preparing') }}
+            {{ t(reconciling ? 'bots.dependencies.progress.reconciling' : 'bots.dependencies.progress.preparing') }}
           </p>
           <div
             v-for="(line, index) in lines"

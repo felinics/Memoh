@@ -180,7 +180,7 @@ The `Human QA` section contains only one status checkbox, `- [ ] Human QA passed
 ### Container / Workspace Management
 
 - Each bot can have an isolated **workspace container** (file editing, exec, MCP tool hosting, optional headed browser/display); host↔container communication is a **gRPC bridge over Unix Domain Sockets**, not TCP.
-- The canonical workspace image is built from `docker/Dockerfile.workspace`; per-bot managed dependencies install into `/data` via `internal/workspacedeps/`.
+- The canonical workspace image is built from `docker/Dockerfile.workspace`; per-bot managed dependencies keep metadata under `/data/.memoh/deps` via `internal/workspacedeps/`; payloads and caches use the fixed workspace path `/data/.memoh/deps`.
 - `internal/container/` provides the runtime abstraction (`docker`, `containerd`, `apple` adapters). Snapshot/storage semantics differ by backend; do not assume containerd-style snapshot lineage for Docker or archive-backed flows.
 - Workspace dependencies (`internal/workspacedeps/`): launcher resolution is read-only — discover existing CLIs without a warm Supermarket cache; chat and device-code login never authorize installation — a Manage-authorized action confirms a frozen recipe revision; App and dependency management only use the bot-owned native workspace; direct Codex/Claude Code also requires a native workspace. Upgrade boundary: `docs/workspace-dependencies-upgrade.md`.
 - Bridge layout, image contract, and display stack details: `docs/codebase-map.md`.

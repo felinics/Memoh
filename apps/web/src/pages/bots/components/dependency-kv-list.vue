@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The read-only key/value block every dependency dialog carries (target
-// version, install path, digest, rollback from/to). One owner so the four
+// version, install path, digest). One owner so the
 // dialogs cannot drift on padding or divider tone. Rows with an empty value
 // are dropped here so callers can pass optional fields unconditionally.
 import { computed } from 'vue'

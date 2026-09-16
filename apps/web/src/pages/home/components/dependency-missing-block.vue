@@ -66,7 +66,7 @@ import type { ErrorBlock } from '@/store/chat-list'
 import { isBackgroundTaskActive, normalizeBackgroundStatus } from '@/store/chat/background-tasks'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import BgTaskLiveStatus from './bg-task-live-status.vue'
-import { dependencyInstallationInProgress, dependencyMissingArgs } from './dependency-missing'
+import { dependencyMissingMessageKey, dependencyMissingArgs } from './dependency-missing'
 
 const props = defineProps<{
   block: ErrorBlock
@@ -90,9 +90,7 @@ const canManage = computed(() => hasBotPermission(
 const text = computed(() => {
   const values = args.value
   if (values.dep_id) {
-    return t(dependencyInstallationInProgress(values)
-      ? 'chat.externalAgent.dependencyMissingInstalling'
-      : 'chat.externalAgent.dependencyMissing', values)
+    return t(dependencyMissingMessageKey(values), values)
   }
   return props.block.content
 })

@@ -179,10 +179,6 @@ func cloneState(original *State) *State {
 	}
 	state := *original
 	state.Entrypoints = cloneStringMap(state.Entrypoints)
-	if state.Previous != nil {
-		previous := *state.Previous
-		previous.Entrypoints = cloneStringMap(previous.Entrypoints)
-		state.Previous = &previous
-	}
+
 	return &state
 }

@@ -3,12 +3,13 @@ import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   getBotsByBotIdDependencies,
   getBotsByBotIdDependenciesByDepIdScript,
-  postBotsByBotIdDependenciesByDepIdRollback,
+  postBotsByBotIdDependenciesByDepIdPrepare,
+  postBotsByBotIdDependenciesByDepIdRepairPrepare,
+  postBotsByBotIdDependenciesByDepIdRepairRetry,
   postBotsByBotIdDependenciesCheckUpdates,
   postBotsByBotIdDependenciesPreflight,
   type HandlersWorkspaceDependencyItem,
   type HandlersWorkspaceDependencyListResponse,
-  type HandlersWorkspaceDependencyOperationResponse,
   type HandlersWorkspaceDependencyPlatform,
   type HandlersWorkspaceDependencyPreflightItem,
   type HandlersWorkspaceDependencyPreflightResponse,
@@ -35,13 +36,47 @@ export type PreflightState = NonNullable<PreflightItem['state']>
 export type ScriptResponse = HandlersWorkspaceDependencyScriptResponse
 export type ScriptEnv = HandlersWorkspaceDependencyScriptEnv
 export type ScriptAction = NonNullable<ScriptResponse['action']>
-export type DependencyOperationResponse = HandlersWorkspaceDependencyOperationResponse
 /**
  * The dependency operations that stream a log. Install here means a retry or
  * an overlay for a dependency an App already references; removal belongs
- * to the App. Rollback is synchronous.
+ * to the App.
  */
 export type DependencyOperationAction = 'install' | 'update' | 'reinstall'
+
+export type DependencyPreparedInstallation = Awaited<ReturnType<typeof prepareDependencyInstallation>>
+
+/** Explicit Manage action: resolve an exact release before the user confirms it. */
+export async function prepareDependencyInstallation(
+  botId: string,
+  depId: string,
+  action: DependencyOperationAction,
+  version: string,
+  definitionRevision: string,
+) {
+  const { data } = await postBotsByBotIdDependenciesByDepIdPrepare({
+    path: { bot_id: botId, dep_id: depId },
+    body: { action, version: version || undefined, definition_revision: definitionRevision },
+    throwOnError: true,
+  })
+  return data
+}
+
+export async function prepareDependencyRepair(botId: string, depId: string, version: string, definitionRevision: string) {
+  const { data } = await postBotsByBotIdDependenciesByDepIdRepairPrepare({
+    path: { bot_id: botId, dep_id: depId },
+    body: { version: version || undefined, definition_revision: definitionRevision || undefined },
+    throwOnError: true,
+  })
+  return data
+}
+
+export async function retryDependencyRepair(botId: string, depId: string) {
+  const { data } = await postBotsByBotIdDependenciesByDepIdRepairRetry({
+    path: { bot_id: botId, dep_id: depId },
+    throwOnError: true,
+  })
+  return data
+}
 
 export const BOT_DEPENDENCIES_QUERY_KEY = 'bot-dependencies'
 
@@ -84,18 +119,6 @@ export async function preflightDependencies(
     body: {
       dependency_ids: dependencyIds,
     },
-    throwOnError: true,
-  })
-  return data
-}
-
-/** Switches back to the previously kept version. Pure data; nothing streams. */
-export async function rollbackDependency(
-  botId: string,
-  depId: string,
-): Promise<DependencyOperationResponse> {
-  const { data } = await postBotsByBotIdDependenciesByDepIdRollback({
-    path: { bot_id: botId, dep_id: depId },
     throwOnError: true,
   })
   return data

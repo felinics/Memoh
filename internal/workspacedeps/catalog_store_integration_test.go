@@ -161,8 +161,8 @@ func TestPostgresCatalogPrunesOnlyUnreferencedHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	botID := createDependencyBot(t, ctx, pool)
-	// Current intent may use another registry while rollback state still
-	// references this source. Preserve every source for an installed identity.
+	// An observed copy from another source must not retain every historical
+	// recipe that happens to share its dependency ID.
 	codex := first.Catalog.MustGet("codex")
 	_, err = newIntegrationStore(pool).Upsert(ctx, UpsertInstallation{InstallationKey: InstallationKey{BotID: botID, DependencyID: "codex"}, Source: InstallationSourceManaged, Status: StatusInstalled, SourceURL: p.sourceURL + "/new-registry", RegistryID: "memoh", DefinitionRevision: codex.Revision})
 	if err != nil {
@@ -175,6 +175,33 @@ func TestPostgresCatalogPrunesOnlyUnreferencedHistory(t *testing.T) {
 	}
 	latest, err := p.Snapshot(ctx, true)
 	if err != nil {
+		t.Fatal(err)
+	}
+	installations := newIntegrationStore(pool).(*postgresStore)
+	// Discovery may change the observed publication, but an independently
+	// authorized target still pins its exact frozen recipe for rootfs repair.
+	python := first.Catalog.MustGet("python")
+	pythonKey := InstallationKey{BotID: botID, DependencyID: "python"}
+	pythonOperation := strings.Repeat("a", 32)
+	if _, err := installations.ClaimOperation(ctx, UpsertInstallation{InstallationKey: pythonKey, Source: InstallationSourceManaged, Status: StatusInstalling}, pythonOperation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installations.FinishAuthorized(ctx, DesiredInstallation{InstallationKey: pythonKey, Version: "3.13.0", SourceURL: p.sourceURL, RegistryID: python.RegistryID, DefinitionRevision: python.Revision, ManifestDigest: python.ManifestDigest, Platform: Platform{OS: "linux", Arch: "amd64", Libc: "glibc"}, Entrypoints: map[string]string{}}, pythonOperation); err != nil {
+		t.Fatal(err)
+	}
+	otherSource := p.sourceURL + "/new-registry"
+	if _, err := installations.UpdateObserved(ctx, pythonKey, ObservedUpdate{SourceURL: &otherSource}); err != nil {
+		t.Fatal(err)
+	}
+	// A script in progress separately pins the recipe it is executing, even
+	// when the prior installed copy was from a different source/publication.
+	claude := first.Catalog.MustGet("claude-code")
+	claudeKey := InstallationKey{BotID: botID, DependencyID: "claude-code"}
+	if _, err := installations.Upsert(ctx, UpsertInstallation{InstallationKey: claudeKey, Source: InstallationSourceManaged, Status: StatusInstalled, SourceURL: otherSource, RegistryID: claude.RegistryID, DefinitionRevision: claude.Revision}); err != nil {
+		t.Fatal(err)
+	}
+	claudeOperation := strings.Repeat("b", 32)
+	if _, err := installations.ClaimOperation(ctx, UpsertInstallation{InstallationKey: claudeKey, Source: InstallationSourceManaged, Status: StatusUpdating, SourceURL: p.sourceURL, RegistryID: claude.RegistryID, DefinitionRevision: claude.Revision}, claudeOperation); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, "UPDATE workspace_dependency_definitions SET last_accessed_at = now() - interval '31 days' WHERE source_url = $1", p.sourceURL); err != nil {
@@ -201,9 +228,9 @@ func TestPostgresCatalogPrunesOnlyUnreferencedHistory(t *testing.T) {
 	}
 	for id, key := range historical {
 		_, err := store.GetDefinition(ctx, key)
-		if id == "codex" || id == "uv" || id == "node" {
+		if id == "python" || id == "claude-code" || id == "uv" || id == "node" {
 			if err != nil {
-				t.Fatalf("removed rollback or recent publication %s: %v", id, err)
+				t.Fatalf("removed desired, active, or recent publication %s: %v", id, err)
 			}
 		} else if !errors.Is(err, ErrCatalogCacheMiss) {
 			t.Fatalf("unused historical %s retained: %v", id, err)
@@ -216,6 +243,28 @@ func TestPostgresCatalogPrunesOnlyUnreferencedHistory(t *testing.T) {
 	}
 	if _, err := store.GetDefinition(ctx, other.DefinitionKey); err != nil {
 		t.Fatalf("pruned another source: %v", err)
+	}
+	// Once the target is revoked and the active operation finishes, neither
+	// audit history nor removed binary versions retain their old definitions.
+	if _, err := installations.ClaimOperation(ctx, UpsertInstallation{InstallationKey: pythonKey, Source: InstallationSourceManaged, Status: StatusRemoving}, strings.Repeat("c", 32)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installations.FinishOperation(ctx, pythonKey, strings.Repeat("c", 32), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installations.FinishOperation(ctx, claudeKey, claudeOperation, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE workspace_dependency_definitions SET last_accessed_at=now()-interval '31 days' WHERE source_url=$1 AND dependency_id IN ('python','claude-code')", p.sourceURL); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.(*postgresCatalogStore).PruneDefinitions(ctx, p.sourceURL); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"python", "claude-code"} {
+		if _, err := store.GetDefinition(ctx, historical[id]); !errors.Is(err, ErrCatalogCacheMiss) {
+			t.Fatalf("unreferenced %s definition retained: %v", id, err)
+		}
 	}
 }
 

@@ -94,25 +94,27 @@ type ContainerMetricsResult struct {
 }
 
 type Manager struct {
-	service           runtimeService
-	networkController netctl.Controller
-	cfg               config.WorkspaceConfig
-	namespace         string
-	db                *pgxpool.Pool
-	queries           dbstore.Queries
-	hookService       *hooks.Service
-	logger            *slog.Logger
-	containerLockMu   sync.Mutex
-	containerLocks    map[string]*sync.Mutex
-	grpcPool          *bridge.Pool
-	bridgeTLS         *BridgeTLSRuntimeOptions
-	remote            *RemoteWorkspaceService
-	templateBootstrap *TemplateBootstrapper
-	setupDiagnostics  WorkspaceSetupDiagnostics
-	legacyMu          sync.RWMutex
-	legacyIPs         map[string]string // botID → IP for pre-bridge containers
-	bridgeResetMu     sync.Mutex
-	bridgeResetFns    []func(botID string) // see OnBridgeReset
+	service            runtimeService
+	networkController  netctl.Controller
+	cfg                config.WorkspaceConfig
+	namespace          string
+	db                 *pgxpool.Pool
+	queries            dbstore.Queries
+	hookService        *hooks.Service
+	logger             *slog.Logger
+	containerLockMu    sync.Mutex
+	containerLocks     map[string]*sync.Mutex
+	grpcPool           *bridge.Pool
+	bridgeTLS          *BridgeTLSRuntimeOptions
+	remote             *RemoteWorkspaceService
+	templateBootstrap  *TemplateBootstrapper
+	setupDiagnostics   WorkspaceSetupDiagnostics
+	legacyMu           sync.RWMutex
+	legacyIPs          map[string]string // botID → IP for pre-bridge containers
+	bridgeResetMu      sync.Mutex
+	bridgeResetFns     []func(botID string) // see OnBridgeReset
+	bridgeReadyFns     []func(context.Context, string)
+	bridgeQuiescentFns []func(context.Context, string, *bridge.Client) error
 }
 
 func NewManager(log *slog.Logger, service runtimeService, networkController netctl.Controller, cfg config.WorkspaceConfig, namespace string, conn *pgxpool.Pool, queryOverride ...dbstore.Queries) *Manager {
@@ -368,6 +370,8 @@ func (m *Manager) WaitForWorkspaceReady(ctx context.Context, botID string) error
 		}
 		cancel()
 		if err == nil {
+			m.notifyNativeWorkspaceQuiescent(ctx, botID, client)
+			m.notifyNativeWorkspaceReady(ctx, botID)
 			return nil
 		}
 		lastErr = err

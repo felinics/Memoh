@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/payloadlease"
 	"github.com/felinics/memoh/internal/workspace/vpath"
 )
 
@@ -40,7 +42,7 @@ type cliProcess interface {
 }
 
 // startCLI spawns one Claude Code process from the resolved launcher path.
-func startCLI(ctx context.Context, client *bridge.Client, workDir string, args, env []string, launcher string) (cliProcess, error) {
+func startCLI(ctx context.Context, client *bridge.Client, workDir string, args, env []string, launcher external.Launcher) (cliProcess, error) {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
 		workDir = defaultProjectPath
@@ -48,7 +50,7 @@ func startCLI(ctx context.Context, client *bridge.Client, workDir string, args, 
 	if err := client.Mkdir(ctx, configDir); err != nil {
 		return nil, fmt.Errorf("create claude config directory %s: %w", configDir, err)
 	}
-	return agentprocess.Start(ctx, client, cliCommand(launcher, args), workDir, env)
+	return agentprocess.Start(ctx, client, payloadlease.Command(cliCommand(launcher.Path, args), launcher.LeasePath, launcher.WorkspaceEpoch), workDir, env)
 }
 
 // cliCommand builds the bridge shell command line. The launcher path is

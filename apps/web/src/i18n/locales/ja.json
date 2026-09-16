@@ -217,12 +217,17 @@
       "busy": "この依存関係で別の操作が進行中です。しばらくしてからもう一度お試しください。",
       "workspace_not_running": "Workspace が起動していません。先に起動してください。",
       "workspace_missing": "Workspace がまだ作成されていません。先に作成してください。",
-      "rollback_unavailable": "ロールバックできる以前のバージョンがありません。",
       "operation_failed": "依存関係の操作に失敗しました。ログを確認して、もう一度お試しください。",
       "catalog_unavailable": "依存関係カタログを取得できません。しばらくしてから再試行してください。",
       "definition_invalid": "依存関係の定義を検証できませんでした。カタログを更新して再試行してください。",
       "definition_unavailable": "この依存関係の定義はキャッシュされていません。Supermarket に接続して再試行してください。",
-      "discovery_failed": "Workspace の依存関係を確認できませんでした。再試行してください。"
+      "discovery_failed": "Workspace の依存関係を確認できませんでした。再試行してください。",
+      "recipe_upgrade_required": "このレシピでは同じバージョンを安全に再インストールできません。更新されたレシピを確認してください。",
+      "repair_authorization_required": "自動復元するには、Bot の管理者がこの依存関係を確認して承認する必要があります。",
+      "target_changed": "インストール対象が変更されました。更新して再確認してください。",
+      "repair_pending": "復元は待機中または実行中です。完了をお待ちください。",
+      "repair_manual_required": "自動復元には対応が必要です。依存関係を確認して復元を再試行してください。",
+      "repair_failed": "復元に失敗しました。依存関係の状態を確認して再試行してください。"
     },
     "acp": {
       "request_invalid": "Agent ランタイムのリクエストが無効です。内容を確認して、もう一度お試しください。",
@@ -1195,7 +1200,14 @@
       "attachmentUnavailable": "外部Agentが添付ファイルにアクセスできません。もう一度添付してください。",
       "imageInputUnsupported": "この外部Agentは添付画像を読み取れません。",
       "invalidChatRuntime": "選択されたチャットruntimeが無効です。",
-      "dependencyMissing": "{dep_id} はこの Workspace にインストールされていません。バックグラウンドでインストール中です。完了後にメッセージを再送してください。",
+      "dependencyMissing": "{dep_id} は利用できません。Bot 管理者に「Apps」でのインストールを依頼してから、メッセージを再送してください。",
+      "dependencyMissingInstalling": "{dep_id} の依存関係の操作が進行中です。完了後にメッセージを再送してください。",
+      "dependencyRepair": {
+        "queued": "{dep_id} {desired_version} の復元は待機中です。完了後にメッセージを再送してください。",
+        "installing": "{dep_id} {desired_version} を復元しています。完了後にメッセージを再送してください。",
+        "backoff": "{dep_id} {desired_version} の復元は再試行待ちです。「Apps」で状態を確認できます。",
+        "manual_required": "{dep_id} {desired_version} の復元には Bot 管理者の対応が必要です。「Apps」で確認してください。"
+      },
       "dependencyMissingProgress": "バックグラウンドでインストール中…",
       "dependencyMissingDone": "インストール完了。再送できます。",
       "dependencyMissingFailed": "バックグラウンドのインストールに失敗しました。Bot 設定の「依存関係」から再試行してください。",
@@ -2516,8 +2528,6 @@
         "install": "インストール",
         "reinstall": "再インストール",
         "update": "更新",
-        "rollback": "{version} にロールバック",
-        "rollbackPlain": "ロールバック",
         "remove": "削除",
         "viewScript": "スクリプトを表示",
         "viewProgress": "進行状況を表示"
@@ -2535,18 +2545,23 @@
         "installTitle": "{name} をインストール",
         "reinstallTitle": "{name} を再インストール",
         "updateTitle": "{name} を更新",
-        "updateDescription": "現在は {from} です。新しいバージョンを先にインストールし、成功した場合のみ切り替えます。失敗しても現在のバージョンには影響せず、後からロールバックできます。",
+        "updateDescription": "現在のバージョンは {from} です。新しいバージョンのインストールが成功すると切り替わります。",
         "installDescription": "Workspace に {name} をダウンロードしてインストールします。",
-        "reinstallDescription": "Workspace に {name} を再ダウンロードしてインストールします。",
+        "reinstallDescription": "{name} を再ダウンロードしてインストールします。同じバージョン、または別のリリースを指定できます。",
         "dependency": "依存関係",
         "installPath": "インストール先",
         "version": "バージョン",
-        "versionPlaceholder": "最新バージョン",
-        "versionHelp": "空欄のままにすると最新バージョンをインストールします。",
+        "versionPlaceholder": "最新リリース",
+        "versionHelp": "空欄で最新リリースを確認するか、以前のものも含め正確なバージョンを入力してください。インストール前に対象を確認できます。",
         "installConfirm": "インストール",
         "updateConfirm": "更新",
         "installAndEnable": "インストールして有効化",
-        "versionInvalid": "1.2.3 や latest のようなリリース識別子を入力してください。"
+        "versionInvalid": "1.2.3 や latest のようなリリース識別子を入力してください。",
+        "review": "インストール対象を確認",
+        "preparing": "インストール対象を確認中…",
+        "prepareFailed": "正確なインストール対象を準備できませんでした。もう一度お試しください。",
+        "source": "提供元",
+        "repairConsent": "このレシピでバージョン {version} をインストールします。ファイルが失われた場合、Memoh は同じリリースを自動的に復元できます。"
       },
       "progress": {
         "installing": "{name} をインストール中",
@@ -2561,8 +2576,9 @@
         "version": "バージョン",
         "entrypoint": "エントリーポイント",
         "log": "操作ログ",
+        "reconciling": "記録された操作を確認中…",
         "unknownTitle": "結果は未確認です",
-        "unknownHint": "操作結果はまだ確認されていません。依存関係を更新して状態を確認してください。"
+        "unknownHint": "操作結果を確認できませんでした。依存関係を更新して状態を確認してから、再インストールしてください。"
       },
       "script": {
         "title": "Workspace で実行されるスクリプト",
@@ -2576,16 +2592,7 @@
       },
       "remove": {
         "title": "{name} を削除しますか？",
-        "description": "この Workspace から {name} とインストール済みの各バージョンを削除します。この依存関係を必要とするプログラムが動作しなくなる場合があります。"
-      },
-      "rollback": {
-        "title": "{name} をロールバック",
-        "description": "{from} から {to} に戻します。ローカルに保持されたバージョンへ切り替えるだけで、ダウンロードは行いません。",
-        "current": "現在",
-        "target": "戻す先",
-        "confirm": "{to} にロールバック",
-        "success": "{to} にロールバックしました",
-        "failed": "ロールバックに失敗しました"
+        "description": "この Workspace から {name} を削除します。依存するプログラムが動作しなくなる可能性があります。"
       },
       "preflight": {
         "failed": "依存関係を確認できませんでした",
@@ -2607,7 +2614,23 @@
       },
       "busy": "この Workspace では別の依存関係の操作がまだ実行中です。",
       "catalogStaleTitle": "キャッシュされた依存関係を表示中",
-      "catalogStaleDescription": "Supermarket に接続できません。再試行して最新のカタログを取得できます。"
+      "catalogStaleDescription": "Supermarket に接続できません。再試行して最新のカタログを取得できます。",
+      "repair": {
+        "authorize": "自動復元を有効にする",
+        "authorizeTitle": "{name} の自動復元を有効にする",
+        "authorizeDescription": "確認した {name} のリリースを再インストールし、ファイルが失われた場合に自動復元できるようにします。",
+        "authorizeConfirm": "再インストールして復元を有効化",
+        "retry": "復元を再試行",
+        "retryFailed": "復元を要求できませんでした。もう一度お試しください。",
+        "targetVersion": "復元対象：{version}",
+        "managerRequired": "Bot の管理者にインストール対象の確認と自動復元の有効化を依頼してください。",
+        "status": {
+          "queued": "復元を待機中",
+          "installing": "復元中",
+          "backoff": "再試行を待機中",
+          "manual_required": "対応が必要"
+        }
+      }
     },
     "folders": {
       "create": "新しいフォルダ",
@@ -3865,6 +3888,20 @@
     "copyFailed": "コードをコピーできませんでした"
   },
   "apps": {
+    "prepare": {
+      "review": "インストール計画を確認",
+      "failed": "インストール計画を準備できませんでした。もう一度お試しください。",
+      "dependencies": "依存関係の変更",
+      "noDependencies": "依存関係のインストールスクリプトは実行されません。",
+      "action": "操作",
+      "version": "バージョン",
+      "definitionRevision": "レシピのリビジョン",
+      "registry": "レジストリ",
+      "source": "提供元の URL",
+      "appRevision": "App のリビジョン",
+      "resumeTitle": "{name} のインストールを続行",
+      "resumeDescription": "復元する依存関係を確認してから続行してください。"
+    },
     "diagnostics": {
       "failed": "操作に失敗しました",
       "partial": "対応が必要",

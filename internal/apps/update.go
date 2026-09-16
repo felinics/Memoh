@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/supermarket"
+	"github.com/felinics/memoh/internal/workspacedeps"
 )
 
 // UpdateRequest selects what to update for one App in a bot's isolated workspace.
@@ -14,15 +17,17 @@ type UpdateRequest struct {
 	RegistryID string
 	AppID      string
 
-	// Release moves the installation to the registry's current release.
-	Release bool
-	// Dependencies are updated to their latest version. Each must be one the
+	// Release moves the installation to the confirmed ReleaseRevision.
+	Release                 bool
+	ReleaseRevision         string
+	DependencyConfirmations []DependencyConfirmation
+	// Dependencies are updated to their confirmed version. Each must be one the
 	// App references or, for a discovered canonical App, its own id.
 	Dependencies []string
 }
 
 // UpdateSelection runs the chosen updates of one App as one stream:
-// the dependencies first, each to its latest version, then the release.
+// the dependencies first, each to its confirmed version, then the release.
 // A dependency that fails does not stop the others; the release step only
 // runs when it was selected.
 func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateRequest, sink EventSink) (OperationResult, error) {
@@ -74,6 +79,34 @@ func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateR
 		}
 	}
 
+	var targetRelease supermarket.AppDescriptor
+	var required []string
+	if req.Release {
+		if !supermarket.IsCanonicalSHA256(req.ReleaseRevision) {
+			return OperationResult{}, ErrInvalidRequest
+		}
+		targetRelease, err = s.registry.FetchRelease(ctx, registryID, appID, req.ReleaseRevision)
+		if err != nil {
+			return OperationResult{}, err
+		}
+		if err := validateReferences(targetRelease); err != nil {
+			return OperationResult{}, err
+		}
+		if targetRelease.Revision != inst.Revision || (inst.Status != StatusInstalled && inst.Status != StatusPartial) {
+			required = targetRelease.Dependencies
+		}
+	}
+	states := map[string]workspacedeps.Entry{}
+	if len(required)+len(depIDs) > 0 {
+		states, err = s.dependencyStates(ctx, botID)
+		if err != nil {
+			return OperationResult{}, err
+		}
+	}
+	confirmed, err := s.validateDependencyConfirmations(ctx, botID, required, depIDs, states, req.DependencyConfirmations)
+	if err != nil {
+		return OperationResult{}, err
+	}
 	result := OperationResult{Installation: inst}
 	sink.Send(Event{Type: EventStarted, Kind: KindApp, ID: appID, Version: inst.Version})
 	var firstErr error
@@ -81,9 +114,11 @@ func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateR
 	for _, depID := range depIDs {
 		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
 		step := StepResult{Kind: KindDependency, ID: depID}
-		res, err := s.dependencies.Update(ctx, botID, depID, "", logSink(sink, KindDependency, depID))
+		target := confirmed[depID]
+		res, err := s.dependencies.Update(workspacedeps.WithDefinitionRevision(ctx, target.DefinitionRevision), botID, depID, target.Version, logSink(sink, KindDependency, depID))
 		if err != nil {
-			step.Status, step.Error = StepFailed, err.Error()
+			s.logger.Warn("App dependency update failed", slog.String("dependency_id", depID), slog.Any("error", err))
+			step.Status, step.Error = StepFailed, publicCause(err)
 			failed++
 			if firstErr == nil {
 				firstErr = err
@@ -95,7 +130,7 @@ func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateR
 		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
 	}
 	if req.Release {
-		releaseResult, err := s.updateRelease(ctx, botID, inst, sink, true)
+		releaseResult, err := s.applyRelease(ctx, botID, inst, targetRelease, sink, true, installConfirmations(req.DependencyConfirmations))
 		result.Steps = append(result.Steps, releaseResult.Steps...)
 		if releaseResult.Installation.ID != "" {
 			result.Installation = releaseResult.Installation
@@ -128,38 +163,10 @@ func uniqueDependencyIDs(ids []string) []string {
 	return unique
 }
 
-// Update moves an installation to the registry's current release. Skills
-// are replaced atomically, new references are linked or installed, dropped
-// dependencies are removed the way Remove would, and dropped connector
-// references are unlinked while the bot-level connection stays authorized.
-// Dependency definitions keep their own update cycle; an App update never
-// reinstalls a dependency that is already present.
-func (s *Service) Update(ctx context.Context, botID, installationID string, sink EventSink) (OperationResult, error) {
-	sink = nonNilSink(sink)
-	inst, err := s.store.GetByID(ctx, botID, installationID)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	unlock, err := lockInstallation(ctx, botID, inst.RegistryID, inst.AppID)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	defer unlock()
-	inst, err = s.store.GetByID(ctx, botID, installationID)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	return s.updateRelease(ctx, botID, inst, sink, false)
-}
-
-// updateRelease is the body of Update once the installation is locked.
-// announced is set when the caller already sent the started event.
-func (s *Service) updateRelease(ctx context.Context, botID string, inst Installation, sink EventSink, announced bool) (OperationResult, error) {
-	current, err := s.registry.FetchCurrentApp(ctx, inst.RegistryID, inst.AppID)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	if current.Revision == inst.Revision && (inst.Status == StatusInstalled || inst.Status == StatusPartial) {
+// applyRelease publishes the confirmed App release after the installation lock
+// and all selected dependency confirmations have been checked.
+func (s *Service) applyRelease(ctx context.Context, botID string, inst Installation, release supermarket.AppDescriptor, sink EventSink, announced bool, confirmations []DependencyConfirmation) (OperationResult, error) {
+	if release.Revision == inst.Revision && (inst.Status == StatusInstalled || inst.Status == StatusPartial) {
 		release, err := s.releaseFor(ctx, inst)
 		if err != nil {
 			return OperationResult{}, err
@@ -178,12 +185,18 @@ func (s *Service) updateRelease(ctx context.Context, botID string, inst Installa
 		sink.Send(Event{Type: EventDone, Kind: KindApp, ID: inst.AppID, Status: string(inst.Status), Version: inst.Version})
 		return result, nil
 	}
-	release, err := s.registry.FetchRelease(ctx, inst.RegistryID, inst.AppID, current.Revision)
-	if err != nil {
-		return OperationResult{}, err
-	}
 	if err := validateReferences(release); err != nil {
 		return OperationResult{}, err
 	}
-	return s.materialize(ctx, botID, release, inst.Reason, StatusUpdating, sink, announced)
+	return s.materialize(ctx, botID, release, inst.Reason, StatusUpdating, sink, announced, confirmations)
+}
+
+func installConfirmations(confirmations []DependencyConfirmation) []DependencyConfirmation {
+	result := make([]DependencyConfirmation, 0, len(confirmations))
+	for _, target := range confirmations {
+		if target.Action == "install" {
+			result = append(result, target)
+		}
+	}
+	return result
 }

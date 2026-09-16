@@ -2,6 +2,15 @@
 
 状态：已实施（Supermarket 侧在 `feat/packages` 分支，Memoh 侧在本分支）。本文是 skills、workspace dependencies、connector 三条线合并为 app 的设计与实施记录。涉及两个仓库：Supermarket（registry 与 API）与 Memoh（Server 与 Web）。
 
+Dependency lifecycle update (2026-09-14): the current
+[workspace dependency contract](workspace-dependencies.md) supersedes the original
+dependency execution details below. App preparation freezes the App release and
+every dependency version/revision that will execute a script before confirmation.
+Linking an existing dependency grants no repair authority. Dependencies have one
+confirmed target and authorized recovery; the dependency Rollback action and
+previous-version UI/API have been removed. See the
+[upgrade guide](../workspace-dependencies-upgrade.md) for migration and cleanup.
+
 ## 1. 背景与目标
 
 现状：
@@ -29,9 +38,9 @@
 | 数据迁移 | 不做，当前版本尚未发布 |
 | 部分安装 | 允许，app 有 `partial` 状态 |
 | 哪些 registry 可含 deps 与 connector | 第一期仅 `memoh` registry；远程 registry 的 app 只有 skills |
-| dep 的 revision 是否被 app 锁定 | 不锁定，安装与更新时总是解析 dep 当前定义，与现有 workspacedeps 行为一致 |
+| Dependency revision selection | The App manifest references IDs; preparation freezes each executable dependency's exact version and definition revision before confirmation. Execution uses those confirmations without selecting latest again. |
 | 安装粒度 | App 与依赖仅安装到 Bot 的隔离工作区，安装记录与 dep 引用按 Bot 管理；connection 仍为 Bot 级共享 |
-| 子项删除 | skills、deps、connector 不能在 app 之外单独删除；dep 子项保留 update、reinstall、rollback、查看脚本，connector 子项保留授权、重新授权、启停、断开（断开会吊销 Bot 级连接并让引用它的 app 重新要求授权） |
+| Component management | Skills, dependencies and connectors are removed through their App. Dependency details retain update, reinstall, script preview and authorized repair controls. Connector details retain authorization, reauthorization, enable/disable and disconnect; disconnect revokes the Bot connection and requires referencing Apps to authorize it again. |
 | 自动带装的包 | 不自动回收，删除确认框提供“同时移除仅被它使用的自动安装包”勾选，默认不勾 |
 
 ## 3. Registry 侧（Supermarket 仓库）
@@ -153,7 +162,7 @@ categories:
 | `bot_skill_package_installations` | 改名 `bot_app_installations`；新增 `version TEXT`、`status TEXT`（`installed`、`partial`、`installing`、`updating`、`removing`、`failed`）、`reason TEXT`（`user`、`required`）、`available_revision TEXT`、`available_version TEXT`、`last_checked_at TIMESTAMPTZ`、`last_error TEXT`、`release BYTEA`（缓存的 release 文档，让列表不依赖 Supermarket 在线） |
 | `bot_app_dependency_refs` | 新增，`(team_id, installation_id, dependency_id)` 唯一，`installation_id` 级联删除 |
 | `bot_app_connector_refs` | 新增，`(team_id, installation_id, connector_type)` 唯一，`connection_id TEXT` 可空，`required BOOLEAN` |
-| `bot_dependency_installations` | 不变 |
+| `bot_dependency_installations` | Current dependency observations and operation identity; authorized recovery targets and audit events now live separately in `bot_dependency_desired_installations` and `bot_dependency_authorization_events`. Legacy observations do not receive repair authority. |
 | `connectors` | 不变 |
 | `workspace_dependency_definitions`、`workspace_dependency_catalogs` | 不变 |
 
@@ -164,7 +173,7 @@ RLS 策略与现有表一致。
 新增 `internal/apps`，编排三个既有服务，不复制它们的逻辑：
 
 - skills 部分沿用 `internal/supermarket` 的 `FetchAppRelease`、`prepareApp` 与 `internal/skills` 的 `PublishApp`、`PrepareAppRemoval`。
-- deps 部分调用 `internal/workspacedeps` 的 `Install`、`Update`、`Remove`、`CheckUpdates`、`Preflight`。
+- Dependencies delegate preparation, confirmed Install/Update/Reinstall, Remove, CheckUpdates and Preflight to `internal/workspacedeps`; reference creation alone does not authorize repair.
 - connector 部分调用 `internal/connectors` 的 `BeginOAuth`、`CreateCredential`、`Reauthorize`、`Delete`、`SetEnabled`。
 
 `internal/skillapps` 改名 `internal/apps/store`，承载新表的读写。
@@ -173,11 +182,13 @@ RLS 策略与现有表一致。
 
 流式操作的 SSE 若在中途断开（代理抖动、5 秒写超时遇到卡顿的连接），服务端会继续执行；前端操作 store 改为轮询应用列表直到该包不再处于进行中状态，再按记录的结果收尾，只有超过 10 分钟仍未确认才显示“结果未确认”。
 
-输入 `(bot, registry, app, revision)`。
+Input includes `(bot, registry, app, revision)` and the exact dependency
+confirmations returned by `/bots/:bot_id/apps/prepare`. Preparation precedes the
+user's confirmation and does not install dependencies or publish Skills.
 
 1. 拉取并校验 release，检查 `dependencies` 与 `connectors` 非空时 registry 必须是 `memoh`。
 2. 写安装记录，状态 `installing`。
-3. 逐个处理 dependency 引用：若该 `(bot, dep)` 已安装或镜像自带，只写引用；否则调用 workspacedeps 安装，日志流透传给客户端。任一失败记录 `last_error` 但继续。
+3. For each dependency, reuse an existing usable copy without granting repair authority. If installation is needed, require its exact version and frozen definition confirmation before calling workspacedeps; stream its progress and record failures. A dependency that becomes missing after preparation cannot acquire installation authority merely from its App reference.
 4. 发布 skills，原子替换，失败则整个安装记为 `failed` 并回滚 skills。
 5. 逐个处理 connector 引用：bot 上已有该 type 的 active connection 则复用并写引用；否则写空 `connection_id` 的引用，等待用户授权。
 6. 汇总状态：全部完成为 `installed`；有 dep 失败或必需 connector 未授权为 `partial`；skills 失败为 `failed`。
@@ -199,7 +210,14 @@ RLS 策略与现有表一致。
 
 检查更新：对每个安装记录取 registry 当前 descriptor，比较 revision，写入 `available_revision` 与 `available_version`，并给出差异摘要：skills 增删改、dependency 引用增删、connector 引用增删。dep 自身的更新沿用 workspacedeps 的 `CheckUpdates`，结果显示在所有引用它的包的子项上。
 
-更新：`POST /apps/update` 按用户在弹窗里勾选的项目执行一条 SSE 流：先把选中的 dep 逐个更新到最新版本（`workspacedeps.Update`），再在勾选了发布时拉取新 release，按 4.3 的顺序处理新增引用，按 4.4 的规则处理被移除的引用，skills 原子替换，最后写新 revision。discovered 的规范包只能更新自身那一个 dep。一级列表在发布或任一 dep 有新版本时直接显示 Update。
+Update uses `POST /bots/:bot_id/apps/update` after preparation and confirmation.
+Selected dependencies update to their confirmed exact versions and immutable
+definitions. A selected App release is also pinned during preparation; execution
+does not select latest again. New references follow section 4.3 and removed
+references follow section 4.4, with atomic Skill replacement and the committed
+App revision recorded afterward. A discovered canonical App can update only its
+own dependency. The list offers Update when an App release or dependency update
+is available.
 
 ### 4.6 发现的 dep 与规范包
 
@@ -213,6 +231,7 @@ RLS 策略与现有表一致。
 | --- | --- | --- |
 | GET | `/bots/:bot_id/apps` | 安装列表，含子项状态与发现的规范包，固定读取 Bot 隔离工作区 |
 | POST | `/bots/:bot_id/apps` | 安装，SSE |
+| POST | `/bots/:bot_id/apps/prepare` | Prepare an immutable App release and exact dependency confirmations; no installation or repair authorization. |
 | GET | `/bots/:bot_id/apps/:installation_id` | 详情 |
 | GET | `/bots/:bot_id/apps/:installation_id/removal-preview` | 删除预览 |
 | DELETE | `/bots/:bot_id/apps/:installation_id` | 删除，SSE |
@@ -223,7 +242,14 @@ RLS 策略与现有表一致。
 | POST | `/bots/:bot_id/apps/:installation_id/connectors/:type/api-key` | 同上 |
 | GET | `/supermarket/categories` | 代理 registry 的全局分类表 |
 
-保留：`/supermarket/*` 其余代理接口；`/bots/:bot_id/dependencies` 列表、`check-updates`、`preflight`、`:dep_id/script`、`:dep_id/install`（仅用于已被 app 引用的 dep 的重试与镜像副本覆盖安装，UI 不再提供“安装新 dep”入口）、`:dep_id/update`、`:dep_id/reinstall`、`:dep_id/rollback`；`/bots/:bot_id/connectors/:connection_id` 的 GET、PATCH、`reauth`；`/connectors/catalog` 用于补全 connector 的名称、图标与授权方式。
+Retained routes include the remaining `/supermarket/*` proxies and
+`/bots/:bot_id/dependencies` List, `check-updates`, `preflight`, `:dep_id/script`,
+`:dep_id/install`, `:dep_id/update` and `:dep_id/reinstall`. Install-like actions
+require exact version/revision confirmation; new dependencies enter through App
+installation. `:dep_id/prepare` and `:dep_id/repair/{prepare,authorize,retry}`
+provide explicit management preparation and recovery. Connector GET, PATCH and
+`reauth` remain under `/bots/:bot_id/connectors/:connection_id`, with
+`/connectors/catalog` supplying display metadata and authorization methods.
 
 删除：`POST /bots/:bot_id/supermarket/install-app`、`GET /bots/:bot_id/supermarket/apps`、`DELETE /bots/:bot_id/supermarket/apps/:installation_id`、`GET /workspace-dependencies/catalog`、`DELETE /bots/:bot_id/dependencies/:dep_id`、`POST /bots/:bot_id/connectors/oauth`、`POST /bots/:bot_id/connectors/api-key`、`DELETE /bots/:bot_id/connectors/:connection_id`、`GET /supermarket/registries/:id/categories`。
 
@@ -234,7 +260,7 @@ RLS 策略与现有表一致。
 - `db/postgres/migrations/0149_apps.{up,down}.sql`、`db/postgres/queries/apps.sql`、sqlc 重新生成。
 - `internal/apps/`：service、store、install、remove、update、list、events。
 - `internal/supermarket/protocol.go`、`app_installer.go`（拆出可复用的 release 拉取与 skills 发布）。
-- `internal/workspacedeps/service.go`：暴露“是否被镜像提供”与“按 dep 列出安装状态”的查询，供包级服务复用；删除独立 install 与 remove 的 handler 绑定，但保留服务方法。
+- `internal/workspacedeps/service.go` exposes dependency observation and preparation to App orchestration. Confirmed install/update/reinstall HTTP actions remain; dependency removal is orchestrated through App removal and shared-reference checks.
 - `internal/connectors/service.go`：新增按 type 查找 bot 上 active connection 的方法。
 - `internal/handlers/apps.go` 新增，`supermarket.go`、`supermarket_skills.go`、`workspace_dependencies.go`、`connectors.go`、`containerd.go` 调整路由。
 - `internal/agent/runtime/codex`、`claudecode` 的依赖启用路径改为规范包。

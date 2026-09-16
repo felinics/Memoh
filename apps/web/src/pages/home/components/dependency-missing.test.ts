@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dependencyInstallationInProgress, dependencyMissingArgs, isDependencyMissingBlock } from './dependency-missing'
+import { dependencyInstallationInProgress, dependencyMissingMessageKey, dependencyMissingArgs, isDependencyMissingBlock } from './dependency-missing'
 
 describe('isDependencyMissingBlock', () => {
   it('matches only the missing-dependency error code', () => {
@@ -31,5 +31,21 @@ describe('dependencyInstallationInProgress', () => {
     expect(dependencyInstallationInProgress({ operation_in_progress: 'false' })).toBe(false)
     expect(dependencyInstallationInProgress({ operation_in_progress: 'true' })).toBe(true)
     expect(dependencyInstallationInProgress({ install_task_id: 'task-1' })).toBe(true)
+  })
+})
+
+
+describe('recovery feedback', () => {
+  it('does not present an unaccepted repair as running', () => {
+    expect(dependencyMissingMessageKey({ dep_id: 'codex', desired_version: '0.154.0', repair_status: 'queued' }))
+      .toBe('chat.externalAgent.dependencyMissing')
+    expect(dependencyMissingMessageKey({ dep_id: 'codex', desired_version: '0.154.0', repair_status: 'queued', repair_operation_id: 'operation-1' }))
+      .toBe('chat.externalAgent.dependencyRepair.queued')
+  })
+  it('distinguishes automatic retry from administrator action', () => {
+    expect(dependencyMissingMessageKey({ desired_version: '0.154.0', repair_status: 'backoff' }))
+      .toBe('chat.externalAgent.dependencyRepair.backoff')
+    expect(dependencyMissingMessageKey({ desired_version: '0.154.0', repair_status: 'manual_required' }))
+      .toBe('chat.externalAgent.dependencyRepair.manual_required')
   })
 })

@@ -121,7 +121,7 @@
             :key="appKey(item)"
             :item="item"
             :workspace-state="workspaceState"
-            :busy="running || dependencyRunning"
+            :busy="running || dependencyRunning || repairPending.size > 0"
             :owns-stream="ownsAppStream(item.registry_id, item.app_id)"
             @action="onAppAction(item, $event)"
           />
@@ -138,8 +138,9 @@
       <SettingsShell width="narrow">
         <AppDetailPanel
           :item="selected"
+          :can-manage="canManage"
           :workspace-state="workspaceState"
-          :busy="running || dependencyRunning"
+          :busy="running || dependencyRunning || repairPending.size > 0"
           :owns-stream="ownsAppStream(selected.registry_id, selected.app_id)"
           :dependency-owns-stream="dependencyOwnsStream"
           :connector-catalog="connectorCatalog"
@@ -179,6 +180,8 @@
 
     <AppUpdateDialog
       :open="!!updateTarget"
+      :bot-id="botId"
+      :action="updateAction"
       :item="updateTarget"
       @update:open="(value) => { if (!value) updateTarget = null }"
       @confirm="onUpdateConfirmed"
@@ -208,6 +211,8 @@
 
     <DependencyConfirmDialog
       :open="confirm.open"
+      :bot-id="botId"
+      :operation="confirm.operation"
       :mode="confirm.mode"
       :item="confirm.item"
       @update:open="(value) => { confirm.open = value }"
@@ -220,6 +225,7 @@
       :action="activeDependency?.action ?? 'update'"
       :lines="activeDependency?.lines ?? []"
       :status="activeDependency?.status ?? 'running'"
+      :reconciling="activeDependency?.reconciling"
       :error="activeDependency?.error"
       :result-version="activeDependency?.resultVersion"
       :entrypoint="activeDependency?.entrypoint"
@@ -238,19 +244,11 @@
       @update:open="(value) => { script.open = value }"
       @update:action="switchScriptAction"
     />
-
-    <DependencyRollbackDialog
-      :open="!!rollbackTarget"
-      :item="rollbackTarget"
-      :loading="rollingBack"
-      @update:open="(value) => { if (!value && !rollingBack) rollbackTarget = null }"
-      @confirm="onRollbackConfirmed"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch, type Ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useQueryCache } from '@pinia/colada'
@@ -282,7 +280,6 @@ import {
 } from '@memohai/sdk'
 import DependencyConfirmDialog from './dependency-confirm-dialog.vue'
 import DependencyProgressDialog from './dependency-progress-dialog.vue'
-import DependencyRollbackDialog from './dependency-rollback-dialog.vue'
 import DependencyScriptDialog from './dependency-script-dialog.vue'
 import AppConnectorAuthDialog from './app-connector-auth-dialog.vue'
 import AppProgressDialog from './app-progress-dialog.vue'
@@ -293,6 +290,7 @@ import type { AppRowAction } from './app-actions'
 import AppUpdateDialog, { type AppUpdateChoice } from './app-update-dialog.vue'
 import { useDependencyOperation } from '../composables/useDependencyOperation'
 import { useAppOperation } from '../composables/useAppOperation'
+import { useAppStatusRefresh } from '../composables/useAppStatusRefresh'
 import {
   checkAppUpdates,
   fetchAppRemovalPreview,
@@ -307,10 +305,11 @@ import {
 } from '@/composables/api/useApps'
 import {
   fetchDependencyScript,
+  retryDependencyRepair,
   invalidateBotDependencies,
-  rollbackDependency,
   type DependencyItem,
   type DependencyOperationAction,
+  type DependencyPreparedInstallation,
   type DependencyWorkspaceState,
   type ScriptAction,
   type ScriptResponse,
@@ -327,13 +326,13 @@ import { useCapabilitiesStore } from '@/store/capabilities'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   dependencyAllows,
-  formatDependencyVersion,
+  dependencyNeedsPolling,
   type DependencyConfirmMode,
   type DependencyMenuAction,
   type DependencyPrimaryAction,
 } from '@/utils/workspace-dependency'
 
-const props = defineProps<{ botId: string }>()
+const props = withDefaults(defineProps<{ botId: string, canManage?: boolean }>(), { canManage: false })
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -443,6 +442,7 @@ const {
 } = useAppOperation(botIdRef, 'bot-apps')
 
 function onAppAction(item: AppItem, action: AppRowAction) {
+  if (!props.canManage && ['resume', 'retry', 'update', 'remove'].includes(action)) return
   switch (action) {
     case 'open':
       openDetail(item)
@@ -460,15 +460,11 @@ function onAppAction(item: AppItem, action: AppRowAction) {
     case 'resume':
     case 'retry':
       if (!item.installation_id) return
-      startApp({
-        registryId: item.registry_id ?? '',
-        appId: item.app_id ?? '',
-        installationId: item.installation_id,
-        name: appDisplayName(item, locale.value),
-        action: 'resume',
-      })
+      updateAction.value = 'resume'
+      updateTarget.value = item
       return
     case 'update':
+      updateAction.value = 'update'
       updateTarget.value = item
       return
     case 'remove':
@@ -482,18 +478,25 @@ function onAppAction(item: AppItem, action: AppRowAction) {
 // ---- Update -----------------------------------------------------------------
 
 const updateTarget = ref<AppItem | null>(null)
+const updateAction = ref<'update' | 'resume'>('update')
 
 function onUpdateConfirmed(choice: AppUpdateChoice) {
   const item = updateTarget.value
   updateTarget.value = null
-  if (!item) return
+  if (!item || !props.canManage) return
   startApp({
     registryId: item.registry_id ?? '',
     appId: item.app_id ?? '',
     installationId: item.installation_id ?? undefined,
     name: appDisplayName(item, locale.value),
-    action: 'update',
-    update: { ...choice },
+    action: choice.action,
+    dependencyConfirmations: choice.dependencyConfirmations,
+    resumeRevision: choice.action === 'resume' ? choice.releaseRevision : undefined,
+    update: choice.action === 'update' ? {
+      release: choice.release,
+      dependencies: choice.dependencies,
+      releaseRevision: choice.releaseRevision,
+    } : undefined,
   })
 }
 
@@ -653,75 +656,64 @@ const confirm = reactive<{
   mode: DependencyConfirmMode
   item: DependencyItem | null
   operation: DependencyOperationAction
-  definitionRevision: string
-}>({ open: false, mode: 'update', item: null, operation: 'update', definitionRevision: '' })
+}>({ open: false, mode: 'update', item: null, operation: 'update' })
 
 function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operation: DependencyOperationAction) {
+  if (!props.canManage || running.value || dependencyRunning.value) return
   confirm.item = item
-  confirm.definitionRevision = item.definition_revision ?? ''
   confirm.mode = mode
   confirm.operation = operation
   confirm.open = true
 }
 
-function onDependencyConfirmed(version: string) {
+function onDependencyConfirmed(target: DependencyPreparedInstallation) {
   const item = confirm.item
+  if (!props.canManage || !item || !target.version || !target.definition_revision) return
   confirm.open = false
-  if (item) startDependency(item, confirm.operation, { version, definitionRevision: confirm.definitionRevision })
+  startDependency(item, confirm.operation, { version: target.version, definitionRevision: target.definition_revision })
 }
 
 function onDependencyPrimary(item: DependencyItem, action: DependencyPrimaryAction) {
-  switch (action.kind) {
-    case 'viewProgress':
-      viewDependencyProgress(item)
-      return
-    case 'update':
-      openConfirm(item, 'update', 'update')
-      return
-    case 'retry':
-      openConfirm(item, 'reinstall', 'reinstall')
-      return
-    default:
-      break
+  if (action.kind === 'viewProgress') {
+    viewDependencyProgress(item)
+    return
   }
+  if (action.kind === 'retryRepair') {
+    void retryRepair(item)
+    return
+  }
+  if (!action.operation || !props.canManage) return
+  const mode = action.kind === 'update' ? 'update' : action.kind === 'install' ? 'install' : 'reinstall'
+  openConfirm(item, mode, action.operation)
 }
-
-const rollbackTarget = ref<DependencyItem | null>(null)
-const rollingBack = ref(false)
 
 function onDependencyMenu(item: DependencyItem, action: DependencyMenuAction) {
   switch (action.kind) {
+    case 'install':
     case 'reinstall':
-      openConfirm(item, 'reinstall', 'reinstall')
+      if (action.operation) openConfirm(item, action.kind, action.operation)
       return
-    case 'rollback':
-      rollbackTarget.value = item
+    case 'authorizeRepair':
+      openConfirm(item, 'authorizeRepair', 'reinstall')
       return
     case 'viewScript':
       void openScript(item, dependencyAllows(item, 'update') ? 'update' : 'install')
       return
-    default:
-      break
   }
 }
 
-async function onRollbackConfirmed() {
-  const item = rollbackTarget.value
-  if (!item?.id || rollingBack.value) return
-  const to = formatDependencyVersion(item.previous_version)
-  rollingBack.value = true
+const repairPending = ref(new Set<string>())
+async function retryRepair(item: DependencyItem) {
+  const botId = props.botId
+  if (!props.canManage || !item.id || repairPending.value.has(item.id)) return
+  repairPending.value.add(item.id)
   try {
-    await runMutation(() => rollbackDependency(props.botId, item.id ?? ''), {
-      fallbackMessage: t('bots.dependencies.rollback.failed'),
-      onSuccess: async () => {
-        rollbackTarget.value = null
-        toast.success(t('bots.dependencies.rollback.success', { to }))
-        await Promise.all([invalidateBotApps(queryCache, props.botId), invalidateBotDependencies(queryCache, props.botId)])
-        if (item.category === 'agent') void queryCache.invalidateQueries({ key: ['bot-agents', props.botId] })
-      },
-    })
+    await retryDependencyRepair(botId, item.id)
+    await Promise.all([invalidateBotApps(queryCache, botId), invalidateBotDependencies(queryCache, botId)])
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('bots.dependencies.repair.retryFailed')))
   } finally {
-    rollingBack.value = false
+    repairPending.value.delete(item.id)
   }
 }
 
@@ -833,44 +825,20 @@ function goToSupermarket() {
   void router.push({ name: 'supermarket', query: { botId: props.botId } }).catch(() => {})
 }
 
-// ---- Polling for operations this client does not own ------------------------
+// ---- Read-only observation of server-side operations ------------------------
 
-const POLL_MS = 5_000
-let pollTimer: ReturnType<typeof setInterval> | null = null
-let tabActive = true
+const hasForeignProgress = computed(() => items.value.some(item =>
+  (appInProgress(item) && !ownsAppStream(item.registry_id, item.app_id))
+  || item.dependencies?.some(dep => dep.dependency && dependencyNeedsPolling(dep.dependency)),
+))
 
-const hasForeignProgress = computed(() => items.value.some(item => appInProgress(item) && !ownsAppStream(item.registry_id, item.app_id)))
-
-function stopPolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}
-
-function syncPolling() {
-  const shouldPoll = tabActive && hasForeignProgress.value
-  if (shouldPoll && !pollTimer) {
-    pollTimer = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') void refetchApps()
-    }, POLL_MS)
-  } else if (!shouldPoll) {
-    stopPolling()
-  }
-}
-
-watch(hasForeignProgress, syncPolling, { immediate: true })
-
-onActivated(() => {
-  tabActive = true
-  syncPolling()
-  void refetchApps()
+useAppStatusRefresh({
+  botId: () => props.botId,
+  detailKey: () => selectedKey.value,
+  inProgress: () => hasForeignProgress.value,
+  refresh: () => {
+    forceRefresh.value = true
+    return refetchApps()
+  },
 })
-
-onDeactivated(() => {
-  tabActive = false
-  stopPolling()
-})
-
-onBeforeUnmount(stopPolling)
 </script>

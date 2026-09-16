@@ -220,12 +220,17 @@
       "busy": "该依赖正在进行其他操作，请稍后再试。",
       "workspace_not_running": "工作区未运行，请先启动。",
       "workspace_missing": "尚未创建工作区，请先创建。",
-      "rollback_unavailable": "没有可回滚的旧版本。",
       "operation_failed": "依赖操作失败，请查看日志后重试。",
       "catalog_unavailable": "暂时无法获取依赖目录，请稍后重试。",
       "definition_invalid": "依赖定义未通过校验，请刷新目录后重试。",
       "definition_unavailable": "本地没有缓存这份依赖定义，请连接 Supermarket 后重试。",
-      "discovery_failed": "暂时无法检查工作区依赖，请重试。"
+      "discovery_failed": "暂时无法检查工作区依赖，请重试。",
+      "recipe_upgrade_required": "此安装配方无法安全地重装同一版本，请先查看并确认更新的安装配方。",
+      "repair_authorization_required": "需要 Bot 管理员确认并授权此依赖，才能自动恢复。",
+      "target_changed": "安装目标已变化，请刷新后重新确认。",
+      "repair_pending": "恢复已排队或正在进行，请等待完成。",
+      "repair_manual_required": "自动恢复需要处理，请检查依赖后重试恢复。",
+      "repair_failed": "恢复失败，请检查依赖状态后重试。"
     },
     "acp": {
       "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
@@ -1229,7 +1234,14 @@
       "attachmentUnavailable": "无法让外部 Agent 访问该附件，请重新添加。",
       "imageInputUnsupported": "这个外部 Agent 无法读取所附图片。",
       "invalidChatRuntime": "选择的对话运行时无效。",
-      "dependencyMissing": "{dep_id} 尚未安装在此工作区，正在后台安装。完成后请重发这条消息。",
+      "dependencyMissing": "{dep_id} 暂不可用。请让 Bot 管理员到「应用」安装后，再重发消息。",
+      "dependencyMissingInstalling": "{dep_id} 的依赖操作正在进行，完成后请重发消息。",
+      "dependencyRepair": {
+        "queued": "{dep_id} {desired_version} 已排队恢复，完成后请重发消息。",
+        "installing": "正在恢复 {dep_id} {desired_version}，完成后请重发消息。",
+        "backoff": "{dep_id} {desired_version} 正在等待重试恢复，可到「应用」查看状态。",
+        "manual_required": "{dep_id} {desired_version} 无法自动恢复，请让 Bot 管理员到「应用」处理。"
+      },
       "dependencyMissingProgress": "正在后台安装…",
       "dependencyMissingDone": "安装完成，可以重发消息了。",
       "dependencyMissingFailed": "后台安装失败，请到 Bot 设置的「依赖」中重试。",
@@ -2518,8 +2530,6 @@
         "install": "安装",
         "reinstall": "重新安装",
         "update": "更新",
-        "rollback": "回滚到 {version}",
-        "rollbackPlain": "回滚",
         "remove": "卸载",
         "viewScript": "查看脚本",
         "viewProgress": "查看进度"
@@ -2537,18 +2547,23 @@
         "installTitle": "安装 {name}",
         "reinstallTitle": "重新安装 {name}",
         "updateTitle": "更新 {name}",
-        "updateDescription": "当前 {from}。新版本安装完成后才切换；失败不影响当前版本，成功后可回滚。",
+        "updateDescription": "当前版本为 {from}。新版本安装成功后才会切换。",
         "installDescription": "将在工作区中下载并安装 {name}。",
-        "reinstallDescription": "在工作区中重新下载并安装 {name}。",
+        "reinstallDescription": "重新下载并安装 {name}。可以使用当前版本，也可以指定其他版本。",
         "dependency": "依赖",
         "installPath": "安装位置",
         "version": "版本",
         "versionPlaceholder": "最新版本",
-        "versionHelp": "留空则安装最新版。",
+        "versionHelp": "留空查询最新版本，或输入准确版本号，也可以选择旧版本。安装前会展示目标供确认。",
         "installConfirm": "安装",
         "updateConfirm": "更新",
         "installAndEnable": "安装并启用",
-        "versionInvalid": "请输入 1.2.3 或 latest 这样的版本标识。"
+        "versionInvalid": "请输入 1.2.3 或 latest 这样的版本标识。",
+        "review": "查看安装目标",
+        "preparing": "正在准备安装目标…",
+        "prepareFailed": "无法准备准确的安装目标，请重试。",
+        "source": "来源",
+        "repairConsent": "使用此安装配方安装 {version}。负载文件丢失时，Memoh 可自动恢复同一版本。"
       },
       "progress": {
         "installing": "正在安装 {name}",
@@ -2563,8 +2578,9 @@
         "version": "版本",
         "entrypoint": "入口",
         "log": "操作日志",
+        "reconciling": "正在核对已记录的操作…",
         "unknownTitle": "结果未确认",
-        "unknownHint": "操作结果尚未确认，请刷新依赖列表查看状态。"
+        "unknownHint": "尚未确认操作结果。请刷新依赖状态，再决定是否重新安装。"
       },
       "script": {
         "title": "将在工作区执行的脚本",
@@ -2578,16 +2594,7 @@
       },
       "remove": {
         "title": "卸载 {name}？",
-        "description": "从工作区中移除 {name} 及其已安装版本。依赖它的程序可能无法运行。"
-      },
-      "rollback": {
-        "title": "回滚 {name}",
-        "description": "从 {from} 回到 {to}。回滚只切换本地已保留的版本，不联网。",
-        "current": "当前版本",
-        "target": "回到",
-        "confirm": "回滚到 {to}",
-        "success": "已回滚到 {to}",
-        "failed": "回滚失败"
+        "description": "从工作区移除 {name}。依赖它的程序可能无法运行。"
       },
       "preflight": {
         "failed": "无法检查依赖",
@@ -2609,7 +2616,23 @@
       },
       "busy": "此工作区还有其他依赖操作在进行中。",
       "catalogStaleTitle": "正在显示缓存的依赖",
-      "catalogStaleDescription": "暂时无法连接 Supermarket，可重试获取最新目录。"
+      "catalogStaleDescription": "暂时无法连接 Supermarket，可重试获取最新目录。",
+      "repair": {
+        "authorize": "启用自动恢复",
+        "authorizeTitle": "为 {name} 启用自动恢复",
+        "authorizeDescription": "重新安装经过确认的 {name} 版本，以便负载文件丢失时自动恢复。",
+        "authorizeConfirm": "重新安装并启用恢复",
+        "retry": "重试恢复",
+        "retryFailed": "无法请求恢复，请重试。",
+        "targetVersion": "恢复目标：{version}",
+        "managerRequired": "请让 Bot 管理员确认安装目标并启用恢复。",
+        "status": {
+          "queued": "恢复已排队",
+          "installing": "正在恢复",
+          "backoff": "等待重试",
+          "manual_required": "需要处理"
+        }
+      }
     },
     "folders": {
       "create": "新建文件夹",
@@ -3872,6 +3895,20 @@
     "copyFailed": "复制验证码失败"
   },
   "apps": {
+    "prepare": {
+      "review": "查看安装计划",
+      "failed": "无法准备安装计划，请重试。",
+      "dependencies": "将执行的依赖变更",
+      "noDependencies": "无需运行依赖安装脚本。",
+      "action": "操作",
+      "version": "版本",
+      "definitionRevision": "安装配方版本",
+      "registry": "应用源",
+      "source": "来源地址",
+      "appRevision": "应用版本标识",
+      "resumeTitle": "继续安装 {name}",
+      "resumeDescription": "查看要恢复的依赖，再确认继续安装。"
+    },
     "diagnostics": {
       "failed": "操作失败",
       "partial": "需要处理",

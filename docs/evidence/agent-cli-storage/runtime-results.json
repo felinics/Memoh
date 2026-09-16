@@ -1,0 +1,69 @@
+{
+  "date": "2026-09-14",
+  "environment": "OSS local development, Linux ARM64/containerd, http://localhost:18080 and http://localhost:18082",
+  "rootfs": {
+    "passed": true,
+    "container_removed": true,
+    "rootfs_marker_absent": true,
+    "no_install_or_retry_after_recreate": true,
+    "observation_reconnected_after_server_reload": true,
+    "test_only_auth_file_hash_unchanged": true,
+    "test_only_auth_file_mode": "600",
+    "local_control_in_launcher": true,
+    "dependencies": [
+      {
+        "id": "codex",
+        "version": "0.154.0",
+        "recipe_revision": "b018873f251187dc5747a1f357ec7b5793036a6fb15f062dfbc555555d3a6f79",
+        "before_installation_id": "c19970c245f6bc4d5b6f99fd3de4685a",
+        "after_installation_id": "2607f13a8c8361a8f6681cdba6b59e0a",
+        "authorization_revision_unchanged": true
+      },
+      {
+        "id": "node",
+        "version": "24.4.1",
+        "recipe_revision": "e4c5f914e12f8c3febc2a5be0a9010946125d2002e912d70209e2e7bf10a01b7",
+        "before_installation_id": "756dae1c841e50430dc65174dff72814",
+        "after_installation_id": "a3b3aa624d14fdac8d75b9dbe53333cd",
+        "authorization_revision_unchanged": true
+      },
+      {
+        "id": "pnpm",
+        "version": "12.4.1",
+        "recipe_revision": "885c5d8f3ac41bcb41397846f32e17edcc692e308a16508cab042aa2fd675276",
+        "before_installation_id": "b765365cd40f770a77eaac5b956f78e1",
+        "after_installation_id": "139143300753ef787b2ad0a09d955b5b",
+        "authorization_revision_unchanged": true
+      },
+      {
+        "id": "claude-code",
+        "version": "2.1.270",
+        "recipe_revision": "423b08e4d87092b3fb8bc617705cca2424134ae6f07b8964796576e9c62c8128",
+        "before_installation_id": "7d4056e3420d1e098ecb9bdeb6e89d8f",
+        "after_installation_id": "69d9e346e6f1469523d295510458e6b5",
+        "authorization_revision_unchanged": true
+      }
+    ],
+    "version_commands": [
+      "codex-cli 0.154.0",
+      "v24.4.1",
+      "12.4.1",
+      "2.1.270 (Claude Code)"
+    ]
+  },
+  "same_version_replacement": {
+    "initialize_seconds": 0.381758834,
+    "old_server_responded_after_reinstall": true,
+    "old_server_response_seconds": 0.014669708,
+    "retained_while_running": true,
+    "retained_after_exit_before_restart": true,
+    "old_payload_collected_after_restart": true,
+    "launcher_after_restart": "codex-cli 0.154.0"
+  },
+  "limitations": [
+    "No authenticated model call or resume was performed.",
+    "The auth.json fixture contains test-only data.",
+    "Timing samples are not performance benchmarks.",
+    "Agent verification is not human QA."
+  ]
+}

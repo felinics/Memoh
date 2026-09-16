@@ -33,7 +33,7 @@ func TestKernelLockSurvivesSupervisorDeathWhileChildRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := Home(root, "inheritance")
-	lock := lockPath(home, "inheritance")
+	lock := executionLockPath(home, "inheritance", runtime.GOOS)
 	childBody := "exec 8<> " + shellQuote(fifo) + "\nprintf '%s\\n' \"$$\"\nread release <&8\n"
 	command := exec.CommandContext(testContext(t), "/bin/sh", "-c", scriptExecCommand) //nolint:gosec // G204: executes the production wrapper against synthetic test paths.
 	command.Env = append(os.Environ(), buildEnv(RunSpec{

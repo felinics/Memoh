@@ -30,13 +30,25 @@ const lockProbeHelpers = `memoh_lock_active() {
 // scriptExecWrapper acquires an OS advisory lock before sh reads the script.
 // flock and lockf retain the same inode until the entire command exits, and
 // the kernel releases it on crash. There is no user-space stale-lock deletion.
-const scriptExecWrapper = `memoh_lock="$(dirname "$MEMOH_DEP_HOME")/.locks/$MEMOH_DEP_ID.lock"
+const scriptExecWrapper = `memoh_os="${MEMOH_DEP_OS:-$(uname -s)}"
+case "$memoh_os" in
+  linux|Linux) memoh_control="${MEMOH_DEP_CONTROL_ROOT:-/run/memoh/deps}" ;;
+  *) memoh_control="$(dirname "$MEMOH_DEP_HOME")" ;;
+esac
+memoh_lock="$memoh_control/.locks/$MEMOH_DEP_ID.lock"
+for memoh_guard in "$memoh_control" "$memoh_control/.locks" "$memoh_lock"; do
+  [ ! -L "$memoh_guard" ] || { printf '%s\n' 'dependency control path must not be a symlink' >&2; exit 77; }
+done
+if ! mkdir -p "$memoh_control/.locks"; then
+  printf '%s\n' 'workspace image must provide writable /run/memoh/deps; recreate the workspace with the matching image' >&2
+  exit 77
+fi
 mkdir -p "$(dirname "$memoh_lock")"
 if [ -d "$memoh_lock" ]; then
   printf '%s\n' 'legacy dependency lock directory requires operator recovery' >&2
   exit 73
 fi
-case "${MEMOH_DEP_OS:-$(uname -s)}" in
+case "$memoh_os" in
   darwin|Darwin)
     # FD mode keeps the lock in the shell and its descendants. Command mode
     # unlocks when the lockf supervisor exits, even if its child is still alive.
@@ -69,6 +81,11 @@ dep_log()    { printf '%s\n' "$*" >&2; }
 dep_result() { printf '%s' "$1" > "$MEMOH_DEP_RESULT"; }
 # shellcheck disable=SC2329
 dep_switch() {
+  if [ -n "${MEMOH_DEP_INSTALL_DIR:-}" ] && [ -n "${MEMOH_DEP_OPERATION_DIR:-}" ]; then
+    [ "$1" = "$MEMOH_DEP_INSTALL_DIR" ] || { dep_log "invalid installation candidate"; return 1; }
+    printf '%s\n' "$1" > "$MEMOH_DEP_OPERATION_DIR/candidate"
+    return 0
+  fi
   case "$MEMOH_DEP_OS" in
     darwin)
       # BSD mv has no -T. ln -sfh is unlink+create, close enough to atomic for

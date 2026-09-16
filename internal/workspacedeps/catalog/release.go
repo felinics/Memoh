@@ -79,6 +79,16 @@ func (d Definition) Dependency() Dependency { return d.loaded.dep.clone() }
 
 func (d Definition) Icon() []byte { return bytes.Clone(d.loaded.iconBytes) }
 
+// Script reads a verified script from one frozen publication without requiring
+// a current dependency graph. Receipt recovery never re-runs its prerequisites.
+func (d Definition) Script(action Action) (string, bool) {
+	if d.loaded == nil {
+		return "", false
+	}
+	script, ok := d.loaded.scripts[action]
+	return script.content, ok
+}
+
 func (d Definition) WithRetired(retired bool) Definition {
 	loaded := *d.loaded
 	loaded.dep = loaded.dep.clone()

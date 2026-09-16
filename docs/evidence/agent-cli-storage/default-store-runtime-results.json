@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "result": "passed_with_entrypoint_repair",
+  "scope": "OSS default dependency store with real Manage confirmation, persisted authorization and root filesystem replacement",
+  "source_head": "46eee328605d420510ea9ebdaf00a2a77a4ef842",
+  "server_binary_sha256": "007624afa5de45b45a26bd308c78af125d1aa04c3a3688b10056c9894a0a5c08",
+  "environment": {
+    "api_url": "http://localhost:18100",
+    "web_url": "http://localhost:18102",
+    "database": "memoh_default_store_b23019",
+    "containerd_namespace": "default-store-b23019",
+    "host_data_root": "/opt/memoh/default-store-b23019",
+    "workspace_image": "docker.io/memohai/workspace:debian",
+    "workspace_image_digest": "sha256:36bb5415bd4228aac81b114dd3a33d00ac3d4dd9b1d1077c85adbc83ad7b04d5",
+    "dependency_store_root": "",
+    "existing_18080_configuration_unchanged": true,
+    "existing_bots_and_credentials_unchanged": true
+  },
+  "fixture": {
+    "bot_id": "633a7c7f-6ae9-495c-8370-8f0deabcdef1",
+    "bot_name": "default-store-qa-b23019",
+    "onboarding_completion": {
+      "method": "PUT",
+      "path": "/users/me",
+      "body": {
+        "metadata": {
+          "onboarding_completed": true
+        }
+      },
+      "uses_normal_authenticated_ui_contract": true,
+      "fixture_user_matches_bot_owner": true
+    },
+    "model_or_agent_credentials_added": false
+  },
+  "confirmed_installation": {
+    "dependency_id": "uv",
+    "version": "0.12.12",
+    "definition_revision": "c08c6b3cd8ad226a7652c1f67ac42eb24dc65aeab75f2245c99cdcc8b65f4667",
+    "source_url": "http://host.docker.internal:5175",
+    "registry_id": "memoh",
+    "manifest_digest": "sha256:08e6e5304161f7ea5ce957c825963dabd4be45268b3f8df154c446ff82b15dd3",
+    "operation_id": "ba2523d3eb7c9405e85ba4bb0e1b14a7",
+    "installation_id": "ba2523d3eb7c9405e85ba4bb0e1b14a7",
+    "payload_path": "/data/.memoh/deps/uv/installs/ba2523d3eb7c9405e85ba4bb0e1b14a7",
+    "store_root": "/data/.memoh/deps",
+    "launcher": "/data/.memoh/deps/bin/uv",
+    "launcher_output": "uv 0.12.12 (aarch64-unknown-linux-gnu)",
+    "executable_sha256": "e35ce2790b68619d2f7169706a6509f871343ab9141c74fc1edd47dd5bde71e7"
+  },
+  "rootfs_replacement": {
+    "delete_request": {
+      "method": "DELETE",
+      "path": "/bots/633a7c7f-6ae9-495c-8370-8f0deabcdef1/container?preserve_data=true"
+    },
+    "create_request": {
+      "method": "POST",
+      "path": "/bots/633a7c7f-6ae9-495c-8370-8f0deabcdef1/container",
+      "body": {
+        "restore_data": true
+      }
+    },
+    "container_removed_before_recreation": true,
+    "marker_outside_data_absent_after_recreation": true,
+    "data_restored": true,
+    "installation_id_unchanged": true,
+    "payload_path_unchanged": true,
+    "executable_hash_unchanged": true,
+    "managed_launcher_output_after": "uv 0.12.12 (aarch64-unknown-linux-gnu)",
+    "authorization_fields_unchanged": {
+      "version": "0.12.12",
+      "revision": "ba2523d3eb7c9405e85ba4bb0e1b14a7",
+      "definition_revision": "c08c6b3cd8ad226a7652c1f67ac42eb24dc65aeab75f2245c99cdcc8b65f4667",
+      "source_url": "http://host.docker.internal:5175",
+      "registry_id": "memoh",
+      "manifest_digest": "sha256:08e6e5304161f7ea5ce957c825963dabd4be45268b3f8df154c446ff82b15dd3",
+      "auto_repair_authorized_at": "2026-09-14T16:28:08.986796Z"
+    },
+    "authorization_audit_unchanged": true,
+    "authorization_audit_count": 1
+  },
+  "entrypoint_repair": {
+    "occurred": true,
+    "operation_id": "07cd13ac60f2ca2b79f8a880f8de67bc",
+    "action": "reinstall",
+    "kind": "restore_existing_payload_entrypoints",
+    "repair_attempts_before": 0,
+    "repair_attempts_after": 1,
+    "reinstalled_payload": false,
+    "download_recipe_executed": false,
+    "evidence": "The persisted payload installation ID/path/hash did not change. restoreDesiredEntrypoints reuses RestoreInstallationID and executes only dep_switch plus dep_result; it does not run the download recipe. The completed receipt was removed, while .operations/uv/current retains the new repair operation ID.",
+    "archive_behavior": {
+      "source": "internal/workspace/dataio.go:653",
+      "observation": "tarGzDir skips symbolic links, including the recorded current link. Regular payload and shim files remain in the archive.",
+      "restore_order_source": "internal/workspace/manager.go:810",
+      "restore_order": "restorePreservedIntoSnapshot completes before startTaskAndEnsureNetwork; this observed case is not an early readiness race.",
+      "repair_source": "internal/workspacedeps/payload.go:445"
+    },
+    "zero_operation_expectation_passed": false
+  },
+  "screenshots": [
+    "default-store-uv-confirmation.jpg",
+    "default-store-uv-installed.jpg",
+    "default-store-uv-after-rebuild.jpg"
+  ],
+  "limitations": [
+    "The default-store rootfs reconstruction was not a zero-operation event: the archive omitted current and one entrypoint repair ran.",
+    "This verifies the OSS containerd default layout; it is not E2B or NFS performance evidence.",
+    "Agent UI interaction and screenshots do not constitute human QA."
+  ],
+  "production_code_changed_for_verification": false
+}

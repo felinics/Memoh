@@ -62,17 +62,27 @@ func dependencyMissingFeedback(missing *external.DependencyMissingError) *agentf
 	if operationInProgress {
 		message = "Claude Code is not installed in this workspace yet; a dependency operation is already in progress. Send the message again when it finishes."
 	}
+	args := map[string]string{
+		"dep_id":                firstNonEmpty(missing.DependencyID, dependencyID),
+		"install_task_id":       strings.TrimSpace(missing.TaskID),
+		"operation_in_progress": strconv.FormatBool(operationInProgress),
+	}
+	for key, value := range map[string]string{
+		"repair_status":       missing.RepairStatus,
+		"repair_operation_id": missing.RepairOperationID,
+		"desired_version":     missing.DesiredVersion,
+	} {
+		if value != "" {
+			args[key] = value
+		}
+	}
 	return agentfeedback.New(
 		agentfeedback.CodeAgentDependencyMissing,
 		"dependency_missing",
 		http.StatusConflict,
 		"chat.externalAgent.dependencyMissing",
 		message,
-		map[string]string{
-			"dep_id":                firstNonEmpty(missing.DependencyID, dependencyID),
-			"install_task_id":       strings.TrimSpace(missing.TaskID),
-			"operation_in_progress": strconv.FormatBool(operationInProgress),
-		},
+		args,
 	)
 }
 

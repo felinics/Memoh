@@ -71,11 +71,24 @@ func TestFinalizationEOFWithoutExitRetainsRecoverableOperation(t *testing.T) {
 
 type missingExitStream struct {
 	grpc.ServerStream
-	dropExit *atomic.Bool
+	dropExit     *atomic.Bool
+	dropTerminal bool
+}
+
+func (s *missingExitStream) RecvMsg(message any) error {
+	if err := s.ServerStream.RecvMsg(message); err != nil {
+		return err
+	}
+	if input, ok := message.(*pb.ExecInput); ok && input.Command != "" {
+		// Drop only the filesystem finalization terminal frame. Version and epoch
+		// probes must complete normally so this test reaches its intended boundary.
+		s.dropTerminal = s.dropExit.Load() && input.Command == scriptExecCommand && len(input.Env) == 3
+	}
+	return nil
 }
 
 func (s *missingExitStream) SendMsg(message any) error {
-	if output, ok := message.(*pb.ExecOutput); ok && output.GetStream() == pb.ExecOutput_EXIT && s.dropExit.Load() {
+	if output, ok := message.(*pb.ExecOutput); ok && output.GetStream() == pb.ExecOutput_EXIT && s.dropTerminal {
 		return nil
 	}
 	return s.ServerStream.SendMsg(message)

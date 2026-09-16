@@ -18,7 +18,7 @@ import type { DependencyOperationAction } from './useWorkspaceDependencies'
 // HandlersWorkspaceDependencyStreamEvent flattens them into one all-optional
 // bag, which is why the union is spelled out here.
 export type WorkspaceDependencyStreamEvent =
-  | { type: 'started'; dependency_id: string; version?: string; definition_revision?: string }
+  | { type: 'started'; dependency_id: string; operation_id?: string; version?: string; definition_revision?: string }
   | { type: 'log'; stream: 'stdout' | 'stderr'; data: string }
   | { type: 'done'; version?: string; entrypoints?: Record<string, string>; definition_revision?: string }
   | SSEErrorEvent
@@ -26,11 +26,10 @@ export type WorkspaceDependencyStreamEvent =
 export interface WorkspaceDependencyStreamRequestOptions {
   /** Conversation that requested this manager-confirmed operation. */
   sessionId?: string
-  /** Revision returned by this operation's script preview. Omit to resolve latest. */
+  /** Frozen recipe returned by the explicit prepare/confirm flow. */
   definitionRevision?: string
   /**
-   * Version to install / update / reinstall to. Empty means the latest the
-   * catalog script resolves (or the manifest pin).
+   * Exact release returned by preparation and confirmed by the manager.
    */
   version?: string
   /**
@@ -62,6 +61,7 @@ export function isWorkspaceDependencyStreamEvent(value: unknown): value is Works
   switch (event.type) {
     case 'started':
       return typeof event.dependency_id === 'string'
+        && (event.operation_id === undefined || typeof event.operation_id === 'string')
         && (event.version === undefined || typeof event.version === 'string')
     case 'log':
       return (event.stream === 'stdout' || event.stream === 'stderr')
@@ -111,18 +111,18 @@ export async function* streamDependencyOperation(
     sseMaxRetryAttempts: 1,
   }
 
-  // An empty version sends no body: the Server then resolves the latest (or
-  // the manifest pin), which is exactly what "leave blank" promises.
+  // Send exactly the target that was reviewed; the Server rejects an
+  // unprepared release instead of resolving a moving latest at execution.
   const version = options.version?.trim() ?? ''
   const definitionRevision = options.definitionRevision?.trim() ?? ''
   const sessionId = options.sessionId?.trim() ?? ''
   const versioned = {
     ...request,
-    body: version || definitionRevision || sessionId ? {
-      version: version || undefined,
-      definition_revision: definitionRevision || undefined,
+    body: {
+      version,
+      definition_revision: definitionRevision,
       session_id: sessionId || undefined,
-    } : undefined,
+    },
   }
 
   const result = action === 'update'

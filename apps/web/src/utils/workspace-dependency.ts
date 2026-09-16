@@ -23,7 +23,7 @@ export interface DependencyStatusBadge {
   tooltipKey?: string
 }
 
-export type DependencyPrimaryActionKind = 'install' | 'reinstall' | 'retry' | 'update' | 'viewProgress'
+export type DependencyPrimaryActionKind = 'install' | 'reinstall' | 'retry' | 'retryRepair' | 'update' | 'viewProgress'
 
 export interface DependencyPrimaryAction {
   kind: DependencyPrimaryActionKind
@@ -36,7 +36,7 @@ export interface DependencyPrimaryAction {
   disabled: boolean
 }
 
-export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'viewScript'
+export type DependencyMenuActionKind = 'install' | 'reinstall' | 'authorizeRepair' | 'viewScript'
 
 export interface DependencyMenuAction {
   kind: DependencyMenuActionKind
@@ -51,7 +51,7 @@ export interface DependencyMenuAction {
   separatorBefore: boolean
 }
 
-export type DependencyConfirmMode = 'install' | 'update' | 'reinstall'
+export type DependencyConfirmMode = 'install' | 'update' | 'reinstall' | 'authorizeRepair'
 
 export type DependencyProgressStatus = 'running' | 'done' | 'error' | 'unknown'
 
@@ -93,8 +93,19 @@ export function validDependencyVersion(value: string): boolean {
   return !version || (/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(version) && !version.includes('..'))
 }
 
-export function dependencyInProgress(item: Pick<DependencyItem, 'status'>): boolean {
+export function dependencyInProgress(item: Pick<DependencyItem, 'status' | 'desired'>): boolean {
   return item.status === 'installing' || item.status === 'updating' || item.status === 'removing'
+    || item.desired?.repair_status === 'queued' || item.desired?.repair_status === 'installing'
+}
+
+/** Pending recovery needs polling, including the server's scheduled retry. */
+export function dependencyNeedsPolling(item: DependencyItem): boolean {
+  return dependencyInProgress(item) || item.desired?.repair_status === 'backoff'
+}
+
+export function dependencyDesiredVersionDifference(item: DependencyItem): string {
+  const desired = formatDependencyVersion(item.desired?.version)
+  return desired && desired !== formatDependencyVersion(item.installed_version) ? desired : ''
 }
 
 export function dependencyPlatformUnsupported(item: Pick<DependencyItem, 'platform_supported'>): boolean {
@@ -125,8 +136,8 @@ export function sortDependencies<T extends DependencyItem>(items: T[], nameOf: (
 
 /**
  * Installed row whose last upstream check reported a version other than the
- * copy in effect. The Server pins nothing, so the rule is the same for every
- * dependency: the check-update result is the only source of "newer".
+ * copy in effect. The upstream check is the only source of "newer"; a
+ * different authorized recovery target alone does not mean an update exists.
  */
 export function dependencyUpdateAvailable(
   item: Pick<DependencyItem, 'status' | 'update_available' | 'latest_version' | 'installed_version'>,
@@ -151,6 +162,8 @@ export function dependencyAllows(item: Pick<DependencyItem, 'actions'>, action: 
 export function dependencyNeedsAttention(item: DependencyItem): boolean {
   return item.status === 'missing'
     || item.status === 'failed'
+    || item.desired?.repair_status === 'backoff'
+    || item.desired?.repair_status === 'manual_required'
     || dependencyUpdateAvailable(item)
 }
 
@@ -161,6 +174,14 @@ export function dependencyStatusBadge(item: DependencyItem): DependencyStatusBad
       key: `${STATUS_KEY}.unsupported`,
       spinner: false,
       tooltipKey: `${STATUS_KEY}.unsupportedTooltip`,
+    }
+  }
+  const repairStatus = item.desired?.repair_status
+  if (repairStatus && repairStatus !== 'ready') {
+    return {
+      variant: repairStatus === 'manual_required' ? 'destructive' : repairStatus === 'backoff' ? 'warning' : 'secondary',
+      key: `bots.dependencies.repair.status.${repairStatus}`,
+      spinner: repairStatus === 'queued' || repairStatus === 'installing',
     }
   }
   if (dependencyInProgress(item)) {
@@ -216,8 +237,11 @@ export function dependencyPrimaryAction(
     if (!options.ownsStream) return null
     return { kind: 'viewProgress', labelKey: `${ACTION_KEY}.viewProgress`, variant: 'outline', disabled: false }
   }
+  if (dependencyAllows(item, 'retry_repair')) {
+    return { kind: 'retryRepair', labelKey: 'bots.dependencies.repair.retry', variant: 'default', disabled }
+  }
   if (item.status === 'failed') {
-    if (!item.actions?.length) return null
+    if (!(['install', 'update', 'reinstall'] as const).some(action => dependencyAllows(item, action))) return null
     return {
       kind: 'retry',
       labelKey: 'common.retry',
@@ -292,15 +316,13 @@ export function dependencyMenuActions(
       separatorBefore: false,
     })
   }
-  const previous = formatDependencyVersion(item.previous_version)
-  if (previous && dependencyAllows(item, 'rollback')) {
+  if (dependencyAllows(item, 'authorize_repair')) {
     items.push({
-      kind: 'rollback',
-      labelKey: `${ACTION_KEY}.rollback`,
-      args: { version: previous },
+      kind: 'authorizeRepair',
+      labelKey: 'bots.dependencies.repair.authorize',
       destructive: false,
       disabled: readonly,
-      separatorBefore: false,
+      separatorBefore: items.length > 0,
     })
   }
   // Removal is not offered per dependency: the App that references the

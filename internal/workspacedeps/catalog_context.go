@@ -46,6 +46,9 @@ func (s *Service) catalogFor(ctx context.Context) *catalog.Catalog {
 }
 
 func (s *Service) operationCatalog(ctx context.Context, depID string) (*catalog.Catalog, error) {
+	if frozen, ok := ctx.Value(frozenRepairCatalogKey{}).(*catalog.Catalog); ok {
+		return frozen, nil
+	}
 	revision, _ := ctx.Value(revisionContextKey{}).(string)
 	// A revision returned by preparation is already the choice for this
 	// operation. Do not re-resolve latest between preview and execution.
@@ -66,4 +69,18 @@ func (s *Service) operationCatalog(ctx context.Context, depID string) (*catalog.
 		definition = definition.WithRetired(true)
 	}
 	return result.Catalog.Using(definition)
+}
+
+type operationStartedKey struct{}
+
+// WithOperationStarted observes the durable acceptance of a managed operation.
+func WithOperationStarted(ctx context.Context, notify func(string)) context.Context {
+	return context.WithValue(ctx, operationStartedKey{}, notify)
+}
+
+// NotifyOperationStarted delivers an operation identity after its claim succeeds.
+func NotifyOperationStarted(ctx context.Context, operationID string) {
+	if notify, ok := ctx.Value(operationStartedKey{}).(func(string)); ok {
+		notify(operationID)
+	}
 }

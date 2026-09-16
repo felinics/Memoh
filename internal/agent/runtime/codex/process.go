@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/agentprocess"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/payloadlease"
 	"github.com/felinics/memoh/internal/workspace/vpath"
 )
 
@@ -18,7 +20,7 @@ const containerPath = vpath.DataMount + "/.memoh/deps/bin:/opt/memoh/toolkit/bin
 type appServerProcess = agentprocess.Process
 
 // startAppServer launches `codex app-server` from the resolved launcher path.
-func startAppServer(ctx context.Context, client *bridge.Client, workDir, home string, cfg Config, launcher string) (*appServerProcess, error) {
+func startAppServer(ctx context.Context, client *bridge.Client, workDir, home string, cfg Config, launcher external.Launcher) (*appServerProcess, error) {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
 		workDir = defaultProjectPath
@@ -29,7 +31,7 @@ func startAppServer(ctx context.Context, client *bridge.Client, workDir, home st
 	if err := materializeCodexConfig(ctx, client, home, cfg); err != nil {
 		return nil, err
 	}
-	return agentprocess.Start(ctx, client, appServerCommand(launcher), workDir, codexAppServerEnv(home))
+	return agentprocess.Start(ctx, client, payloadlease.Command(appServerCommand(launcher.Path), launcher.LeasePath, launcher.WorkspaceEpoch), workDir, codexAppServerEnv(home))
 }
 
 func codexAppServerEnv(home string) []string {

@@ -20,16 +20,18 @@ import (
 	"github.com/felinics/memoh/internal/httpx"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/workspacedeps"
+	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 var appConnectorTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // appService is the slice of *apps.Service the routes use.
 type appService interface {
+	Prepare(ctx context.Context, botID string, req apps.PrepareRequest) (apps.PreparedOperation, error)
 	List(ctx context.Context, botID string, refresh bool) (apps.ListResult, error)
 	Get(ctx context.Context, botID, installationID string) (apps.Item, error)
 	Install(ctx context.Context, botID string, req apps.InstallRequest, sink apps.EventSink) (apps.OperationResult, error)
-	Resume(ctx context.Context, botID, installationID string, sink apps.EventSink) (apps.OperationResult, error)
+	Resume(ctx context.Context, botID, installationID string, req apps.ResumeRequest, sink apps.EventSink) (apps.OperationResult, error)
 	UpdateSelection(ctx context.Context, botID string, req apps.UpdateRequest, sink apps.EventSink) (apps.OperationResult, error)
 	Remove(ctx context.Context, botID, installationID string, opts apps.RemoveOptions, sink apps.EventSink) (apps.OperationResult, error)
 	RemovalPreview(ctx context.Context, botID, installationID string) (apps.RemovalPreview, error)
@@ -62,6 +64,7 @@ func (h *AppsHandler) Register(e *echo.Echo) {
 	g := e.Group("/bots/:bot_id/apps")
 	g.GET("", h.List)
 	g.POST("", h.Install)
+	g.POST("/prepare", h.Prepare)
 	g.POST("/check-updates", h.CheckUpdates)
 	g.POST("/update", h.UpdateSelection)
 	g.GET("/:installation_id", h.Get)
@@ -149,9 +152,10 @@ type AppListResponse struct {
 
 // AppInstallRequest names one immutable App release to install.
 type AppInstallRequest struct {
-	RegistryID string `json:"registry_id" validate:"required"`
-	AppID      string `json:"app_id" validate:"required"`
-	Revision   string `json:"revision" validate:"required"`
+	RegistryID              string                      `json:"registry_id" validate:"required"`
+	AppID                   string                      `json:"app_id" validate:"required"`
+	Revision                string                      `json:"revision" validate:"required"`
+	DependencyConfirmations []AppDependencyConfirmation `json:"dependency_confirmations,omitempty"`
 }
 
 // AppUpdateRequest selects what to update for one App on a workspace
@@ -160,10 +164,52 @@ type AppUpdateRequest struct {
 	RegistryID string `json:"registry_id" validate:"required"`
 	AppID      string `json:"app_id" validate:"required"`
 
-	// Release moves the installation to the registry's current release.
+	// Release moves the installation to the prepared release_revision.
 	Release bool `json:"release"`
-	// Dependencies are updated to their latest version.
+	// ReleaseRevision is the immutable App release returned by prepare.
+	ReleaseRevision         string                      `json:"release_revision,omitempty"`
+	DependencyConfirmations []AppDependencyConfirmation `json:"dependency_confirmations,omitempty"`
+	// Dependencies are updated to their confirmed version.
 	Dependencies []string `json:"dependencies,omitempty"`
+}
+
+// AppDependencyConfirmation is the exact dependency publication and version
+// approved by the manager, including restoration of that version after loss.
+type AppDependencyConfirmation struct {
+	DependencyID       string `json:"dependency_id"`
+	Action             string `json:"action" enums:"install,update"`
+	Version            string `json:"version"`
+	DefinitionRevision string `json:"definition_revision"`
+	SourceURL          string `json:"source_url"`
+	RegistryID         string `json:"registry_id"`
+	ManifestDigest     string `json:"manifest_digest"`
+}
+
+// AppPrepareRequest selects the App operation to prepare for confirmation.
+type AppPrepareRequest struct {
+	Action         string   `json:"action" enums:"install,resume,update"`
+	RegistryID     string   `json:"registry_id,omitempty"`
+	AppID          string   `json:"app_id,omitempty"`
+	Revision       string   `json:"revision,omitempty"`
+	InstallationID string   `json:"installation_id,omitempty"`
+	Release        bool     `json:"release,omitempty"`
+	Dependencies   []string `json:"dependencies,omitempty"`
+}
+
+// AppPrepareResponse pins the App release and dependencies that will execute.
+// Dependencies already present in the workspace are linked without new repair
+// authorization and do not appear in this list.
+type AppPrepareResponse struct {
+	RegistryID   string                      `json:"registry_id"`
+	AppID        string                      `json:"app_id"`
+	Revision     string                      `json:"revision"`
+	Dependencies []AppDependencyConfirmation `json:"dependencies"`
+}
+
+// AppResumeRequest confirms dependencies still missing from a partial App.
+type AppResumeRequest struct {
+	Revision                string                      `json:"revision" validate:"required"`
+	DependencyConfirmations []AppDependencyConfirmation `json:"dependency_confirmations,omitempty"`
 }
 
 // AppRemovalPreviewDependency says what removing an App does to one
@@ -223,7 +269,7 @@ type AppStreamEvent struct {
 	Kind      string            `json:"kind,omitempty" enums:"app,dependency,skills,connector"`
 	ID        string            `json:"id,omitempty"`
 	Stream    string            `json:"stream,omitempty" enums:"stdout,stderr"`
-	Data      string            `json:"data,omitempty"`
+	Data      string            `json:"data"`
 	Status    string            `json:"status,omitempty"`
 	Version   string            `json:"version,omitempty"`
 	Message   string            `json:"message,omitempty"`
@@ -353,6 +399,41 @@ func (h *AppsHandler) RemovalPreview(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+// Prepare godoc
+// @Summary Prepare an App operation for confirmation
+// @Description Resolves the immutable App release and exact dependency versions. It may start the workspace and run version checks, but never installs dependencies or grants automatic repair authority. Confirm the returned dependencies before install, resume or update.
+// @Tags apps
+// @Accept json
+// @Produce json
+// @Param bot_id path string true "Bot ID"
+// @Param payload body AppPrepareRequest true "App operation to prepare"
+// @Success 200 {object} AppPrepareResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
+// @Router /bots/{bot_id}/apps/prepare [post].
+func (h *AppsHandler) Prepare(c echo.Context) error {
+	botID, err := h.authorize(c)
+	if err != nil {
+		return err
+	}
+	var req AppPrepareRequest
+	if err := bindWorkspaceManagementRequest(c, &req); err != nil {
+		return apperror.Wrap(apperror.CodeAppRequestInvalid, err, nil)
+	}
+	result, err := h.service.Prepare(c.Request().Context(), botID, apps.PrepareRequest{Action: req.Action, RegistryID: req.RegistryID, AppID: req.AppID, Revision: req.Revision, InstallationID: req.InstallationID, Release: req.Release, Dependencies: req.Dependencies})
+	if err != nil {
+		return h.httpError(err)
+	}
+	resp := AppPrepareResponse{RegistryID: result.RegistryID, AppID: result.AppID, Revision: result.Revision, Dependencies: make([]AppDependencyConfirmation, 0, len(result.Dependencies))}
+	for _, dep := range result.Dependencies {
+		resp.Dependencies = append(resp.Dependencies, appDependencyConfirmation(dep))
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
 // Install godoc
 // @Summary Install an App release into a bot workspace
 // @Description Installs missing dependencies, publishes the Skills and links connectors, streaming progress. A dependency failure or an unauthorized required connector leaves the installation partial. Events: started, step, log, step_done, done, error.
@@ -382,6 +463,7 @@ func (h *AppsHandler) Install(c echo.Context) error {
 	return h.stream(c, "install", func(ctx context.Context, sink apps.EventSink) (apps.OperationResult, error) {
 		return h.service.Install(ctx, botID, apps.InstallRequest{
 			RegistryID: req.RegistryID, AppID: req.AppID, Revision: req.Revision,
+			DependencyConfirmations: appDependencyConfirmations(req.DependencyConfirmations),
 		}, sink)
 	})
 }
@@ -390,9 +472,11 @@ func (h *AppsHandler) Install(c echo.Context) error {
 // @Summary Continue a partial App installation
 // @Description Installs dependencies that are still missing, reconciles the Skills and links connectors that were authorized since. Events: started, step, log, step_done, done, error.
 // @Tags apps
+// @Accept json
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Param installation_id path string true "App installation ID"
+// @Param payload body AppResumeRequest true "Confirmed dependency targets"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} apperror.Problem
@@ -406,14 +490,21 @@ func (h *AppsHandler) Resume(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	var req AppResumeRequest
+	if err := bindWorkspaceManagementRequest(c, &req); err != nil {
+		return apperror.Wrap(apperror.CodeAppRequestInvalid, err, nil)
+	}
+	if !supermarketclient.IsCanonicalSHA256(req.Revision) {
+		return apperror.New(apperror.CodeAppRequestInvalid, nil)
+	}
 	return h.stream(c, "resume", func(ctx context.Context, sink apps.EventSink) (apps.OperationResult, error) {
-		return h.service.Resume(ctx, botID, installationID, sink)
+		return h.service.Resume(ctx, botID, installationID, apps.ResumeRequest{Revision: req.Revision, DependencyConfirmations: appDependencyConfirmations(req.DependencyConfirmations)}, sink)
 	})
 }
 
 // UpdateSelection godoc
 // @Summary Update parts of an App on a bot workspace
-// @Description Updates the selected dependencies to their latest version and, when release is set, moves the installation to the registry's current release, streaming progress. A discovered App may update its own dependency. Events: started, step, log, step_done, done, error.
+// @Description Updates the selected dependencies to their confirmed exact versions and, when release is set, moves the installation to release_revision, streaming progress. A discovered App may update its own dependency. Events: started, step, log, step_done, done, error.
 // @Tags apps
 // @Accept json
 // @Produce text/event-stream
@@ -441,6 +532,7 @@ func (h *AppsHandler) UpdateSelection(c echo.Context) error {
 		return h.service.UpdateSelection(ctx, botID, apps.UpdateRequest{
 			RegistryID: req.RegistryID, AppID: req.AppID,
 			Release: req.Release, Dependencies: req.Dependencies,
+			ReleaseRevision: req.ReleaseRevision, DependencyConfirmations: appDependencyConfirmations(req.DependencyConfirmations),
 		}, sink)
 	})
 }
@@ -597,7 +689,11 @@ type appOperation func(ctx context.Context, sink apps.EventSink) (apps.Operation
 // afterwards becomes an error frame. A browser disconnect does not cancel
 // the admitted operation.
 func (h *AppsHandler) stream(c echo.Context, action string, run appOperation) error {
-	ctx := context.WithoutCancel(c.Request().Context())
+	actor, err := RequireChannelIdentityID(c)
+	if err != nil {
+		return err
+	}
+	ctx := workspacedeps.WithRepairActor(context.WithoutCancel(c.Request().Context()), actor)
 	writer, flusher, err := beginSSEResponse(c)
 	if err != nil {
 		return err
@@ -652,7 +748,8 @@ func (h *AppsHandler) httpError(err error) error {
 	case errors.Is(err, connectors.ErrInvalidInput), errors.Is(err, connectors.ErrNotConfigured), errors.Is(err, connectors.ErrUpstreamUnavailable):
 		return connectorHTTPError(err)
 	case errors.Is(err, workspacedeps.ErrWorkspaceNotRunning), errors.Is(err, workspacedeps.ErrWorkspaceMissing),
-		errors.Is(err, workspacedeps.ErrBusy),
+		errors.Is(err, workspacedeps.ErrBusy), errors.Is(err, workspacedeps.ErrInvalidVersion), errors.Is(err, workspacedeps.ErrActionUnsupported),
+		errors.Is(err, workspacedeps.ErrPlatformUnsupported), errors.Is(err, workspacedeps.ErrLegacyReinstallUnsafe),
 		errors.Is(err, workspacedeps.ErrDependencyNotFound), errors.Is(err, workspacedeps.ErrCatalogUnavailable),
 		errors.Is(err, workspacedeps.ErrDefinitionInvalid), errors.Is(err, workspacedeps.ErrDefinitionUnavailable):
 		return workspaceDependencyError(err)
@@ -748,6 +845,18 @@ func appItem(item apps.Item, dataRoot string) AppItem {
 			entry.Status = "linked"
 		}
 		out.Connectors = append(out.Connectors, entry)
+	}
+	return out
+}
+
+func appDependencyConfirmation(dep apps.DependencyConfirmation) AppDependencyConfirmation {
+	return AppDependencyConfirmation{DependencyID: dep.DependencyID, Action: string(dep.Action), Version: dep.Version, DefinitionRevision: dep.DefinitionRevision, SourceURL: dep.SourceURL, RegistryID: dep.RegistryID, ManifestDigest: dep.ManifestDigest}
+}
+
+func appDependencyConfirmations(in []AppDependencyConfirmation) []apps.DependencyConfirmation {
+	out := make([]apps.DependencyConfirmation, 0, len(in))
+	for _, dep := range in {
+		out = append(out, apps.DependencyConfirmation{DependencyID: dep.DependencyID, Action: catalog.Action(dep.Action), Version: dep.Version, DefinitionRevision: dep.DefinitionRevision, SourceURL: dep.SourceURL, RegistryID: dep.RegistryID, ManifestDigest: dep.ManifestDigest})
 	}
 	return out
 }
