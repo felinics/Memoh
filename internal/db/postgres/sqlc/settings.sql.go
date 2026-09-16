@@ -34,6 +34,7 @@ SET command_ui_language = 'auto',
     video_model_id = NULL,
     persist_full_tool_results = false,
     show_tool_calls_in_im = false,
+    reuse_tool_call_message_in_im = false,
     tool_approval_config = '{"enabled":false,"read":{"require_approval":false,"bypass_globs":[],"force_review_globs":[]},"write":{"require_approval":true,"bypass_globs":["/data/**","/tmp/**"],"force_review_globs":[]},"exec":{"require_approval":false,"bypass_commands":[],"force_review_commands":[]}}'::jsonb,
     display_enabled = true,
     overlay_provider = '',
@@ -72,6 +73,7 @@ SELECT
   video_models.id AS video_model_id,
   bots.persist_full_tool_results,
   bots.show_tool_calls_in_im,
+  bots.reuse_tool_call_message_in_im,
   bots.tool_approval_config,
   bots.display_enabled,
   bots.overlay_provider,
@@ -92,34 +94,35 @@ WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $1
 `
 
 type GetSettingsByBotIDRow struct {
-	BotID                   pgtype.UUID `json:"bot_id"`
-	ReasoningEffort         string      `json:"reasoning_effort"`
-	CompactionEnabled       bool        `json:"compaction_enabled"`
-	CompactionThreshold     int32       `json:"compaction_threshold"`
-	CompactionTargetPercent pgtype.Int4 `json:"compaction_target_percent"`
-	Timezone                pgtype.Text `json:"timezone"`
-	ChatModelID             pgtype.UUID `json:"chat_model_id"`
-	DefaultBotAgentID       pgtype.UUID `json:"default_bot_agent_id"`
-	ChatRuntime             string      `json:"chat_runtime"`
-	ChatAcpAgentID          pgtype.Text `json:"chat_acp_agent_id"`
-	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
-	ChatAcpProjectMode      string      `json:"chat_acp_project_mode"`
-	CompactionModelID       pgtype.UUID `json:"compaction_model_id"`
-	SearchProviderID        pgtype.UUID `json:"search_provider_id"`
-	FetchProviderID         pgtype.UUID `json:"fetch_provider_id"`
-	MemoryProviderID        pgtype.UUID `json:"memory_provider_id"`
-	ImageModelID            pgtype.UUID `json:"image_model_id"`
-	TtsModelID              pgtype.UUID `json:"tts_model_id"`
-	TranscriptionModelID    pgtype.UUID `json:"transcription_model_id"`
-	VideoModelID            pgtype.UUID `json:"video_model_id"`
-	PersistFullToolResults  bool        `json:"persist_full_tool_results"`
-	ShowToolCallsInIm       bool        `json:"show_tool_calls_in_im"`
-	ToolApprovalConfig      []byte      `json:"tool_approval_config"`
-	DisplayEnabled          bool        `json:"display_enabled"`
-	OverlayProvider         string      `json:"overlay_provider"`
-	OverlayEnabled          bool        `json:"overlay_enabled"`
-	OverlayConfig           []byte      `json:"overlay_config"`
-	CommandUiLanguage       string      `json:"command_ui_language"`
+	BotID                    pgtype.UUID `json:"bot_id"`
+	ReasoningEffort          string      `json:"reasoning_effort"`
+	CompactionEnabled        bool        `json:"compaction_enabled"`
+	CompactionThreshold      int32       `json:"compaction_threshold"`
+	CompactionTargetPercent  pgtype.Int4 `json:"compaction_target_percent"`
+	Timezone                 pgtype.Text `json:"timezone"`
+	ChatModelID              pgtype.UUID `json:"chat_model_id"`
+	DefaultBotAgentID        pgtype.UUID `json:"default_bot_agent_id"`
+	ChatRuntime              string      `json:"chat_runtime"`
+	ChatAcpAgentID           pgtype.Text `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath       string      `json:"chat_acp_project_path"`
+	ChatAcpProjectMode       string      `json:"chat_acp_project_mode"`
+	CompactionModelID        pgtype.UUID `json:"compaction_model_id"`
+	SearchProviderID         pgtype.UUID `json:"search_provider_id"`
+	FetchProviderID          pgtype.UUID `json:"fetch_provider_id"`
+	MemoryProviderID         pgtype.UUID `json:"memory_provider_id"`
+	ImageModelID             pgtype.UUID `json:"image_model_id"`
+	TtsModelID               pgtype.UUID `json:"tts_model_id"`
+	TranscriptionModelID     pgtype.UUID `json:"transcription_model_id"`
+	VideoModelID             pgtype.UUID `json:"video_model_id"`
+	PersistFullToolResults   bool        `json:"persist_full_tool_results"`
+	ShowToolCallsInIm        bool        `json:"show_tool_calls_in_im"`
+	ReuseToolCallMessageInIm bool        `json:"reuse_tool_call_message_in_im"`
+	ToolApprovalConfig       []byte      `json:"tool_approval_config"`
+	DisplayEnabled           bool        `json:"display_enabled"`
+	OverlayProvider          string      `json:"overlay_provider"`
+	OverlayEnabled           bool        `json:"overlay_enabled"`
+	OverlayConfig            []byte      `json:"overlay_config"`
+	CommandUiLanguage        string      `json:"command_ui_language"`
 }
 
 func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSettingsByBotIDRow, error) {
@@ -148,6 +151,7 @@ func (q *Queries) GetSettingsByBotID(ctx context.Context, id pgtype.UUID) (GetSe
 		&i.VideoModelID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
+		&i.ReuseToolCallMessageInIm,
 		&i.ToolApprovalConfig,
 		&i.DisplayEnabled,
 		&i.OverlayProvider,
@@ -216,15 +220,16 @@ WITH updated AS (
       END,
       persist_full_tool_results = $31,
       show_tool_calls_in_im = $32,
-      tool_approval_config = $33,
-      display_enabled = $34,
-      overlay_provider = $35,
-      overlay_enabled = $36,
-      overlay_config = $37,
-      command_ui_language = $38,
+      reuse_tool_call_message_in_im = $33,
+      tool_approval_config = $34,
+      display_enabled = $35,
+      overlay_provider = $36,
+      overlay_enabled = $37,
+      overlay_config = $38,
+      command_ui_language = $39,
       updated_at = now()
-  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $39
-  RETURNING bots.id, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
+  WHERE bots.team_id = public.memoh_current_team_id() AND bots.id = $40
+  RETURNING bots.id, bots.reasoning_effort, bots.compaction_enabled, bots.compaction_threshold, bots.compaction_target_percent, bots.timezone, bots.chat_model_id, bots.default_bot_agent_id, bots.chat_runtime, bots.chat_acp_agent_id, bots.chat_acp_project_path, bots.chat_acp_project_mode, bots.compaction_model_id, bots.image_model_id, bots.search_provider_id, bots.fetch_provider_id, bots.memory_provider_id, bots.tts_model_id, bots.transcription_model_id, bots.video_model_id, bots.persist_full_tool_results, bots.show_tool_calls_in_im, bots.reuse_tool_call_message_in_im, bots.tool_approval_config, bots.display_enabled, bots.overlay_provider, bots.overlay_enabled, bots.overlay_config, bots.command_ui_language
 )
 SELECT
   updated.id AS bot_id,
@@ -249,6 +254,7 @@ SELECT
   video_models.id AS video_model_id,
   updated.persist_full_tool_results,
   updated.show_tool_calls_in_im,
+  updated.reuse_tool_call_message_in_im,
   updated.tool_approval_config,
   updated.display_enabled,
   updated.overlay_provider,
@@ -300,6 +306,7 @@ type UpsertBotSettingsParams struct {
 	VideoModelID               pgtype.UUID `json:"video_model_id"`
 	PersistFullToolResults     bool        `json:"persist_full_tool_results"`
 	ShowToolCallsInIm          bool        `json:"show_tool_calls_in_im"`
+	ReuseToolCallMessageInIm   bool        `json:"reuse_tool_call_message_in_im"`
 	ToolApprovalConfig         []byte      `json:"tool_approval_config"`
 	DisplayEnabled             bool        `json:"display_enabled"`
 	OverlayProvider            string      `json:"overlay_provider"`
@@ -310,34 +317,35 @@ type UpsertBotSettingsParams struct {
 }
 
 type UpsertBotSettingsRow struct {
-	BotID                   pgtype.UUID `json:"bot_id"`
-	ReasoningEffort         string      `json:"reasoning_effort"`
-	CompactionEnabled       bool        `json:"compaction_enabled"`
-	CompactionThreshold     int32       `json:"compaction_threshold"`
-	CompactionTargetPercent pgtype.Int4 `json:"compaction_target_percent"`
-	Timezone                pgtype.Text `json:"timezone"`
-	ChatModelID             pgtype.UUID `json:"chat_model_id"`
-	DefaultBotAgentID       pgtype.UUID `json:"default_bot_agent_id"`
-	ChatRuntime             string      `json:"chat_runtime"`
-	ChatAcpAgentID          pgtype.Text `json:"chat_acp_agent_id"`
-	ChatAcpProjectPath      string      `json:"chat_acp_project_path"`
-	ChatAcpProjectMode      string      `json:"chat_acp_project_mode"`
-	CompactionModelID       pgtype.UUID `json:"compaction_model_id"`
-	SearchProviderID        pgtype.UUID `json:"search_provider_id"`
-	FetchProviderID         pgtype.UUID `json:"fetch_provider_id"`
-	MemoryProviderID        pgtype.UUID `json:"memory_provider_id"`
-	ImageModelID            pgtype.UUID `json:"image_model_id"`
-	TtsModelID              pgtype.UUID `json:"tts_model_id"`
-	TranscriptionModelID    pgtype.UUID `json:"transcription_model_id"`
-	VideoModelID            pgtype.UUID `json:"video_model_id"`
-	PersistFullToolResults  bool        `json:"persist_full_tool_results"`
-	ShowToolCallsInIm       bool        `json:"show_tool_calls_in_im"`
-	ToolApprovalConfig      []byte      `json:"tool_approval_config"`
-	DisplayEnabled          bool        `json:"display_enabled"`
-	OverlayProvider         string      `json:"overlay_provider"`
-	OverlayEnabled          bool        `json:"overlay_enabled"`
-	OverlayConfig           []byte      `json:"overlay_config"`
-	CommandUiLanguage       string      `json:"command_ui_language"`
+	BotID                    pgtype.UUID `json:"bot_id"`
+	ReasoningEffort          string      `json:"reasoning_effort"`
+	CompactionEnabled        bool        `json:"compaction_enabled"`
+	CompactionThreshold      int32       `json:"compaction_threshold"`
+	CompactionTargetPercent  pgtype.Int4 `json:"compaction_target_percent"`
+	Timezone                 pgtype.Text `json:"timezone"`
+	ChatModelID              pgtype.UUID `json:"chat_model_id"`
+	DefaultBotAgentID        pgtype.UUID `json:"default_bot_agent_id"`
+	ChatRuntime              string      `json:"chat_runtime"`
+	ChatAcpAgentID           pgtype.Text `json:"chat_acp_agent_id"`
+	ChatAcpProjectPath       string      `json:"chat_acp_project_path"`
+	ChatAcpProjectMode       string      `json:"chat_acp_project_mode"`
+	CompactionModelID        pgtype.UUID `json:"compaction_model_id"`
+	SearchProviderID         pgtype.UUID `json:"search_provider_id"`
+	FetchProviderID          pgtype.UUID `json:"fetch_provider_id"`
+	MemoryProviderID         pgtype.UUID `json:"memory_provider_id"`
+	ImageModelID             pgtype.UUID `json:"image_model_id"`
+	TtsModelID               pgtype.UUID `json:"tts_model_id"`
+	TranscriptionModelID     pgtype.UUID `json:"transcription_model_id"`
+	VideoModelID             pgtype.UUID `json:"video_model_id"`
+	PersistFullToolResults   bool        `json:"persist_full_tool_results"`
+	ShowToolCallsInIm        bool        `json:"show_tool_calls_in_im"`
+	ReuseToolCallMessageInIm bool        `json:"reuse_tool_call_message_in_im"`
+	ToolApprovalConfig       []byte      `json:"tool_approval_config"`
+	DisplayEnabled           bool        `json:"display_enabled"`
+	OverlayProvider          string      `json:"overlay_provider"`
+	OverlayEnabled           bool        `json:"overlay_enabled"`
+	OverlayConfig            []byte      `json:"overlay_config"`
+	CommandUiLanguage        string      `json:"command_ui_language"`
 }
 
 func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsParams) (UpsertBotSettingsRow, error) {
@@ -374,6 +382,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		arg.VideoModelID,
 		arg.PersistFullToolResults,
 		arg.ShowToolCallsInIm,
+		arg.ReuseToolCallMessageInIm,
 		arg.ToolApprovalConfig,
 		arg.DisplayEnabled,
 		arg.OverlayProvider,
@@ -406,6 +415,7 @@ func (q *Queries) UpsertBotSettings(ctx context.Context, arg UpsertBotSettingsPa
 		&i.VideoModelID,
 		&i.PersistFullToolResults,
 		&i.ShowToolCallsInIm,
+		&i.ReuseToolCallMessageInIm,
 		&i.ToolApprovalConfig,
 		&i.DisplayEnabled,
 		&i.OverlayProvider,

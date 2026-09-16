@@ -374,6 +374,7 @@ const form = reactive<SettingsForm>({
   timezone: '',
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
+  reuse_tool_call_message_in_im: false,
   name: '',
 })
 
@@ -394,6 +395,7 @@ const SETTINGS_FIELD_KEYS = [
   'video_model_id',
   'reasoning_effort',
   'show_tool_calls_in_im',
+  'reuse_tool_call_message_in_im',
 ] as const satisfies readonly (keyof SettingsForm)[]
 
 // Last-known-server snapshot. The autosave engine diffs `form` against this;
@@ -420,6 +422,7 @@ watch(settings, (val) => {
     video_model_id: val.video_model_id ?? '',
     reasoning_effort: val.reasoning_effort || 'medium',
     show_tool_calls_in_im: val.show_tool_calls_in_im ?? false,
+    reuse_tool_call_message_in_im: val.reuse_tool_call_message_in_im ?? false,
   }
   // Per-field guard: a refetch landing while the user has an unsaved edit
   // (form diverged from synced, save still in flight) must not clobber the

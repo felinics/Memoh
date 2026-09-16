@@ -27,6 +27,12 @@ type matrixOutboundStream struct {
 	lastFormat      channel.MessageFormat
 	lastEditedAt    time.Time
 	toolMessages    map[string]string
+	// With reuseToolCallMessage set, ordinary tool calls share one edited
+	// message per uninterrupted batch, tracked by toolStatus. toolStatus is only
+	// touched by Push and Close; the interval is a field so tests can shorten it.
+	reuseToolCallMessage bool
+	toolStatus           *channel.ToolCallStatusTracker
+	toolStatusInterval   time.Duration
 }
 
 func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
@@ -40,6 +46,10 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+	}
+
+	if channel.EndsToolCallBatch(event) {
+		s.finishToolStatus(ctx)
 	}
 
 	switch event.Type {
@@ -60,17 +70,14 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		s.mu.Unlock()
 		return s.upsertText(ctx, text, channel.MessageFormatPlain, true)
 	case channel.StreamEventToolCallStart:
-		s.mu.Lock()
-		bufText := strings.TrimSpace(s.rawBuffer.String())
-		s.mu.Unlock()
-		if bufText != "" {
-			if err := s.upsertText(ctx, bufText, channel.MessageFormatPlain, true); err != nil {
-				return err
-			}
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
 		}
-		s.resetMessageState()
-		return s.sendToolCallMessage(ctx, event.ToolCall, channel.BuildToolCallStart(event.ToolCall))
+		return s.pushToolCallStart(ctx, event.ToolCall)
 	case channel.StreamEventToolCallEnd:
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
+		}
 		return s.sendToolCallMessage(ctx, event.ToolCall, channel.BuildToolCallEnd(event.ToolCall))
 	case channel.StreamEventDelta:
 		if event.Phase == channel.StreamPhaseReasoning || event.Delta == "" {
@@ -119,12 +126,36 @@ func (s *matrixOutboundStream) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	// Finish first so background status updates stop even when ctx is done.
+	s.finishToolStatus(ctx)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 	s.closed.Store(true)
+	return nil
+}
+
+func (s *matrixOutboundStream) pushToolCallStart(ctx context.Context, tc *channel.StreamToolCall) error {
+	if err := s.flushBufferedText(ctx); err != nil {
+		return err
+	}
+	return s.sendToolCallMessage(ctx, tc, channel.BuildToolCallStart(tc))
+}
+
+// flushBufferedText commits buffered text before tool calls take over and
+// resets the message state, so the next text starts a new message below them.
+func (s *matrixOutboundStream) flushBufferedText(ctx context.Context) error {
+	s.mu.Lock()
+	bufText := strings.TrimSpace(s.rawBuffer.String())
+	s.mu.Unlock()
+	if bufText != "" {
+		if err := s.upsertText(ctx, bufText, channel.MessageFormatPlain, true); err != nil {
+			return err
+		}
+	}
+	s.resetMessageState()
 	return nil
 }
 

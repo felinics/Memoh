@@ -118,13 +118,22 @@ type PlainTextUserInputRunner interface {
 	AdvancePlainTextUserInput(ctx context.Context, input userinput.AdvanceTextInput) (userinput.AdvanceTextResult, error)
 }
 
+// IMDisplayOptions are bot-level preferences for how agent activity appears in
+// IM channels.
+type IMDisplayOptions struct {
+	// ShowToolCalls reports whether tool_call lifecycle events reach IM adapters.
+	ShowToolCalls bool
+	// ReuseToolCallMessage asks adapters that can edit messages to fold the
+	// ordinary tool calls of a batch into one live status message.
+	ReuseToolCallMessage bool
+}
+
 // IMDisplayOptionsReader exposes bot-level IM display preferences.
 // Implementations typically adapt the settings service.
 type IMDisplayOptionsReader interface {
-	// ShowToolCallsInIM reports whether tool_call lifecycle events should
-	// reach IM adapters for the given bot. Returns false by default when the
-	// bot or its settings cannot be resolved.
-	ShowToolCallsInIM(ctx context.Context, botID string) (bool, error)
+	// IMDisplayOptions returns the preferences for the given bot. Callers fall
+	// back to the zero value, which hides tool calls, when the lookup fails.
+	IMDisplayOptions(ctx context.Context, botID string) (IMDisplayOptions, error)
 }
 
 type DefaultChatRuntimeSettings struct {
@@ -394,30 +403,35 @@ func (p *ChannelInboundProcessor) SetBotPermissionChecker(checker BotPermissionC
 	p.permissionChecker = checker
 }
 
-// shouldShowToolCallsInIM reports whether tool_call_start / tool_call_end
-// events should reach the IM adapter for the given bot. Failures and missing
-// configuration default to false so tool calls remain hidden unless explicitly
-// enabled.
-func (p *ChannelInboundProcessor) shouldShowToolCallsInIM(ctx context.Context, botID string) bool {
+// resolveIMDisplayOptions returns how tool_call_start / tool_call_end events
+// reach the adapter of the given channel. Local channels always receive every
+// event. For IM channels, failures and missing configuration fall back to
+// hiding tool calls unless explicitly enabled, and message reuse only applies
+// while tool calls are shown.
+func (p *ChannelInboundProcessor) resolveIMDisplayOptions(ctx context.Context, channelType channel.ChannelType, botID string) IMDisplayOptions {
+	if isLocalChannelType(channelType) {
+		return IMDisplayOptions{ShowToolCalls: true}
+	}
 	if p == nil || p.imDisplayOptions == nil {
-		return false
+		return IMDisplayOptions{}
 	}
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
-		return false
+		return IMDisplayOptions{}
 	}
-	show, err := p.imDisplayOptions.ShowToolCallsInIM(ctx, botID)
+	options, err := p.imDisplayOptions.IMDisplayOptions(ctx, botID)
 	if err != nil {
 		if p.logger != nil {
 			p.logger.Debug(
-				"show_tool_calls_in_im lookup failed, defaulting to hidden",
+				"IM display options lookup failed, defaulting to hidden tool calls",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
 		}
-		return false
+		return IMDisplayOptions{}
 	}
-	return show
+	options.ReuseToolCallMessage = options.ReuseToolCallMessage && options.ShowToolCalls
+	return options
 }
 
 // HandleInbound processes an inbound channel message through identity resolution and chat gateway.
@@ -1004,6 +1018,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if sourceMessageID != "" {
 		replyRef.MessageID = sourceMessageID
 	}
+	displayOptions := p.resolveIMDisplayOptions(ctx, msg.Channel, identity.BotID)
 	stream, err := sender.OpenStream(ctx, target, channel.StreamOptions{
 		Reply:           replyRef,
 		SourceMessageID: sourceMessageID,
@@ -1011,6 +1026,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			"route_id":          resolved.RouteID,
 			"conversation_type": msg.Conversation.Type,
 		},
+		ReuseToolCallMessage: displayOptions.ReuseToolCallMessage,
 	})
 	if err != nil {
 		if statusNotifier != nil {
@@ -1052,7 +1068,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// before they reach the adapter when the bot's show_tool_calls_in_im
 	// setting is off. The filter sits inside the TeeStream so WebUI
 	// observers still receive the full event stream.
-	if !isLocalChannelType(msg.Channel) && !p.shouldShowToolCallsInIM(ctx, identity.BotID) {
+	if !displayOptions.ShowToolCalls {
 		stream = channel.NewToolCallDroppingStream(stream)
 	}
 
@@ -3840,12 +3856,14 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	if sourceMessageID != "" {
 		replyRef.MessageID = sourceMessageID
 	}
+	displayOptions := p.resolveIMDisplayOptions(ctx, msg.Channel, identity.BotID)
 	stream, err := sender.OpenStream(ctx, target, channel.StreamOptions{
 		Reply:           replyRef,
 		SourceMessageID: sourceMessageID,
 		Metadata: map[string]any{
 			"conversation_type": msg.Conversation.Type,
 		},
+		ReuseToolCallMessage: displayOptions.ReuseToolCallMessage,
 	})
 	if err != nil {
 		return err
@@ -3860,7 +3878,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 	}
 	defer func() { _ = closeStream() }()
 
-	if !isLocalChannelType(msg.Channel) && !p.shouldShowToolCallsInIM(ctx, identity.BotID) {
+	if !displayOptions.ShowToolCalls {
 		stream = channel.NewToolCallDroppingStream(stream)
 	}
 	if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventStatus, Status: channel.StreamStatusStarted}); err != nil {

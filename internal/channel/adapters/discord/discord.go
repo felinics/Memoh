@@ -608,11 +608,13 @@ func (a *DiscordAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig
 	}
 
 	return &discordOutboundStream{
-		adapter: a,
-		cfg:     cfg,
-		target:  target,
-		reply:   opts.Reply,
-		session: session,
+		adapter:              a,
+		cfg:                  cfg,
+		target:               target,
+		reply:                opts.Reply,
+		session:              session,
+		reuseToolCallMessage: opts.ReuseToolCallMessage,
+		toolStatusInterval:   discordToolStatusEditInterval,
 	}, nil
 }
 

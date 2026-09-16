@@ -998,11 +998,13 @@ func (a *SlackAdapter) OpenStream(ctx context.Context, cfg channel.ChannelConfig
 	}
 
 	return &slackOutboundStream{
-		adapter: a,
-		cfg:     cfg,
-		target:  target,
-		reply:   reply,
-		api:     api,
+		adapter:              a,
+		cfg:                  cfg,
+		target:               target,
+		reply:                reply,
+		api:                  api,
+		reuseToolCallMessage: opts.ReuseToolCallMessage,
+		toolStatusInterval:   slackStreamUpdateThrottle,
 	}, nil
 }
 

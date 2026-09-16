@@ -451,10 +451,12 @@ func (a *MatrixAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig,
 		reply = &channel.ReplyRef{Target: normalizeTarget(target), MessageID: strings.TrimSpace(opts.SourceMessageID)}
 	}
 	return &matrixOutboundStream{
-		adapter: a,
-		cfg:     parsed,
-		target:  normalizeTarget(target),
-		reply:   reply,
+		adapter:              a,
+		cfg:                  parsed,
+		target:               normalizeTarget(target),
+		reply:                reply,
+		reuseToolCallMessage: opts.ReuseToolCallMessage,
+		toolStatusInterval:   matrixEditThrottle,
 	}, nil
 }
 
