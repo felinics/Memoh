@@ -4,7 +4,7 @@ import MarkdownRender, { enableKatex, enableMermaid, setCustomComponents } from 
 import ThemedMermaidBlock from '@/components/themed-mermaid-block/index.vue'
 import ChatCodeBlock from '@/pages/home/components/chat-code-block.vue'
 import { useSettingsStore } from '@/store/settings'
-import { registerSharedMarkdownComponents } from '@/components/markdown'
+import { disableInlineMath, registerSharedMarkdownComponents } from '@/components/markdown'
 
 const props = withDefaults(defineProps<{
   content: string
@@ -41,6 +41,7 @@ const codeFontRenderKey = computed(() => settings.codeFontStack)
         :fade="false"
         :show-tooltips="false"
         :mermaid-props="{ showTooltips: false }"
+        :custom-markdown-it="disableInlineMath"
         custom-id="file-preview-md"
       />
     </div>
