@@ -19,7 +19,7 @@ export default defineConfig({
         root: webRoot,
         plugins: [vue()],
         resolve: {
-          dedupe: ['vue'],
+          dedupe: ['vue', 'vee-validate'],
           alias: {
             '@': fileURLToPath(new URL('./apps/web/src', import.meta.url)),
             '#': fileURLToPath(new URL('./packages/ui/src', import.meta.url)),
