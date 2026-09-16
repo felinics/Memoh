@@ -73,6 +73,7 @@ const searchProviders: string[] = [
   ...withVariants('jina', []),
   ...withVariants('exa', ['color']),
   ...withVariants('cloudflare', []),
+  ...withVariants('firecrawl', []),
   ...withVariants('microsoft', ['color']),
   'brave',
   'bocha',

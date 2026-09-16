@@ -9,6 +9,7 @@ const (
 	ProviderBing       ProviderName = "bing"
 	ProviderGoogle     ProviderName = "google"
 	ProviderTavily     ProviderName = "tavily"
+	ProviderFirecrawl  ProviderName = "firecrawl"
 	ProviderSogou      ProviderName = "sogou"
 	ProviderSerper     ProviderName = "serper"
 	ProviderSearXNG    ProviderName = "searxng"

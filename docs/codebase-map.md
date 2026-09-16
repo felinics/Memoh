@@ -95,7 +95,7 @@ Memoh/
 │   ├── email/                  #   Email provider and outbox management (Mailgun, generic SMTP, OAuth)
 │   ├── embedded/               #   Embedded filesystem assets (web only)
 │   ├── display/                #   Workspace display service (Xvnc/RFB/WebRTC sessions and input forwarding)
-│   ├── fetchproviders/         #   Web-fetch provider management (native, Jina, Cloudflare Markdown)
+│   ├── fetchproviders/         #   Web-fetch provider management (native, Jina, Cloudflare Markdown, Firecrawl)
 │   ├── handlers/               #   HTTP request handlers (REST API endpoints)
 │   ├── healthcheck/            #   Health check adapter system (MCP, channel checkers)
 │   ├── hooks/                  #   Bot-defined lifecycle hooks (PreToolUse, TurnEnd, … from hooks.json)
@@ -116,7 +116,7 @@ Memoh/
 │   ├── registry/               #   Provider registry service (YAML provider templates)
 │   ├── rpc/                    #   Internal server↔channel RPC (shared-secret auth, runtime method fan-out)
 │   ├── schedule/               #   Scheduled task service (cron)
-│   ├── searchproviders/        #   Search engine provider management (Brave, etc.)
+│   ├── searchproviders/        #   Search engine provider management (Brave, Firecrawl, etc.)
 │   ├── server/                 #   HTTP server wrapper (Echo setup, middleware, shutdown)
 │   ├── settings/               #   Bot settings management
 │   ├── apps/          #   Installed Supermarket App state
