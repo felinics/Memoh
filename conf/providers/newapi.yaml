@@ -1,6 +1,6 @@
 name: New API
 client_type: openai-completions
 icon: newapi-color
-base_url: https://your.new-api-provider.com
+base_url: https://your.new-api-provider.com/v1
 
 models:

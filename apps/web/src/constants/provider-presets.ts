@@ -199,7 +199,7 @@ export const providerPresets: ProviderPreset[] = [
     id: 'newapi',
     name: 'New API',
     clientType: 'openai-completions',
-    baseUrl: 'https://your.new-api-provider.com',
+    baseUrl: 'https://your.new-api-provider.com/v1',
     icon: 'newapi-color',
     source: 'newapi.yaml',
   },
