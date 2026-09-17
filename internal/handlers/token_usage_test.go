@@ -40,11 +40,13 @@ func (q *tokenUsageQueries) ListTokenUsageRecords(_ context.Context, arg sqlc.Li
 	q.listParams = arg
 	return []sqlc.ListTokenUsageRecordsRow{
 		{
-			ID:          testUUID("55555555-5555-5555-5555-555555555555"),
-			SessionID:   testUUID("66666666-6666-6666-6666-666666666666"),
-			SessionType: "acp_agent",
-			ModelSlug:   "codex",
-			ModelName:   "Codex",
+			ID:           testUUID("55555555-5555-5555-5555-555555555555"),
+			SessionID:    testUUID("66666666-6666-6666-6666-666666666666"),
+			SessionType:  "acp_agent",
+			Harness:      "acp_agent",
+			ProviderName: "OpenAI Codex",
+			ModelSlug:    "codex",
+			ModelName:    "Codex",
 		},
 	}, nil
 }
@@ -153,6 +155,13 @@ func TestListTokenUsageRecordsAllowsACPAgentFilter(t *testing.T) {
 	}
 	if !queries.countParams.SessionType.Valid || queries.countParams.SessionType.String != "acp_agent" {
 		t.Fatalf("count session type = %#v, want acp_agent", queries.countParams.SessionType)
+	}
+	var response TokenUsageRecordsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Items) != 1 || response.Items[0].Harness != "acp_agent" || response.Items[0].ProviderName != "OpenAI Codex" {
+		t.Fatalf("independent harness/provider attribution = %#v", response.Items)
 	}
 }
 

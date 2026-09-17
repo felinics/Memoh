@@ -3635,7 +3635,9 @@
     "colBot": "Bot",
     "colSessionType": "タイプ",
     "colModel": "モデル",
-    "colProvider": "プロバイダー",
+    "colProvider": "モデルプロバイダー",
+    "colHarness": "Harness",
+    "unknown": "不明",
     "colInputTokens": "入力",
     "colOutputTokens": "出力"
   },

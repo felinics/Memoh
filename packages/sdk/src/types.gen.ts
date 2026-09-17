@@ -2717,6 +2717,7 @@ export type HandlersSupermarketSkillSource = {
 export type HandlersTokenUsageRecord = {
     cache_read_tokens?: number;
     created_at?: string;
+    harness?: string;
     id?: string;
     input_tokens?: number;
     model_id?: string;

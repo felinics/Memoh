@@ -24697,6 +24697,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "harness": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },

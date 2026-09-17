@@ -73,6 +73,7 @@ type TokenUsageRecord struct {
 	CreatedAt       string `json:"created_at"`
 	SessionID       string `json:"session_id"`
 	SessionType     string `json:"session_type"`
+	Harness         string `json:"harness"`
 	ModelID         string `json:"model_id"`
 	ModelSlug       string `json:"model_slug"`
 	ModelName       string `json:"model_name"`
@@ -373,6 +374,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 			CreatedAt:       formatPgTime(r.CreatedAt),
 			SessionID:       formatOptionalUUID(r.SessionID),
 			SessionType:     r.SessionType,
+			Harness:         r.Harness,
 			ModelID:         formatOptionalUUID(r.ModelID),
 			ModelSlug:       r.ModelSlug,
 			ModelName:       r.ModelName,

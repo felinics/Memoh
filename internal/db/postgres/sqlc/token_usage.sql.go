@@ -291,6 +291,7 @@ SELECT
   m.id,
   m.created_at,
   m.session_id,
+  m.runtime_type::text AS harness,
   CASE
     WHEN COALESCE(
       NULLIF(m.runtime_type, ''),
@@ -376,6 +377,7 @@ type ListTokenUsageRecordsRow struct {
 	ID              pgtype.UUID        `json:"id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	SessionID       pgtype.UUID        `json:"session_id"`
+	Harness         string             `json:"harness"`
 	SessionType     string             `json:"session_type"`
 	ModelID         pgtype.UUID        `json:"model_id"`
 	ModelSlug       string             `json:"model_slug"`
@@ -408,6 +410,7 @@ func (q *Queries) ListTokenUsageRecords(ctx context.Context, arg ListTokenUsageR
 			&i.ID,
 			&i.CreatedAt,
 			&i.SessionID,
+			&i.Harness,
 			&i.SessionType,
 			&i.ModelID,
 			&i.ModelSlug,

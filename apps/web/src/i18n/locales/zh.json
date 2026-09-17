@@ -3642,7 +3642,9 @@
     "colBot": "Bot",
     "colSessionType": "类型",
     "colModel": "模型",
-    "colProvider": "Provider",
+    "colProvider": "模型供应商",
+    "colHarness": "Harness",
+    "unknown": "未知",
     "colInputTokens": "输入",
     "colOutputTokens": "输出"
   },

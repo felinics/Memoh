@@ -187,7 +187,10 @@
           </EmptyHeader>
         </Empty>
 
-        <SettingsSection :title="$t('usage.records')">
+        <SectionGroup
+          :title="$t('usage.records')"
+          tone="muted"
+        >
           <template
             v-if="recordsPaginationSummary"
             #actions
@@ -201,7 +204,7 @@
             <TableHeader>
               <TableRow>
                 <TableHead>{{ $t('usage.colTime') }}</TableHead>
-                <TableHead>{{ $t('usage.colSessionType') }}</TableHead>
+                <TableHead>{{ $t('usage.colHarness') }}</TableHead>
                 <TableHead>{{ $t('usage.colModel') }}</TableHead>
                 <TableHead>{{ $t('usage.colProvider') }}</TableHead>
                 <TableHead class="text-right">
@@ -242,10 +245,10 @@
                   <TableCell class="whitespace-nowrap text-muted-foreground">
                     {{ formatDateTimeShort(r.created_at, { locale }) }}
                   </TableCell>
-                  <TableCell>{{ sessionTypeLabel(r.session_type) }}</TableCell>
+                  <TableCell>{{ harnessLabel(r.harness) }}</TableCell>
                   <TableCell>{{ recordModelLabel(r) }}</TableCell>
                   <TableCell class="text-muted-foreground">
-                    {{ r.provider_name || '-' }}
+                    {{ recordProviderLabel(r.provider_name) }}
                   </TableCell>
                   <TableCell class="text-right tabular-nums">
                     {{ formatNumber(r.input_tokens ?? 0) }}
@@ -257,7 +260,7 @@
               </template>
             </TableBody>
           </Table>
-        </SettingsSection>
+        </SectionGroup>
 
         <!-- Pagination lives OUTSIDE the section card: it's the table's pager, not
              a row of the card. Kept justify-end below the card so it doesn't fight
@@ -347,7 +350,7 @@ import {
 } from '@felinic/ui'
 import { getBotsQuery } from '@memohai/sdk/colada'
 import { getBotsByBotIdTokenUsage, getBotsByBotIdTokenUsageRecords } from '@memohai/sdk'
-import { MetricReadout, PageShell, SettingsSection } from '@felinic/ui'
+import { MetricReadout, PageShell, SectionGroup, SettingsSection } from '@felinic/ui'
 import BotSelect from '@/components/bot-select/index.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
@@ -564,18 +567,23 @@ function setRecordsPage(page: number) {
   recordsPage.value = String(clamped)
 }
 
-function sessionTypeLabel(type: string | undefined): string {
+function harnessLabel(type: string | undefined): string {
   switch (type) {
-    case 'chat': return t('usage.chat')
-    case 'discuss': return t('usage.discuss')
-    case 'acp_agent': return t('usage.acpAgent')
-    case 'schedule': return t('usage.schedule')
-    default: return type || '-'
+    case 'model': return 'Memoh'
+    case 'codex': return 'Codex'
+    case 'claude-code': return 'Claude Code'
+    case 'acp_agent': return 'ACP'
+    default: return type || t('usage.unknown')
   }
 }
 
+function recordProviderLabel(name: string | undefined): string {
+  return !name || name.toLowerCase() === 'unknown' ? t('usage.unknown') : name
+}
+
 function recordModelLabel(r: HandlersTokenUsageRecord): string {
-  return r.model_name || r.model_slug || '-'
+  const label = r.model_name || r.model_slug
+  return !label || label.toLowerCase() === 'unknown' ? t('usage.unknown') : label
 }
 
 onMounted(() => {

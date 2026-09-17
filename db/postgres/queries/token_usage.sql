@@ -117,6 +117,7 @@ SELECT
   m.id,
   m.created_at,
   m.session_id,
+  m.runtime_type::text AS harness,
   CASE
     WHEN COALESCE(
       NULLIF(m.runtime_type, ''),

@@ -3642,7 +3642,9 @@
     "colBot": "Bot",
     "colSessionType": "Type",
     "colModel": "Model",
-    "colProvider": "Provider",
+    "colProvider": "Model provider",
+    "colHarness": "Harness",
+    "unknown": "Unknown",
     "colInputTokens": "Input",
     "colOutputTokens": "Output"
   },
