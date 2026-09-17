@@ -126,11 +126,6 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 	return &next
 }
 
-func (s *readMediaDecorationState) mergeMessages(steps []sdk.StepResult, fallback []sdk.Message, interruptedDurableStep int) []sdk.Message {
-	messages, _ := s.mergeMessagesWithOrigins(steps, fallback, interruptedDurableStep)
-	return messages
-}
-
 func (s *readMediaDecorationState) mergeMessagesWithOrigins(steps []sdk.StepResult, fallback []sdk.Message, interruptedDurableStep int) ([]sdk.Message, []int) {
 	if s == nil {
 		return fallback, nil
