@@ -3538,6 +3538,8 @@ definitions:
     type: object
   handlers.ChannelMeta:
     properties:
+      acl_exempt:
+        type: boolean
       capabilities:
         $ref: '#/definitions/channel.ChannelCapabilities'
       config_schema:
@@ -14204,8 +14206,8 @@ paths:
       description: |-
         Lightweight SSE for sidebar live-sort. Carries only session
         identifiers and minimal metadata (touched timestamps, titles).
-        Never includes message bodies. Filters out internal session
-        types such as schedule and subagent.
+        Never includes message bodies. Filters out sessions with
+        internal visibility, such as managed subagent work.
       parameters:
       - description: Bot ID
         in: path

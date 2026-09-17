@@ -1980,6 +1980,7 @@ export type HandlersCacheStats = {
 };
 
 export type HandlersChannelMeta = {
+    acl_exempt?: boolean;
     capabilities?: ChannelChannelCapabilities;
     config_schema?: ChannelConfigSchema;
     configless?: boolean;

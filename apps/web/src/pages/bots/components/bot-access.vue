@@ -710,7 +710,17 @@ const chatScopeOptions = computed(() => [
   { value: 'thread', label: t('bots.access.threadConversationGroup') },
 ])
 
-const aclExcludedChannelTypes = new Set(['web'])
+// Channels chat ACL cannot meaningfully gate: the local web session is the
+// owner by definition, and ACLExempt channels (from /channels meta) are
+// owner-only, so rules or members scoped to them would be inert.
+const aclExcludedChannelTypes = computed(() => {
+  const excluded = new Set(['web'])
+  for (const meta of channelMetas.value ?? []) {
+    const type = meta.type?.trim()
+    if (meta.acl_exempt && type) excluded.add(type)
+  }
+  return excluded
+})
 
 interface MemberOptionMeta {
   kind?: 'identity' | 'group'
@@ -807,7 +817,7 @@ const platformMetaByType = computed(() => {
 const platformOptions = computed(() =>
   [...platformMetaByType.value.values()]
     .map(meta => ({ value: meta.type?.trim() ?? '', label: formatPlatformName(meta.type, meta.display_name) }))
-    .filter(option => option.value && !aclExcludedChannelTypes.has(option.value))
+    .filter(option => option.value && !aclExcludedChannelTypes.value.has(option.value))
     .sort((a, b) => a.label.localeCompare(b.label)),
 )
 
@@ -1125,7 +1135,7 @@ interface MemberCandidateOption {
 const memberCandidateOptions = computed<MemberCandidateOption[]>(() => {
   const present = new Set(members.value.map(m => m.channelIdentityId))
   const identityOptions = (identityCandidates.value?.items ?? [])
-    .filter(i => i.id && !present.has(i.id) && !aclExcludedChannelTypes.has(i.channel ?? ''))
+    .filter(i => i.id && !present.has(i.id) && !aclExcludedChannelTypes.value.has(i.channel ?? ''))
     .map(i => ({
       value: i.id ?? '',
       label: i.display_name || i.channel_subject_id || i.id || '',
@@ -1135,7 +1145,7 @@ const memberCandidateOptions = computed<MemberCandidateOption[]>(() => {
       meta: { kind: 'identity', avatarUrl: i.avatar_url, channelLabel: channelTypeDisplayName(t, i.channel ?? '') },
     }))
   const groupOptions = (groupCandidates.value ?? [])
-    .filter(g => g.conversation_id && g.channel && !aclExcludedChannelTypes.has(g.channel))
+    .filter(g => g.conversation_id && g.channel && !aclExcludedChannelTypes.value.has(g.channel))
     .flatMap((g) => {
       const key = groupRowKey(g.channel ?? '', g.conversation_id ?? '')
       if (present.has(key)) return []
@@ -1519,7 +1529,7 @@ const centerDialogTitle = computed(() => !formVisible.value && advancedRules.val
 
 const identityOptions = computed(() =>
   (identityCandidates.value?.items ?? [])
-    .filter(i => !aclExcludedChannelTypes.has(i.channel ?? ''))
+    .filter(i => !aclExcludedChannelTypes.value.has(i.channel ?? ''))
     .map(i => ({
       value: i.id ?? '',
       label: i.display_name || i.channel_subject_id || i.id || '',
