@@ -1167,6 +1167,18 @@
     "reasoningMax": "最大",
     "sessions": "会话",
     "newSession": "新会话",
+    "sessionSelection": {
+      "start": "多选",
+      "count": "已选 {count} 条",
+      "selectDisplayed": "全选已展示会话",
+      "deselectDisplayed": "取消已展示项勾选",
+      "deleteCount": "删除（{count}）",
+      "confirm": "确定删除选中的 {count} 个会话？删除后无法从界面恢复。",
+      "runningWarning": "其中包含正在执行的会话，删除可能中断执行。",
+      "scheduleWarning": "定时任务仍会保持启用，后续可能产生新会话。",
+      "partialFailure": "{total} 条删除请求中有 {failed} 条出错。列表已刷新，剩余会话保留勾选，可重试。",
+      "deleted": "已删除 {count} 个会话。"
+    },
     "deleteSession": "删除会话",
     "deleteSessionConfirm": "确定要删除此会话吗？",
     "renameSession": "重命名会话",
