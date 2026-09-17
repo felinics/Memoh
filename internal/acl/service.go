@@ -26,6 +26,10 @@ var (
 type Service struct {
 	queries dbstore.Queries
 	logger  *slog.Logger
+	// channelExempt reports channel types whose traffic bypasses ACL
+	// evaluation entirely (owner-only channels). Wired from the channel
+	// registry at composition time; nil means no exemptions.
+	channelExempt func(channelType string) bool
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
@@ -38,10 +42,19 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	}
 }
 
+// SetChannelExemption installs the predicate used by Evaluate to skip ACL
+// checks for channels that no third party can ever reach.
+func (s *Service) SetChannelExemption(fn func(channelType string) bool) {
+	s.channelExempt = fn
+}
+
 // Evaluate checks whether the given request is allowed to perform chat.trigger.
 // Rules only override the bot's default mode: deny rules matter in blacklist mode,
 // and allow rules matter in whitelist mode.
 func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, error) {
+	if s != nil && s.channelExempt != nil && s.channelExempt(strings.TrimSpace(req.ChannelType)) {
+		return true, nil
+	}
 	// Validate scope before any service nil checks so callers get meaningful errors.
 	sourceScope, err := normalizeSourceScope(req.SourceScope)
 	if err != nil {

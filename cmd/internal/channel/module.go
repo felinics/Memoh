@@ -3,6 +3,7 @@ package channel
 import (
 	"go.uber.org/fx"
 
+	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/local"
 	"github.com/felinics/memoh/internal/channel/identities"
@@ -32,7 +33,19 @@ func FoundationModule() fx.Option {
 			provideChannelRegistry,
 			channel.NewStore,
 		),
+		fx.Invoke(
+			wireACLChannelExemption,
+		),
 	)
+}
+
+// wireACLChannelExemption feeds the channel registry's ACLExempt descriptor
+// flag into the ACL service so owner-only channels skip chat ACL evaluation.
+func wireACLChannelExemption(aclService *acl.Service, registry *channel.Registry) {
+	aclService.SetChannelExemption(func(channelType string) bool {
+		desc, ok := registry.GetDescriptor(channel.ChannelType(channelType))
+		return ok && desc.ACLExempt
+	})
 }
 
 // ServerLocalModule supplies the local Web channel path. It does not start any

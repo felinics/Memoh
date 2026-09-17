@@ -207,6 +207,41 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
+func TestEvaluateSkipsExemptChannel(t *testing.T) {
+	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
+
+	var evaluateQueries int
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			evaluateQueries++
+			return noRule()
+		},
+	}
+	queries := postgresstore.NewQueries(sqlc.New(db))
+	service := NewService(nil, queries)
+	service.SetChannelExemption(func(channelType string) bool {
+		return channelType == "weixin"
+	})
+
+	allowed, err := service.Evaluate(context.Background(), EvaluateRequest{
+		BotID:             botUUID.String(),
+		ChannelIdentityID: "55555555-5555-5555-5555-555555555555",
+		ChannelType:       "weixin",
+		SourceScope: SourceScope{
+			ConversationType: "private",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !allowed {
+		t.Fatal("expected exempt channel to be allowed")
+	}
+	if evaluateQueries != 0 {
+		t.Fatalf("expected no queries for exempt channel, got %d", evaluateQueries)
+	}
+}
+
 func TestEvaluatePassesGroupScopeToQuery(t *testing.T) {
 	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
 	identityUUID := "55555555-5555-5555-5555-555555555555"

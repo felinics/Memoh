@@ -89,11 +89,15 @@ type Descriptor struct {
 	DisplayName        string
 	Configless         bool
 	AckDisabledWebhook bool
-	Capabilities       ChannelCapabilities
-	OutboundPolicy     OutboundPolicy
-	ConfigSchema       ConfigSchema
-	UserConfigSchema   ConfigSchema
-	TargetSpec         TargetSpec
+	// ACLExempt marks channels that no third party can ever reach (e.g.
+	// owner-only personal-assistant channels), so the chat ACL gate allows
+	// all inbound traffic on them.
+	ACLExempt        bool
+	Capabilities     ChannelCapabilities
+	OutboundPolicy   OutboundPolicy
+	ConfigSchema     ConfigSchema
+	UserConfigSchema ConfigSchema
+	TargetSpec       TargetSpec
 }
 
 // ConfigNormalizer validates and normalizes channel and user-binding configurations.
