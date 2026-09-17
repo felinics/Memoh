@@ -334,6 +334,15 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
       path: '/oauth/mcp/callback',
       component: () => import('@/pages/oauth/mcp-callback.vue'),
     },
+    {
+      // Generic provider deep-link target (`#payload=` carries the prefilled
+      // provider as base64url JSON; see utils/provider-connect.ts). Standalone
+      // confirm page — the key stays in the fragment and is only saved after
+      // explicit user confirmation.
+      name: 'provider-connect',
+      path: '/providers/connect',
+      component: () => import('@/pages/providers/connect.vue'),
+    },
     // Dev-only component wall. Registered ONLY in dev builds, so the chunk and
     // its auth-bypass guard never exist in production. Reached by setting the
     // `memoh:dev-tools` localStorage flag and navigating to /dev/components.

@@ -1672,6 +1672,28 @@
       "connecting": "Connecting"
     }
   },
+  "providerConnect": {
+    "title": "Add Provider",
+    "description": "A third-party service wants to add the following provider to Memoh. It will only be saved after your confirmation.",
+    "name": "Name",
+    "baseUrl": "Base URL",
+    "clientType": "Client Type",
+    "apiKey": "API Key",
+    "confirm": "Add Provider",
+    "decline": "Cancel",
+    "createFailed": "Failed to add provider",
+    "invalidTitle": "Invalid Link",
+    "backToProviders": "Back to Providers",
+    "error": {
+      "missing": "The link is missing its payload.",
+      "decode": "The link payload could not be parsed.",
+      "kind": "The link is not a provider import link.",
+      "version": "The link version is not supported.",
+      "baseUrl": "The link contains no valid base URL.",
+      "apiKey": "The link contains no API key.",
+      "clientType": "The link specifies an unsupported client type."
+    }
+  },
   "webSearch": {
     "title": "Web Search",
     "add": "Add",

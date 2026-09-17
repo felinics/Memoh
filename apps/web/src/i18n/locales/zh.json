@@ -1672,6 +1672,28 @@
       "connecting": "连接中"
     }
   },
+  "providerConnect": {
+    "title": "添加 Provider",
+    "description": "第三方服务想将以下 Provider 添加到你的 Memoh，确认后才会保存。",
+    "name": "名称",
+    "baseUrl": "Base URL",
+    "clientType": "API 格式",
+    "apiKey": "API Key",
+    "confirm": "添加",
+    "decline": "取消",
+    "createFailed": "添加 Provider 失败",
+    "invalidTitle": "链接无效",
+    "backToProviders": "返回 Provider 列表",
+    "error": {
+      "missing": "链接缺少 payload 参数。",
+      "decode": "链接内容无法解析。",
+      "kind": "这不是 Provider 导入链接。",
+      "version": "不支持的链接版本。",
+      "baseUrl": "链接中没有合法的 Base URL。",
+      "apiKey": "链接中没有 API Key。",
+      "clientType": "链接指定了不支持的 API 格式。"
+    }
+  },
   "webSearch": {
     "title": "网页搜索",
     "add": "添加",

@@ -1641,6 +1641,28 @@
       "connecting": "接続中"
     }
   },
+  "providerConnect": {
+    "title": "プロバイダーを追加",
+    "description": "外部サービスが以下のプロバイダーを Memoh に追加しようとしています。確認するまで保存されません。",
+    "name": "名前",
+    "baseUrl": "ベース URL",
+    "clientType": "クライアントタイプ",
+    "apiKey": "API キー",
+    "confirm": "追加",
+    "decline": "キャンセル",
+    "createFailed": "プロバイダーの追加に失敗しました",
+    "invalidTitle": "無効なリンク",
+    "backToProviders": "プロバイダー一覧に戻る",
+    "error": {
+      "missing": "リンクに payload がありません。",
+      "decode": "リンクの内容を解析できませんでした。",
+      "kind": "プロバイダーインポートリンクではありません。",
+      "version": "サポートされていないリンクのバージョンです。",
+      "baseUrl": "リンクに有効なベース URL がありません。",
+      "apiKey": "リンクに API キーがありません。",
+      "clientType": "サポートされていないクライアントタイプが指定されています。"
+    }
+  },
   "webSearch": {
     "title": "ウェブ検索",
     "add": "追加",
