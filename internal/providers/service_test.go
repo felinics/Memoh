@@ -975,6 +975,87 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 	})
 }
 
+// Regression for the New API "import 0 models" report: a provider linked to a
+// template (even an EMPTY one) must still list models from the live endpoint;
+// the template only enriches matching IDs with curated capabilities.
+func TestFetchRemoteModelsViaSDKMergesTemplateCapabilities(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "newapi.yaml"), []byte(`
+name: New API
+client_type: openai-completions
+base_url: https://example.invalid/v1
+
+models:
+  - model_id: curated-chat
+    name: Curated Chat
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 128000
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models path, got %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "curated-chat", "object": "model"},
+				{"id": "endpoint-only", "object": "model"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil, "", dir)
+	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"base_url":"` + server.URL + `/v1","api_key":"sk-test"}`),
+		Metadata:   []byte(`{"preset":{"source":"newapi.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	if len(remoteModels) != 2 {
+		t.Fatalf("expected the endpoint's 2 models (template must not short-circuit), got %d", len(remoteModels))
+	}
+
+	var curated, endpointOnly *RemoteModel
+	for i := range remoteModels {
+		switch remoteModels[i].ID {
+		case "curated-chat":
+			curated = &remoteModels[i]
+		case "endpoint-only":
+			endpointOnly = &remoteModels[i]
+		}
+	}
+	if curated == nil || endpointOnly == nil {
+		t.Fatalf("missing expected models: %#v", remoteModels)
+	}
+	if curated.Name != "Curated Chat" {
+		t.Fatalf("expected curated template name, got %q", curated.Name)
+	}
+	if !curated.CapabilitiesKnown {
+		t.Fatal("expected CapabilitiesKnown for a template-matched model")
+	}
+	if curated.ContextWindow == nil || *curated.ContextWindow != 128000 {
+		t.Fatalf("expected template context window, got %#v", curated.ContextWindow)
+	}
+	if got := strings.Join(curated.Compatibilities, ","); got != "tool-call" {
+		t.Fatalf("compatibilities = %q", got)
+	}
+	if endpointOnly.CapabilitiesKnown {
+		t.Fatal("endpoint-only model must stay CapabilitiesKnown=false")
+	}
+	if endpointOnly.Name != "endpoint-only" {
+		t.Fatalf("expected ID fallback name, got %q", endpointOnly.Name)
+	}
+}
+
 // providerTestQueries stubs dbstore.Queries with the single row Test needs;
 // every other method nil-panics, which keeps this test honest about how
 // little the probe path is allowed to touch the database.

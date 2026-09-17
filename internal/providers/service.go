@@ -397,18 +397,14 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return s.fetchGitHubCopilotModels(ctx, provider)
 	}
 
-	if models, ok := s.fetchTemplateModels(ctx, provider); ok {
-		return models, nil
-	}
-
-	remoteModels, err := s.fetchRemoteModelsViaSDK(ctx, provider)
-	if err != nil {
-		return nil, err
-	}
-
-	return remoteModels, nil
+	return s.fetchRemoteModelsViaSDK(ctx, provider)
 }
 
+// fetchTemplateModels returns the curated template/catalog entries for a
+// provider, when one is associated. The list describes CAPABILITIES of known
+// models, never which models this endpoint actually serves: callers must treat
+// it as lookup-by-ID metadata, not as the model list (an empty template like
+// New API must not short-circuit the remote /models call).
 func (s *Service) fetchTemplateModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, bool) {
 	if provider.ProviderTemplateID.Valid {
 		models, err := s.queries.ListProviderTemplateModels(ctx, provider.ProviderTemplateID)
@@ -521,6 +517,16 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 		return nil, fmt.Errorf("list models: %w", err)
 	}
 
+	// Best-effort capability lookup: template/catalog entries keyed by model ID
+	// enrich the models the endpoint actually serves; they never add, remove,
+	// or substitute entries (a gateway like New API decides its own list).
+	templatesByID := make(map[string]RemoteModel)
+	if templateModels, ok := s.fetchTemplateModels(ctx, provider); ok {
+		for _, model := range templateModels {
+			templatesByID[model.ID] = model
+		}
+	}
+
 	remoteModels := make([]RemoteModel, 0, len(sdkModels))
 	for _, m := range sdkModels {
 		modelType := m.Type
@@ -547,12 +553,30 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 			}
 			dimensions = &dim
 		}
-		remoteModels = append(remoteModels, RemoteModel{
+		remote := RemoteModel{
 			ID:         m.ID,
 			Name:       name,
 			Type:       string(modelType),
 			Dimensions: dimensions,
-		})
+		}
+		if template, found := templatesByID[m.ID]; found {
+			// The live endpoint keeps deciding ID/type; curated fields fill in.
+			if template.Name != "" {
+				remote.Name = template.Name
+			}
+			remote.Description = template.Description
+			remote.Compatibilities = template.Compatibilities
+			remote.ReasoningEfforts = template.ReasoningEfforts
+			remote.ThinkingMode = template.ThinkingMode
+			remote.ReasoningDialect = template.ReasoningDialect
+			remote.ReasoningOffSupport = template.ReasoningOffSupport
+			remote.ReasoningDefaultOn = template.ReasoningDefaultOn
+			remote.ThinkingBudgetMin = template.ThinkingBudgetMin
+			remote.ThinkingBudgetMax = template.ThinkingBudgetMax
+			remote.ContextWindow = template.ContextWindow
+			remote.CapabilitiesKnown = true
+		}
+		remoteModels = append(remoteModels, remote)
 	}
 	return remoteModels, nil
 }
