@@ -540,18 +540,27 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 		if name == "" {
 			name = m.ID
 		}
+		template, found := templatesByID[m.ID]
 		var dimensions *int
 		if modelType == sdk.ModelTypeEmbedding {
-			dim, err := models.InferEmbeddingDimensions(ctx, string(clientType), baseURL, creds.APIKey, m.ID, probeTimeout, nil)
-			if err != nil {
-				logger := s.logger
-				if logger == nil {
-					logger = slog.Default()
+			switch {
+			case found && template.Dimensions != nil:
+				// The template already curates this model's dimensions; a live
+				// probe would spend tokens and can spuriously fail on gateways
+				// whose key lacks embedding permission.
+				dimensions = template.Dimensions
+			default:
+				dim, err := models.InferEmbeddingDimensions(ctx, string(clientType), baseURL, creds.APIKey, m.ID, probeTimeout, nil)
+				if err != nil {
+					logger := s.logger
+					if logger == nil {
+						logger = slog.Default()
+					}
+					logger.Warn("skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
+					continue
 				}
-				logger.Warn("skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
-				continue
+				dimensions = &dim
 			}
-			dimensions = &dim
 		}
 		remote := RemoteModel{
 			ID:         m.ID,
