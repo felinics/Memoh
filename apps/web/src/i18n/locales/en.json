@@ -1670,7 +1670,9 @@
       "githubConnectHint": "Sign in with GitHub to use Copilot models.",
       "revokeConfirm": "Revoke authorization for this account?",
       "connecting": "Connecting"
-    }
+    },
+    "saveSuccess": "Provider saved",
+    "saveBeforeTest": "Save changes before testing the connection."
   },
   "webSearch": {
     "title": "Web Search",

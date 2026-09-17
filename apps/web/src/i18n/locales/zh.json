@@ -1670,7 +1670,9 @@
       "githubConnectHint": "登录 GitHub 账号后即可使用 Copilot 模型。",
       "revokeConfirm": "确定撤销此账号的授权？",
       "connecting": "连接中"
-    }
+    },
+    "saveSuccess": "服务商配置已保存",
+    "saveBeforeTest": "请先保存修改，再测试连接。"
   },
   "webSearch": {
     "title": "网页搜索",

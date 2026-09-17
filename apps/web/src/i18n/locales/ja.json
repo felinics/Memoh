@@ -1639,7 +1639,9 @@
       "githubConnectHint": "GitHub アカウントでサインインすると、Copilot のモデルを利用できます。",
       "revokeConfirm": "このアカウントの認可を取り消しますか?",
       "connecting": "接続中"
-    }
+    },
+    "saveSuccess": "プロバイダー設定を保存しました",
+    "saveBeforeTest": "変更を保存してから接続をテストしてください。"
   },
   "webSearch": {
     "title": "ウェブ検索",
