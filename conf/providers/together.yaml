@@ -3,6 +3,8 @@ client_type: openai-completions
 icon: "together-color"
 base_url: "https://api.together.xyz/v1"
 
+# Together's supported serverless catalog is account-dependent and should be
+# refreshed from its Models API when credentials are available.
 models:
   - model_id: "deepseek-ai/DeepSeek-R1"
     name: "DeepSeek R1"

@@ -3,94 +3,157 @@ client_type: openai-completions
 icon: "zhipu-color"
 base_url: "https://api.z.ai/api/paas/v4"
 
+# Z.AI's current model and pricing catalog, ordered newest first.
 models:
-  - model_id: "glm-4-32b-0414-128k"
-    name: "GLM 4 32b 0414 128k"
+  - model_id: "glm-5.3-flash"
+    name: "GLM-5.3-Flash"
     type: chat
     config:
-      compatibilities: [tool-call]
-      context_window: 128000
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-5.3"
+    name: "GLM-5.3"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-5.2"
+    name: "GLM-5.2"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-5.1"
+    name: "GLM-5.1"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-5"
+    name: "GLM-5"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-5-code"
+    name: "GLM-5 Code"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-4.7"
+    name: "GLM-4.7"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-4.7-flashx"
+    name: "GLM-4.7 FlashX"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-4.6"
+    name: "GLM-4.6"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "glm-4.5"
-    name: "GLM 4.5"
+    name: "GLM-4.5"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-4.5-x"
+    name: "GLM-4.5 X"
+    type: chat
+    config:
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-4.5-airx"
+    name: "GLM-4.5 AirX"
     type: chat
     config:
       compatibilities: [tool-call]
       context_window: 128000
   - model_id: "glm-4.5-air"
-    name: "GLM 4.5 Air"
+    name: "GLM-4.5 Air"
     type: chat
     config:
       compatibilities: [tool-call]
       context_window: 128000
-  - model_id: "glm-4.5-airx"
-    name: "GLM 4.5 Airx"
+  - model_id: "glm-4.7-flash"
+    name: "GLM-4.7 Flash"
     type: chat
     config:
-      compatibilities: [tool-call]
-      context_window: 128000
+      compatibilities: [tool-call, reasoning]
+      context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "glm-4.5-flash"
-    name: "GLM 4.5 Flash"
+    name: "GLM-4.5 Flash"
     type: chat
     config:
       compatibilities: [tool-call]
       context_window: 128000
-  - model_id: "glm-4.5-x"
-    name: "GLM 4.5 X"
+  - model_id: "glm-4.6v"
+    name: "GLM-4.6V"
     type: chat
     config:
-      compatibilities: [tool-call]
+      compatibilities: [vision, tool-call, reasoning]
       context_window: 128000
-  - model_id: "glm-4.5v"
-    name: "GLM 4.5v"
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
+  - model_id: "glm-4.6v-flashx"
+    name: "GLM-4.6V FlashX"
     type: chat
     config:
       compatibilities: [vision, tool-call]
       context_window: 128000
-  - model_id: "glm-4.6"
-    name: "GLM 4.6"
+  - model_id: "glm-4.6v-flash"
+    name: "GLM-4.6V Flash"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "glm-4.7"
-    name: "GLM 4.7"
+      compatibilities: [vision, tool-call]
+      context_window: 128000
+  - model_id: "glm-4.5v"
+    name: "GLM-4.5V"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "glm-4.7-flash"
-    name: "GLM 4.7 Flash"
+      compatibilities: [vision, tool-call]
+      context_window: 128000
+  - model_id: "glm-ocr"
+    name: "GLM-OCR"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "glm-5"
-    name: "GLM 5"
+      compatibilities: [vision]
+      context_window: 128000
+  - model_id: "glm-4-32b-0414-128k"
+    name: "GLM-4-32B-0414-128K"
     type: chat
     config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "glm-5-code"
-    name: "GLM 5 Code"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
-  - model_id: "glm-5.1"
-    name: "GLM 5.1"
-    type: chat
-    config:
-      compatibilities: [tool-call, reasoning]
-      context_window: 200000
-      thinking_mode: toggle
-      reasoning_efforts: [low, medium, high]
+      compatibilities: [tool-call]
+      context_window: 128000

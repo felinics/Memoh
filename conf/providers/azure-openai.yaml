@@ -3,6 +3,7 @@ client_type: openai-completions
 icon: "azure-color"
 base_url: "https://<resource>.openai.azure.com/openai/v1"
 
+# Deployments are tenant-specific; the live Azure resource is authoritative.
 models:
   - model_id: "command-r-plus"
     name: "Command R Plus"

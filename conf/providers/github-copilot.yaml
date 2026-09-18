@@ -2,51 +2,104 @@ name: GitHub Copilot
 client_type: github-copilot
 icon: github-copilot
 
+# GitHub Copilot's catalog is managed by OAuth and the Copilot service; it
+# intentionally has no user-configurable base_url. These are the current GA
+# models listed in GitHub's supported-models table, newest first.
 models:
-  - model_id: claude-opus-4.6-1m
-    name: Claude Opus 4.6 (1M context)(Internal only)
+  - model_id: gpt-6-astra
+    name: GPT-6 Astra
     type: chat
     config:
       context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
-      reasoning_efforts: [low, medium, high]
+      reasoning_efforts: [low, medium, high, xhigh]
 
-  - model_id: claude-opus-4.6
-    name: Claude Opus 4.6
+  - model_id: gpt-5.6-terra
+    name: GPT-5.6 Terra
     type: chat
     config:
-      context_window: 144000
+      context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
-      reasoning_efforts: [low, medium, high]
+      reasoning_efforts: [low, medium, high, xhigh]
 
-  - model_id: claude-sonnet-4.6
-    name: Claude Sonnet 4.6
+  - model_id: gpt-5.6-sol
+    name: GPT-5.6 Sol
+    type: chat
+    config:
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
+      reasoning_efforts: [low, medium, high, xhigh]
+
+  - model_id: gpt-5.6-luna
+    name: GPT-5.6 Luna
+    type: chat
+    config:
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
+      reasoning_efforts: [low, medium, high, xhigh]
+
+  - model_id: claude-fable-5.1
+    name: Claude Fable 5.1
+    type: chat
+    config:
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
+
+  - model_id: claude-fable-5
+    name: Claude Fable 5
+    type: chat
+    config:
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
+
+  - model_id: claude-opus-5
+    name: Claude Opus 5
+    type: chat
+    config:
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
+
+  - model_id: claude-opus-4.8
+    name: Claude Opus 4.8
+    type: chat
+    config:
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
+
+  - model_id: claude-opus-4.7
+    name: Claude Opus 4.7
+    type: chat
+    config:
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
+
+  - model_id: claude-sonnet-5
+    name: Claude Sonnet 5
+    type: chat
+    config:
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
+
+  - model_id: claude-haiku-4.5
+    name: Claude Haiku 4.5
     type: chat
     config:
       context_window: 200000
       compatibilities: [vision, tool-call, reasoning]
-      reasoning_efforts: [low, medium, high]
 
-  - model_id: goldeneye-free-auto
-    name: Goldeneye
+  - model_id: gpt-5.5
+    name: GPT-5.5
     type: chat
     config:
-      context_window: 400000
-      compatibilities: [vision, tool-call]
-
-  - model_id: gpt-5.2-codex
-    name: GPT-5.2-Codex
-    type: chat
-    config:
-      context_window: 400000
+      context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
       reasoning_efforts: [low, medium, high, xhigh]
 
-  - model_id: gpt-5.3-codex
-    name: GPT-5.3-Codex
+  - model_id: gpt-5.4
+    name: GPT-5.4
     type: chat
     config:
-      context_window: 400000
+      context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
       reasoning_efforts: [low, medium, high, xhigh]
 
@@ -58,11 +111,18 @@ models:
       compatibilities: [vision, tool-call, reasoning]
       reasoning_efforts: [disable, low, medium, high, xhigh]
 
-  - model_id: gpt-5.4
-    name: GPT-5.4
+  - model_id: gpt-5.4-nano
+    name: GPT-5.4 nano
     type: chat
     config:
       context_window: 400000
+      compatibilities: [vision, tool-call, reasoning]
+
+  - model_id: gpt-5.3-codex
+    name: GPT-5.3-Codex
+    type: chat
+    config:
+      context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
       reasoning_efforts: [low, medium, high, xhigh]
 
@@ -70,117 +130,68 @@ models:
     name: GPT-5 mini
     type: chat
     config:
-      context_window: 264000
-      compatibilities: [vision, tool-call, reasoning]
-      reasoning_efforts: [low, medium, high]
-
-  - model_id: gpt-4o-mini-2024-07-18
-    name: GPT-4o mini
-    type: chat
-    config:
-      context_window: 128000
-      compatibilities: [tool-call]
-
-  - model_id: grok-code-fast-1
-    name: Grok Code Fast 1
-    type: chat
-    config:
-      context_window: 128000
-      compatibilities: [tool-call]
-
-  - model_id: gpt-5.1
-    name: GPT-5.1
-    type: chat
-    config:
-      context_window: 264000
-      compatibilities: [vision, tool-call, reasoning]
-      reasoning_efforts: [disable, low, medium, high]
-
-  - model_id: text-embedding-3-small
-    name: Embedding V3 small
-    type: embedding
-    config:
-      dimensions: 1536
-
-  - model_id: text-embedding-3-small-inference
-    name: Embedding V3 small (Inference)
-    type: embedding
-    config:
-      dimensions: 1536
-
-  - model_id: claude-sonnet-4
-    name: Claude Sonnet 4
-    type: chat
-    config:
-      context_window: 216000
+      context_window: 400000
       compatibilities: [vision, tool-call, reasoning]
 
-  - model_id: claude-sonnet-4.5
-    name: Claude Sonnet 4.5
+  - model_id: gemini-3.8-flash
+    name: Gemini 3.8 Flash
     type: chat
     config:
-      context_window: 144000
+      context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
 
-  - model_id: claude-opus-4.5
-    name: Claude Opus 4.5
+  - model_id: gemini-3.7-flash
+    name: Gemini 3.7 Flash
     type: chat
     config:
-      context_window: 160000
+      context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
 
-  - model_id: claude-haiku-4.5
-    name: Claude Haiku 4.5
+  - model_id: gemini-3.6-flash
+    name: Gemini 3.6 Flash
     type: chat
     config:
-      context_window: 144000
+      context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
 
-  - model_id: gpt-4.1-2025-04-14
-    name: GPT-4.1
+  - model_id: gemini-3.5-flash
+    name: Gemini 3.5 Flash
     type: chat
     config:
-      context_window: 128000
-      compatibilities: [vision, tool-call]
-
-  - model_id: gpt-5.2
-    name: GPT-5.2
-    type: chat
-    config:
-      context_window: 264000
+      context_window: 1000000
       compatibilities: [vision, tool-call, reasoning]
-      reasoning_efforts: [low, medium, high, xhigh]
 
-  - model_id: gpt-3.5-turbo-0613
-    name: GPT 3.5 Turbo
+  - model_id: mai-code-1.1-flash
+    name: MAI-Code-1.1-Flash
     type: chat
     config:
-      context_window: 16384
-      compatibilities: [tool-call]
+      context_window: 256000
+      compatibilities: [tool-call, reasoning]
 
-  - model_id: gpt-4.1
-    name: GPT-4.1
+  - model_id: kimi-k2.7-code
+    name: Kimi K2.7 Code
     type: chat
     config:
-      context_window: 128000
-      compatibilities: [vision, tool-call]
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
 
-  - model_id: gpt-3.5-turbo
-    name: GPT 3.5 Turbo
+  - model_id: kimi-k3
+    name: Kimi K3
     type: chat
     config:
-      context_window: 16384
-      compatibilities: [tool-call]
+      context_window: 1000000
+      compatibilities: [vision, tool-call, reasoning]
 
-  - model_id: gpt-4o-mini
-    name: GPT-4o mini
+  - model_id: grok-4.6
+    name: Grok 4.6
     type: chat
     config:
-      context_window: 128000
-      compatibilities: [tool-call]
+      context_window: 500000
+      compatibilities: [vision, tool-call, reasoning]
 
-  - model_id: text-embedding-ada-002
-    name: Embedding V2 Ada
-    type: embedding
+  - model_id: grok-4.5
+    name: Grok 4.5
+    type: chat
     config:
-      dimensions: 1536
+      context_window: 500000
+      compatibilities: [vision, tool-call, reasoning]
