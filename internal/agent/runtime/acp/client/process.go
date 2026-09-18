@@ -17,7 +17,8 @@ import (
 
 const (
 	stderrTailLimit = 8 * 1024
-	// defaultContainerPath is the PATH ACP agents run with. The managed
+	// defaultContainerPath is the PATH ACP agents start from; the user's shell
+	// configuration extends it (see resolveContainerPath). The managed
 	// dependency shim directory comes first so a managed overlay
 	// of an image runtime (node, python, uv) wins over the toolkit copy.
 	defaultContainerPath = dataMountPath + "/.memoh/deps/bin:" + containerToolkitBin + ":/usr/local/bin:/usr/bin:/bin"
@@ -281,6 +282,18 @@ func checkCommand(ctx context.Context, client *bridge.Client, check, workDir str
 	})
 }
 
+// CommandNotFoundError reports a launch command that resolves neither on the
+// workspace PATH nor in the toolkit. It is its own type because retrying cannot
+// fix it: public surfaces tell the user which command to install or correct.
+type CommandNotFoundError struct {
+	Command string
+	detail  string
+}
+
+func (e *CommandNotFoundError) Error() string {
+	return fmt.Sprintf("ACP command %q is not available in the workspace PATH or %s%s. Install it in the workspace or rebuild the Memoh workspace runtime with %s available", e.Command, containerToolkitBin, e.detail, containerToolkitBin)
+}
+
 func commandNotAvailableError(command string, result *bridge.ExecResult) error {
 	detail := ""
 	if result != nil {
@@ -292,7 +305,7 @@ func commandNotAvailableError(command string, result *bridge.ExecResult) error {
 	if detail != "" {
 		detail = ": " + detail
 	}
-	return fmt.Errorf("ACP command %q is not available in the workspace PATH or %s%s. Install it in the workspace or rebuild the Memoh workspace runtime with %s available", command, containerToolkitBin, detail, containerToolkitBin)
+	return &CommandNotFoundError{Command: command, detail: detail}
 }
 
 func isPlainCommand(command string) bool {

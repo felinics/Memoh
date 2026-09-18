@@ -235,6 +235,7 @@
       "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
       "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
       "operation_failed": "Agent 运行实例操作失败，请重试。",
+      "command_not_found": "在工作区里找不到命令「{command}」。请先在工作区终端里安装它，或在 Agent 配置里把命令改成绝对路径。",
       "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
       "model_id_required": "请选择模型后重试。",
       "model_unavailable": "所选模型已不再可用于这个外部 Agent。",

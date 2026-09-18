@@ -232,6 +232,7 @@
       "runtime_conflict": "Agent ランタイムはこの操作を実行できる状態ではありません。更新してからもう一度お試しください。",
       "runtime_limit_reached": "実行中の Agent ランタイムが多すぎます。1 つ終了してからもう一度お試しください。",
       "operation_failed": "Agent ランタイムの操作に失敗しました。もう一度お試しください。",
+      "command_not_found": "ワークスペースでコマンド「{command}」が見つかりません。ワークスペースのターミナルでインストールするか、Agent のコマンドを絶対パスで指定してください。",
       "model_selection_unsupported": "この外部Agentはモデルの切り替えに対応していません。",
       "model_id_required": "モデルを選択して、もう一度お試しください。",
       "model_unavailable": "選択したモデルはこの外部Agentで利用できなくなりました。",

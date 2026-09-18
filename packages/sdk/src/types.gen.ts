@@ -5333,6 +5333,10 @@ export type PostBotsByBotIdAcpRuntimesErrors = {
      */
     404: ApperrorProblem;
     /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
      * Too Many Requests
      */
     429: ApperrorProblem;

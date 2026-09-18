@@ -235,6 +235,7 @@
       "runtime_conflict": "The Agent runtime is not ready for this operation. Refresh and try again.",
       "runtime_limit_reached": "Too many Agent runtimes are active. Close one and try again.",
       "operation_failed": "The Agent runtime operation failed. Please try again.",
+      "command_not_found": "The command \"{command}\" was not found in the workspace. Install it from the workspace terminal, or set the Agent command to its absolute path.",
       "model_selection_unsupported": "This external agent does not support model selection.",
       "model_id_required": "Choose a model and try again.",
       "model_unavailable": "The selected model is no longer available for this external agent.",

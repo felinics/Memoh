@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/shellenv"
 )
 
 const (
@@ -35,6 +37,17 @@ type runtimeLease struct {
 }
 
 func prepareRuntimeLease(ctx context.Context, client *bridge.Client, opts processOptions) (*runtimeLease, error) {
+	lease, err := prepareGuardedRuntimeLease(ctx, client, opts)
+	if err != nil {
+		return nil, err
+	}
+	// The PATH probe runs the user's shell configuration, which can be slow.
+	// It stays outside the sync guard so it never holds the bot generation lock.
+	lease.applyShellPath(ctx, opts.Logger)
+	return lease, nil
+}
+
+func prepareGuardedRuntimeLease(ctx context.Context, client *bridge.Client, opts processOptions) (*runtimeLease, error) {
 	if opts.RuntimeSyncGuard == nil {
 		return prepareRuntimeLeaseUnguarded(ctx, client, opts)
 	}
@@ -121,7 +134,6 @@ func (l *runtimeLease) buildEnvironments(ctx context.Context, opts processOption
 	base = withoutEnvKeys(base, "PATH")
 
 	agentEnv := append([]string(nil), base...)
-	agentEnv = append(agentEnv, "PATH="+defaultContainerPath)
 	for _, binding := range bindings {
 		value := strings.TrimSpace(binding.Value)
 		if runtimePath := strings.TrimSpace(binding.RuntimePath); runtimePath != "" {
@@ -137,10 +149,31 @@ func (l *runtimeLease) buildEnvironments(ctx context.Context, opts processOption
 		agentEnv = append(agentEnv, binding.Name+"="+value)
 	}
 
+	// PATH is set by applyShellPath once the lease exists.
 	toolEnv := append([]string(nil), base...)
-	toolEnv = append(toolEnv, "HOME="+dataMountPath, "PATH="+defaultContainerPath)
+	toolEnv = append(toolEnv, "HOME="+dataMountPath)
 	unsetEnv := mergeEnvNames(opts.UnsetEnv, ownedNames)
 	return agentEnv, toolEnv, unsetEnv, nil
+}
+
+// applyShellPath extends defaultContainerPath with the directories the user's
+// shell configuration adds, so an agent installed from the workspace terminal
+// is found without an absolute path. The probe sees the agent's own
+// environment: rc files key their PATH additions off HOME. A failed probe
+// must not block the launch, so it degrades to the default.
+func (l *runtimeLease) applyShellPath(ctx context.Context, logger *slog.Logger) {
+	containerPath, err := shellenv.ResolvePath(ctx, l.client, defaultContainerPath, l.agentEnv, l.unsetEnv)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("workspace shell PATH probe failed; ACP agent runs with the default PATH",
+				slog.String("agent_id", l.agentID),
+				slog.String("bot_id", l.botID),
+				slog.Any("error", err))
+		}
+		containerPath = defaultContainerPath
+	}
+	l.agentEnv = append(l.agentEnv, "PATH="+containerPath)
+	l.toolEnv = append(l.toolEnv, "PATH="+containerPath)
 }
 
 func runtimeOwnedEnvNames(bindings []acpprofile.RuntimeEnvBinding) []string {

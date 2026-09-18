@@ -8136,6 +8136,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "429":
           description: Too Many Requests
           schema:
@@ -14204,8 +14208,8 @@ paths:
       description: |-
         Lightweight SSE for sidebar live-sort. Carries only session
         identifiers and minimal metadata (touched timestamps, titles).
-        Never includes message bodies. Filters out internal session
-        types such as schedule and subagent.
+        Never includes message bodies. Filters out sessions with
+        internal visibility, such as managed subagent work.
       parameters:
       - description: Bot ID
         in: path
