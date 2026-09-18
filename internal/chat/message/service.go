@@ -2091,7 +2091,7 @@ func toMessageFromBeforeCursorBySessionRow(row sqlc.ListMessagesBeforeCursorBySe
 }
 
 func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
-	return toMessageFields(
+	message := toMessageFields(
 		row.ID,
 		row.BotID,
 		row.SessionID,
@@ -2112,6 +2112,8 @@ func toMessageFromIDBySessionRow(row sqlc.GetMessageByIDBySessionRow) Message {
 		row.DisplayText,
 		row.CreatedAt,
 	)
+	message.TurnID = uuidString(row.TurnID)
+	return message
 }
 
 func toMessageFromLocateWindowByExternalIDBySessionRow(row sqlc.LocateMessagesWindowByExternalIDBySessionRow) Message {

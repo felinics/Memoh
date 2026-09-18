@@ -15,6 +15,16 @@ type fakeHistorySessionLister struct {
 	sessions []session.Thread
 }
 
+func TestHistoryListSessionsRejectsMalformedLimits(t *testing.T) {
+	t.Parallel()
+	provider := NewHistoryProvider(nil, fakeHistorySessionLister{}, nil, nil)
+	for _, limit := range []any{"garbage", true, 1.5, -0.5} {
+		if _, err := provider.execListSessions(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{"limit": limit}); err == nil {
+			t.Errorf("accepted malformed limit %v", limit)
+		}
+	}
+}
+
 func (f fakeHistorySessionLister) ListByBot(_ context.Context, _ string) ([]session.Thread, error) {
 	return f.sessions, nil
 }
@@ -46,6 +56,11 @@ func (f *fakeHistoryMessageReader) GetByIDBySession(_ context.Context, sessionID
 	f.exactSessionID = sessionID
 	f.exactMessageID = messageID
 	return f.exactMessage, f.exactErr
+}
+
+func (f *fakeHistoryMessageReader) ListBeforeMessageBySession(_ context.Context, sessionID, _ string, _ int32) ([]messagepkg.Message, error) {
+	f.beforeSessionID = sessionID
+	return f.beforeMessages, nil
 }
 
 func TestHistoryProviderGetMessagesDefaultsToCurrentSession(t *testing.T) {
@@ -99,7 +114,10 @@ func TestHistoryProviderGetMessagesBeforeUsesRequestedSession(t *testing.T) {
 		},
 	}
 	provider := NewHistoryProvider(nil, fakeHistorySessionLister{
-		sessions: []session.Thread{{ID: "session-other", BotID: "bot-1", CreatedByUserID: "user-1"}},
+		sessions: []session.Thread{
+			{ID: "session-current", BotID: "bot-1", CreatedByUserID: "user-1"},
+			{ID: "session-other", BotID: "bot-1", CreatedByUserID: "user-1"},
+		},
 	}, reader, nil)
 
 	got, err := provider.execGetMessages(context.Background(), SessionContext{
@@ -225,11 +243,11 @@ func TestHistoryProviderListSessionsFiltersOtherUsersAndRoutes(t *testing.T) {
 		t.Fatalf("execListSessions() error = %v", err)
 	}
 	items := got.(map[string]any)["sessions"].([]map[string]any)
-	if len(items) != 3 {
-		t.Fatalf("visible sessions = %v, want current, same route, and same user", items)
+	if len(items) != 2 {
+		t.Fatalf("visible sessions = %v, want current and same route", items)
 	}
 	for _, item := range items {
-		if item["session_id"] == "session-bob" {
+		if item["session_id"] == "session-bob" || item["session_id"] == "session-same-user" {
 			t.Fatalf("inaccessible session leaked: %v", item)
 		}
 	}

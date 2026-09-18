@@ -36,11 +36,11 @@ func TestMemoryProviderFiltersSourceRefsByHistoryVisibility(t *testing.T) {
 		BotID: "bot-1", SessionID: "session-current", UserID: "user-1",
 	}, output).(map[string]any)
 	refs := filtered["results"].([]map[string]any)[0]["source_refs"].([]map[string]any)
-	if len(refs) != 3 {
-		t.Fatalf("source refs = %v, want only current, same-route, and same-user refs", refs)
+	if len(refs) != 2 {
+		t.Fatalf("source refs = %v, want only current and same-route refs", refs)
 	}
 	for _, ref := range refs {
-		if ref["session_id"] == "session-bob" || ref["message_id"] == "legacy-unscoped" {
+		if ref["session_id"] == "session-bob" || ref["session_id"] == "session-same-user" || ref["message_id"] == "legacy-unscoped" {
 			t.Fatalf("inaccessible source ref leaked: %v", ref)
 		}
 	}

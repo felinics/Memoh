@@ -9,15 +9,14 @@ import (
 
 // visibleHistorySessions resolves the history scope of one tool invocation.
 // Memory facts are bot-shared, but the transcripts that produced them are not:
-// a caller may read its current session, another thread on the same external
-// route, or another thread created by the same authenticated user.
+// External routes stay within that route; route-less callers use their owner.
 func visibleHistorySessions(ctx context.Context, lister SessionLister, sess SessionContext) ([]session.Thread, map[string]struct{}, error) {
 	allowed := make(map[string]struct{})
 	currentSessionID := strings.TrimSpace(sess.SessionID)
-	if currentSessionID != "" {
-		allowed[currentSessionID] = struct{}{}
-	}
 	if lister == nil {
+		if currentSessionID != "" {
+			allowed[currentSessionID] = struct{}{}
+		}
 		return nil, allowed, nil
 	}
 
@@ -28,14 +27,19 @@ func visibleHistorySessions(ctx context.Context, lister SessionLister, sess Sess
 
 	currentRouteID := ""
 	currentUserID := strings.TrimSpace(sess.UserID)
+	currentFound := false
 	for _, thread := range threads {
-		if thread.ID == currentSessionID {
+		if currentSessionID != "" && strings.TrimSpace(thread.ID) == currentSessionID {
+			currentFound = true
 			currentRouteID = strings.TrimSpace(thread.RouteID)
 			if persistedUserID := strings.TrimSpace(thread.CreatedByUserID); persistedUserID != "" {
 				currentUserID = persistedUserID
 			}
 			break
 		}
+	}
+	if !currentFound {
+		return nil, allowed, nil
 	}
 	visible := make([]session.Thread, 0, len(threads))
 	for _, thread := range threads {
@@ -45,8 +49,8 @@ func visibleHistorySessions(ctx context.Context, lister SessionLister, sess Sess
 		}
 		sameSession := threadID == currentSessionID
 		sameRoute := currentRouteID != "" && strings.TrimSpace(thread.RouteID) == currentRouteID
-		sameUser := currentUserID != "" && strings.TrimSpace(thread.CreatedByUserID) == currentUserID
-		if !sameSession && !sameRoute && !sameUser {
+		sameUser := currentRouteID == "" && currentUserID != "" && strings.TrimSpace(thread.CreatedByUserID) == currentUserID
+		if !sameSession && (thread.Visibility == session.VisibilityInternal || (!sameRoute && !sameUser)) {
 			continue
 		}
 		visible = append(visible, thread)

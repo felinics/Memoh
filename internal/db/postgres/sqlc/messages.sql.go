@@ -2310,6 +2310,7 @@ SELECT
   m.id,
   m.bot_id,
   m.session_id,
+  m.turn_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
@@ -2328,7 +2329,7 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
 WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.id = $2
@@ -2344,6 +2345,7 @@ type GetMessageByIDBySessionRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
 	SessionID               pgtype.UUID        `json:"session_id"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	SenderUserID            pgtype.UUID        `json:"sender_user_id"`
 	ExternalMessageID       pgtype.Text        `json:"external_message_id"`
@@ -2369,6 +2371,7 @@ func (q *Queries) GetMessageByIDBySession(ctx context.Context, arg GetMessageByI
 		&i.ID,
 		&i.BotID,
 		&i.SessionID,
+		&i.TurnID,
 		&i.SenderChannelIdentityID,
 		&i.SenderUserID,
 		&i.ExternalMessageID,
@@ -3940,7 +3943,7 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
 WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
@@ -4048,7 +4051,7 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
 WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
@@ -4584,7 +4587,7 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
 WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = $1
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
@@ -6309,68 +6312,98 @@ func (q *Queries) ReplaceHistoryTurn(ctx context.Context, arg ReplaceHistoryTurn
 }
 
 const searchMessages = `-- name: SearchMessages :many
-SELECT
-  m.id,
-  m.bot_id,
-  m.session_id,
-  m.sender_channel_identity_id,
-  m.role,
-  m.content,
-  m.created_at,
-  ci.display_name AS sender_display_name,
-  s.channel_type AS platform
-FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.bot_id = $1
-  AND m.session_id = ANY($2::uuid[])
-  AND ($3::uuid IS NULL OR m.session_id = $3::uuid)
-  AND ($4::uuid IS NULL OR m.sender_channel_identity_id = $4::uuid)
-  AND ($5::timestamptz IS NULL OR m.created_at >= $5::timestamptz)
-  AND ($6::timestamptz IS NULL OR m.created_at <= $6::timestamptz)
-  AND ($7::text IS NULL OR m.role = $7::text)
-  AND ($8::text IS NULL OR (
-    CASE
-      WHEN jsonb_typeof(m.content->'content') = 'string'
-        THEN m.content->>'content'
-      WHEN jsonb_typeof(m.content->'content') = 'array'
-        THEN (SELECT COALESCE(string_agg(elem->>'text', ' '), '')
-              FROM jsonb_array_elements(m.content->'content') AS elem
-              WHERE elem->>'type' = 'text')
-      ELSE ''
-    END
-  ) ILIKE '%' || $8::text || '%')
-ORDER BY m.created_at DESC, m.id DESC
-LIMIT $9
+WITH projected AS NOT MATERIALIZED (
+  SELECT m.id, m.bot_id, m.session_id, m.turn_id, m.sender_channel_identity_id, m.role, m.created_at,
+    ci.display_name AS sender_display_name, s.channel_type AS platform,
+    concat_ws(' ',
+      m.display_text,
+      CASE
+        WHEN jsonb_typeof(m.content) = 'string' THEN m.content #>> '{}'
+        WHEN jsonb_typeof(m.content->'content') = 'string' THEN m.content->>'content'
+        WHEN m.role = 'tool' AND COALESCE(jsonb_typeof(m.content->'tool_call_id') = 'string', false)
+          AND btrim(m.content->>'tool_call_id', E' \t\n\r\f\x0B') <> ''
+          AND NOT COALESCE(jsonb_path_exists(m.content->'content', '$[*] ? (@.type == "tool-result")'), false)
+          THEN m.content->>'content'
+        ELSE ''
+      END,
+      (
+        SELECT string_agg(
+          CASE elem->>'type'
+            WHEN 'text' THEN elem->>'text'
+            WHEN 'tool-call' THEN concat_ws(' ', elem->>'toolName', elem->>'toolCallId', elem->>'input', elem->>'args')
+            WHEN 'tool-result' THEN concat_ws(' ', elem->>'toolName', elem->>'toolCallId', elem->>'result', elem->>'output')
+            ELSE ''
+          END, ' ' ORDER BY ordinal
+        )
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(m.content->'content') = 'array' THEN m.content->'content'
+            WHEN m.content->'content'->>'type' = 'tool-result' THEN jsonb_build_array(m.content->'content')
+            WHEN jsonb_typeof(m.content) = 'array' THEN m.content
+            WHEN m.content ? 'type' THEN jsonb_build_array(m.content)
+            ELSE '[]'::jsonb
+          END
+        ) WITH ORDINALITY AS parts(elem, ordinal)
+      ),
+      CASE WHEN jsonb_typeof(m.content->'tool_calls') = 'array' THEN (
+        SELECT string_agg(concat_ws(' ', call->>'id', call->'function'->>'name', call->'function'->>'arguments'), ' ' ORDER BY ordinal)
+        FROM jsonb_array_elements(m.content->'tool_calls')
+          WITH ORDINALITY AS calls(call, ordinal)
+      ) END,
+      m.content->>'tool_call_id', m.content->>'name'
+    )::text AS search_text
+  FROM bot_visible_history_messages m
+  JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
+  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.bot_id = $3
+    AND m.session_id = ANY($4::uuid[])
+    AND ($5::uuid IS NULL OR m.session_id = $5::uuid)
+    AND ($6::uuid IS NULL OR m.sender_channel_identity_id = $6::uuid)
+    AND ($7::timestamptz IS NULL OR m.created_at >= $7::timestamptz)
+    AND ($8::timestamptz IS NULL OR m.created_at <= $8::timestamptz)
+    AND ($9::text IS NULL OR m.role = $9::text)
+    AND ($10::timestamptz IS NULL OR (m.created_at, m.id) < ($10::timestamptz, $11::uuid))
+)
+SELECT id, bot_id, session_id, turn_id, sender_channel_identity_id, role, created_at, sender_display_name, platform,
+  substring(search_text FROM greatest(1, strpos(lower(search_text), lower(COALESCE($1::text, ''))) - 32) FOR 1024)::text AS search_text
+FROM projected
+WHERE $1::text IS NULL OR strpos(lower(search_text), lower($1::text)) > 0
+ORDER BY created_at DESC, id DESC
+LIMIT $2
 `
 
 type SearchMessagesParams struct {
-	BotID      pgtype.UUID        `json:"bot_id"`
-	SessionIds []pgtype.UUID      `json:"session_ids"`
-	SessionID  pgtype.UUID        `json:"session_id"`
-	ContactID  pgtype.UUID        `json:"contact_id"`
-	StartTime  pgtype.Timestamptz `json:"start_time"`
-	EndTime    pgtype.Timestamptz `json:"end_time"`
-	Role       pgtype.Text        `json:"role"`
-	Keyword    pgtype.Text        `json:"keyword"`
-	MaxCount   int32              `json:"max_count"`
+	Keyword         pgtype.Text        `json:"keyword"`
+	MaxCount        int32              `json:"max_count"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	SessionIds      []pgtype.UUID      `json:"session_ids"`
+	SessionID       pgtype.UUID        `json:"session_id"`
+	ContactID       pgtype.UUID        `json:"contact_id"`
+	StartTime       pgtype.Timestamptz `json:"start_time"`
+	EndTime         pgtype.Timestamptz `json:"end_time"`
+	Role            pgtype.Text        `json:"role"`
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
 }
 
 type SearchMessagesRow struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
 	SessionID               pgtype.UUID        `json:"session_id"`
+	TurnID                  pgtype.UUID        `json:"turn_id"`
 	SenderChannelIdentityID pgtype.UUID        `json:"sender_channel_identity_id"`
 	Role                    string             `json:"role"`
-	Content                 []byte             `json:"content"`
 	CreatedAt               pgtype.Timestamptz `json:"created_at"`
 	SenderDisplayName       pgtype.Text        `json:"sender_display_name"`
 	Platform                pgtype.Text        `json:"platform"`
+	SearchText              string             `json:"search_text"`
 }
 
 func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) ([]SearchMessagesRow, error) {
 	rows, err := q.db.Query(ctx, searchMessages,
+		arg.Keyword,
+		arg.MaxCount,
 		arg.BotID,
 		arg.SessionIds,
 		arg.SessionID,
@@ -6378,8 +6411,8 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 		arg.StartTime,
 		arg.EndTime,
 		arg.Role,
-		arg.Keyword,
-		arg.MaxCount,
+		arg.CursorCreatedAt,
+		arg.CursorID,
 	)
 	if err != nil {
 		return nil, err
@@ -6392,12 +6425,13 @@ func (q *Queries) SearchMessages(ctx context.Context, arg SearchMessagesParams) 
 			&i.ID,
 			&i.BotID,
 			&i.SessionID,
+			&i.TurnID,
 			&i.SenderChannelIdentityID,
 			&i.Role,
-			&i.Content,
 			&i.CreatedAt,
 			&i.SenderDisplayName,
 			&i.Platform,
+			&i.SearchText,
 		); err != nil {
 			return nil, err
 		}
