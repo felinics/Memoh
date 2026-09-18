@@ -35,8 +35,17 @@ type Service struct {
 
 const (
 	botLifecycleOperationTimeout   = 5 * time.Minute
+	botLifecycleStatusTimeout      = 15 * time.Second
 	botRuntimeConfigPublishTimeout = 30 * time.Second
 )
+
+// NewLifecycleStatusContext returns a short-lived context that can still write
+// bot status after the parent lifecycle budget is exhausted. Delete already
+// uses this so a timed-out cleanup can revert "deleting" back to "ready";
+// create must do the same so a timed-out setup cannot strand "creating".
+func NewLifecycleStatusContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), botLifecycleStatusTimeout)
+}
 
 var (
 	ErrBotNotFound       = errors.New("bot not found")
@@ -603,6 +612,9 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 	lifecycleCtx, cancel := context.WithTimeout(ctx, botLifecycleOperationTimeout)
 	defer cancel()
 
+	statusCtx, cancelStatus := NewLifecycleStatusContext(lifecycleCtx)
+	defer cancelStatus()
+
 	var setupErr error
 	if s.containerLifecycle != nil {
 		if err := s.containerLifecycle.SetupBotContainer(lifecycleCtx, botID); err != nil {
@@ -610,7 +622,7 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
-			if recordErr := s.RecordContainerSetupFailure(lifecycleCtx, botID, "setup", err); recordErr != nil {
+			if recordErr := s.RecordContainerSetupFailure(statusCtx, botID, "setup", err); recordErr != nil {
 				s.logger.Warn("record bot container setup failure failed",
 					slog.String("bot_id", botID),
 					slog.Any("error", recordErr),
@@ -619,7 +631,7 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 			if errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
 				setupErr = err
 			}
-		} else if clearErr := s.ClearContainerSetupFailure(lifecycleCtx, botID); clearErr != nil {
+		} else if clearErr := s.ClearContainerSetupFailure(statusCtx, botID); clearErr != nil {
 			s.logger.Warn("clear bot container setup failure failed",
 				slog.String("bot_id", botID),
 				slog.Any("error", clearErr),
@@ -627,7 +639,7 @@ func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
 		}
 	}
 
-	if err := s.updateStatus(lifecycleCtx, botID, BotStatusReady); err != nil {
+	if err := s.updateStatus(statusCtx, botID, BotStatusReady); err != nil {
 		s.logger.Error("failed to update bot status to ready after create",
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
@@ -649,7 +661,7 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID string) {
 	// whole lifecycle budget: reverting on the exhausted context would
 	// strand the bot in status "deleting" with no retry path.
 	revertToReady := func() {
-		revertCtx, cancelRevert := context.WithTimeout(context.WithoutCancel(lifecycleCtx), 15*time.Second)
+		revertCtx, cancelRevert := NewLifecycleStatusContext(lifecycleCtx)
 		defer cancelRevert()
 		if err := s.updateStatus(revertCtx, botID, BotStatusReady); err != nil {
 			s.logger.Error("revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))

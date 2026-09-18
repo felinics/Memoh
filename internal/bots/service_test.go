@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -100,12 +101,15 @@ type fakeContainerLifecycle struct {
 	setupErr   error
 }
 
-func (f *fakeContainerLifecycle) SetupBotContainer(_ context.Context, botID string) error {
+func (f *fakeContainerLifecycle) SetupBotContainer(ctx context.Context, botID string) error {
 	if f.onSetup != nil {
 		f.onSetup()
 	}
 	f.setupBotID = botID
-	return f.setupErr
+	if f.setupErr != nil {
+		return f.setupErr
+	}
+	return ctx.Err()
 }
 
 func (*fakeContainerLifecycle) CleanupBotContainer(context.Context, string, bool) error {
@@ -408,6 +412,88 @@ func TestRunCreateLifecycleClearsSetupFailureAfterSuccess(t *testing.T) {
 	}
 	if workspace["image"] != "ghcr.io/felinics/workspace:latest" {
 		t.Fatalf("workspace image was not preserved: %#v", workspace)
+	}
+}
+
+func TestNewLifecycleStatusContextSurvivesCanceledParent(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ctx, stop := NewLifecycleStatusContext(parent)
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("status context should stay usable after parent cancel, got %v", err)
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("status context should have a deadline")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > botLifecycleStatusTimeout {
+		t.Fatalf("status deadline remaining = %s, want (0, %s]", remaining, botLifecycleStatusTimeout)
+	}
+}
+
+func TestRunCreateLifecycleMarksReadyAfterLifecycleContextExpires(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	botID := botUUID.String()
+	events := make([]string, 0, 3)
+	var persisted []byte
+	var status string
+
+	db := &fakeDBTX{
+		queryRowFunc: func(ctx context.Context, query string, args ...any) pgx.Row {
+			if err := ctx.Err(); err != nil {
+				return &fakeRow{scanFunc: func(_ ...any) error { return err }}
+			}
+			switch {
+			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
+				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{}`))
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
+				events = append(events, "metadata")
+				payload, ok := args[6].([]byte)
+				if !ok {
+					t.Fatalf("metadata arg type = %T, want []byte", args[6])
+				}
+				persisted = append([]byte(nil), payload...)
+				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)
+			default:
+				t.Fatalf("unexpected query: %s", query)
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+		execFunc: func(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+			if err := ctx.Err(); err != nil {
+				return pgconn.CommandTag{}, err
+			}
+			if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2") {
+				events = append(events, "status")
+				status = args[1].(string)
+			}
+			return pgconn.CommandTag{}, nil
+		},
+	}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	svc.SetContainerLifecycle(&fakeContainerLifecycle{
+		onSetup: func() {
+			events = append(events, "setup")
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := svc.runCreateLifecycle(ctx, botID); err != nil {
+		t.Fatalf("run create lifecycle: %v", err)
+	}
+	if status != BotStatusReady {
+		t.Fatalf("bot status = %q, want %q", status, BotStatusReady)
+	}
+	if len(events) != 3 || events[0] != "setup" || events[1] != "metadata" || events[2] != "status" {
+		t.Fatalf("expected setup, metadata, status after expired lifecycle, got %v", events)
+	}
+	setupError := requireLastSetupError(t, persisted)
+	if got, _ := setupError["message"].(string); !strings.Contains(got, context.Canceled.Error()) {
+		t.Fatalf("persisted message = %q, want canceled lifecycle", got)
 	}
 }
 

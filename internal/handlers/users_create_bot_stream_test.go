@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -294,6 +295,57 @@ func TestCreateBotStreamReportsStableBootstrapErrorAndLeavesBotReady(t *testing.
 	}
 }
 
+func TestCreateBotStreamMarksReadyAfterWorkspaceTimeout(t *testing.T) {
+	prev := createBotWorkspaceTimeout
+	createBotWorkspaceTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { createBotWorkspaceTimeout = prev })
+
+	ownerID := "00000000-0000-0000-0000-000000000109"
+	botID := "00000000-0000-0000-0000-000000000209"
+	streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
+
+	handler := &UsersHandler{
+		logger:         slog.Default(),
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{waitForCtx: true},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
+		"name": "timeout-bot",
+		"display_name": "Timeout Bot",
+		"acl_preset": "allow_all",
+		"wait_for_ready": true
+	}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(echo.HeaderAccept, "text/event-stream")
+	rec := httptest.NewRecorder()
+	ctx := testAuthContext(echo.New(), req, rec, ownerID)
+
+	if err := handler.CreateBot(ctx); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+
+	events := decodeSSEEvents(t, rec.Body.String())
+	if len(events) < 2 {
+		t.Fatalf("events len = %d, want bot_created and error: %#v", len(events), events)
+	}
+	if events[0]["type"] != "bot_created" {
+		t.Fatalf("first event type = %#v, want bot_created; events=%#v", events[0]["type"], events)
+	}
+	last := events[len(events)-1]
+	if last["type"] != "error" {
+		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
+	}
+	if streamDB.status != bots.BotStatusReady {
+		t.Fatalf("bot status = %q, want %q after workspace timeout", streamDB.status, bots.BotStatusReady)
+	}
+	setupError := requireStreamLastSetupError(t, streamDB.persistedMetadata)
+	if got, _ := setupError["message"].(string); !strings.Contains(got, context.DeadlineExceeded.Error()) {
+		t.Fatalf("persisted message = %q, want deadline exceeded", got)
+	}
+}
+
 func TestGetMeReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000105"
 
@@ -404,13 +456,21 @@ func newTestCreateBotAccountService(userID string) *accounts.Service {
 }
 
 type createBotStreamWorkspace struct {
-	events []workspace.ContainerSetupEvent
-	err    error
+	events     []workspace.ContainerSetupEvent
+	err        error
+	waitForCtx bool
 }
 
-func (w *createBotStreamWorkspace) SetupBotContainerWithProgress(_ context.Context, _ string, progress workspace.ContainerSetupProgress) error {
+func (w *createBotStreamWorkspace) SetupBotContainerWithProgress(ctx context.Context, _ string, progress workspace.ContainerSetupProgress) error {
 	for _, event := range w.events {
 		progress(event)
+	}
+	if w.waitForCtx {
+		<-ctx.Done()
+		if w.err != nil {
+			return w.err
+		}
+		return ctx.Err()
 	}
 	return w.err
 }
@@ -443,7 +503,10 @@ type createBotStreamDB struct {
 	persistedMetadata []byte
 }
 
-func (d *createBotStreamDB) Exec(_ context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+func (d *createBotStreamDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+	if err := ctx.Err(); err != nil {
+		return pgconn.CommandTag{}, err
+	}
 	if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2") && len(args) > 1 {
 		d.status, _ = args[1].(string)
 	}
@@ -454,7 +517,10 @@ func (*createBotStreamDB) Query(context.Context, string, ...interface{}) (pgx.Ro
 	return nil, nil
 }
 
-func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
+func (d *createBotStreamDB) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	if err := ctx.Err(); err != nil {
+		return &createBotStreamRow{scanFunc: func(_ ...any) error { return err }}
+	}
 	switch {
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "id = $1"):
 		return &createBotStreamRow{scanFunc: func(_ ...any) error { return nil }}
