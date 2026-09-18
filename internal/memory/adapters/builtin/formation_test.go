@@ -381,6 +381,35 @@ func TestOnAfterChatFallbackWithoutLLM(t *testing.T) {
 	}
 }
 
+func TestOnAfterChatSkipsLLMWhenRequested(t *testing.T) {
+	t.Parallel()
+	store := newFakeStore()
+	runtime := newFileRuntime(store)
+	llm := &fakeLLM{
+		extractFacts: []string{"this must not be extracted"},
+	}
+
+	p := NewBuiltinProvider(slog.Default(), runtime)
+	p.SetLLM(llm)
+
+	err := p.OnAfterChat(context.Background(), adapters.AfterChatRequest{
+		BotID:   "bot-1",
+		SkipLLM: true,
+		Messages: []adapters.Message{
+			{Role: "user", Content: "Keep this transcript without an LLM"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("OnAfterChat error: %v", err)
+	}
+	if llm.extractCalls != 0 {
+		t.Fatalf("expected no extraction calls, got %d", llm.extractCalls)
+	}
+	if len(store.items) != 1 {
+		t.Fatalf("expected raw transcript fallback to store one item, got %d", len(store.items))
+	}
+}
+
 func TestOnBeforeChatRecallsFactMemory(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
