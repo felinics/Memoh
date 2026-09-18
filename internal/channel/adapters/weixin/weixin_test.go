@@ -24,9 +24,9 @@ func TestWeixinAdapter_Descriptor(t *testing.T) {
 		t.Errorf("desc.DisplayName = %q", desc.DisplayName)
 	}
 	// The channel is owner-only (iLink ClawBot lives inside the activator's
-	// own WeChat), so it must stay exempt from the chat ACL gate.
-	if !desc.ACLExempt {
-		t.Error("weixin descriptor should be ACLExempt")
+	// own WeChat), so it must stay marked OwnerOnly.
+	if !desc.OwnerOnly {
+		t.Error("weixin descriptor should be OwnerOnly")
 	}
 	if !desc.Capabilities.Text {
 		t.Error("should support text")

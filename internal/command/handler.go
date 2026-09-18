@@ -420,6 +420,12 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 		}
 	}
 	writeAccess := role == "owner" || role == "manager"
+	if !writeAccess && h.aclEvaluator != nil && h.aclEvaluator.OwnerOnlyChannel(input.ChannelType) {
+		// On owner-only channels every reachable sender is the operator by
+		// construction, so requiring /link for write commands is dead
+		// friction — the same reason the chat ACL gate skips them.
+		writeAccess = true
+	}
 
 	resource := canonicalResource(parsed.Resource)
 	// /language <lang> shorthand → /language set <lang>. Must run BEFORE cc is

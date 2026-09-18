@@ -22754,9 +22754,6 @@ const docTemplate = `{
         "handlers.ChannelMeta": {
             "type": "object",
             "properties": {
-                "acl_exempt": {
-                    "type": "boolean"
-                },
                 "capabilities": {
                     "$ref": "#/definitions/channel.ChannelCapabilities"
                 },
@@ -22768,6 +22765,9 @@ const docTemplate = `{
                 },
                 "display_name": {
                     "type": "string"
+                },
+                "owner_only": {
+                    "type": "boolean"
                 },
                 "target_spec": {
                     "$ref": "#/definitions/channel.TargetSpec"

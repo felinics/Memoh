@@ -26,10 +26,9 @@ var (
 type Service struct {
 	queries dbstore.Queries
 	logger  *slog.Logger
-	// channelExempt reports channel types whose traffic bypasses ACL
-	// evaluation entirely (owner-only channels). Wired from the channel
-	// registry at composition time; nil means no exemptions.
-	channelExempt func(channelType string) bool
+	// ownerOnly reports channel types that no third party can ever reach.
+	// Wired from the channel registry at composition time; nil means none.
+	ownerOnly func(channelType string) bool
 }
 
 func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
@@ -42,17 +41,23 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	}
 }
 
-// SetChannelExemption installs the predicate used by Evaluate to skip ACL
-// checks for channels that no third party can ever reach.
-func (s *Service) SetChannelExemption(fn func(channelType string) bool) {
-	s.channelExempt = fn
+// SetOwnerOnlyChannels installs the predicate identifying owner-only
+// channels (no third party can ever become a sender).
+func (s *Service) SetOwnerOnlyChannels(fn func(channelType string) bool) {
+	s.ownerOnly = fn
+}
+
+// OwnerOnlyChannel reports whether the channel type is owner-only. Safe to
+// call on a nil Service or before wiring; both report false.
+func (s *Service) OwnerOnlyChannel(channelType string) bool {
+	return s != nil && s.ownerOnly != nil && s.ownerOnly(strings.TrimSpace(channelType))
 }
 
 // Evaluate checks whether the given request is allowed to perform chat.trigger.
 // Rules only override the bot's default mode: deny rules matter in blacklist mode,
 // and allow rules matter in whitelist mode.
 func (s *Service) Evaluate(ctx context.Context, req EvaluateRequest) (bool, error) {
-	if s != nil && s.channelExempt != nil && s.channelExempt(strings.TrimSpace(req.ChannelType)) {
+	if s.OwnerOnlyChannel(req.ChannelType) {
 		return true, nil
 	}
 	// Validate scope before any service nil checks so callers get meaningful errors.

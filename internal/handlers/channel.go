@@ -95,7 +95,7 @@ type ChannelMeta struct {
 	Type             string                      `json:"type"`
 	DisplayName      string                      `json:"display_name"`
 	Configless       bool                        `json:"configless"`
-	ACLExempt        bool                        `json:"acl_exempt"`
+	OwnerOnly        bool                        `json:"owner_only"`
 	Capabilities     channel.ChannelCapabilities `json:"capabilities"`
 	ConfigSchema     channel.ConfigSchema        `json:"config_schema"`
 	UserConfigSchema channel.ConfigSchema        `json:"user_config_schema"`
@@ -117,7 +117,7 @@ func (h *ChannelHandler) ListChannels(c echo.Context) error {
 			Type:             desc.Type.String(),
 			DisplayName:      desc.DisplayName,
 			Configless:       desc.Configless,
-			ACLExempt:        desc.ACLExempt,
+			OwnerOnly:        desc.OwnerOnly,
 			Capabilities:     desc.Capabilities,
 			ConfigSchema:     desc.ConfigSchema,
 			UserConfigSchema: desc.UserConfigSchema,

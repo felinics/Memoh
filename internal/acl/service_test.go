@@ -207,7 +207,7 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
-func TestEvaluateSkipsExemptChannel(t *testing.T) {
+func TestEvaluateSkipsOwnerOnlyChannel(t *testing.T) {
 	botUUID := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
 
 	var evaluateQueries int
@@ -219,7 +219,7 @@ func TestEvaluateSkipsExemptChannel(t *testing.T) {
 	}
 	queries := postgresstore.NewQueries(sqlc.New(db))
 	service := NewService(nil, queries)
-	service.SetChannelExemption(func(channelType string) bool {
+	service.SetOwnerOnlyChannels(func(channelType string) bool {
 		return channelType == "weixin"
 	})
 
@@ -235,10 +235,10 @@ func TestEvaluateSkipsExemptChannel(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !allowed {
-		t.Fatal("expected exempt channel to be allowed")
+		t.Fatal("expected owner-only channel to be allowed")
 	}
 	if evaluateQueries != 0 {
-		t.Fatalf("expected no queries for exempt channel, got %d", evaluateQueries)
+		t.Fatalf("expected no queries for owner-only channel, got %d", evaluateQueries)
 	}
 }
 

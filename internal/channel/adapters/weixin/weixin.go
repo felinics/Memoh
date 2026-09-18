@@ -49,8 +49,8 @@ func (*WeixinAdapter) Descriptor() channel.Descriptor {
 		DisplayName: "WeChat",
 		// The iLink ClawBot lives only inside the activating user's own
 		// WeChat as a plugin entry; no third party can become a sender,
-		// so chat ACL is meaningless for this channel.
-		ACLExempt: true,
+		// so every sender is the operator by construction.
+		OwnerOnly: true,
 		Capabilities: channel.ChannelCapabilities{
 			Text:           true,
 			Attachments:    true,

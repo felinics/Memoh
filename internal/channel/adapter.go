@@ -89,10 +89,12 @@ type Descriptor struct {
 	DisplayName        string
 	Configless         bool
 	AckDisabledWebhook bool
-	// ACLExempt marks channels that no third party can ever reach (e.g.
-	// owner-only personal-assistant channels), so the chat ACL gate allows
-	// all inbound traffic on them.
-	ACLExempt        bool
+	// OwnerOnly marks channels that no third party can ever reach (e.g.
+	// personal-assistant channels living inside the activator's own
+	// account). Every sender on these channels is treated as the operator:
+	// the chat ACL gate allows their traffic, and write-gated slash
+	// commands run without /link.
+	OwnerOnly        bool
 	Capabilities     ChannelCapabilities
 	OutboundPolicy   OutboundPolicy
 	ConfigSchema     ConfigSchema

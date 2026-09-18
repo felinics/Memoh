@@ -34,17 +34,18 @@ func FoundationModule() fx.Option {
 			channel.NewStore,
 		),
 		fx.Invoke(
-			wireACLChannelExemption,
+			wireOwnerOnlyChannels,
 		),
 	)
 }
 
-// wireACLChannelExemption feeds the channel registry's ACLExempt descriptor
-// flag into the ACL service so owner-only channels skip chat ACL evaluation.
-func wireACLChannelExemption(aclService *acl.Service, registry *channel.Registry) {
-	aclService.SetChannelExemption(func(channelType string) bool {
+// wireOwnerOnlyChannels feeds the channel registry's OwnerOnly descriptor
+// flag into the ACL service so owner-only channels skip chat ACL evaluation
+// and grant write-command access without /link.
+func wireOwnerOnlyChannels(aclService *acl.Service, registry *channel.Registry) {
+	aclService.SetOwnerOnlyChannels(func(channelType string) bool {
 		desc, ok := registry.GetDescriptor(channel.ChannelType(channelType))
-		return ok && desc.ACLExempt
+		return ok && desc.OwnerOnly
 	})
 }
 

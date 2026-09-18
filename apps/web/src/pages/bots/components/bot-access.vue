@@ -711,13 +711,13 @@ const chatScopeOptions = computed(() => [
 ])
 
 // Channels chat ACL cannot meaningfully gate: the local web session is the
-// owner by definition, and ACLExempt channels (from /channels meta) are
+// owner by definition, and OwnerOnly channels (from /channels meta) are
 // owner-only, so rules or members scoped to them would be inert.
 const aclExcludedChannelTypes = computed(() => {
   const excluded = new Set(['web'])
   for (const meta of channelMetas.value ?? []) {
     const type = meta.type?.trim()
-    if (meta.acl_exempt && type) excluded.add(type)
+    if (meta.owner_only && type) excluded.add(type)
   }
   return excluded
 })
