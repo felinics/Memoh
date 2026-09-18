@@ -119,6 +119,8 @@ func (*WebProvider) callSearch(ctx context.Context, providerName string, configJ
 		return callGoogleSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderTavily):
 		return callTavilySearch(ctx, configJSON, query, count)
+	case string(searchproviders.ProviderFirecrawl):
+		return callFirecrawlSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderSogou):
 		return callSogouSearch(ctx, configJSON, query, count)
 	case string(searchproviders.ProviderSerper):
@@ -312,6 +314,67 @@ func callTavilySearch(ctx context.Context, configJSON []byte, query string, coun
 	results := make([]map[string]any, 0, len(raw.Results))
 	for _, item := range raw.Results {
 		results = append(results, map[string]any{"title": item.Title, "url": item.URL, "description": item.Content})
+	}
+	return map[string]any{"query": query, "results": results}, nil
+}
+
+func callFirecrawlSearch(ctx context.Context, configJSON []byte, query string, count int) (any, error) {
+	cfg := parseSearchConfig(configJSON)
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.firecrawl.dev/v2/search")
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return nil, errors.New("firecrawl API key is required")
+	}
+	payload, err := json.Marshal(map[string]any{"query": query, "limit": count})
+	if err != nil {
+		return nil, err
+	}
+	timeout := parseSearchTimeout(configJSON, 15*time.Second)
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, errors.New("invalid search provider base_url")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := client.Do(req) //nolint:gosec // endpoint is administrator-configured
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, buildSearchHTTPError(resp.StatusCode, body)
+	}
+	var raw struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+		Data    struct {
+			Web []struct {
+				Title       string `json:"title"`
+				URL         string `json:"url"`
+				Description string `json:"description"`
+			} `json:"web"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, errors.New("invalid search response")
+	}
+	if !raw.Success {
+		if raw.Error != "" {
+			return nil, fmt.Errorf("firecrawl search failed: %s", raw.Error)
+		}
+		return nil, errors.New("firecrawl search failed")
+	}
+	results := make([]map[string]any, 0, len(raw.Data.Web))
+	for _, item := range raw.Data.Web {
+		results = append(results, map[string]any{
+			"title": item.Title, "url": item.URL, "description": item.Description,
+		})
 	}
 	return map[string]any{"query": query, "results": results}, nil
 }

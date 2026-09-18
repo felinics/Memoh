@@ -1711,6 +1711,7 @@
       "bing": "Bing",
       "google": "Google",
       "tavily": "Tavily",
+      "firecrawl": "Firecrawl",
       "sogou": "搜狗",
       "serper": "Serper",
       "searxng": "SearXNG",
@@ -1723,7 +1724,8 @@
     "fetchProviderNames": {
       "native": "原生抓取",
       "jina": "Jina Reader",
-      "cloudflare_markdown": "Cloudflare Markdown"
+      "cloudflare_markdown": "Cloudflare Markdown",
+      "firecrawl": "Firecrawl"
     }
   },
   "memory": {

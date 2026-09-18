@@ -1,6 +1,7 @@
 package searchproviders
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -9,6 +10,30 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 )
+
+func TestFirecrawlProviderMetadata(t *testing.T) {
+	service := &Service{}
+	if !isValidProviderName(ProviderFirecrawl) {
+		t.Fatal("Firecrawl must be accepted as a search provider")
+	}
+	for _, meta := range service.ListMeta(context.Background()) {
+		if meta.Provider != string(ProviderFirecrawl) {
+			continue
+		}
+		if meta.DisplayName != "Firecrawl" {
+			t.Fatalf("display name = %q", meta.DisplayName)
+		}
+		fields := meta.ConfigSchema.Fields
+		if fields["api_key"].Type != "secret" || !fields["api_key"].Required {
+			t.Fatalf("api_key schema = %#v", fields["api_key"])
+		}
+		if fields["base_url"].Example != "https://api.firecrawl.dev/v2/search" {
+			t.Fatalf("base_url schema = %#v", fields["base_url"])
+		}
+		return
+	}
+	t.Fatal("Firecrawl metadata not found")
+}
 
 func TestMapSearchProviderWriteError(t *testing.T) {
 	t.Parallel()

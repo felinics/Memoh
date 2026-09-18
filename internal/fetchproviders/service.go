@@ -98,6 +98,34 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 				},
 			},
 		},
+		{
+			Provider:    string(ProviderFirecrawl),
+			DisplayName: "Firecrawl",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Firecrawl API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Firecrawl Scrape API URL",
+						Required:    false,
+						Example:     "https://api.firecrawl.dev/v2/scrape",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "Scrape timeout in seconds (1-300)",
+						Required:    false,
+						Example:     30,
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -307,13 +335,14 @@ var defaultProviders = []struct {
 	Enable      bool
 }{
 	{ProviderCloudflareMarkdown, "Cloudflare Markdown", false},
+	{ProviderFirecrawl, "Firecrawl", false},
 	{ProviderJina, "Jina Reader", false},
 	{ProviderNative, "Native", true},
 }
 
 func isValidProviderName(name ProviderName) bool {
 	switch name {
-	case ProviderNative, ProviderJina, ProviderCloudflareMarkdown:
+	case ProviderNative, ProviderJina, ProviderCloudflareMarkdown, ProviderFirecrawl:
 		return true
 	default:
 		return false
