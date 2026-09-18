@@ -40,6 +40,22 @@ const (
 	MetadataKeySourcePath = "source_path"
 	MetadataKeySourceURL  = "source_url"
 
+	// Sticker metadata travels on an ordinary image attachment, because a
+	// sticker is stored and shown to the model as readable image bytes. These
+	// keys carry the sticker's own identity alongside those bytes, which is
+	// what lets a saved sticker be sent again as a sticker.
+	//
+	// MetadataKeyStickerFileID is present only when a preview replaced the
+	// sticker in the media store, so it means "the stored bytes are not the
+	// sticker"; readers fall back to the attachment's own file id. The unique
+	// id is the stable identity across bots and re-sends, and is what marks an
+	// attachment as a sticker at all.
+	MetadataKeyStickerFileID   = "sticker_file_id"
+	MetadataKeyStickerUniqueID = "sticker_unique_id"
+	MetadataKeyStickerSet      = "sticker_set"
+	MetadataKeyStickerEmoji    = "sticker_emoji"
+	MetadataKeyStickerKind     = "sticker_kind"
+
 	containerMediaSubdir       = ".memoh/media"
 	legacyContainerMediaSubdir = "media"
 )

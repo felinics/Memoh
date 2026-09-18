@@ -175,6 +175,8 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolGetMessages():    "history",
 		ToolSearchMessages(): "history",
 		ToolSearchMemory():   "memory",
+		ToolSearchStickers(): "stickers",
+		ToolSaveSticker():    "stickers",
 		ToolListSkills():     "skills",
 		ToolUseSkill():       "skills",
 

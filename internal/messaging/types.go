@@ -71,6 +71,10 @@ const (
 	AttachmentVoice AttachmentType = "voice"
 	AttachmentFile  AttachmentType = "file"
 	AttachmentGIF   AttachmentType = "gif"
+	// AttachmentSticker sends a platform sticker by its native reference.
+	// Only Telegram implements it; other adapters reject the type rather than
+	// silently delivering a still image.
+	AttachmentSticker AttachmentType = "sticker"
 )
 
 type Attachment struct {

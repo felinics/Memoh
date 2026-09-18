@@ -488,3 +488,32 @@ type AudioCatalogStore interface {
 type MessageSearch interface {
 	SearchMessages(ctx context.Context, filter Filter) ([]Record, error)
 }
+
+// StickerSighting is one inbound sticker the bot has seen in a conversation.
+// It carries only what is needed to send that sticker again and to identify
+// it; the description that makes a sticker findable lives in the bot's
+// workspace sticker library, not in the database.
+type StickerSighting struct {
+	// Ref is the platform reference that sends the sticker — Telegram's
+	// file_id for the sticker itself, never the preview that was stored.
+	Ref      string
+	UniqueID string
+	Pack     string
+	Emoji    string
+	Kind     string
+	// ContentHash addresses the stored preview bytes, the only fallback when
+	// a platform reference stops working.
+	ContentHash string
+	Mime        string
+	Name        string
+	SeenAt      time.Time
+}
+
+// StickerSightingStore answers "which sticker did this conversation just
+// see", so a save can name a sticker without the model having to quote an
+// opaque platform id back.
+type StickerSightingStore interface {
+	// before is the caller's turn boundary: sightings after it exist in the
+	// conversation but were not visible to the turn asking.
+	RecentStickerSightings(ctx context.Context, sessionID string, limit int, before time.Time) ([]StickerSighting, error)
+}

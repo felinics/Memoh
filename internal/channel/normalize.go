@@ -20,6 +20,11 @@ func InferAttachmentType(currentType AttachmentType, mime, name string) Attachme
 		return AttachmentVoice
 	case string(AttachmentVideo):
 		return AttachmentVideo
+	case string(AttachmentSticker):
+		// A sticker's MIME is image/webp or video/webm, so inference would
+		// demote it to an image or a file and lose the send path it was
+		// declared for.
+		return AttachmentSticker
 	case string(AttachmentFile):
 		// keep inferring below for better classification
 	default:

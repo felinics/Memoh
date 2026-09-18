@@ -980,6 +980,8 @@
       "list_skills": "スキルを一覧表示",
       "list_models": "モデルを一覧表示",
       "list_workdirs": "作業ディレクトリを一覧表示",
+      "search_stickers": "ステッカーを検索",
+      "save_sticker": "ステッカーを保存",
       "list_acp_agents": "ACP Agent を一覧表示",
       "list_acp_agents_one": "ACP Agent を確認",
       "browser_action": "ブラウザー {action}",

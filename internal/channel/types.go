@@ -251,6 +251,20 @@ const (
 	AttachmentVoice AttachmentType = "voice"
 	AttachmentFile  AttachmentType = "file"
 	AttachmentGIF   AttachmentType = "gif"
+	// AttachmentSticker is an outbound-only type. Inbound stickers stay
+	// images, because what arrives is a readable preview the model can see;
+	// what goes out has to be a sticker, because a sticker file id sent as a
+	// photo is rejected by Telegram.
+	AttachmentSticker AttachmentType = "sticker"
+)
+
+// Sticker kinds as reported by the source platform. The metadata keys that
+// carry them live in internal/attachment, next to the other attachment
+// metadata keys.
+const (
+	StickerKindStatic   = "static"
+	StickerKindAnimated = "animated"
+	StickerKindVideo    = "video"
 )
 
 // Attachment represents a binary file attached to a message.

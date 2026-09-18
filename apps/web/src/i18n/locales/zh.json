@@ -1011,6 +1011,8 @@
       "list_skills": "列出技能",
       "list_models": "列出模型",
       "list_workdirs": "列出工作目录",
+      "search_stickers": "搜索贴纸",
+      "save_sticker": "保存贴纸",
       "list_acp_agents": "列出 ACP Agent",
       "list_acp_agents_one": "查看 ACP Agent",
       "browser_action": "浏览器 {action}",

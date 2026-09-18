@@ -2502,3 +2502,33 @@ func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {
 		})
 	}
 }
+
+// 贴纸引用属于签发它的平台。没有这道能力检查,飞书和钉钉会把 Telegram 的
+// file_id 当成自己的句柄收下——飞书随后按 file_key 发出去,钉钉要到 adapter
+// 才拒绝。
+func TestValidateMessageAgainstCapabilities_StickersRequireSupport(t *testing.T) {
+	t.Parallel()
+
+	msg := Message{Attachments: []Attachment{{
+		Type:           AttachmentSticker,
+		PlatformKey:    "CAACAgUAAxkBAAEsticker",
+		SourcePlatform: "telegram",
+	}}}
+
+	unsupported := ChannelCapabilities{Attachments: true, Media: true}
+	if err := validateMessageAgainstCapabilities(unsupported, true, msg); err == nil ||
+		!strings.Contains(err.Error(), "does not support stickers") {
+		t.Fatalf("error = %v, want a channel without sticker support to refuse", err)
+	}
+
+	supported := ChannelCapabilities{Attachments: true, Media: true, Stickers: true}
+	if err := validateMessageAgainstCapabilities(supported, true, msg); err != nil {
+		t.Fatalf("channel with sticker support refused: %v", err)
+	}
+
+	// 普通图片不受这条约束。
+	image := Message{Attachments: []Attachment{{Type: AttachmentImage, URL: "https://example.com/a.png"}}}
+	if err := validateMessageAgainstCapabilities(unsupported, true, image); err != nil {
+		t.Fatalf("image attachment refused by the sticker check: %v", err)
+	}
+}

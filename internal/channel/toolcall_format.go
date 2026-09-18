@@ -49,6 +49,9 @@ var builtinToolCallEmoji = map[string]string{
 
 	"get_contacts": "👥",
 
+	"search_stickers": "🎴",
+	"save_sticker":    "🎴",
+
 	"list_email_accounts": "📧",
 	"send_email":          "📧",
 	"list_email":          "📧",
