@@ -100,7 +100,7 @@ const dialogName = ref('')
           <AccordionItem value="item-2">
             <AccordionTrigger>Which channels are supported?</AccordionTrigger>
             <AccordionContent>
-              Telegram, Discord, Lark, DingTalk, WeChat, Matrix, Email, and more.
+              Telegram, Discord, Lark, DingTalk, WeChat, Matrix, and more.
             </AccordionContent>
           </AccordionItem>
           <AccordionItem value="item-3">

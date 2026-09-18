@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"go.uber.org/fx"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/config"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	emailpkg "github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/handlers"
 	"github.com/felinics/memoh/internal/healthcheck"
 	channelchecker "github.com/felinics/memoh/internal/healthcheck/checkers/channel"
@@ -45,7 +43,6 @@ import (
 	"github.com/felinics/memoh/internal/media"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
-	"github.com/felinics/memoh/internal/oauthclients"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/settings"
@@ -156,19 +153,6 @@ func provideWebHandler(channelManager *channel.Manager, channelStore *channel.St
 	return h
 }
 
-func provideEmailOAuthHandler(log *slog.Logger, service *emailpkg.Service, tokenStore *emailpkg.DBOAuthTokenStore, oauthClients *oauthclients.Registry, cfg config.Config) *handlers.EmailOAuthHandler {
-	addr := strings.TrimSpace(cfg.Server.Addr)
-	if addr == "" {
-		addr = ":8080"
-	}
-	host := addr
-	if strings.HasPrefix(host, ":") {
-		host = "localhost" + host
-	}
-	callbackURL := "http://" + host + "/api/email/oauth/callback"
-	return handlers.NewEmailOAuthHandler(log, service, tokenStore, oauthClients, callbackURL)
-}
-
 type serverParams struct {
 	fx.In
 
@@ -193,12 +177,12 @@ func provideServer(params serverParams) *server.Server {
 	)
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, emailService *emailpkg.Service, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			if err := coremodule.EnsureAdminUser(ctx, logger, accountStore, emailService, cfg); err != nil {
+			if err := coremodule.EnsureAdminUser(ctx, logger, accountStore, cfg); err != nil {
 				return err
 			}
 			botService.SetContainerReachability(func(ctx context.Context, botID string) error {

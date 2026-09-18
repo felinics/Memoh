@@ -60,7 +60,7 @@ const isOverwrite = computed(() => allowOverwrite.value && importMode.value === 
 // Canonical section order. Every section is always shown; those absent from the
 // backup (or empty) are rendered disabled so users see the full picture.
 const ALL_SECTIONS = [
-  'settings', 'models', 'acl', 'channels', 'mcp', 'schedules', 'email', 'history', 'assets', 'workspace',
+  'settings', 'models', 'acl', 'channels', 'mcp', 'schedules', 'history', 'assets', 'workspace',
 ] as const
 
 const sectionItems = computed(() => {

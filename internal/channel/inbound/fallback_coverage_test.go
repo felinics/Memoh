@@ -57,20 +57,20 @@ func TestNoButtonFallbackCoverage(t *testing.T) {
 			mustContain:   []string{"/mcp get <name>"},
 		},
 		{
-			name: "list display-only with cross-nav extras (email)",
+			name: "list display-only with cross-nav extras (models)",
 			result: &command.Result{
-				Text: "Email Providers",
+				Text: "Models",
 				Interactive: &command.Interactive{Kind: command.InteractiveList, List: &command.ListView{
-					Resource: "email", Action: "providers",
-					Items: []command.ListItem{{Label: "smtp.gmail.com"}},
+					Resource: "models", Action: "list",
+					Items: []command.ListItem{{Label: "Example model"}},
 					ExtraActions: []command.ListItem{
-						{Action: &command.ItemAction{Resource: "email", Action: "bindings"}},
-						{Action: &command.ItemAction{Resource: "email", Action: "outbox"}},
+						{Action: &command.ItemAction{Resource: "models", Action: "get"}},
+						{Action: &command.ItemAction{Resource: "models", Action: "variants"}},
 					},
 				}},
 			},
 			expectTrailer: true,
-			mustContain:   []string{"/email bindings", "/email outbox"},
+			mustContain:   []string{"/models get", "/models variants"},
 		},
 		{
 			name: "list display-only no extras (schedule logs — genuinely empty)",

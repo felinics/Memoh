@@ -175,7 +175,6 @@ src/
 │   │       ├── bot-memory.vue         # Memory configuration tab
 │   │       ├── bot-mcp.vue            # MCP connections tab
 │   │       ├── bot-schedule.vue       # Schedule management tab
-│   │       ├── bot-email.vue          # Email configuration tab
 │   │       ├── bot-container.vue      # Container management tab
 │   │       ├── bot-network.vue        # Workspace network tab
 │   │       ├── bot-tool-approval.vue  # Tool approval settings tab
@@ -209,7 +208,6 @@ src/
 │   ├── people/                #   User management (admin only)
 │   ├── onboarding/            #   First-run setup wizard
 │   ├── dev/components/        #   Dev-only component wall (see § Dev Component Wall)
-│   ├── email/                 #   Email provider management
 │   ├── supermarket/           #   Supermarket (template/skill marketplace)
 │   ├── usage/                 #   Token usage statistics
 │   ├── appearance/            #   Theme / language / appearance settings
@@ -281,7 +279,6 @@ Chat routes register **null stub components** in the router. The real UI (`MainS
 | `/settings/voice` | voice | `voice/index.vue` | TTS + transcription providers |
 | `/settings/speech` | — | redirect | Legacy alias → `voice` |
 | `/settings/transcription` | — | redirect | Legacy alias → `voice` |
-| `/settings/email` | email | `email/index.vue` | Email provider management |
 | `/settings/supermarket` | supermarket | `supermarket/index.vue` | Template/skill marketplace |
 | `/settings/supermarket/category/:categoryId` | supermarket-category | `supermarket/category.vue` | App category |
 | `/settings/supermarket/:registryId/:appId` | supermarket-app-detail | `supermarket/app-detail.vue` | App detail |
@@ -325,7 +322,7 @@ The shell splits into three layers (`App.vue` is the orchestrator):
    - **ChatWorkspace** (`pages/home/components/chat-workspace.vue`) — [dockview-vue](https://dockview.dev) host for the center area.
 
 3. **Settings section** — `pages/settings-section/` renders in a fixed full-screen layer (visibility toggle, not v-if). Uses `MainLayout` with:
-   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible `/settings` route sidebar. Top has a "back to chat" button that restores the last selected bot/session. Menu items include Bots, Providers, Web Search, Memory, Voice, Email, Supermarket, Usage, People (admin), Appearance, Keyboard, Profile, Platform, and About.
+   - **SettingsSidebar** (`components/settings-sidebar/`) — Collapsible `/settings` route sidebar. Top has a "back to chat" button that restores the last selected bot/session. Menu items include Bots, Providers, Web Search, Memory, Voice, Supermarket, Usage, People (admin), Appearance, Keyboard, Profile, Platform, and About.
    - **SidebarInset** — `<KeepAlive>` wrapped `<RouterView>` for settings pages.
 
 4. **Auth-boundary pages** (`/login`, `/onboarding`, `/oauth/*`, `/dev/*`) — Neither `MainSection` nor the settings section mounts; `<RouterView>` renders them full-screen alone.
@@ -335,7 +332,7 @@ The shell splits into three layers (`App.vue` is the orchestrator):
    - **ChatPane** — Message list with scroll and input area with attachments (KeepAlive-cached per session inside the chat panel).
    - **SessionInfoRing** — Session info display in the composer.
 
-Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, email, memory, voice).
+Several settings pages use **MasterDetailSidebarLayout** (`components/master-detail-sidebar-layout/`) for left-sidebar + detail-panel patterns (providers, web search, memory, voice).
 
 ### Dev Component Wall
 
@@ -556,7 +553,7 @@ Live conversation turns are read over the **WebSocket**. SSE carries identifiers
 - Locales: `en` (English, default), `zh` (Chinese)
 - Files: `src/i18n/locales/en.json`, `src/i18n/locales/zh.json`
 - Usage: `const { t } = useI18n()` → `t('bots.title')`
-- Key namespaces: `common`, `auth`, `sidebar`, `breadcrumb`, `settings`, `about`, `chat`, `models`, `provider`, `webSearch`, `memory`, `speech`, `transcription`, `email`, `mcp`, `home`, `bots`, `usage`, `appearance`, `supermarket`
+- Key namespaces: `common`, `auth`, `sidebar`, `breadcrumb`, `settings`, `about`, `chat`, `models`, `provider`, `webSearch`, `memory`, `speech`, `transcription`, `mcp`, `home`, `bots`, `usage`, `appearance`, `supermarket`
 
 ## Vite Configuration
 

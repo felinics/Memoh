@@ -73,12 +73,6 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `lifecycle_events` — Container lifecycle events
 - `bot_workspace_resource_limits` — Per-bot CPU/memory/storage quotas
 
-**Email**
-- `email_providers` — Pluggable email service backends (Mailgun, generic SMTP)
-- `email_oauth_tokens` — OAuth2 tokens for email providers (Gmail)
-- `bot_email_bindings` — Per-bot email provider binding with permissions
-- `email_outbox` — Outbound email audit log
-
 **Scheduling & Automation**
 - `schedule` — Scheduled tasks (cron)
 - `schedule_logs` — Schedule execution logs

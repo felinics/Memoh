@@ -7,23 +7,18 @@ import (
 	"github.com/felinics/memoh/internal/channel/adapters/local"
 	"github.com/felinics/memoh/internal/channel/identities"
 	"github.com/felinics/memoh/internal/channel/inbound"
-	emailpkg "github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/rpc/serverruntime"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 )
 
 // Module assembles the shared Channel boundary providers: registry,
-// manager, lifecycle, inbound processing, discuss pipeline, email, and
+// manager, lifecycle, inbound processing, discuss pipeline, and
 // webhook tunnel. Turn execution is consumed through the injected
 // turn.Service; this module never touches the resolver or agent directly.
 func FoundationModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
 			identities.NewService,
-			emailpkg.NewDBOAuthTokenStore,
-			provideEmailRegistry,
-			emailpkg.NewService,
-			emailpkg.NewOutboxService,
 			provideRouteService,
 			providePipeline,
 			provideEventStore,
@@ -36,7 +31,7 @@ func FoundationModule() fx.Option {
 }
 
 // ServerLocalModule supplies the local Web channel path. It does not start any
-// external channel or email connections.
+// external channel connections.
 func ServerLocalModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
@@ -63,20 +58,15 @@ func RuntimeModule() fx.Option {
 			provideRemoteSkillResolver,
 			provideRemoteChannelAudio,
 			provideStandaloneChannelSettings,
-			provideEmailChatGateway,
-			provideEmailTrigger,
-			emailpkg.NewManager,
 			provideChannelRouter,
 			provideChannelManager,
 			provideChannelLifecycleService,
 			provideLocalChannelRuntime,
 			provideChannelRuntimeInterface,
-			provideEmailRuntimeInterface,
 			webhooktunnel.NewManager,
 		),
 		fx.Invoke(
 			startChannelManager,
-			startEmailManager,
 			startWebhookTunnelListener,
 			startWebhookTunnel,
 		),
@@ -84,7 +74,7 @@ func RuntimeModule() fx.Option {
 }
 
 // EmbeddedModule runs the full channel runtime inside the Server process:
-// external channel adapters, email manager, and webhook tunnel, wired to
+// external channel adapters, and webhook tunnel, wired to
 // the local command/skill/audio surfaces with no RPC involved. This is the
 // pre-split all-in-one deployment shape — bare-metal installs without an
 // internal_rpc secret keep their channels working without operating a
@@ -98,20 +88,15 @@ func EmbeddedModule() fx.Option {
 			provideLocalSkillResolver,
 			provideLocalChannelAudio,
 			provideLocalChannelSettings,
-			provideEmailChatGateway,
-			provideEmailTrigger,
-			emailpkg.NewManager,
 			provideChannelRouter,
 			provideChannelManager,
 			provideChannelLifecycleService,
 			provideLocalChannelRuntime,
 			provideChannelRuntimeInterface,
-			provideEmailRuntimeInterface,
 			webhooktunnel.NewManager,
 		),
 		fx.Invoke(
 			startChannelManager,
-			startEmailManager,
 			startWebhookTunnelListener,
 			startWebhookTunnel,
 		),
@@ -128,8 +113,6 @@ func provideLocalChannelRuntime(lifecycle *channel.Lifecycle, store *channel.Sto
 }
 
 func provideChannelRuntimeInterface(runtime *channel.LocalRuntime) channel.Runtime { return runtime }
-
-func provideEmailRuntimeInterface(manager *emailpkg.Manager) emailpkg.Runtime { return manager }
 
 func provideRemoteCommandHandler(client *serverruntime.Client) inbound.CommandHandler { return client }
 

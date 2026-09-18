@@ -13,7 +13,7 @@ import (
 // message and asset row just to display a number.
 var summaryLightSections = []Section{
 	SectionSettings, SectionModels, SectionACL, SectionChannels,
-	SectionMCP, SectionSchedules, SectionEmail,
+	SectionMCP, SectionSchedules,
 }
 
 // Summary reports what a live bot would export: per-section item counts and a
@@ -62,7 +62,6 @@ func (s *Service) Summary(ctx context.Context, botID string) (SummaryResult, err
 	add(SectionChannels, data.Channels, "channel_type")
 	add(SectionMCP, data.MCP, "name")
 	add(SectionSchedules, data.Schedules, "name")
-	add(SectionEmail, data.EmailBindings, "email_address")
 	res.Sections = append(res.Sections, s.summarizeHistory(ctx, botID))
 	res.Sections = append(res.Sections, s.summarizeAssets(ctx, botID))
 	res.Sections = append(res.Sections, s.summarizeWorkspace(ctx, botID))

@@ -122,12 +122,6 @@ func shouldSkipJWT(path string) bool {
 	if isPublicChannelMediaPath(path) {
 		return true
 	}
-	if strings.HasPrefix(path, "/email/mailgun/webhook/") {
-		return true
-	}
-	if strings.HasPrefix(path, "/email/oauth/callback") || strings.HasPrefix(path, "/api/email/oauth/callback") {
-		return true
-	}
 	if strings.HasPrefix(path, "/oauth/mcp/callback") || strings.HasPrefix(path, "/api/oauth/mcp/callback") {
 		return true
 	}

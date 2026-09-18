@@ -200,16 +200,12 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolGenerateImage(): "image-gen",
 	}
 	exempt := map[ToolName]string{
-		ToolWebSearch():         "self-describing one-shot search tool",
-		ToolWebFetch():          "self-describing one-shot fetch tool",
-		ToolListWorkdirs():      "self-describing one-shot listing tool; schedule Usage references it",
-		ToolListACPAgents():     "self-describing two-tier listing tool; schedule Usage references it",
-		ToolGenerateVideo():     "self-describing media generation tool",
-		ToolTranscribeAudio():   "self-describing media transcription tool",
-		ToolListEmailAccounts(): "email tool descriptions carry account/read/write semantics",
-		ToolSendEmail():         "email tool descriptions carry account/read/write semantics",
-		ToolListEmail():         "email tool descriptions carry account/read/write semantics",
-		ToolReadEmail():         "email tool descriptions carry account/read/write semantics",
+		ToolWebSearch():       "self-describing one-shot search tool",
+		ToolWebFetch():        "self-describing one-shot fetch tool",
+		ToolListWorkdirs():    "self-describing one-shot listing tool; schedule Usage references it",
+		ToolListACPAgents():   "self-describing two-tier listing tool; schedule Usage references it",
+		ToolGenerateVideo():   "self-describing media generation tool",
+		ToolTranscribeAudio(): "self-describing media transcription tool",
 	}
 
 	for _, name := range BuiltInToolNames() {

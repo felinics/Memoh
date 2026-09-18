@@ -269,7 +269,7 @@ import {
 } from '@felinic/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, MessageSquare,
-  ShieldAlert, Database, Mail, Link, Server, SlidersHorizontal,
+  ShieldAlert, Database, Link, Server, SlidersHorizontal,
   Bot as BotIcon, ChevronLeft, Laptop, Package as App
 } from 'lucide-vue-next'
 import { SettingsIcon as Settings } from '@memohai/icon/ui'
@@ -296,7 +296,6 @@ import BotSettings from './components/bot-settings.vue'
 import BotChannels from './components/bot-channels.vue'
 import BotMcp from './components/bot-mcp.vue'
 import BotMemory from './components/bot-memory.vue'
-import BotEmail from './components/bot-email.vue'
 import BotOverview from './components/bot-overview.vue'
 import BotContainer from './components/bot-container.vue'
 import BotRemoteRuntime from './components/bot-remote-runtime.vue'
@@ -408,7 +407,6 @@ const tabList = computed(() => {
     { value: 'advanced', label: 'bots.tabs.advanced', icon: SlidersHorizontal, component: BotAdvanced, params: { 'bot-id': bot_id, 'workspace-backend': botWorkspaceBackend.value } },
     { value: 'access', label: 'bots.tabs.access', icon: ShieldAlert, component: BotAccess, params: { 'bot-id': bot_id, 'bot-type': bot.value?.type } },
     { value: 'agents', label: 'bots.tabs.agents', icon: BotIcon, component: BotAgents, params: { 'bot-id': bot_id } },
-    { value: 'email', label: 'bots.tabs.email', icon: Mail, component: BotEmail, params: { 'bot-id': bot_id } },
     { value: 'mcp', label: 'bots.tabs.mcp', icon: Link, component: BotMcp, params: { 'bot-id': bot_id } },
     { value: 'apps', label: 'bots.tabs.apps', icon: App, component: BotApps, params: { 'bot-id': bot_id } },
   ] satisfies Array<BotDetailsTabRule & {
@@ -444,7 +442,6 @@ const searchIndex = computed(() => {
     { tab: 'advanced', section: 'network', key: 'bots.tabs.network', keywords: ['network', 'proxy', 'vpn', '网络', 'ネットワーク'] },
     { tab: 'advanced', section: 'hooks', key: 'bots.hooks.title', keywords: ['hooks', 'events', 'tool calls', 'approval', 'workspace'] },
     { tab: 'agents', key: 'bots.tabs.agents', keywords: ['codex', 'claude code', 'external agent', 'acp'] },
-    { tab: 'email', key: 'bots.email.title', keywords: ['smtp', 'imap', 'mailbox', 'bindings'] },
     { tab: 'mcp', key: 'bots.tabs.mcp', keywords: ['servers', 'connect', 'custom mcp'] },
     { tab: 'advanced', section: 'compaction', key: 'bots.tabs.compaction', keywords: ['compaction', 'compress', 'summarize', 'context window'] },
   ].filter(item => botWorkspaceBackend.value !== 'remote'
@@ -534,7 +531,7 @@ function closeMobileDetail(): void {
 
 const groupedTabs = computed(() => [
   { key: 'core', keys: ['overview', 'general', 'channels'] },
-  { key: 'capabilities', keys: ['memory', 'agents', 'apps', 'mcp', 'container', 'remote-runtime', 'email'] },
+  { key: 'capabilities', keys: ['memory', 'agents', 'apps', 'mcp', 'container', 'remote-runtime'] },
   { key: 'administration', keys: ['advanced', 'access'] },
 ].map(group => ({
   key: group.key,

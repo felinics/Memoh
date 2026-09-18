@@ -16,7 +16,6 @@ import (
 	turntransport "github.com/felinics/memoh/internal/agent/turn/grpctransport"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/config"
-	"github.com/felinics/memoh/internal/email"
 	intrpc "github.com/felinics/memoh/internal/rpc"
 	"github.com/felinics/memoh/internal/rpc/channelruntime"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
@@ -51,12 +50,12 @@ func provideServerRuntimeClient(client *runtimeRpc.Client) *serverruntime.Client
 	return serverruntime.NewClient(client)
 }
 
-func provideChannelRPC(log *slog.Logger, cfg config.Config, channelRuntime channel.Runtime, emailRuntime email.Runtime, tunnel *webhooktunnel.Manager) (*channelRPC, error) {
+func provideChannelRPC(log *slog.Logger, cfg config.Config, channelRuntime channel.Runtime, tunnel *webhooktunnel.Manager) (*channelRPC, error) {
 	if err := cfg.ValidateChannelRuntime(); err != nil {
 		return nil, err
 	}
 	server := intrpc.NewServer(cfg.InternalRPC.SharedSecret)
-	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(log, channelruntime.Handlers(channelRuntime, emailRuntime, tunnel)))
+	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(log, channelruntime.Handlers(channelRuntime, tunnel)))
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(server, healthServer)

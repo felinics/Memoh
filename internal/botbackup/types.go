@@ -30,7 +30,6 @@ const (
 	SectionChannels  Section = "channels"
 	SectionMCP       Section = "mcp"
 	SectionSchedules Section = "schedules"
-	SectionEmail     Section = "email"
 	SectionHistory   Section = "history"
 	SectionAssets    Section = "assets"
 	SectionWorkspace Section = "workspace"
@@ -40,14 +39,14 @@ const (
 // profile is always exported (it identifies the bot) and is not user-toggleable.
 var AllExportSections = []Section{
 	SectionSettings, SectionModels, SectionACL, SectionChannels, SectionMCP,
-	SectionSchedules, SectionEmail, SectionHistory, SectionAssets, SectionWorkspace,
+	SectionSchedules, SectionHistory, SectionAssets, SectionWorkspace,
 }
 
 // isSensitiveSection reports whether a section may carry API keys or other
 // credentials, so the UI can warn before export/import. Single source of truth.
 func isSensitiveSection(key Section) bool {
 	switch key {
-	case SectionModels, SectionChannels, SectionMCP, SectionEmail:
+	case SectionModels, SectionChannels, SectionMCP:
 		return true
 	default:
 		return false
@@ -219,7 +218,6 @@ type backupData struct {
 	Channels                any                            `json:"channels,omitempty"`
 	MCP                     any                            `json:"mcp,omitempty"`
 	Schedules               any                            `json:"schedules,omitempty"`
-	EmailBindings           any                            `json:"email_bindings,omitempty"`
 	Dependencies            backupDependencies             `json:"dependencies,omitempty"`
 	History                 backupHistory                  `json:"history,omitempty"`
 }
@@ -247,7 +245,6 @@ type backupDependencies struct {
 	SearchProviders any `json:"search_providers,omitempty"`
 	FetchProviders  any `json:"fetch_providers,omitempty"`
 	MemoryProviders any `json:"memory_providers,omitempty"`
-	EmailProviders  any `json:"email_providers,omitempty"`
 }
 
 type backupHistory struct {

@@ -66,7 +66,6 @@ import (
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	displaypkg "github.com/felinics/memoh/internal/display"
-	emailpkg "github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/handlers"
 	hookspkg "github.com/felinics/memoh/internal/hooks"
@@ -892,7 +891,7 @@ func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, serv
 	})
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, emailService *emailpkg.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
 		DB:              conn,
@@ -903,7 +902,6 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		Channels:        channelStore,
 		MCP:             mcpService,
 		Schedules:       scheduleService,
-		Email:           emailService,
 		Providers:       providerService,
 		Models:          modelsService,
 		SearchProviders: searchProviderService,
@@ -977,7 +975,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -997,7 +995,6 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
 		agenttools.NewBackgroundProvider(log, bgManager),
 		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, displayService, config.DefaultDataMount),
-		agenttools.NewEmailProvider(log, emailService, emailRuntime),
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
 		agenttools.NewSkillProvider(log),
@@ -1172,7 +1169,7 @@ func startContainerReconciliation(lc fx.Lifecycle, manager *workspace.Manager, _
 
 // EnsureAdminUser bootstraps the admin account on first start. Exported
 // for the composing commands that host the HTTP server.
-func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore.AccountStore, emailService *emailpkg.Service, cfg config.Config) error {
+func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore.AccountStore, cfg config.Config) error {
 	if accountStore == nil {
 		return errors.New("account store not configured")
 	}
@@ -1219,11 +1216,6 @@ func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 	})
 	if err != nil {
 		return err
-	}
-	if emailService != nil {
-		if err := emailService.EnsureDefaultGmailProvider(ctx, user.ID); err != nil {
-			return fmt.Errorf("ensure admin gmail provider: %w", err)
-		}
 	}
 	log.Info("Admin user created", slog.String("username", username))
 	return nil

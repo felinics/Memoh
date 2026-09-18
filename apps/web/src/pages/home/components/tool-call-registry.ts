@@ -29,13 +29,9 @@ import {
   Heading,
   Image as ImageIcon,
   ImagePlus,
-  Inbox,
   Keyboard,
   Link,
   ListChecks,
-  Mail,
-  MailOpen,
-  MailPlus,
   MessageSquareReply,
   MessageSquareText,
   MessagesSquare,
@@ -81,9 +77,6 @@ import ToolCallDetailApplyPatch from './tool-call-detail-apply-patch.vue'
 import ToolCallDetailComputer from './tool-call-detail-computer.vue'
 import ToolCallDetailContacts from './tool-call-detail-contacts.vue'
 import ToolCallDetailEdit from './tool-call-detail-edit.vue'
-import ToolCallDetailEmailAccounts from './tool-call-detail-email-accounts.vue'
-import ToolCallDetailEmailList from './tool-call-detail-email-list.vue'
-import ToolCallDetailEmailRead from './tool-call-detail-email-read.vue'
 import ToolCallDetailExec from './tool-call-detail-exec.vue'
 import ToolCallDetailImage from './tool-call-detail-image.vue'
 import ToolCallDetailMemory from './tool-call-detail-memory.vue'
@@ -148,7 +141,7 @@ export function isDirPathTool(toolName: string): boolean {
 const READONLY_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
   'list_execution_locations',
-  'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
+  'get_contacts', 'list_sessions',
   'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'list_background', 'get_background_status', 'wait', 'wait_until',
   'browser_observe', 'computer_observe',
 ])
@@ -167,13 +160,13 @@ export type ToolBucket = 'browse' | 'edit' | 'run' | 'message' | 'schedule' | 'm
 const BUCKETS: Array<[ToolBucket, Set<string>]> = [
   ['browse', new Set([
     'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages', 'get_messages',
-    'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
+    'get_contacts', 'list_sessions',
     'list_schedule', 'get_schedule', 'list_skills', 'list_models', 'list_workdirs',
     'list_acp_agents', 'list_execution_locations',
   ])],
   ['edit', new Set(['write', 'edit', 'apply_patch'])],
   ['run', new Set(['exec'])],
-  ['message', new Set(['send', 'react', 'send_email', 'speak'])],
+  ['message', new Set(['send', 'react', 'speak'])],
   ['schedule', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
   ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
   ['agent', new Set(['spawn_agent', 'send_message', 'list_agents'])],
@@ -201,7 +194,7 @@ export type SummaryFragment = 'fileOperations' | 'searches' | 'commands' | 'mess
 const FRAGMENT_TOOLS: Array<[SummaryFragment, Set<string>]> = [
   ['fileOperations', new Set(['read', 'list', 'write', 'edit', 'apply_patch'])],
   ['commands', new Set(['exec'])],
-  ['messages', new Set(['send', 'react', 'send_email', 'speak'])],
+  ['messages', new Set(['send', 'react', 'speak'])],
   ['schedules', new Set(['create_schedule', 'update_schedule', 'delete_schedule'])],
   ['media', new Set(['generate_image', 'generate_video', 'transcribe_audio'])],
   ['agents', new Set(['spawn_agent', 'send_message', 'list_agents'])],
@@ -215,7 +208,7 @@ export function toolFragmentKind(toolName: string): SummaryFragment {
   for (const [kind, names] of FRAGMENT_TOOLS) {
     if (names.has(toolName)) return kind
   }
-  // Read-only lookups (web/memory/message search, list_*/get_*, email reads,
+  // Read-only lookups (web/memory/message search, list_*/get_*,
   // bg status, waits) all read to the user as "it looked something up" — one
   // 'searches' counter keeps the header to one clause instead of a taxonomy.
   return isReadOnlyTool(toolName) ? 'searches' : 'steps'
@@ -921,41 +914,6 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         target: pickString(input, 'id'),
         expandable: true,
       }
-    case 'list_email_accounts':
-      return {
-        icon: Mail,
-        actionKey: 'list_email_accounts',
-        target: '',
-        detail: ToolCallDetailEmailAccounts,
-      }
-    case 'send_email': {
-      const subject = pickString(input, 'subject')
-      const to = pickString(input, 'to')
-      return {
-        icon: MailPlus,
-        actionKey: 'send_email',
-        target: subject || to,
-        fullTarget: subject ? `${to} — ${subject}` : to,
-        expandable: true,
-      }
-    }
-    case 'list_email':
-      return {
-        icon: Inbox,
-        actionKey: 'list_email',
-        target: '',
-        detail: ToolCallDetailEmailList,
-      }
-    case 'read_email': {
-      const uid = input.uid
-      const target = uid != null ? `#${String(uid)}` : ''
-      return {
-        icon: MailOpen,
-        actionKey: 'read_email',
-        target,
-        detail: ToolCallDetailEmailRead,
-      }
-    }
     case 'speak': {
       const text = pickString(input, 'text')
       return {

@@ -12,7 +12,7 @@ func TestFilterSubagentToolsBlocksOnlyDirectInteractionAndDelegation(t *testing.
 		ToolAskUser().String(), ToolSend().String(), ToolReact().String(),
 		ToolSpawnAgent().String(), ToolSendMessage().String(), ToolListAgents().String(), ToolListModels().String(),
 		ToolSpeak().String(), ToolCreateSchedule().String(), ToolSearchMemory().String(), ToolUseSkill().String(),
-		ToolBrowserAction().String(), ToolComputerAction().String(), ToolSendEmail().String(),
+		ToolBrowserAction().String(), ToolComputerAction().String(),
 		ToolGenerateImage().String(), ToolGenerateVideo().String(), ToolTranscribeAudio().String(),
 		"external_mcp_tool",
 	}
@@ -27,7 +27,7 @@ func TestFilterSubagentToolsBlocksOnlyDirectInteractionAndDelegation(t *testing.
 	}
 	want := []string{
 		ToolSpeak().String(), ToolCreateSchedule().String(), ToolSearchMemory().String(), ToolUseSkill().String(),
-		ToolBrowserAction().String(), ToolComputerAction().String(), ToolSendEmail().String(),
+		ToolBrowserAction().String(), ToolComputerAction().String(),
 		ToolGenerateImage().String(), ToolGenerateVideo().String(), ToolTranscribeAudio().String(),
 		"external_mcp_tool",
 	}

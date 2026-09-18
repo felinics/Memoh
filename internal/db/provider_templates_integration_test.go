@@ -190,7 +190,7 @@ func TestProviderInstancesLinkToGlobalTemplates(t *testing.T) {
 		})
 	}
 
-	for _, table := range []string{"fetch_providers", "memory_providers", "email_providers"} {
+	for _, table := range []string{"fetch_providers", "memory_providers"} {
 		t.Run(table+"_has_no_template_link", func(t *testing.T) {
 			var hasColumn bool
 			if err := pool.QueryRow(ctx, `

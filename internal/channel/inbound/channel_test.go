@@ -1680,8 +1680,6 @@ func TestChannelInboundProcessorACLDeniedManagerMessageDoesNotSuggestLink(t *tes
 		nil,
 		nil,
 		nil,
-		nil,
-		nil,
 	))
 	sender := &fakeReplySender{}
 
@@ -1866,7 +1864,7 @@ func TestChannelInboundProcessorQQAndWeixinWriteCommandsNeedLinkedManager(t *tes
 			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 			aclSvc := &fakeChatACL{allowed: false}
 			processor.SetACLService(aclSvc)
-			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
+			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
 			sender := &fakeReplySender{}
 
 			msg := channel.InboundMessage{
@@ -2330,8 +2328,6 @@ func TestChannelInboundProcessorStatusUsesRouteSession(t *testing.T) {
 		nil,
 		nil,
 		nil,
-		nil,
-		nil,
 		cmdQueries,
 		nil,
 		nil,
@@ -2389,8 +2385,6 @@ func TestChannelInboundProcessorDirectedModeCommandPermissionDeniedReplies(t *te
 	gateway := &fakeChatGateway{}
 	processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, policySvc, "", 0)
 	processor.SetCommandHandler(command.NewHandler(
-		nil,
-		nil,
 		nil,
 		nil,
 		nil,
@@ -4081,8 +4075,6 @@ func TestChannelInboundProcessorCommandExecutesWithUnprovenReplyAttachments(t *t
 		},
 	}
 	processor.SetCommandHandler(command.NewHandler(
-		nil,
-		nil,
 		nil,
 		nil,
 		nil,

@@ -243,11 +243,6 @@
           "summary": "Token usage summary",
           "by-model": "Token usage grouped by model"
         },
-        "email": {
-          "providers": "List email providers",
-          "bindings": "List bot email bindings",
-          "outbox": "List recently sent emails"
-        },
         "skill": {
           "list": "List all skills"
         },
@@ -387,27 +382,6 @@
       "back": "◀ MCP",
       "notFound": "No MCP connection named {name}. See connections with {command}.",
       "deleted": "✅ MCP connection {name} deleted."
-    },
-    "email": {
-      "providersTitle": "Email Providers",
-      "bindingsTitle": "Email Bindings",
-      "outboxTitle": "Outbox",
-      "providersEmpty": "No email providers yet.\n\nEmail providers let the bot send and receive mail. Add one in the web dashboard.",
-      "bindingsEmpty": "No email bindings yet.\n\nA binding gives this bot an email address it can send from. Add one in the web dashboard.",
-      "outboxEmpty": "No emails sent yet.\n\nEmails the bot sends will appear here.",
-      "section": {
-        "providers": "Providers",
-        "bindings": "Bindings",
-        "outbox": "Outbox"
-      },
-      "fieldAddress": "Address",
-      "fieldPermissions": "Permissions",
-      "fieldSubject": "Subject",
-      "fieldTo": "To",
-      "fieldSent": "Sent",
-      "permRead": "read",
-      "permWrite": "write",
-      "permDelete": "delete"
     },
     "usage": {
       "unavailable": "Token usage isn't available right now.",
@@ -555,7 +529,6 @@
     "schedule": "Manage scheduled tasks",
     "mcp": "Manage MCP connections",
     "usage": "View token usage",
-    "email": "View email configuration",
     "skill": "View bot skills",
     "fs": "Browse workspace files",
     "access": "Inspect identity and permissions",

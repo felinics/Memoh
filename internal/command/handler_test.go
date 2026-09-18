@@ -97,11 +97,11 @@ func (f *fakeCommandQueries) UpdateSessionModelPreference(_ context.Context, arg
 
 // newTestHandler creates a Handler with nil services for use in tests.
 func newTestHandler(roleResolver MemberRoleResolver) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries CommandQueries) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
 }
 
 // The /model and /reasoning clear path (issue #879, P11′): a session-bound
@@ -130,7 +130,7 @@ func TestClearSessionModelPreference(t *testing.T) {
 }
 
 func newTestHandlerWithACL(roleResolver MemberRoleResolver, evaluator AccessEvaluator) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
 }
 
 // --- tests ---
@@ -569,7 +569,7 @@ func TestBareInvocationLandings(t *testing.T) {
 	// Groups that previously dumped Usage() help now land on a useful read view.
 	want := map[string]string{
 		"schedule": "list", "mcp": "list", "memory": "list",
-		"search": "list", "email": "outbox", "fs": "list",
+		"search": "list", "fs": "list",
 	}
 	for name, action := range want {
 		g, ok := h.registry.groups[name]
@@ -604,7 +604,7 @@ func TestGlobalHelp_AllGroups(t *testing.T) {
 	for _, group := range []string{
 		"schedule", "mcp", "settings",
 		"model", "memory", "search", "usage",
-		"email", "skill", "fs", "access",
+		"skill", "fs", "access",
 	} {
 		if !strings.Contains(help, "/"+group) {
 			t.Errorf("missing /%s in global help", group)

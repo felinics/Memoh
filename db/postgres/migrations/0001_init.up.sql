@@ -981,7 +981,6 @@ CREATE TABLE IF NOT EXISTS bot_history_message_assets (
 
 CREATE INDEX IF NOT EXISTS idx_message_assets_message_id ON bot_history_message_assets(message_id);
 
-
 CREATE TABLE IF NOT EXISTS bot_history_message_compacts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
@@ -1028,75 +1027,7 @@ CREATE TABLE IF NOT EXISTS schedule_logs (
 CREATE INDEX IF NOT EXISTS idx_schedule_logs_schedule ON schedule_logs(schedule_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_schedule_logs_bot ON schedule_logs(bot_id, started_at DESC);
 
--- email_providers: pluggable email service backends
-CREATE TABLE IF NOT EXISTS email_providers (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  config JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT email_providers_user_name_unique UNIQUE (user_id, name)
-);
-
-CREATE INDEX IF NOT EXISTS idx_email_providers_user_id ON email_providers(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_provider_template_id ON providers(provider_template_id);
-
--- email_oauth_tokens: stored OAuth2 tokens for Gmail email providers
-CREATE TABLE IF NOT EXISTS email_oauth_tokens (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email_provider_id UUID NOT NULL UNIQUE REFERENCES email_providers(id) ON DELETE CASCADE,
-  email_address TEXT NOT NULL DEFAULT '',
-  access_token TEXT NOT NULL DEFAULT '',
-  refresh_token TEXT NOT NULL DEFAULT '',
-  expires_at TIMESTAMPTZ,
-  scope TEXT NOT NULL DEFAULT '',
-  state TEXT NOT NULL DEFAULT '',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_email_oauth_tokens_state ON email_oauth_tokens(state) WHERE state != '';
-
--- bot_email_bindings: per-bot email provider binding with read/write/delete permissions
-CREATE TABLE IF NOT EXISTS bot_email_bindings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  email_provider_id UUID NOT NULL REFERENCES email_providers(id) ON DELETE CASCADE,
-  email_address TEXT NOT NULL,
-  can_read BOOLEAN NOT NULL DEFAULT TRUE,
-  can_write BOOLEAN NOT NULL DEFAULT TRUE,
-  can_delete BOOLEAN NOT NULL DEFAULT FALSE,
-  config JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT bot_email_bindings_unique UNIQUE (bot_id, email_provider_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_bot_email_bindings_bot_id ON bot_email_bindings(bot_id);
-CREATE INDEX IF NOT EXISTS idx_bot_email_bindings_provider_id ON bot_email_bindings(email_provider_id);
-
--- email_outbox: outbound email audit log
-CREATE TABLE IF NOT EXISTS email_outbox (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  provider_id UUID NOT NULL REFERENCES email_providers(id) ON DELETE CASCADE,
-  bot_id UUID NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
-  message_id TEXT NOT NULL DEFAULT '',
-  from_address TEXT NOT NULL DEFAULT '',
-  to_addresses JSONB NOT NULL DEFAULT '[]'::jsonb,
-  subject TEXT NOT NULL DEFAULT '',
-  body_text TEXT NOT NULL DEFAULT '',
-  body_html TEXT NOT NULL DEFAULT '',
-  attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed')),
-  error TEXT NOT NULL DEFAULT '',
-  sent_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_email_outbox_provider_id ON email_outbox(provider_id);
-CREATE INDEX IF NOT EXISTS idx_email_outbox_bot_id ON email_outbox(bot_id, created_at DESC);
 
 -- provider_oauth_tokens: OAuth2 tokens for LLM providers (e.g. OpenAI Codex OAuth)
 CREATE TABLE IF NOT EXISTS provider_oauth_tokens (
@@ -1202,7 +1133,6 @@ CREATE TABLE IF NOT EXISTS memory_edges (
 CREATE INDEX IF NOT EXISTS idx_memory_edges_src  ON memory_edges (bot_id, src_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_dst  ON memory_edges (bot_id, dst_node);
 CREATE INDEX IF NOT EXISTS idx_memory_edges_rel  ON memory_edges (bot_id, rel);
-
 
 -- ---------------------------------------------------------------------------
 -- Canonical team and membership schema
@@ -1331,7 +1261,6 @@ ALTER TABLE IF EXISTS public.bot_acl_rules ADD COLUMN IF NOT EXISTS team_id uuid
 ALTER TABLE IF EXISTS public.bot_channel_admins ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_channel_configs ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_channel_routes ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.bot_email_bindings ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_message_assets ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_message_compacts ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.bot_history_messages ADD COLUMN IF NOT EXISTS team_id uuid;
@@ -1347,9 +1276,6 @@ ALTER TABLE IF EXISTS public.channel_identities ADD COLUMN IF NOT EXISTS team_id
 ALTER TABLE IF EXISTS public.channel_link_codes ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.container_versions ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.containers ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.email_oauth_tokens ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.email_outbox ADD COLUMN IF NOT EXISTS team_id uuid;
-ALTER TABLE IF EXISTS public.email_providers ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.fetch_providers ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.lifecycle_events ADD COLUMN IF NOT EXISTS team_id uuid;
 ALTER TABLE IF EXISTS public.mcp_connections ADD COLUMN IF NOT EXISTS team_id uuid;
@@ -1387,7 +1313,6 @@ BEGIN
 END
 $users_legacy_team_column$;
 
-
 -- Give team_id a DEFAULT so any INSERT (sqlc-generated or raw) auto-fills the
 -- current team from the session/transaction GUC. Fail-closed: if the GUC is
 -- unset, public.memoh_current_team_id() raises rather than inserting a NULL/guessed team.
@@ -1395,7 +1320,6 @@ ALTER TABLE IF EXISTS public.bot_acl_rules ALTER COLUMN team_id SET DEFAULT publ
 ALTER TABLE IF EXISTS public.bot_channel_admins ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_channel_configs ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_channel_routes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.bot_email_bindings ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_message_assets ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_message_compacts ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.bot_history_messages ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
@@ -1411,9 +1335,6 @@ ALTER TABLE IF EXISTS public.channel_identities ALTER COLUMN team_id SET DEFAULT
 ALTER TABLE IF EXISTS public.channel_link_codes ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.container_versions ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.containers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.email_oauth_tokens ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.email_outbox ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
-ALTER TABLE IF EXISTS public.email_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.fetch_providers ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.lifecycle_events ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
 ALTER TABLE IF EXISTS public.mcp_connections ALTER COLUMN team_id SET DEFAULT public.memoh_current_team_id();
@@ -1953,8 +1874,6 @@ ALTER TABLE public.bots NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.bots DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.channel_link_codes NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.channel_link_codes DISABLE ROW LEVEL SECURITY;
-ALTER TABLE public.email_providers NO FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.email_providers DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_bindings NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_bindings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_identity_bindings NO FORCE ROW LEVEL SECURITY;
@@ -1981,8 +1900,6 @@ ALTER TABLE public.bots
     DROP CONSTRAINT IF EXISTS bots_owner_user_id_fkey;
 ALTER TABLE public.channel_link_codes
     DROP CONSTRAINT IF EXISTS channel_link_codes_user_id_fkey;
-ALTER TABLE public.email_providers
-    DROP CONSTRAINT IF EXISTS email_providers_user_id_fkey;
 ALTER TABLE public.user_channel_bindings
     DROP CONSTRAINT IF EXISTS user_channel_bindings_user_id_fkey;
 ALTER TABLE public.user_channel_identity_bindings
@@ -2030,11 +1947,6 @@ ALTER TABLE public.channel_link_codes
     FOREIGN KEY (team_id, user_id)
     REFERENCES public.team_members(team_id, user_id)
     ON DELETE CASCADE;
-ALTER TABLE public.email_providers
-    ADD CONSTRAINT email_providers_user_id_fkey
-    FOREIGN KEY (team_id, user_id)
-    REFERENCES public.team_members(team_id, user_id)
-    ON DELETE CASCADE;
 ALTER TABLE public.user_channel_bindings
     ADD CONSTRAINT user_channel_bindings_user_id_fkey
     FOREIGN KEY (team_id, user_id)
@@ -2070,8 +1982,6 @@ ALTER TABLE public.bots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bots FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.channel_link_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.channel_link_codes FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.email_providers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.email_providers FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_bindings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_bindings FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.user_channel_identity_bindings ENABLE ROW LEVEL SECURITY;

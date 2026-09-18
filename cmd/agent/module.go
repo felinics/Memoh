@@ -29,7 +29,7 @@ func runServe() {
 // With internal_rpc.shared_secret set (docker compose), the channel
 // runtime is a separate process reached over authenticated gRPC. Without
 // it (pre-split bare-metal installs), the full channel runtime runs
-// embedded in this process so external channels, email, and webhook
+// embedded in this process so external channels, and webhook
 // endpoints keep working with a single binary and an unchanged config.
 func optionsFor(cfg config.Config) fx.Option {
 	if cfg.SplitChannelRuntime() {
@@ -46,7 +46,6 @@ func splitOptions() fx.Option {
 			provideRuntimeRPCClient,
 			provideChannelRuntimeClient,
 			provideChannelRuntime,
-			provideEmailRuntime,
 			provideWebhookTunnelStatus,
 			provideServerRPC,
 		),
@@ -63,7 +62,6 @@ func embeddedOptions() fx.Option {
 			// are served from this process again, as before the split.
 			provideServerHandler(channelpkg.NewWebhookServerHandler),
 			provideServerHandler(weixin.NewQRServerHandler),
-			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
 		),
 	)
@@ -116,10 +114,6 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewAudioHandler),
 			provideServerHandler(handlers.NewVideoHandler),
 			provideServerHandler(handlers.NewBotAudioHandler),
-			provideServerHandler(handlers.NewEmailProvidersHandler),
-			provideServerHandler(handlers.NewEmailBindingsHandler),
-			provideServerHandler(handlers.NewEmailOutboxHandler),
-			provideServerHandler(provideEmailOAuthHandler),
 			provideServerHandler(handlers.NewMCPHandler),
 			provideServerHandler(handlers.NewMCPOAuthHandler),
 			provideServerHandler(handlers.NewConnectorsHandler),

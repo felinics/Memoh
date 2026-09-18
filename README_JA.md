@@ -64,7 +64,7 @@ docker compose up -d
 
 Compose は Server と Channel を別々のサービスとして起動します。内部 RPC secret は安全に保管し、stack を再作成するときも同じ値を使用してください。
 
-Docker を使わない場合（既存のベアメタル環境からのアップグレードを含む）は、`config.toml` の `internal_rpc.shared_secret` を空のままにしてください。Server が Channel ランタイムを内蔵し、外部チャネル・Email・webhook エンドポイントを含めて単一プロセスの all-in-one として動作し続けます。`memoh-channel` プロセスは不要です。secret を設定すると 2 プロセスの分離デプロイに切り替わります。
+Docker を使わない場合（既存のベアメタル環境からのアップグレードを含む）は、`config.toml` の `internal_rpc.shared_secret` を空のままにしてください。Server が Channel ランタイムを内蔵し、外部チャネル・webhook エンドポイントを含めて単一プロセスの all-in-one として動作し続けます。`memoh-channel` プロセスは不要です。secret を設定すると 2 プロセスの分離デプロイに切り替わります。
 
 setup 済みの既存 checkout では、引き続き `git pull` を使用できます。post-merge hook
 が新しい submodule を初期化し、setup がそれ以降の pull で再帰更新を有効にします。

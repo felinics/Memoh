@@ -288,20 +288,6 @@ type BotDependencyInstallation struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
-type BotEmailBinding struct {
-	ID              pgtype.UUID        `json:"id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
-	EmailAddress    string             `json:"email_address"`
-	CanRead         bool               `json:"can_read"`
-	CanWrite        bool               `json:"can_write"`
-	CanDelete       bool               `json:"can_delete"`
-	Config          []byte             `json:"config"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	TeamID          pgtype.UUID        `json:"team_id"`
-}
-
 type BotHistoryMessage struct {
 	ID                      pgtype.UUID        `json:"id"`
 	BotID                   pgtype.UUID        `json:"bot_id"`
@@ -579,49 +565,6 @@ type ContextLifecycle struct {
 	Snapshot           []byte             `json:"snapshot"`
 	SelectionDecisions []byte             `json:"selection_decisions"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-}
-
-type EmailOauthToken struct {
-	ID              pgtype.UUID        `json:"id"`
-	EmailProviderID pgtype.UUID        `json:"email_provider_id"`
-	EmailAddress    string             `json:"email_address"`
-	AccessToken     string             `json:"access_token"`
-	RefreshToken    string             `json:"refresh_token"`
-	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
-	Scope           string             `json:"scope"`
-	State           string             `json:"state"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	TeamID          pgtype.UUID        `json:"team_id"`
-}
-
-type EmailOutbox struct {
-	ID          pgtype.UUID        `json:"id"`
-	ProviderID  pgtype.UUID        `json:"provider_id"`
-	BotID       pgtype.UUID        `json:"bot_id"`
-	MessageID   string             `json:"message_id"`
-	FromAddress string             `json:"from_address"`
-	ToAddresses []byte             `json:"to_addresses"`
-	Subject     string             `json:"subject"`
-	BodyText    string             `json:"body_text"`
-	BodyHtml    string             `json:"body_html"`
-	Attachments []byte             `json:"attachments"`
-	Status      string             `json:"status"`
-	Error       string             `json:"error"`
-	SentAt      pgtype.Timestamptz `json:"sent_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	TeamID      pgtype.UUID        `json:"team_id"`
-}
-
-type EmailProvider struct {
-	ID        pgtype.UUID        `json:"id"`
-	UserID    pgtype.UUID        `json:"user_id"`
-	Name      string             `json:"name"`
-	Provider  string             `json:"provider"`
-	Config    []byte             `json:"config"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TeamID    pgtype.UUID        `json:"team_id"`
 }
 
 type FetchProvider struct {

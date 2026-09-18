@@ -14,7 +14,6 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	emailpkg "github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/mcp"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
@@ -73,19 +72,17 @@ type Handler struct {
 	settingsService *settings.Service
 	mcpConnService  *mcp.ConnectionService
 
-	modelsService      *models.Service
-	providersService   *providers.Service
-	memProvService     *memprovider.Service
-	searchProvService  *searchproviders.Service
-	emailService       *emailpkg.Service
-	emailOutboxService *emailpkg.OutboxService
-	compactionService  *compaction.Service
-	queries            CommandQueries
-	sqlcQueries        dbstore.Queries
-	aclEvaluator       AccessEvaluator
-	skillLoader        SkillLoader
-	containerFS        ContainerFS
-	linkConsumer       LinkConsumer
+	modelsService     *models.Service
+	providersService  *providers.Service
+	memProvService    *memprovider.Service
+	searchProvService *searchproviders.Service
+	compactionService *compaction.Service
+	queries           CommandQueries
+	sqlcQueries       dbstore.Queries
+	aclEvaluator      AccessEvaluator
+	skillLoader       SkillLoader
+	containerFS       ContainerFS
+	linkConsumer      LinkConsumer
 
 	logger *slog.Logger
 }
@@ -124,8 +121,6 @@ func NewHandler(
 	providersService *providers.Service,
 	memProvService *memprovider.Service,
 	searchProvService *searchproviders.Service,
-	emailService *emailpkg.Service,
-	emailOutboxService *emailpkg.OutboxService,
 	queries CommandQueries,
 	aclEvaluator AccessEvaluator,
 	skillLoader SkillLoader,
@@ -135,21 +130,19 @@ func NewHandler(
 		log = slog.Default()
 	}
 	h := &Handler{
-		roleResolver:       roleResolver,
-		scheduleService:    scheduleService,
-		settingsService:    settingsService,
-		mcpConnService:     mcpConnService,
-		modelsService:      modelsService,
-		providersService:   providersService,
-		memProvService:     memProvService,
-		searchProvService:  searchProvService,
-		emailService:       emailService,
-		emailOutboxService: emailOutboxService,
-		queries:            queries,
-		aclEvaluator:       aclEvaluator,
-		skillLoader:        skillLoader,
-		containerFS:        containerFS,
-		logger:             log.With(slog.String("component", "command")),
+		roleResolver:      roleResolver,
+		scheduleService:   scheduleService,
+		settingsService:   settingsService,
+		mcpConnService:    mcpConnService,
+		modelsService:     modelsService,
+		providersService:  providersService,
+		memProvService:    memProvService,
+		searchProvService: searchProvService,
+		queries:           queries,
+		aclEvaluator:      aclEvaluator,
+		skillLoader:       skillLoader,
+		containerFS:       containerFS,
+		logger:            log.With(slog.String("component", "command")),
 	}
 	h.registry = h.buildRegistry()
 	return h

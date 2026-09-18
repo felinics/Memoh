@@ -28,7 +28,6 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	emailpkg "github.com/felinics/memoh/internal/email"
 	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/mcp"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
@@ -182,11 +181,6 @@ func (s *Service) targetSectionCounts(ctx context.Context, botID string) map[Sec
 			out[SectionSchedules] = len(rows)
 		}
 	}
-	if s.email != nil {
-		if rows, err := s.email.ListBindings(ctx, botID); err == nil {
-			out[SectionEmail] = len(rows)
-		}
-	}
 	if s.queries != nil {
 		if msgs, err := s.queries.ListMessages(ctx, optionalUUID(botID)); err == nil {
 			out[SectionHistory] = len(msgs)
@@ -249,19 +243,6 @@ func (s *Service) clearSchedules(ctx context.Context, botID string) {
 	}
 }
 
-func (s *Service) clearEmailBindings(ctx context.Context, botID string) {
-	if s.email == nil {
-		return
-	}
-	rows, err := s.email.ListBindings(ctx, botID)
-	if err != nil {
-		return
-	}
-	for _, b := range rows {
-		_ = s.email.DeleteBinding(ctx, b.ID)
-	}
-}
-
 // summarizeSections lists the sections a backup contains (i.e. whose file was
 // written at export time), with item counts and a sample of item labels. A
 // section is shown even when its count is 0, so import mirrors the section set
@@ -295,8 +276,6 @@ func summarizeSections(entries map[string]backupZipEntry) []SectionSummary {
 		jsonArrayLabels(entries["bot/mcp_connections.json"].data, sectionItemLimit, "name"))
 	add(SectionSchedules, "bot/schedules.json", countArrayEntry(entries, "bot/schedules.json"),
 		jsonArrayLabels(entries["bot/schedules.json"].data, sectionItemLimit, "name"))
-	add(SectionEmail, "bot/email_bindings.json", countArrayEntry(entries, "bot/email_bindings.json"),
-		jsonArrayLabels(entries["bot/email_bindings.json"].data, sectionItemLimit, "email_address"))
 	add(SectionHistory, "history/messages.json", countArrayEntry(entries, "history/messages.json"),
 		jsonArrayLabels(entries["history/sessions.json"].data, sectionItemLimit, "title", "type"))
 	add(SectionAssets, "assets/message_assets.json", countArrayEntry(entries, "assets/message_assets.json"),
@@ -525,15 +504,10 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	}
 	state.idMap[profile.ID] = targetBotID
 	state.createMode = created
-	if opts.wants(SectionEmail) {
-		if err := s.importEmailDependencies(ctx, state, targetBotID, &deps); err != nil {
-			return ImportResult{}, err
-		}
-	}
 
 	// Compensation: in create mode, undo a partially-imported bot on any fatal
 	// failure. Deleting the bot cascades to all its child rows (settings, acl,
-	// channels, mcp, schedules, email bindings, sessions, messages, assets,
+	// channels, mcp, schedules, sessions, messages, assets,
 	// container), leaving no trace. Overwrite mode keeps skip/merge/replace
 	// semantics and is not rolled back.
 	committed := false
@@ -667,14 +641,6 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 			return err
 		}
 	}
-	if opts.wants(SectionEmail) {
-		if opts.strategyFor(SectionEmail) == StrategyReplace {
-			s.clearEmailBindings(ctx, targetBotID)
-		}
-		if err := restore("email import failed", func() error { return s.restoreEmailBindings(ctx, targetBotID, state, deps) }); err != nil {
-			return err
-		}
-	}
 	if opts.wants(SectionHistory) {
 		replace := opts.strategyFor(SectionHistory) == StrategyReplace
 		if err := restore("history import failed", func() error {
@@ -774,7 +740,6 @@ type dependencyMap struct {
 	searchProviders map[string]string
 	fetchProviders  map[string]string
 	memoryProviders map[string]string
-	emailProviders  map[string]string
 }
 
 func newDependencyMap() dependencyMap {
@@ -784,7 +749,6 @@ func newDependencyMap() dependencyMap {
 		searchProviders: map[string]string{},
 		fetchProviders:  map[string]string{},
 		memoryProviders: map[string]string{},
-		emailProviders:  map[string]string{},
 	}
 }
 
@@ -846,29 +810,6 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 		deps.memoryProviders[item.ID] = id
 	}
 	return deps, nil
-}
-
-func (s *Service) importEmailDependencies(ctx context.Context, state *importState, targetBotID string, deps *dependencyMap) error {
-	if s.email == nil {
-		return nil
-	}
-	if s.bots == nil {
-		return errors.New("bot service not configured")
-	}
-	targetBot, err := s.bots.Get(ctx, targetBotID)
-	if err != nil {
-		return fmt.Errorf("get target bot owner: %w", err)
-	}
-	emailProviders, _ := readEntry[[]emailpkg.ProviderResponse](state, "dependencies/email_providers.json")
-	for _, item := range emailProviders {
-		id, err := s.ensureEmailProvider(ctx, targetBot.OwnerUserID, item)
-		if err != nil {
-			state.warnings = append(state.warnings, "email provider dependency skipped: "+err.Error())
-			continue
-		}
-		deps.emailProviders[item.ID] = id
-	}
-	return nil
 }
 
 func (s *Service) restoreBot(ctx context.Context, actorUserID string, profile bots.Bot, opts ImportOptions) (string, bool, error) {
@@ -1241,40 +1182,6 @@ func (s *Service) restoreSchedules(ctx context.Context, botID string, state *imp
 			continue
 		}
 		state.counts[SectionSchedules]++
-	}
-	return nil
-}
-
-func (s *Service) restoreEmailBindings(ctx context.Context, botID string, state *importState, deps dependencyMap) error {
-	if s.email == nil {
-		return nil
-	}
-	items, err := readEntry[[]emailpkg.BindingResponse](state, "bot/email_bindings.json")
-	if err != nil {
-		return err
-	}
-	for _, item := range items {
-		providerID := deps.emailProviders[item.EmailProviderID]
-		if providerID == "" {
-			providerID = item.EmailProviderID
-		}
-		canRead := item.CanRead
-		canWrite := item.CanWrite
-		canDelete := item.CanDelete
-		if _, err := s.email.CreateBinding(ctx, botID, emailpkg.CreateBindingRequest{
-			EmailProviderID: providerID,
-			EmailAddress:    item.EmailAddress,
-			CanRead:         &canRead,
-			CanWrite:        &canWrite,
-			CanDelete:       &canDelete,
-			Config:          item.Config,
-		}); err != nil {
-			if e := state.itemErr("email binding", err); e != nil {
-				return e
-			}
-			continue
-		}
-		state.counts[SectionEmail]++
 	}
 	return nil
 }
@@ -2117,60 +2024,6 @@ func (s *Service) ensureMemoryProvider(ctx context.Context, item memprovider.Pro
 		return "", err
 	}
 	return created.ID, nil
-}
-
-func (s *Service) ensureEmailProvider(ctx context.Context, ownerUserID string, item emailpkg.ProviderResponse) (string, error) {
-	if s.email == nil {
-		return item.ID, errors.New("email service not configured")
-	}
-	ownerUserID = strings.TrimSpace(ownerUserID)
-	if ownerUserID == "" {
-		return item.ID, errors.New("target bot owner is required")
-	}
-	list, _ := s.email.ListProviders(ctx, ownerUserID, "")
-	for _, existing := range list {
-		if existing.Name == item.Name {
-			if shouldUpdateImportedEmailProvider(existing, item) {
-				updated, err := s.email.UpdateProvider(ctx, ownerUserID, existing.ID, emailpkg.UpdateProviderRequest{
-					Config: item.Config,
-				})
-				if err != nil {
-					return "", err
-				}
-				return updated.ID, nil
-			}
-			return existing.ID, nil
-		}
-	}
-	created, err := s.email.CreateProvider(ctx, ownerUserID, emailpkg.CreateProviderRequest{
-		Name:     item.Name,
-		Provider: emailpkg.ProviderName(item.Provider),
-		Config:   item.Config,
-	})
-	if err != nil {
-		return "", err
-	}
-	return created.ID, nil
-}
-
-func shouldUpdateImportedEmailProvider(existing, imported emailpkg.ProviderResponse) bool {
-	if existing.Provider != imported.Provider || imported.Provider != "gmail" {
-		return false
-	}
-	return emailProviderConfigString(existing.Config, "email_address") == "" &&
-		emailProviderConfigString(imported.Config, "email_address") != ""
-}
-
-func emailProviderConfigString(config map[string]any, key string) string {
-	value, ok := config[key]
-	if !ok {
-		return ""
-	}
-	text, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(text)
 }
 
 func loadManifest(raw []byte) (map[string]backupZipEntry, Manifest, error) {

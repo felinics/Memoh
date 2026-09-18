@@ -243,11 +243,6 @@
           "summary": "Token 用量汇总",
           "by-model": "按模型查看 token 用量"
         },
-        "email": {
-          "providers": "列出邮箱服务商",
-          "bindings": "列出机器人邮箱绑定",
-          "outbox": "列出最近发送的邮件"
-        },
         "skill": {
           "list": "列出全部技能"
         },
@@ -387,27 +382,6 @@
       "back": "◀ MCP 连接",
       "notFound": "没有名为 {name} 的 MCP 连接。用 {command} 查看连接。",
       "deleted": "✅ MCP 连接 {name} 已删除。"
-    },
-    "email": {
-      "providersTitle": "邮箱服务商",
-      "bindingsTitle": "邮箱绑定",
-      "outboxTitle": "发件箱",
-      "providersEmpty": "尚未配置邮箱服务商。\n\n邮箱服务商让机器人收发邮件。请在 Web 控制台添加。",
-      "bindingsEmpty": "尚未绑定邮箱。\n\n绑定为机器人分配发信地址。请在 Web 控制台添加。",
-      "outboxEmpty": "暂无发信记录。\n\n机器人发出的邮件会显示在这里。",
-      "section": {
-        "providers": "服务商",
-        "bindings": "绑定",
-        "outbox": "发件箱"
-      },
-      "fieldAddress": "地址",
-      "fieldPermissions": "权限",
-      "fieldSubject": "主题",
-      "fieldTo": "收件人",
-      "fieldSent": "发送时间",
-      "permRead": "读取",
-      "permWrite": "写入",
-      "permDelete": "删除"
     },
     "usage": {
       "unavailable": "Token 用量暂不可用。",
@@ -555,7 +529,6 @@
     "schedule": "管理定时任务",
     "mcp": "管理 MCP 连接",
     "usage": "查看 token 用量",
-    "email": "查看邮箱配置",
     "skill": "查看技能",
     "fs": "浏览工作区文件",
     "access": "查看身份与权限",

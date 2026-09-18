@@ -60,11 +60,6 @@ func ToolGenerateVideo() ToolName   { return toolname.ToolGenerateVideo() }
 func ToolTranscribeAudio() ToolName { return toolname.ToolTranscribeAudio() }
 func ToolAskUser() ToolName         { return toolname.ToolAskUser() }
 
-func ToolListEmailAccounts() ToolName { return toolname.ToolListEmailAccounts() }
-func ToolSendEmail() ToolName         { return toolname.ToolSendEmail() }
-func ToolListEmail() ToolName         { return toolname.ToolListEmail() }
-func ToolReadEmail() ToolName         { return toolname.ToolReadEmail() }
-
 func toolRef(name ToolName) string {
 	return "`" + name.String() + "`"
 }

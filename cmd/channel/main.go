@@ -1,4 +1,4 @@
-// cmd/channel hosts external channel adapters, email receivers, and webhook
+// cmd/channel hosts external channel adapters, and webhook
 // endpoints as a standalone service. Agent turns run in the Server process and
 // are reached through the authenticated internal RPC transport.
 package main
@@ -117,7 +117,6 @@ func options() fx.Option {
 			provideServerHandler(channel.NewWebhookServerHandler),
 			provideServerHandler(weixin.NewQRServerHandler),
 			provideServerHandler(handlers.NewConfiguredPublicMediaHandler),
-			provideServerHandler(handlers.NewEmailWebhookHandler),
 			provideServer,
 		),
 		fx.Invoke(startChannelRPC, startServer),

@@ -1,7 +1,7 @@
 <template>
   <!--
     Owner for the "scrollable framed muted text preview" shape that recurred
-    across 5 detail panels (browser snapshot, computer snapshot, email body,
+    across detail panels (browser snapshot, computer snapshot,
     web-fetch content, spawn task text) with drifting max-h buckets
     (32/48/48/48/60 — 48 is the majority across these five, so that's what
     this owns). Two shapes were deliberately left local instead of forced in:

@@ -37,7 +37,9 @@ func buildSampleBundle(t *testing.T) []byte {
 	write("bot/channel_configs.json", "channels", []map[string]any{{"channel_type": "telegram"}, {"channel_type": "discord"}})
 	write("bot/mcp_connections.json", "mcp", []map[string]any{{"name": "srv"}})
 	write("bot/schedules.json", "schedules", []map[string]any{{"name": "job"}})
-	write("bot/email_bindings.json", "email", []map[string]any{{"email_address": "a@b.com"}})
+	// Older bundles may still contain retired email data. It is never offered for restore.
+	write("bot/email_bindings.json", "email", []map[string]any{{"email_address": "legacy@example.com"}})
+	write("dependencies/email_providers.json", "email_providers", []map[string]any{{"provider": "gmail"}})
 	write("history/sessions.json", "history", []map[string]any{{"title": "chat 1", "type": "conversation"}})
 	write("history/messages.json", "history", []map[string]any{{"id": "1"}, {"id": "2"}, {"id": "3"}})
 	write("assets/message_assets.json", "assets", []map[string]any{{"name": "image.png"}})
@@ -89,6 +91,11 @@ func TestPreviewPlainBundleRoundTrip(t *testing.T) {
 	preview, err := svc.Preview(context.Background(), buildSampleBundle(t), ImportOptions{}, "")
 	if err != nil {
 		t.Fatalf("Preview() error = %v", err)
+	}
+	for _, section := range preview.Sections {
+		if section.Key == "email" {
+			t.Fatal("retired email data must not be offered for restore")
+		}
 	}
 	if preview.Encrypted {
 		t.Fatal("plain bundle reported as encrypted")
