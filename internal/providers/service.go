@@ -529,7 +529,18 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 
 	remoteModels := make([]RemoteModel, 0, len(sdkModels))
 	for _, m := range sdkModels {
+		template, found := templatesByID[m.ID]
 		modelType := m.Type
+		if found {
+			switch template.Type {
+			case string(sdk.ModelTypeChat), string(sdk.ModelTypeEmbedding):
+				// List endpoints often lack real per-model types (the OpenAI
+				// protocol has none, so completions/responses hardcode chat);
+				// the curated template type wins for a known model ID, e.g.
+				// text-embedding-* must survive as embedding with dimensions.
+				modelType = sdk.ModelType(template.Type)
+			}
+		}
 		if modelType == "" {
 			modelType = sdk.ModelTypeChat
 		}
@@ -540,7 +551,6 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 		if name == "" {
 			name = m.ID
 		}
-		template, found := templatesByID[m.ID]
 		var dimensions *int
 		if modelType == sdk.ModelTypeEmbedding {
 			switch {
@@ -568,8 +578,8 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 			Type:       string(modelType),
 			Dimensions: dimensions,
 		}
-		if template, found := templatesByID[m.ID]; found {
-			// The live endpoint keeps deciding ID/type; curated fields fill in.
+		if found {
+			// The live endpoint keeps deciding the list; curated fields fill in.
 			if template.Name != "" {
 				remote.Name = template.Name
 			}

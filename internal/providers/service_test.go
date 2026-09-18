@@ -994,6 +994,11 @@ models:
     config:
       compatibilities: [tool-call]
       context_window: 128000
+  - model_id: curated-embed
+    name: Curated Embed
+    type: embedding
+    config:
+      dimensions: 1536
 `), 0o600); err != nil {
 		t.Fatalf("write template: %v", err)
 	}
@@ -1005,6 +1010,7 @@ models:
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"id": "curated-chat", "object": "model"},
+				{"id": "curated-embed", "object": "model"},
 				{"id": "endpoint-only", "object": "model"},
 			},
 		})
@@ -1020,20 +1026,22 @@ models:
 	if err != nil {
 		t.Fatalf("fetch remote models: %v", err)
 	}
-	if len(remoteModels) != 2 {
-		t.Fatalf("expected the endpoint's 2 models (template must not short-circuit), got %d", len(remoteModels))
+	if len(remoteModels) != 3 {
+		t.Fatalf("expected the endpoint's 3 models (template must not short-circuit), got %d", len(remoteModels))
 	}
 
-	var curated, endpointOnly *RemoteModel
+	var curated, embed, endpointOnly *RemoteModel
 	for i := range remoteModels {
 		switch remoteModels[i].ID {
 		case "curated-chat":
 			curated = &remoteModels[i]
+		case "curated-embed":
+			embed = &remoteModels[i]
 		case "endpoint-only":
 			endpointOnly = &remoteModels[i]
 		}
 	}
-	if curated == nil || endpointOnly == nil {
+	if curated == nil || embed == nil || endpointOnly == nil {
 		t.Fatalf("missing expected models: %#v", remoteModels)
 	}
 	if curated.Name != "Curated Chat" {
@@ -1047,6 +1055,15 @@ models:
 	}
 	if got := strings.Join(curated.Compatibilities, ","); got != "tool-call" {
 		t.Fatalf("compatibilities = %q", got)
+	}
+	// The OpenAI wire has no per-model type (the SDK defaults everything to
+	// chat): the template's curated embedding type and dimensions must win,
+	// and the server must never see a dimensions probe.
+	if embed.Type != string(models.ModelTypeEmbedding) {
+		t.Fatalf("expected template embedding type, got %q", embed.Type)
+	}
+	if embed.Dimensions == nil || *embed.Dimensions != 1536 {
+		t.Fatalf("expected template dimensions 1536, got %#v", embed.Dimensions)
 	}
 	if endpointOnly.CapabilitiesKnown {
 		t.Fatal("endpoint-only model must stay CapabilitiesKnown=false")
