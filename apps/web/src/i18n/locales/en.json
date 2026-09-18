@@ -1156,6 +1156,18 @@
     "reasoningMax": "Max",
     "sessions": "Sessions",
     "newSession": "New Session",
+    "sessionSelection": {
+      "start": "Select",
+      "count": "{count} selected",
+      "selectDisplayed": "Select displayed",
+      "deselectDisplayed": "Deselect displayed",
+      "deleteCount": "Delete ({count})",
+      "confirm": "Delete {count} selected sessions? They cannot be restored from the app.",
+      "runningWarning": "Some selected sessions are still running. Deleting them may interrupt their work.",
+      "scheduleWarning": "Scheduled tasks will remain enabled and may create new sessions.",
+      "partialFailure": "{failed} of {total} deletion requests failed. The list has been refreshed; remaining sessions are still selected for retry.",
+      "deleted": "Deleted {count} sessions."
+    },
     "deleteSession": "Delete Session",
     "deleteSessionConfirm": "Are you sure you want to delete this session?",
     "renameSession": "Rename Session",

@@ -1137,6 +1137,18 @@
     "reasoningMax": "マックス",
     "sessions": "セッション",
     "newSession": "新しいセッション",
+    "sessionSelection": {
+      "start": "複数選択",
+      "count": "{count}件を選択中",
+      "selectDisplayed": "表示済みをすべて選択",
+      "deselectDisplayed": "表示済みの選択を解除",
+      "deleteCount": "削除（{count}）",
+      "confirm": "選択した{count}件のセッションを削除しますか？アプリから復元することはできません。",
+      "runningWarning": "実行中のセッションが含まれています。削除すると実行が中断される場合があります。",
+      "scheduleWarning": "スケジュールタスクは引き続き有効で、新しいセッションが作成される場合があります。",
+      "partialFailure": "{total}件中{failed}件の削除リクエストでエラーが発生しました。一覧を更新しました。残っているセッションは選択されたままなので、再試行できます。",
+      "deleted": "{count}件のセッションを削除しました。"
+    },
     "deleteSession": "セッションを削除",
     "deleteSessionConfirm": "このセッションを削除してもよろしいですか？",
     "renameSession": "セッション名を変更",
