@@ -27,7 +27,7 @@ import (
 type Service struct {
 	queries               dbstore.Queries
 	logger                *slog.Logger
-	containerLifecycle    ContainerLifecycle
+	workspaceIntents      WorkspaceIntents
 	connectorLifecycle    ConnectorLifecycle
 	checkers              []RuntimeChecker
 	containerReachability func(ctx context.Context, botID string) error
@@ -36,6 +36,9 @@ type Service struct {
 const (
 	botLifecycleOperationTimeout   = 5 * time.Minute
 	botRuntimeConfigPublishTimeout = 30 * time.Second
+	// botLifecycleStatusWriteTimeout bounds the status write that must land
+	// after a lifecycle step exhausted its own budget.
+	botLifecycleStatusWriteTimeout = 15 * time.Second
 )
 
 var (
@@ -58,9 +61,10 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	}
 }
 
-// SetContainerLifecycle registers a container lifecycle handler for bot operations.
-func (s *Service) SetContainerLifecycle(lc ContainerLifecycle) {
-	s.containerLifecycle = lc
+// SetWorkspaceIntents registers the workspace intent recorder (the
+// botworkspace reconciler) for bot creation and deletion.
+func (s *Service) SetWorkspaceIntents(intents WorkspaceIntents) {
+	s.workspaceIntents = intents
 }
 
 // SetConnectorLifecycle registers connector cleanup for bot deletion.
@@ -176,18 +180,74 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
-	if req.SkipLifecycle {
+	if req.SkipLifecycle || s.workspaceIntents == nil {
 		return bot, nil
 	}
-	if req.WaitForReady {
-		waitCtx := context.WithoutCancel(ctx)
-		if err := s.runCreateLifecycle(waitCtx, bot.ID); err != nil {
-			return Bot{}, err
-		}
-		return s.Get(waitCtx, bot.ID)
+	// The workspace is provisioned by the reconciler; the request only
+	// records the intent. A failed provisioning leaves the bot in status
+	// failed with its diagnostics, never stranded in creating.
+	generation, err := s.workspaceIntents.EnsurePresent(ctx, bot.ID, workspaceImageFromMetadata(metadata))
+	if err != nil {
+		return Bot{}, fmt.Errorf("record workspace intent: %w", err)
 	}
-	s.enqueueCreateLifecycle(ctx, bot.ID)
-	return bot, nil
+	if !req.WaitForReady {
+		return bot, nil
+	}
+	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), botLifecycleOperationTimeout)
+	defer cancel()
+	outcome, err := s.workspaceIntents.AwaitSettled(waitCtx, bot.ID, generation)
+	if err != nil {
+		return Bot{}, fmt.Errorf("wait for workspace: %w", err)
+	}
+	if outcome.Observed == WorkspaceObservedFailed {
+		return Bot{}, workspaceOutcomeError(outcome)
+	}
+	return s.Get(waitCtx, bot.ID)
+}
+
+// workspaceOutcomeError turns a failed observation into the stable errors the
+// API layer maps to user-facing codes.
+func workspaceOutcomeError(outcome WorkspaceOutcome) error {
+	message := strings.TrimSpace(outcome.LastError)
+	if message == "" {
+		message = "workspace setup failed"
+	}
+	if outcome.LastErrorPhase == WorkspacePhaseBootstrap {
+		return fmt.Errorf("%w: %s", workspace.ErrWorkspaceTemplateBootstrapFailed, message)
+	}
+	return fmt.Errorf("workspace setup failed (%s): %s", outcome.LastErrorPhase, message)
+}
+
+// workspaceImageFromMetadata reads the image preference a caller may have
+// placed in bot metadata (workspace.image) so the first provisioning uses it.
+func workspaceImageFromMetadata(metadata map[string]any) string {
+	section, ok := metadata["workspace"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	image, _ := section["image"].(string)
+	return strings.TrimSpace(image)
+}
+
+// SetBotStatusFromWorkspace lets the workspace reconciler derive bots.status.
+// A bot that is being deleted keeps that status; the delete lifecycle owns it.
+func (s *Service) SetBotStatusFromWorkspace(ctx context.Context, botID, status string) error {
+	if s.queries == nil {
+		return errors.New("bot queries not configured")
+	}
+	botUUID, err := db.ParseUUID(botID)
+	if err != nil {
+		return err
+	}
+	row, err := s.queries.GetBotByID(ctx, botUUID)
+	if err != nil {
+		return err
+	}
+	current := strings.TrimSpace(row.Status)
+	if current == BotStatusDeleting || current == status {
+		return nil
+	}
+	return s.queries.UpdateBotStatus(ctx, sqlc.UpdateBotStatusParams{ID: botUUID, Status: status})
 }
 
 // MarkReady marks a bot lifecycle transition as complete and returns the fresh row.
@@ -555,6 +615,10 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	if err != nil {
 		return err
 	}
+	// Remember where the bot came from so a failed deletion can put it back
+	// there: a bot whose creation failed must not become "ready" because its
+	// delete cleanup hit a transient error.
+	revertStatus := BotStatusReady
 	err = runtimefence.InResetTransaction(ctx, s.queries, botID, "", func(queries dbstore.Queries) error {
 		row, err := queries.GetBotByID(ctx, botUUID)
 		if err != nil {
@@ -563,12 +627,15 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 		if strings.TrimSpace(row.Status) == BotStatusDeleting {
 			return nil
 		}
+		if strings.TrimSpace(row.Status) == BotStatusFailed {
+			revertStatus = BotStatusFailed
+		}
 		return queries.UpdateBotStatus(ctx, sqlc.UpdateBotStatusParams{ID: botUUID, Status: BotStatusDeleting})
 	})
 	if err != nil {
 		return err
 	}
-	s.enqueueDeleteLifecycle(ctx, botUUID.String())
+	s.enqueueDeleteLifecycle(ctx, botUUID.String(), revertStatus)
 	return nil
 }
 
@@ -588,70 +655,27 @@ func (s *Service) ListChecks(ctx context.Context, botID string) ([]BotCheck, err
 	return s.buildRuntimeChecks(ctx, asSQLCBot(row), true)
 }
 
-func (s *Service) enqueueCreateLifecycle(ctx context.Context, botID string) {
-	go func() {
-		if err := s.runCreateLifecycle(context.WithoutCancel(ctx), botID); err != nil {
-			s.logger.Error("bot create lifecycle failed",
-				slog.String("bot_id", botID),
-				slog.Any("error", err),
-			)
-		}
-	}()
+func (s *Service) enqueueDeleteLifecycle(ctx context.Context, botID, revertStatus string) {
+	go s.runDeleteLifecycle(context.WithoutCancel(ctx), botID, revertStatus)
 }
 
-func (s *Service) runCreateLifecycle(ctx context.Context, botID string) error {
+// runDeleteLifecycle tears the bot down. revertStatus is restored when a
+// blocking step fails so the user can retry (ready, or failed for a bot whose
+// creation never completed).
+func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus string) {
 	lifecycleCtx, cancel := context.WithTimeout(ctx, botLifecycleOperationTimeout)
 	defer cancel()
-
-	var setupErr error
-	if s.containerLifecycle != nil {
-		if err := s.containerLifecycle.SetupBotContainer(lifecycleCtx, botID); err != nil {
-			s.logger.Error("bot container setup failed",
-				slog.String("bot_id", botID),
-				slog.Any("error", err),
-			)
-			if recordErr := s.RecordContainerSetupFailure(lifecycleCtx, botID, "setup", err); recordErr != nil {
-				s.logger.Warn("record bot container setup failure failed",
-					slog.String("bot_id", botID),
-					slog.Any("error", recordErr),
-				)
-			}
-			if errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
-				setupErr = err
-			}
-		} else if clearErr := s.ClearContainerSetupFailure(lifecycleCtx, botID); clearErr != nil {
-			s.logger.Warn("clear bot container setup failure failed",
-				slog.String("bot_id", botID),
-				slog.Any("error", clearErr),
-			)
-		}
+	if revertStatus != BotStatusFailed {
+		revertStatus = BotStatusReady
 	}
-
-	if err := s.updateStatus(lifecycleCtx, botID, BotStatusReady); err != nil {
-		s.logger.Error("failed to update bot status to ready after create",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-		return err
-	}
-	return setupErr
-}
-
-func (s *Service) enqueueDeleteLifecycle(ctx context.Context, botID string) {
-	go s.runDeleteLifecycle(context.WithoutCancel(ctx), botID)
-}
-
-func (s *Service) runDeleteLifecycle(ctx context.Context, botID string) {
-	lifecycleCtx, cancel := context.WithTimeout(ctx, botLifecycleOperationTimeout)
-	defer cancel()
 
 	// The revert must succeed even when the failing cleanup consumed the
 	// whole lifecycle budget: reverting on the exhausted context would
 	// strand the bot in status "deleting" with no retry path.
 	revertToReady := func() {
-		revertCtx, cancelRevert := context.WithTimeout(context.WithoutCancel(lifecycleCtx), 15*time.Second)
+		revertCtx, cancelRevert := context.WithTimeout(context.WithoutCancel(lifecycleCtx), botLifecycleStatusWriteTimeout)
 		defer cancelRevert()
-		if err := s.updateStatus(revertCtx, botID, BotStatusReady); err != nil {
+		if err := s.updateStatus(revertCtx, botID, revertStatus); err != nil {
 			s.logger.Error("revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))
 		}
 	}
@@ -667,12 +691,29 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID string) {
 		}
 	}
 
-	if s.containerLifecycle != nil {
-		if err := s.containerLifecycle.CleanupBotContainer(lifecycleCtx, botID, false); err != nil {
-			s.logger.Error("bot container cleanup failed",
+	// The workspace is removed by the reconciler, which retries transient
+	// backend failures (a Cloud operation still in flight, a slow provider).
+	// The bot row is deleted only once the workspace is observed absent, so
+	// resources cannot be orphaned by a deleted bot. If the budget runs out
+	// the bot returns to its previous status and the reconciler keeps
+	// converging the workspace in the background; deleting again resumes.
+	if s.workspaceIntents != nil {
+		generation, err := s.workspaceIntents.RequestAbsent(lifecycleCtx, botID, false)
+		if err != nil {
+			s.logger.Error("record workspace removal intent failed", slog.String("bot_id", botID), slog.Any("error", err))
+			revertToReady()
+			return
+		}
+		outcome, err := s.workspaceIntents.AwaitSettled(lifecycleCtx, botID, generation)
+		if err != nil || outcome.Observed != WorkspaceObservedAbsent {
+			s.logger.Error("bot workspace removal did not complete within the delete budget",
 				slog.String("bot_id", botID),
+				slog.String("observed", outcome.Observed),
+				slog.String("last_error", outcome.LastError),
 				slog.Any("error", err),
 			)
+			revertToReady()
+			return
 		}
 	}
 
@@ -848,15 +889,27 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 	status := strings.TrimSpace(row.Status)
 	checks := make([]BotCheck, 0, 4)
 
-	if status == BotStatusCreating {
-		checks = append(checks, BotCheck{
+	if status == BotStatusCreating || status == BotStatusFailed {
+		initCheck := BotCheck{
 			ID:       BotCheckTypeContainerInit,
 			Type:     BotCheckTypeContainerInit,
 			TitleKey: "bots.checks.titles.containerInit",
 			Status:   BotCheckStatusUnknown,
 			Summary:  "Initialization is in progress.",
 			Detail:   "Bot resources are still being provisioned.",
-		})
+		}
+		if status == BotStatusFailed {
+			initCheck.Status = BotCheckStatusError
+			initCheck.Summary = "Workspace initialization failed."
+			initCheck.Detail = "Bot resources failed to provision. Retry the workspace or delete the bot."
+			if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && strings.TrimSpace(outcome.LastError) != "" {
+				initCheck.Detail = outcome.LastError
+				initCheck.Metadata = map[string]any{
+					"setup_error_phase": outcome.LastErrorPhase,
+				}
+			}
+		}
+		checks = append(checks, initCheck)
 		checks = append(checks, BotCheck{
 			ID:       BotCheckTypeContainerRecord,
 			Type:     BotCheckTypeContainerRecord,
@@ -928,6 +981,13 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 	setupFailure, hasSetupFailure, err := lastContainerSetupFailure(row.Metadata)
 	if err != nil {
 		return nil, err
+	}
+	// The reconciler's observation is authoritative for provisioning failures;
+	// the metadata diagnostic only covers degraded initialization detected at
+	// startup for an existing container.
+	if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && outcome.Observed == WorkspaceObservedFailed {
+		hasSetupFailure = true
+		setupFailure = containerSetupFailure{Phase: outcome.LastErrorPhase, Message: outcome.LastError}
 	}
 	initCheck := BotCheck{
 		ID:       BotCheckTypeContainerInit,
@@ -1101,4 +1161,17 @@ func summarizeChecks(checks []BotCheck) (string, int32) {
 		return BotCheckStateUnknown, 0
 	}
 	return BotCheckStateOK, 0
+}
+
+// workspaceOutcome reads the reconciler's current observation for a bot.
+func (s *Service) workspaceOutcome(ctx context.Context, botID string) (WorkspaceOutcome, bool) {
+	if s.workspaceIntents == nil {
+		return WorkspaceOutcome{}, false
+	}
+	outcome, ok, err := s.workspaceIntents.Current(ctx, botID)
+	if err != nil {
+		s.logger.Warn("load workspace observation failed", slog.String("bot_id", botID), slog.Any("error", err))
+		return WorkspaceOutcome{}, false
+	}
+	return outcome, ok
 }

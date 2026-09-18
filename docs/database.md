@@ -67,6 +67,7 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `bot_app_installations` — Installed Registry App revision per bot in its isolated workspace
 
 **Containers**
+- `bot_workspaces` — Declarative workspace state per bot: desired/observed state with generations, retry backoff, reconciler lease
 - `containers` — Bot container instances
 - `snapshots` — Container snapshots
 - `container_versions` — Container version tracking

@@ -2196,6 +2196,10 @@
       "failedTitle": "セットアップに失敗しました",
       "retry": "リトライ",
       "back": "フォームに戻る",
+      "retryWorkspace": "Workspace をリトライ",
+      "continueLater": "あとで対応",
+      "openExisting": "既存の Bot を開く",
+      "stillProvisioning": "Workspace はまだ準備中です。Bot の Workspace ページで待つか、今すぐリトライしてください。",
       "line": {
         "command": "Bot「{name}」を作成しています",
         "botCreated": "Botレコードが作成されました",

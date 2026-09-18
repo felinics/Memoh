@@ -499,6 +499,27 @@ type BotWorkdir struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type BotWorkspace struct {
+	BotID              pgtype.UUID        `json:"bot_id"`
+	TeamID             pgtype.UUID        `json:"team_id"`
+	DesiredState       string             `json:"desired_state"`
+	DesiredGeneration  int64              `json:"desired_generation"`
+	Image              string             `json:"image"`
+	PreserveData       bool               `json:"preserve_data"`
+	ObservedState      string             `json:"observed_state"`
+	ObservedGeneration int64              `json:"observed_generation"`
+	EverReady          bool               `json:"ever_ready"`
+	LastError          string             `json:"last_error"`
+	LastErrorPhase     string             `json:"last_error_phase"`
+	Attempts           int32              `json:"attempts"`
+	NextAttemptAt      pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseOwner         string             `json:"lease_owner"`
+	LeaseUntil         pgtype.Timestamptz `json:"lease_until"`
+	Version            int64              `json:"version"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotWorkspaceResourceLimit struct {
 	BotID         pgtype.UUID        `json:"bot_id"`
 	CpuMillicores int64              `json:"cpu_millicores"`

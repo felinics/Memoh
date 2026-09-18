@@ -176,7 +176,7 @@ func (m *Manager) waitTaskRunning(ctx context.Context, containerID string, timeo
 // ---------------------------------------------------------------------------
 
 // EnsureRunning verifies the container exists and its task is running.
-// If the container is missing, it rebuilds via SetupBotContainer.
+// A missing container is reported as ErrContainerNotFound.
 // If the task is stopped, it restarts and sets up networking.
 func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 	if m.remote != nil {
@@ -191,23 +191,20 @@ func (m *Manager) EnsureRunning(ctx context.Context, botID string) error {
 // EnsureNativeRunning manages only the server-owned container workspace,
 // regardless of which target is currently Primary.
 func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
+	// Creating a workspace is the botworkspace reconciler's job alone: it
+	// records intent and owns the data-safety rules. A missing container is
+	// reported, never rebuilt here, so a workspace the user removed (or one
+	// the reconciler is about to remove) cannot be resurrected by a start or
+	// by a tool call that needs the container.
 	containerID, err := m.ContainerID(ctx, botID)
 	if err != nil {
-		if errors.Is(err, ErrContainerNotFound) {
-			m.logger.Warn("container missing, rebuilding", slog.String("bot_id", botID))
-			return m.SetupBotContainer(ctx, botID)
-		}
 		return err
 	}
-
-	_, err = m.service.GetContainer(ctx, containerID)
-	if err != nil {
-		if !ctr.IsNotFound(err) {
-			return err
+	if _, err := m.service.GetContainer(ctx, containerID); err != nil {
+		if ctr.IsNotFound(err) {
+			return fmt.Errorf("%w: container %s is missing in the runtime", ErrContainerNotFound, containerID)
 		}
-		m.logger.Warn("container missing in containerd, rebuilding",
-			slog.String("bot_id", botID), slog.String("container_id", containerID))
-		return m.SetupBotContainer(ctx, botID)
+		return err
 	}
 
 	taskInfo, err := m.service.GetTaskInfo(ctx, containerID)
@@ -343,7 +340,7 @@ func (m *Manager) GetContainerInfo(ctx context.Context, botID string) (*Containe
 }
 
 // ---------------------------------------------------------------------------
-// Container lifecycle (bots.ContainerLifecycle interface)
+// Container lifecycle (botworkspace.Backend teardown + startup reconcile)
 // ---------------------------------------------------------------------------
 
 type ContainerSetupEvent struct {
@@ -362,112 +359,6 @@ type ContainerSetupEvent struct {
 }
 
 type ContainerSetupProgress func(ContainerSetupEvent)
-
-// SetupBotContainer creates/starts the container and upserts the DB record.
-func (m *Manager) SetupBotContainer(ctx context.Context, botID string) error {
-	return m.setupBotContainer(ctx, botID, nil)
-}
-
-func (m *Manager) SetupBotContainerWithProgress(ctx context.Context, botID string, progress ContainerSetupProgress) error {
-	return m.setupBotContainer(ctx, botID, progress)
-}
-
-func (m *Manager) setupBotContainer(ctx context.Context, botID string, progress ContainerSetupProgress) error {
-	emit := func(event ContainerSetupEvent) {
-		if progress != nil {
-			progress(event)
-		}
-	}
-
-	image, err := m.resolveWorkspaceImage(ctx, botID)
-	if err != nil {
-		m.logger.Error("setup bot container: resolve image failed",
-			slog.String("bot_id", botID),
-			slog.Any("error", err))
-		return err
-	}
-	emit(ContainerSetupEvent{Type: "pulling", Image: image})
-	result, err := m.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
-		Unpack:        true,
-		StorageDriver: m.cfg.Snapshotter,
-		OnProgress: func(p ctr.PullProgress) {
-			emit(ContainerSetupEvent{Type: "pull_progress", Layers: p.Layers})
-		},
-	})
-	if err != nil {
-		m.logger.Error("setup bot container: prepare image failed",
-			slog.String("bot_id", botID),
-			slog.String("image", image),
-			slog.Any("error", err))
-		return err
-	}
-	if strings.TrimSpace(result.ImageRef) != "" {
-		image = result.ImageRef
-	}
-	switch result.Mode {
-	case ImagePrepareSkipped:
-		emit(ContainerSetupEvent{Type: "pull_skipped", Image: image, Message: result.Message})
-	case ImagePrepareDelegated:
-		emit(ContainerSetupEvent{Type: "pull_delegated", Image: image, Message: result.Message})
-	}
-	gpu, err := m.resolveWorkspaceGPU(ctx, botID)
-	if err != nil {
-		return err
-	}
-
-	emit(ContainerSetupEvent{Type: "creating"})
-	hadPreservedData := m.HasPreservedData(botID)
-	if hadPreservedData {
-		emit(ContainerSetupEvent{Type: "restoring"})
-	}
-
-	if err := m.StartWithResolvedConfig(ctx, botID, image, gpu); err != nil {
-		m.logger.Error("setup bot container: start failed",
-			slog.String("bot_id", botID),
-			slog.Any("error", err))
-		return err
-	}
-	if err := m.WaitForWorkspaceReady(ctx, botID); err != nil {
-		m.logger.Error("setup bot container: bridge not ready",
-			slog.String("bot_id", botID),
-			slog.Any("error", err))
-		return err
-	}
-	if err := m.InitializeNativeWorkspace(ctx, botID); err != nil {
-		m.logger.Error("setup bot container: workspace initialization failed",
-			slog.String("bot_id", botID),
-			slog.Any("error", err))
-		return err
-	}
-	if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
-		m.logger.Warn("setup bot container: remember workspace image failed",
-			slog.String("bot_id", botID),
-			slog.String("image", image),
-			slog.Any("error", err))
-	}
-
-	containerID := m.resolveContainerID(ctx, botID)
-	m.upsertContainerRecord(ctx, botID, containerID, "running", image)
-	event := ContainerSetupEvent{
-		Type:             "complete",
-		Image:            image,
-		ContainerID:      containerID,
-		WorkspaceBackend: workspaceBackendFromRecord(""),
-		Started:          true,
-		DataRestored:     hadPreservedData && !m.HasPreservedData(botID),
-		HasPreservedData: m.HasPreservedData(botID),
-	}
-	if status, err := m.GetContainerInfo(ctx, botID); err == nil {
-		event.ContainerID = status.ContainerID
-		event.WorkspaceBackend = status.WorkspaceBackend
-		event.RuntimeBackend = status.RuntimeBackend
-		event.ContainerPath = status.ContainerPath
-		event.CDIDevices = status.CDIDevices
-		event.HasPreservedData = status.HasPreservedData
-	}
-	emit(event)
-	return nil
-}
 
 // CleanupBotContainer removes the container and DB record for a bot.
 // When preserveData is true, /data is exported to a backup archive before deletion.
@@ -522,14 +413,13 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 					slog.String("container_id", containerID), slog.Any("error", err))
 				continue
 			}
-			// Container missing in containerd — rebuild.
-			m.logger.Warn("reconcile: container missing, rebuilding",
+			// Container missing in the runtime. Re-provisioning is the
+			// botworkspace reconciler's job (drift detection observes the
+			// workspace as absent and provisions it again without deleting
+			// anything); here we only record what we saw.
+			m.logger.Warn("reconcile: container missing; left to the workspace reconciler",
 				slog.String("bot_id", botID), slog.String("container_id", containerID))
-			if setupErr := m.SetupBotContainer(ctx, botID); setupErr != nil {
-				m.logger.Error("reconcile: rebuild failed",
-					slog.String("bot_id", botID), slog.Any("error", setupErr))
-				m.markContainerStatus(ctx, botID, "error")
-			}
+			m.markContainerStatus(ctx, botID, "missing")
 			continue
 		}
 

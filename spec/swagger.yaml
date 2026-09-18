@@ -9808,6 +9808,7 @@ paths:
       tags:
       - containerd
     post:
+      description: Records the intent for a running workspace and streams the
       parameters:
       - description: Bot ID
         in: path
@@ -9833,7 +9834,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create and start workspace for bot
+      summary: Create workspace for bot
       tags:
       - containerd
   /bots/{bot_id}/container/browser/sessions:
@@ -14206,8 +14207,8 @@ paths:
       description: |-
         Lightweight SSE for sidebar live-sort. Carries only session
         identifiers and minimal metadata (touched timestamps, titles).
-        Never includes message bodies. Filters out internal session
-        types such as schedule and subagent.
+        Never includes message bodies. Filters out sessions with
+        internal visibility, such as managed subagent work.
       parameters:
       - description: Bot ID
         in: path

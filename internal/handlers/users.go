@@ -22,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/route"
 	"github.com/felinics/memoh/internal/db"
@@ -32,9 +33,8 @@ import (
 	"github.com/felinics/memoh/internal/workspace"
 )
 
-type botCreateWorkspace interface {
-	SetupBotContainerWithProgress(ctx context.Context, botID string, progress workspace.ContainerSetupProgress) error
-}
+// botCreateWorkspace is the reconciler slice the SSE creation stream needs.
+type botCreateWorkspace = workspaceIntents
 
 type runtimeResetService interface {
 	BeginBotHistoryReset(ctx context.Context, botID string) (resetCtx context.Context, release func(), err error)
@@ -502,6 +502,8 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
 	}
 
+	// The bot row is created first; the workspace intent is recorded below so
+	// the subscription is in place before the reconciler starts emitting.
 	req.WaitForReady = false
 	req.SkipLifecycle = true
 	bot, err := h.botService.Create(c.Request().Context(), ownerID, req)
@@ -540,81 +542,53 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 
 	send(createBotStreamBotEvent{Type: "bot_created", Bot: scrubBotForResponse(bot)})
 
-	lifecycleCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Minute)
-	defer cancel()
+	events, unsubscribe := h.workspaceSetup.Subscribe(bot.ID)
+	defer unsubscribe()
 
-	if err := h.workspaceSetup.SetupBotContainerWithProgress(lifecycleCtx, bot.ID, func(event workspace.ContainerSetupEvent) {
-		switch event.Type {
-		case "pulling":
-			send(createContainerPullingEvent{Type: "pulling", Image: event.Image})
-		case "pull_progress":
-			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: event.Layers})
-		case "pull_skipped", "pull_delegated":
-			send(createContainerPullStatusEvent{Type: event.Type, Image: event.Image, Message: event.Message})
-		case "creating":
-			send(createContainerCreatingEvent{Type: "creating"})
-		case "restoring":
-			send(createContainerRestoringEvent{Type: "restoring"})
-		case "complete":
-			send(createContainerCompleteEvent{
-				Type: "complete",
-				Container: CreateContainerResponse{
-					ContainerID:      event.ContainerID,
-					WorkspaceBackend: event.WorkspaceBackend,
-					RuntimeBackend:   event.RuntimeBackend,
-					ContainerPath:    event.ContainerPath,
-					Image:            event.Image,
-					CDIDevices:       event.CDIDevices,
-					Started:          event.Started,
-					DataRestored:     event.DataRestored,
-					HasPreservedData: event.HasPreservedData,
-				},
-			})
-		}
-	}); err != nil {
-		h.logger.Error("bot container setup failed",
+	// Recording the intent must not depend on the client staying connected.
+	intentCtx, cancelIntent := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 15*time.Second)
+	intent, err := h.workspaceSetup.EnsurePresent(intentCtx, bot.ID, workspaceImageFromCreateRequest(req))
+	cancelIntent()
+	if err != nil {
+		h.logger.Error("record workspace intent failed",
 			slog.String("bot_id", bot.ID),
 			slog.Any("error", err),
 		)
-		if recordErr := h.botService.RecordContainerSetupFailure(lifecycleCtx, bot.ID, "setup", err); recordErr != nil {
-			h.logger.Warn("record bot container setup failure failed",
-				slog.String("bot_id", bot.ID),
-				slog.Any("error", recordErr),
-			)
-		}
-		if _, readyErr := h.botService.MarkReady(lifecycleCtx, bot.ID); readyErr != nil {
-			h.logger.Error("failed to update bot status to ready after stream create failure",
-				slog.String("bot_id", bot.ID),
-				slog.Any("error", readyErr),
-			)
-			sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed; ready status update failed")
-			return nil
-		}
-		if event, ok := newWorkspaceSetupAppError(err, httpx.RequestID(c)); ok {
-			_ = send(event)
-			return nil
-		}
-		sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed")
+		sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup could not be scheduled")
 		return nil
 	}
 
-	if clearErr := h.botService.ClearContainerSetupFailure(lifecycleCtx, bot.ID); clearErr != nil {
-		h.logger.Warn("clear bot container setup failure failed",
-			slog.String("bot_id", bot.ID),
-			slog.Any("error", clearErr),
-		)
+	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), workspaceStreamBudget)
+	defer cancel()
+	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
+		return h.workspaceSetup.Await(ctx, bot.ID, intent.DesiredGeneration)
+	}, httpx.RequestID(c), sendError)
+	if outcome.Failed {
+		return nil
 	}
-	readyBot, err := h.botService.MarkReady(lifecycleCtx, bot.ID)
+
+	readyBot, err := h.botService.Get(streamCtx, bot.ID)
 	if err != nil {
-		h.logger.Error("failed to update bot status to ready after stream create",
+		h.logger.Error("load bot after workspace provisioning failed",
 			slog.String("bot_id", bot.ID),
 			slog.Any("error", err),
 		)
-		sendError("bot_ready_update_failed", "bots.create.failedSubtitle", "ready status update failed: "+err.Error())
+		sendError("bot_ready_update_failed", "bots.create.failedSubtitle", "bot could not be loaded after workspace setup")
 		return nil
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil
+}
+
+// workspaceImageFromCreateRequest reads the optional workspace.image preference
+// from the create request metadata.
+func workspaceImageFromCreateRequest(req bots.CreateBotRequest) string {
+	section, ok := req.Metadata["workspace"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	image, _ := section["image"].(string)
+	return strings.TrimSpace(image)
 }
 
 // CheckBotName godoc

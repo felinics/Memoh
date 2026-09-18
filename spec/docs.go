@@ -3611,10 +3611,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "description": "Records the intent for a running workspace and streams the",
                 "tags": [
                     "containerd"
                 ],
-                "summary": "Create and start workspace for bot",
+                "summary": "Create workspace for bot",
                 "parameters": [
                     {
                         "type": "string",
@@ -8528,7 +8529,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/sessions/events": {
             "get": {
-                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out internal session\ntypes such as schedule and subagent.",
+                "description": "Lightweight SSE for sidebar live-sort. Carries only session\nidentifiers and minimal metadata (touched timestamps, titles).\nNever includes message bodies. Filters out sessions with\ninternal visibility, such as managed subagent work.",
                 "produces": [
                     "text/event-stream"
                 ],

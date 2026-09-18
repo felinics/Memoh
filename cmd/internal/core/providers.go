@@ -50,6 +50,7 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/botbackup"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/route"
 	"github.com/felinics/memoh/internal/chat/event"
@@ -552,8 +553,74 @@ func injectBotConnectorLifecycle(botService *bots.Service, connectorService *con
 	botService.SetConnectorLifecycle(connectorService)
 }
 
-func injectBotContainerLifecycle(botService *bots.Service, manager *workspace.Manager) {
-	botService.SetContainerLifecycle(manager)
+// provideBotWorkspaceService builds the workspace reconciler over the bot
+// workspace table and the native workspace manager as its backend.
+func provideBotWorkspaceService(log *slog.Logger, queries dbstore.Queries, manager *workspace.Manager) *botworkspace.Service {
+	return botworkspace.New(botworkspace.NewRepository(queries), manager, log, botworkspace.Options{})
+}
+
+// injectBotWorkspaceIntents connects the bots service and the reconciler in
+// both directions: bots records intents, the reconciler derives bots.status.
+func injectBotWorkspaceIntents(botService *bots.Service, workspaces *botworkspace.Service, containerdHandler *handlers.ContainerdHandler) {
+	botService.SetWorkspaceIntents(botWorkspaceIntents{svc: workspaces})
+	workspaces.SetBotStatusWriter(botService)
+	containerdHandler.SetWorkspaceIntents(workspaces)
+}
+
+// botWorkspaceIntents adapts the reconciler to the bots.WorkspaceIntents port
+// without either package importing the other.
+type botWorkspaceIntents struct {
+	svc *botworkspace.Service
+}
+
+func (a botWorkspaceIntents) EnsurePresent(ctx context.Context, botID, image string) (int64, error) {
+	w, err := a.svc.EnsurePresent(ctx, botID, image)
+	if err != nil {
+		return 0, err
+	}
+	return w.DesiredGeneration, nil
+}
+
+func (a botWorkspaceIntents) RequestAbsent(ctx context.Context, botID string, preserve bool) (int64, error) {
+	w, err := a.svc.RequestAbsent(ctx, botID, preserve)
+	if err != nil {
+		return 0, err
+	}
+	return w.DesiredGeneration, nil
+}
+
+func (a botWorkspaceIntents) AwaitSettled(ctx context.Context, botID string, generation int64) (bots.WorkspaceOutcome, error) {
+	w, err := a.svc.Await(ctx, botID, generation)
+	return toWorkspaceOutcome(w), err
+}
+
+func (a botWorkspaceIntents) Current(ctx context.Context, botID string) (bots.WorkspaceOutcome, bool, error) {
+	w, err := a.svc.Get(ctx, botID)
+	if err != nil {
+		if errors.Is(err, botworkspace.ErrNotFound) {
+			return bots.WorkspaceOutcome{}, false, nil
+		}
+		return bots.WorkspaceOutcome{}, false, err
+	}
+	return toWorkspaceOutcome(w), true, nil
+}
+
+func toWorkspaceOutcome(w botworkspace.Workspace) bots.WorkspaceOutcome {
+	return bots.WorkspaceOutcome{
+		Desired:        w.Desired,
+		Observed:       w.Observed,
+		LastError:      w.LastError,
+		LastErrorPhase: w.LastErrorPhase,
+		EverReady:      w.EverReady,
+	}
+}
+
+// startBotWorkspaceReconciler runs the reconciler for the Server's lifetime.
+func startBotWorkspaceReconciler(lc fx.Lifecycle, workspaces *botworkspace.Service) {
+	lc.Append(fx.Hook{
+		OnStart: workspaces.Start,
+		OnStop:  workspaces.Stop,
+	})
 }
 
 func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.Runner {
