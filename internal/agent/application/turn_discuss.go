@@ -32,6 +32,8 @@ type turnRuntimeHooks struct {
 	resolveRunConfig func(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
 	inlineImages     func(context.Context, string, []timeline.ImageAttachmentRef) []sdk.ImagePart
 	storeRound       func(context.Context, string, string, string, string, string, []sdk.Message, string, *contextfrag.LifecycleHolder) error
+	// discussProbe lets tests supply a verdict without a live judge model.
+	discussProbe func(context.Context, turn.StartTurnCommand, ResolveRunConfigResult) discussProbeResult
 }
 
 // startDiscussTurn orchestrates one discuss turn: resolve the run config,
@@ -166,13 +168,30 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		s.pumpDiscussAgent(ctx, cmd, h)
 		return
 	}
+	// Probe gate: an outside judge decides whether this wake-up should run at
+	// all. It precedes sync compaction deliberately — a wake-up that never
+	// reaches the model does not need its context compacted yet, so a silent
+	// group costs one cheap judgement instead of a summarizer plus a primary.
+	//
+	// Native runtime only. The external-runtime branch above keeps its
+	// DiscussAddressed gate: the gate's other half is the activation contract
+	// handed to the primary, and a hosted Claude Code/Codex agent does not take
+	// that contract from us, so gating them here would buy a judgement we
+	// cannot hold the agent to.
+	probe := s.discussProbeVerdict(ctx, cmd, resolved)
+	if probe.Ran && !probe.Activated {
+		if h.emit(turn.DiscussEventSkipped, nil) {
+			h.contentLightTerminal = true
+		}
+		return
+	}
 	if s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id) {
 		if h.emit(turn.DiscussEventRecompose, nil) {
 			h.contentLightTerminal = true
 		}
 		return
 	}
-	s.pumpDiscussNative(ctx, cmd, h, resolved)
+	s.pumpDiscussNative(ctx, cmd, h, resolved, probe)
 }
 
 // maybeSyncCompactDiscuss is the pre-turn synchronous compaction backstop
@@ -228,7 +247,7 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 	return res.Status == compaction.StatusOK
 }
 
-func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult) {
+func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult, probe discussProbeResult) {
 	runConfig := resolved.RunConfig
 	runConfig.RunID = h.id
 	budgetTokens := resolved.ContextBudgetMaxTokens
@@ -286,7 +305,15 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		imageParts = s.inlineDiscussImages(ctx, cmd.BotID, refs)
 		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 	}
-	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, imageParts)
+	// Images are placed first, then the activation is appended to both
+	// representations: it must reach the provider compiler as a fragment, and it
+	// must not be the message that inline vision input lands on.
+	runConfig.Messages, runConfig.ContextSourceFrags = appendDiscussActivation(
+		runConfig.Messages,
+		s.collectDiscussSourceFrags(ctx, runConfig, admitted, imageParts),
+		probe,
+		runConfig.ContextScope,
+	)
 	runConfig = runConfig.RefreshContextFrag()
 	terminal := s.contextLifecycleTerminal(ctx, runConfig)
 	var lifecycleCause error

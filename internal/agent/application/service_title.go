@@ -161,26 +161,40 @@ func (s *Service) maybeGenerateSessionTitle(ctx context.Context, req ChatRequest
 }
 
 func (s *Service) resolveTitleModel(ctx context.Context, botID string) (modelID, ownerUserID string, err error) {
-	if s.queries == nil || s.accountService == nil {
+	if s.accountService == nil {
 		return "", "", errors.New("title model profile dependencies are not configured")
 	}
-	parsedBotID, err := db.ParseUUID(botID)
+	ownerUserID, err = s.resolveBotOwnerUserID(ctx, botID)
 	if err != nil {
 		return "", "", err
 	}
-	bot, err := s.queries.GetBotByID(ctx, parsedBotID)
-	if err != nil {
-		return "", "", err
-	}
-	if !bot.OwnerUserID.Valid {
-		return "", "", errors.New("bot owner is not configured")
-	}
-	ownerUserID = bot.OwnerUserID.String()
 	account, err := s.accountService.Get(ctx, ownerUserID)
 	if err != nil {
 		return "", "", err
 	}
 	return strings.TrimSpace(account.TitleModelID), ownerUserID, nil
+}
+
+// resolveBotOwnerUserID reads just the owning user. Split out of
+// resolveTitleModel because callers that already know which model to use still
+// need the owner for credential resolution, and should not pay for the account
+// profile read to get it.
+func (s *Service) resolveBotOwnerUserID(ctx context.Context, botID string) (string, error) {
+	if s.queries == nil {
+		return "", errors.New("bot owner lookup dependencies are not configured")
+	}
+	parsedBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return "", err
+	}
+	bot, err := s.queries.GetBotByID(ctx, parsedBotID)
+	if err != nil {
+		return "", err
+	}
+	if !bot.OwnerUserID.Valid {
+		return "", errors.New("bot owner is not configured")
+	}
+	return bot.OwnerUserID.String(), nil
 }
 
 func shouldGenerateSessionTitle(sess session.Thread) bool {

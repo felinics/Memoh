@@ -1017,7 +1017,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		CompactionThreshold:     &compactionThreshold,
 		CompactionTargetPercent: &compactionTargetPercent,
 		CompactionModelID:       ptrString(modelID(eff.CompactionModelID, deps.models)),
-		DiscussProbeModelID:     modelID(eff.DiscussProbeModelID, deps.models),
+		DiscussProbeModelID:     ptrString(modelID(eff.DiscussProbeModelID, deps.models)),
 		PersistFullToolResults:  &persistFullToolResults,
 		ShowToolCallsInIM:       &showToolCalls,
 		ToolApprovalConfig:      &toolApproval,

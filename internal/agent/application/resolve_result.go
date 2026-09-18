@@ -11,4 +11,8 @@ type ResolveRunConfigResult struct {
 	ModelID                string // database UUID of the selected model
 	RuntimeType            string
 	ContextBudgetMaxTokens int
+	// DiscussProbeModelID is the bot's configured probe model, carried from the
+	// settings read the base builder already performed. Empty means the bot has
+	// no override; the gate then falls back to the owner's title model.
+	DiscussProbeModelID string
 }

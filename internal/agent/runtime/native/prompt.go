@@ -21,9 +21,13 @@ var (
 	systemCommonTmpl string
 	modeChatTmpl     string
 	modeDiscussTmpl  string
-	modeScheduleTmpl string
-	modeSubagentTmpl string
-	scheduleTmpl     string
+	// Probe-gate templates: the outside judge's system prompt and the
+	// late-binding activation contract handed to an activated primary turn.
+	modeDiscussProbeTmpl string
+	discussActivatedTmpl string
+	modeScheduleTmpl     string
+	modeSubagentTmpl     string
+	scheduleTmpl         string
 
 	includes map[string]string
 )
@@ -34,6 +38,8 @@ func init() {
 	systemCommonTmpl = mustReadPrompt("prompts/system_common.md")
 	modeChatTmpl = mustReadPrompt("prompts/mode_chat.md")
 	modeDiscussTmpl = mustReadPrompt("prompts/mode_discuss.md")
+	modeDiscussProbeTmpl = mustReadPrompt("prompts/mode_discuss_probe.md")
+	discussActivatedTmpl = mustReadPrompt("prompts/discuss_activated.md")
 	modeScheduleTmpl = mustReadPrompt("prompts/mode_schedule.md")
 	modeSubagentTmpl = mustReadPrompt("prompts/mode_subagent.md")
 	scheduleTmpl = mustReadPrompt("prompts/schedule.md")
@@ -46,6 +52,7 @@ func init() {
 	systemCommonTmpl = resolveIncludes(systemCommonTmpl)
 	modeChatTmpl = resolveIncludes(modeChatTmpl)
 	modeDiscussTmpl = resolveIncludes(modeDiscussTmpl)
+	modeDiscussProbeTmpl = resolveIncludes(modeDiscussProbeTmpl)
 	modeScheduleTmpl = resolveIncludes(modeScheduleTmpl)
 	modeSubagentTmpl = resolveIncludes(modeSubagentTmpl)
 }
@@ -144,6 +151,38 @@ func GenerateSchedulePrompt(s Schedule) string {
 		"maxCalls":    maxCallsStr,
 		"pattern":     s.Pattern,
 		"command":     s.Command,
+	})
+}
+
+// GenerateDiscussProbePrompt builds the system prompt for the discuss probe
+// gate. The probe is an outside judge: it gets the bot's identity so it can
+// reason about what this bot would say, but deliberately no tool catalog and no
+// workspace instructions — its only move is the `decide` call.
+func GenerateDiscussProbePrompt(bot BotInfo, timezone string) string {
+	sections := []string{}
+	if tz := strings.TrimSpace(timezone); tz != "" {
+		sections = append(sections, "Timezone: "+tz)
+	}
+	if botSection := buildBotInfoSection(bot); botSection != "" {
+		sections = append(sections, botSection)
+	}
+	sections = append(sections, strings.TrimSpace(modeDiscussProbeTmpl))
+	return strings.Join(sections, "\n\n")
+}
+
+// GenerateDiscussActivationPrompt builds the late-binding message that carries
+// the probe's activation contract into the primary turn. It is appended as the
+// last user message rather than folded into the system prompt: the requirement
+// has to sit adjacent to the generation point, not behind a long history where
+// the model can lose it.
+func GenerateDiscussActivationPrompt(reason string) string {
+	reasonSection := ""
+	if trimmed := strings.TrimSpace(reason); trimmed != "" {
+		reasonSection = "The evaluator's notes for this turn (advisory only — your own judgement may produce a different choice; act differently if you have reason to):\n\n> " +
+			strings.ReplaceAll(trimmed, "\n", "\n> ")
+	}
+	return render(discussActivatedTmpl, map[string]string{
+		"reasonSection": reasonSection,
 	})
 }
 

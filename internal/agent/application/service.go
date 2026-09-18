@@ -486,7 +486,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	}
 	req = s.applySubagentThreadDefaults(ctx, req, sessionPrefModelID != "")
 
-	runCfg, chatModel, provider, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
+	runCfg, chatModel, provider, _, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
 		BotID:              req.BotID,
 		ChatID:             req.ChatID,
 		SessionID:          req.ThreadID,
@@ -909,10 +909,13 @@ type baseRunConfigParams struct {
 // buildBaseRunConfig creates a RunConfig with model, credentials, skills,
 // identity and system prompt — everything except Messages/Query/InlineImages.
 // Both resolve() and ResolveRunConfig() delegate to this shared builder.
-func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (native.RunConfig, models.GetResponse, sqlc.Provider, error) {
+// The resolved bot settings travel back with the config: this builder already
+// reads them, and the discuss probe gate would otherwise re-read the same row on
+// every group message.
+func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams) (native.RunConfig, models.GetResponse, sqlc.Provider, settings.Settings, error) {
 	botSettings, err := s.loadBotSettings(ctx, p.BotID)
 	if err != nil {
-		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
+		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, settings.Settings{}, err
 	}
 	botInfo, loopDetectionEnabled := s.loadBotRuntimeInfo(ctx, p.BotID)
 	userTimezoneName, userClockLocation := s.resolveTimezone(ctx, p.BotID, p.UserID)
@@ -926,14 +929,14 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 
 	chatModel, provider, err := s.selectChatModel(ctx, req, botSettings, p.SessionPrefModelID)
 	if err != nil {
-		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
+		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, settings.Settings{}, err
 	}
 
 	authService := providers.NewService(nil, s.queries, "")
 	authCtx := oauthctx.WithUserID(ctx, p.UserID)
 	creds, err := authService.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
-		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("resolve provider credentials: %w", err)
+		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, settings.Settings{}, fmt.Errorf("resolve provider credentials: %w", err)
 	}
 
 	baseURL := providers.ProviderConfigString(provider, "base_url")
@@ -1028,7 +1031,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		cfg.ToolApprovalHandler = s.buildToolApprovalHandler(p)
 	}
 	if bound, hasWorkdir, workdirErr := s.resolveSessionWorkdirBinding(ctx, p.BotID, p.SessionID); workdirErr != nil {
-		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, workdirErr
+		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, settings.Settings{}, workdirErr
 	} else if hasWorkdir {
 		cfg.Identity.WorkdirPath = bound.WorkDir
 		// Pin the workdir's target so the resolution below runs against it —
@@ -1041,11 +1044,11 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 			cfg.Identity.WorkspaceTargetKind = strings.TrimSpace(target.Kind)
 			cfg.Identity.WorkspaceTargetName = strings.TrimSpace(target.Name)
 		} else if workspace.WorkspaceTargetFromContext(ctx) != "" {
-			return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, targetErr
+			return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, settings.Settings{}, targetErr
 		}
 	}
 
-	return cfg, chatModel, provider, nil
+	return cfg, chatModel, provider, botSettings, nil
 }
 
 func (s *Service) canDeliverUserInputStream() bool {
@@ -1372,7 +1375,7 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 	if !strings.EqualFold(strings.TrimSpace(sessionType), sessionmode.Schedule) {
 		sessionPrefModelID, sessionPrefEffort = s.sessionModelPreference(ctx, sessionID)
 	}
-	cfg, chatModel, _, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
+	cfg, chatModel, _, botSettings, err := s.buildBaseRunConfig(ctx, baseRunConfigParams{
 		BotID:              botID,
 		SessionID:          sessionID,
 		ChannelIdentityID:  channelIdentityID,
@@ -1396,6 +1399,7 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 		ModelID:                chatModel.ID,
 		RuntimeType:            runtimeType,
 		ContextBudgetMaxTokens: contextBudget,
+		DiscussProbeModelID:    strings.TrimSpace(botSettings.DiscussProbeModelID),
 	}, nil
 }
 

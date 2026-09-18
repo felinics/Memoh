@@ -84,7 +84,7 @@ type UpsertRequest struct {
 	CompactionThreshold     *int                `json:"compaction_threshold,omitempty"`
 	CompactionTargetPercent *int                `json:"compaction_target_percent,omitempty"`
 	CompactionModelID       *string             `json:"compaction_model_id,omitempty"`
-	DiscussProbeModelID     string              `json:"discuss_probe_model_id,omitempty"`
+	DiscussProbeModelID     *string             `json:"discuss_probe_model_id,omitempty"`
 	PersistFullToolResults  *bool               `json:"persist_full_tool_results,omitempty"`
 	ShowToolCallsInIM       *bool               `json:"show_tool_calls_in_im,omitempty"`
 	ToolApprovalConfig      *ToolApprovalConfig `json:"tool_approval_config,omitempty"`
