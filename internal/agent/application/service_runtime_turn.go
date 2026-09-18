@@ -838,6 +838,7 @@ func (s *Service) persistRuntimeRound(
 	contextLifecycle *contextfrag.LifecycleHolder,
 	reasoningTiming []messagepkg.ReasoningTimingSegment,
 ) error {
+	req.RuntimeType = runtimeType
 	meta := map[string]any{
 		"runtime_type": runtimeType,
 		"project_path": projectPath,

@@ -12,6 +12,7 @@ import (
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/hooks"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
+	"github.com/felinics/memoh/internal/runtimekind"
 )
 
 const defaultMemorySearchTimeout = 1200 * time.Millisecond
@@ -300,6 +301,7 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []
 		ChannelIdentityID: strings.TrimSpace(req.SourceChannelIdentityID),
 		DisplayName:       s.resolveDisplayName(ctx, req),
 		TimezoneLocation:  tzLoc,
+		SkipLLM:           runtimekind.IsExternal(req.RuntimeType),
 	}); err != nil {
 		s.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return

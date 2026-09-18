@@ -29,6 +29,9 @@ type AfterChatRequest struct {
 	ChannelIdentityID string
 	DisplayName       string
 	TimezoneLocation  *time.Location
+	// SkipLLM keeps memory formation from borrowing the bot's chat model when
+	// an external agent runtime owns the model for this turn.
+	SkipLLM bool
 }
 
 // LLM is the interface for LLM operations needed by memory service.

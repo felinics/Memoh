@@ -284,7 +284,7 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 		return nil
 	}
 
-	if p.llm != nil {
+	if p.llm != nil && !req.SkipLLM {
 		result := runFormation(ctx, p.logger, p.llm, p.service, req)
 		p.logger.Debug("memory formation completed",
 			slog.String("bot_id", botID),
@@ -297,7 +297,8 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 		return nil
 	}
 
-	// Fallback: no LLM configured, store raw transcript (legacy path).
+	// Fallback: no LLM configured or intentionally skipped, store the raw
+	// transcript without borrowing another model.
 	filters := map[string]any{
 		"namespace": sharedMemoryNamespace,
 		"scopeId":   botID,
