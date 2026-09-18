@@ -149,8 +149,38 @@ func TestBrowserActionAliases(t *testing.T) {
 	if got := normalizeBrowserAction("scrollintoview"); got != "scroll_into_view" {
 		t.Fatalf("unexpected scrollintoview alias: %q", got)
 	}
+	if got := normalizeBrowserAction("keyboard_inserttext"); got != "keyboard_type" {
+		t.Fatalf("unexpected keyboard_inserttext alias: %q", got)
+	}
 	if got := normalizeBrowserAction("fill"); got != "fill" {
 		t.Fatalf("unexpected canonical action: %q", got)
+	}
+}
+
+// Every action the executor implements must be advertised in the schema enum,
+// including the compatibility aliases, so a strict-schema caller can express
+// them (C01 in the completion plan).
+func TestBrowserActionSchemaAdvertisesEveryAction(t *testing.T) {
+	schema := browserActionContract.schema("x")
+	action, _ := schema["properties"].(map[string]any)["action"].(map[string]any)
+	enum, _ := action["enum"].([]string)
+	got := map[string]bool{}
+	for _, name := range enum {
+		got[name] = true
+	}
+	for _, want := range []string{"keyboard_type", "keyboard_inserttext", "keydown", "keyup", "dblclick", "scrollintoview", "double_click", "scroll_into_view", "navigate", "tab_close"} {
+		if !got[want] {
+			t.Fatalf("schema enum is missing %q: %v", want, enum)
+		}
+	}
+	if schema["additionalProperties"] != false {
+		t.Fatalf("expected strict schema, got %#v", schema["additionalProperties"])
+	}
+	props := schema["properties"].(map[string]any)
+	for _, want := range []string{"button", "click_count", "duration_ms", "x", "y", "to_x", "to_y"} {
+		if _, ok := props[want]; !ok {
+			t.Fatalf("schema is missing parameter %q", want)
+		}
 	}
 }
 
@@ -254,14 +284,13 @@ func TestComputerA11yShellQuote(t *testing.T) {
 }
 
 func TestComputerRefFallbackPoint(t *testing.T) {
-	item := a11ySnapshotItem{Ref: "e3", Center: &a11yPoint{X: 120, Y: 240}}
-	item.CenterX = item.Center.X
-	item.CenterY = item.Center.Y
-	if item.Ref != "e3" {
-		t.Fatalf("expected ref e3, got %q", item.Ref)
+	item := a11ySnapshotItem{Ref: "e3", X: 100, Y: 230, Width: 40, Height: 20}
+	center, ok := item.center()
+	if !ok || center.X != 120 || center.Y != 240 {
+		t.Fatalf("expected center 120,240 from geometry, got %#v ok=%v", center, ok)
 	}
-	if item.CenterX != 120 || item.CenterY != 240 {
-		t.Fatalf("expected center to propagate, got %d,%d", item.CenterX, item.CenterY)
+	if _, ok := (a11ySnapshotItem{Ref: "e4", X: 5, Y: 5}).center(); ok {
+		t.Fatal("expected no center without a box")
 	}
 	if got := normalizeBrowserRef("E3"); got != "e3" {
 		t.Fatalf("expected canonical ref e3, got %q", got)

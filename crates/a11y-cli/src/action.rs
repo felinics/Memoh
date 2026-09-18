@@ -11,6 +11,7 @@ use crate::refs::{self, RefEntry};
 #[derive(Serialize)]
 struct ActionResult {
     ok: bool,
+    protocol_version: u32,
     action: &'static str,
     #[serde(rename = "ref")]
     ref_id: String,
@@ -19,19 +20,31 @@ struct ActionResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    fallback: Option<Fallback>,
+    fallback: Option<Point>,
 }
 
-#[derive(Serialize)]
-struct Fallback {
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+struct Point {
     x: i32,
     y: i32,
+}
+
+/// Pointer fallback for an entry: only meaningful when the entry has a real
+/// on-screen box. Without one, the previous behaviour clicked at the
+/// saturated centre of a zero box (typically 0,0) — the wrong element.
+fn fallback_point(entry: &RefEntry) -> Option<Point> {
+    if !entry.has_geometry() {
+        return None;
+    }
+    let (x, y) = entry.center();
+    Some(Point { x, y })
 }
 
 impl ActionResult {
     fn success(action: &'static str, entry: &RefEntry, detail: impl Into<String>) -> Self {
         Self {
             ok: true,
+            protocol_version: crate::PROTOCOL_VERSION,
             action,
             ref_id: entry.ref_id.clone(),
             detail: Some(detail.into()),
@@ -41,14 +54,14 @@ impl ActionResult {
     }
 
     fn failure(action: &'static str, entry: &RefEntry, error: impl Into<String>) -> Self {
-        let (x, y) = entry.center();
         Self {
             ok: false,
+            protocol_version: crate::PROTOCOL_VERSION,
             action,
             ref_id: entry.ref_id.clone(),
             detail: None,
             error: Some(error.into()),
-            fallback: Some(Fallback { x, y }),
+            fallback: fallback_point(entry),
         }
     }
 
@@ -56,6 +69,50 @@ impl ActionResult {
         println!("{}", serde_json::to_string(self)?);
         Ok(())
     }
+}
+
+/// `a11y-cli locate --ref eN`: resolve a ref from the persisted index to its
+/// role, name, box and centre. It never touches the accessibility bus and
+/// never re-numbers refs, so the Go caller can turn a ref into pointer
+/// coordinates (double-click, right-click, scroll) without the re-scan that
+/// used to move refs onto different elements.
+#[derive(Serialize)]
+struct LocateResult {
+    ok: bool,
+    protocol_version: u32,
+    action: &'static str,
+    #[serde(rename = "ref")]
+    ref_id: String,
+    role: String,
+    name: String,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    center: Option<Point>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    states: Vec<String>,
+}
+
+pub fn locate(ref_id: &str) -> Result<()> {
+    let entry = refs::lookup(ref_id)?;
+    let out = LocateResult {
+        ok: true,
+        protocol_version: crate::PROTOCOL_VERSION,
+        action: "locate",
+        ref_id: entry.ref_id.clone(),
+        role: entry.role.clone(),
+        name: entry.name.clone(),
+        x: entry.x,
+        y: entry.y,
+        width: entry.width,
+        height: entry.height,
+        center: fallback_point(&entry),
+        states: entry.states.clone(),
+    };
+    println!("{}", serde_json::to_string(&out)?);
+    Ok(())
 }
 
 pub async fn click(ref_id: &str) -> Result<()> {
@@ -211,6 +268,43 @@ mod tests {
     fn preferred_index_handles_empty_descriptors() {
         let descriptors: [atspi::Action; 0] = [];
         assert_eq!(preferred_action_index(&descriptors), 0);
+    }
+
+    fn entry(w: i32, h: i32) -> RefEntry {
+        RefEntry {
+            ref_id: "e2".to_string(),
+            bus_name: ":1.7".to_string(),
+            object_path: "/org/a11y/atspi/accessible/2".to_string(),
+            role: "push button".to_string(),
+            name: "OK".to_string(),
+            x: 100,
+            y: 40,
+            width: w,
+            height: h,
+            states: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn fallback_point_uses_center_of_real_box() {
+        assert_eq!(
+            fallback_point(&entry(50, 20)),
+            Some(Point { x: 125, y: 50 })
+        );
+    }
+
+    #[test]
+    fn fallback_point_is_absent_without_geometry() {
+        assert_eq!(fallback_point(&entry(0, 0)), None);
+        assert_eq!(fallback_point(&entry(30, 0)), None);
+    }
+
+    #[test]
+    fn failure_result_omits_fallback_without_geometry() {
+        let result = ActionResult::failure("click", &entry(0, 0), "no actions");
+        let json = serde_json::to_string(&result).expect("serialize");
+        assert!(!json.contains("fallback"), "unexpected fallback in {json}");
+        assert!(json.contains("\"protocol_version\":2"));
     }
 
     #[test]

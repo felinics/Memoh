@@ -25,9 +25,32 @@ pub struct RefEntry {
     pub y: i32,
     pub width: i32,
     pub height: i32,
+    /// Interesting AT-SPI states at snapshot time (`focused`, `editable`,
+    /// `checked`, ...). Older index files predate the field, so it defaults
+    /// to empty instead of failing to parse.
+    #[serde(default)]
+    pub states: Vec<String>,
 }
 
+/// Largest coordinate a pointer event can address. RFB carries pointer
+/// positions as 16-bit values, and AT-SPI reports extents near `i32::MIN` for
+/// nodes that have never been laid out, so anything outside this range is not
+/// a real screen position.
+pub const MAX_POINTER_COORD: i32 = 32767;
+
 impl RefEntry {
+    /// Whether the entry carries a usable on-screen box. Entries without one
+    /// (popups, virtual children, unrealised tree cells that report absurd
+    /// extents) can still be driven through AT-SPI actions but must never be
+    /// turned into pointer coordinates.
+    pub fn has_geometry(&self) -> bool {
+        if self.width <= 0 || self.height <= 0 {
+            return false;
+        }
+        let (cx, cy) = self.center();
+        (0..=MAX_POINTER_COORD).contains(&cx) && (0..=MAX_POINTER_COORD).contains(&cy)
+    }
+
     /// Bounding box center, used as the RFB fallback target.
     pub fn center(&self) -> (i32, i32) {
         let cx = self.x.saturating_add(self.width / 2);
@@ -132,7 +155,57 @@ mod tests {
             y: 50,
             width: 30,
             height: 20,
+            states: Vec::new(),
         }
+    }
+
+    #[test]
+    fn has_geometry_requires_positive_box() {
+        assert!(sample_entry().has_geometry());
+        let flat = RefEntry {
+            width: 0,
+            height: 12,
+            ..sample_entry()
+        };
+        assert!(!flat.has_geometry());
+    }
+
+    #[test]
+    fn has_geometry_rejects_unrealised_extents() {
+        // GTK tree cells that were never laid out report extents around
+        // i32::MIN; those must never become pointer targets.
+        let bogus = RefEntry {
+            x: -2147483648 + 200,
+            y: -2147483648 + 10,
+            width: 528,
+            height: 38,
+            ..sample_entry()
+        };
+        assert!(!bogus.has_geometry());
+        let offscreen = RefEntry {
+            x: -1000,
+            y: -1000,
+            width: 5,
+            height: 5,
+            ..sample_entry()
+        };
+        assert!(!offscreen.has_geometry());
+        let huge = RefEntry {
+            x: 40000,
+            y: 10,
+            width: 20,
+            height: 20,
+            ..sample_entry()
+        };
+        assert!(!huge.has_geometry());
+    }
+
+    #[test]
+    fn legacy_index_without_states_still_parses() {
+        let legacy = r#"{"entries":[{"ref_id":"e1","bus_name":":1.9","object_path":"/a","role":"entry","name":"Search","x":1,"y":2,"width":3,"height":4}]}"#;
+        let index: RefIndex = serde_json::from_str(legacy).expect("legacy index parses");
+        assert_eq!(index.entries.len(), 1);
+        assert!(index.entries[0].states.is_empty());
     }
 
     #[test]

@@ -137,23 +137,8 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 	return []sdk.Tool{
 		{
 			Name:        ToolBrowserAction().String(),
-			Description: "Operate the current workspace browser tab. Prefer element refs from an observation result over CSS selectors; use selectors only as a fallback. Use fill to replace input values, type to append text, and press for shortcuts or submit keys. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
-			Parameters: browserObjectSchema(map[string]any{
-				"action":          map[string]any{"type": "string", "enum": []string{"navigate", "click", "double_click", "focus", "type", "fill", "press", "hover", "select", "check", "uncheck", "scroll", "scroll_into_view", "drag", "upload", "wait", "go_back", "go_forward", "reload", "tab_new", "tab_select", "tab_close"}, "description": "Browser action to perform. Compatibility aliases dblclick, scrollintoview, keyboard_type, and keyboard_inserttext are also accepted; keydown and keyup dispatch a single raw key event."},
-				"url":             map[string]any{"type": "string", "description": "URL to open for navigate or tab_new."},
-				"ref":             map[string]any{"type": "string", "description": "Element ref such as e12 from a browser observation snapshot or screenshot annotation. Preferred over selector."},
-				"selector":        map[string]any{"type": "string", "description": "CSS selector for the target element when no ref is available."},
-				"text":            map[string]any{"type": "string", "description": "Text for type or fill."},
-				"key":             map[string]any{"type": "string", "description": "Key or key chord for press, e.g. Enter, Tab, Escape, Control+a."},
-				"value":           map[string]any{"type": "string", "description": "Option value for select."},
-				"target_ref":      map[string]any{"type": "string", "description": "Drop target ref for drag, preferred over target_selector."},
-				"target_selector": map[string]any{"type": "string", "description": "Drop target CSS selector for drag when no target_ref is available."},
-				"files":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Workspace file paths to upload."},
-				"tab_index":       map[string]any{"type": "integer", "minimum": 0, "description": "Tab index for tab_select or tab_close."},
-				"direction":       map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}, "description": "Scroll direction. Defaults to down."},
-				"amount":          map[string]any{"type": "integer", "minimum": 1, "maximum": 5000, "default": 500, "description": "Scroll amount in pixels."},
-				"timeout":         map[string]any{"type": "integer", "minimum": 1, "maximum": 45000, "default": 1000, "description": "Timeout in milliseconds for wait or navigation readiness."},
-			}, []string{"action"}),
+			Description: "Operate the current workspace browser tab. Prefer element refs from an observation result over CSS selectors; use selectors only as a fallback and viewport x/y only when no element target applies. Use fill to replace or clear a value, type to insert at the caret, and press for shortcuts or submit keys. Each action accepts only the parameters listed for it; anything else is rejected before the browser is touched. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
+			Parameters:  browserActionContract.schema(browserActionContract.actionDescription("Browser action to perform:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execBrowserAction(ctx.Context, sess, inputAsMap(input))
 			},
@@ -161,44 +146,23 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 		{
 			Name:        ToolBrowserObserve().String(),
 			Description: "Inspect the current workspace browser without changing page state. Prefer snapshot for interactive elements and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are saved to a workspace path and are not attached automatically.",
-			Parameters: browserObjectSchema(map[string]any{
-				"observe":   map[string]any{"type": "string", "enum": []string{"snapshot", "get_content", "screenshot_annotate", "screenshot", "get_html", "evaluate", "get_url", "get_title", "pdf", "tab_list"}, "description": "What to observe from the page."},
-				"ref":       map[string]any{"type": "string", "description": "Element ref from snapshot or screenshot_annotate. Scopes get_content/get_html and evaluate helper use."},
-				"selector":  map[string]any{"type": "string", "description": "CSS selector to scope get_content or get_html when no ref is available."},
-				"script":    map[string]any{"type": "string", "description": "JavaScript expression to evaluate. Keep it short and read-only unless the task requires otherwise."},
-				"full_page": map[string]any{"type": "boolean", "default": false, "description": "Capture a full-page screenshot for screenshot."},
-			}, []string{"observe"}),
+			Parameters:  browserObserveContract.schema(browserObserveContract.actionDescription("What to observe from the page:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execBrowserObserve(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
 			Name:        ToolComputerObserve().String(),
-			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility-tree listing of interactive UI elements with refs for later desktop actions. Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and is not attached automatically.",
-			Parameters: browserObjectSchema(map[string]any{
-				"observe": map[string]any{"type": "string", "enum": []string{"snapshot", "screenshot"}, "description": "What to observe from the desktop."},
-			}, []string{"observe"}),
+			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility listing of on-screen UI elements with refs, geometry, and states for later desktop actions. Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and is not attached automatically.",
+			Parameters:  computerObserveContract.schema(computerObserveContract.actionDescription("What to observe from the desktop:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execComputerObserve(ctx.Context, sess, inputAsMap(input))
 			},
 		},
 		{
 			Name:        ToolComputerAction().String(),
-			Description: "Drive the workspace desktop. Prefer refs from a desktop observation snapshot for click/double_click/type/fill/scroll; coordinates (x, y) are only a fallback when no ref applies (native dialogs, raw drags, pointer hovers). For in-page browser targets, prefer browser-specific actions when they are available.",
-			Parameters: browserObjectSchema(map[string]any{
-				"action":      map[string]any{"type": "string", "enum": []string{"click", "double_click", "type", "fill", "key", "scroll", "drag", "wait", "mouse_move", "pointer"}, "description": "Desktop action to perform."},
-				"ref":         map[string]any{"type": "string", "description": "Element ref such as e3 from a desktop observation snapshot. Preferred over coordinates for click/double_click/type/fill/scroll."},
-				"x":           map[string]any{"type": "integer", "minimum": 0, "description": "X coordinate in desktop pixels (used when no ref is provided or as fallback)."},
-				"y":           map[string]any{"type": "integer", "minimum": 0, "description": "Y coordinate in desktop pixels (used when no ref is provided or as fallback)."},
-				"to_x":        map[string]any{"type": "integer", "minimum": 0, "description": "Destination X coordinate for drag."},
-				"to_y":        map[string]any{"type": "integer", "minimum": 0, "description": "Destination Y coordinate for drag."},
-				"button":      map[string]any{"type": "string", "enum": []string{"left", "middle", "right"}, "description": "Mouse button. Defaults to left."},
-				"button_mask": map[string]any{"type": "integer", "minimum": 0, "maximum": 255, "description": "Raw RFB button mask for pointer actions."},
-				"direction":   map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}, "description": "Scroll direction. Defaults to down."},
-				"amount":      map[string]any{"type": "integer", "minimum": 1, "maximum": 10000, "default": 500, "description": "Scroll amount or wait duration in milliseconds."},
-				"key":         map[string]any{"type": "string", "description": "Key or key chord, e.g. Enter, Escape, Control+a."},
-				"text":        map[string]any{"type": "string", "description": "Text to type or fill into the target."},
-			}, []string{"action"}),
+			Description: "Drive the workspace desktop. Prefer refs from a desktop observation snapshot for click/double_click/type/fill/scroll; coordinates (x, y) are only a fallback when no ref applies (native dialogs, raw drags, pointer hovers). Each action accepts only the parameters listed for it. For in-page browser targets, prefer browser-specific actions when they are available.",
+			Parameters:  computerActionContract.schema(computerActionContract.actionDescription("Desktop action to perform:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execComputerAction(ctx.Context, sess, inputAsMap(input))
 			},
@@ -206,11 +170,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 		{
 			Name:        ToolBrowserRemoteSession().String(),
 			Description: "Advanced escape hatch for code-driven automation. Exposes the workspace Chrome CDP endpoint for chromium.connectOverCDP or other CDP clients.",
-			Parameters: browserObjectSchema(map[string]any{
-				"action":     map[string]any{"type": "string", "enum": []string{"create", "close", "status"}, "description": "Session action to perform."},
-				"session_id": map[string]any{"type": "string", "description": "Target/session ID returned by create or status."},
-				"url":        map[string]any{"type": "string", "description": "Optional URL to open when creating a target."},
-			}, []string{"action"}),
+			Parameters:  browserRemoteSessionContract.schema(browserRemoteSessionContract.actionDescription("Session action to perform:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execRemoteSession(ctx.Context, sess, inputAsMap(input))
 			},
@@ -238,17 +198,41 @@ func sessionBotID(session SessionContext) (string, error) {
 	return botID, nil
 }
 
+// execBrowserAction validates the call against the action contract before
+// anything touches the browser, so a malformed request fails with no side
+// effect.
 func (p *BrowserProvider) execBrowserAction(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	if _, err := browserActionContract.normalize(args); err != nil {
+		return nil, err
+	}
+	return p.runBrowser(ctx, session, args)
+}
+
+func (p *BrowserProvider) execBrowserObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	spec, err := browserObserveContract.normalize(args)
+	if err != nil {
+		return nil, err
+	}
+	payload := map[string]any{"action": spec.Name}
+	for _, key := range []string{"ref", "selector", "script"} {
+		if v := StringArg(args, key); v != "" {
+			payload[key] = v
+		}
+	}
+	if v, ok, _ := BoolArg(args, "full_page"); ok {
+		payload["full_page"] = v
+	}
+	return p.runBrowser(ctx, session, payload)
+}
+
+// runBrowser executes an already-validated browser request.
+func (p *BrowserProvider) runBrowser(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
 	botID, err := sessionBotID(session)
 	if err != nil {
 		return nil, err
 	}
 	if err := p.ensureDisplayEnabled(ctx, botID); err != nil {
 		return nil, err
-	}
-	action := StringArg(args, "action")
-	if action == "" {
-		return nil, errors.New("action is required")
 	}
 	runCtx, cancel := context.WithTimeout(ctx, browserToolTimeout)
 	defer cancel()
@@ -259,24 +243,11 @@ func (p *BrowserProvider) execBrowserAction(ctx context.Context, session Session
 	return p.browserActionResult(ctx, botID, data), nil
 }
 
-func (p *BrowserProvider) execBrowserObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	observe := StringArg(args, "observe")
-	if observe == "" {
-		return nil, errors.New("observe is required")
-	}
-	payload := map[string]any{"action": observe}
-	for _, key := range []string{"ref", "selector", "script"} {
-		if v := StringArg(args, key); v != "" {
-			payload[key] = v
-		}
-	}
-	if v, ok, _ := BoolArg(args, "full_page"); ok {
-		payload["full_page"] = v
-	}
-	return p.execBrowserAction(ctx, session, payload)
-}
-
 func (p *BrowserProvider) execRemoteSession(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+	spec, err := browserRemoteSessionContract.normalize(args)
+	if err != nil {
+		return nil, err
+	}
 	botID, err := sessionBotID(session)
 	if err != nil {
 		return nil, err
@@ -288,8 +259,7 @@ func (p *BrowserProvider) execRemoteSession(ctx context.Context, session Session
 	if err != nil {
 		return nil, err
 	}
-	action := StringArg(args, "action")
-	switch action {
+	switch spec.Name {
 	case "create":
 		targetURL := StringArg(args, "url")
 		target, err := p.createOrActiveTarget(ctx, client, targetURL)
@@ -318,28 +288,28 @@ func (p *BrowserProvider) execRemoteSession(ctx context.Context, session Session
 			"targets":          publicTargets(targets),
 		}, nil
 	case "close":
-		sessionID := StringArg(args, "session_id")
-		if sessionID == "" {
-			return nil, errors.New("session_id is required for close")
-		}
-		return p.closeTarget(ctx, client, sessionID)
+		return p.closeTarget(ctx, client, StringArg(args, "session_id"))
 	default:
-		return nil, fmt.Errorf("unknown session action: %s", action)
+		return nil, fmt.Errorf("unknown session action: %s", spec.Name)
 	}
 }
 
 func (p *BrowserProvider) execComputerObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	observe := strings.TrimSpace(StringArg(args, "observe"))
-	if observe == "" {
-		return nil, errors.New("observe is required")
+	spec, err := computerObserveContract.normalize(args)
+	if err != nil {
+		return nil, err
 	}
-	switch observe {
+	switch spec.Name {
 	case "screenshot":
 		return p.execComputerScreenshot(ctx, session)
 	case "snapshot":
-		return p.execComputerSnapshot(ctx, session)
+		limit, _, err := IntArg(args, "limit")
+		if err != nil {
+			return nil, err
+		}
+		return p.execComputerSnapshot(ctx, session, limit)
 	default:
-		return nil, fmt.Errorf("unknown computer observe: %s", observe)
+		return nil, fmt.Errorf("unknown computer observe: %s", spec.Name)
 	}
 }
 
@@ -358,7 +328,7 @@ func (p *BrowserProvider) execComputerScreenshot(ctx context.Context, session Se
 	return p.buildScreenshotBytesResult(ctx, botID, img, mime, p.screenshotDir(), nil), nil
 }
 
-func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session SessionContext) (any, error) {
+func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session SessionContext, limit int) (any, error) {
 	botID, err := p.requireComputerDisplay(session)
 	if err != nil {
 		return nil, err
@@ -367,13 +337,25 @@ func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session Sess
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := computerA11ySnapshot(ctx, client)
+	snapshot, err := computerA11ySnapshot(ctx, client, limit)
 	if err != nil {
 		return nil, err
 	}
+	p.logger.Debug("computer snapshot",
+		slog.String("bot_id", botID),
+		slog.String("helper_version", snapshot.HelperVersion),
+		slog.String("bus_address", snapshot.Diagnostics.BusAddress),
+		slog.String("display", snapshot.Diagnostics.Display),
+		slog.Int("accepted", snapshot.Diagnostics.Accepted),
+		slog.Bool("truncated", snapshot.Truncated),
+	)
 	return map[string]any{
-		"snapshot":  snapshot.Lines,
-		"ref_count": len(snapshot.Items),
+		"snapshot":       snapshot.text(),
+		"ref_count":      len(snapshot.Items),
+		"limit":          snapshot.Limit,
+		"truncated":      snapshot.Truncated,
+		"helper_version": snapshot.HelperVersion,
+		"diagnostics":    snapshot.Diagnostics.public(),
 	}, nil
 }
 
@@ -382,10 +364,11 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 	if err != nil {
 		return nil, err
 	}
-	action := StringArg(args, "action")
-	if action == "" {
-		return nil, errors.New("action is required")
+	spec, err := computerActionContract.normalize(args)
+	if err != nil {
+		return nil, err
 	}
+	action := spec.Name
 	if _, err := p.ensureComputerDisplay(ctx, botID); err != nil {
 		return nil, err
 	}
@@ -407,52 +390,38 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		}
 		return map[string]any{"moved": true, "x": x, "y": y, "button_mask": mask}, nil
 	case "click", "double_click":
-		count := 1
-		if action == "double_click" {
-			count = 2
+		count, err := guiClickCount(args, action)
+		if err != nil {
+			return nil, err
 		}
+		mask := mouseButtonMask(StringArg(args, "button"))
 		if ref != "" {
-			result, err := p.clickByRef(ctx, botID, ref, count)
-			if err != nil {
-				return nil, err
-			}
-			if result != nil {
-				return result, nil
-			}
+			return p.clickByRef(ctx, botID, ref, mask, count)
 		}
 		x, y, err := requiredPoint(args)
 		if err != nil {
-			return nil, fmt.Errorf("click requires ref or x/y: %w", err)
+			return nil, err
 		}
-		mask := mouseButtonMask(StringArg(args, "button"))
-		for i := 0; i < count; i++ {
-			if err := p.pointerClick(ctx, botID, x, y, mask); err != nil {
-				return nil, err
-			}
+		if err := p.pointerMultiClick(ctx, botID, x, y, mask, count); err != nil {
+			return nil, err
 		}
-		return map[string]any{"clicked": true, "x": x, "y": y, "button": buttonName(mask), "click_count": count}, nil
+		return map[string]any{"clicked": true, "x": x, "y": y, "button": buttonName(mask), "click_count": count, "via": "rfb"}, nil
 	case "type", "fill":
-		text := StringArg(args, "text")
-		if text == "" {
-			return nil, errors.New("text is required")
-		}
+		text := rawStringArg(args, "text")
+		replace := action == "fill"
 		if ref != "" {
-			result, err := p.editByRef(ctx, botID, ref, text, action == "fill")
-			if err != nil {
+			return p.editByRef(ctx, botID, ref, text, replace)
+		}
+		if replace {
+			if err := p.replaceFocusedText(ctx, botID, text); err != nil {
 				return nil, err
 			}
-			if result != nil {
-				return result, nil
-			}
+			return map[string]any{"filled": text, "target": "focus", "via": "rfb", "cleared_with": "select_all"}, nil
 		}
 		if err := p.typeText(ctx, botID, text); err != nil {
 			return nil, err
 		}
-		out := map[string]any{"typed": text}
-		if action == "fill" {
-			out = map[string]any{"filled": text}
-		}
-		return out, nil
+		return map[string]any{"typed": text, "target": "focus", "via": "rfb"}, nil
 	case "drag":
 		x, y, err := requiredPoint(args)
 		if err != nil {
@@ -462,84 +431,126 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		if err != nil {
 			return nil, err
 		}
-		if err := p.pointerDrag(ctx, botID, x, y, toX, toY, mouseButtonMask(StringArg(args, "button"))); err != nil {
+		mask := mouseButtonMask(StringArg(args, "button"))
+		if err := p.pointerDrag(ctx, botID, x, y, toX, toY, mask); err != nil {
 			return nil, err
 		}
-		return map[string]any{"dragged": true, "x": x, "y": y, "to_x": toX, "to_y": toY}, nil
+		return map[string]any{"dragged": true, "x": x, "y": y, "to_x": toX, "to_y": toY, "button": buttonName(mask)}, nil
 	case "scroll":
 		x, y := optionalPoint(args, defaultComputerWidth/2, defaultComputerHeight/2)
+		target := "point"
 		if ref != "" {
-			if entry, err := lookupComputerRef(ctx, p.containers, botID, ref); err == nil && entry != nil {
-				x, y = entry.CenterX, entry.CenterY
+			client, err := p.containers.MCPClient(ctx, botID)
+			if err != nil {
+				return nil, err
 			}
+			located, err := computerA11yLocate(ctx, client, ref)
+			if err != nil {
+				return nil, err
+			}
+			if located.Center == nil {
+				return nil, fmt.Errorf("ref %s has no on-screen box to scroll at; observe again or pass x/y", ref)
+			}
+			x, y = located.Center.X, located.Center.Y
+			target = ref
+		} else if _, hasX, _ := IntArg(args, "x"); !hasX {
+			target = "desktop_center"
 		}
 		direction := StringArg(args, "direction")
 		if direction == "" {
 			direction = "down"
 		}
-		amount, err := intArgOr(args, "amount", 500)
+		amount, err := intArgOr(args, "amount", computerDefaultScrollAmount)
 		if err != nil {
 			return nil, err
 		}
-		if err := p.pointerScroll(ctx, botID, x, y, direction, amount); err != nil {
+		steps, err := p.pointerScroll(ctx, botID, x, y, direction, amount)
+		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"scrolled": direction, "amount": amount, "x": x, "y": y}, nil
+		return map[string]any{"scrolled": direction, "amount": amount, "wheel_steps": steps, "x": x, "y": y, "target": target, "via": "rfb"}, nil
 	case "key":
 		key := StringArg(args, "key")
-		if key == "" {
-			return nil, errors.New("key is required")
-		}
 		if err := p.typeKeyChord(ctx, botID, key); err != nil {
 			return nil, err
 		}
 		return map[string]any{"pressed": key}, nil
 	case "wait":
-		amount, err := intArgOr(args, "amount", 1000)
+		ms, err := computerWaitDuration(args)
 		if err != nil {
 			return nil, err
 		}
-		if err := sleepContext(ctx, time.Duration(amount)*time.Millisecond); err != nil {
+		if err := sleepContext(ctx, time.Duration(ms)*time.Millisecond); err != nil {
 			return nil, err
 		}
-		return map[string]any{"waited_ms": amount}, nil
+		return map[string]any{"waited_ms": ms}, nil
 	default:
 		return nil, fmt.Errorf("unknown computer action: %s", action)
 	}
 }
 
-func (p *BrowserProvider) clickByRef(ctx context.Context, botID, ref string, count int) (map[string]any, error) {
+// clickByRef clicks an accessibility ref. A plain left single click goes
+// through the element's AT-SPI action with a pointer fallback. Anything else
+// (double or triple click, middle or right button) has no AT-SPI equivalent:
+// the default action fires once and carries no button, so the ref is resolved
+// to its on-screen centre and real pointer events are replayed instead.
+func (p *BrowserProvider) clickByRef(ctx context.Context, botID, ref string, mask byte, count int) (map[string]any, error) {
 	client, err := p.containers.MCPClient(ctx, botID)
 	if err != nil {
 		return nil, err
 	}
-	result, err := computerA11yClick(ctx, client, ref)
+	if mask == rfbButtonLeft && count == 1 {
+		result, err := computerA11yClick(ctx, client, ref)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case result.OK:
+			out := map[string]any{"clicked": true, "ref": ref, "button": "left", "click_count": 1, "via": "a11y"}
+			if result.Detail != "" {
+				out["a11y_action"] = result.Detail
+			}
+			return out, nil
+		case result.Fallback != nil && a11yPointerCoordValid(*result.Fallback):
+			if err := p.pointerMultiClick(ctx, botID, result.Fallback.X, result.Fallback.Y, mask, 1); err != nil {
+				return nil, err
+			}
+			return map[string]any{"clicked": true, "ref": ref, "x": result.Fallback.X, "y": result.Fallback.Y, "button": "left", "click_count": 1, "via": "rfb_fallback"}, nil
+		default:
+			if result.Error != "" {
+				return nil, fmt.Errorf("a11y click %s failed: %s", ref, result.Error)
+			}
+			return nil, fmt.Errorf("a11y click %s failed without diagnostic", ref)
+		}
+	}
+	located, err := computerA11yLocate(ctx, client, ref)
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case result.OK:
-		out := map[string]any{"clicked": true, "ref": ref, "click_count": count, "via": "a11y"}
-		if count == 2 {
-			out["double_clicked"] = true
-		}
-		return out, nil
-	case result.Fallback != nil:
-		mask := rfbButtonLeft
-		for i := 0; i < count; i++ {
-			if err := p.pointerClick(ctx, botID, result.Fallback.X, result.Fallback.Y, mask); err != nil {
-				return nil, err
-			}
-		}
-		return map[string]any{"clicked": true, "x": result.Fallback.X, "y": result.Fallback.Y, "ref": ref, "click_count": count, "via": "rfb_fallback"}, nil
+	if located.Center == nil {
+		return nil, fmt.Errorf("ref %s has no on-screen box, and a %s %s click cannot be expressed as an accessibility action; observe again or pass x/y", ref, clickCountName(count), buttonName(mask))
+	}
+	if err := p.pointerMultiClick(ctx, botID, located.Center.X, located.Center.Y, mask, count); err != nil {
+		return nil, err
+	}
+	return map[string]any{"clicked": true, "ref": ref, "x": located.Center.X, "y": located.Center.Y, "button": buttonName(mask), "click_count": count, "via": "rfb"}, nil
+}
+
+func clickCountName(count int) string {
+	switch count {
+	case 2:
+		return "double"
+	case 3:
+		return "triple"
 	default:
-		if result.Error != "" {
-			return nil, fmt.Errorf("a11y click %s failed: %s", ref, result.Error)
-		}
-		return nil, fmt.Errorf("a11y click %s failed without diagnostic", ref)
+		return "single"
 	}
 }
 
+// editByRef types into or replaces the text of an accessibility ref. When
+// AT-SPI cannot edit the widget and reports a pointer fallback, the widget is
+// focused by clicking it; a replace then clears it before typing, so fill
+// keeps its "replace everything" meaning on the fallback path too.
 func (p *BrowserProvider) editByRef(ctx context.Context, botID, ref, text string, replace bool) (map[string]any, error) {
 	client, err := p.containers.MCPClient(ctx, botID)
 	if err != nil {
@@ -549,25 +560,29 @@ func (p *BrowserProvider) editByRef(ctx context.Context, botID, ref, text string
 	if err != nil {
 		return nil, err
 	}
+	key := "typed"
+	if replace {
+		key = "filled"
+	}
 	switch {
 	case result.OK:
-		key := "typed"
-		if replace {
-			key = "filled"
-		}
 		return map[string]any{key: text, "ref": ref, "via": "a11y"}, nil
-	case result.Fallback != nil:
-		if err := p.pointerClick(ctx, botID, result.Fallback.X, result.Fallback.Y, rfbButtonLeft); err != nil {
+	case result.Fallback != nil && a11yPointerCoordValid(*result.Fallback):
+		if err := p.pointerMultiClick(ctx, botID, result.Fallback.X, result.Fallback.Y, rfbButtonLeft, 1); err != nil {
 			return nil, err
+		}
+		out := map[string]any{key: text, "ref": ref, "x": result.Fallback.X, "y": result.Fallback.Y, "via": "rfb_fallback"}
+		if replace {
+			if err := p.replaceFocusedText(ctx, botID, text); err != nil {
+				return nil, err
+			}
+			out["cleared_with"] = "select_all"
+			return out, nil
 		}
 		if err := p.typeText(ctx, botID, text); err != nil {
 			return nil, err
 		}
-		key := "typed"
-		if replace {
-			key = "filled"
-		}
-		return map[string]any{key: text, "ref": ref, "x": result.Fallback.X, "y": result.Fallback.Y, "via": "rfb_fallback"}, nil
+		return out, nil
 	default:
 		if result.Error != "" {
 			return nil, fmt.Errorf("a11y edit %s failed: %s", ref, result.Error)
@@ -1004,36 +1019,40 @@ func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args m
 	switch action {
 	case "navigate":
 		targetURL := StringArg(args, "url")
-		if targetURL == "" {
-			return nil, errors.New("url is required for navigate")
+		timeout, err := browserReadyTimeout(args)
+		if err != nil {
+			return nil, err
 		}
 		result, err := page.conn.Call(ctx, "Page.navigate", map[string]any{"url": targetURL})
 		if err != nil {
 			return nil, err
 		}
-		_ = page.waitReady(ctx, timeoutArg(args, 30000))
 		nav := map[string]any{}
 		_ = json.Unmarshal(result, &nav)
+		if errText, ok := nav["errorText"].(string); ok && strings.TrimSpace(errText) != "" {
+			return nil, fmt.Errorf("navigate to %s failed: %s", targetURL, errText)
+		}
+		if err := page.waitReady(ctx, timeout); err != nil {
+			return nil, fmt.Errorf("navigate to %s: %w", targetURL, err)
+		}
 		currentURL, _ := page.evaluateString(ctx, "location.href")
 		nav["url"] = currentURL
+		nav["timeout_ms"] = timeout
 		return nav, nil
 	case "click", "double_click":
-		target := browserTargetArg(args, "selector", "ref")
-		if err := target.require(action); err != nil {
-			return nil, err
-		}
-		point, err := page.elementPoint(ctx, target)
+		count, err := guiClickCount(args, action)
 		if err != nil {
 			return nil, err
 		}
-		count := 1
-		if action == "double_click" {
-			count = 2
-		}
-		if err := page.mouseClick(ctx, point.X, point.Y, "left", count); err != nil {
+		button := browserButton(args)
+		target, point, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
+		if err != nil {
 			return nil, err
 		}
-		return target.withResult(map[string]any{"clicked": target.label(), "x": point.X, "y": point.Y, "click_count": count}), nil
+		if err := page.mouseClick(ctx, point.X, point.Y, button, count); err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"clicked": target.labelOr("point"), "x": point.X, "y": point.Y, "button": button, "click_count": count}), nil
 	case "focus":
 		target := browserTargetArg(args, "selector", "ref")
 		if err := target.require("focus"); err != nil {
@@ -1046,13 +1065,7 @@ func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args m
 		return target.withResult(map[string]any{"focused": target.label()}), nil
 	case "type":
 		target := browserTargetArg(args, "selector", "ref")
-		text := StringArg(args, "text")
-		if err := target.require("type"); err != nil {
-			return nil, err
-		}
-		if text == "" {
-			return nil, errors.New("text is required for type")
-		}
+		text := rawStringArg(args, "text")
 		if _, err := page.evaluate(ctx, fmt.Sprintf(`(() => { const el = mustTarget(%s, %s); el.focus(); return true })()`, jsQuote(target.Selector), jsQuote(target.Ref))); err != nil {
 			return nil, err
 		}
@@ -1062,85 +1075,74 @@ func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args m
 		return target.withResult(map[string]any{"typed": text}), nil
 	case "fill":
 		target := browserTargetArg(args, "selector", "ref")
-		text := StringArg(args, "text")
-		if err := target.require("fill"); err != nil {
-			return nil, err
-		}
-		if text == "" {
-			return nil, errors.New("text is required for fill")
-		}
-		_, err := page.evaluate(ctx, fmt.Sprintf(`(() => {
+		text := rawStringArg(args, "text")
+		result, err := page.evaluate(ctx, fmt.Sprintf(`(() => {
 const el = mustTarget(%s, %s);
+const text = %s;
 el.focus();
-if ("value" in el) {
-  el.value = %s;
-  el.dispatchEvent(new InputEvent("input", { bubbles: true, data: %s, inputType: "insertText" }));
+if ("value" in el && !(el instanceof HTMLButtonElement)) {
+  el.value = text;
+  el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: text === "" ? "deleteContentBackward" : "insertText" }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
-} else {
-  el.textContent = %s;
+  return { value: el.value, kind: "value" };
 }
-return true;
-})()`, jsQuote(target.Selector), jsQuote(target.Ref), jsQuote(text), jsQuote(text), jsQuote(text)))
+if (el.isContentEditable) {
+  el.textContent = text;
+  el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: text === "" ? "deleteContentBackward" : "insertText" }));
+  return { value: el.textContent, kind: "contenteditable" };
+}
+throw new Error("element is not editable: " + %s);
+})()`, jsQuote(target.Selector), jsQuote(target.Ref), jsQuote(text), jsQuote(target.label())))
 		if err != nil {
 			return nil, err
 		}
-		return target.withResult(map[string]any{"filled": text}), nil
+		out := map[string]any{"filled": text}
+		if fields, ok := result.(map[string]any); ok {
+			out["value"] = fields["value"]
+			out["kind"] = fields["kind"]
+		}
+		return target.withResult(out), nil
 	case "press":
 		key := StringArg(args, "key")
-		if key == "" {
-			return nil, errors.New("key is required for press")
-		}
 		if err := page.pressKey(ctx, key); err != nil {
 			return nil, err
 		}
 		return map[string]any{"pressed": key}, nil
-	case "keyboard_type", "keyboard_inserttext":
-		text := StringArg(args, "text")
-		if text == "" {
-			return nil, fmt.Errorf("text is required for %s", action)
-		}
+	case "keyboard_type":
+		text := rawStringArg(args, "text")
 		if err := page.insertText(ctx, text); err != nil {
 			return nil, err
 		}
 		return map[string]any{"inserted_text": text}, nil
 	case "keydown", "keyup":
 		key := StringArg(args, "key")
-		if key == "" {
-			return nil, fmt.Errorf("key is required for %s", action)
-		}
 		if err := page.dispatchKey(ctx, key, action == "keydown"); err != nil {
 			return nil, err
 		}
 		return map[string]any{action: key}, nil
 	case "hover":
-		target := browserTargetArg(args, "selector", "ref")
-		if err := target.require("hover"); err != nil {
-			return nil, err
-		}
-		point, err := page.elementPoint(ctx, target)
+		target, point, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
 		if err != nil {
 			return nil, err
 		}
 		if err := page.mouseMove(ctx, point.X, point.Y); err != nil {
 			return nil, err
 		}
-		return target.withResult(map[string]any{"hovered": target.label(), "x": point.X, "y": point.Y}), nil
+		return target.withResult(map[string]any{"hovered": target.labelOr("point"), "x": point.X, "y": point.Y}), nil
 	case "select":
 		target := browserTargetArg(args, "selector", "ref")
-		value := StringArg(args, "value")
-		if err := target.require("select"); err != nil {
-			return nil, err
-		}
-		if value == "" {
-			return nil, errors.New("value is required for select")
-		}
+		value := rawStringArg(args, "value")
 		result, err := page.evaluate(ctx, fmt.Sprintf(`(() => {
 const el = mustTarget(%s, %s);
-el.value = %s;
+const value = %s;
+if (!(el instanceof HTMLSelectElement)) throw new Error("element is not a select: " + %s);
+const option = Array.from(el.options).find(o => o.value === value);
+if (!option) throw new Error("select has no option with value " + JSON.stringify(value));
+el.value = value;
 el.dispatchEvent(new Event("input", { bubbles: true }));
 el.dispatchEvent(new Event("change", { bubbles: true }));
 return el.value;
-})()`, jsQuote(target.Selector), jsQuote(target.Ref), jsQuote(value)))
+})()`, jsQuote(target.Selector), jsQuote(target.Ref), jsQuote(value), jsQuote(target.label())))
 		if err != nil {
 			return nil, err
 		}
@@ -1226,11 +1228,12 @@ return true;
 		if direction == "" {
 			direction = "down"
 		}
-		amount, err := intArgOr(args, "amount", 500)
+		amount, err := intArgOr(args, "amount", browserDefaultScrollAmount)
 		if err != nil {
 			return nil, err
 		}
 		target := browserTargetArg(args, "selector", "ref")
+		scrolled := "page"
 		if target.present() {
 			_, err = page.evaluate(ctx, fmt.Sprintf(`(() => {
 const el = mustTarget(%s, %s);
@@ -1239,49 +1242,51 @@ const dy = %d;
 el.scrollBy(dx, dy);
 return true;
 })()`, jsQuote(target.Selector), jsQuote(target.Ref), scrollDeltaX(direction, amount), scrollDeltaY(direction, amount)))
+			scrolled = target.label()
 		} else {
-			err = page.mouseWheel(ctx, scrollDeltaX(direction, amount), scrollDeltaY(direction, amount))
+			var point elementPoint
+			if x, y, ok := optionalFloatPoint(args, "x", "y"); ok {
+				point = elementPoint{X: x, Y: y}
+				scrolled = "point"
+			} else {
+				point, err = page.viewportCenter(ctx)
+				if err != nil {
+					return nil, err
+				}
+			}
+			err = page.mouseWheel(ctx, point.X, point.Y, scrollDeltaX(direction, amount), scrollDeltaY(direction, amount))
 		}
 		if err != nil {
 			return nil, err
 		}
-		return target.withResult(map[string]any{"scrolled": direction, "amount": amount}), nil
+		return target.withResult(map[string]any{"scrolled": scrolled, "direction": direction, "amount": amount}), nil
 	case "scroll_into_view":
 		target := browserTargetArg(args, "selector", "ref")
-		if err := target.require("scroll_into_view"); err != nil {
-			return nil, err
-		}
 		_, err := page.evaluate(ctx, fmt.Sprintf(`(() => { mustTarget(%s, %s).scrollIntoView({ block: "center", inline: "center" }); return true })()`, jsQuote(target.Selector), jsQuote(target.Ref)))
 		if err != nil {
 			return nil, err
 		}
 		return target.withResult(map[string]any{"scrolled_into_view": target.label()}), nil
 	case "drag":
-		sourceTarget := browserTargetArg(args, "selector", "ref")
-		dropTarget := browserTargetArg(args, "target_selector", "target_ref")
-		if err := sourceTarget.require("drag source"); err != nil {
-			return nil, err
-		}
-		if err := dropTarget.require("drag target"); err != nil {
-			return nil, err
-		}
-		source, err := page.elementPoint(ctx, sourceTarget)
+		sourceTarget, source, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
 		if err != nil {
 			return nil, err
 		}
-		targetPoint, err := page.elementPoint(ctx, dropTarget)
+		dropTarget, drop, err := page.resolvePoint(ctx, args, "target_selector", "target_ref", "to_x", "to_y")
 		if err != nil {
 			return nil, err
 		}
-		if err := page.mouseDrag(ctx, source.X, source.Y, targetPoint.X, targetPoint.Y); err != nil {
+		button := browserButton(args)
+		if err := page.mouseDrag(ctx, source.X, source.Y, drop.X, drop.Y, button); err != nil {
 			return nil, err
 		}
-		return map[string]any{"dragged": sourceTarget.label(), "target": dropTarget.label(), "ref": sourceTarget.Ref, "selector": sourceTarget.Selector, "target_ref": dropTarget.Ref, "target_selector": dropTarget.Selector}, nil
+		return map[string]any{
+			"dragged": sourceTarget.labelOr("point"), "target": dropTarget.labelOr("point"), "button": button,
+			"ref": sourceTarget.Ref, "selector": sourceTarget.Selector, "x": source.X, "y": source.Y,
+			"target_ref": dropTarget.Ref, "target_selector": dropTarget.Selector, "to_x": drop.X, "to_y": drop.Y,
+		}, nil
 	case "upload":
 		target := browserTargetArg(args, "selector", "ref")
-		if err := target.require("upload"); err != nil {
-			return nil, err
-		}
 		files := stringSliceArg(args, "files")
 		if len(files) == 0 {
 			return nil, errors.New("files is required for upload")
@@ -1292,30 +1297,50 @@ return true;
 		return target.withResult(map[string]any{"uploaded": files}), nil
 	case "wait":
 		target := browserTargetArg(args, "selector", "ref")
-		timeout := timeoutArg(args, 1000)
 		if target.present() {
+			timeout, err := browserReadyTimeout(args)
+			if err != nil {
+				return nil, err
+			}
 			if err := page.waitTarget(ctx, target, timeout); err != nil {
 				return nil, err
 			}
-			return target.withResult(map[string]any{"waited_for": target.label()}), nil
+			return target.withResult(map[string]any{"waited_for": target.label(), "timeout_ms": timeout}), nil
 		}
-		if err := sleepContext(ctx, time.Duration(timeout)*time.Millisecond); err != nil {
+		ms, err := browserWaitDuration(args)
+		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"waited_ms": timeout}, nil
+		if err := sleepContext(ctx, time.Duration(ms)*time.Millisecond); err != nil {
+			return nil, err
+		}
+		return map[string]any{"waited_ms": ms}, nil
 	case "go_back", "go_forward":
+		timeout, err := browserReadyTimeout(args)
+		if err != nil {
+			return nil, err
+		}
 		if err := page.navigateHistory(ctx, action == "go_forward"); err != nil {
 			return nil, err
 		}
+		if err := page.waitReady(ctx, timeout); err != nil {
+			return nil, fmt.Errorf("%s: %w", action, err)
+		}
 		currentURL, _ := page.evaluateString(ctx, "location.href")
-		return map[string]any{"url": currentURL}, nil
+		return map[string]any{"url": currentURL, "timeout_ms": timeout}, nil
 	case "reload":
+		timeout, err := browserReadyTimeout(args)
+		if err != nil {
+			return nil, err
+		}
 		if _, err := page.conn.Call(ctx, "Page.reload", nil); err != nil {
 			return nil, err
 		}
-		_ = page.waitReady(ctx, timeoutArg(args, 30000))
+		if err := page.waitReady(ctx, timeout); err != nil {
+			return nil, fmt.Errorf("reload: %w", err)
+		}
 		currentURL, _ := page.evaluateString(ctx, "location.href")
-		return map[string]any{"url": currentURL}, nil
+		return map[string]any{"url": currentURL, "timeout_ms": timeout}, nil
 	case "get_url":
 		currentURL, err := page.evaluateString(ctx, "location.href")
 		if err != nil {
@@ -1565,6 +1590,79 @@ func (t browserTarget) label() string {
 	return t.Selector
 }
 
+// labelOr returns the target label, or fallback when the action was
+// addressed by coordinates instead of an element.
+func (t browserTarget) labelOr(fallback string) string {
+	if t.present() {
+		return t.label()
+	}
+	return fallback
+}
+
+// browserButton returns the CDP mouse button name for the call (validation
+// has already restricted it to left, middle, or right).
+func browserButton(args map[string]any) string {
+	button := strings.ToLower(strings.TrimSpace(StringArg(args, "button")))
+	if button == "" {
+		return "left"
+	}
+	return button
+}
+
+// cdpButtonsMask maps a CDP button name to the Input.dispatchMouseEvent
+// "buttons" bitmask reported while it is held.
+func cdpButtonsMask(button string) int {
+	switch button {
+	case "right":
+		return 2
+	case "middle":
+		return 4
+	default:
+		return 1
+	}
+}
+
+// optionalFloatPoint reads a coordinate pair when both halves are present.
+func optionalFloatPoint(args map[string]any, xKey, yKey string) (float64, float64, bool) {
+	x, okX, errX := IntArg(args, xKey)
+	y, okY, errY := IntArg(args, yKey)
+	if errX != nil || errY != nil || !okX || !okY {
+		return 0, 0, false
+	}
+	return float64(x), float64(y), true
+}
+
+// resolvePoint resolves an element target (ref/selector keys) or an explicit
+// coordinate pair to a viewport point. The contract guarantees exactly one of
+// them is present for actions that call this.
+func (p *cdpPage) resolvePoint(ctx context.Context, args map[string]any, selectorKey, refKey, xKey, yKey string) (browserTarget, elementPoint, error) {
+	target := browserTargetArg(args, selectorKey, refKey)
+	if target.present() {
+		point, err := p.elementPoint(ctx, target)
+		return target, point, err
+	}
+	if x, y, ok := optionalFloatPoint(args, xKey, yKey); ok {
+		return target, elementPoint{X: x, Y: y}, nil
+	}
+	return target, elementPoint{}, fmt.Errorf("%s/%s or %s/%s is required", refKey, selectorKey, xKey, yKey)
+}
+
+func (p *cdpPage) viewportCenter(ctx context.Context) (elementPoint, error) {
+	value, err := p.evaluate(ctx, `({ x: window.innerWidth / 2, y: window.innerHeight / 2 })`)
+	if err != nil {
+		return elementPoint{}, err
+	}
+	var point elementPoint
+	raw, _ := json.Marshal(value)
+	if err := json.Unmarshal(raw, &point); err != nil {
+		return elementPoint{}, err
+	}
+	if point.X <= 0 || point.Y <= 0 {
+		point = elementPoint{X: defaultComputerWidth / 2, Y: defaultComputerHeight / 2}
+	}
+	return point, nil
+}
+
 func (t browserTarget) withResult(result map[string]any) map[string]any {
 	if result == nil {
 		result = map[string]any{}
@@ -1634,30 +1732,40 @@ func (p *cdpPage) mouseClick(ctx context.Context, x, y float64, button string, c
 	return err
 }
 
-func (p *cdpPage) mouseDrag(ctx context.Context, fromX, fromY, toX, toY float64) error {
+// mouseDrag presses, moves in steps, and releases. The release is attempted
+// even when an intermediate move fails so the page is not left with a button
+// held down.
+func (p *cdpPage) mouseDrag(ctx context.Context, fromX, fromY, toX, toY float64, button string) (err error) {
 	if err := p.mouseMove(ctx, fromX, fromY); err != nil {
 		return err
 	}
-	if _, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": fromX, "y": fromY, "button": "left", "clickCount": 1}); err != nil {
+	if _, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": fromX, "y": fromY, "button": button, "clickCount": 1}); err != nil {
 		return err
 	}
+	lastX, lastY := fromX, fromY
+	defer func() {
+		if _, releaseErr := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": lastX, "y": lastY, "button": button, "clickCount": 1}); releaseErr != nil && err == nil {
+			err = releaseErr
+		}
+	}()
+	buttons := cdpButtonsMask(button)
 	for i := 1; i <= 8; i++ {
 		t := float64(i) / 8
 		x := fromX + (toX-fromX)*t
 		y := fromY + (toY-fromY)*t
-		if _, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y, "button": "left", "buttons": 1}); err != nil {
+		if _, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y, "button": button, "buttons": buttons}); err != nil {
 			return err
 		}
+		lastX, lastY = x, y
 	}
-	_, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": toX, "y": toY, "button": "left", "clickCount": 1})
-	return err
+	return nil
 }
 
-func (p *cdpPage) mouseWheel(ctx context.Context, deltaX, deltaY int) error {
+func (p *cdpPage) mouseWheel(ctx context.Context, x, y float64, deltaX, deltaY int) error {
 	_, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{
 		"type":   "mouseWheel",
-		"x":      defaultComputerWidth / 2,
-		"y":      defaultComputerHeight / 2,
+		"x":      x,
+		"y":      y,
 		"deltaX": deltaX,
 		"deltaY": deltaY,
 	})
@@ -1905,7 +2013,7 @@ func (p *cdpPage) waitReady(ctx context.Context, timeoutMS int) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return errors.New("page load timed out")
+			return fmt.Errorf("page did not become ready within %d ms", timeoutMS)
 		}
 		if err := sleepContext(ctx, 200*time.Millisecond); err != nil {
 			return err
@@ -2004,11 +2112,48 @@ func screenshotExtension(mimeType string) string {
 	}
 }
 
-func (p *BrowserProvider) pointerClick(ctx context.Context, botID string, x, y int, mask byte) error {
-	return p.sendDisplayInputs(ctx, botID,
-		displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: mask},
-		displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: 0},
+// pointerMultiClick sends count press/release pairs in one RFB batch. Sending
+// them together keeps the clicks inside the toolkit's double-click interval,
+// which separate round-trips do not guarantee.
+func (p *BrowserProvider) pointerMultiClick(ctx context.Context, botID string, x, y int, mask byte, count int) error {
+	if count < 1 {
+		count = 1
+	}
+	events := make([]displaypkg.ControlInput, 0, count*2)
+	for i := 0; i < count; i++ {
+		events = append(events,
+			displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: mask},
+			displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: 0},
+		)
+	}
+	return p.sendDisplayInputs(ctx, botID, events...)
+}
+
+// replaceFocusedText clears the focused widget with Select All + BackSpace
+// and then types text, so a pointer-driven fill replaces instead of appending.
+// An empty text leaves the widget cleared.
+func (p *BrowserProvider) replaceFocusedText(ctx context.Context, botID, text string) error {
+	const (
+		keysymControl   uint32 = 0xffe3
+		keysymA         uint32 = 'a'
+		keysymBackSpace uint32 = 0xff08
 	)
+	events := []displaypkg.ControlInput{
+		{Type: "key", Keysym: keysymControl, Down: true},
+		{Type: "key", Keysym: keysymA, Down: true},
+		{Type: "key", Keysym: keysymA, Down: false},
+		{Type: "key", Keysym: keysymControl, Down: false},
+		{Type: "key", Keysym: keysymBackSpace, Down: true},
+		{Type: "key", Keysym: keysymBackSpace, Down: false},
+	}
+	for _, r := range text {
+		ks := keysymForRune(r)
+		events = append(events,
+			displaypkg.ControlInput{Type: "key", Keysym: ks, Down: true},
+			displaypkg.ControlInput{Type: "key", Keysym: ks, Down: false},
+		)
+	}
+	return p.sendDisplayInputs(ctx, botID, events...)
 }
 
 func (p *BrowserProvider) pointerDrag(ctx context.Context, botID string, fromX, fromY, toX, toY int, mask byte) error {
@@ -2023,7 +2168,10 @@ func (p *BrowserProvider) pointerDrag(ctx context.Context, botID string, fromX, 
 	return p.sendDisplayInputs(ctx, botID, events...)
 }
 
-func (p *BrowserProvider) pointerScroll(ctx context.Context, botID string, x, y int, direction string, amount int) error {
+// pointerScroll turns a pixel amount into discrete RFB wheel steps (about
+// 120 px each, capped at 20) and reports how many were sent, since the
+// desktop cannot scroll by an exact pixel count.
+func (p *BrowserProvider) pointerScroll(ctx context.Context, botID string, x, y int, direction string, amount int) (int, error) {
 	var mask byte
 	switch direction {
 	case "up":
@@ -2035,15 +2183,20 @@ func (p *BrowserProvider) pointerScroll(ctx context.Context, botID string, x, y 
 	case "down", "":
 		mask = rfbWheelDown
 	default:
-		return fmt.Errorf("unsupported scroll direction %q", direction)
+		return 0, fmt.Errorf("unsupported scroll direction %q", direction)
 	}
 	steps := clamp(int(math.Ceil(float64(amount)/120.0)), 1, 20)
+	events := make([]displaypkg.ControlInput, 0, steps*2)
 	for i := 0; i < steps; i++ {
-		if err := p.pointerClick(ctx, botID, x, y, mask); err != nil {
-			return err
-		}
+		events = append(events,
+			displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: mask},
+			displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: 0},
+		)
 	}
-	return nil
+	if err := p.sendDisplayInputs(ctx, botID, events...); err != nil {
+		return 0, err
+	}
+	return steps, nil
 }
 
 func (p *BrowserProvider) typeText(ctx context.Context, botID, text string) error {
@@ -2299,26 +2452,6 @@ func splitKeyChord(key string) []string {
 		}
 	}
 	return out
-}
-
-func normalizeBrowserAction(action string) string {
-	normalized := strings.ToLower(strings.TrimSpace(action))
-	switch normalized {
-	case "dblclick":
-		return "double_click"
-	case "scrollintoview":
-		return "scroll_into_view"
-	default:
-		return normalized
-	}
-}
-
-func timeoutArg(args map[string]any, fallback int) int {
-	value, ok, err := IntArg(args, "timeout")
-	if err != nil || !ok || value <= 0 {
-		return fallback
-	}
-	return value
 }
 
 func intArgOr(args map[string]any, key string, fallback int) (int, error) {
