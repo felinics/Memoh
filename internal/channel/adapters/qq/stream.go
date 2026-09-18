@@ -19,6 +19,10 @@ import (
 // fewer shards means fewer chances for the known middle-shard drops.
 const defaultStreamShardInterval = time.Second
 
+// streamCloseTimeout bounds the best-effort closing shard sent when a turn is
+// aborted or the final shard fails.
+const streamCloseTimeout = 5 * time.Second
+
 type qqOutboundStream struct {
 	target string
 	reply  *channel.ReplyRef
@@ -42,6 +46,11 @@ type qqOutboundStream struct {
 	streamIndex  int
 	lastShardAt  time.Time
 	streamBroken bool
+	// lastShardContent is the newest content QQ accepted; retiring the
+	// stream has to replay it because replace mode rejects any payload that
+	// is not prefixed by what was already delivered.
+	lastShardContent string
+	streamDone       bool
 }
 
 func (a *QQAdapter) OpenStream(_ context.Context, cfg channel.ChannelConfig, target string, opts channel.StreamOptions) (channel.PreparedOutboundStream, error) {
@@ -172,12 +181,16 @@ func (s *qqOutboundStream) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	s.closed.Store(true)
+	// An aborted turn still has to retire the stream, and its context is
+	// usually already canceled by the time Close runs, so the closing shard
+	// gets a cancellation-free context of its own.
+	s.finishStream(context.WithoutCancel(ctx))
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-	s.closed.Store(true)
 	return nil
 }
 
@@ -220,8 +233,28 @@ func (s *qqOutboundStream) pushShard(ctx context.Context, state int, content str
 	s.streamIndex++
 	s.lastShardAt = s.now()
 	s.streamBroken = false
+	s.lastShardContent = content
+	if state == qqStreamInputDone {
+		s.streamDone = true
+	}
 	s.mu.Unlock()
 	return nil
+}
+
+// finishStream retires an open stream with input_state=10 carrying the last
+// content QQ accepted. Without it the QQ client renders the message as
+// forever "generating" — an unfinished stream never times out on its own.
+func (s *qqOutboundStream) finishStream(ctx context.Context) {
+	s.mu.Lock()
+	content := s.lastShardContent
+	pending := s.streamSend != nil && s.streamIndex > 0 && !s.streamDone && content != ""
+	s.mu.Unlock()
+	if !pending {
+		return
+	}
+	closeCtx, cancel := context.WithTimeout(ctx, streamCloseTimeout)
+	defer cancel()
+	_ = s.pushShard(closeCtx, qqStreamInputDone, content)
 }
 
 func (s *qqOutboundStream) flush(ctx context.Context, msg channel.PreparedMessage) error {
@@ -270,6 +303,11 @@ func (s *qqOutboundStream) flush(ctx context.Context, msg channel.PreparedMessag
 			if logicalMsg.IsEmpty() && len(preparedAttachments) == 0 {
 				return nil
 			}
+		} else {
+			// Earlier shards already put partial text on screen. Retire the
+			// stream at that point so it stops rendering as unfinished; the
+			// fallback below still carries the complete text.
+			s.finishStream(context.WithoutCancel(ctx))
 		}
 	}
 	if logicalMsg.IsEmpty() && len(preparedAttachments) == 0 {

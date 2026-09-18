@@ -405,3 +405,129 @@ func TestQQOutboundStreamC2CThrottlesMiddleShards(t *testing.T) {
 		t.Fatalf("final shard must complete full text: %+v", shards[2])
 	}
 }
+
+func TestQQOutboundStreamCloseRetiresUnfinishedStream(t *testing.T) {
+	t.Parallel()
+
+	var shards []qqStreamShardRequest
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: 0,
+		now:            time.Now,
+		send: func(context.Context, channel.PreparedOutboundMessage) error {
+			t.Fatal("legacy send must not run for a retired stream")
+			return nil
+		},
+		streamSend: func(_ context.Context, req qqStreamShardRequest) (qqStreamShardResponse, error) {
+			shards = append(shards, req)
+			return qqStreamShardResponse{ID: "sm-1"}, nil
+		},
+	}
+
+	// A turn that dies before StreamEventFinal: its context is already gone
+	// by the time Close runs, which is exactly when the client would be left
+	// rendering a permanently unfinished message.
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "半截回复"})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	cancel()
+	if err := stream.Close(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Close error = %v, want context.Canceled", err)
+	}
+
+	if len(shards) != 2 {
+		t.Fatalf("expected the delta shard plus a closing shard, got %d: %+v", len(shards), shards)
+	}
+	closing := shards[1]
+	if closing.InputState != qqStreamInputDone {
+		t.Fatalf("closing shard state = %d, want %d", closing.InputState, qqStreamInputDone)
+	}
+	if closing.ContentRaw != "半截回复" {
+		t.Fatalf("closing shard must replay the last accepted content, got %q", closing.ContentRaw)
+	}
+	if closing.StreamMsgID != "sm-1" {
+		t.Fatalf("closing shard must reuse the server stream id: %+v", closing)
+	}
+}
+
+func TestQQOutboundStreamCloseSkipsRetireAfterNormalFinal(t *testing.T) {
+	t.Parallel()
+
+	var shards []qqStreamShardRequest
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: 0,
+		now:            time.Now,
+		send:           func(context.Context, channel.PreparedOutboundMessage) error { return nil },
+		streamSend: func(_ context.Context, req qqStreamShardRequest) (qqStreamShardResponse, error) {
+			shards = append(shards, req)
+			return qqStreamShardResponse{ID: "sm-1"}, nil
+		},
+	}
+
+	ctx := context.Background()
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "完整回复"})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{}})); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+	before := len(shards)
+	if err := stream.Close(ctx); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if len(shards) != before {
+		t.Fatalf("a completed stream must not be retired again: %+v", shards[before:])
+	}
+}
+
+func TestQQOutboundStreamFinalShardFailureRetiresStreamBeforeFallback(t *testing.T) {
+	t.Parallel()
+
+	var shards []qqStreamShardRequest
+	var sent []channel.OutboundMessage
+	finalFailed := false
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: 0,
+		now:            time.Now,
+		send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
+			sent = append(sent, msg.LogicalMessage())
+			return nil
+		},
+		streamSend: func(_ context.Context, req qqStreamShardRequest) (qqStreamShardResponse, error) {
+			// The first attempt to close the stream fails, mirroring a
+			// timeout on the last call of an otherwise healthy stream; the
+			// retire shard that follows must still land.
+			if req.InputState == qqStreamInputDone && !finalFailed {
+				finalFailed = true
+				return qqStreamShardResponse{}, errors.New("boom")
+			}
+			shards = append(shards, req)
+			return qqStreamShardResponse{ID: "sm-1"}, nil
+		},
+	}
+
+	ctx := context.Background()
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "半截回复"})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "，完整结尾"})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	if err := stream.Push(ctx, preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{}})); err != nil {
+		t.Fatalf("push final: %v", err)
+	}
+
+	last := shards[len(shards)-1]
+	if last.InputState != qqStreamInputDone {
+		t.Fatalf("stream must be retired after a failed final shard, got %+v", shards)
+	}
+	if last.ContentRaw != "半截回复，完整结尾" {
+		t.Fatalf("retire shard must replay the last accepted content, got %q", last.ContentRaw)
+	}
+	if len(sent) != 1 || sent[0].Message.PlainText() != "半截回复，完整结尾" {
+		t.Fatalf("fallback must still carry the complete text, got %+v", sent)
+	}
+}
