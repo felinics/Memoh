@@ -24,6 +24,7 @@
                   :placeholder="$t('common.namePlaceholder')"
                   :aria-label="$t('common.name')"
                   :aria-invalid="!!errorMessage"
+                  :disabled="editLoading"
                   v-bind="componentField"
                 />
               </FormControl>
@@ -44,6 +45,7 @@
               <FormControl>
                 <Select
                   :model-value="value"
+                  :disabled="editLoading"
                   :aria-invalid="!!errorMessage"
                   @update:model-value="handleChange"
                 >
@@ -82,6 +84,7 @@
                   :placeholder="$t('provider.urlPlaceholder')"
                   :aria-label="$t('provider.url')"
                   :aria-invalid="!!errorMessage"
+                  :disabled="editLoading"
                   v-bind="componentField"
                 />
               </FormControl>
@@ -109,6 +112,7 @@
                   :placeholder="getStoredSecret(props.provider?.config as Record<string, unknown> | undefined) || $t('provider.apiKeyPlaceholder')"
                   :aria-label="$t('provider.apiKey')"
                   :aria-invalid="!!errorMessage"
+                  :disabled="editLoading"
                   v-bind="componentField"
                 />
               </FormControl>
@@ -131,6 +135,7 @@
               <FormControl>
                 <Select
                   :model-value="value || '5m'"
+                  :disabled="editLoading"
                   :aria-invalid="!!errorMessage"
                   @update:model-value="handleChange"
                 >
@@ -401,6 +406,7 @@ import { useI18n } from 'vue-i18n'
 import { ConfirmPopover, DeviceCodePanel, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { providerPresets } from '@/constants/provider-presets'
 
 const { t } = useI18n()
 const { syncProviderModelCatalog } = useProviderModelCatalog()
@@ -531,6 +537,26 @@ const clientTypeOptions = computed(() =>
 // Validation lives in the schema; the payload keeps the write-only api_key
 // contract (empty = keep the stored secret; the backend shallow-merges config
 // and preserves masked secrets).
+function providerPresetSource(): string {
+  const metadata = props.provider?.metadata as Record<string, unknown> | undefined
+  // Template materialization stamps registry.source; template drafts carry
+  // preset.source — check both before falling back to "key required".
+  for (const section of ['registry', 'preset']) {
+    const nested = metadata?.[section] as Record<string, unknown> | undefined
+    const source = nested?.source
+    if (typeof source === 'string' && source) return source
+  }
+  return ''
+}
+
+// Some presets legitimately need no key (Ollama, LM Studio, …); requiring one
+// would make any edit to such a provider unsaveable. Custom (preset-less)
+// providers keep the strict default.
+function presetRequiresApiKey(): boolean {
+  const preset = providerPresets.find(p => p.source === providerPresetSource())
+  return preset ? preset.requiresApiKey !== false : true
+}
+
 const providerSchema = toTypedSchema(z.object({
   name: z.string().min(1, t('provider.nameRequired')),
   base_url: z.string().optional(),
@@ -541,7 +567,7 @@ const providerSchema = toTypedSchema(z.object({
   const existingSecret = getStoredSecret(
     props.provider?.config as Record<string, unknown> | undefined,
   )
-  if (!isManagedOAuthClientType(value.client_type) && !value.api_key?.trim() && !existingSecret.trim()) {
+  if (!isManagedOAuthClientType(value.client_type) && presetRequiresApiKey() && !value.api_key?.trim() && !existingSecret.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['api_key'],
