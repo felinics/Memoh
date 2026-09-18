@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQueryCache } from '@pinia/colada'
@@ -103,6 +103,7 @@ import {
 } from '@felinic/ui'
 import { CircleX } from 'lucide-vue-next'
 import {
+  getProviders,
   getProviderTemplates,
   postProviders,
   postProvidersByIdImportModels,
@@ -125,17 +126,38 @@ const payload = ref<ProviderConnectPayload>()
 const errorReason = ref<ProviderConnectError>()
 const creating = ref(false)
 
-onMounted(() => {
+function readPayloadFromHash() {
   const encoded = new URLSearchParams(window.location.hash.slice(1)).get('payload') ?? ''
+  // The link is a bearer credential: scrub the fragment from the current
+  // history entry right after reading it so the key doesn't linger in browser
+  // history (and history sync) after the hop. Unconditional — an unparseable
+  // payload still carries whatever the sender put in the URL.
+  window.history.replaceState(window.history.state, '', window.location.pathname)
+  // A create already in flight owns the screen: both buttons are disabled and
+  // confirm() captured its payload, so swapping the card under it would only
+  // show something the user cannot act on. The fragment is scrubbed either way.
+  if (creating.value) return
+  payload.value = undefined
+  errorReason.value = undefined
   try {
     payload.value = parseProviderConnectPayload(encoded)
   } catch (err) {
     errorReason.value = err instanceof PayloadError ? err.reason : 'decode'
   }
-  // The link is a bearer credential: scrub the fragment from the current
-  // history entry right after parsing so the key doesn't linger in browser
-  // history (and history sync) after the hop.
-  window.history.replaceState(window.history.state, '', window.location.pathname)
+}
+
+onMounted(() => {
+  readPayloadFromHash()
+  // A second import link differs from the scrubbed URL only by its fragment,
+  // so the browser treats it as a same-document navigation: no reload, no
+  // remount, and vue-router never sees it either. Without this listener the
+  // page would keep showing — and confirming — the FIRST link's provider while
+  // the second link's API key sat unscrubbed in the address bar and history.
+  window.addEventListener('hashchange', readPayloadFromHash)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', readPayloadFromHash)
 })
 
 function goBack() {
@@ -187,6 +209,22 @@ async function confirm() {
       toast.error(t('models.importFailed'))
     }
 
+    // Seed the providers cache with the post-create list BEFORE navigating.
+    // The settings page resolves `?provider=<id>` against that cached list on
+    // its very first frame, and `['providers']` is a persisted query: a list
+    // hydrated from a previous session does not contain the provider we just
+    // made, so the page would read the id as deleted, strip the query and drop
+    // the user on the list instead of the provider they just imported.
+    // Best-effort — on failure the page still revalidates on mount.
+    try {
+      const { data: providers } = await getProviders({ throwOnError: true })
+      queryCache.setQueryData(['providers'], providers)
+    } catch {
+      // ignored: invalidation below still refreshes the list on mount
+    }
+
+    // After setQueryData (which marks the entry fresh), so the page also
+    // revalidates against the server once it mounts.
     queryCache.invalidateQueries({ key: ['providers'] })
     queryCache.invalidateQueries({ key: ['models'] })
 
