@@ -204,3 +204,5 @@ require (
 )
 
 tool github.com/swaggo/swag/cmd/swag
+
+replace github.com/felinics/twilight => github.com/akazwz/twilight-ai v0.4.1-0.20260918160219-479123c22031

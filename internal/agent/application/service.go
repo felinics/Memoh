@@ -1094,6 +1094,7 @@ func resolveRunReasoningConfig(chatModel models.GetResponse, botSettings setting
 // to spawned subagents as "the user's explicit pick this turn" and memory must
 // not leak into that channel.
 func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.Settings, requestedEffort, sessionEffort, clientType string) *models.ReasoningConfig {
+	clientType = models.ResolveModelClientType(clientType, chatModel.ModelID)
 	stored := botSettings.ReasoningEffort
 	if e := strings.TrimSpace(sessionEffort); e != "" {
 		stored = e

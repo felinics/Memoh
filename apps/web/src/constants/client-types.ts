@@ -33,6 +33,11 @@ export function isManagedModelCatalogClientType(clientType: unknown): boolean {
 }
 
 export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
+  'opencode-go': {
+    value: 'opencode-go',
+    label: 'OpenCode Go',
+    hint: 'OpenCode Go (per-model API routing)',
+  },
   'openai-responses': {
     value: 'openai-responses',
     label: 'OpenAI Responses',

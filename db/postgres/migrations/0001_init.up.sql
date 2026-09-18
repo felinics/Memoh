@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS providers (
     'google-generative-ai',
     'openai-codex',
     'github-copilot',
+    'opencode-go',
     'edge-speech',
     'openai-speech',
     'openai-transcription',

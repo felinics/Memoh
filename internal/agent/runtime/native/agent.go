@@ -292,6 +292,7 @@ func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool
 }
 
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
+	ctx = models.WithModelSession(ctx, cfg.Identity.SessionID)
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
@@ -1042,6 +1043,7 @@ func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration, o
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *GenerateResult, retErr error) {
+	ctx = models.WithModelSession(ctx, cfg.Identity.SessionID)
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}

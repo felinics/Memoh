@@ -281,7 +281,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		selectedSystemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
 	)
 
-	result, err := sdk.GenerateTextResult(ctx,
+	result, err := sdk.GenerateTextResult(models.WithModelSession(ctx, cfg.SessionID),
 		sdk.WithModel(model),
 		sdk.WithSystem(systemPromptDecorated),
 		sdk.WithMessages(sdkMessages),
