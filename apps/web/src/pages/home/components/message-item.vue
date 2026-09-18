@@ -254,6 +254,7 @@
                   :mermaid-props="{ showTooltips: false }"
                   :code-block-dark-theme="codeBlockTheme.dark"
                   :code-block-light-theme="codeBlockTheme.light"
+                  :custom-markdown-it="disableInlineMath"
                   custom-id="chat-msg"
                 />
               </div>
@@ -411,6 +412,7 @@ import { CircleAlert, Sparkles, Target, TriangleAlert } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
 import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
+import { disableInlineMath } from '@/components/markdown'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
 import ChatAnswersCard from './chat-answers-card.vue'

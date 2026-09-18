@@ -1,5 +1,5 @@
 import { defineComponent, h, type Component } from 'vue'
-import { setCustomComponents } from 'markstream-vue'
+import { setCustomComponents, type MarkdownIt } from 'markstream-vue'
 import MdCheckbox from './md-checkbox.vue'
 import MdFootnoteReference from './md-footnote-reference.vue'
 import MdFootnoteAnchor from './md-footnote-anchor.vue'
@@ -24,6 +24,15 @@ const sharedComponents: Record<string, Component> = {
 }
 
 const registered = new Set<string>()
+
+// Temporary workaround: markstream's inline `math` rule pairs any two `$`
+// signs (`$5 和 $15` → a formula spanning "5 和", leftover "15"). There is no
+// single-dollar switch yet. Disabling the inline rule keeps block `$$...$$`.
+// Remove once stream-markdown-parser exposes a way to opt out of `$...$`.
+export function disableInlineMath(md: MarkdownIt): MarkdownIt {
+  md.inline.ruler.disable('math', true)
+  return md
+}
 
 // markstream resolves a code fence's component by its LANGUAGE name before
 // falling back to the `code_block` key, and that lookup shares one namespace
