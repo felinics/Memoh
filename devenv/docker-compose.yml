@@ -140,6 +140,11 @@ services:
       MEMOH_DEV_WORKSPACE_IMAGE: "${MEMOH_DEV_WORKSPACE_IMAGE:-memohai/workspace:debian}"
       MEMOH_CONNECT_IT_BASE_URL: "${MEMOH_CONNECT_IT_BASE_URL:-}"
       MEMOH_CONNECT_IT_API_TOKEN: "${MEMOH_CONNECT_IT_API_TOKEN:-}"
+      # Tracing is off unless you point this at a collector, e.g.
+      #   OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317 mise run dev
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "${OTEL_EXPORTER_OTLP_PROTOCOL:-}"
+      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:-}"
       # Proxy: use host.docker.internal for localhost proxies, e.g.
       #   HTTP_PROXY=http://host.docker.internal:7890 mise run dev
       HTTP_PROXY: "${HTTP_PROXY:-${http_proxy:-}}"
