@@ -589,9 +589,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			aborted = true
 			continue
 		case next, ok := <-streamResult.Stream:
-			// Whatever it is, something came back from the provider: that is
-			// the wait a user sits through before anything appears.
-			endFirstPart()
 			if !ok {
 				streamClosed = true
 				continue
@@ -599,6 +596,17 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			part = next
 		}
 		interruptedStep.observe(part)
+
+		// The provider has said something only once a part carries content.
+		// StartPart and the step bookkeeping around it are emitted by the SDK
+		// as soon as it has a goroutine, so ending on those would time our own
+		// plumbing — which is what the first two attempts at this span did.
+		switch part.(type) {
+		case *sdk.TextStartPart, *sdk.TextDeltaPart,
+			*sdk.ReasoningStartPart, *sdk.ReasoningDeltaPart,
+			*sdk.ToolInputStartPart, *sdk.StreamToolCallPart:
+			endFirstPart()
+		}
 
 		switch p := part.(type) {
 		case *sdk.StartPart:
