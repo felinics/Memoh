@@ -73,6 +73,31 @@ func TestAuthorizeToolApprovalResponseFailsClosed(t *testing.T) {
 	}
 }
 
+func TestCapabilityApprovalRequiresManageAndDoesNotReplay(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"mcp_manage", "app_manage"} {
+		t.Run(name, func(t *testing.T) {
+			checker := &recordingToolApprovalPermissionChecker{allow: false}
+			service := &Service{botPermissions: checker}
+			target := toolapproval.Request{ID: "approval-1", BotID: "bot-1", ToolName: name, Operation: toolapproval.OperationPermission, Status: toolapproval.StatusApproved}
+			input := ToolApprovalResponseInput{ActorUserID: "user-1"}
+			if err := service.authorizeToolApprovalResponse(context.Background(), target, input); !errors.Is(err, toolapproval.ErrForbidden) || checker.permission != bots.PermissionManage {
+				t.Fatalf("management approval permission = %q, error = %v", checker.permission, err)
+			}
+			checker.allow = true
+			if err := service.authorizeToolApprovalResponse(context.Background(), target, input); err != nil {
+				t.Fatal(err)
+			}
+			// No agent is configured: a replay would fail instead of acknowledging
+			// the decision consumed by the already-running prepared operation.
+			committed := CommittedToolApprovalResponse{request: target, usesDecisionWaiter: isCapabilityManagementApproval(target)}
+			if err := service.ContinueCommittedToolApprovalResponse(context.Background(), committed, nil); err != nil {
+				t.Fatalf("live management approval must not replay: %v", err)
+			}
+		})
+	}
+}
+
 func TestLegacyPermissionOptionID(t *testing.T) {
 	t.Parallel()
 

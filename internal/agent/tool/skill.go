@@ -12,13 +12,18 @@ import (
 
 type SkillProvider struct {
 	logger *slog.Logger
+	load   func(context.Context, string) (map[string]SkillDetail, error)
 }
 
-func NewSkillProvider(log *slog.Logger) *SkillProvider {
+func NewSkillProvider(log *slog.Logger, loaders ...func(context.Context, string) (map[string]SkillDetail, error)) *SkillProvider {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &SkillProvider{logger: log.With(slog.String("tool", "skill"))}
+	p := &SkillProvider{logger: log.With(slog.String("tool", "skill"))}
+	if len(loaders) > 0 {
+		p.load = loaders[0]
+	}
+	return p
 }
 
 func (*SkillProvider) Usage(_ context.Context, _ SessionContext, available AvailableTools) string {
@@ -35,7 +40,14 @@ func (*SkillProvider) Usage(_ context.Context, _ SessionContext, available Avail
 	return usageSection("Skills", parts)
 }
 
-func (*SkillProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *SkillProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+	if p.load != nil {
+		loaded, err := p.load(ctx, session.BotID)
+		if err != nil {
+			return nil, err
+		}
+		session.Skills = loaded
+	}
 	if len(session.Skills) == 0 {
 		return nil, nil
 	}

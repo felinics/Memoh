@@ -300,6 +300,9 @@ type nativeApprovalResult struct {
 
 // requireApproval delegates approval policy and waiting to toolapproval.RunFlow.
 func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.ToolSessionContext, toolName string, arguments map[string]any) (nativeApprovalResult, error) {
+	if toolName == ToolMCPManage().String() || toolName == ToolAppManage().String() {
+		return nativeApprovalResult{approved: true}, nil
+	}
 	if s == nil || s.approval == nil {
 		return nativeApprovalResult{approved: true}, nil
 	}
@@ -339,6 +342,9 @@ func (s *NativeToolSource) requireApproval(ctx context.Context, session mcp.Tool
 }
 
 func isWorkspaceTargetToolName(toolName string) bool {
+	if toolName == "mcp_manage" || toolName == "app_manage" {
+		return false
+	}
 	_, ok := toolapproval.OperationForTool(toolName)
 	return ok
 }
@@ -404,6 +410,7 @@ func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessio
 	providers := append([]ToolProvider(nil), s.providers...)
 	s.mu.RUnlock()
 	toolSession := sessionFromMCP(session)
+	toolSession.ApprovalEmitter = func(req toolapproval.Request) bool { return s.emitToolApprovalRequest(session, req) }
 	var out []nativeLoadedTool
 	for providerIndex, provider := range providers {
 		providerTools, err := provider.Tools(ctx, toolSession)

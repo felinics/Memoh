@@ -11,6 +11,11 @@ import (
 type Code string
 
 const (
+	CodeCapabilityNotFound                       Code = "capability.not_found"
+	CodeCapabilityApprovalRequired               Code = "capability.approval_required"
+	CodeCapabilityOperationFailed                Code = "capability.operation_failed"
+	CodeCapabilityRequestInvalid                 Code = "capability.request_invalid"
+	CodeCapabilityAccessDenied                   Code = "capability.access_denied"
 	CodeWorkspaceDependencyDiscoveryFailed       Code = "workspace_dependency.discovery_failed"
 	CodeWorkspaceDependencyDefinitionUnavailable Code = "workspace_dependency.definition_unavailable"
 	CodeWorkspaceDependencyDefinitionInvalid     Code = "workspace_dependency.definition_invalid"
@@ -529,6 +534,11 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The external agent could not apply the selected settings. Please retry.",
 	},
+	CodeCapabilityAccessDenied:     {HTTPStatus: http.StatusForbidden, Detail: "You need Manage permission on this bot to manage its capabilities."},
+	CodeCapabilityRequestInvalid:   {HTTPStatus: http.StatusBadRequest, Detail: "The capability request is invalid. Check the action and its parameters."},
+	CodeCapabilityOperationFailed:  {HTTPStatus: http.StatusBadGateway, Detail: "The capability operation failed. Check its status before retrying."},
+	CodeCapabilityApprovalRequired: {HTTPStatus: http.StatusForbidden, Detail: "This capability change requires an approved management request."},
+	CodeCapabilityNotFound:         {HTTPStatus: http.StatusNotFound, Detail: "The requested capability could not be found."},
 	CodeToolApprovalForbidden: {
 		HTTPStatus: http.StatusForbidden,
 		Detail:     "You do not have permission to answer this approval request.",

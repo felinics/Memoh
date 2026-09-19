@@ -694,3 +694,14 @@ func TestAgentConfigEffectiveContextAbsoluteMaxTokens(t *testing.T) {
 		t.Fatalf("explicit cap = %d, want 500000", got)
 	}
 }
+
+func TestPublicURLRejectsCredentialsAndNonHTTPLinks(t *testing.T) {
+	for _, origin := range []string{"https://user:secret@example.com", "javascript:alert(1)", "/relative", "https://example.com?token=secret", "https://example.com#secret"} {
+		t.Run(origin, func(t *testing.T) {
+			cfg := Config{Server: ServerConfig{PublicURL: origin}}
+			if err := cfg.validate(); err == nil || !strings.Contains(err.Error(), "server.public_url") {
+				t.Fatalf("invalid public URL accepted: %v", err)
+			}
+		})
+	}
+}

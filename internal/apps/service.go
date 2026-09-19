@@ -172,11 +172,21 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest,
 // missing are installed again, Skills are reconciled and connectors are
 // linked when a connection appeared since.
 func (s *Service) Resume(ctx context.Context, botID, installationID string, sink EventSink) (OperationResult, error) {
-	inst, err := s.store.GetByID(ctx, botID, installationID)
-	if err != nil {
-		return OperationResult{}, err
+	return s.resume(ctx, botID, installationID, "", sink)
+}
+
+// ResumeApproved resumes only the release the user reviewed. The revision is
+// checked while holding the installation lock so a concurrent update cannot
+// substitute a different release between approval and materialization.
+func (s *Service) ResumeApproved(ctx context.Context, botID, installationID, revision string, sink EventSink) (OperationResult, error) {
+	if revision == "" {
+		return OperationResult{}, ErrInvalidRequest
 	}
-	release, err := s.releaseFor(ctx, inst)
+	return s.resume(ctx, botID, installationID, revision, sink)
+}
+
+func (s *Service) resume(ctx context.Context, botID, installationID, revision string, sink EventSink) (OperationResult, error) {
+	inst, err := s.store.GetByID(ctx, botID, installationID)
 	if err != nil {
 		return OperationResult{}, err
 	}
@@ -185,6 +195,17 @@ func (s *Service) Resume(ctx context.Context, botID, installationID string, sink
 		return OperationResult{}, err
 	}
 	defer unlock()
+	inst, err = s.store.GetByID(ctx, botID, installationID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if revision != "" && inst.Revision != revision {
+		return OperationResult{}, ErrInvalidRequest
+	}
+	release, err := s.releaseFor(ctx, inst)
+	if err != nil {
+		return OperationResult{}, err
+	}
 	return s.materialize(ctx, botID, release, inst.Reason, StatusInstalling, sink, false)
 }
 

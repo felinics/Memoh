@@ -911,3 +911,37 @@ func TestUpdateSelectionRunsDependenciesBeforeTheRelease(t *testing.T) {
 		t.Fatalf("events = %s", types)
 	}
 }
+
+func TestUpdateSelectionKeepsApprovedRevisionWhenLatestChanges(t *testing.T) {
+	h := newHarness()
+	v1 := release("memoh", "codex", "a", "1.0.0", []string{"codex"}, nil, nil)
+	h.publish(v1)
+	h.install(t, v1)
+	approved := release("memoh", "codex", "b", "1.1.0", []string{"codex"}, nil, nil)
+	h.publish(approved)
+	h.publish(release("memoh", "codex", "c", "2.0.0", []string{"codex"}, nil, nil))
+	result, err := h.service.UpdateSelection(context.Background(), testBotID, UpdateRequest{RegistryID: "memoh", AppID: "codex", Release: true, Revision: approved.Revision}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Installation.Revision != approved.Revision || result.Installation.Version != approved.Version {
+		t.Fatalf("installed %+v instead of approved release %+v", result.Installation, approved)
+	}
+}
+
+func TestResumeApprovedRejectsChangedRelease(t *testing.T) {
+	h := newHarness()
+	pkg := release("memoh", "pdf", "a", "1.0.0", []string{"pdf"}, nil, nil)
+	h.publish(pkg)
+	result, _ := h.install(t, pkg)
+	next := release("memoh", "pdf", "b", "2.0.0", []string{"pdf"}, nil, nil)
+	h.publish(next)
+	h.install(t, next)
+	published := len(h.publisher.published)
+	if _, err := h.service.ResumeApproved(t.Context(), testBotID, result.Installation.ID, pkg.Revision, nil); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("changed release accepted: %v", err)
+	}
+	if len(h.publisher.published) != published {
+		t.Fatal("changed release was published")
+	}
+}

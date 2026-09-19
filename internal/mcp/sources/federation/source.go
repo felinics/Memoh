@@ -83,6 +83,9 @@ func NewSource(log *slog.Logger, gateway Gateway, connections ConnectionLister, 
 	return source
 }
 
+// Invalidate forgets discovery after a management change.
+func (s *Source) Invalidate(botID string) { s.mu.Lock(); delete(s.cache, botID); s.mu.Unlock() }
+
 func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext) ([]mcpgw.ToolDescriptor, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" || s.gateway == nil {
@@ -119,6 +122,22 @@ func (s *Source) CallTool(ctx context.Context, session mcpgw.ToolSessionContext,
 		if !ok {
 			return nil, mcpgw.ErrToolNotFound
 		}
+	}
+	connections, listErr := s.connections.ListActiveByBot(ctx, botID)
+	if listErr != nil {
+		return nil, listErr
+	}
+	valid := false
+	for _, connection := range connections {
+		if connection.ID == route.connection.ID && connection.UpdatedAt.Equal(route.connection.UpdatedAt) {
+			valid = true
+			route.connection = connection
+			break
+		}
+	}
+	if !valid {
+		s.Invalidate(botID)
+		return nil, mcpgw.ErrToolNotFound
 	}
 	if arguments == nil {
 		arguments = map[string]any{}

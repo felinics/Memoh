@@ -12,6 +12,7 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/workspace"
@@ -36,13 +37,13 @@ type ToolApprovalResponseInput struct {
 }
 
 type CommittedToolApprovalResponse struct {
-	request         toolapproval.Request
-	input           ToolApprovalResponseInput
-	runID           string
-	runHandle       sessionruntime.RunHandle
-	isExternalAgent bool
-	activePrompt    *externalAgentActivePromptSubscription
-	ackOnly         bool
+	request            toolapproval.Request
+	input              ToolApprovalResponseInput
+	runID              string
+	runHandle          sessionruntime.RunHandle
+	usesDecisionWaiter bool
+	activePrompt       *externalAgentActivePromptSubscription
+	ackOnly            bool
 }
 
 func (s *Service) respondToolApproval(ctx context.Context, input ToolApprovalResponseInput, eventCh chan<- WSStreamEvent) error {
@@ -70,6 +71,10 @@ func (s *Service) CommitToolApprovalResponse(ctx context.Context, input ToolAppr
 	if err != nil {
 		return CommittedToolApprovalResponse{}, err
 	}
+	// Management tools retain their prepared operation inside the active call.
+	// A response wakes that waiter; replaying the tool would prepare and execute
+	// a second operation instead of the exact change the user approved.
+	usesDecisionWaiter := isExternalAgent || isCapabilityManagementApproval(target)
 	ctx = workspace.WithWorkspaceTarget(ctx, target.WorkspaceTargetID)
 	if isExternalAgent {
 		if err := s.authorizeExternalAgentToolApprovalResponse(ctx, target, input); err != nil {
@@ -78,11 +83,11 @@ func (s *Service) CommitToolApprovalResponse(ctx context.Context, input ToolAppr
 	} else if err := s.authorizeToolApprovalResponse(ctx, target, input); err != nil {
 		return CommittedToolApprovalResponse{}, err
 	}
-	if isExternalAgent && !s.toolApproval.CanRespond(target) {
+	if usesDecisionWaiter && !s.toolApproval.CanRespond(target) {
 		if _, err := s.toolApproval.Reject(ctx, target.ID, "", "tool approval expired: the requesting tool call is no longer waiting"); err != nil && !errors.Is(err, toolapproval.ErrAlreadyDecided) {
 			return CommittedToolApprovalResponse{}, err
 		}
-		return CommittedToolApprovalResponse{request: target, input: input, isExternalAgent: true, ackOnly: true}, nil
+		return CommittedToolApprovalResponse{request: target, input: input, usesDecisionWaiter: true, ackOnly: true}, nil
 	}
 	decision := strings.ToLower(strings.TrimSpace(input.Decision))
 	optionID := input.OptionID
@@ -141,10 +146,10 @@ func (s *Service) CommitToolApprovalResponse(ctx context.Context, input ToolAppr
 		return CommittedToolApprovalResponse{}, err
 	}
 	return CommittedToolApprovalResponse{
-		request:         target,
-		input:           input,
-		isExternalAgent: isExternalAgent,
-		activePrompt:    activePrompt,
+		request:            target,
+		input:              input,
+		usesDecisionWaiter: usesDecisionWaiter,
+		activePrompt:       activePrompt,
 	}, nil
 }
 
@@ -209,7 +214,7 @@ func (s *Service) continueCommittedToolApprovalResponse(
 	if committed.ackOnly {
 		return emitApprovalAck(ctx, eventCh)
 	}
-	if committed.isExternalAgent {
+	if committed.usesDecisionWaiter {
 		if committed.activePrompt != nil {
 			return forwardExternalAgentActivePrompt(ctx, committed.activePrompt, eventCh, externalAgentActivePromptForwardOptions{
 				SkipToolCallID: target.ToolCallID,
@@ -323,6 +328,9 @@ func (s *Service) authorizeToolApprovalResponse(ctx context.Context, target tool
 	// authorization subject (base behavior).
 	actorID := firstNonEmpty(input.ActorUserID, input.ActorChannelIdentityID)
 	permission, ok := toolApprovalPermission(target.Operation)
+	if isCapabilityManagementApproval(target) {
+		permission, ok = bots.PermissionManage, true
+	}
 	if strings.TrimSpace(botID) == "" || strings.TrimSpace(actorID) == "" || !ok {
 		return toolapproval.ErrForbidden
 	}
@@ -332,6 +340,10 @@ func (s *Service) authorizeToolApprovalResponse(ctx context.Context, target tool
 		return toolapproval.ErrForbidden
 	}
 	return nil
+}
+
+func isCapabilityManagementApproval(target toolapproval.Request) bool {
+	return target.ToolName == agenttools.ToolMCPManage().String() || target.ToolName == agenttools.ToolAppManage().String()
 }
 
 func toolApprovalPermission(operation string) (string, bool) {

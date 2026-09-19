@@ -424,6 +424,8 @@ type DecisionTarget struct {
 	// rebuilt from the database) from an inline waiter run (codex, claude,
 	// ACP), whose blocked turn died with its owner and cannot be resumed.
 	SessionRuntime string
+	// InlineDecision also covers native tools that retain prepared work in process.
+	InlineDecision bool
 }
 
 func (t DecisionTarget) normalized() DecisionTarget {

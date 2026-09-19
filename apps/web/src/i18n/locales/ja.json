@@ -112,6 +112,13 @@
     "finish": "完了"
   },
   "errors": {
+    "capability": {
+      "access_denied": "機能を管理するには、この Bot の管理権限が必要です。",
+      "request_invalid": "機能管理のリクエストが無効です。操作とパラメーターを確認してください。",
+      "operation_failed": "機能の操作に失敗しました。状態を確認してから再試行してください。",
+      "approval_required": "この機能の変更には承認が必要です。",
+      "not_found": "指定された機能が見つかりません。更新して再試行してください。"
+    },
     "queue": {
       "steer_unsupported": "現在の実行にはメッセージを追加できません。終了してから新しいメッセージを送信してください。"
     },
@@ -982,6 +989,26 @@
       "list_workdirs": "作業ディレクトリを一覧表示",
       "list_acp_agents": "ACP Agent を一覧表示",
       "list_acp_agents_one": "ACP Agent を確認",
+      "mcp_manage": "MCP 接続を管理",
+      "mcp_manage_list": "MCP 接続を一覧表示",
+      "mcp_manage_get": "MCP 接続を確認",
+      "mcp_manage_create": "MCP 接続を作成",
+      "mcp_manage_update": "MCP 接続を更新",
+      "mcp_manage_delete": "MCP 接続を削除",
+      "mcp_manage_probe": "MCP 接続をテスト",
+      "mcp_manage_authorize": "MCP 接続を認証",
+      "app_search": "App を検索",
+      "app_search_categories": "App カテゴリを一覧表示",
+      "app_search_get": "App を確認",
+      "app_manage": "App を管理",
+      "app_manage_list": "App を一覧表示",
+      "app_manage_refresh": "App の状態を更新",
+      "app_manage_check_updates": "App のアップデートを確認",
+      "app_manage_install": "App をインストール",
+      "app_manage_update": "App をアップデート",
+      "app_manage_resume": "App のインストールを再開",
+      "app_manage_uninstall": "App をアンインストール",
+      "app_manage_authorize": "App コネクタを認証",
       "browser_action": "ブラウザー {action}",
       "browser_observe": "ブラウザー {action} を観察",
       "computer_observe": "デスクトップ {action} を観察",

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	skillset "github.com/felinics/memoh/internal/skills"
+	"github.com/felinics/memoh/internal/supermarket"
 )
 
 // UpdateRequest selects what to update for one App in a bot's isolated workspace.
@@ -16,6 +17,8 @@ type UpdateRequest struct {
 
 	// Release moves the installation to the registry's current release.
 	Release bool
+	// Revision optionally pins the release selected before management approval.
+	Revision string
 	// Dependencies are updated to their latest version. Each must be one the
 	// App references or, for a discovered canonical App, its own id.
 	Dependencies []string
@@ -95,7 +98,7 @@ func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateR
 		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
 	}
 	if req.Release {
-		releaseResult, err := s.updateRelease(ctx, botID, inst, sink, true)
+		releaseResult, err := s.updateRelease(ctx, botID, inst, sink, true, req.Revision)
 		result.Steps = append(result.Steps, releaseResult.Steps...)
 		if releaseResult.Installation.ID != "" {
 			result.Installation = releaseResult.Installation
@@ -154,8 +157,14 @@ func (s *Service) Update(ctx context.Context, botID, installationID string, sink
 
 // updateRelease is the body of Update once the installation is locked.
 // announced is set when the caller already sent the started event.
-func (s *Service) updateRelease(ctx context.Context, botID string, inst Installation, sink EventSink, announced bool) (OperationResult, error) {
-	current, err := s.registry.FetchCurrentApp(ctx, inst.RegistryID, inst.AppID)
+func (s *Service) updateRelease(ctx context.Context, botID string, inst Installation, sink EventSink, announced bool, revision ...string) (OperationResult, error) {
+	var current supermarket.AppDescriptor
+	var err error
+	if len(revision) > 0 && revision[0] != "" {
+		current, err = s.registry.FetchRelease(ctx, inst.RegistryID, inst.AppID, revision[0])
+	} else {
+		current, err = s.registry.FetchCurrentApp(ctx, inst.RegistryID, inst.AppID)
+	}
 	if err != nil {
 		return OperationResult{}, err
 	}

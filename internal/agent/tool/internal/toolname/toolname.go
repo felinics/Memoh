@@ -82,7 +82,12 @@ func ToolSendEmail() Name         { return newName("send_email") }
 func ToolListEmail() Name         { return newName("list_email") }
 func ToolReadEmail() Name         { return newName("read_email") }
 
+func ToolMCPManage() Name { return newName("mcp_manage") }
+func ToolAppSearch() Name { return newName("app_search") }
+func ToolAppManage() Name { return newName("app_manage") }
+
 var all = []Name{
+	ToolMCPManage(), ToolAppSearch(), ToolAppManage(),
 	ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolExec(), ToolApplyPatch(), ToolListExecutionLocations(), ToolListBackground(), ToolGetBackgroundStatus(), ToolKillBackground(), ToolWait(), ToolWaitUntil(),
 	ToolSend(), ToolReact(), ToolSpeak(),
 	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),

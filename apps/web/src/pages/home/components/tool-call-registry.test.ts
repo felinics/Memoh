@@ -146,6 +146,29 @@ describe('tool call registry', () => {
     // An unknown modifier keeps the plain action rather than inventing a key.
     expect(getToolDisplay(toolBlock('browser_action', { action: 'scroll', direction: 'sideways' })).actionKey)
       .toBe('browserAction.scroll')
+    const capabilityCases: Array<[string, Record<string, unknown>, string, string]> = [
+      ['mcp_manage', { action: 'list' }, 'mcp_manage_list', ''],
+      ['mcp_manage', { action: 'get', connection_id: 'mcp-1' }, 'mcp_manage_get', 'mcp-1'],
+      ['mcp_manage', { action: 'create', name: 'Docs' }, 'mcp_manage_create', 'Docs'],
+      ['mcp_manage', { action: 'update', connection_id: 'mcp-1' }, 'mcp_manage_update', 'mcp-1'],
+      ['mcp_manage', { action: 'delete', connection_id: 'mcp-1' }, 'mcp_manage_delete', 'mcp-1'],
+      ['mcp_manage', { action: 'probe', connection_id: 'mcp-1' }, 'mcp_manage_probe', 'mcp-1'],
+      ['mcp_manage', { action: 'authorize', connection_id: 'mcp-1' }, 'mcp_manage_authorize', 'mcp-1'],
+      ['app_search', { action: 'categories', registry: 'official' }, 'app_search_categories', 'official'],
+      ['app_search', { action: 'search', q: 'calendar' }, 'app_search', '"calendar"'],
+      ['app_search', { action: 'get', app_id: 'calendar' }, 'app_search_get', 'calendar'],
+      ['app_manage', { action: 'list' }, 'app_manage_list', ''],
+      ['app_manage', { action: 'list', refresh: true }, 'app_manage_refresh', ''],
+      ['app_manage', { action: 'list', check_updates: true }, 'app_manage_check_updates', ''],
+      ['app_manage', { action: 'install', app_id: 'calendar' }, 'app_manage_install', 'calendar'],
+      ['app_manage', { action: 'update', installation_id: 'app-1' }, 'app_manage_update', 'app-1'],
+      ['app_manage', { action: 'resume', installation_id: 'app-1' }, 'app_manage_resume', 'app-1'],
+      ['app_manage', { action: 'uninstall', installation_id: 'app-1' }, 'app_manage_uninstall', 'app-1'],
+      ['app_manage', { action: 'authorize', installation_id: 'app-1', connector_type: 'google' }, 'app_manage_authorize', 'google'],
+    ]
+    for (const [tool, input, actionKey, target] of capabilityCases) {
+      expect(getToolDisplay(toolBlock(tool, input))).toMatchObject({ actionKey, target })
+    }
   })
 
   it.each([

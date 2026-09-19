@@ -115,6 +115,13 @@
     "finish": "完成"
   },
   "errors": {
+    "capability": {
+      "access_denied": "需要此 Bot 的管理权限才能管理其能力。",
+      "request_invalid": "能力管理请求无效，请检查操作和参数。",
+      "operation_failed": "能力管理操作失败，请检查当前状态后重试。",
+      "approval_required": "请先批准此能力变更请求。",
+      "not_found": "找不到请求的能力，请刷新后重试。"
+    },
     "queue": {
       "steer_unsupported": "当前运行不支持插入消息，请等它结束后再发送。"
     },
@@ -1013,6 +1020,26 @@
       "list_workdirs": "列出工作目录",
       "list_acp_agents": "列出 ACP Agent",
       "list_acp_agents_one": "查看 ACP Agent",
+      "mcp_manage": "管理 MCP 连接",
+      "mcp_manage_list": "列出 MCP 连接",
+      "mcp_manage_get": "查看 MCP 连接",
+      "mcp_manage_create": "创建 MCP 连接",
+      "mcp_manage_update": "更新 MCP 连接",
+      "mcp_manage_delete": "删除 MCP 连接",
+      "mcp_manage_probe": "测试 MCP 连接",
+      "mcp_manage_authorize": "授权 MCP 连接",
+      "app_search": "搜索 App",
+      "app_search_categories": "列出 App 分类",
+      "app_search_get": "查看 App",
+      "app_manage": "管理 App",
+      "app_manage_list": "列出 App",
+      "app_manage_refresh": "刷新 App 状态",
+      "app_manage_check_updates": "检查 App 更新",
+      "app_manage_install": "安装 App",
+      "app_manage_update": "更新 App",
+      "app_manage_resume": "继续安装 App",
+      "app_manage_uninstall": "卸载 App",
+      "app_manage_authorize": "授权 App 连接器",
       "browser_action": "浏览器 {action}",
       "browser_observe": "观察浏览器 {action}",
       "computer_observe": "观察桌面 {action}",

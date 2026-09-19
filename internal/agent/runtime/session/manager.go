@@ -128,10 +128,10 @@ type runControl struct {
 	stepMu       sync.Mutex
 	stepConsumed int
 	stepChanged  chan struct{}
-	// pendingDecisions tracks every decision that still awaits a terminal
-	// status. decisionInline marks runtimes that block inside the same turn
+	// pendingDecisions maps open decisions to whether they wait inline.
+	// decisionInline marks runtimes that block inside the same turn
 	// instead of parking and re-entering through EventAgentStart.
-	pendingDecisions       map[string]struct{}
+	pendingDecisions       map[string]bool
 	decisionInline         bool
 	abortStateMu           sync.Mutex
 	claimEstablished       bool
@@ -177,7 +177,7 @@ func (c *runControl) handle() RunHandle {
 	return RunHandle{BotID: c.botID, SessionID: c.sessionID, RunID: c.runID, OwnerID: c.ownerID, TurnID: c.turnID, Generation: c.generation, FencingToken: c.fencingToken}
 }
 
-func (c *runControl) beginDecisionWait(decisionID string) {
+func (c *runControl) beginDecisionWait(decisionID string, inline bool) {
 	if c == nil {
 		return
 	}
@@ -191,9 +191,9 @@ func (c *runControl) beginDecisionWait(decisionID string) {
 		c.decisionReadyOnce = sync.Once{}
 	}
 	if c.pendingDecisions == nil {
-		c.pendingDecisions = map[string]struct{}{}
+		c.pendingDecisions = map[string]bool{}
 	}
-	c.pendingDecisions[decisionKey(decisionID)] = struct{}{}
+	c.pendingDecisions[decisionKey(decisionID)] = inline
 }
 
 // endDecisionWait records that one pending decision reached a terminal
@@ -242,7 +242,15 @@ func (c *runControl) canParkForDecision() bool {
 	}
 	c.decisionMu.Lock()
 	defer c.decisionMu.Unlock()
-	return !c.decisionInline && len(c.pendingDecisions) > 0
+	if c.decisionInline {
+		return false
+	}
+	for _, inline := range c.pendingDecisions {
+		if !inline {
+			return true
+		}
+	}
+	return false
 }
 
 // decisionKey identifies one decision across its pending and terminal
@@ -268,13 +276,30 @@ func (c *runControl) markInlineDecisions() {
 	c.decisionInline = true
 }
 
-func (c *runControl) resumesOnTerminalDecision() bool {
+func (c *runControl) inlineDecision(decisionID string) bool {
 	if c == nil {
 		return false
 	}
 	c.decisionMu.Lock()
 	defer c.decisionMu.Unlock()
-	return c.decisionInline
+	return c.decisionInline || c.pendingDecisions[decisionKey(decisionID)]
+}
+
+func (c *runControl) hasInlineDecision() bool {
+	if c == nil {
+		return false
+	}
+	c.decisionMu.Lock()
+	defer c.decisionMu.Unlock()
+	if c.decisionInline {
+		return true
+	}
+	for _, inline := range c.pendingDecisions {
+		if inline {
+			return true
+		}
+	}
+	return false
 }
 
 // markDecisionReady releases WaitDecisionContinuationReady: the parked
@@ -1710,7 +1735,7 @@ func (m *Manager) prepareAgentTerminalEvent(
 		status,
 		errorCode,
 		"",
-		ctrl.resumesOnTerminalDecision(),
+		!ctrl.canParkForDecision(),
 	)
 	if err != nil {
 		return agentTerminalProposal{}, err
@@ -1777,21 +1802,22 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	if m.localControlForHandle(handle) != ctrl {
 		return nil, ErrRunOwnershipLost
 	}
+	inlineDecision := event.InlineDecision || ctrl.inlineDecision(decisionEventID(event))
 	switch event.Type {
 	case native.EventToolApprovalRequest, native.EventUserInputRequest:
 		if pendingDecisionEvent(event) {
-			ctrl.beginDecisionWait(decisionEventID(event))
+			ctrl.beginDecisionWait(decisionEventID(event), event.InlineDecision)
 			if err := m.setWaitingDecision(ctx, handle); err != nil {
 				return nil, err
 			}
-		} else if ctrl.resumesOnTerminalDecision() {
+		} else if inlineDecision {
 			// Runtimes that block inline on the decision (codex, claude, ACP
 			// gateway tools) continue the same turn — the LAST terminal
 			// status is their resume signal; without this transition their
 			// runs stay in waiting_decision forever, and resuming any
 			// earlier would mark the run running while sibling decisions
-			// still block it. A native run's set is left untouched no matter
-			// when the terminal statuses land: its stream parks with every
+			// still block it. Deferred native decisions stay open regardless of
+			// when their terminal statuses land: the stream parks with every
 			// raised decision still open, and only the re-entering
 			// EventAgentStart clears them and resumes.
 			if stillWaiting := ctrl.endDecisionWait(decisionEventID(event)); !stillWaiting {
@@ -1846,7 +1872,7 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	// Evaluated after the ledger switch above so a terminal decision event
 	// sees the set it just shrank: the live projection may only leave
 	// waiting_decision when no sibling decision remains open.
-	resumeLiveOnTerminal := ctrl.resumesOnTerminalDecision() && !ctrl.decisionWaitActive()
+	resumeLiveOnTerminal := inlineDecision && !ctrl.decisionWaitActive()
 	snapshot, changed, err := m.updateActiveAndPublish(ctx, handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
 		// Finalization may replay a durable decision after the run entered

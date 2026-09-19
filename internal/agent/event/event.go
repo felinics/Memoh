@@ -51,15 +51,17 @@ const (
 type StreamEvent struct {
 	InternalFeedbackIndexes []int `json:"internal_feedback_indexes,omitempty"`
 
-	Type           StreamEventType  `json:"type"`
-	Delta          string           `json:"delta,omitempty"`
-	ToolName       string           `json:"toolName,omitempty"`
-	ToolCallID     string           `json:"toolCallId,omitempty"`
-	ApprovalID     string           `json:"approvalId,omitempty"`
-	UserInputID    string           `json:"userInputId,omitempty"`
-	ShortID        int              `json:"shortId,omitempty"`
-	Status         string           `json:"status,omitempty"`
-	Input          any              `json:"input,omitempty"`
+	Type        StreamEventType `json:"type"`
+	Delta       string          `json:"delta,omitempty"`
+	ToolName    string          `json:"toolName,omitempty"`
+	ToolCallID  string          `json:"toolCallId,omitempty"`
+	ApprovalID  string          `json:"approvalId,omitempty"`
+	UserInputID string          `json:"userInputId,omitempty"`
+	ShortID     int             `json:"shortId,omitempty"`
+	Status      string          `json:"status,omitempty"`
+	Input       any             `json:"input,omitempty"`
+	// InlineDecision marks a request whose caller waits inside the current turn.
+	InlineDecision bool             `json:"inline_decision,omitempty"`
 	Metadata       map[string]any   `json:"metadata,omitempty"`
 	Progress       any              `json:"progress,omitempty"`
 	Result         any              `json:"result,omitempty"`

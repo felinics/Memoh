@@ -11,11 +11,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/apperror"
@@ -292,6 +294,7 @@ func sendEvent(ctx context.Context, ch chan<- StreamEvent, evt StreamEvent) bool
 }
 
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
+	cfg.capabilityChanges = &atomic.Bool{}
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
@@ -494,6 +497,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 	opts = append(opts, a.onStepOption(streamCtx, cfg, nil))
 	var nextDurableStep int
+	var capabilityCheckpoint *sdk.StepResult
 	// emittedStep counts FinishStepParts seen on this attempt so the step_end
 	// marker can name the durable step index the following commit will use.
 	emittedStep := 0
@@ -504,6 +508,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 		}
 		nextDurableStep = stepIndex + 1
+		if cfg.capabilityChanges.Swap(false) && step.DeferredToolApproval == nil {
+			snapshot := *step
+			capabilityCheckpoint = &snapshot
+			return errCapabilitiesChanged
+		}
 		return nil
 	}
 	opts = append(opts, sdk.WithOnStepCommitted(onStepCommitted))
@@ -765,6 +774,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			}
 
 		case *sdk.ErrorPart:
+			if errors.Is(p.Error, errCapabilitiesChanged) {
+				continue
+			}
 			if streamCtx.Err() != nil {
 				aborted = true
 				break
@@ -961,6 +973,20 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			cfg.InjectedRecorder,
 		)
 	}
+	if streamClosed && !aborted && capabilityCheckpoint != nil {
+		steps := append(append([]sdk.StepResult(nil), streamResult.Steps...), *capabilityCheckpoint)
+		if cfg.capabilityRefreshCount >= 32 {
+			turnError = "Too many capability refreshes in one turn."
+			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+			return
+		}
+		cfg = capabilityContinuation(cfg, steerContinuationMessages(cfg, steps, committedStepMessages), len(steps))
+		cancel(context.Canceled)
+		eventGate.close()
+		continued = true
+		a.runStream(ctx, cfg, ch)
+		return
+	}
 	// A final response can still discover a steer item at the commit
 	// boundary. Re-open the same run with the committed transcript so the
 	// steer becomes the next model input instead of being stranded after the
@@ -1042,6 +1068,7 @@ func drainStreamUntilClosed(stream <-chan sdk.StreamPart, grace time.Duration, o
 }
 
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *GenerateResult, retErr error) {
+	cfg.capabilityChanges = &atomic.Bool{}
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
 	}
@@ -1167,13 +1194,29 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 			return nil
 		}),
 	)
-	if cfg.OnStepCommitted != nil {
-		opts = append(opts, sdk.WithOnStepCommitted(func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-			return cfg.OnStepCommitted(readMediaState.withMessageOrigins(ctx, stepIndex), cfg.StepIndexOffset+stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata))
-		}))
-	}
+	var capabilitySteps []sdk.StepResult
+	opts = append(opts, sdk.WithOnStepCommitted(func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+		if cfg.OnStepCommitted != nil {
+			if err := cfg.OnStepCommitted(readMediaState.withMessageOrigins(ctx, stepIndex), cfg.StepIndexOffset+stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)); err != nil {
+				return err
+			}
+		}
+		capabilitySteps = append(capabilitySteps, *step)
+		if cfg.capabilityChanges.Swap(false) && step.DeferredToolApproval == nil {
+			return errCapabilitiesChanged
+		}
+		return nil
+	}))
 
 	genResult, err := a.client.GenerateTextResult(genCtx, opts...)
+	capabilitiesChanged := errors.Is(err, errCapabilitiesChanged)
+	if capabilitiesChanged {
+		genResult = &sdk.GenerateResult{Steps: capabilitySteps}
+		for _, step := range capabilitySteps {
+			genResult.Messages = append(genResult.Messages, step.Messages...)
+		}
+		err = nil
+	}
 	if stepErr := contextStepBudgetError(genCtx); stepErr != nil {
 		return nil, stepErr
 	}
@@ -1218,8 +1261,15 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		finalMessages, feedbackIndexes = readMediaState.mergeMessagesWithOrigins(genResult.Steps, finalMessages, -1)
 	}
 	finalMessages = toolExecutionMetadata.annotate(finalMessages)
-	if cfg.ContinueAfterFinal != nil && cfg.ContinueAfterFinal.Swap(false) && len(genResult.Steps) > 0 {
-		cfg = appendSteerContinuation(cfg, steerContinuationMessages(cfg, genResult.Steps, committedStepMessages), len(genResult.Steps))
+	if (capabilitiesChanged || cfg.ContinueAfterFinal != nil && cfg.ContinueAfterFinal.Swap(false)) && len(genResult.Steps) > 0 {
+		if capabilitiesChanged {
+			if cfg.capabilityRefreshCount >= 32 {
+				return nil, errors.New("too many capability refreshes in one turn")
+			}
+			cfg = capabilityContinuation(cfg, steerContinuationMessages(cfg, genResult.Steps, committedStepMessages), len(genResult.Steps))
+		} else {
+			cfg = appendSteerContinuation(cfg, steerContinuationMessages(cfg, genResult.Steps, committedStepMessages), len(genResult.Steps))
+		}
 		next, nextErr := a.runGenerate(genCtx, cfg)
 		if nextErr != nil {
 			return nil, nextErr
@@ -1697,6 +1747,11 @@ func (a *Agent) assembleTools(
 		}
 	}
 	session := tools.SessionContext{
+		CapabilitiesChanged: func() {
+			if cfg.capabilityChanges != nil {
+				cfg.capabilityChanges.Store(true)
+			}
+		},
 		BotID:                     cfg.Identity.BotID,
 		ChatID:                    cfg.Identity.ChatID,
 		SessionID:                 cfg.Identity.SessionID,
@@ -1917,6 +1972,12 @@ func isAskUserArgumentParseError(message string) bool {
 // agent-layer StreamEvent suitable for the output channel.
 func toolStreamEventToAgentEvent(evt tools.ToolStreamEvent) StreamEvent {
 	switch evt.Type {
+	case tools.StreamEventToolApproval:
+		if evt.Approval == nil {
+			return StreamEvent{}
+		}
+		req := evt.Approval
+		return StreamEvent{Type: EventToolApprovalRequest, InlineDecision: true, ToolCallID: req.ToolCallID, ToolName: req.ToolName, Input: req.ToolInput, ApprovalID: req.ID, ShortID: req.ShortID, Status: req.Status, Metadata: map[string]any{"approval": toolapproval.RequestMetadata(*req)}}
 	case tools.StreamEventAttachment:
 		atts := make([]FileAttachment, 0, len(evt.Attachments))
 		for _, a := range evt.Attachments {

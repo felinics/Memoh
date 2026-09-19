@@ -14,6 +14,9 @@ format = "text"
 
 [server]
 addr = ":8080"
+# Externally reachable Web origin for capability setup links and MCP OAuth.
+# May also be set with MEMOH_SERVER_PUBLIC_URL.
+public_url = ""
 rpc_listen_addr = "127.0.0.1:9090"
 
 [channel]

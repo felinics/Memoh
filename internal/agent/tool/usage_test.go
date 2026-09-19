@@ -153,6 +153,7 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 	t.Parallel()
 
 	covered := map[ToolName]string{
+		ToolMCPManage(): "capability management", ToolAppSearch(): "capability management", ToolAppManage(): "capability management",
 		ToolRead():                   "container",
 		ToolWrite():                  "container",
 		ToolList():                   "container",

@@ -45,6 +45,7 @@ import (
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/apps"
 	audiopkg "github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/boot"
 	"github.com/felinics/memoh/internal/botagents"
@@ -96,6 +97,7 @@ import (
 	"github.com/felinics/memoh/internal/storage/providers/containerfs"
 	"github.com/felinics/memoh/internal/storage/providers/fallback"
 	"github.com/felinics/memoh/internal/storage/providers/localfs"
+	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/team"
 	"github.com/felinics/memoh/internal/userruntime"
 	videopkg "github.com/felinics/memoh/internal/video"
@@ -997,6 +999,9 @@ func provideOAuthService(log *slog.Logger, queries dbstore.Queries, cfg config.C
 		host = "localhost" + host
 	}
 	callbackURL := "http://" + host + "/oauth/mcp/callback"
+	if cfg.Server.PublicURL != "" {
+		callbackURL = strings.TrimRight(cfg.Server.PublicURL, "/") + "/api/oauth/mcp/callback"
+	}
 	return mcp.NewOAuthService(log, queries, callbackURL)
 }
 
@@ -1017,9 +1022,8 @@ func injectACPToolProviders(source *agenttools.NativeToolSource, toolProviders [
 	}
 }
 
-func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config) *mcp.ToolGatewayService {
+func provideToolGatewayService(log *slog.Logger, fedGateway *handlers.MCPFederationGateway, oauthService *mcp.OAuthService, connectorSource *connectors.Source, containerdHandler *handlers.ContainerdHandler, nativeSource *agenttools.NativeToolSource, toolContexts *mcp.ToolSessionContextStore, cfg config.Config, fedSource *mcpfederation.Source) *mcp.ToolGatewayService {
 	fedGateway.SetOAuthService(oauthService)
-	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
 	limits := agentLimitsFromConfig(cfg.Agent)
 	svc := mcp.NewToolGatewayService(log, []mcp.ToolSource{nativeSource, connectorSource, fedSource}, mcp.WithToolOutputLimit(limits.ToolOutputLimit()))
 	containerdHandler.SetToolGatewayService(svc)
@@ -1045,15 +1049,45 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, appService *apps.Service, oauthService *mcp.OAuthService, approvalService *toolapproval.Service, workspaceDeps *workspacedeps.Service, cfg config.Config, containerdHandler *handlers.ContainerdHandler, fedSource *mcpfederation.Source) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
 	}
 	channelMessaging := channelmessagingadapter.New(channelRuntime, registry, assetResolver)
 	historySessions := channelthreadadapter.NewLister(sessionService, routeService)
-	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
+	fedGateway.SetOAuthService(oauthService)
 	return []agenttools.ToolProvider{
+		agenttools.NewCapabilityProvider(log, agenttools.CapabilityOptions{
+			Connections: mcpConnService, OAuth: oauthService, Apps: appService, PublicURL: cfg.Server.PublicURL,
+			Registry: supermarket.NewInstaller(supermarket.NewClient(cfg.Supermarket.GetBaseURL(), nil), manager, log),
+			Catalog:  supermarket.NewClient(cfg.Supermarket.GetBaseURL(), nil), Approval: approvalService,
+			FreezeDependencies: workspaceDeps.FreezeCatalog, Invalidate: func(botID string) { fedSource.Invalidate(botID); connectorSource.Invalidate(botID) },
+			Access: func(ctx context.Context, identity, botID string, manage bool) error {
+				isAdmin, err := accountService.IsAdmin(ctx, identity)
+				if err != nil {
+					return err
+				}
+				permission := bots.PermissionChat
+				if manage {
+					permission = bots.PermissionManage
+				}
+				_, err = botService.AuthorizeAccessWithPermission(ctx, identity, botID, isAdmin, permission)
+				return err
+			},
+			Probe: func(ctx context.Context, botID string, conn mcp.Connection) ([]mcp.ToolDescriptor, error) {
+				switch conn.Type {
+				case "http":
+					return fedGateway.ListHTTPConnectionTools(ctx, conn)
+				case "sse":
+					return fedGateway.ListSSEConnectionTools(ctx, conn)
+				case "stdio":
+					return fedGateway.ListStdioConnectionTools(ctx, botID, conn)
+				default:
+					return nil, errors.New("unsupported MCP transport")
+				}
+			},
+		}),
 		agenttools.NewAskUserProvider(log),
 		agenttools.NewMessageProvider(log, channelMessaging, channelMessaging, channelMessaging, assetResolver),
 		agenttools.NewContactsProvider(log, channelcontactadapter.NewSource(routeService)),
@@ -1068,7 +1102,17 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewEmailProvider(log, emailService, emailRuntime),
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
-		agenttools.NewSkillProvider(log),
+		agenttools.NewSkillProvider(log, func(ctx context.Context, botID string) (map[string]agenttools.SkillDetail, error) {
+			items, err := containerdHandler.LoadSkills(ctx, botID)
+			if err != nil {
+				return nil, err
+			}
+			result := map[string]agenttools.SkillDetail{}
+			for _, item := range items {
+				result[item.Name] = agenttools.SkillDetail{Description: item.Description, Content: item.Content, Path: stdpath.Dir(item.SourcePath)}
+			}
+			return result, nil
+		}),
 		agenttools.NewTTSProvider(log, settingsService, audioService, channelMessaging, channelMessaging),
 		agenttools.NewTranscriptionProvider(log, settingsService, audioService, mediaService),
 		agenttools.NewImageGenProvider(log, settingsService, modelsService, queries, manager, config.DefaultDataMount),
@@ -1490,4 +1534,9 @@ func (a *applicationBotPermissionChecker) HasBotPermission(ctx context.Context, 
 		return false, err
 	}
 	return bots.HasPermission(perms, permission), nil
+}
+
+func provideFederationSource(log *slog.Logger, gateway *handlers.MCPFederationGateway, connections *mcp.ConnectionService, oauth *mcp.OAuthService) *mcpfederation.Source {
+	gateway.SetOAuthService(oauth)
+	return mcpfederation.NewSource(log, gateway, connections, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
 }

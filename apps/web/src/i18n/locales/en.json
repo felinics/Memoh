@@ -115,6 +115,13 @@
     "finish": "Done"
   },
   "errors": {
+    "capability": {
+      "access_denied": "You need Manage permission on this bot to manage its capabilities.",
+      "request_invalid": "The capability request is invalid. Check the action and its parameters.",
+      "operation_failed": "The capability operation failed. Check its status before retrying.",
+      "approval_required": "This capability change requires an approved management request.",
+      "not_found": "The requested capability could not be found."
+    },
     "queue": {
       "steer_unsupported": "This run cannot accept steer input. Wait for it to finish and send a new message."
     },
@@ -1001,6 +1008,26 @@
       "list_workdirs": "List workdirs",
       "list_acp_agents": "List ACP agents",
       "list_acp_agents_one": "Inspect ACP agent",
+      "mcp_manage": "Manage MCP connection",
+      "mcp_manage_list": "List MCP connections",
+      "mcp_manage_get": "Inspect MCP connection",
+      "mcp_manage_create": "Create MCP connection",
+      "mcp_manage_update": "Update MCP connection",
+      "mcp_manage_delete": "Delete MCP connection",
+      "mcp_manage_probe": "Test MCP connection",
+      "mcp_manage_authorize": "Authorize MCP connection",
+      "app_search": "Search Apps",
+      "app_search_categories": "List App categories",
+      "app_search_get": "Inspect App",
+      "app_manage": "Manage App",
+      "app_manage_list": "List Apps",
+      "app_manage_refresh": "Refresh App status",
+      "app_manage_check_updates": "Check App updates",
+      "app_manage_install": "Install App",
+      "app_manage_update": "Update App",
+      "app_manage_resume": "Resume App installation",
+      "app_manage_uninstall": "Uninstall App",
+      "app_manage_authorize": "Authorize App connector",
       "browser_action": "Browser {action}",
       "browser_observe": "Observe browser {action}",
       "computer_observe": "Observe desktop {action}",

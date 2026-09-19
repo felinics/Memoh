@@ -126,6 +126,8 @@ type InjectMessage struct {
 
 // RunConfig holds everything needed for a single agent invocation.
 type RunConfig struct {
+	capabilityChanges      *atomic.Bool
+	capabilityRefreshCount int
 	// RunID is the stable identity allocated by durable admission for this
 	// invocation. Direct callers without admission receive one at the
 	// application creation boundary before the native runtime starts.

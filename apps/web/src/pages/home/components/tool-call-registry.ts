@@ -147,6 +147,7 @@ export function isDirPathTool(toolName: string): boolean {
 // Read-only tools contribute lookup counts to the process summary.
 const READONLY_TOOLS = new Set([
   'read', 'list', 'web_search', 'web_fetch', 'search_memory', 'search_messages',
+  'app_search',
   'list_execution_locations',
   'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
   'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'list_background', 'get_background_status', 'wait', 'wait_until',
@@ -170,6 +171,7 @@ const BUCKETS: Array<[ToolBucket, Set<string>]> = [
     'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
     'list_schedule', 'get_schedule', 'list_skills', 'list_models', 'list_workdirs',
     'list_acp_agents', 'list_execution_locations',
+    'app_search',
   ])],
   ['edit', new Set(['write', 'edit', 'apply_patch'])],
   ['run', new Set(['exec'])],
@@ -889,6 +891,81 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
         // materially different call than reading the catalog.
         actionKey: agentId ? 'list_acp_agents_one' : 'list_acp_agents',
         target: agentId,
+        expandable: true,
+      }
+    }
+    case 'mcp_manage': {
+      const action = pickString(input, 'action')
+      const connectionId = pickString(input, 'connection_id')
+      const variants: Record<string, { icon: Component; actionKey: string }> = {
+        list: { icon: Cable, actionKey: 'mcp_manage_list' },
+        get: { icon: SearchCheck, actionKey: 'mcp_manage_get' },
+        create: { icon: Plus, actionKey: 'mcp_manage_create' },
+        update: { icon: Wrench, actionKey: 'mcp_manage_update' },
+        delete: { icon: Unplug, actionKey: 'mcp_manage_delete' },
+        probe: { icon: Activity, actionKey: 'mcp_manage_probe' },
+        authorize: { icon: Link, actionKey: 'mcp_manage_authorize' },
+      }
+      const variant = variants[action] ?? { icon: Cable, actionKey: 'mcp_manage' }
+      return {
+        ...variant,
+        target: action === 'create' ? pickString(input, 'name') : connectionId,
+        expandable: true,
+      }
+    }
+    case 'app_search': {
+      const action = pickString(input, 'action')
+      if (action === 'categories') {
+        return {
+          icon: ListChecks,
+          actionKey: 'app_search_categories',
+          target: pickString(input, 'registry'),
+          expandable: true,
+        }
+      }
+      if (action === 'get') {
+        return {
+          icon: SearchCheck,
+          actionKey: 'app_search_get',
+          target: pickString(input, 'app_id'),
+          expandable: true,
+        }
+      }
+      const query = pickString(input, 'q')
+      return {
+        icon: Search,
+        actionKey: 'app_search',
+        target: query ? `"${query}"` : pickString(input, 'category', 'registry'),
+        fullTarget: query,
+        expandable: true,
+      }
+    }
+    case 'app_manage': {
+      const action = pickString(input, 'action')
+      const installationId = pickString(input, 'installation_id')
+      if (action === 'list') {
+        const actionKey = input.check_updates === true
+          ? 'app_manage_check_updates'
+          : input.refresh === true
+            ? 'app_manage_refresh'
+            : 'app_manage_list'
+        return { icon: Boxes, actionKey, target: '', expandable: true }
+      }
+      const variants: Record<string, { icon: Component; actionKey: string }> = {
+        install: { icon: Plus, actionKey: 'app_manage_install' },
+        update: { icon: RotateCw, actionKey: 'app_manage_update' },
+        resume: { icon: Power, actionKey: 'app_manage_resume' },
+        uninstall: { icon: X, actionKey: 'app_manage_uninstall' },
+        authorize: { icon: Link, actionKey: 'app_manage_authorize' },
+      }
+      const variant = variants[action] ?? { icon: Boxes, actionKey: 'app_manage' }
+      return {
+        ...variant,
+        target: action === 'install'
+          ? pickString(input, 'app_id')
+          : action === 'authorize'
+            ? pickString(input, 'connector_type') || installationId
+            : installationId,
         expandable: true,
       }
     }

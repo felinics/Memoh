@@ -365,7 +365,7 @@ func (m *Manager) abortLocal(ctx context.Context, ctrl *runControl) (bool, error
 	if ctrl.cancel != nil {
 		ctrl.cancel()
 	}
-	if waitingDecision && !ctrl.resumesOnTerminalDecision() {
+	if waitingDecision && !ctrl.hasInlineDecision() {
 		// A native parked run has no live stream to observe the cancel; the
 		// terminal write must happen here. An inline runtime's turn is still
 		// alive blocked on its waiter — the cancel unwinds it and the turn's

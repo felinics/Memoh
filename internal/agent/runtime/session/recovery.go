@@ -57,8 +57,10 @@ func (m *Manager) recoverWaitingDecision(ctx context.Context, candidate LeaseCan
 	// fake a resumable run whose answers have nowhere to go. Declining here
 	// lets the reaper's default path mark the run lost — answers then land
 	// on the honest CanRespond=false cancellation.
-	if runtimekind.UsesDecisionWaiter(targets[0].SessionRuntime) {
-		return false, nil
+	for _, target := range targets {
+		if target.InlineDecision || runtimekind.UsesDecisionWaiter(target.SessionRuntime) {
+			return false, nil
+		}
 	}
 	preserved := make([]runtimefence.PreservedDecision, 0, len(targets))
 	for i, target := range targets {

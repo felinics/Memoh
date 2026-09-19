@@ -6,6 +6,16 @@ import (
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
+// FreezeCatalog pins all dependency definitions for a prepared management operation.
+// The returned context must be retained across approval and execution.
+func (s *Service) FreezeCatalog(ctx context.Context) (context.Context, []catalog.Dependency, error) {
+	frozen, result, err := s.prepareCatalog(ctx, true, false)
+	if err != nil {
+		return ctx, nil, err
+	}
+	return frozen, result.Catalog.List(), nil
+}
+
 type (
 	catalogContextKey  struct{}
 	revisionContextKey struct{}

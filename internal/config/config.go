@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +150,7 @@ type LogConfig struct {
 }
 
 type ServerConfig struct {
+	PublicURL     string `toml:"public_url"`
 	Addr          string `toml:"addr"`
 	RPCListenAddr string `toml:"rpc_listen_addr"`
 }
@@ -828,6 +830,13 @@ func Load(path string) (Config, error) {
 }
 
 func (cfg Config) validate() error {
+	if cfg.Server.PublicURL != "" {
+		u, err := url.Parse(cfg.Server.PublicURL)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return errors.New("server.public_url must be an absolute HTTP(S) URL without credentials, query or fragment")
+		}
+	}
+
 	if cfg.Database.DriverOrDefault() != DefaultDatabaseDriver {
 		return fmt.Errorf("unsupported database driver %q", cfg.Database.DriverOrDefault())
 	}
@@ -897,6 +906,9 @@ func (cfg *Config) applyBridgeTLSEnvOverrides() {
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_PUBLIC_BASE_URL")); value != "" {
 		cfg.WebhookTunnel.PublicBaseURL = value
+	}
+	if value := strings.TrimSpace(os.Getenv("MEMOH_SERVER_PUBLIC_URL")); value != "" {
+		cfg.Server.PublicURL = value
 	}
 	if value := strings.TrimSpace(os.Getenv("MEMOH_WEBHOOK_TUNNEL_LISTEN_ADDR")); value != "" {
 		cfg.WebhookTunnel.ListenAddr = value

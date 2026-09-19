@@ -112,7 +112,8 @@ func toolApprovalDecisionTarget(row dbsqlc.ToolApprovalRequest) sessionruntime.D
 		BotID: decisionUUIDString(row.BotID), SessionID: decisionUUIDString(row.SessionID),
 		RunID: decisionUUIDString(row.RunID), TurnID: decisionUUIDString(row.TurnID),
 		Status: row.Status, FencingToken: pgInt64(row.RuntimeFencingToken),
-		ControlID: pgText(row.ResponseControlID), PayloadHash: pgText(row.ResponsePayloadHash),
+		InlineDecision: isCapabilityManagementApproval(toolapproval.Request{ToolName: row.ToolName}),
+		ControlID:      pgText(row.ResponseControlID), PayloadHash: pgText(row.ResponsePayloadHash),
 	}
 }
 
@@ -326,16 +327,17 @@ func (s *Service) handleRuntimeDecisionCommand(ctx context.Context, command sess
 		committed.runID = command.RunID
 		committed.runHandle = runHandle
 		s.publishCommittedRuntimeDecision(runCtx, command, native.StreamEvent{
-			Type:       native.EventToolApprovalRequest,
-			ToolName:   committed.request.ToolName,
-			ToolCallID: committed.request.ToolCallID,
-			ApprovalID: committed.request.ID,
-			ShortID:    committed.request.ShortID,
-			Status:     committed.request.Status,
-			Input:      committed.request.ToolInput,
-			Metadata:   approvalResultMetadata(committed.request),
+			Type:           native.EventToolApprovalRequest,
+			ToolName:       committed.request.ToolName,
+			InlineDecision: committed.usesDecisionWaiter,
+			ToolCallID:     committed.request.ToolCallID,
+			ApprovalID:     committed.request.ID,
+			ShortID:        committed.request.ShortID,
+			Status:         committed.request.Status,
+			Input:          committed.request.ToolInput,
+			Metadata:       approvalResultMetadata(committed.request),
 		})
-		if committed.isExternalAgent || committed.ackOnly {
+		if committed.usesDecisionWaiter || committed.ackOnly {
 			defer runCancel()
 			s.ackInlineRuntimeDecision(runCtx, command)
 			return nil

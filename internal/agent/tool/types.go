@@ -12,6 +12,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agent/tool/internal/toolset"
 )
@@ -31,13 +32,15 @@ const (
 	StreamEventReaction      StreamEventType = "reaction"
 	StreamEventSpeech        StreamEventType = "speech"
 	StreamEventSpawnProgress StreamEventType = "spawn_progress"
+	StreamEventToolApproval  StreamEventType = "tool_approval_request"
 )
 
 // ToolStreamEvent is a side-effect event emitted by a tool targeting the
 // current conversation (e.g. inline attachment, reaction, or TTS speech).
 // The agent framework converts these into the appropriate wire-level events.
 type ToolStreamEvent struct {
-	Type StreamEventType
+	Approval *toolapproval.Request
+	Type     StreamEventType
 	// ToolCallID identifies the tool call that produced this side effect, so
 	// downstream persistence can anchor it to the right message (and keep the
 	// live ordering after a history reload). Empty when unknown.
@@ -301,6 +304,8 @@ type MessageSnapshotEntry struct {
 
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
+	CapabilitiesChanged    func()
+	ApprovalEmitter        func(toolapproval.Request) bool
 	BotID                  string
 	ChatID                 string
 	SessionID              string

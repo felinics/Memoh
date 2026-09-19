@@ -7,7 +7,7 @@
 The main configuration file is `config.toml` (copied from `conf/app.example.toml` or environment-specific templates for development), containing:
 
 - `[log]` — Logging configuration (level, format)
-- `[server]` — HTTP listen address
+- `[server]` — HTTP listen address and optional `public_url` for the externally reachable Web origin (for example, `https://app.example.com`). Set `MEMOH_SERVER_PUBLIC_URL` to override it. Capability tools use this base URL for credential setup links and the MCP OAuth callback at `/api/oauth/mcp/callback`. Configure it for channel conversations; without it, setup links are relative and OAuth keeps the existing local callback default. Do not include credentials, query parameters, or a fragment.
 - `[admin]` — Admin account credentials
 - `[auth]` — JWT authentication settings
 - `[database]` — Database backend selection (`postgres`)
