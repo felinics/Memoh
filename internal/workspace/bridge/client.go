@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -57,6 +58,12 @@ func DialTLS(_ context.Context, target string, tlsOpts *TLSOptions) (*Client, er
 	creds := insecure.NewCredentials()
 	opts := []grpc.DialOption{
 		grpc.WithNoProxy(),
+		// Every dial to a workspace funnels through here — UDS and TCP mTLS
+		// alike — so this is the one place the client span and the outgoing
+		// traceparent have to be attached. The bridge on the other end is not
+		// instrumented: it runs inside the workspace container, which has no
+		// collector to export to (see docs/observability.md).
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                30 * time.Second, // ping every 30s if idle
 			Timeout:             10 * time.Second, // wait 10s for ping ack
