@@ -29,6 +29,11 @@ struct ActionResult {
     unsupported: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     selection: Option<Selection>,
+    /// Set when the ref was carried over unobserved from an earlier snapshot
+    /// (the latest one was scoped to a subtree), which is why no pointer
+    /// fallback is offered.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    carried: bool,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -49,7 +54,7 @@ pub struct Selection {
 /// on-screen box. Without one, the previous behaviour clicked at the
 /// saturated centre of a zero box (typically 0,0) — the wrong element.
 fn fallback_point(entry: &RefEntry) -> Option<Point> {
-    if !entry.has_geometry() {
+    if entry.carried || !entry.has_geometry() {
         return None;
     }
     let (x, y) = entry.center();
@@ -68,6 +73,7 @@ impl ActionResult {
             fallback: None,
             unsupported: false,
             selection: None,
+            carried: entry.carried,
         }
     }
 
@@ -82,6 +88,7 @@ impl ActionResult {
             fallback: fallback_point(entry),
             unsupported: false,
             selection: None,
+            carried: entry.carried,
         }
     }
 
@@ -99,6 +106,7 @@ impl ActionResult {
             fallback: None,
             unsupported: true,
             selection: None,
+            carried: entry.carried,
         }
     }
 
@@ -134,6 +142,8 @@ struct LocateResult {
     actions: Vec<String>,
     #[serde(skip_serializing_if = "is_zero")]
     app_pid: u32,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    carried: bool,
 }
 
 fn is_zero(value: &u32) -> bool {
@@ -157,6 +167,7 @@ pub fn locate(ref_id: &str, snapshot: Option<&str>) -> Result<()> {
         states: entry.states.clone(),
         actions: entry.actions.clone(),
         app_pid: entry.app_pid,
+        carried: entry.carried,
     };
     println!("{}", serde_json::to_string(&out)?);
     Ok(())
@@ -593,7 +604,17 @@ mod tests {
             states: Vec::new(),
             actions: Vec::new(),
             app_pid: 0,
+            depth: 0,
+            value: None,
+            carried: false,
         }
+    }
+
+    #[test]
+    fn fallback_point_is_absent_for_carried_entries() {
+        let mut carried = entry(30, 20);
+        carried.carried = true;
+        assert_eq!(fallback_point(&carried), None);
     }
 
     #[test]
@@ -615,7 +636,7 @@ mod tests {
         let result = ActionResult::failure("click", &entry(0, 0), "no actions");
         let json = serde_json::to_string(&result).expect("serialize");
         assert!(!json.contains("fallback"), "unexpected fallback in {json}");
-        assert!(json.contains("\"protocol_version\":3"));
+        assert!(json.contains("\"protocol_version\":4"));
         assert!(!json.contains("unsupported"));
     }
 

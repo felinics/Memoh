@@ -1043,6 +1043,8 @@
       },
       "browserObserve": {
         "snapshot": "Inspect page structure",
+        "state_and_screenshot": "Capture page state and screenshot",
+        "probe": "Probe browser capabilities",
         "get_content": "Read page content",
         "screenshot_annotate": "Capture annotated page screenshot",
         "screenshot": "Capture page screenshot",
@@ -1055,6 +1057,8 @@
       },
       "computerObserve": {
         "snapshot": "Desktop snapshot",
+        "state_and_screenshot": "Capture desktop state and screenshot",
+        "probe": "Probe desktop capabilities",
         "screenshot": "Desktop screenshot"
       },
       "computerAction": {

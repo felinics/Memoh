@@ -1,18 +1,21 @@
-//! `a11y-cli snapshot` subcommand — walk the desktop (or one application's)
-//! accessibility tree iteratively, assign `eN` refs to visible nodes, persist
-//! the index under a fresh snapshot id, and emit both human-readable lines and
+//! `a11y-cli snapshot` subcommand — walk the desktop, one application, or the
+//! subtree below a ref iteratively, assign `eN` refs to visible nodes (reusing
+//! the previous ids for elements that are still there), persist the index
+//! under a fresh snapshot id, and emit both human-readable lines and
 //! structured JSON with diagnostics so the Go caller can tell whether an empty
 //! list means "no UI" or "everything filtered out".
+
+use std::collections::HashMap;
 
 use anyhow::Result;
 use atspi::object_ref::ObjectRefOwned;
 use atspi::proxy::accessible::AccessibleProxy;
-use atspi::{AccessibilityConnection, CoordType, Role, State, StateSet};
+use atspi::{AccessibilityConnection, CoordType, Interface, InterfaceSet, Role, State, StateSet};
 use serde::Serialize;
 
 use crate::apps;
 use crate::connection;
-use crate::refs::{self, RefEntry};
+use crate::refs::{self, RefEntry, RefIndex};
 
 /// Maximum number of applications we descend into before giving up. The
 /// registry sits in front of every connected accessibility application; a
@@ -21,6 +24,8 @@ const MAX_APPS: usize = 32;
 /// Maximum nodes inspected across the entire walk. AT-SPI trees can balloon
 /// (LibreOffice Calc exposes ~2^31 cells), so we cap aggressively.
 const MAX_VISITS: usize = 8000;
+/// Longest value text read from an editable widget.
+const MAX_VALUE_CHARS: usize = 200;
 
 #[derive(Serialize)]
 struct SnapshotItem {
@@ -32,6 +37,9 @@ struct SnapshotItem {
     y: i32,
     width: i32,
     height: i32,
+    depth: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     states: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -77,24 +85,60 @@ struct SnapshotOutput {
     snapshot_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     app: Option<SnapshotApp>,
+    /// The ref whose subtree was walked, when `--scope` was given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
     /// The `--limit` that was in effect, echoed so the caller can tell a
     /// short list from a capped one.
     limit: usize,
     truncated: bool,
+    /// How many refs kept the id they had in the previous index.
+    reused_refs: usize,
+    /// How many entries of the previous index were carried over unobserved
+    /// because this snapshot was scoped to a subtree (see `RefEntry::carried`).
+    carried_refs: usize,
     items: Vec<SnapshotItem>,
     lines: Vec<String>,
     refs_path: String,
     diagnostics: Diagnostics,
 }
 
-pub async fn run(limit: usize, app: Option<&str>) -> Result<()> {
+/// One starting point of the walk: an accessible node and the pid of the
+/// application it belongs to.
+struct WalkRoot<'a> {
+    proxy: AccessibleProxy<'a>,
+    app_pid: u32,
+}
+
+pub async fn run(limit: usize, app: Option<&str>, scope: Option<&str>, reuse: bool) -> Result<()> {
     let conn = connection::open().await?;
     let all_apps = apps::list(&conn).await?;
-    let (scope, roots): (
-        Option<SnapshotApp>,
-        Vec<&(apps::AppInfo, AccessibleProxy<'_>)>,
-    ) = match app {
-        Some(selector) => {
+    let previous: Option<RefIndex> = refs::load().ok();
+
+    let mut scope_ref: Option<String> = None;
+    let (scope_app, roots): (Option<SnapshotApp>, Vec<WalkRoot<'_>>) = match (scope, app) {
+        (Some(scope_id), _) => {
+            let entry = refs::lookup(scope_id, None)?;
+            let object = entry.to_object_ref()?;
+            let proxy = connection::accessible_for(&conn, &object).await?;
+            scope_ref = Some(entry.ref_id.clone());
+            let app_info = all_apps
+                .iter()
+                .find(|(info, _)| info.pid == entry.app_pid && entry.app_pid > 0)
+                .map(|(info, _)| SnapshotApp {
+                    app_id: info.app_id.clone(),
+                    pid: info.pid,
+                    name: info.name.clone(),
+                });
+            (
+                app_info,
+                vec![WalkRoot {
+                    proxy,
+                    app_pid: entry.app_pid,
+                }],
+            )
+        }
+        (None, Some(selector)) => {
             let chosen = apps::select(&all_apps, selector)?;
             (
                 Some(SnapshotApp {
@@ -102,15 +146,41 @@ pub async fn run(limit: usize, app: Option<&str>) -> Result<()> {
                     pid: chosen.0.pid,
                     name: chosen.0.name.clone(),
                 }),
-                vec![chosen],
+                vec![WalkRoot {
+                    proxy: chosen.1.clone(),
+                    app_pid: chosen.0.pid,
+                }],
             )
         }
-        None => (None, all_apps.iter().collect()),
+        (None, None) => (
+            None,
+            all_apps
+                .iter()
+                .map(|(info, proxy)| WalkRoot {
+                    proxy: proxy.clone(),
+                    app_pid: info.pid,
+                })
+                .collect(),
+        ),
     };
-    let (entries, truncated, diagnostics) = collect(&conn, &roots, limit).await?;
+
+    let (mut entries, truncated, diagnostics) = collect(&conn, &roots, limit).await?;
+    let reused_refs = assign_refs(&mut entries, previous.as_ref().filter(|_| reuse));
     let snapshot_id = refs::new_snapshot_id();
-    let app_pid = scope.as_ref().map(|s| s.pid).unwrap_or(0);
-    let refs_path = refs::write(&snapshot_id, app_pid, &entries)?;
+    let app_pid = scope_app.as_ref().map(|s| s.pid).unwrap_or(0);
+    // A subtree observation leaves everything outside the subtree
+    // unobserved; with ref reuse those entries are carried over so their
+    // ids stay reserved for the next whole-target observation.
+    let mut index_entries = entries.clone();
+    let mut carried_refs = 0;
+    if scope.is_some() && reuse {
+        if let Some(index) = previous.as_ref() {
+            let carried = carry_over(index, &entries);
+            carried_refs = carried.len();
+            index_entries.extend(carried);
+        }
+    }
+    let refs_path = refs::write(&snapshot_id, app_pid, &index_entries)?;
 
     let lines: Vec<String> = entries.iter().map(format_line).collect();
     let items: Vec<SnapshotItem> = entries
@@ -123,6 +193,8 @@ pub async fn run(limit: usize, app: Option<&str>) -> Result<()> {
             y: entry.y,
             width: entry.width,
             height: entry.height,
+            depth: entry.depth,
+            value: entry.value.clone(),
             states: entry.states.clone(),
             actions: entry.actions.clone(),
             app_pid: entry.app_pid,
@@ -134,9 +206,12 @@ pub async fn run(limit: usize, app: Option<&str>) -> Result<()> {
         protocol_version: crate::PROTOCOL_VERSION,
         helper_version: env!("CARGO_PKG_VERSION"),
         snapshot_id,
-        app: scope,
+        app: scope_app,
+        scope: scope_ref,
         limit,
         truncated,
+        reused_refs,
+        carried_refs,
         items,
         lines,
         refs_path: refs_path.display().to_string(),
@@ -146,8 +221,53 @@ pub async fn run(limit: usize, app: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Give every entry a ref id. With a previous index, elements that are still
+/// present keep their old id (matched by bus name + object path) and new
+/// elements continue above the previous maximum, so a ref never silently
+/// moves onto a different element between two observations. Without one the
+/// ids are dense from e1.
+fn assign_refs(entries: &mut [RefEntry], previous: Option<&RefIndex>) -> usize {
+    let (known, mut next): (HashMap<String, String>, u32) = match previous {
+        Some(index) => (index.ref_by_object(), index.max_ref_number() + 1),
+        None => (HashMap::new(), 1),
+    };
+    let mut reused = 0;
+    for entry in entries.iter_mut() {
+        if let Some(id) = known.get(&entry.object_key()) {
+            entry.ref_id = id.clone();
+            reused += 1;
+        } else {
+            entry.ref_id = format!("e{next}");
+            next += 1;
+        }
+    }
+    reused
+}
+
+/// Entries of the previous index whose object was not observed this time,
+/// marked as carried over. Objects that were observed again are represented
+/// by their fresh entry only.
+fn carry_over(previous: &RefIndex, observed: &[RefEntry]) -> Vec<RefEntry> {
+    let present: std::collections::HashSet<String> =
+        observed.iter().map(RefEntry::object_key).collect();
+    previous
+        .entries
+        .iter()
+        .filter(|entry| !present.contains(&entry.object_key()))
+        .map(|entry| RefEntry {
+            carried: true,
+            ..entry.clone()
+        })
+        .collect()
+}
+
 fn format_line(entry: &RefEntry) -> String {
-    let mut line = format!("- {}", entry.role);
+    let mut line = String::new();
+    for _ in 0..entry.depth {
+        line.push_str("  ");
+    }
+    line.push_str("- ");
+    line.push_str(&entry.role);
     let name = entry.name.trim();
     if !name.is_empty() {
         line.push(' ');
@@ -158,6 +278,18 @@ fn format_line(entry: &RefEntry) -> String {
         line.push_str(&format!(
             " @{},{} {}x{}",
             entry.x, entry.y, entry.width, entry.height
+        ));
+    }
+    if let Some(value) = &entry.value {
+        let shown: String = value.chars().take(80).collect();
+        let suffix = if value.chars().count() > 80 {
+            "…"
+        } else {
+            ""
+        };
+        line.push_str(&format!(
+            " value={}",
+            json_quote(&format!("{shown}{suffix}"))
         ));
     }
     if !entry.states.is_empty() {
@@ -204,7 +336,7 @@ fn interesting_states(states: &StateSet) -> Vec<String> {
 
 async fn collect(
     conn: &AccessibilityConnection,
-    roots: &[&(apps::AppInfo, AccessibleProxy<'_>)],
+    roots: &[WalkRoot<'_>],
     limit: usize,
 ) -> Result<(Vec<RefEntry>, bool, Diagnostics)> {
     let mut entries: Vec<RefEntry> = Vec::new();
@@ -216,15 +348,15 @@ async fn collect(
     };
     let mut truncated = false;
 
-    for (info, app_proxy) in roots.iter().take(MAX_APPS) {
+    for root in roots.iter().take(MAX_APPS) {
         if entries.len() >= limit {
             truncated = true;
             break;
         }
 
-        // Iterative depth-first walk inside this application.
-        let mut stack: Vec<AccessibleProxy<'_>> = vec![(*app_proxy).clone()];
-        while let Some(node) = stack.pop() {
+        // Iterative depth-first walk inside this root.
+        let mut stack: Vec<(AccessibleProxy<'_>, u32)> = vec![(root.proxy.clone(), 0)];
+        while let Some((node, depth)) = stack.pop() {
             if entries.len() >= limit {
                 truncated = true;
                 break;
@@ -235,10 +367,10 @@ async fn collect(
             }
             diag.visited += 1;
 
-            match describe(conn, &node, entries.len() + 1, info.pid).await {
+            match describe(conn, &node, depth, root.app_pid).await {
                 Outcome::Keep(entry) => {
                     diag.accepted += 1;
-                    entries.push(entry);
+                    entries.push(*entry);
                 }
                 Outcome::SkipState => diag.skipped_state += 1,
                 Outcome::SkipRole => diag.skipped_role += 1,
@@ -257,7 +389,7 @@ async fn collect(
             };
             for child_obj in child_objs.into_iter().rev() {
                 if let Ok(child) = into_accessible(conn, child_obj).await {
-                    stack.push(child);
+                    stack.push((child, depth + 1));
                 }
             }
         }
@@ -273,7 +405,7 @@ async fn into_accessible<'a>(
 }
 
 enum Outcome {
-    Keep(RefEntry),
+    Keep(Box<RefEntry>),
     SkipState,
     SkipRole,
     SkipGeometry,
@@ -283,7 +415,7 @@ enum Outcome {
 async fn describe(
     conn: &AccessibilityConnection,
     node: &AccessibleProxy<'_>,
-    next_index: usize,
+    depth: u32,
     app_pid: u32,
 ) -> Outcome {
     let states = match node.get_state().await {
@@ -325,11 +457,13 @@ async fn describe(
         return Outcome::SkipGeometry;
     }
 
+    let interfaces = node.get_interfaces().await.ok();
     let actions = action_names(conn, node).await;
+    let value = read_value(conn, node, role, &states, interfaces.as_ref()).await;
 
     let inner = node.inner();
-    Outcome::Keep(RefEntry {
-        ref_id: format!("e{next_index}"),
+    Outcome::Keep(Box::new(RefEntry {
+        ref_id: String::new(),
         bus_name: inner.destination().to_string(),
         object_path: inner.path().to_string(),
         role: role_name,
@@ -341,7 +475,49 @@ async fn describe(
         states: interesting_states(&states),
         actions,
         app_pid,
-    })
+        depth,
+        value,
+        carried: false,
+    }))
+}
+
+/// Current value of a control when it has one: numbers for Value-interface
+/// widgets (sliders, spin buttons, progress bars), the text of editable text
+/// widgets, and a mask for password fields. Best effort; None when the node
+/// has no readable value.
+async fn read_value(
+    conn: &AccessibilityConnection,
+    node: &AccessibleProxy<'_>,
+    role: Role,
+    states: &StateSet,
+    interfaces: Option<&InterfaceSet>,
+) -> Option<String> {
+    if role == Role::PasswordText {
+        return Some("•••".to_string());
+    }
+    let interfaces = interfaces?;
+    if interfaces.contains(Interface::Value) {
+        let proxy = connection::value_for(conn, node).await.ok()?;
+        let current = proxy.current_value().await.ok()?;
+        return Some(format_number(current));
+    }
+    if states.contains(State::Editable) && interfaces.contains(Interface::Text) {
+        let proxy = connection::text_for(conn, node).await.ok()?;
+        let count = proxy.character_count().await.ok()?;
+        let end = count.min(MAX_VALUE_CHARS as i32);
+        let text = proxy.get_text(0, end).await.ok()?;
+        return Some(text);
+    }
+    None
+}
+
+/// Render an AT-SPI value without a spurious fraction for whole numbers.
+fn format_number(value: f64) -> String {
+    if value.fract() == 0.0 && value.abs() < 1e15 {
+        format!("{}", value as i64)
+    } else {
+        format!("{value}")
+    }
 }
 
 /// Names of the AT-SPI actions a node exposes, empty when it has none or the
@@ -402,6 +578,9 @@ mod tests {
             states: Vec::new(),
             actions: Vec::new(),
             app_pid: 0,
+            depth: 0,
+            value: None,
+            carried: false,
         }
     }
 
@@ -415,6 +594,131 @@ mod tests {
             line,
             "- text \"Search\" [ref=e3] @10,20 200x24 (focused, editable) actions=click,menu"
         );
+    }
+
+    #[test]
+    fn format_line_indents_by_depth_and_shows_value() {
+        let mut e = entry("spin button", "Count", 10, 20, 60, 24);
+        e.depth = 2;
+        e.value = Some("42".to_string());
+        assert_eq!(
+            format_line(&e),
+            "    - spin button \"Count\" [ref=e3] @10,20 60x24 value=\"42\""
+        );
+        let mut long = entry("text", "", 0, 0, 10, 10);
+        long.value = Some("x".repeat(100));
+        let line = format_line(&long);
+        assert!(line.ends_with("…\""), "{line}");
+    }
+
+    #[test]
+    fn assign_refs_reuses_ids_by_object_identity() {
+        let previous = RefIndex {
+            snapshot_id: "s0".to_string(),
+            app_pid: 0,
+            entries: vec![
+                RefEntry {
+                    ref_id: "e4".to_string(),
+                    object_path: "/a".to_string(),
+                    ..entry("button", "A", 0, 0, 1, 1)
+                },
+                RefEntry {
+                    ref_id: "e9".to_string(),
+                    object_path: "/b".to_string(),
+                    ..entry("button", "B", 0, 0, 1, 1)
+                },
+            ],
+        };
+        let mut fresh = vec![
+            RefEntry {
+                object_path: "/b".to_string(),
+                ..entry("button", "B", 0, 0, 1, 1)
+            },
+            RefEntry {
+                object_path: "/c".to_string(),
+                ..entry("button", "C", 0, 0, 1, 1)
+            },
+            RefEntry {
+                object_path: "/a".to_string(),
+                ..entry("button", "A", 0, 0, 1, 1)
+            },
+        ];
+        let reused = assign_refs(&mut fresh, Some(&previous));
+        assert_eq!(reused, 2);
+        assert_eq!(fresh[0].ref_id, "e9");
+        assert_eq!(fresh[1].ref_id, "e10");
+        assert_eq!(fresh[2].ref_id, "e4");
+
+        let mut dense = vec![entry("a", "", 0, 0, 1, 1), entry("b", "", 0, 0, 1, 1)];
+        assert_eq!(assign_refs(&mut dense, None), 0);
+        assert_eq!(dense[0].ref_id, "e1");
+        assert_eq!(dense[1].ref_id, "e2");
+    }
+
+    #[test]
+    fn carry_over_reserves_unobserved_refs_for_the_next_walk() {
+        let previous = RefIndex {
+            snapshot_id: "s0".to_string(),
+            app_pid: 0,
+            entries: vec![
+                RefEntry {
+                    ref_id: "e1".to_string(),
+                    object_path: "/a".to_string(),
+                    ..entry("frame", "App", 0, 0, 100, 100)
+                },
+                RefEntry {
+                    ref_id: "e2".to_string(),
+                    object_path: "/b".to_string(),
+                    ..entry("text", "", 10, 10, 50, 20)
+                },
+            ],
+        };
+        // A subtree walk re-observed only /b.
+        let mut observed = vec![RefEntry {
+            object_path: "/b".to_string(),
+            ..entry("text", "", 10, 10, 50, 20)
+        }];
+        assert_eq!(assign_refs(&mut observed, Some(&previous)), 1);
+        assert_eq!(observed[0].ref_id, "e2");
+        let carried = carry_over(&previous, &observed);
+        assert_eq!(carried.len(), 1);
+        assert_eq!(carried[0].ref_id, "e1");
+        assert!(carried[0].carried);
+
+        // The next whole-target walk reuses both ids from the merged index.
+        let mut merged = observed.clone();
+        merged.extend(carried);
+        let index = RefIndex {
+            snapshot_id: "s1".to_string(),
+            app_pid: 0,
+            entries: merged,
+        };
+        let mut whole = vec![
+            RefEntry {
+                object_path: "/a".to_string(),
+                ..entry("frame", "App", 0, 0, 100, 100)
+            },
+            RefEntry {
+                object_path: "/b".to_string(),
+                ..entry("text", "", 10, 10, 50, 20)
+            },
+            RefEntry {
+                object_path: "/c".to_string(),
+                ..entry("push button", "OK", 0, 0, 10, 10)
+            },
+        ];
+        assert_eq!(assign_refs(&mut whole, Some(&index)), 2);
+        assert_eq!(whole[0].ref_id, "e1");
+        assert_eq!(whole[1].ref_id, "e2");
+        assert_eq!(whole[2].ref_id, "e3");
+        assert!(whole.iter().all(|e| !e.carried));
+    }
+
+    #[test]
+    fn format_number_drops_zero_fraction() {
+        assert_eq!(format_number(42.0), "42");
+        assert_eq!(format_number(0.5), "0.5");
+        assert_eq!(format_number(-3.0), "-3");
     }
 
     #[test]

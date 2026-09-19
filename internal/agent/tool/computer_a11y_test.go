@@ -7,17 +7,17 @@ import (
 )
 
 // snapshotFixture mirrors the JSON emitted by crates/a11y-cli `snapshot`
-// (protocol 3): lines is an array, geometry is x/y/width/height, and the
+// (protocol 4): lines is an array, geometry is x/y/width/height, and the
 // diagnostics carry the private bus address.
-const snapshotFixture = `{"ok":true,"protocol_version":3,"helper_version":"0.1.0","snapshot_id":"s1a2b3c","limit":300,"truncated":false,` +
+const snapshotFixture = `{"ok":true,"protocol_version":4,"helper_version":"0.1.0","snapshot_id":"s1a2b3c","limit":300,"truncated":false,"reused_refs":1,` +
 	`"items":[{"ref":"e1","role":"frame","name":"Application Finder","x":0,"y":0,"width":1280,"height":960},` +
-	`{"ref":"e2","role":"text","name":"","x":40,"y":72,"width":600,"height":34,"states":["focused","editable"],"actions":["activate"],"app_pid":4242},` +
+	`{"ref":"e2","role":"text","name":"","x":40,"y":72,"width":600,"height":34,"depth":1,"value":"hello","states":["focused","editable"],"actions":["activate"],"app_pid":4242},` +
 	`{"ref":"e3","role":"link","name":"Help","x":0,"y":0,"width":0,"height":0}],` +
 	`"lines":["- frame \"Application Finder\" [ref=e1] @0,0 1280x960","- text [ref=e2] @40,72 600x34 (focused, editable)","- link \"Help\" [ref=e3]"],` +
 	`"refs_path":"/tmp/a11y-cli-refs.json",` +
 	`"diagnostics":{"apps":3,"visited":120,"accepted":3,"skipped_state":80,"skipped_role":30,"skipped_geometry":7,"errors":0,"bus_address":"unix:path=/run/user/1000/at-spi/bus_0","display":":99"}}`
 
-func TestDecodeA11ySnapshotProtocol3(t *testing.T) {
+func TestDecodeA11ySnapshotProtocol4(t *testing.T) {
 	t.Parallel()
 
 	var out a11ySnapshotOutput
@@ -43,6 +43,12 @@ func TestDecodeA11ySnapshotProtocol3(t *testing.T) {
 	if got := out.Items[1].Actions; len(got) != 1 || got[0] != "activate" || out.Items[1].AppPID != 4242 {
 		t.Fatalf("actions/app_pid not decoded: %#v pid=%d", got, out.Items[1].AppPID)
 	}
+	if out.Items[1].Depth != 1 || out.Items[1].Value == nil || *out.Items[1].Value != "hello" || out.ReusedRefs != 1 {
+		t.Fatalf("depth/value/reused_refs not decoded: %#v reused=%d", out.Items[1], out.ReusedRefs)
+	}
+	if out.Items[1].fingerprint() == out.Items[0].fingerprint() {
+		t.Fatal("fingerprints must differ between different items")
+	}
 	text := out.text()
 	if !strings.Contains(text, "[ref=e2] @40,72 600x34 (focused, editable)") {
 		t.Fatalf("lines not joined: %q", text)
@@ -65,9 +71,9 @@ func TestDecodeA11yRefusesOtherProtocols(t *testing.T) {
 	if !errors.Is(err, errA11yHelperOutdated) {
 		t.Fatalf("legacy output must be reported as an outdated helper, got %v", err)
 	}
-	future := `{"ok":true,"protocol_version":2,"items":[],"lines":[]}`
+	future := `{"ok":true,"protocol_version":3,"items":[],"lines":[]}`
 	err = decodeA11y([]byte(future), "snapshot", &out)
-	if !errors.Is(err, errA11yHelperOutdated) || !strings.Contains(err.Error(), "helper protocol 2") {
+	if !errors.Is(err, errA11yHelperOutdated) || !strings.Contains(err.Error(), "helper protocol 3") {
 		t.Fatalf("mismatched protocol must be refused with both versions, got %v", err)
 	}
 	if err := decodeA11y([]byte("not json"), "snapshot", &out); err == nil || !strings.Contains(err.Error(), "parse a11y-cli snapshot output") {
@@ -79,14 +85,14 @@ func TestDecodeA11yActionAndLocate(t *testing.T) {
 	t.Parallel()
 
 	var action a11yActionOutput
-	if err := decodeA11y([]byte(`{"ok":false,"protocol_version":3,"action":"click","ref":"e2","error":"no actions","fallback":{"x":340,"y":89}}`), "click", &action); err != nil {
+	if err := decodeA11y([]byte(`{"ok":false,"protocol_version":4,"action":"click","ref":"e2","error":"no actions","fallback":{"x":340,"y":89}}`), "click", &action); err != nil {
 		t.Fatalf("decode action: %v", err)
 	}
 	if action.OK || action.Fallback == nil || action.Fallback.X != 340 || action.Error != "no actions" {
 		t.Fatalf("unexpected action output: %#v", action)
 	}
 	var located a11yLocateOutput
-	if err := decodeA11y([]byte(`{"ok":true,"protocol_version":3,"action":"locate","ref":"e3","role":"link","name":"Help","x":0,"y":0,"width":0,"height":0}`), "locate", &located); err != nil {
+	if err := decodeA11y([]byte(`{"ok":true,"protocol_version":4,"action":"locate","ref":"e3","role":"link","name":"Help","x":0,"y":0,"width":0,"height":0}`), "locate", &located); err != nil {
 		t.Fatalf("decode locate: %v", err)
 	}
 	if located.Center != nil {

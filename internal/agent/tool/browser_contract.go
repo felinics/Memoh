@@ -174,23 +174,32 @@ var browserActionContract = newGUIContractWithCommon("action", browserElementKey
 
 func browserObserveParams() map[string]map[string]any {
 	return map[string]map[string]any{
-		"browser_id":  {"type": "string", "description": "Browser instance id, e.g. chrome-9222. Defaults to the session's selected browser."},
-		"tab_id":      {"type": "string", "description": "Tab id to observe. Defaults to the session's selected tab. Mutually exclusive with tab_index."},
-		"tab_index":   {"type": "integer", "minimum": 0, "description": "Zero-based page index within the browser (compatibility form)."},
-		"snapshot_id": {"type": "string", "description": "Snapshot the ref was taken in; defaults to the tab's latest snapshot in this session."},
-		"ref":         {"type": "string", "description": "Element ref from snapshot or screenshot_annotate. Scopes get_content and get_html."},
-		"selector":    {"type": "string", "description": "CSS selector to scope get_content or get_html when no ref is available."},
-		"script":      {"type": "string", "description": "JavaScript expression for evaluate. Keep it short and read-only unless the task requires otherwise."},
-		"full_page":   {"type": "boolean", "default": false, "description": "Capture the whole document instead of the viewport for screenshot."},
+		"browser_id":      {"type": "string", "description": "Browser instance id, e.g. chrome-9222. Defaults to the session's selected browser."},
+		"tab_id":          {"type": "string", "description": "Tab id to observe. Defaults to the session's selected tab. Mutually exclusive with tab_index."},
+		"tab_index":       {"type": "integer", "minimum": 0, "description": "Zero-based page index within the browser (compatibility form)."},
+		"snapshot_id":     {"type": "string", "description": "Snapshot the ref was taken in; defaults to the tab's latest snapshot in this session."},
+		"ref":             {"type": "string", "description": "Element ref from snapshot or screenshot_annotate. Scopes get_content and get_html."},
+		"selector":        {"type": "string", "description": "CSS selector to scope get_content or get_html when no ref is available."},
+		"script":          {"type": "string", "description": "JavaScript expression for evaluate. Keep it short and read-only unless the task requires otherwise."},
+		"full_page":       {"type": "boolean", "default": false, "description": "Capture the whole document instead of the viewport for screenshot."},
+		"image_mode":      {"type": "string", "enum": []string{"auto", "path"}, "default": "auto", "description": "auto: the screenshot is saved and, when the model accepts images, also sent to the model as its next input; path: saved only."},
+		"limit":           {"type": "integer", "minimum": 1, "maximum": a11ySnapshotMaxLimit, "default": a11ySnapshotDefaultLimit, "description": "Maximum number of lines returned per page of a snapshot."},
+		"scope_ref":       {"type": "string", "description": "Ref from the tab's latest snapshot; the new snapshot lists only that element's subtree."},
+		"cursor":          {"type": "string", "description": "next_cursor from the previous snapshot result: continue reading that same snapshot instead of taking a new one. Not combined with scope_ref or disable_diffing."},
+		"disable_diffing": {"type": "boolean", "default": false, "description": "Return the full listing even when a previous snapshot of the same tab exists (by default only added, updated, and removed elements are listed)."},
 	}
 }
 
+var browserSnapshotParams = []string{"limit", "scope_ref", "cursor", "disable_diffing"}
+
 var browserObserveContract = newGUIContractWithCommon("observe", browserElementKeys, browserObserveParams(), browserTargetParams, validateBrowserTargetParams, []guiActionSpec{
-	{Name: "snapshot", Summary: "list interactive elements with refs bound to a new snapshot_id"},
+	{Name: "snapshot", Summary: "accessibility tree of the tab (roles, names, values, states, hierarchy) with refs for interactive elements, bound to a new snapshot_id; incremental against the previous snapshot of the same tab unless disable_diffing", Optional: browserSnapshotParams},
 	{Name: "get_content", Summary: "readable text of the page or one element", Locator: guiLocatorElementOptional},
 	{Name: "get_html", Summary: "outerHTML of the document or innerHTML of one element", Locator: guiLocatorElementOptional},
-	{Name: "screenshot", Summary: "save a screenshot to the workspace", Optional: []string{"full_page"}},
-	{Name: "screenshot_annotate", Summary: "save a screenshot with element refs drawn on it (also a new snapshot_id)"},
+	{Name: "screenshot", Summary: "capture the viewport (or the full page) to the workspace and, by default, into the model's next input; the result states the pixel size and coordinate space", Optional: []string{"full_page", "image_mode"}},
+	{Name: "screenshot_annotate", Summary: "screenshot with element refs drawn on it (also a new snapshot_id)", Optional: []string{"image_mode"}},
+	{Name: "state_and_screenshot", Summary: "snapshot and screenshot of the same tab in one call, each with its capture time and a consistency check", Optional: append(append([]string{}, browserSnapshotParams...), "full_page", "image_mode")},
+	{Name: "probe", Summary: "what this tab's backends can do right now: CDP, accessibility tree, screenshot, viewport"},
 	{Name: "evaluate", Summary: "evaluate a JavaScript expression in the page", Required: []string{"script"}},
 	{Name: "get_url", Summary: "the tab's URL"},
 	{Name: "get_title", Summary: "the tab's document title"},

@@ -1024,6 +1024,8 @@
       },
       "browserObserve": {
         "snapshot": "ページの構造を確認",
+        "state_and_screenshot": "ページ構造とスクリーンショットを取得",
+        "probe": "ブラウザの機能を確認",
         "get_content": "ページの内容を読み取り",
         "screenshot_annotate": "注釈付きのページ画像を撮影",
         "screenshot": "ページのスクリーンショットを撮影",
@@ -1036,6 +1038,8 @@
       },
       "computerObserve": {
         "snapshot": "デスクトップのスナップショット",
+        "state_and_screenshot": "デスクトップ構造とスクリーンショットを取得",
+        "probe": "デスクトップの機能を確認",
         "screenshot": "デスクトップのスクリーンショット"
       },
       "computerAction": {

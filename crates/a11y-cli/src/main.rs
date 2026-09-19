@@ -20,7 +20,7 @@ mod snapshot;
 /// (`internal/agent/tool/computer_a11y.go`). Bump it whenever a field the Go
 /// side relies on changes shape; the Go side refuses output from a different
 /// version instead of silently misreading it.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Top-level CLI definition.
 #[derive(Parser)]
@@ -47,6 +47,14 @@ enum Command {
         /// bus name such as `:1.42`, or an application name.
         #[arg(long)]
         app: Option<String>,
+        /// Restrict the walk to the subtree of a ref from the current index.
+        #[arg(long)]
+        scope: Option<String>,
+        /// Keep the ref ids of elements that were already in the previous
+        /// index (matched by bus name and object path); new elements get
+        /// fresh ids above the previous maximum.
+        #[arg(long, default_value_t = false)]
+        reuse: bool,
     },
     /// Resolve a ref from the persisted snapshot index to its geometry
     /// without touching the accessibility bus or re-numbering anything.
@@ -125,7 +133,12 @@ fn main() -> Result<()> {
         match cli.command {
             Command::Probe => probe::run().await,
             Command::Apps => apps::run().await,
-            Command::Snapshot { limit, app } => snapshot::run(limit, app.as_deref()).await,
+            Command::Snapshot {
+                limit,
+                app,
+                scope,
+                reuse,
+            } => snapshot::run(limit, app.as_deref(), scope.as_deref(), reuse).await,
             Command::Locate { r#ref, snapshot } => action::locate(&r#ref, snapshot.as_deref()),
             Command::Click { r#ref, snapshot } => action::click(&r#ref, snapshot.as_deref()).await,
             Command::Type {

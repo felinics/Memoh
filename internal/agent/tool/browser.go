@@ -102,13 +102,16 @@ func (*BrowserProvider) Usage(_ context.Context, session SessionContext, availab
 	}
 	hasObserve := available.Has(ToolBrowserObserve()) || available.Has(ToolComputerObserve())
 	if hasObserve {
-		readHint := "the returned path can be used by later workspace actions when needed."
 		if session.SupportsImageInput {
+			readHint := ""
 			if readRef, ok := available.Ref(ToolRead()); ok {
-				readHint = "Read the returned path with " + readRef + " when you need the image."
+				readHint = " Read a saved path with " + readRef + " when you need the image again later."
 			}
+			parts = append(parts, "**Snapshots and screenshots**: snapshot returns the accessibility tree with refs and is incremental after the first observation of a target (added +, updated ~, removed refs); use cursor to keep reading a long one and scope_ref to zoom into a subtree. screenshot saves the image to a workspace path and also shows it to you on your next step (image_mode auto) unless image_mode is path; the result states the image size and coordinate space."+readHint)
+		} else {
+			readHint := "the returned path can be used by later workspace actions when needed."
+			parts = append(parts, "**Snapshots and screenshots**: snapshot returns the accessibility tree with refs and is incremental after the first observation of a target; use cursor and scope_ref for long trees. Screenshots are saved to a workspace path; this model cannot view images, so rely on snapshot for page state and "+readHint)
 		}
-		parts = append(parts, "**Screenshots**: Observe tools save screenshots to a workspace path; they are not attached to the conversation. "+readHint)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -155,16 +158,16 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 			Name:        ToolBrowserObserve().String(),
 			Description: "Inspect a workspace browser tab without changing page state. Prefer snapshot for interactive elements (it returns a snapshot_id that its refs belong to) and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are saved to a workspace path and are not attached automatically.",
 			Parameters:  browserObserveContract.schema(browserObserveContract.actionDescription("What to observe from the page:")),
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execBrowserObserve(ctx.Context, sess, inputAsMap(input))
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) { //nolint:contextcheck // the call context derives from ctx.Context with the tool call id attached
+				return p.execBrowserObserve(withToolCallID(ctx.Context, ctx.ToolCallID), sess, inputAsMap(input))
 			},
 		},
 		{
 			Name:        ToolComputerObserve().String(),
 			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility listing of on-screen UI elements with refs, geometry, states, and available actions, bound to a snapshot_id; pass app_id to scope it to one application. Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and is not attached automatically.",
 			Parameters:  computerObserveContract.schema(computerObserveContract.actionDescription("What to observe from the desktop:")),
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execComputerObserve(ctx.Context, sess, inputAsMap(input))
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) { //nolint:contextcheck // the call context derives from ctx.Context with the tool call id attached
+				return p.execComputerObserve(withToolCallID(ctx.Context, ctx.ToolCallID), sess, inputAsMap(input))
 			},
 		},
 		{
@@ -222,16 +225,20 @@ func (p *BrowserProvider) execBrowserObserve(ctx context.Context, session Sessio
 		return nil, err
 	}
 	payload := map[string]any{"action": spec.Name}
-	for _, key := range []string{"ref", "selector", "script", "browser_id", "tab_id", "snapshot_id"} {
+	for _, key := range []string{"ref", "selector", "script", "browser_id", "tab_id", "snapshot_id", "scope_ref", "cursor", "image_mode"} {
 		if v := StringArg(args, key); v != "" {
 			payload[key] = v
 		}
 	}
-	if v, ok, _ := IntArg(args, "tab_index"); ok {
-		payload["tab_index"] = v
+	for _, key := range []string{"tab_index", "limit"} {
+		if v, ok, _ := IntArg(args, key); ok {
+			payload[key] = v
+		}
 	}
-	if v, ok, _ := BoolArg(args, "full_page"); ok {
-		payload["full_page"] = v
+	for _, key := range []string{"full_page", "disable_diffing"} {
+		if v, ok, _ := BoolArg(args, key); ok {
+			payload[key] = v
+		}
 	}
 	return p.runBrowser(ctx, session, payload)
 }
@@ -259,7 +266,7 @@ func (p *BrowserProvider) runBrowser(ctx context.Context, session SessionContext
 	if err != nil {
 		return nil, err
 	}
-	return p.browserActionResult(ctx, botID, data), nil
+	return p.browserActionResult(ctx, session, botID, data, args), nil
 }
 
 func (p *BrowserProvider) execRemoteSession(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
@@ -554,36 +561,59 @@ return el.checked;
 		}
 		return target.withResult(map[string]any{action + "ed": target.label(), "checked": result}), nil
 	case "screenshot":
-		fullPage, _, _ := BoolArg(args, "full_page")
-		b64, err := page.captureScreenshot(ctx, fullPage)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"screenshot": b64, "mimeType": "image/png", "full_page": fullPage}, nil
+		return p.browserScreenshot(ctx, page, args, nil)
 	case "screenshot_annotate":
-		snapshotID := newBrowserSnapshotID()
-		annotations, err := page.annotate(ctx, snapshotID)
+		opts, err := guiSnapshotOptionsFrom(args)
 		if err != nil {
 			return nil, err
 		}
-		b64, captureErr := page.captureScreenshot(ctx, false)
-		removeErr := page.removeAnnotations(ctx)
-		if captureErr != nil {
-			return nil, captureErr
+		opts.DisableDiffing = true
+		snapshot, err := p.browserSnapshot(ctx, state, tab, page, args, opts)
+		if err != nil {
+			return nil, err
 		}
-		if removeErr != nil {
+		annotations, err := page.annotatePinned(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result, captureErr := p.browserScreenshot(ctx, page, args, map[string]any{"annotations": annotations, "snapshot_id": snapshot["snapshot_id"], "ref_count": snapshot["ref_count"]})
+		if removeErr := page.removeAnnotations(ctx); removeErr != nil {
 			p.logger.Debug("remove browser annotations failed", slog.Any("error", removeErr))
 		}
-		state.recordBrowserSnapshot(guiSnapshotRecord{ID: snapshotID, BrowserID: tab.Browser.ID, TabID: tab.Target.ID, Taken: time.Now()})
-		return map[string]any{"screenshot": b64, "mimeType": "image/png", "annotations": annotations, "snapshot_id": snapshotID}, nil
+		return result, captureErr
 	case "snapshot":
-		snapshotID := newBrowserSnapshotID()
-		items, truncated, err := page.takeSnapshot(ctx, snapshotID, 300)
+		opts, err := guiSnapshotOptionsFrom(args)
 		if err != nil {
 			return nil, err
 		}
-		state.recordBrowserSnapshot(guiSnapshotRecord{ID: snapshotID, BrowserID: tab.Browser.ID, TabID: tab.Target.ID, Taken: time.Now()})
-		return map[string]any{"snapshot": formatBrowserSnapshot(items, truncated), "snapshot_id": snapshotID, "ref_count": len(items), "truncated": truncated}, nil
+		return p.browserSnapshot(ctx, state, tab, page, args, opts)
+	case "state_and_screenshot":
+		opts, err := guiSnapshotOptionsFrom(args)
+		if err != nil {
+			return nil, err
+		}
+		if opts.Cursor != "" {
+			return nil, errors.New("state_and_screenshot always takes a new snapshot; use snapshot with cursor to continue reading one")
+		}
+		before := page.pageGeneration(ctx)
+		snapshot, err := p.browserSnapshot(ctx, state, tab, page, args, opts)
+		if err != nil {
+			return nil, err
+		}
+		extra := map[string]any{"snapshot_taken_at": time.Now().UTC().Format(time.RFC3339Nano)}
+		for k, v := range snapshot {
+			extra[k] = v
+		}
+		after := page.pageGeneration(ctx)
+		extra["consistent"] = before != "" && before == after
+		if before != after {
+			extra["consistency_note"] = "the document changed between the snapshot and the screenshot; observe again before relying on refs"
+		}
+		return p.browserScreenshot(ctx, page, args, extra)
+	case "probe":
+		out := page.browserProbe(ctx)
+		out["title"] = tab.Target.Title
+		return out, nil
 	case "get_content":
 		target := browserTargetArg(args, "selector", "ref")
 		expr := `document.body ? document.body.innerText : ""`
@@ -963,11 +993,96 @@ func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Cl
 	}
 }
 
-func (p *BrowserProvider) browserActionResult(ctx context.Context, botID string, data map[string]any) any {
-	if b64, ok := data["screenshot"].(string); ok && b64 != "" {
-		return p.buildScreenshotResult(ctx, botID, b64, p.screenshotDir(), data)
+func (p *BrowserProvider) browserActionResult(ctx context.Context, session SessionContext, botID string, data map[string]any, args map[string]any) any {
+	b64, ok := data["screenshot"].(string)
+	if !ok || b64 == "" {
+		return data
 	}
-	return data
+	imgBytes, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		delete(data, "screenshot")
+		data["content"] = []map[string]any{{"type": "text", "text": "Screenshot captured (failed to decode image data)"}}
+		return data
+	}
+	return p.screenshotResult(ctx, session, botID, imgBytes, "image/png", data, args)
+}
+
+// browserScreenshot captures the viewport or the full page and describes the
+// coordinate space of the image: viewport captures map CSS pixels through
+// the device pixel ratio with the origin at the viewport's top-left; full
+// page captures use document coordinates.
+func (*BrowserProvider) browserScreenshot(ctx context.Context, page *cdpPage, args map[string]any, extra map[string]any) (map[string]any, error) {
+	fullPage, _, _ := BoolArg(args, "full_page")
+	metrics, metricsErr := page.viewportMetrics(ctx)
+	b64, err := page.captureScreenshot(ctx, fullPage)
+	if err != nil {
+		return nil, err
+	}
+	data := map[string]any{"screenshot": b64, "mimeType": "image/png", "full_page": fullPage}
+	if metricsErr == nil {
+		data["viewport"] = metrics
+		if fullPage {
+			data["coordinate_space"] = "document CSS pixels: x/y for browser_action are viewport coordinates, so subtract the viewport scroll offset"
+			data["origin"] = "top-left corner of the document"
+		} else {
+			data["coordinate_space"] = "viewport CSS pixels: divide image pixels by device_pixel_ratio to get x/y for browser_action"
+			data["origin"] = "top-left corner of the viewport"
+		}
+	}
+	for k, v := range extra {
+		data[k] = v
+	}
+	return data, nil
+}
+
+// browserSnapshot observes the tab through the accessibility tree, keeps
+// refs stable across observations of the same tab, and presents the result
+// as a full or incremental page.
+func (*BrowserProvider) browserSnapshot(ctx context.Context, state *guiSessionState, tab resolvedTab, page *cdpPage, args map[string]any, opts guiSnapshotOptions) (map[string]any, error) {
+	key := "browser:" + tab.Target.ID
+	if opts.Cursor != "" {
+		pg, baseline, err := continueSnapshot(state, key, StringArg(args, "snapshot_id"), opts.Cursor, opts.Limit)
+		if err != nil {
+			return nil, err
+		}
+		out := pg.result()
+		out["snapshot_id"] = baseline.SnapshotID
+		return out, nil
+	}
+	// Refs are assigned page-wide whatever the scope, so reuse starts from
+	// the latest observation of the tab at any scope.
+	baseline := state.latestBaseline(key)
+	scopeBackend := 0
+	if opts.ScopeRef != "" {
+		id, err := page.scopeBackendID(ctx, opts.ScopeRef)
+		if err != nil {
+			return nil, fmt.Errorf("scope_ref: %w", err)
+		}
+		scopeBackend = id
+	}
+	snapshotID := newBrowserSnapshotID()
+	res, err := page.takeAXSnapshot(ctx, snapshotID, baseline, scopeBackend)
+	if err != nil {
+		return nil, err
+	}
+	state.recordBrowserSnapshot(guiSnapshotRecord{ID: snapshotID, BrowserID: tab.Browser.ID, TabID: tab.Target.ID, Taken: time.Now()})
+	pg := presentSnapshot(state, key, opts.ScopeRef, snapshotID, res.Nodes, res.RefsByKey, res.MaxRef, res.Truncated, opts)
+	out := pg.result()
+	out["snapshot_id"] = snapshotID
+	out["source"] = res.Source
+	out["ref_count"] = res.Interactive
+	out["reused_refs"] = res.Reused
+	out["limit"] = opts.Limit
+	out["taken_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	if res.Source == "cdp_accessibility" {
+		out["ax_nodes"] = res.AXNodes
+	} else {
+		out["degraded"] = "the accessibility tree was unavailable; this is a flat DOM scan without hierarchy or states"
+	}
+	if opts.ScopeRef != "" {
+		out["scope_ref"] = opts.ScopeRef
+	}
+	return out, nil
 }
 
 var browserSnapshotCounter struct {
@@ -982,88 +1097,6 @@ func newBrowserSnapshotID() string {
 	defer browserSnapshotCounter.mu.Unlock()
 	browserSnapshotCounter.n++
 	return fmt.Sprintf("b%x-%x", time.Now().UnixMilli(), browserSnapshotCounter.n)
-}
-
-func (p *BrowserProvider) execComputerObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	spec, err := computerObserveContract.normalize(args)
-	if err != nil {
-		return nil, err
-	}
-	switch spec.Name {
-	case "screenshot":
-		return p.execComputerScreenshot(ctx, session)
-	case "snapshot":
-		limit, _, err := IntArg(args, "limit")
-		if err != nil {
-			return nil, err
-		}
-		return p.execComputerSnapshot(ctx, session, limit, StringArg(args, "app_id"))
-	default:
-		return nil, fmt.Errorf("unknown computer observe: %s", spec.Name)
-	}
-}
-
-func (p *BrowserProvider) execComputerScreenshot(ctx context.Context, session SessionContext) (any, error) {
-	botID, err := p.requireComputerDisplay(session)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := p.ensureComputerDisplay(ctx, botID); err != nil {
-		return nil, err
-	}
-	img, mime, err := p.display.Screenshot(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	return p.buildScreenshotBytesResult(ctx, botID, img, mime, p.screenshotDir(), nil), nil
-}
-
-// execComputerSnapshot observes the desktop or one application. Without an
-// explicit app_id the session's selected application (if any) is used.
-func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session SessionContext, limit int, appID string) (any, error) {
-	botID, err := p.requireComputerDisplay(session)
-	if err != nil {
-		return nil, err
-	}
-	client, err := p.ensureComputerDisplay(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	state := p.sessions.get(session)
-	if appID = strings.TrimSpace(appID); appID == "" {
-		_, _, appID = state.defaults()
-	}
-	snapshot, err := computerA11ySnapshot(ctx, client, limit, appID)
-	if err != nil {
-		return nil, err
-	}
-	state.recordComputerSnapshot(guiSnapshotRecord{ID: snapshot.SnapshotID, AppID: appID, Taken: time.Now()})
-	p.logger.Debug("computer snapshot",
-		slog.String("bot_id", botID),
-		slog.String("helper_version", snapshot.HelperVersion),
-		slog.String("snapshot_id", snapshot.SnapshotID),
-		slog.String("app_id", appID),
-		slog.String("bus_address", snapshot.Diagnostics.BusAddress),
-		slog.String("display", snapshot.Diagnostics.Display),
-		slog.Int("accepted", snapshot.Diagnostics.Accepted),
-		slog.Bool("truncated", snapshot.Truncated),
-	)
-	out := map[string]any{
-		"snapshot":       snapshot.text(),
-		"snapshot_id":    snapshot.SnapshotID,
-		"ref_count":      len(snapshot.Items),
-		"limit":          snapshot.Limit,
-		"truncated":      snapshot.Truncated,
-		"helper_version": snapshot.HelperVersion,
-		"diagnostics":    snapshot.Diagnostics.public(),
-	}
-	if snapshot.App != nil {
-		out["app_id"] = snapshot.App.AppID
-		out["app_name"] = snapshot.App.Name
-	} else {
-		out["scope"] = "desktop"
-	}
-	return out, nil
 }
 
 // computerActionTarget resolves the application and snapshot a ref-based
@@ -1271,7 +1304,7 @@ func (p *BrowserProvider) runComputerAction(ctx context.Context, botID string, c
 				return nil, err
 			}
 			if located.Center == nil {
-				return nil, fmt.Errorf("ref %s has no on-screen box to scroll at; observe again or pass x/y", ref)
+				return nil, located.noCenterError(ref, "scroll at the element")
 			}
 			x, y = located.Center.X, located.Center.Y
 			target = ref
@@ -1342,7 +1375,7 @@ func (p *BrowserProvider) clickByRef(ctx context.Context, botID string, client *
 		return nil, err
 	}
 	if located.Center == nil {
-		return nil, fmt.Errorf("ref %s has no on-screen box, and a %s %s click cannot be expressed as an accessibility action; observe again or pass x/y", ref, clickCountName(count), buttonName(mask))
+		return nil, located.noCenterError(ref, clickCountName(count)+" "+buttonName(mask)+" click")
 	}
 	if err := p.pointerMultiClick(ctx, botID, located.Center.X, located.Center.Y, mask, count); err != nil {
 		return nil, err
@@ -1454,7 +1487,7 @@ func (p *BrowserProvider) computerPaste(ctx context.Context, botID string, clien
 		}
 		if located.Center == nil {
 			restore()
-			return nil, fmt.Errorf("ref %s has no on-screen box to focus for pasting; observe again or paste into the focused widget", ref)
+			return nil, located.noCenterError(ref, "click to focus it for pasting")
 		}
 		if err := p.pointerMultiClick(ctx, botID, located.Center.X, located.Center.Y, rfbButtonLeft, 1); err != nil {
 			restore()
@@ -1596,43 +1629,6 @@ func (p *BrowserProvider) ensureDisplayEnabled(ctx context.Context, botID string
 		return errors.New("workspace desktop is not enabled for this bot")
 	}
 	return nil
-}
-
-func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base64Data string, dir string, data map[string]any) any {
-	imgBytes, err := base64.StdEncoding.DecodeString(base64Data)
-	if err != nil {
-		return map[string]any{"content": []map[string]any{{"type": "text", "text": "Screenshot captured (failed to decode image data)"}}}
-	}
-	return p.buildScreenshotBytesResult(ctx, botID, imgBytes, "image/png", dir, data)
-}
-
-func (p *BrowserProvider) buildScreenshotBytesResult(ctx context.Context, botID string, imgBytes []byte, mimeType string, dir string, data map[string]any) any {
-	if mimeType == "" {
-		mimeType = "image/png"
-	}
-	ext := screenshotExtension(mimeType)
-	containerPath := fmt.Sprintf("%s/%d%s", dir, time.Now().UnixMilli(), ext)
-	saveErr := p.saveBytes(ctx, botID, containerPath, imgBytes)
-	text := fmt.Sprintf("Screenshot saved to %s", containerPath)
-	if saveErr != nil {
-		text = fmt.Sprintf("Screenshot captured (failed to save: %s)", saveErr.Error())
-	}
-	content := []map[string]any{{"type": "text", "text": text}}
-	if data != nil {
-		if annotations, ok := data["annotations"]; ok {
-			content = append(content, map[string]any{"type": "text", "text": fmt.Sprintf("Annotations: %v", annotations)})
-		}
-	}
-	result := map[string]any{"content": content, "path": containerPath, "mimeType": mimeType}
-	if saveErr != nil {
-		result["save_error"] = saveErr.Error()
-	}
-	for _, key := range []string{"snapshot_id", "browser_id", "tab_id", "tab_source", "full_page"} {
-		if v, ok := data[key]; ok {
-			result[key] = v
-		}
-	}
-	return result
 }
 
 func (p *BrowserProvider) screenshotDir() string {
