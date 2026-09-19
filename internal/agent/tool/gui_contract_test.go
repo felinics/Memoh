@@ -30,7 +30,7 @@ func TestBrowserContractRejectsBadCallsBeforeExecution(t *testing.T) {
 		{name: "timeout over max", args: map[string]any{"action": "navigate", "url": "https://a", "timeout": 90000}, want: "timeout must be at most 45000"},
 		{name: "drag without target", args: map[string]any{"action": "drag", "ref": "e1"}, want: "drag requires a drop target"},
 		{name: "drag with two targets", args: map[string]any{"action": "drag", "ref": "e1", "target_ref": "e2", "to_x": 1, "to_y": 2}, want: "either target_ref/target_selector or to_x/to_y"},
-		{name: "tab_select without index", args: map[string]any{"action": "tab_select"}, want: "tab_index is required for tab_select"},
+		{name: "tab_select without index", args: map[string]any{"action": "tab_select"}, want: "tab_id (or the compatibility tab_index) is required for tab_select"},
 		{name: "wrong type", args: map[string]any{"action": "click", "ref": "e1", "click_count": "two"}, want: "click_count must be a number"},
 	}
 	for _, tc := range cases {

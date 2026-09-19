@@ -17,7 +17,7 @@ const (
 	// a11yProtocolVersion must match PROTOCOL_VERSION in
 	// crates/a11y-cli/src/main.rs. Output from any other version is refused
 	// instead of being decoded into a plausible-looking but wrong result.
-	a11yProtocolVersion      = 2
+	a11yProtocolVersion      = 3
 	a11ySnapshotDefaultLimit = 300
 	a11ySnapshotMaxLimit     = 2000
 )
@@ -32,21 +32,27 @@ type a11yPoint struct {
 	Y int `json:"y"`
 }
 
-type a11ySnapshotItem struct {
-	Ref    string   `json:"ref"`
-	Role   string   `json:"role"`
-	Name   string   `json:"name"`
-	X      int      `json:"x"`
-	Y      int      `json:"y"`
-	Width  int      `json:"width"`
-	Height int      `json:"height"`
-	States []string `json:"states,omitempty"`
-}
-
 // a11yMaxPointerCoord mirrors MAX_POINTER_COORD in the helper: RFB pointer
 // positions are 16-bit, and AT-SPI reports extents near math.MinInt32 for
 // nodes that were never laid out.
 const a11yMaxPointerCoord = 32767
+
+func a11yPointerCoordValid(p a11yPoint) bool {
+	return p.X >= 0 && p.X <= a11yMaxPointerCoord && p.Y >= 0 && p.Y <= a11yMaxPointerCoord
+}
+
+type a11ySnapshotItem struct {
+	Ref     string   `json:"ref"`
+	Role    string   `json:"role"`
+	Name    string   `json:"name"`
+	X       int      `json:"x"`
+	Y       int      `json:"y"`
+	Width   int      `json:"width"`
+	Height  int      `json:"height"`
+	States  []string `json:"states,omitempty"`
+	Actions []string `json:"actions,omitempty"`
+	AppPID  int      `json:"app_pid,omitempty"`
+}
 
 // center returns the on-screen centre of the element, or false when the
 // helper reported no usable box (such nodes can still be driven through
@@ -60,10 +66,6 @@ func (it a11ySnapshotItem) center() (a11yPoint, bool) {
 		return a11yPoint{}, false
 	}
 	return point, true
-}
-
-func a11yPointerCoordValid(p a11yPoint) bool {
-	return p.X >= 0 && p.X <= a11yMaxPointerCoord && p.Y >= 0 && p.Y <= a11yMaxPointerCoord
 }
 
 type a11yDiagnostics struct {
@@ -92,10 +94,19 @@ func (d a11yDiagnostics) public() map[string]any {
 	}
 }
 
+// a11ySnapshotApp is the application a snapshot was scoped to.
+type a11ySnapshotApp struct {
+	AppID string `json:"app_id"`
+	PID   int    `json:"pid"`
+	Name  string `json:"name"`
+}
+
 type a11ySnapshotOutput struct {
 	OK              bool               `json:"ok"`
 	ProtocolVersion int                `json:"protocol_version"`
 	HelperVersion   string             `json:"helper_version"`
+	SnapshotID      string             `json:"snapshot_id"`
+	App             *a11ySnapshotApp   `json:"app,omitempty"`
 	Limit           int                `json:"limit"`
 	Truncated       bool               `json:"truncated"`
 	Items           []a11ySnapshotItem `json:"items"`
@@ -111,14 +122,39 @@ func (o *a11ySnapshotOutput) text() string {
 	return strings.Join(o.Lines, "\n")
 }
 
+type a11ySelection struct {
+	Start int    `json:"start"`
+	End   int    `json:"end"`
+	Mode  string `json:"mode"`
+}
+
 type a11yActionOutput struct {
-	OK              bool       `json:"ok"`
-	ProtocolVersion int        `json:"protocol_version"`
-	Ref             string     `json:"ref"`
-	Action          string     `json:"action"`
-	Detail          string     `json:"detail,omitempty"`
-	Fallback        *a11yPoint `json:"fallback,omitempty"`
-	Error           string     `json:"error,omitempty"`
+	OK              bool           `json:"ok"`
+	ProtocolVersion int            `json:"protocol_version"`
+	Ref             string         `json:"ref"`
+	Action          string         `json:"action"`
+	Detail          string         `json:"detail,omitempty"`
+	Fallback        *a11yPoint     `json:"fallback,omitempty"`
+	Error           string         `json:"error,omitempty"`
+	Unsupported     bool           `json:"unsupported,omitempty"`
+	Selection       *a11ySelection `json:"selection,omitempty"`
+}
+
+// fallbackPoint returns the helper's pointer fallback only when it is a real
+// screen position.
+func (o *a11yActionOutput) fallbackPoint() (a11yPoint, bool) {
+	if o == nil || o.Fallback == nil || !a11yPointerCoordValid(*o.Fallback) {
+		return a11yPoint{}, false
+	}
+	return *o.Fallback, true
+}
+
+// failure renders a failed helper action as an error for the model.
+func (o *a11yActionOutput) failure(what, ref string) error {
+	if o.Error != "" {
+		return fmt.Errorf("a11y %s %s failed: %s", what, ref, o.Error)
+	}
+	return fmt.Errorf("a11y %s %s failed without diagnostic", what, ref)
 }
 
 type a11yLocateOutput struct {
@@ -133,6 +169,67 @@ type a11yLocateOutput struct {
 	Height          int        `json:"height"`
 	Center          *a11yPoint `json:"center,omitempty"`
 	States          []string   `json:"states,omitempty"`
+	Actions         []string   `json:"actions,omitempty"`
+	AppPID          int        `json:"app_pid,omitempty"`
+}
+
+type a11yAppWindow struct {
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Active bool   `json:"active"`
+}
+
+type a11yAppInfo struct {
+	AppID   string          `json:"app_id"`
+	PID     int             `json:"pid"`
+	BusName string          `json:"bus_name"`
+	Name    string          `json:"name"`
+	Toolkit string          `json:"toolkit"`
+	Version string          `json:"version"`
+	Windows []a11yAppWindow `json:"windows"`
+}
+
+// publicMap is what list_apps returns to the model: identity, status, and
+// the windows the model can recognise the application by. The bus name is a
+// transport detail and stays out.
+func (a a11yAppInfo) publicMap() map[string]any {
+	windows := make([]map[string]any, 0, len(a.Windows))
+	for _, w := range a.Windows {
+		win := map[string]any{"name": w.Name, "role": w.Role, "active": w.Active}
+		if w.Width > 0 && w.Height > 0 {
+			win["bounds"] = map[string]int{"x": w.X, "y": w.Y, "width": w.Width, "height": w.Height}
+		}
+		windows = append(windows, win)
+	}
+	out := map[string]any{
+		"app_id":  a.AppID,
+		"name":    a.Name,
+		"status":  "running",
+		"windows": windows,
+	}
+	if a.PID > 0 {
+		out["pid"] = a.PID
+	}
+	if a.Toolkit != "" {
+		out["toolkit"] = a.Toolkit
+	}
+	if a.Version != "" {
+		out["toolkit_version"] = a.Version
+	}
+	return out
+}
+
+type a11yAppsOutput struct {
+	OK              bool          `json:"ok"`
+	ProtocolVersion int           `json:"protocol_version"`
+	HelperVersion   string        `json:"helper_version"`
+	Apps            []a11yAppInfo `json:"apps"`
+	BusAddress      string        `json:"bus_address,omitempty"`
+	Display         string        `json:"display,omitempty"`
 }
 
 func execA11y(ctx context.Context, client *bridge.Client, args ...string) ([]byte, error) {
@@ -192,11 +289,32 @@ func decodeA11y(raw []byte, what string, out any) error {
 	return nil
 }
 
-func computerA11ySnapshot(ctx context.Context, client *bridge.Client, limit int) (*a11ySnapshotOutput, error) {
+func computerA11yApps(ctx context.Context, client *bridge.Client) (*a11yAppsOutput, error) {
+	raw, err := execA11y(ctx, client, "apps")
+	if err != nil {
+		return nil, err
+	}
+	var out a11yAppsOutput
+	if err := decodeA11y(raw, "apps", &out); err != nil {
+		return nil, err
+	}
+	if !out.OK {
+		return nil, errors.New("a11y-cli apps reported failure")
+	}
+	return &out, nil
+}
+
+// computerA11ySnapshot walks the desktop, or only the application selected
+// by app (an app_id such as app:1234) when it is non-empty.
+func computerA11ySnapshot(ctx context.Context, client *bridge.Client, limit int, app string) (*a11ySnapshotOutput, error) {
 	if limit <= 0 {
 		limit = a11ySnapshotDefaultLimit
 	}
-	raw, err := execA11y(ctx, client, "snapshot", "--limit", strconv.Itoa(limit))
+	args := []string{"snapshot", "--limit", strconv.Itoa(limit)}
+	if app = strings.TrimSpace(app); app != "" {
+		args = append(args, "--app", app)
+	}
+	raw, err := execA11y(ctx, client, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +328,16 @@ func computerA11ySnapshot(ctx context.Context, client *bridge.Client, limit int)
 	return &out, nil
 }
 
-func computerA11yLocate(ctx context.Context, client *bridge.Client, ref string) (*a11yLocateOutput, error) {
-	raw, err := execA11y(ctx, client, "locate", "--ref", ref)
+func a11ySnapshotArgs(snapshotID string) []string {
+	if snapshotID = strings.TrimSpace(snapshotID); snapshotID == "" {
+		return nil
+	}
+	return []string{"--snapshot", snapshotID}
+}
+
+func computerA11yLocate(ctx context.Context, client *bridge.Client, ref, snapshotID string) (*a11yLocateOutput, error) {
+	args := append([]string{"locate", "--ref", ref}, a11ySnapshotArgs(snapshotID)...)
+	raw, err := execA11y(ctx, client, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -230,31 +356,42 @@ func computerA11yLocate(ctx context.Context, client *bridge.Client, ref string) 
 	return &out, nil
 }
 
-func computerA11yClick(ctx context.Context, client *bridge.Client, ref string) (*a11yActionOutput, error) {
-	return runA11yAction(ctx, client, "click", ref, nil)
+func computerA11yClick(ctx context.Context, client *bridge.Client, ref, snapshotID string) (*a11yActionOutput, error) {
+	return runA11yAction(ctx, client, "click", ref, snapshotID)
 }
 
-func computerA11yEdit(ctx context.Context, client *bridge.Client, ref, text string, replace bool) (*a11yActionOutput, error) {
+func computerA11yEdit(ctx context.Context, client *bridge.Client, ref, text string, replace bool, snapshotID string) (*a11yActionOutput, error) {
 	action := "type"
 	if replace {
 		action = "fill"
 	}
-	return runA11yAction(ctx, client, action, ref, &text)
+	return runA11yAction(ctx, client, action, ref, snapshotID, "--text", text)
 }
 
-// runA11yAction invokes a ref-based helper action. text is passed through
-// verbatim when non-nil, including the empty string, so fill can clear.
-func runA11yAction(ctx context.Context, client *bridge.Client, action, ref string, text *string) (*a11yActionOutput, error) {
-	args := []string{action, "--ref", ref}
-	if text != nil {
-		args = append(args, "--text", *text)
-	}
+func computerA11ySetValue(ctx context.Context, client *bridge.Client, ref, value, snapshotID string) (*a11yActionOutput, error) {
+	return runA11yAction(ctx, client, "set-value", ref, snapshotID, "--value", value)
+}
+
+func computerA11ySelectText(ctx context.Context, client *bridge.Client, ref, text, prefix, suffix, mode, snapshotID string) (*a11yActionOutput, error) {
+	return runA11yAction(ctx, client, "select-text", ref, snapshotID, "--text", text, "--prefix", prefix, "--suffix", suffix, "--mode", mode)
+}
+
+func computerA11yNamedAction(ctx context.Context, client *bridge.Client, ref, name, snapshotID string) (*a11yActionOutput, error) {
+	return runA11yAction(ctx, client, "action", ref, snapshotID, "--name", name)
+}
+
+// runA11yAction invokes a ref-based helper subcommand. extra flags are passed
+// verbatim, including empty values, so fill can clear a field.
+func runA11yAction(ctx context.Context, client *bridge.Client, subcommand, ref, snapshotID string, extra ...string) (*a11yActionOutput, error) {
+	args := []string{subcommand, "--ref", ref}
+	args = append(args, a11ySnapshotArgs(snapshotID)...)
+	args = append(args, extra...)
 	raw, err := execA11y(ctx, client, args...)
 	if err != nil {
 		return nil, err
 	}
 	var out a11yActionOutput
-	if err := decodeA11y(raw, action, &out); err != nil {
+	if err := decodeA11y(raw, subcommand, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

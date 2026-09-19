@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -55,19 +56,34 @@ type guiContract struct {
 	ElementKeys []string
 	Params      map[string]map[string]any
 	Actions     []guiActionSpec
+	// Common lists parameters every action accepts (target identity).
+	Common []string
+	// CommonValidate runs for every action, before the action's own checks.
+	CommonValidate func(args map[string]any) error
 
 	byName  map[string]*guiActionSpec
 	aliases map[string]string
 }
 
 func newGUIContract(actionKey string, elementKeys []string, params map[string]map[string]any, actions []guiActionSpec) *guiContract {
+	return newGUIContractWithCommon(actionKey, elementKeys, params, nil, nil, actions)
+}
+
+func newGUIContractWithCommon(actionKey string, elementKeys []string, params map[string]map[string]any, common []string, commonValidate func(map[string]any) error, actions []guiActionSpec) *guiContract {
 	c := &guiContract{
-		ActionKey:   actionKey,
-		ElementKeys: elementKeys,
-		Params:      params,
-		Actions:     actions,
-		byName:      make(map[string]*guiActionSpec, len(actions)),
-		aliases:     make(map[string]string),
+		ActionKey:      actionKey,
+		ElementKeys:    elementKeys,
+		Params:         params,
+		Actions:        actions,
+		Common:         common,
+		CommonValidate: commonValidate,
+		byName:         make(map[string]*guiActionSpec, len(actions)),
+		aliases:        make(map[string]string),
+	}
+	for _, key := range common {
+		if _, ok := params[key]; !ok {
+			panic("gui contract: common parameter " + key + " is not declared")
+		}
 	}
 	for i := range c.Actions {
 		spec := &c.Actions[i]
@@ -98,6 +114,7 @@ func newGUIContract(actionKey string, elementKeys []string, params map[string]ma
 func (s *guiActionSpec) allKeys(c *guiContract) []string {
 	keys := append([]string{}, s.Required...)
 	keys = append(keys, s.Optional...)
+	keys = append(keys, c.Common...)
 	switch s.Locator {
 	case guiLocatorElement, guiLocatorElementOptional:
 		keys = append(keys, c.ElementKeys...)
@@ -130,6 +147,52 @@ func (c *guiContract) enumValues() []string {
 	}
 	for _, spec := range c.Actions {
 		out = append(out, spec.Aliases...)
+	}
+	return out
+}
+
+// documentation renders the contract as structured data for the
+// computer_context documentation action: the same specs that generate the
+// schema and drive validation, so what the model reads is what runs.
+func (c *guiContract) documentation() map[string]any {
+	actions := make([]map[string]any, 0, len(c.Actions))
+	for _, spec := range c.Actions {
+		entry := map[string]any{
+			"name":    spec.Name,
+			"summary": spec.Summary,
+		}
+		if len(spec.Aliases) > 0 {
+			entry["aliases"] = spec.Aliases
+		}
+		if len(spec.Required) > 0 {
+			entry["required"] = spec.Required
+		}
+		if len(spec.Optional) > 0 {
+			entry["optional"] = spec.Optional
+		}
+		if locator := c.locatorText(spec.Locator); locator != "" {
+			entry["target"] = locator
+		}
+		if len(spec.AllowEmpty) > 0 {
+			entry["allow_empty"] = spec.AllowEmpty
+		}
+		actions = append(actions, entry)
+	}
+	params := make(map[string]any, len(c.Params))
+	for name, schema := range c.Params {
+		cloned := make(map[string]any, len(schema))
+		for k, v := range schema {
+			cloned[k] = v
+		}
+		params[name] = cloned
+	}
+	out := map[string]any{
+		"action_key": c.ActionKey,
+		"actions":    actions,
+		"parameters": params,
+	}
+	if len(c.Common) > 0 {
+		out["common_parameters"] = c.Common
 	}
 	return out
 }
@@ -167,6 +230,11 @@ func (c *guiContract) actionDescription(intro string) string {
 			b.WriteString("]")
 		}
 		b.WriteString("\n")
+	}
+	if len(c.Common) > 0 {
+		b.WriteString("Every action also accepts: ")
+		b.WriteString(strings.Join(c.Common, ", "))
+		b.WriteString(".\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -258,6 +326,11 @@ func (c *guiContract) normalize(args map[string]any) (*guiActionSpec, error) {
 	}
 	if err := c.checkLocator(spec, args); err != nil {
 		return nil, err
+	}
+	if c.CommonValidate != nil {
+		if err := c.CommonValidate(args); err != nil {
+			return nil, err
+		}
 	}
 	if spec.Validate != nil {
 		if err := spec.Validate(args); err != nil {
@@ -489,6 +562,39 @@ func guiDurationMS(args map[string]any, legacyKey string, fallback int) (int, er
 		}
 	}
 	return fallback, nil
+}
+
+// floatArg reads a numeric parameter as float64.
+func floatArg(args map[string]any, key string) (float64, bool, error) {
+	if args == nil {
+		return 0, false, nil
+	}
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return 0, false, nil
+	}
+	switch v := raw.(type) {
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, true, fmt.Errorf("%s must be a valid number", key)
+		}
+		return v, true, nil
+	case int:
+		return float64(v), true, nil
+	case int64:
+		return float64(v), true, nil
+	default:
+		value, ok, err := IntArg(args, key)
+		return float64(value), ok, err
+	}
+}
+
+// jsonUnmarshalLoose decodes raw JSON into out, ignoring an empty payload.
+func jsonUnmarshalLoose(raw []byte, out any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	return json.Unmarshal(raw, out)
 }
 
 // rawStringArg returns a string parameter verbatim. StringArg trims

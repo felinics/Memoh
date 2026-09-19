@@ -52,6 +52,7 @@ func ToolBrowserObserve() ToolName       { return toolname.ToolBrowserObserve() 
 func ToolComputerObserve() ToolName      { return toolname.ToolComputerObserve() }
 func ToolComputerAction() ToolName       { return toolname.ToolComputerAction() }
 func ToolBrowserRemoteSession() ToolName { return toolname.ToolBrowserRemoteSession() }
+func ToolComputerContext() ToolName      { return toolname.ToolComputerContext() }
 
 func ToolWebSearch() ToolName       { return toolname.ToolWebSearch() }
 func ToolWebFetch() ToolName        { return toolname.ToolWebFetch() }

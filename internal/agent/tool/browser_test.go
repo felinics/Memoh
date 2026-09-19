@@ -296,3 +296,15 @@ func TestComputerRefFallbackPoint(t *testing.T) {
 		t.Fatalf("expected canonical ref e3, got %q", got)
 	}
 }
+
+func TestPageExceptionMessageDropsStackTrace(t *testing.T) {
+	t.Parallel()
+
+	got := pageExceptionMessage("Error: ref e1 is stale: observe again\n    at elementByRef (<anonymous>:135:21)\n    at mustTarget (<anonymous>:145:40)", "Uncaught")
+	if got != "ref e1 is stale: observe again" {
+		t.Fatalf("unexpected message: %q", got)
+	}
+	if got := pageExceptionMessage("", "Uncaught (in promise)"); got != "Uncaught (in promise)" {
+		t.Fatalf("expected text fallback, got %q", got)
+	}
+}

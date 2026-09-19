@@ -1006,6 +1006,7 @@
       "computer_observe": "Observe desktop {action}",
       "computer_action": "Desktop {action}",
       "browser_remote_session": "Browser session {action}",
+      "computer_context": "Computer context {action}",
       "browserAction": {
         "navigate": "Open web page",
         "click": "Click",
@@ -1013,6 +1014,10 @@
         "focus": "Focus",
         "type": "Type",
         "fill": "Fill",
+        "set_value": "Set value",
+        "paste": "Paste into page",
+        "select_text": "Select text in page",
+        "secondary_action": "Run page element action",
         "press": "Press key",
         "hover": "Hover",
         "select": "Select option",
@@ -1057,6 +1062,10 @@
         "double_click": "Double click",
         "type": "Type",
         "fill": "Fill",
+        "set_value": "Set value",
+        "paste": "Paste on desktop",
+        "select_text": "Select text on desktop",
+        "secondary_action": "Run element action",
         "key": "Press key",
         "scroll": "Scroll",
         "scroll_up": "Scroll up",
@@ -1069,6 +1078,14 @@
         "wait": "Wait on computer",
         "mouse_move": "Move pointer",
         "pointer": "Pointer"
+      },
+      "computerContext": {
+        "get_state": "Check desktop and browsers",
+        "list_apps": "List applications",
+        "get_app": "Select application",
+        "list_browsers": "List browsers",
+        "get_browser": "Select browser",
+        "documentation": "Read GUI tool documentation"
       },
       "remoteSession": {
         "create": "Open session",

@@ -1,8 +1,8 @@
-//! `a11y-cli snapshot` subcommand — walk the desktop accessibility tree
-//! iteratively, assign `eN` refs to visible nodes, persist the index, and
-//! emit both human-readable lines and structured JSON with diagnostics so the
-//! Go caller can tell whether an empty list means "no UI" or "everything
-//! filtered out".
+//! `a11y-cli snapshot` subcommand — walk the desktop (or one application's)
+//! accessibility tree iteratively, assign `eN` refs to visible nodes, persist
+//! the index under a fresh snapshot id, and emit both human-readable lines and
+//! structured JSON with diagnostics so the Go caller can tell whether an empty
+//! list means "no UI" or "everything filtered out".
 
 use anyhow::Result;
 use atspi::object_ref::ObjectRefOwned;
@@ -10,6 +10,7 @@ use atspi::proxy::accessible::AccessibleProxy;
 use atspi::{AccessibilityConnection, CoordType, Role, State, StateSet};
 use serde::Serialize;
 
+use crate::apps;
 use crate::connection;
 use crate::refs::{self, RefEntry};
 
@@ -33,6 +34,14 @@ struct SnapshotItem {
     height: i32,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     states: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    actions: Vec<String>,
+    #[serde(skip_serializing_if = "is_zero")]
+    app_pid: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 #[derive(Serialize, Default)]
@@ -50,12 +59,24 @@ struct Diagnostics {
     display: Option<String>,
 }
 
+/// The application a snapshot was scoped to.
+#[derive(Serialize)]
+struct SnapshotApp {
+    app_id: String,
+    pid: u32,
+    name: String,
+}
+
 #[derive(Serialize)]
 struct SnapshotOutput {
     ok: bool,
     /// Contract version; see `crate::PROTOCOL_VERSION`.
     protocol_version: u32,
     helper_version: &'static str,
+    /// Identifier of this observation; refs are only valid together with it.
+    snapshot_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app: Option<SnapshotApp>,
     /// The `--limit` that was in effect, echoed so the caller can tell a
     /// short list from a capped one.
     limit: usize,
@@ -66,10 +87,30 @@ struct SnapshotOutput {
     diagnostics: Diagnostics,
 }
 
-pub async fn run(limit: usize) -> Result<()> {
+pub async fn run(limit: usize, app: Option<&str>) -> Result<()> {
     let conn = connection::open().await?;
-    let (entries, truncated, diagnostics) = collect(&conn, limit).await?;
-    let refs_path = refs::write(&entries)?;
+    let all_apps = apps::list(&conn).await?;
+    let (scope, roots): (
+        Option<SnapshotApp>,
+        Vec<&(apps::AppInfo, AccessibleProxy<'_>)>,
+    ) = match app {
+        Some(selector) => {
+            let chosen = apps::select(&all_apps, selector)?;
+            (
+                Some(SnapshotApp {
+                    app_id: chosen.0.app_id.clone(),
+                    pid: chosen.0.pid,
+                    name: chosen.0.name.clone(),
+                }),
+                vec![chosen],
+            )
+        }
+        None => (None, all_apps.iter().collect()),
+    };
+    let (entries, truncated, diagnostics) = collect(&conn, &roots, limit).await?;
+    let snapshot_id = refs::new_snapshot_id();
+    let app_pid = scope.as_ref().map(|s| s.pid).unwrap_or(0);
+    let refs_path = refs::write(&snapshot_id, app_pid, &entries)?;
 
     let lines: Vec<String> = entries.iter().map(format_line).collect();
     let items: Vec<SnapshotItem> = entries
@@ -83,6 +124,8 @@ pub async fn run(limit: usize) -> Result<()> {
             width: entry.width,
             height: entry.height,
             states: entry.states.clone(),
+            actions: entry.actions.clone(),
+            app_pid: entry.app_pid,
         })
         .collect();
 
@@ -90,6 +133,8 @@ pub async fn run(limit: usize) -> Result<()> {
         ok: true,
         protocol_version: crate::PROTOCOL_VERSION,
         helper_version: env!("CARGO_PKG_VERSION"),
+        snapshot_id,
+        app: scope,
         limit,
         truncated,
         items,
@@ -118,7 +163,14 @@ fn format_line(entry: &RefEntry) -> String {
     if !entry.states.is_empty() {
         line.push_str(&format!(" ({})", entry.states.join(", ")));
     }
+    if !entry.actions.is_empty() {
+        line.push_str(&format!(" actions={}", entry.actions.join(",")));
+    }
     line
+}
+
+fn json_quote(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""))
 }
 
 /// States worth surfacing to the model: they change what an action can do
@@ -150,41 +202,28 @@ fn interesting_states(states: &StateSet) -> Vec<String> {
     out
 }
 
-fn json_quote(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""))
-}
-
 async fn collect(
     conn: &AccessibilityConnection,
+    roots: &[&(apps::AppInfo, AccessibleProxy<'_>)],
     limit: usize,
 ) -> Result<(Vec<RefEntry>, bool, Diagnostics)> {
-    let registry = conn.root_accessible_on_registry().await?;
-    let app_refs = registry.get_children().await?;
-
     let mut entries: Vec<RefEntry> = Vec::new();
     let mut diag = Diagnostics {
-        apps: app_refs.len(),
+        apps: roots.len(),
         bus_address: connection::current_bus_address(),
         display: std::env::var("DISPLAY").ok(),
         ..Diagnostics::default()
     };
     let mut truncated = false;
 
-    for app_obj in app_refs.into_iter().take(MAX_APPS) {
+    for (info, app_proxy) in roots.iter().take(MAX_APPS) {
         if entries.len() >= limit {
             truncated = true;
             break;
         }
-        let app_proxy = match connection::accessible_for(conn, &app_obj).await {
-            Ok(proxy) => proxy,
-            Err(_) => {
-                diag.errors += 1;
-                continue;
-            }
-        };
 
         // Iterative depth-first walk inside this application.
-        let mut stack: Vec<AccessibleProxy<'_>> = vec![app_proxy];
+        let mut stack: Vec<AccessibleProxy<'_>> = vec![(*app_proxy).clone()];
         while let Some(node) = stack.pop() {
             if entries.len() >= limit {
                 truncated = true;
@@ -196,7 +235,7 @@ async fn collect(
             }
             diag.visited += 1;
 
-            match describe(conn, &node, entries.len() + 1).await {
+            match describe(conn, &node, entries.len() + 1, info.pid).await {
                 Outcome::Keep(entry) => {
                     diag.accepted += 1;
                     entries.push(entry);
@@ -245,6 +284,7 @@ async fn describe(
     conn: &AccessibilityConnection,
     node: &AccessibleProxy<'_>,
     next_index: usize,
+    app_pid: u32,
 ) -> Outcome {
     let states = match node.get_state().await {
         Ok(s) => s,
@@ -285,6 +325,8 @@ async fn describe(
         return Outcome::SkipGeometry;
     }
 
+    let actions = action_names(conn, node).await;
+
     let inner = node.inner();
     Outcome::Keep(RefEntry {
         ref_id: format!("e{next_index}"),
@@ -297,7 +339,25 @@ async fn describe(
         width,
         height,
         states: interesting_states(&states),
+        actions,
+        app_pid,
     })
+}
+
+/// Names of the AT-SPI actions a node exposes, empty when it has none or the
+/// interface is missing. Best effort: a failure here must not drop the node.
+async fn action_names(conn: &AccessibilityConnection, node: &AccessibleProxy<'_>) -> Vec<String> {
+    let Ok(actions) = connection::action_for(conn, node).await else {
+        return Vec::new();
+    };
+    let Ok(descriptors) = actions.get_actions().await else {
+        return Vec::new();
+    };
+    descriptors
+        .into_iter()
+        .map(|a| a.name.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect()
 }
 
 fn is_on_screen(states: &StateSet) -> bool {
@@ -340,17 +400,20 @@ mod tests {
             width: w,
             height: h,
             states: Vec::new(),
+            actions: Vec::new(),
+            app_pid: 0,
         }
     }
 
     #[test]
-    fn format_line_appends_states_when_present() {
+    fn format_line_appends_states_and_actions_when_present() {
         let mut e = entry("text", "Search", 10, 20, 200, 24);
         e.states = vec!["focused".to_string(), "editable".to_string()];
+        e.actions = vec!["click".to_string(), "menu".to_string()];
         let line = format_line(&e);
         assert_eq!(
             line,
-            "- text \"Search\" [ref=e3] @10,20 200x24 (focused, editable)"
+            "- text \"Search\" [ref=e3] @10,20 200x24 (focused, editable) actions=click,menu"
         );
     }
 

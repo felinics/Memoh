@@ -74,6 +74,9 @@ import {
   Workflow,
   Wrench,
   X,
+  ClipboardPaste,
+  TextSelect,
+  LayoutDashboard,
 } from 'lucide-vue-next'
 import type { ToolCallBlock } from '@/store/chat-list'
 import ToolCallDetailBrowser from './tool-call-detail-browser.vue'
@@ -150,7 +153,7 @@ const READONLY_TOOLS = new Set([
   'list_execution_locations',
   'get_contacts', 'list_sessions', 'list_email', 'read_email', 'list_email_accounts',
   'list_schedule', 'get_schedule', 'list_skills', 'bg_status', 'list_background', 'get_background_status', 'wait', 'wait_until',
-  'browser_observe', 'computer_observe',
+  'browser_observe', 'computer_observe', 'computer_context',
 ])
 
 export function isReadOnlyTool(toolName: string): boolean {
@@ -522,6 +525,10 @@ const BROWSER_ACTION_ICONS: Record<string, Component> = {
   focus: Focus,
   type: Keyboard,
   fill: TextCursorInput,
+  set_value: TextCursorInput,
+  paste: ClipboardPaste,
+  select_text: TextSelect,
+  secondary_action: ListChecks,
   press: Keyboard,
   hover: MousePointer2,
   select: ChevronDown,
@@ -564,6 +571,15 @@ const COMPUTER_OBSERVE_ICONS: Record<string, Component> = {
   screenshot: Camera,
 }
 
+const COMPUTER_CONTEXT_ICONS: Record<string, Component> = {
+  get_state: LayoutDashboard,
+  list_apps: AppWindow,
+  get_app: AppWindow,
+  list_browsers: Globe,
+  get_browser: Globe,
+  documentation: FileText,
+}
+
 const COMPUTER_ACTION_ICONS: Record<string, Component> = {
   click: MousePointerClick,
   click_right: MousePointerClick,
@@ -571,6 +587,10 @@ const COMPUTER_ACTION_ICONS: Record<string, Component> = {
   double_click: MousePointerClick,
   type: Keyboard,
   fill: TextCursorInput,
+  set_value: TextCursorInput,
+  paste: ClipboardPaste,
+  select_text: TextSelect,
+  secondary_action: ListChecks,
   key: Keyboard,
   scroll: MoveVertical,
   scroll_up: MoveUp,
@@ -1079,6 +1099,14 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       return {
         ...resolved,
         target: guiKeyTarget(resolved.action, input) || pickString(input, 'ref') || coords,
+        detail: ToolCallDetailComputer,
+      }
+    }
+    case 'computer_context': {
+      const resolved = resolveGuiAction(COMPUTER_CONTEXT_ICONS, 'computerContext', LayoutDashboard, 'computer_context', pickString(input, 'action'))
+      return {
+        ...resolved,
+        target: pickString(input, 'app', 'browser_id', 'app_id', 'url'),
         detail: ToolCallDetailComputer,
       }
     }

@@ -1018,6 +1018,7 @@
       "computer_observe": "观察桌面 {action}",
       "computer_action": "桌面 {action}",
       "browser_remote_session": "浏览器会话 {action}",
+      "computer_context": "电脑上下文 {action}",
       "browserAction": {
         "navigate": "打开网页",
         "click": "点击",
@@ -1025,6 +1026,10 @@
         "focus": "聚焦",
         "type": "输入",
         "fill": "填充",
+        "set_value": "设置值",
+        "paste": "向页面粘贴",
+        "select_text": "在页面中选中文本",
+        "secondary_action": "执行页面元素动作",
         "press": "按键",
         "hover": "悬停",
         "select": "选择选项",
@@ -1069,6 +1074,10 @@
         "double_click": "双击",
         "type": "输入",
         "fill": "填充",
+        "set_value": "设置值",
+        "paste": "在桌面粘贴",
+        "select_text": "在桌面选中文本",
+        "secondary_action": "执行元素动作",
         "key": "按键",
         "scroll": "滚动",
         "scroll_up": "向上滚动",
@@ -1081,6 +1090,14 @@
         "wait": "在电脑上等待",
         "mouse_move": "移动指针",
         "pointer": "指针操作"
+      },
+      "computerContext": {
+        "get_state": "查看桌面与浏览器状态",
+        "list_apps": "列出应用",
+        "get_app": "选择应用",
+        "list_browsers": "列出浏览器",
+        "get_browser": "选择浏览器",
+        "documentation": "读取 GUI 工具文档"
       },
       "remoteSession": {
         "create": "开启会话",

@@ -161,7 +161,7 @@ func (s *Service) CreatePending(ctx context.Context, input CreatePendingInput) (
 	if err != nil {
 		return Request{}, err
 	}
-	operation, ok := OperationForTool(input.ToolName)
+	operation, ok := OperationForCall(input.ToolName, inputMap(input.ToolInput))
 	if !ok {
 		return Request{}, errors.New("unsupported tool approval operation")
 	}
@@ -511,7 +511,7 @@ func (s *Service) runApprovalHook(ctx context.Context, event string, input Creat
 		"reason":       req.DecisionReason,
 	}
 	if req.Operation == "" {
-		if operation, ok := OperationForTool(input.ToolName); ok {
+		if operation, ok := OperationForCall(input.ToolName, inputMap(input.ToolInput)); ok {
 			payload["operation"] = operation
 		}
 	}

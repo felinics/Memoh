@@ -310,21 +310,35 @@ P0 实施记录（2026-09-18，分支 `feat/computer-browser-p0`）：
 
 ### P1：目标发现和稳定引用
 
-- [ ] 新增 computer_context 全部 action。
-- [ ] 增加 app_id/browser_id/tab_id 定位、会话缺省上下文及 generation。
-- [ ] 实现稳定 ref 与快照归属；失效引用不能命中新元素。
-- [ ] 支持两个应用、两个浏览器、多个标签页和同名目标歧义。
+- [x] 新增 computer_context 全部 action。
+- [x] 增加 app_id/browser_id/tab_id 定位、会话缺省上下文及 generation。
+- [x] 实现稳定 ref 与快照归属；失效引用不能命中新元素。
+- [x] 支持两个应用、两个浏览器、多个标签页和同名目标歧义。
 
 验收：切换或关闭其他标签页不改变显式 tab_id 的操作对象；不同会话互不覆盖默认目标；已连接电脑默认位置不改变 GUI 工具的 native Workspace 范围。
 
+P1 实施记录（2026-09-19，分支 `feat/computer-browser-p1-p2`，基于 P0）：
+
+- `computer_context`（`internal/agent/tool/computer_context.go`）：`get_state`（应用、浏览器、标签页与会话当前选择，分域报错）、`list_apps`/`get_app`（`a11y-cli apps` 通过总线守护进程解析 pid，`app_id = app:<pid>`；名称歧义返回候选 id；`launch=true` 按 desktop entry / PATH / 绝对路径解析为 argv 启动，不经 shell 拼接，并由审批策略按 exec 治理，见 `approval.OperationForCall`；启动后未注册到无障碍总线的进程如 xterm 返回 `accessible: false` 的结构化结果而不是伪装成功）、`list_browsers`/`get_browser`（按 `--remote-debugging-port` 发现 Chromium 实例，`browser_id = chrome-<port>`；URL 只用于匹配现有标签页，多个匹配返回候选）、`documentation`（返回生成 schema 所用的契约与各后端能力）。
+- 目标身份：所有浏览器调用接受 `browser_id`/`tab_id`（兼容 `tab_index`），所有桌面调用接受 `app_id`；缺省来自 per-(bot, session) 的内存状态（`gui_session.go`），不同会话互不覆盖；动作开始前冻结目标，`tab_source` 标明来源。`browser_id` 必须是发现返回的 id，URL 与命令名在校验层即被拒绝。
+- 稳定引用：浏览器快照把元素列表钉在页面上（`memohTakeSnapshot`）并返回 `snapshot_id`，ref 只在同一快照、同一标签页、元素仍在文档中时解析，导航/刷新/历史使之失效；桌面快照的 `snapshot_id` 写入 helper 的引用索引，动作携带 `--snapshot`，跨快照 ref 被 helper 拒绝，Go 侧还要求本会话最近快照覆盖所选应用。
+- 真实验证（脚本化模型驱动真实 UI）：两台 xfce4-terminal + 一台 xfce4-appfinder、两个 Chromium 实例（9222/9223）与多个标签页；同名应用歧义、显式 tab_id 不受会话切页影响、导航后与跨快照 ref 被拒绝、跨会话默认目标隔离（每条消息新会话）均有工具记录，见 PR 截图。
+
 ### P2：补齐输入和元素操作
 
-- [ ] Computer/Browser 的 paste、select_text、set_value、secondary_action。
-- [ ] Browser 坐标点击/悬停/拖动、按钮与次数、pages 滚动。
-- [ ] 完整键盘按下/释放、取消清理与剪贴板恢复。
-- [ ] 对表单、contenteditable、原生控件验证实际事件和保存结果。
+- [x] Computer/Browser 的 paste、select_text、set_value、secondary_action。
+- [x] Browser 坐标点击/悬停/拖动、按钮与次数、pages 滚动。
+- [x] 完整键盘按下/释放、取消清理与剪贴板恢复。
+- [x] 对表单、contenteditable、原生控件验证实际事件和保存结果。
 
 验收：多行中文/emoji、HTML 粘贴、重复文本消歧、选区前后光标、嵌套滚动、拖放、用户改动剪贴板和中断后的释放均有实际证据。
+
+P2 实施记录（2026-09-19，同一分支）：
+
+- Browser：`set_value`（原生 setter + input/change，select 校验选项存在）、`paste`（真实 `paste` 事件携带 text/plain 与 text/html，页面处理器消费则 `via: paste_event`，否则 contenteditable 走 insertHTML、字段走 insertText）、`select_text`（`prefix+text+suffix` 唯一匹配，重复与缺失分别报错；`selection_type` 支持选中及光标前后；UTF-16 偏移）、`secondary_action` 明确返回不支持（DOM 无辅助动作）、`scroll` 支持 `pages`（按目标可见区域换算，返回前后 scrollTop）、`keydown`/`keyup` 在会话内跟踪按住的键并在后续 `press` 中带上修饰键，`press` 在失败时也释放本次按下的修饰键。
+- Computer：`set_value`（EditableText 内容或 Value 接口数值，超范围与非数值明确报错，不支持的控件如按钮返回明确错误）、`select_text`（AT-SPI Text 选区/光标，字符偏移）、`secondary_action`（只执行快照 `actions=` 列出的动作，未列出的名称返回可用列表）、`paste`（xclip 剪贴板：保存原剪贴板 → 写入 → 聚焦目标 → Ctrl+V → 恢复；粘贴期间被改动则保留，按 bot 串行）；工作区镜像新增 `xclip`。
+- 键鼠：Browser `mouseDrag` 在中途失败时也释放按钮；Computer `drag` 失败时补发释放；`mouse_move`/`pointer` 保持的按钮在后续失败时释放。
+- 真实验证：浏览器侧 set_value「设置的值 🚀」→ select_text 消歧/光标定位后输入 → html 粘贴被页面处理器消费、文本粘贴走 insertText → pages 滚动 scrollTop 0→120 → keydown Shift 后页面 keydown 事件 shiftKey=true，keyup 后为 false；桌面侧 set_value/select_text/fill 清空/剪贴板粘贴「粘贴 pasted 🚀」后原剪贴板「user clipboard」被恢复、未列出的辅助动作与按钮 set_value 被明确拒绝。
 
 ### P3：观察、真实 AX 与截图媒体
 

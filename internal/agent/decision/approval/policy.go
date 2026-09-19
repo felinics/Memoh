@@ -10,7 +10,7 @@ import (
 func policyDecision(cfg PolicyConfig, toolName string, input any) string {
 	cfg = NormalizePolicyConfig(cfg)
 	args := inputMap(input)
-	operation, ok := OperationForTool(toolName)
+	operation, ok := OperationForCall(toolName, args)
 	if !ok {
 		return DecisionBypass
 	}
@@ -153,6 +153,34 @@ func OperationForTool(toolName string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// OperationForCall classifies a concrete tool call. It extends
+// OperationForTool with the calls whose operation depends on their input:
+// computer_context.get_app with launch=true starts a process in the
+// workspace, which is an exec no matter which tool spelled it. The exec
+// policy then matches the requested application against its command lists
+// through the synthesized "command" argument.
+func OperationForCall(toolName string, args map[string]any) (string, bool) {
+	if operation, ok := OperationForTool(toolName); ok {
+		return operation, true
+	}
+	if strings.EqualFold(strings.TrimSpace(toolName), "computer_context") &&
+		strings.EqualFold(readString(args, "action"), "get_app") &&
+		readBool(args, "launch") {
+		if _, present := args["command"]; !present && args != nil {
+			args["command"] = readString(args, "app")
+		}
+		return OperationExec, true
+	}
+	return "", false
+}
+
+func readBool(m map[string]any, key string) bool {
+	if v, ok := m[key].(bool); ok {
+		return v
+	}
+	return false
 }
 
 func inputMap(input any) map[string]any {

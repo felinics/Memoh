@@ -69,6 +69,7 @@ func ToolBrowserObserve() Name       { return newName("browser_observe") }
 func ToolComputerObserve() Name      { return newName("computer_observe") }
 func ToolComputerAction() Name       { return newName("computer_action") }
 func ToolBrowserRemoteSession() Name { return newName("browser_remote_session") }
+func ToolComputerContext() Name      { return newName("computer_context") }
 
 func ToolWebSearch() Name       { return newName("web_search") }
 func ToolWebFetch() Name        { return newName("web_fetch") }
@@ -88,7 +89,7 @@ var all = []Name{
 	ToolGetContacts(), ToolListSessions(), ToolGetMessages(), ToolSearchMessages(), ToolSearchMemory(), ToolListSkills(), ToolUseSkill(), ToolSpawnAgent(), ToolSendMessage(), ToolListAgents(), ToolListModels(),
 	ToolListWorkdirs(), ToolListACPAgents(),
 	ToolListSchedule(), ToolGetSchedule(), ToolCreateSchedule(), ToolUpdateSchedule(), ToolDeleteSchedule(),
-	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(),
+	ToolBrowserAction(), ToolBrowserObserve(), ToolComputerObserve(), ToolComputerAction(), ToolBrowserRemoteSession(), ToolComputerContext(),
 	ToolWebSearch(), ToolWebFetch(), ToolGenerateImage(), ToolGenerateVideo(), ToolTranscribeAudio(), ToolAskUser(),
 	ToolListEmailAccounts(), ToolSendEmail(), ToolListEmail(), ToolReadEmail(),
 }

@@ -987,6 +987,7 @@
       "computer_observe": "デスクトップ {action} を観察",
       "computer_action": "デスクトップ {action}",
       "browser_remote_session": "ブラウザーセッション {action}",
+      "computer_context": "コンピュータ コンテキスト {action}",
       "browserAction": {
         "navigate": "Web ページを開く",
         "click": "クリック",
@@ -994,6 +995,10 @@
         "focus": "フォーカス",
         "type": "タイプ",
         "fill": "埋める",
+        "set_value": "値を設定",
+        "paste": "ページに貼り付け",
+        "select_text": "ページ内のテキストを選択",
+        "secondary_action": "ページ要素のアクションを実行",
         "press": "キーを押します",
         "hover": "ホバー",
         "select": "オプションを選択してください",
@@ -1038,6 +1043,10 @@
         "double_click": "ダブルクリック",
         "type": "タイプ",
         "fill": "埋める",
+        "set_value": "値を設定",
+        "paste": "デスクトップに貼り付け",
+        "select_text": "デスクトップのテキストを選択",
+        "secondary_action": "要素のアクションを実行",
         "key": "キーを押します",
         "scroll": "スクロール",
         "scroll_up": "上にスクロール",
@@ -1050,6 +1059,14 @@
         "wait": "コンピューターで待機",
         "mouse_move": "ポインタを移動する",
         "pointer": "ポインタ"
+      },
+      "computerContext": {
+        "get_state": "デスクトップとブラウザの状態を確認",
+        "list_apps": "アプリ一覧を取得",
+        "get_app": "アプリを選択",
+        "list_browsers": "ブラウザ一覧を取得",
+        "get_browser": "ブラウザを選択",
+        "documentation": "GUI ツールのドキュメントを読む"
       },
       "remoteSession": {
         "create": "セッションを開く",

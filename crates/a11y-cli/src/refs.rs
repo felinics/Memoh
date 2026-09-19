@@ -1,9 +1,11 @@
 //! Persistent ref index for the desktop accessibility tree. A `snapshot`
-//! invocation writes the latest mapping to `/tmp/a11y-cli-refs.json`; later
-//! `click`/`type`/`fill` invocations read the same file to resolve `eN` back
-//! into a `(bus_name, object_path)` pair.
+//! invocation writes the latest mapping to `/tmp/a11y-cli-refs.json` together
+//! with the snapshot id it belongs to; later ref-based invocations read the
+//! same file to resolve `eN` back into a `(bus_name, object_path)` pair and
+//! refuse refs that were taken in a different snapshot.
 
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use atspi::object_ref::{ObjectRef, ObjectRefOwned};
@@ -12,6 +14,12 @@ use atspi::zbus::zvariant::ObjectPath;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_REFS_PATH: &str = "/tmp/a11y-cli-refs.json";
+
+/// Largest coordinate a pointer event can address. RFB carries pointer
+/// positions as 16-bit values, and AT-SPI reports extents near `i32::MIN` for
+/// nodes that have never been laid out, so anything outside this range is not
+/// a real screen position.
+pub const MAX_POINTER_COORD: i32 = 32767;
 
 /// One row in the persisted refs file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,13 +38,13 @@ pub struct RefEntry {
     /// to empty instead of failing to parse.
     #[serde(default)]
     pub states: Vec<String>,
+    /// Names of the AT-SPI actions the element exposed at snapshot time.
+    #[serde(default)]
+    pub actions: Vec<String>,
+    /// Process id of the application that owns the element (0 if unknown).
+    #[serde(default)]
+    pub app_pid: u32,
 }
-
-/// Largest coordinate a pointer event can address. RFB carries pointer
-/// positions as 16-bit values, and AT-SPI reports extents near `i32::MIN` for
-/// nodes that have never been laid out, so anything outside this range is not
-/// a real screen position.
-pub const MAX_POINTER_COORD: i32 = 32767;
 
 impl RefEntry {
     /// Whether the entry carries a usable on-screen box. Entries without one
@@ -70,6 +78,13 @@ impl RefEntry {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct RefIndex {
+    /// Identifier of the snapshot these entries were taken in. Empty for
+    /// index files written by helpers that predate snapshot binding.
+    #[serde(default)]
+    pub snapshot_id: String,
+    /// Process id the snapshot was scoped to, 0 for the whole desktop.
+    #[serde(default)]
+    pub app_pid: u32,
     pub entries: Vec<RefEntry>,
 }
 
@@ -79,14 +94,27 @@ fn refs_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(DEFAULT_REFS_PATH))
 }
 
-pub fn write(entries: &[RefEntry]) -> Result<PathBuf> {
+/// Mint a snapshot id that is unique per invocation on this machine: wall
+/// clock nanoseconds mixed with the helper's pid, rendered as `s<hex>`.
+pub fn new_snapshot_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let pid = u64::from(std::process::id());
+    format!("s{:x}", nanos.rotate_left(17) ^ (pid << 40) ^ pid)
+}
+
+pub fn write(snapshot_id: &str, app_pid: u32, entries: &[RefEntry]) -> Result<PathBuf> {
     let target = refs_path();
-    write_to(&target, entries)?;
+    write_to(&target, snapshot_id, app_pid, entries)?;
     Ok(target)
 }
 
-fn write_to(path: &Path, entries: &[RefEntry]) -> Result<()> {
+fn write_to(path: &Path, snapshot_id: &str, app_pid: u32, entries: &[RefEntry]) -> Result<()> {
     let index = RefIndex {
+        snapshot_id: snapshot_id.to_string(),
+        app_pid,
         entries: entries.to_vec(),
     };
     let data = serde_json::to_vec_pretty(&index).context("serialize refs index")?;
@@ -100,11 +128,31 @@ fn write_to(path: &Path, entries: &[RefEntry]) -> Result<()> {
     std::fs::write(path, data).with_context(|| format!("write refs index to {}", path.display()))
 }
 
-pub fn lookup(ref_id: &str) -> Result<RefEntry> {
+fn read_index() -> Result<(PathBuf, RefIndex)> {
     let target = refs_path();
     let data = std::fs::read(&target)
         .with_context(|| format!("read refs index at {}", target.display()))?;
     let index: RefIndex = serde_json::from_slice(&data).context("parse refs index")?;
+    Ok((target, index))
+}
+
+/// Resolve a ref. When `expected_snapshot` is given the index must have been
+/// written by that exact snapshot; a ref from an older observation is refused
+/// instead of being mapped onto whatever element now carries the same number.
+pub fn lookup(ref_id: &str, expected_snapshot: Option<&str>) -> Result<RefEntry> {
+    let (target, index) = read_index()?;
+    if let Some(expected) = expected_snapshot.map(str::trim).filter(|s| !s.is_empty()) {
+        if index.snapshot_id != expected {
+            let current = if index.snapshot_id.is_empty() {
+                "an index without a snapshot id".to_string()
+            } else {
+                format!("snapshot {}", index.snapshot_id)
+            };
+            anyhow::bail!(
+                "ref {ref_id} was taken in snapshot {expected}, but the current index is {current}; observe again before acting"
+            );
+        }
+    }
     let normalized = normalize(ref_id);
     for entry in index.entries {
         if entry.ref_id == normalized {
@@ -156,6 +204,8 @@ mod tests {
             width: 30,
             height: 20,
             states: Vec::new(),
+            actions: Vec::new(),
+            app_pid: 0,
         }
     }
 
@@ -206,6 +256,16 @@ mod tests {
         let index: RefIndex = serde_json::from_str(legacy).expect("legacy index parses");
         assert_eq!(index.entries.len(), 1);
         assert!(index.entries[0].states.is_empty());
+        assert!(index.entries[0].actions.is_empty());
+        assert!(index.snapshot_id.is_empty());
+    }
+
+    #[test]
+    fn snapshot_ids_are_unique_and_prefixed() {
+        let a = new_snapshot_id();
+        let b = new_snapshot_id();
+        assert!(a.starts_with('s') && b.starts_with('s'));
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -264,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn write_and_lookup_roundtrip() {
+    fn write_and_lookup_roundtrip_binds_to_snapshot() {
         let path = unique_refs_path();
         // SAFETY: tests are single-threaded with regard to this env var
         // because each test invocation uses a unique path.
@@ -280,17 +340,20 @@ mod tests {
                 ..sample_entry()
             },
         ];
-        let written = write(&entries).expect("write should succeed");
+        let written = write("s123", 0, &entries).expect("write should succeed");
         assert_eq!(written, path);
 
-        let entry = lookup("e2").expect("lookup should find e2");
+        let entry = lookup("e2", None).expect("lookup should find e2");
         assert_eq!(entry.ref_id, "e2");
         assert_eq!(entry.name, "Stop");
 
-        let entry = lookup("REF=E1").expect("lookup should accept normalized form");
+        let entry = lookup("REF=E1", Some("s123")).expect("matching snapshot resolves");
         assert_eq!(entry.ref_id, "e1");
 
-        assert!(lookup("e99").is_err(), "missing refs should error");
+        let err = lookup("e1", Some("s999")).expect_err("foreign snapshot must be refused");
+        assert!(err.to_string().contains("observe again"), "{err}");
+
+        assert!(lookup("e99", None).is_err(), "missing refs should error");
 
         let _ = std::fs::remove_file(&path);
         unsafe { std::env::remove_var("A11Y_CLI_REFS") };
