@@ -83,11 +83,21 @@ func Setup(ctx context.Context, cfg config.TelemetryConfig, svc Service, log *sl
 	// SDK-internal failures — an export that could not be delivered, a
 	// malformed attribute — otherwise go to stderr outside the log stream.
 	// They are warnings: losing telemetry is not losing work.
+	// The SDK's own error text quotes the target it was handed, so redacting
+	// only the field added here is not enough — an export failure would print
+	// the endpoint verbatim. hostPort already keeps credentials away from the
+	// exporter; scrubbing the message is the belt to that pair of braces.
+	safe := safeEndpoint(cfg.Endpoint)
+	raw := strings.TrimSpace(cfg.Endpoint)
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		message := err.Error()
+		if raw != "" && raw != safe {
+			message = strings.ReplaceAll(message, raw, safe)
+		}
 		// This handler outlives Setup; ctx here is the startup context, and an
 		// export failure an hour later does not belong to it.
 		//logctx:plain
-		log.Warn("opentelemetry", slog.Any("error", err), slog.String("endpoint", safeEndpoint(cfg.Endpoint)))
+		log.Warn("opentelemetry", slog.String("error", message), slog.String("endpoint", safe))
 	}))
 
 	exporter, err := newExporter(ctx, cfg)
