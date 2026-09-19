@@ -177,16 +177,28 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 	go func() {
 		defer close(chunkCh)
 		defer close(errCh)
+		ctx, endTurn := startTurnSpan(ctx, req)
+		// turnErr is what the caller will see on errCh; the span reports the
+		// same outcome the caller is told about, not a separate opinion.
+		var turnErr error
+		defer func() { endTurn(turnErr) }()
+		// Every failure exit goes through fail, so the span's outcome cannot
+		// drift from what the caller is told. The guard is mechanical: no
+		// bare send to errCh may remain in this function.
+		fail := func(err error) {
+			turnErr = err
+			errCh <- err
+		}
 		streamReq := req
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
 		}
 		if err := rejectReservedSkillMetadataIfPresent(streamReq); err != nil {
-			errCh <- err
+			fail(err)
 			return
 		}
 		if err := s.rejectRequestedSkillsIfUnsupportedContext(ctx, streamReq); err != nil {
-			errCh <- err
+			fail(err)
 			return
 		}
 		dispatch, err := s.resolveRuntimeDispatch(ctx, streamReq)
@@ -196,12 +208,12 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				slog.String("session_id", streamReq.ThreadID),
 				slog.Any("error", err),
 			)
-			errCh <- err
+			fail(err)
 			return
 		}
 		if dispatch.kind == dispatchExternal {
 			if err := rejectExternalAgentWorkspaceTarget(streamReq); err != nil {
-				errCh <- err
+				fail(err)
 				return
 			}
 			s.streamRuntimeChunks(ctx, dispatch.driver, streamReq, chunkCh, errCh)
@@ -209,7 +221,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		}
 		streamCtx, preparedReq, prepareErr := s.prepareWorkspaceRequest(ctx, streamReq)
 		if prepareErr != nil {
-			errCh <- prepareErr
+			fail(prepareErr)
 			return
 		}
 		streamReq = preparedReq
@@ -225,7 +237,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					slog.String("chat_id", streamReq.ChatID),
 					slog.Any("error", err),
 				)
-				errCh <- err
+				fail(err)
 				return
 			}
 		}
@@ -236,7 +248,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				slog.String("chat_id", streamReq.ChatID),
 				slog.Any("error", err),
 			)
-			errCh <- err
+			fail(err)
 			return
 		}
 		streamReq.Query = rc.query
@@ -482,7 +494,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			if lifecycleCause == nil {
 				lifecycleCause = commitErr
 			}
-			errCh <- commitErr
+			fail(commitErr)
 		}
 
 		if idleCancel.DidFire() {
@@ -504,7 +516,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			agentStreamErr = context.Cause(idleCtx)
 		}
 		if agentStreamErr != nil {
-			errCh <- agentStreamErr
+			fail(agentStreamErr)
 		}
 	}()
 	return chunkCh, errCh
@@ -538,7 +550,14 @@ func (s *Service) streamChatWSResultWithHooks(
 	abortCh <-chan struct{},
 	preflight func(context.Context) error,
 	postPersist func(context.Context, []messagepkg.Message) error,
-) ([]messagepkg.Message, error) {
+) (_ []messagepkg.Message, turnErr error) {
+	// Named so the deferred span close sees whatever any of this function's
+	// returns produced. Tracking it by hand would mean touching fifteen
+	// return statements and being wrong the first time someone adds a
+	// sixteenth.
+	ctx, endTurn := startTurnSpan(ctx, req)
+	defer func() { endTurn(turnErr) }()
+
 	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
 		return nil, err
 	}
