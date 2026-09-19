@@ -97,6 +97,7 @@ import (
 	"github.com/felinics/memoh/internal/storage/providers/fallback"
 	"github.com/felinics/memoh/internal/storage/providers/localfs"
 	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/telemetry"
 	"github.com/felinics/memoh/internal/userruntime"
 	videopkg "github.com/felinics/memoh/internal/video"
 	"github.com/felinics/memoh/internal/workdir"
@@ -113,6 +114,29 @@ func provideLogger(cfg config.Config) *slog.Logger {
 	// Application code takes the returned logger; it does not reach for this.
 	logger.SetDefault(log)
 	return log
+}
+
+// setupTelemetry installs context propagation and, when a collector is
+// configured, trace export. It is an fx.Invoke rather than a provider because
+// nothing depends on its result: it configures OpenTelemetry's globals, which
+// is how the instrumentation in libraries and in internal/telemetry finds it.
+//
+// Failing to reach a collector at startup must not stop the process. The
+// exporter retries in the background, and a deployment whose collector is
+// down should keep serving requests without telemetry rather than refuse to
+// boot.
+func setupTelemetry(lc fx.Lifecycle, cfg config.Config, svc telemetry.Service, log *slog.Logger) {
+	svc.InstanceID = cfg.InstanceID
+	shutdown, err := telemetry.Setup(context.Background(), cfg.Telemetry, svc, log)
+	if err != nil {
+		log.Error("tracing setup failed; continuing without it", slog.Any("error", err))
+		return
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return shutdown(ctx)
+		},
+	})
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {

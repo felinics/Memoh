@@ -74,7 +74,7 @@ Added by the handler, never by the call site:
 | Key | Source |
 | --- | --- |
 | `request_id` | The id echo's `RequestID` middleware assigns, put into the context by `httpx.RequestIDContext`. The same id the client receives, in the response header and in `apperror.Problem`. |
-| `trace_id`, `span_id` | The span context, when tracing is configured. |
+| `trace_id`, `span_id` | The span context, when tracing is configured — see [observability.md](observability.md). |
 
 Absent identity means absent keys rather than empty ones: an empty `trace_id`
 would match a query for records that have no trace at all.

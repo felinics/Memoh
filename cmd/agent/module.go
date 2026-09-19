@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/channel/adapters/weixin"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/telemetry"
 )
 
 func runServe() {
@@ -72,6 +73,7 @@ func embeddedOptions() fx.Option {
 func commonOptions() fx.Option {
 	return fx.Options(
 		fx.Provide(provideConfig),
+		fx.Supply(telemetry.Service{Name: "memoh-server"}),
 		coremodule.FoundationModule(),
 		channelmodule.FoundationModule(),
 		coremodule.ServerModule(),

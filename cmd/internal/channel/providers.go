@@ -74,6 +74,7 @@ import (
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/storage/providers/localfs"
 	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/telemetry"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -354,6 +355,7 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 	// look up. Both are assigned before anything else runs.
 	e.Use(middleware.RequestID())
 	e.Use(httpx.RequestIDContext)
+	e.Use(telemetry.EchoServer)
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimit("1M"))
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
