@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	neturl "net/url"
 	"strings"
 	"testing"
 
@@ -60,20 +59,6 @@ func TestShouldLimitPublicRequestBody(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("path=%q want=%v got=%v", tc.path, tc.want, got)
 		}
-	}
-}
-
-func TestSafeRequestLogURIStripsPublicMediaQuery(t *testing.T) {
-	t.Parallel()
-
-	u, err := neturl.Parse("/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg?exp=123&sig=secret")
-	if err != nil {
-		t.Fatalf("parse url: %v", err)
-	}
-	got := safeRequestLogURI(u, u.RequestURI())
-	want := "/channels/line/public/media/bot-1/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/preview.jpg"
-	if got != want {
-		t.Fatalf("safeRequestLogURI = %q, want %q", got, want)
 	}
 }
 

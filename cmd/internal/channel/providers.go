@@ -61,6 +61,7 @@ import (
 	emailgmail "github.com/felinics/memoh/internal/email/adapters/gmail"
 	emailmailgun "github.com/felinics/memoh/internal/email/adapters/mailgun"
 	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/media"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
@@ -347,8 +348,33 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+	// This listener faces the public internet: it receives third-party channel
+	// webhooks and serves public media. It had neither a request id nor an
+	// access log, so a delivery a platform reports as failed left nothing to
+	// look up. Both are assigned before anything else runs.
+	e.Use(middleware.RequestID())
+	e.Use(httpx.RequestIDContext)
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimit("1M"))
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		HandleError: true,
+		LogStatus:   true,
+		LogURI:      true,
+		LogMethod:   true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			// Same fields and the same URI sanitizer as the main server: the
+			// media paths this listener serves carry an authorising token in
+			// the query string.
+			log.InfoContext(c.Request().Context(), "request",
+				slog.String("method", v.Method),
+				slog.String("uri", httpx.SafeRequestLogURI(c.Request().URL, v.URI)),
+				slog.Int("status", v.Status),
+				slog.Duration("latency", v.Latency),
+				slog.String("remote_ip", c.RealIP()),
+			)
+			return nil
+		},
+	}))
 	e.GET("/health", func(c echo.Context) error {
 		return c.String(http.StatusOK, "ok\n")
 	})

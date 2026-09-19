@@ -26,10 +26,13 @@ const (
 )
 
 func main() {
-	os.Exit(runBridge())
+	// The bridge runs inside the workspace container and writes to its own
+	// stdout. It builds its logger here and passes it down rather than
+	// reaching for a shared one; see docs/logging.md.
+	os.Exit(runBridge(logger.New(os.Stdout, "info", "json")))
 }
 
-func runBridge() int {
+func runBridge(log *slog.Logger) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -38,14 +41,14 @@ func runBridge() int {
 	_ = os.Setenv("PATH", os.Getenv("PATH")+":/opt/memoh/toolkit/bin")
 
 	reverseHTTP := bridgesvc.NewReverseHTTPBroker()
-	startDisplaySupervisor(ctx)
-	startToolsProxy(ctx, reverseHTTP)
+	startDisplaySupervisor(ctx, log)
+	startToolsProxy(ctx, log, reverseHTTP)
 
 	network := "unix"
 	address := os.Getenv("BRIDGE_SOCKET_PATH")
 	if tcpAddr := os.Getenv("BRIDGE_TCP_ADDR"); tcpAddr != "" {
 		if !isBridgeTCPListenAddrAllowed(tcpAddr) {
-			logger.Error("BRIDGE_TCP_ADDR must be loopback or use :port bind shorthand; explicit non-loopback TCP exposes bridge gRPC without TLS/auth", slog.String("addr", tcpAddr))
+			log.ErrorContext(ctx, "BRIDGE_TCP_ADDR must be loopback or use :port bind shorthand; explicit non-loopback TCP exposes bridge gRPC without TLS/auth", slog.String("addr", tcpAddr))
 			return 1
 		}
 		network = "tcp"
@@ -61,7 +64,7 @@ func runBridge() int {
 
 	lis, err := (&net.ListenConfig{}).Listen(ctx, network, address)
 	if err != nil {
-		logger.Error("failed to listen", slog.String("network", network), slog.String("address", address), slog.Any("error", err))
+		log.ErrorContext(ctx, "failed to listen", slog.String("network", network), slog.String("address", address), slog.Any("error", err))
 		return 1
 	}
 
@@ -85,12 +88,12 @@ func runBridge() int {
 	if network == "tcp" {
 		creds, err := bridgeServerCredentials()
 		if err != nil {
-			logger.Error("bridge TLS configuration invalid", slog.Any("error", err))
+			log.ErrorContext(ctx, "bridge TLS configuration invalid", slog.Any("error", err))
 			return 1
 		}
 		if creds != nil {
 			serverOpts = append(serverOpts, grpc.Creds(creds))
-			logger.Info("bridge TCP gRPC requires mTLS", slog.String("mode", bridgeTLSModeStrict))
+			log.InfoContext(ctx, "bridge TCP gRPC requires mTLS", slog.String("mode", bridgeTLSModeStrict))
 		}
 	}
 	srv := grpc.NewServer(serverOpts...)
@@ -104,11 +107,11 @@ func runBridge() int {
 
 	shutdownDone := make(chan struct{})
 	go func() {
-		stopBridgeGRPCServer(ctx, srv)
+		stopBridgeGRPCServer(ctx, log, srv)
 		close(shutdownDone)
 	}()
 
-	logger.Info("bridge gRPC server listening", slog.String("network", network), slog.String("address", address))
+	log.InfoContext(ctx, "bridge gRPC server listening", slog.String("network", network), slog.String("address", address))
 	serveErr := srv.Serve(lis)
 	unexpectedServeErr := serveErr != nil && !errors.Is(serveErr, grpc.ErrServerStopped)
 	if unexpectedServeErr {
@@ -118,15 +121,15 @@ func runBridge() int {
 		<-shutdownDone
 	}
 	if unexpectedServeErr {
-		logger.Error("gRPC server failed", slog.Any("error", serveErr))
+		log.ErrorContext(ctx, "gRPC server failed", slog.Any("error", serveErr))
 		return 1
 	}
 	return 0
 }
 
-func stopBridgeGRPCServer(ctx context.Context, srv *grpc.Server) {
+func stopBridgeGRPCServer(ctx context.Context, log *slog.Logger, srv *grpc.Server) {
 	<-ctx.Done()
-	logger.FromContext(ctx).Info("shutting down gRPC server")
+	log.InfoContext(ctx, "shutting down gRPC server")
 	// Bridge Exec streams can legitimately live for the lifetime of an ACP
 	// process, so graceful draining has no useful upper bound here. Calling
 	// GracefulStop and Stop concurrently can also deadlock inside grpc-go when

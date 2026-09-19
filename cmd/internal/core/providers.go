@@ -107,8 +107,12 @@ import (
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
-	logger.Init(cfg.Log.Level, cfg.Log.Format)
-	return logger.L
+	log := logger.New(os.Stdout, cfg.Log.Level, cfg.Log.Format)
+	// Point slog's package-level logger and the standard log package at the
+	// same handler, so output from dependencies lands in the same stream.
+	// Application code takes the returned logger; it does not reach for this.
+	logger.SetDefault(log)
+	return log
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {

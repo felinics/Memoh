@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/logger"
 )
 
 type requestLogTestHandler struct {
@@ -58,7 +58,12 @@ func TestServerRequestLogOmitsQuery(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			handled := false
-			srv := NewServer(slog.New(slog.NewJSONHandler(&logs, nil)), ":0", "test-secret", requestLogTestHandler{
+			// logger.New, not a bare JSON handler: request_id reaches the
+			// record through the correlation handler rather than being
+			// written by this middleware, so a logger assembled any other
+			// way would drop it — which is what this case would then be
+			// asserting about.
+			srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", requestLogTestHandler{
 				handle: func(c echo.Context) error {
 					handled = true
 					if c.Request().URL.RawQuery != tc.query {

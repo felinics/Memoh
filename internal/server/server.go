@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
-	neturl "net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -48,6 +47,9 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	e.HideBanner = true
 	e.HTTPErrorHandler = newHTTPErrorHandler(log, e.DefaultHTTPErrorHandler)
 	e.Use(middleware.RequestID())
+	// Directly after RequestID: everything below, and every handler, logs with
+	// a context that carries the id.
+	e.Use(httpx.RequestIDContext)
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
 		Limit: "1M",
@@ -67,13 +69,16 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 		LogURI:      true,
 		LogMethod:   true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			log.Info("request",
+			// InfoContext, not Info: the request's context is what carries the
+			// id and any trace identity, and request_id is no longer written
+			// by hand here — one source for it, on every record rather than
+			// just this one.
+			log.InfoContext(c.Request().Context(), "request",
 				slog.String("method", v.Method),
-				slog.String("uri", safeRequestLogURI(c.Request().URL, v.URI)),
+				slog.String("uri", httpx.SafeRequestLogURI(c.Request().URL, v.URI)),
 				slog.Int("status", v.Status),
 				slog.Duration("latency", v.Latency),
 				slog.String("remote_ip", c.RealIP()),
-				slog.String("request_id", httpx.RequestID(c)),
 			)
 			return nil
 		},
@@ -167,15 +172,4 @@ func isPublicChannelWebhookPath(path string) bool {
 
 func isPublicChannelMediaPath(path string) bool {
 	return publicmedia.IsPath(path)
-}
-
-func safeRequestLogURI(u *neturl.URL, fallback string) string {
-	if u == nil {
-		var err error
-		u, err = neturl.ParseRequestURI(fallback)
-		if err != nil {
-			return ""
-		}
-	}
-	return u.EscapedPath()
 }
