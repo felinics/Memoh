@@ -63,13 +63,39 @@ than either keeping or dropping them whole.
 | gRPC, workspace bridge | Client spans, host → workspace container | `otelgrpc` client handler in `internal/workspace/bridge` |
 | gRPC, remote runtime | Client spans, server → runtime over the WebSocket tunnel | `otelgrpc` client handler in `internal/userruntime` |
 | PostgreSQL | One span per query, on all three pools | `telemetry.PgxTracer` |
+| Agent turn | One span per turn, with its outcome | `startTurnSpan`, on both entry points |
+| Model call | One span per provider call, with the attempt count | `internal/agent/runtime/native` |
+| Tool call | One span per tool execution | `wrapToolTracing`, in `assembleTools` |
 
-Turn orchestration inside `internal/agent/application` is **not** instrumented
-yet. That is the layer where a trace is most useful, and it is also the layer
-still being restructured; span names and attributes are an interface that
-dashboards and alerts are written against, so fixing them before the code
-underneath settles would mean breaking them later. It is the next piece of
-work, not an oversight.
+A turn therefore reads as a tree:
+
+```
+GET /bots/:bot_id/web/ws
+└ agent.turn                     outcome=completed
+  └ agent.model.stream_start     model=…, provider=…
+    └ agent.tool ask_user
+      └ bridgepb.ContainerService/ListDir
+      └ postgresql.query
+```
+
+### What the span names promise
+
+`agent.model.stream_start` and `agent.model.generate` are separate names
+because they do not measure the same interval. The first covers establishing
+the stream, retries included, and ends when the provider accepts the request
+— the wait before anything appears. The second covers a whole non-streaming
+call. Reading either as the other would be worse than having neither.
+
+The `agent.*` names are **not a stable interface yet**. The agent application
+package is still being restructured, and these names are placed at its
+current seams. Write a dashboard against them if it helps; expect to revisit
+it. The framework-level names above (HTTP routes, gRPC methods,
+`postgresql.query`) do not carry that caveat — they follow the shape of the
+protocol, not of our code.
+
+Turn orchestration is instrumented at its boundaries, not throughout.
+Assembly, memory retrieval and compaction have no spans of their own yet;
+they show up as time inside `agent.turn` that no child accounts for.
 
 `cmd/bridge` is not instrumented either, and that one is permanent for the
 same reason its logs are not collected: it runs inside the per-bot workspace
@@ -84,12 +110,16 @@ safer a place for a credential than a log line. Request and response bodies,
 authorization headers, API keys, tokens, signed URLs, model conversations,
 tool arguments.
 
-Two specific consequences:
+Specifically:
 
 - HTTP spans record the path through `httpx.SafeRequestLogURI`, never the
   query string, which on some routes carries an authorising token.
 - Database spans record the SQL text but never the arguments. The text is
   code; the arguments are the contents of the rows being read and written.
+- Tool spans record the tool's name, never its input. A tool call carries
+  file contents, shell commands and whatever the user asked for.
+- Model spans record the model and provider, never the prompt, the reply, or
+  the tool definitions sent with the request.
 
 ## Correlation with logs
 
