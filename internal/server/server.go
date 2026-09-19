@@ -12,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/channel/publicmedia"
 	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/telemetry"
 )
 
 type Server struct {
@@ -50,6 +51,9 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	// Directly after RequestID: everything below, and every handler, logs with
 	// a context that carries the id.
 	e.Use(httpx.RequestIDContext)
+	// After RequestIDContext so the span can carry the id the client is given,
+	// and before everything else so the span covers the work they do.
+	e.Use(telemetry.EchoServer)
 	e.Use(middleware.Recover())
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
 		Limit: "1M",
