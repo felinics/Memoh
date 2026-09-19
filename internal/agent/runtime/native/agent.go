@@ -514,25 +514,29 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	var streamResult *sdk.StreamResult
-	// establishCtx, deliberately not assigned back over streamCtx: this span
-	// measures getting the stream open, and it ends there. Overwriting
-	// streamCtx would make everything the turn does afterwards — the drain,
-	// every tool call — a child of a span that has already ended and that
-	// claims to measure something else.
-	establishCtx, streamSpan := traceModelCall(streamCtx, spanModelStreamStart, cfg.Model)
+	// The span is for timing only; its context is deliberately discarded and
+	// streamCtx is what the SDK gets. The SDK keeps the context it is called
+	// with for the whole stream, tool execution included, so handing it the
+	// span's context would make every tool call a child of a span that has
+	// already ended and that claims to measure only getting the stream open.
+	_, streamSpan := traceModelCall(streamCtx, spanModelStreamStart, cfg.Model)
 	attemptsUsed := 0
 	var establishErr error
-	// Deferred rather than closed on each exit: this loop returns from five
-	// places, and the one that was missed — the consumer going away while a
-	// retry event is being sent — leaks a span that is never exported,
-	// because a span that never ends never leaves the process.
-	defer func() { endModelCall(streamSpan, attemptsUsed, establishErr) }()
+	// Called at the moment establishment concludes, so the span measures what
+	// its name says. The deferred call is the safety net: this loop returns
+	// from five places, and the one that was missed — the consumer going away
+	// while a retry event is being sent — leaked a span that is never
+	// exported, because a span that never ends never leaves the process.
+	// OnceFunc makes the net free when the normal path already closed it.
+	endEstablish := sync.OnceFunc(func() { endModelCall(streamSpan, attemptsUsed, establishErr) })
+	defer endEstablish()
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
 		var err error
 		attemptsUsed = attempt + 1
-		streamResult, err = a.client.StreamText(establishCtx, opts...)
+		streamResult, err = a.client.StreamText(streamCtx, opts...)
 		establishErr = err
 		if err == nil {
+			endEstablish()
 			break
 		}
 		if !isRetryableStreamError(err) {
@@ -560,7 +564,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		}
 		delay := retryDelay(attempt, retryCfg)
 		if delay > 0 {
-			if err := sleepWithContext(establishCtx, delay); err != nil {
+			if err := sleepWithContext(streamCtx, delay); err != nil {
 				turnError = fmt.Sprintf("stream start: context cancelled during retry: %v", err)
 				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 				return
