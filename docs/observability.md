@@ -72,19 +72,24 @@ A turn therefore reads as a tree:
 ```
 GET /bots/:bot_id/web/ws
 └ agent.turn                     outcome=completed
-  └ agent.model.stream_start     model=…, provider=…
-    └ agent.tool ask_user
-      └ bridgepb.ContainerService/ListDir
-      └ postgresql.query
+  └ agent.model.first_part       model=…, provider=…
+  └ agent.tool ask_user
+    └ bridgepb.ContainerService/ListDir
+    └ postgresql.query
 ```
 
 ### What the span names promise
 
-`agent.model.stream_start` and `agent.model.generate` are separate names
-because they do not measure the same interval. The first covers establishing
-the stream, retries included, and ends when the provider accepts the request
-— the wait before anything appears. The second covers a whole non-streaming
-call. Reading either as the other would be worse than having neither.
+`agent.model.first_part` and `agent.model.generate` are separate names
+because they do not measure the same interval. The first ends when the first
+part of the reply arrives — the pause a user sits through before anything
+appears, retries included — and deliberately does not cover the rest of the
+reply, which would hide that number inside one dominated by how long the
+answer happened to be. The second covers a whole non-streaming call.
+
+The model spans are leaves beside the tool spans, not their parents. The SDK
+keeps the context it is handed for the whole stream, so passing it a span's
+context would file every tool call under a span that has already ended.
 
 The `agent.*` names are **not a stable interface yet**. The agent application
 package is still being restructured, and these names are placed at its

@@ -514,29 +514,27 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	var streamResult *sdk.StreamResult
-	// The span is for timing only; its context is deliberately discarded and
-	// streamCtx is what the SDK gets. The SDK keeps the context it is called
-	// with for the whole stream, tool execution included, so handing it the
-	// span's context would make every tool call a child of a span that has
-	// already ended and that claims to measure only getting the stream open.
-	_, streamSpan := traceModelCall(streamCtx, spanModelStreamStart, cfg.Model)
+	// Timing only: the span's context is deliberately discarded and streamCtx
+	// is what the SDK gets. The SDK keeps the context it is called with for
+	// the whole stream, tool execution included, so handing it the span's
+	// context would make every tool call a child of this span rather than of
+	// the turn.
+	_, streamSpan := traceModelCall(streamCtx, spanModelFirstPart, cfg.Model)
 	attemptsUsed := 0
 	var establishErr error
-	// Called at the moment establishment concludes, so the span measures what
-	// its name says. The deferred call is the safety net: this loop returns
-	// from five places, and the one that was missed — the consumer going away
-	// while a retry event is being sent — leaked a span that is never
-	// exported, because a span that never ends never leaves the process.
-	// OnceFunc makes the net free when the normal path already closed it.
-	endEstablish := sync.OnceFunc(func() { endModelCall(streamSpan, attemptsUsed, establishErr) })
-	defer endEstablish()
+	// Closed when the first part arrives — see the drain loop below — because
+	// StreamText returns as soon as it has launched its goroutine, so closing
+	// it here would time that launch and nothing else. The deferred call is
+	// the safety net for the paths that never reach a first part: a span that
+	// never ends never leaves the process.
+	endFirstPart := sync.OnceFunc(func() { endModelCall(streamSpan, attemptsUsed, establishErr) })
+	defer endFirstPart()
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
 		var err error
 		attemptsUsed = attempt + 1
 		streamResult, err = a.client.StreamText(streamCtx, opts...)
 		establishErr = err
 		if err == nil {
-			endEstablish()
 			break
 		}
 		if !isRetryableStreamError(err) {
@@ -591,6 +589,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			aborted = true
 			continue
 		case next, ok := <-streamResult.Stream:
+			// Whatever it is, something came back from the provider: that is
+			// the wait a user sits through before anything appears.
+			endFirstPart()
 			if !ok {
 				streamClosed = true
 				continue
@@ -2176,8 +2177,12 @@ func (a *Agent) runMidStreamRetry(
 			return failResult(), true
 		}
 
-		retryCtx, retrySpan := traceModelCall(streamCtx, spanModelStreamStart, retryCfgCopy.Model)
-		retryResult, retryErr := a.client.StreamText(retryCtx, retryOpts...)
+		// streamCtx, not the span's context, for the same reason as the first
+		// attempt: the SDK keeps what it is given for the whole stream, so
+		// passing the span's would reparent this retry's tool calls under a
+		// span that is about to end.
+		_, retrySpan := traceModelCall(streamCtx, spanModelRetry, retryCfgCopy.Model)
+		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)
 		endModelCall(retrySpan, attempt+1, retryErr)
 		if retryErr != nil {
 			a.logger.WarnContext(sendCtx, "mid-stream retry failed to start",

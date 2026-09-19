@@ -15,14 +15,23 @@ import (
 // one measures, because the two are not the same duration and reading them as
 // if they were would be worse than having neither.
 const (
-	// spanModelStreamStart covers establishing the stream, including retries,
-	// and ends when the provider accepts the request — not when the reply is
-	// finished. That interval is what a user experiences as the wait before
-	// anything appears, and it is the one a provider problem shows up in.
-	spanModelStreamStart = "agent.model.stream_start"
+	// spanModelFirstPart covers the wait before the provider says anything:
+	// it starts when the request is built, includes retries, and ends when
+	// the first part of the reply arrives. That is the pause a user sits
+	// through, and the one a provider problem shows up in.
+	//
+	// It deliberately does not cover the rest of the reply. Naming the whole
+	// generation would hide the number that matters inside one that is
+	// dominated by how long the answer happened to be.
+	spanModelFirstPart = "agent.model.first_part"
 	// spanModelGenerate covers a whole non-streaming call, so this one is the
 	// full generation.
 	spanModelGenerate = "agent.model.generate"
+	// spanModelRetry covers restarting a stream that broke partway through.
+	// It ends when the new stream is handed back rather than at its first
+	// part: the reply is already in progress, so there is no user-visible
+	// pause to measure, only whether the restart worked.
+	spanModelRetry = "agent.model.stream_retry"
 )
 
 // traceModelCall starts a span around a call to the model provider.
