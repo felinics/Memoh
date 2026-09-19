@@ -180,9 +180,26 @@ func useInsecure(cfg config.TelemetryConfig) bool {
 // operator to configure — and a startup line is read by everyone who can read
 // logs.
 func safeEndpoint(endpoint string) string {
+	// A bare host:port is a valid thing to configure and is not a URL, so
+	// url.Parse leaves Host empty for it and the parsed form cannot be
+	// trusted to have found the credentials. Parsing against a synthetic
+	// scheme makes "user:pass@collector:4317" and "collector:4317" take the
+	// same path — the first is exactly the input that would otherwise fall
+	// through unredacted.
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Host == "" {
-		return endpoint
+		parsed, err = url.Parse("scheme://" + endpoint)
+		if err != nil || parsed.Host == "" {
+			// Not addressable either way. Anything before an @ is the part
+			// that could be a credential.
+			if _, after, found := strings.Cut(endpoint, "@"); found {
+				return after
+			}
+			return endpoint
+		}
+		parsed.User = nil
+		parsed.RawQuery = ""
+		return strings.TrimPrefix(parsed.String(), "scheme://")
 	}
 	parsed.User = nil
 	parsed.RawQuery = ""

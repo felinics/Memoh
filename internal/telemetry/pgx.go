@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -60,8 +61,18 @@ func (PgxTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 		// the trace — the same data the arguments were withheld to protect.
 		// SQLSTATE says what went wrong without saying what the value was.
 		var pgErr *pgconn.PgError
-		if errors.As(data.Err, &pgErr) {
+		switch {
+		case errors.As(data.Err, &pgErr):
 			span.SetAttributes(attribute.String("db.response.status_code", pgErr.Code))
+		case errors.Is(data.Err, context.Canceled):
+			span.SetAttributes(attribute.String("error.type", "context.Canceled"))
+		case errors.Is(data.Err, context.DeadlineExceeded):
+			span.SetAttributes(attribute.String("error.type", "context.DeadlineExceeded"))
+		default:
+			// The type, never the message. A dial failure or a closed pool
+			// still needs to be distinguishable from a rejected query, and a
+			// Go type name cannot contain a row's contents.
+			span.SetAttributes(attribute.String("error.type", fmt.Sprintf("%T", data.Err)))
 		}
 		span.SetStatus(codes.Error, "")
 	}
