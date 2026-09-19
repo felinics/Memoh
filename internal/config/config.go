@@ -3,8 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,6 +85,119 @@ type Config struct {
 	BridgeTLS             BridgeTLSConfig             `toml:"bridge_tls"`
 	WebhookTunnel         WebhookTunnelConfig         `toml:"webhook_tunnel"`
 	ConnectIt             ConnectItConfig             `toml:"connect_it"`
+	Telemetry             TelemetryConfig             `toml:"telemetry"`
+}
+
+// TelemetryConfig configures OpenTelemetry trace export. It is off unless an
+// endpoint is set, here or through the standard OTEL_EXPORTER_OTLP_ENDPOINT /
+// OTEL_EXPORTER_OTLP_TRACES_ENDPOINT variables.
+//
+// "Off" has to mean no exporter at all rather than an exporter pointed
+// somewhere harmless: the OTLP SDK defaults an unset endpoint to
+// localhost:4317, so a build that always constructs one would spend every
+// deployment without a collector retrying a connection that cannot succeed.
+type TelemetryConfig struct {
+	// Endpoint is an OTLP collector address: host:port for grpc, or a URL for
+	// http. Empty disables export.
+	Endpoint string `toml:"endpoint"`
+	// Protocol is "grpc" (default) or "http".
+	Protocol string `toml:"protocol"`
+	// Insecure sends over plaintext. Required for an http:// endpoint or a
+	// grpc collector without TLS.
+	Insecure bool `toml:"insecure"`
+	// Headers are sent with every export, for collectors that authenticate.
+	Headers map[string]string `toml:"headers"`
+	// SampleRatio is the fraction of traces started here that are recorded,
+	// between 0 and 1; 1 records every trace. A sampling decision already made
+	// upstream is always respected, so this applies to traces this process
+	// starts. Defaults to 1: a self-hosted deployment small enough to need no
+	// collector tuning should not have to discover why its traces are missing.
+	SampleRatio float64 `toml:"sample_ratio"`
+	// ServiceName overrides the reported service.name. Empty uses the name the
+	// binary registers at startup.
+	ServiceName string `toml:"service_name"`
+}
+
+// OTLP transports for TelemetryConfig.Protocol.
+const (
+	TelemetryProtocolGRPC = "grpc"
+	TelemetryProtocolHTTP = "http"
+)
+
+// Enabled reports whether trace export should be configured.
+func (c TelemetryConfig) Enabled() bool {
+	return strings.TrimSpace(c.Endpoint) != ""
+}
+
+// applyTelemetryEnvOverrides lets the standard OTEL_* variables drive trace
+// export, overriding the config file.
+//
+// Operators of a self-hosted deployment know these variable names from every
+// other OpenTelemetry-instrumented service they run, and they are what a
+// container platform injects. Giving the file the last word would mean a
+// deployment that sets OTEL_EXPORTER_OTLP_ENDPOINT sees nothing happen and no
+// reason why.
+//
+// Only the variables that map onto an option this config already has are read.
+// OTEL_TRACES_SAMPLER in particular is not honoured beyond its ratio argument:
+// claiming support for sampler names we do not implement would be worse than
+// not reading it.
+func (cfg *Config) applyTelemetryEnvOverrides() {
+	if disabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv("OTEL_SDK_DISABLED"))); err == nil && disabled {
+		cfg.Telemetry.Endpoint = ""
+		return
+	}
+	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"))
+	if endpoint == "" {
+		endpoint = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	}
+	if endpoint != "" {
+		cfg.Telemetry.Endpoint = endpoint
+	}
+	protocol := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL"))
+	if protocol == "" {
+		protocol = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"))
+	}
+	switch protocol {
+	case "grpc":
+		cfg.Telemetry.Protocol = TelemetryProtocolGRPC
+	case "http/protobuf", "http":
+		cfg.Telemetry.Protocol = TelemetryProtocolHTTP
+	}
+	if headers := parseOTLPHeaders(os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")); len(headers) > 0 {
+		cfg.Telemetry.Headers = headers
+	}
+	if arg := strings.TrimSpace(os.Getenv("OTEL_TRACES_SAMPLER_ARG")); arg != "" {
+		if ratio, err := strconv.ParseFloat(arg, 64); err == nil {
+			cfg.Telemetry.SampleRatio = ratio
+		}
+	}
+	if name := strings.TrimSpace(os.Getenv("OTEL_SERVICE_NAME")); name != "" {
+		cfg.Telemetry.ServiceName = name
+	}
+	// An http:// endpoint cannot be reached over TLS whatever the file says.
+	if strings.HasPrefix(cfg.Telemetry.Endpoint, "http://") {
+		cfg.Telemetry.Insecure = true
+	}
+}
+
+// parseOTLPHeaders reads the W3C Baggage-style list the OTLP specification
+// uses for OTEL_EXPORTER_OTLP_HEADERS: comma-separated key=value pairs.
+func parseOTLPHeaders(raw string) map[string]string {
+	out := map[string]string{}
+	for pair := range strings.SplitSeq(raw, ",") {
+		key, value, found := strings.Cut(pair, "=")
+		key = strings.TrimSpace(key)
+		if !found || key == "" {
+			continue
+		}
+		if decoded, err := url.QueryUnescape(strings.TrimSpace(value)); err == nil {
+			out[key] = decoded
+		} else {
+			out[key] = strings.TrimSpace(value)
+		}
+	}
+	return out
 }
 
 // ConnectItConfig is the deployment-level credential Memoh uses to call its
@@ -767,6 +882,10 @@ func Load(path string) (Config, error) {
 				KeyPrefix: DefaultSessionRuntimeRedisKeyPrefix,
 			},
 		},
+		Telemetry: TelemetryConfig{
+			Protocol:    TelemetryProtocolGRPC,
+			SampleRatio: 1,
+		},
 	}
 
 	if path == "" {
@@ -777,6 +896,7 @@ func Load(path string) (Config, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			cfg.applyBridgeTLSEnvOverrides()
+			cfg.applyTelemetryEnvOverrides()
 			if err := cfg.validate(); err != nil {
 				return cfg, err
 			}
@@ -819,6 +939,7 @@ func Load(path string) (Config, error) {
 		cfg.Workspace = cfg.Container.WorkspaceConfig
 	}
 	cfg.applyBridgeTLSEnvOverrides()
+	cfg.applyTelemetryEnvOverrides()
 	if err := cfg.validate(); err != nil {
 		return cfg, err
 	}

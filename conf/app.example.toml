@@ -239,3 +239,24 @@ discovery_cache_ttl_seconds = 600
 # UV_RELEASES_URL = "https://github.com/astral-sh/uv/releases"
 # NPM_MIRROR = "https://registry.npmjs.org"
 # UV_PYTHON_INSTALL_MIRROR = "https://github.com/astral-sh/python-build-standalone/releases/download"
+
+# Distributed tracing, off unless an endpoint is set here or in
+# OTEL_EXPORTER_OTLP_ENDPOINT. With no endpoint the process installs no
+# exporter at all, so leaving this section out costs nothing.
+# Full reference: docs/observability.md
+# [telemetry]
+# OTLP collector address. host:port for grpc, a URL for http.
+# endpoint = "127.0.0.1:4317"
+# "grpc" (default) or "http".
+# protocol = "grpc"
+# Plaintext. Required for a collector without TLS.
+# insecure = true
+# Fraction of traces this process starts that are recorded, 0 to 1. A trace
+# already sampled by the caller is always kept, whatever this says.
+# sample_ratio = 1.0
+# Reported service.name. Defaults to the binary's own ("memoh-server",
+# "memoh-channel").
+# service_name = ""
+# Sent with every export, for collectors that authenticate.
+# [telemetry.headers]
+# authorization = "Bearer ..."
