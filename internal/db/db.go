@@ -9,7 +9,16 @@ import (
 
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/telemetry"
 )
+
+// instrument installs the query tracer on a pool config. All three pools go
+// through here so none of them can be the one that silently produces no
+// database spans. With tracing off the tracer resolves to a no-op.
+func instrument(cfg *pgxpool.Config) *pgxpool.Config {
+	cfg.ConnConfig.Tracer = telemetry.PgxTracer{}
+	return cfg
+}
 
 func Open(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
 	switch driver := DriverFromConfig(cfg); driver {
@@ -30,7 +39,7 @@ func OpenPostgres(ctx context.Context, cfg config.PostgresConfig) (*pgxpool.Pool
 	// memoh.team_id is unset. Upstream is single-team, so we set the default
 	// team at the session level here.
 	poolCfg.AfterConnect = SetDefaultTeamOnConnect
-	return pgxpool.NewWithConfig(ctx, poolCfg)
+	return pgxpool.NewWithConfig(ctx, instrument(poolCfg))
 }
 
 // SetDefaultTeamOnConnect is a pgxpool AfterConnect hook that binds the
@@ -51,5 +60,5 @@ func OpenPostgresDSN(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		return nil, err
 	}
 	cfg.AfterConnect = SetDefaultTeamOnConnect
-	return pgxpool.NewWithConfig(ctx, cfg)
+	return pgxpool.NewWithConfig(ctx, instrument(cfg))
 }
