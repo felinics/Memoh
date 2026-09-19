@@ -514,20 +514,30 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	var streamResult *sdk.StreamResult
-	streamCtx, streamSpan := traceModelCall(streamCtx, spanModelStreamStart, cfg.Model)
+	// establishCtx, deliberately not assigned back over streamCtx: this span
+	// measures getting the stream open, and it ends there. Overwriting
+	// streamCtx would make everything the turn does afterwards — the drain,
+	// every tool call — a child of a span that has already ended and that
+	// claims to measure something else.
+	establishCtx, streamSpan := traceModelCall(streamCtx, spanModelStreamStart, cfg.Model)
 	attemptsUsed := 0
+	var establishErr error
+	// Deferred rather than closed on each exit: this loop returns from five
+	// places, and the one that was missed — the consumer going away while a
+	// retry event is being sent — leaks a span that is never exported,
+	// because a span that never ends never leaves the process.
+	defer func() { endModelCall(streamSpan, attemptsUsed, establishErr) }()
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
 		var err error
 		attemptsUsed = attempt + 1
-		streamResult, err = a.client.StreamText(streamCtx, opts...)
+		streamResult, err = a.client.StreamText(establishCtx, opts...)
+		establishErr = err
 		if err == nil {
-			endModelCall(streamSpan, attemptsUsed, nil)
 			break
 		}
 		if !isRetryableStreamError(err) {
 			turnError = fmt.Sprintf("stream start: %v", err)
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
-			endModelCall(streamSpan, attemptsUsed, err)
 			return
 		}
 		a.logger.WarnContext(ctx, "stream start failed, retrying",
@@ -546,15 +556,13 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		if attempt+1 >= retryCfg.MaxAttempts {
 			turnError = fmt.Sprintf("stream start: all %d attempts failed (last: %v)", retryCfg.MaxAttempts, err)
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
-			endModelCall(streamSpan, attemptsUsed, err)
 			return
 		}
 		delay := retryDelay(attempt, retryCfg)
 		if delay > 0 {
-			if err := sleepWithContext(streamCtx, delay); err != nil {
+			if err := sleepWithContext(establishCtx, delay); err != nil {
 				turnError = fmt.Sprintf("stream start: context cancelled during retry: %v", err)
 				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
-				endModelCall(streamSpan, attemptsUsed, err)
 				return
 			}
 		}

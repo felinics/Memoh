@@ -186,8 +186,20 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		// drift from what the caller is told. The guard is mechanical: no
 		// bare send to errCh may remain in this function.
 		fail := func(err error) {
+			// First error only, and never blocking. errCh holds one; a second
+			// send would block until someone reads, and if the consumer is
+			// stuck on the event channel at the same moment neither side ever
+			// moves — this goroutine would not exit and its channels would
+			// never close. The first error is the cause; later ones are its
+			// consequences.
+			if turnErr != nil {
+				return
+			}
 			turnErr = err
-			errCh <- err
+			select {
+			case errCh <- err:
+			default:
+			}
 		}
 		streamReq := req
 		if streamReq.RawQuery == "" {
@@ -216,7 +228,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				fail(err)
 				return
 			}
-			s.streamRuntimeChunks(ctx, dispatch.driver, streamReq, chunkCh, errCh)
+			s.streamRuntimeChunks(ctx, dispatch.driver, streamReq, chunkCh, fail)
 			return
 		}
 		streamCtx, preparedReq, prepareErr := s.prepareWorkspaceRequest(ctx, streamReq)

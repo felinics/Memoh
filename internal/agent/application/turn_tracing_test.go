@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -189,4 +190,61 @@ func newTracingTestService() *Service {
 	service := newTurnTestService(&fakeRunner{})
 	service.logger = slog.New(slog.DiscardHandler)
 	return service
+}
+
+// The external-runtime path used to write the error channel directly, which
+// meant the caller was told the turn failed while the span said it completed.
+// A trace that disagrees with the answer the caller got is worse than a trace
+// with nothing in it.
+func TestTurnSpanReportsFailureFromEveryPath(t *testing.T) {
+	recorder := recordTurnSpans(t)
+	service := newTracingTestService()
+
+	chunks, errs := service.StreamChat(context.Background(), ChatRequest{BotID: "b", ThreadID: "s"})
+	callerSaw := drainChans(t, chunks, errs)
+
+	span := turnSpan(t, recorder)
+	outcome := spanAttr(span, "agent.turn.outcome").AsString()
+	switch {
+	case callerSaw != nil && outcome == "completed":
+		t.Fatalf("caller was told %v but the span says completed", callerSaw)
+	case callerSaw == nil && outcome == "errored":
+		t.Fatal("the span says errored but the caller was told nothing")
+	}
+}
+
+// fail sends on a channel that holds one. A second failure must not block: if
+// it did, and the consumer were busy with the event channel at that moment,
+// neither side would move and this turn's goroutine would never exit.
+func TestFailDoesNotBlockOnASecondError(t *testing.T) {
+	errCh := make(chan error, 1)
+	var turnErr error
+	fail := func(err error) {
+		if turnErr != nil {
+			return
+		}
+		turnErr = err
+		select {
+		case errCh <- err:
+		default:
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fail(errors.New("first"))
+		fail(errors.New("second"))
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second failure blocked the turn goroutine")
+	}
+	if got := <-errCh; got.Error() != "first" {
+		t.Errorf("caller got %q, want the first error", got)
+	}
+	if turnErr.Error() != "first" {
+		t.Errorf("turnErr = %q, want the first error", turnErr)
+	}
 }
