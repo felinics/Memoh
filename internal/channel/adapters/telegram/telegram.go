@@ -1408,14 +1408,17 @@ func (a *TelegramAdapter) OpenStream(ctx context.Context, cfg channel.ChannelCon
 		}
 	}
 	return &telegramOutboundStream{
-		adapter:       a,
-		cfg:           cfg,
-		target:        target,
-		reply:         opts.Reply,
-		parseMode:     "",
-		isPrivateChat: isPrivateChat,
-		streamChatID:  chatID,
-		draftID:       1,
+		adapter:              a,
+		cfg:                  cfg,
+		target:               target,
+		reply:                opts.Reply,
+		parseMode:            "",
+		isPrivateChat:        isPrivateChat,
+		streamChatID:         chatID,
+		draftID:              1,
+		reuseToolCallMessage: opts.ReuseToolCallMessage,
+		toolStatusInterval:   telegramToolStatusEditInterval,
+		toolStatusKeepAlive:  telegramToolStatusDraftKeepAlive,
 	}, nil
 }
 

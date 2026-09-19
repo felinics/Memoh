@@ -41,6 +41,12 @@ type feishuOutboundStream struct {
 	patchInterval time.Duration
 	closed        atomic.Bool
 	toolMessages  map[string]string
+	// With reuseToolCallMessage set, ordinary tool calls share one patched card
+	// per uninterrupted batch, tracked by toolStatus. toolStatus is only touched
+	// by Push and Close; the interval is a field so tests can shorten it.
+	reuseToolCallMessage bool
+	toolStatus           *channel.ToolCallStatusTracker
+	toolStatusInterval   time.Duration
 }
 
 func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
@@ -54,6 +60,9 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+	}
+	if channel.EndsToolCallBatch(event) {
+		s.finishToolStatus(ctx)
 	}
 	switch event.Type {
 	case channel.StreamEventStatus:
@@ -74,21 +83,15 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		}
 		return s.patchCard(ctx, s.textBuffer.String())
 	case channel.StreamEventToolCallStart:
-		bufText := strings.TrimSpace(s.textBuffer.String())
-		if s.cardMessageID != "" && bufText != "" {
-			_ = s.patchCard(ctx, bufText)
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
 		}
-		s.cardMessageID = ""
-		s.lastPatched = ""
-		s.lastPatchedAt = time.Time{}
-		s.textBuffer.Reset()
-		return s.renderToolCallCard(ctx, event.ToolCall, channel.BuildToolCallStart(event.ToolCall))
+		return s.pushToolCallStart(ctx, event.ToolCall)
 	case channel.StreamEventToolCallEnd:
-		s.cardMessageID = ""
-		s.lastPatched = ""
-		s.lastPatchedAt = time.Time{}
-		s.textBuffer.Reset()
-		return s.renderToolCallCard(ctx, event.ToolCall, channel.BuildToolCallEnd(event.ToolCall))
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
+		}
+		return s.pushToolCallEnd(ctx, event.ToolCall)
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
 			return nil
@@ -179,6 +182,8 @@ func (s *feishuOutboundStream) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	// Finish first so background status updates stop even when ctx is done.
+	s.finishToolStatus(ctx)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -186,6 +191,33 @@ func (s *feishuOutboundStream) Close(ctx context.Context) error {
 	}
 	s.closed.Store(true)
 	return nil
+}
+
+func (s *feishuOutboundStream) pushToolCallStart(ctx context.Context, tc *channel.StreamToolCall) error {
+	s.flushBufferedText(ctx)
+	return s.renderToolCallCard(ctx, tc, channel.BuildToolCallStart(tc))
+}
+
+func (s *feishuOutboundStream) pushToolCallEnd(ctx context.Context, tc *channel.StreamToolCall) error {
+	s.detachTextCard()
+	return s.renderToolCallCard(ctx, tc, channel.BuildToolCallEnd(tc))
+}
+
+// flushBufferedText commits streamed text to its card before tool calls take
+// over and detaches the card, so the next text starts a new card below them.
+func (s *feishuOutboundStream) flushBufferedText(ctx context.Context) {
+	bufText := strings.TrimSpace(s.textBuffer.String())
+	if s.cardMessageID != "" && bufText != "" {
+		_ = s.patchCard(ctx, bufText)
+	}
+	s.detachTextCard()
+}
+
+func (s *feishuOutboundStream) detachTextCard() {
+	s.cardMessageID = ""
+	s.lastPatched = ""
+	s.lastPatchedAt = time.Time{}
+	s.textBuffer.Reset()
 }
 
 func (s *feishuOutboundStream) ensureCard(ctx context.Context, text string) error {

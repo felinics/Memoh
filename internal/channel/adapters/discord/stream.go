@@ -27,6 +27,12 @@ type discordOutboundStream struct {
 	buffer       strings.Builder
 	lastUpdate   time.Time
 	toolMessages map[string]string
+	// With reuseToolCallMessage set, ordinary tool calls share one edited
+	// message per uninterrupted batch, tracked by toolStatus. toolStatus is only
+	// touched by Push and Close; the interval is a field so tests can shorten it.
+	reuseToolCallMessage bool
+	toolStatus           *channel.ToolCallStatusTracker
+	toolStatusInterval   time.Duration
 }
 
 func (s *discordOutboundStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
@@ -41,6 +47,10 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
+	}
+
+	if channel.EndsToolCallBatch(event) {
+		s.finishToolStatus(ctx)
 	}
 
 	switch event.Type {
@@ -112,17 +122,14 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		return nil
 
 	case channel.StreamEventToolCallStart:
-		s.mu.Lock()
-		bufText := strings.TrimSpace(s.buffer.String())
-		s.mu.Unlock()
-		if bufText != "" {
-			if err := s.finalizeMessage(bufText, nil, nil); err != nil {
-				return err
-			}
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
 		}
-		s.resetStreamState()
-		return s.sendToolCallMessage(event.ToolCall, channel.BuildToolCallStart(event.ToolCall))
+		return s.pushToolCallStart(event.ToolCall)
 	case channel.StreamEventToolCallEnd:
+		if s.reuseToolCallMessage {
+			return s.pushToolCallReusingMessage(ctx, event.Type, event.ToolCall)
+		}
 		return s.sendToolCallMessage(event.ToolCall, channel.BuildToolCallEnd(event.ToolCall))
 
 	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted, channel.StreamEventProcessingFailed:
@@ -138,12 +145,36 @@ func (s *discordOutboundStream) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	// Finish first so background status updates stop even when ctx is done.
+	s.finishToolStatus(ctx)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
 	s.closed.Store(true)
+	return nil
+}
+
+func (s *discordOutboundStream) pushToolCallStart(tc *channel.StreamToolCall) error {
+	if err := s.flushBufferedText(); err != nil {
+		return err
+	}
+	return s.sendToolCallMessage(tc, channel.BuildToolCallStart(tc))
+}
+
+// flushBufferedText commits streamed text before tool calls take over and
+// resets the text stream, so the next text starts a new message below them.
+func (s *discordOutboundStream) flushBufferedText() error {
+	s.mu.Lock()
+	bufText := strings.TrimSpace(s.buffer.String())
+	s.mu.Unlock()
+	if bufText != "" {
+		if err := s.finalizeMessage(bufText, nil, nil); err != nil {
+			return err
+		}
+	}
+	s.resetStreamState()
 	return nil
 }
 

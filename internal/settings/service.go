@@ -158,6 +158,11 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 		current.DisplayEnabled = settingsRow.DisplayEnabled
 		current.CommandUILanguage = settingsRow.CommandUiLanguage
+		// Autosaving clients send only the fields that changed. Keep the stored
+		// IM display toggles unless the request sets them, or saving any other
+		// setting would switch tool calls in IM back off.
+		current.ShowToolCallsInIM = existingSettings.ShowToolCallsInIM
+		current.ReuseToolCallMessageInIM = existingSettings.ReuseToolCallMessageInIM
 	}
 	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
 	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
@@ -184,6 +189,9 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	}
 	if req.ShowToolCallsInIM != nil {
 		current.ShowToolCallsInIM = *req.ShowToolCallsInIM
+	}
+	if req.ReuseToolCallMessageInIM != nil {
+		current.ReuseToolCallMessageInIM = *req.ReuseToolCallMessageInIM
 	}
 	if req.ToolApprovalConfig != nil {
 		current.ToolApprovalConfig = NormalizeToolApprovalConfig(*req.ToolApprovalConfig)
@@ -461,6 +469,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		VideoModelIDSet:            videoModelIDSet,
 		PersistFullToolResults:     current.PersistFullToolResults,
 		ShowToolCallsInIm:          current.ShowToolCallsInIM,
+		ReuseToolCallMessageInIm:   current.ReuseToolCallMessageInIM,
 		ToolApprovalConfig:         toolApprovalConfig,
 		DisplayEnabled:             current.DisplayEnabled,
 		OverlayProvider:            normalizedNetwork.OverlayProvider,
@@ -690,6 +699,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.VideoModelID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
+		row.ReuseToolCallMessageInIm,
 		row.ToolApprovalConfig,
 		row.DisplayEnabled,
 		row.OverlayProvider,
@@ -722,6 +732,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.VideoModelID,
 		row.PersistFullToolResults,
 		row.ShowToolCallsInIm,
+		row.ReuseToolCallMessageInIm,
 		row.ToolApprovalConfig,
 		row.DisplayEnabled,
 		row.OverlayProvider,
@@ -753,6 +764,7 @@ func normalizeBotSettingsFields(
 	videoModelID pgtype.UUID,
 	persistFullToolResults bool,
 	showToolCallsInIM bool,
+	reuseToolCallMessageInIM bool,
 	toolApprovalConfig []byte,
 	displayEnabled bool,
 	overlayProvider string,
@@ -817,6 +829,7 @@ func normalizeBotSettingsFields(
 	}
 	settings.PersistFullToolResults = persistFullToolResults
 	settings.ShowToolCallsInIM = showToolCallsInIM
+	settings.ReuseToolCallMessageInIM = reuseToolCallMessageInIM
 	settings.ToolApprovalConfig = parseToolApprovalConfig(toolApprovalConfig)
 	settings.DisplayEnabled = displayEnabled
 	settings.OverlayProvider = strings.TrimSpace(overlayProvider)

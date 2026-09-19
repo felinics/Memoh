@@ -192,6 +192,10 @@ type StreamOptions struct {
 	Reply           *ReplyRef      `json:"reply,omitempty"`
 	SourceMessageID string         `json:"source_message_id,omitempty"`
 	Metadata        map[string]any `json:"metadata,omitempty"`
+	// ReuseToolCallMessage asks adapters that can edit messages to show the
+	// ordinary tool calls of a batch in one live status message instead of one
+	// message per call. Adapters without editing ignore it.
+	ReuseToolCallMessage bool `json:"reuse_tool_call_message,omitempty"`
 }
 
 // MessageFormat indicates how the message text should be rendered.
