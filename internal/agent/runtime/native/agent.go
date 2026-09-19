@@ -514,15 +514,20 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	var streamResult *sdk.StreamResult
+	streamCtx, streamSpan := traceModelCall(streamCtx, spanModelStreamStart, cfg.Model)
+	attemptsUsed := 0
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
 		var err error
+		attemptsUsed = attempt + 1
 		streamResult, err = a.client.StreamText(streamCtx, opts...)
 		if err == nil {
+			endModelCall(streamSpan, attemptsUsed, nil)
 			break
 		}
 		if !isRetryableStreamError(err) {
 			turnError = fmt.Sprintf("stream start: %v", err)
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+			endModelCall(streamSpan, attemptsUsed, err)
 			return
 		}
 		a.logger.WarnContext(ctx, "stream start failed, retrying",
@@ -541,6 +546,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		if attempt+1 >= retryCfg.MaxAttempts {
 			turnError = fmt.Sprintf("stream start: all %d attempts failed (last: %v)", retryCfg.MaxAttempts, err)
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+			endModelCall(streamSpan, attemptsUsed, err)
 			return
 		}
 		delay := retryDelay(attempt, retryCfg)
@@ -548,6 +554,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if err := sleepWithContext(streamCtx, delay); err != nil {
 				turnError = fmt.Sprintf("stream start: context cancelled during retry: %v", err)
 				sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+				endModelCall(streamSpan, attemptsUsed, err)
 				return
 			}
 		}
@@ -1173,7 +1180,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		}))
 	}
 
+	genCtx, genSpan := traceModelCall(genCtx, spanModelGenerate, cfg.Model)
 	genResult, err := a.client.GenerateTextResult(genCtx, opts...)
+	endModelCall(genSpan, 1, err)
 	if stepErr := contextStepBudgetError(genCtx); stepErr != nil {
 		return nil, stepErr
 	}
@@ -1806,7 +1815,7 @@ func (a *Agent) assembleTools(
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
-	return allTools, usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
+	return wrapToolTracing(allTools), usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
 }
 
 func appendToolUsageToSystem(system, toolUsage string) string {
@@ -2155,7 +2164,9 @@ func (a *Agent) runMidStreamRetry(
 			return failResult(), true
 		}
 
-		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)
+		retryCtx, retrySpan := traceModelCall(streamCtx, spanModelStreamStart, retryCfgCopy.Model)
+		retryResult, retryErr := a.client.StreamText(retryCtx, retryOpts...)
+		endModelCall(retrySpan, attempt+1, retryErr)
 		if retryErr != nil {
 			a.logger.WarnContext(sendCtx, "mid-stream retry failed to start",
 				slog.Int("attempt", attempt+1),
