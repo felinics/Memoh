@@ -68,10 +68,13 @@ func Tracer() trace.Tracer {
 // across the others rather than a separate disconnected trace per hop, and
 // nobody has to discover that propagation was the missing piece.
 func Setup(ctx context.Context, cfg config.TelemetryConfig, svc Service, log *slog.Logger) (Shutdown, error) {
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
-		propagation.TraceContext{},
-		propagation.Baggage{},
-	))
+	// TraceContext only. Baggage would make this process a forwarder for
+	// whatever a caller puts in the header: nothing here writes baggage, but
+	// installing the propagator would carry an inbound `baggage:` through the
+	// internal RPC and on into the per-bot workspace container. Propagating
+	// values we neither produce nor read is a channel we would not be able to
+	// account for.
+	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	if !cfg.Enabled() {
 		return func(context.Context) error { return nil }, nil
@@ -81,7 +84,10 @@ func Setup(ctx context.Context, cfg config.TelemetryConfig, svc Service, log *sl
 	// malformed attribute — otherwise go to stderr outside the log stream.
 	// They are warnings: losing telemetry is not losing work.
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
-		log.Warn("opentelemetry", slog.Any("error", err))
+		// This handler outlives Setup; ctx here is the startup context, and an
+		// export failure an hour later does not belong to it.
+		//logctx:plain
+		log.Warn("opentelemetry", slog.Any("error", err), slog.String("endpoint", safeEndpoint(cfg.Endpoint)))
 	}))
 
 	exporter, err := newExporter(ctx, cfg)
@@ -104,8 +110,9 @@ func Setup(ctx context.Context, cfg config.TelemetryConfig, svc Service, log *sl
 	// the one whose failure says least: an exporter talking TLS to a
 	// plaintext collector reports a handshake error, not a configuration
 	// problem.
+	//logctx:plain
 	log.Info("tracing enabled",
-		slog.String("endpoint", cfg.Endpoint),
+		slog.String("endpoint", safeEndpoint(cfg.Endpoint)),
 		slog.String("protocol", protocolOf(cfg)),
 		slog.Bool("tls", !useInsecure(cfg)),
 		slog.Float64("sample_ratio", clampRatio(cfg.SampleRatio)),
@@ -155,14 +162,31 @@ func newExporter(ctx context.Context, cfg config.TelemetryConfig) (*otlptrace.Ex
 // An endpoint with no scheme carries no such instruction, so the config value
 // stands. Setup logs which way it went for exactly that case.
 func useInsecure(cfg config.TelemetryConfig) bool {
-	switch {
-	case strings.HasPrefix(cfg.Endpoint, "http://"):
+	// Lowercased first: a scheme is case-insensitive, and "HTTP://collector"
+	// matching neither branch would quietly negotiate TLS against a plaintext
+	// collector and report a handshake error instead of a configuration one.
+	switch endpoint := strings.ToLower(strings.TrimSpace(cfg.Endpoint)); {
+	case strings.HasPrefix(endpoint, "http://"):
 		return true
-	case strings.HasPrefix(cfg.Endpoint, "https://"):
+	case strings.HasPrefix(endpoint, "https://"):
 		return false
 	default:
 		return cfg.Insecure
 	}
+}
+
+// safeEndpoint renders a collector address for a log record. A URL may carry
+// credentials — http://user:pass@collector:4317 is a valid thing for an
+// operator to configure — and a startup line is read by everyone who can read
+// logs.
+func safeEndpoint(endpoint string) string {
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Host == "" {
+		return endpoint
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	return parsed.String()
 }
 
 // hostPort strips a scheme the grpc exporter does not want; it takes a bare

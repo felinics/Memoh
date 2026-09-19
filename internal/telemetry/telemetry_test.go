@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/url"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -108,5 +110,58 @@ func TestSchemeDecidesTransportSecurity(t *testing.T) {
 				t.Errorf("insecure = %v, want %v", got, tc.wantInsecure)
 			}
 		})
+	}
+}
+
+func TestSetupDoesNotForwardBaggage(t *testing.T) {
+	// Nothing here writes baggage, so installing the propagator would only
+	// make this process carry a caller's header onward — through the internal
+	// RPC and into the per-bot workspace container. A value we neither
+	// produce nor read is a channel we cannot account for.
+	shutdown, err := telemetry.Setup(context.Background(), config.TelemetryConfig{}, telemetry.Service{Name: "test"}, discard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shutdown(context.Background()) })
+
+	in := propagation.MapCarrier{
+		"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+		"baggage":     "secret=synthetic-value",
+	}
+	ctx := otel.GetTextMapPropagator().Extract(context.Background(), in)
+	out := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, out)
+
+	if got := out["baggage"]; got != "" {
+		t.Errorf("baggage forwarded: %q", got)
+	}
+	if out["traceparent"] == "" {
+		t.Error("traceparent was not propagated")
+	}
+}
+
+func TestStartupLineHidesCredentialsInTheEndpoint(t *testing.T) {
+	// An operator may legitimately configure http://user:pass@collector:4317.
+	// A startup line is read by everyone who can read logs.
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	endpoint := (&url.URL{
+		Scheme: "http",
+		User:   url.UserPassword("someone", "synthetic-password"),
+		Host:   "collector:4317",
+	}).String()
+	shutdown, err := telemetry.Setup(context.Background(), config.TelemetryConfig{
+		Endpoint: endpoint,
+	}, telemetry.Service{Name: "test"}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shutdown(context.Background()) })
+
+	if strings.Contains(buf.String(), "synthetic-password") {
+		t.Errorf("the startup line published the endpoint's password: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "collector:4317") {
+		t.Errorf("the startup line does not say where it is exporting: %s", buf.String())
 	}
 }

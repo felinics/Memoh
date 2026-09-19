@@ -12,9 +12,10 @@ import (
 	"github.com/felinics/memoh/internal/telemetry"
 )
 
-// instrument installs the query tracer on a pool config. All three pools go
-// through here so none of them can be the one that silently produces no
-// database spans. With tracing off the tracer resolves to a no-op.
+// instrument installs the query tracer on a pool config. Both pools this
+// package opens go through here, so neither can be the one that silently
+// produces no database spans; the pgvector store opens its own and sets the
+// same tracer directly. With tracing off the tracer resolves to a no-op.
 func instrument(cfg *pgxpool.Config) *pgxpool.Config {
 	cfg.ConnConfig.Tracer = telemetry.PgxTracer{}
 	return cfg

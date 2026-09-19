@@ -2,9 +2,12 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
@@ -51,7 +54,15 @@ func (PgxTracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.T
 func (PgxTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	span := trace.SpanFromContext(ctx)
 	if data.Err != nil && span.IsRecording() {
-		span.RecordError(data.Err)
+		// The error is classified, not recorded. PostgreSQL puts the offending
+		// values in its message: a unique violation reads "Key (email)=(a@b.com)
+		// already exists". Calling RecordError would put that row's contents in
+		// the trace — the same data the arguments were withheld to protect.
+		// SQLSTATE says what went wrong without saying what the value was.
+		var pgErr *pgconn.PgError
+		if errors.As(data.Err, &pgErr) {
+			span.SetAttributes(attribute.String("db.response.status_code", pgErr.Code))
+		}
 		span.SetStatus(codes.Error, "")
 	}
 	span.End()
