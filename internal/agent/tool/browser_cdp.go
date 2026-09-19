@@ -199,7 +199,7 @@ func (p *BrowserProvider) createTarget(ctx context.Context, client *bridge.Clien
 	if strings.TrimSpace(targetURL) == "" {
 		targetURL = "about:blank"
 	}
-	body, status, err := p.cdpHTTP(ctx, client, ep.Port, http.MethodPut, "/json/new?"+url.QueryEscape(targetURL), nil)
+	body, status, err := p.cdpHTTP(ctx, client, ep.Port, http.MethodPut, "/json/new?"+escapeNewTargetURL(targetURL), nil)
 	if err != nil {
 		return cdpTarget{}, err
 	}
@@ -211,6 +211,75 @@ func (p *BrowserProvider) createTarget(ctx context.Context, client *bridge.Clien
 		return cdpTarget{}, err
 	}
 	return target, nil
+}
+
+// escapeNewTargetURL encodes a URL for Chrome's /json/new?<url>. Chrome
+// percent-decodes the query it receives but leaves "+" alone, so the form
+// encoding QueryEscape produces would turn every space of a data: URL (or a
+// query string) into a literal plus sign.
+func escapeNewTargetURL(targetURL string) string {
+	return strings.ReplaceAll(url.QueryEscape(targetURL), "+", "%20")
+}
+
+// browserWebSocketURL returns the browser-level CDP websocket of ep from
+// /json/version, which is what Target.* commands need.
+func (p *BrowserProvider) browserWebSocketURL(ctx context.Context, client *bridge.Client, ep browserEndpoint) (string, error) {
+	body, status, err := p.cdpHTTP(ctx, client, ep.Port, http.MethodGet, "/json/version", nil)
+	if err != nil {
+		return "", err
+	}
+	if status >= 400 {
+		return "", fmt.Errorf("CDP /json/version failed (HTTP %d): %s", status, string(body))
+	}
+	var version struct {
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.Unmarshal(body, &version); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(version.WebSocketDebuggerURL) == "" {
+		return "", errors.New("the browser does not expose a browser-level CDP websocket")
+	}
+	return version.WebSocketDebuggerURL, nil
+}
+
+// createTargetInBackground opens a tab without giving it focus
+// (Target.createTarget background=true over the browser-level connection).
+// Browsers without that connection get an explicit error instead of a
+// foreground tab.
+func (p *BrowserProvider) createTargetInBackground(ctx context.Context, client *bridge.Client, ep browserEndpoint, targetURL string) (cdpTarget, error) {
+	if strings.TrimSpace(targetURL) == "" {
+		targetURL = "about:blank"
+	}
+	wsURL, err := p.browserWebSocketURL(ctx, client, ep)
+	if err != nil {
+		return cdpTarget{}, fmt.Errorf("visible=false is not supported by %s: %w", ep.ID, err)
+	}
+	conn, err := p.dialCDP(ctx, client, cdpTarget{WebSocketDebuggerURL: wsURL})
+	if err != nil {
+		return cdpTarget{}, fmt.Errorf("visible=false is not supported by %s: %w", ep.ID, err)
+	}
+	defer func() { _ = conn.Close() }()
+	result, err := conn.Call(ctx, "Target.createTarget", map[string]any{"url": targetURL, "background": true})
+	if err != nil {
+		return cdpTarget{}, fmt.Errorf("open a background tab in %s: %w", ep.ID, err)
+	}
+	var created struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := json.Unmarshal(result, &created); err != nil || strings.TrimSpace(created.TargetID) == "" {
+		return cdpTarget{}, errors.New("the browser did not return the id of the background tab")
+	}
+	targets, err := p.listTargets(ctx, client, ep)
+	if err != nil {
+		return cdpTarget{}, err
+	}
+	for _, target := range targets {
+		if target.ID == created.TargetID {
+			return target, nil
+		}
+	}
+	return cdpTarget{ID: created.TargetID, Type: "page", URL: targetURL}, nil
 }
 
 func (p *BrowserProvider) activateTarget(ctx context.Context, client *bridge.Client, ep browserEndpoint, id string) error {

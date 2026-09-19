@@ -110,6 +110,9 @@ func shouldSkipJWT(path string) bool {
 	if strings.HasPrefix(path, "/assets/") {
 		return true
 	}
+	if isCDPProxyPath(path) {
+		return true
+	}
 	if isPublicSupermarketSkillIconPath(path) {
 		return true
 	}
@@ -181,4 +184,18 @@ func safeRequestLogURI(u *neturl.URL, fallback string) string {
 		return fallback
 	}
 	return u.RequestURI()
+}
+
+// isCDPProxyPath matches the revocable CDP proxy issued by
+// browser_remote_session: /bots/{bot}/container/cdp/{session}/... . The
+// session id in the path is the capability; CDP clients such as Playwright
+// or chrome-remote-interface cannot send a bearer token, so the handler
+// validates the session instead of the JWT middleware.
+func isCDPProxyPath(path string) bool {
+	if !strings.HasPrefix(path, "/bots/") {
+		return false
+	}
+	rest := strings.TrimPrefix(path, "/bots/")
+	parts := strings.SplitN(rest, "/", 4)
+	return len(parts) == 4 && parts[1] == "container" && parts[2] == "cdp" && parts[3] != ""
 }

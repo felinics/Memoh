@@ -126,6 +126,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewBotBackupHandler),
 			provideServerHandler(handlers.NewTokenUsageHandler),
 			provideServerHandler(handlers.NewSessionInfoHandler),
+			provideServerHandler(coremodule.ProvideGUITabMarksHandler),
 			provideServerHandler(handlers.NewSupermarketHandler),
 			provideServerHandler(handlers.NewAppsHandler),
 			provideServerHandler(provideWebHandler),

@@ -41,6 +41,10 @@ type guiSessionState struct {
 	// the baseline key of its most recent observation at any scope, which is
 	// what a cursor continues and what browser ref reuse starts from.
 	latestObservation map[string]string
+
+	// tabNames holds the session_name a tab was opened with (tab_new): task
+	// organisation metadata for tab_list / tab_get and marks, nothing more.
+	tabNames map[string]string
 }
 
 // baselineKey names one observation configuration: a target plus the scope
@@ -130,9 +134,32 @@ func (st *guiSessionState) forgetTab(tabID string) {
 	defer st.mu.Unlock()
 	delete(st.browserSnapshots, tabID)
 	st.dropBaselinesLocked("browser:" + tabID)
+	delete(st.tabNames, tabID)
 	if st.tabID == tabID {
 		st.tabID = ""
 	}
+}
+
+// setTabName records the session_name of a tab; an empty name forgets it.
+func (st *guiSessionState) setTabName(tabID, name string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	name = strings.TrimSpace(name)
+	if name == "" {
+		delete(st.tabNames, tabID)
+		return
+	}
+	if st.tabNames == nil {
+		st.tabNames = make(map[string]string)
+	}
+	st.tabNames[tabID] = name
+}
+
+// tabName returns the session_name recorded for a tab, if any.
+func (st *guiSessionState) tabName(tabID string) string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.tabNames[tabID]
 }
 
 // snapshotBaseline returns the latest observation of target at scope, nil

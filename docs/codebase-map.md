@@ -81,6 +81,7 @@ Memoh/
 │   ├── chat/                   #   Chat bounded package
 │   │   ├── event/              #     Persisted chat event hub
 │   │   ├── message/            #     Message persistence
+│   │   ├── tabmark/            #     Deliverable / handoff marks on workspace browser tabs (session metadata)
 │   │   ├── thread/             #     Internal Thread lifecycle and forks
 │   │   ├── timeline/           #     Canonical events, projection, rendering, and persistence
 │   │   └── view/               #     API/UI history projection
@@ -136,6 +137,7 @@ Memoh/
 │       ├── manager.go          #     Container reconciliation, gRPC connection pool
 │       ├── manager_lifecycle.go #    Container create/start/stop operations
 │       ├── bridge/             #     gRPC client for in-container bridge service
+│       ├── cdpsession/         #     Revocable CDP sessions issued by browser_remote_session and served by the HTTP proxy
 │       └── bridgepb/           #     Protobuf definitions (bridge.proto)
 ├── apps/                       # Application services
 │   ├── desktop/                #   Native Electron app (@memohai/desktop): hosted-server renderer, tray, menus, preload IPC

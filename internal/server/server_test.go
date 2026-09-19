@@ -203,3 +203,22 @@ func TestShouldSkipJWTOnlyForDigestAddressedSupermarketSkillIcons(t *testing.T) 
 		}
 	}
 }
+
+func TestShouldSkipJWT_CDPProxyPaths(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]bool{
+		"/bots/b1/container/cdp/abcd/json/version":     true,
+		"/bots/b1/container/cdp/abcd/devtools/page/T1": true,
+		"/bots/b1/container/cdp/":                      false,
+		"/bots/b1/container/cdp":                       false,
+		"/bots/b1/container/browser/sessions":          false,
+		"/bots/b1/sessions/s1/gui-marks":               false,
+		"/api/bots/b1/container/cdp/abcd/json/version": false,
+	}
+	for path, want := range cases {
+		if got := shouldSkipJWT(path); got != want {
+			t.Errorf("shouldSkipJWT(%q) = %v, want %v", path, got, want)
+		}
+	}
+}

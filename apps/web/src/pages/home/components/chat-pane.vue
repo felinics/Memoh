@@ -460,6 +460,13 @@
                 @clear="controlGoal('clear')"
                 @resume="controlGoal('resume')"
               />
+              <GuiTabMarks
+                v-if="hasRenderedSession && currentBotId && activeSessionId"
+                class="mx-3 mb-2"
+                :bot-id="currentBotId"
+                :session-id="activeSessionId"
+                :visible="isVisible"
+              />
               <!-- The composer is ALWAYS a two-row card (textarea on top,
                    controls below) — no pill↔multiline morph: a fixed rounded-2xl
                    box, so its shape never depends on the content and nothing
@@ -1284,6 +1291,7 @@ import ChatScrollRail, { type ScrollRailSegment } from './chat-scroll-rail.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
+import GuiTabMarks from './gui-tab-marks.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ComposerModelMenu from './composer-model-menu.vue'
 import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'

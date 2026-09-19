@@ -3982,6 +3982,64 @@ definitions:
       path:
         type: string
     type: object
+  handlers.GUITabMark:
+    properties:
+      browser_id:
+        type: string
+      closed_at:
+        type: string
+      key:
+        type: string
+      kind:
+        type: string
+      marked_at:
+        type: string
+      note:
+        type: string
+      session_name:
+        type: string
+      status:
+        $ref: '#/definitions/handlers.GUITabMarkStatus'
+      tab_id:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      url:
+        type: string
+    type: object
+  handlers.GUITabMarkKeyRequest:
+    properties:
+      key:
+        type: string
+    type: object
+  handlers.GUITabMarkOpenResponse:
+    properties:
+      activated:
+        type: boolean
+      key:
+        type: string
+      status:
+        $ref: '#/definitions/handlers.GUITabMarkStatus'
+    type: object
+  handlers.GUITabMarkStatus:
+    enum:
+    - active
+    - closed
+    - unknown
+    type: string
+    x-enum-varnames:
+    - GUITabMarkActive
+    - GUITabMarkClosed
+    - GUITabMarkUnknown
+  handlers.GUITabMarksResponse:
+    properties:
+      marks:
+        items:
+          $ref: '#/definitions/handlers.GUITabMark'
+        type: array
+    type: object
   handlers.GetContainerMetricsResponse:
     properties:
       backend:
@@ -9940,6 +9998,107 @@ paths:
       summary: Keep browser proxy session alive
       tags:
       - containerd
+  /bots/{bot_id}/container/cdp/{session_id}/devtools/page/{target_id}:
+    get:
+      description: Attaches to the session's page target inside the workspace. Revoking
+        the session closes this connection.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: CDP session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Page target ID (must be the session's tab)
+        in: path
+        name: target_id
+        required: true
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: CDP websocket of a revocable browser session
+      tags:
+      - containerd
+  /bots/{bot_id}/container/cdp/{session_id}/json/list:
+    get:
+      description: Lists the single page target the session is bound to, with its
+        websocket URL rewritten to this proxy. Other tabs of the browser are never
+        listed.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: CDP session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: CDP /json/list of a revocable browser session
+      tags:
+      - containerd
+  /bots/{bot_id}/container/cdp/{session_id}/json/version:
+    get:
+      description: 'Browser metadata for CDP clients. The browser-level websocket
+        is not exposed: a session is scoped to one page target, see /json/list.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: CDP session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: CDP /json/version of a revocable browser session
+      tags:
+      - containerd
   /bots/{bot_id}/container/data/restore:
     post:
       parameters:
@@ -13772,6 +13931,119 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Fork a chat session from an assistant reply
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/gui-marks:
+    get:
+      description: Deliverable / handoff marks the agent placed on workspace browser
+        tabs, with whether each tab still exists.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.GUITabMarksResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List the tab marks of a session
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/gui-marks/dismiss:
+    post:
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Mark key
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.GUITabMarkKeyRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Remove a tab mark
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/gui-marks/open:
+    post:
+      description: Activates the marked tab in the workspace browser so it is visible
+        in the display; the client then shows the display.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Mark key
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.GUITabMarkKeyRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.GUITabMarkOpenResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Bring a marked tab to the front
       tags:
       - sessions
   /bots/{bot_id}/sessions/{session_id}/queue:

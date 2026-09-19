@@ -13,9 +13,11 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/chat/tabmark"
 	displaypkg "github.com/felinics/memoh/internal/display"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/cdpsession"
 )
 
 const (
@@ -45,6 +47,25 @@ type BrowserProvider struct {
 	// clipboards serialises desktop clipboard use per bot: paste saves,
 	// replaces, and restores the X clipboard, which only works one at a time.
 	clipboards sync.Map
+	// marks persists deliverable / handoff tab marks on the session; nil
+	// when the thread store is not wired (the mark actions then fail
+	// explicitly instead of pretending to persist).
+	marks *tabmark.Service
+	// cdpSessions issues the revocable CDP sessions served by the server's
+	// proxy; nil disables the proxied form and browser_remote_session only
+	// reports the direct workspace endpoint.
+	cdpSessions *cdpsession.Store
+}
+
+// SetTabMarks wires the persisted tab marks.
+func (p *BrowserProvider) SetTabMarks(marks *tabmark.Service) {
+	p.marks = marks
+}
+
+// SetCDPSessions wires the revocable CDP session store shared with the HTTP
+// proxy.
+func (p *BrowserProvider) SetCDPSessions(store *cdpsession.Store) {
+	p.cdpSessions = store
 }
 
 func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, containers bridge.Provider, displaySvc *displaypkg.Service, dataRoot string) *BrowserProvider {
@@ -74,7 +95,7 @@ func (*BrowserProvider) Usage(_ context.Context, session SessionContext, availab
 	browserRefs := available.Refs(ToolBrowserObserve(), ToolBrowserAction())
 	switch len(browserRefs) {
 	case 2:
-		parts = append(parts, "**Browser** ("+strings.Join(browserRefs, ", ")+"): Web pages in Chrome. Observe before acting; refs from a snapshot are bound to that snapshot_id and that tab, so observe again after navigation or when a ref is refused. Pass tab_id to address a specific tab; the conversation's selected tab is used otherwise.")
+		parts = append(parts, "**Browser** ("+strings.Join(browserRefs, ", ")+"): Web pages in Chrome. Observe before acting; refs from a snapshot are bound to that snapshot_id and that tab, so observe again after navigation or when a ref is refused. Pass tab_id to address a specific tab; the conversation's selected tab is used otherwise. tab_new takes session_name (a task label) and visible=false for a background tab; tab_get inspects a tab without selecting it. When a tab holds the result the user should open, tab_mark_deliverable it; when the user must take over a tab (login, captcha, confirmation), tab_mark_handoff it and say so in your reply — the marks stay visible in the conversation and can be opened from there.")
 	case 1:
 		if ref, ok := available.Ref(ToolBrowserObserve()); ok {
 			parts = append(parts, "**Browser** ("+ref+"): Web pages in Chrome. Observe before acting; prefer element refs from snapshot over CSS selectors.")
@@ -95,9 +116,9 @@ func (*BrowserProvider) Usage(_ context.Context, session SessionContext, availab
 	}
 	if ref, ok := available.Ref(ToolBrowserRemoteSession()); ok {
 		if len(browserRefs) > 0 || len(desktopRefs) > 0 {
-			parts = append(parts, ref+": Only when running Playwright or other CDP automation inside the workspace is clearly better than the GUI tools above.")
+			parts = append(parts, ref+": Only when running Playwright or other CDP automation is clearly better than the GUI tools above. create issues a revocable session for one tab (a proxied endpoint for clients outside the workspace, plus the direct in-workspace endpoint with its browser-wide scope stated); close revokes it and keeps the tab unless close_tab=true.")
 		} else {
-			parts = append(parts, ref+": Use for code-driven Playwright or other CDP automation inside the workspace.")
+			parts = append(parts, ref+": Use for code-driven Playwright or other CDP automation. create issues a revocable session for one tab; close revokes it and keeps the tab unless close_tab=true.")
 		}
 	}
 	hasObserve := available.Has(ToolBrowserObserve()) || available.Has(ToolComputerObserve())
@@ -262,98 +283,19 @@ func (p *BrowserProvider) runBrowser(ctx context.Context, session SessionContext
 	state := p.sessions.get(session)
 	runCtx, cancel := context.WithTimeout(ctx, browserToolTimeout)
 	defer cancel()
-	data, err := p.runCDPAction(runCtx, client, state, args)
+	data, err := p.runCDPAction(runCtx, session, client, state, args)
 	if err != nil {
 		return nil, err
 	}
 	return p.browserActionResult(ctx, session, botID, data, args), nil
 }
 
-func (p *BrowserProvider) execRemoteSession(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	spec, err := browserRemoteSessionContract.normalize(args)
-	if err != nil {
-		return nil, err
-	}
-	botID, err := sessionBotID(session)
-	if err != nil {
-		return nil, err
-	}
-	if err := p.ensureDisplayEnabled(ctx, botID); err != nil {
-		return nil, err
-	}
-	if p.containers == nil {
-		return nil, errors.New("workspace runtime provider is not configured")
-	}
-	client, err := p.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	state := p.sessions.get(session)
-	browser, err := p.resolveBrowser(ctx, client, state, StringArg(args, "browser_id"))
-	if err != nil {
-		return nil, err
-	}
-	switch spec.Name {
-	case "create":
-		targetURL := StringArg(args, "url")
-		var target cdpTarget
-		created := false
-		if strings.TrimSpace(targetURL) != "" {
-			target, err = p.createTarget(ctx, client, browser, targetURL)
-			created = true
-		} else {
-			var tab resolvedTab
-			tab, err = p.resolveTab(ctx, client, state, map[string]any{"browser_id": browser.ID})
-			target = tab.Target
-		}
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{
-			"id":                      target.ID,
-			"session_id":              target.ID,
-			"browser_id":              browser.ID,
-			"tab_id":                  target.ID,
-			"created_tab":             created,
-			"status":                  "active",
-			"scope":                   "browser-wide CDP endpoint; not revocable independently of the browser",
-			"cdp_url":                 browser.baseURL(),
-			"ws_endpoint":             target.WebSocketDebuggerURL,
-			"web_socket_debugger_url": target.WebSocketDebuggerURL,
-			"connect_over_cdp":        browser.baseURL(),
-			"target":                  target.publicMap(),
-		}, nil
-	case "status":
-		targets, err := p.listTargets(ctx, client, browser)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{
-			"status":           "active",
-			"browser_id":       browser.ID,
-			"cdp_url":          browser.baseURL(),
-			"connect_over_cdp": browser.baseURL(),
-			"targets":          publicTargets(targets),
-		}, nil
-	case "close":
-		id := StringArg(args, "session_id")
-		result, err := p.closeTarget(ctx, client, browser, id)
-		if err != nil {
-			return nil, err
-		}
-		state.forgetTab(id)
-		return result, nil
-	default:
-		return nil, fmt.Errorf("unknown session action: %s", spec.Name)
-	}
-}
-
 // runCDPAction dispatches one validated browser call. Tab-management
 // actions resolve their own targets; page actions freeze one tab first.
-func (p *BrowserProvider) runCDPAction(ctx context.Context, client *bridge.Client, state *guiSessionState, args map[string]any) (map[string]any, error) {
+func (p *BrowserProvider) runCDPAction(ctx context.Context, session SessionContext, client *bridge.Client, state *guiSessionState, args map[string]any) (map[string]any, error) {
 	action := normalizeBrowserAction(StringArg(args, "action"))
 	if isCDPTabAction(action) {
-		return p.runCDPTabAction(ctx, client, state, action, args)
+		return p.runCDPTabAction(ctx, session, client, state, action, args)
 	}
 	tab, page, err := p.connectTab(ctx, client, state, args)
 	if err != nil {
@@ -929,68 +871,6 @@ func htmlToText(html string) string {
 	}
 	out := strings.NewReplacer("&nbsp;", " ", "&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'").Replace(b.String())
 	return strings.TrimSpace(out)
-}
-
-func isCDPTabAction(action string) bool {
-	switch action {
-	case "tab_new", "tab_select", "tab_close", "tab_list":
-		return true
-	default:
-		return false
-	}
-}
-
-func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Client, state *guiSessionState, action string, args map[string]any) (map[string]any, error) {
-	switch action {
-	case "tab_new":
-		browser, err := p.resolveBrowser(ctx, client, state, StringArg(args, "browser_id"))
-		if err != nil {
-			return nil, err
-		}
-		newTarget, err := p.createTarget(ctx, client, browser, StringArg(args, "url"))
-		if err != nil {
-			return nil, err
-		}
-		state.selectTab(browser.ID, newTarget.ID)
-		targets, _ := p.listTargets(ctx, client, browser)
-		return map[string]any{"browser_id": browser.ID, "tab_id": newTarget.ID, "tab_index": targetIndex(targets, newTarget.ID), "target": newTarget.publicMap(), "url": newTarget.URL, "selected": true}, nil
-	case "tab_select":
-		tab, err := p.resolveTab(ctx, client, state, args)
-		if err != nil {
-			return nil, err
-		}
-		if err := p.activateTarget(ctx, client, tab.Browser, tab.Target.ID); err != nil {
-			return nil, err
-		}
-		state.selectTab(tab.Browser.ID, tab.Target.ID)
-		targets, _ := p.listTargets(ctx, client, tab.Browser)
-		return map[string]any{"browser_id": tab.Browser.ID, "tab_id": tab.Target.ID, "tab_index": targetIndex(targets, tab.Target.ID), "target": tab.Target.publicMap(), "url": tab.Target.URL, "title": tab.Target.Title, "activated": true}, nil
-	case "tab_close":
-		tab, err := p.resolveTab(ctx, client, state, args)
-		if err != nil {
-			return nil, err
-		}
-		targets, _ := p.listTargets(ctx, client, tab.Browser)
-		result, err := p.closeTarget(ctx, client, tab.Browser, tab.Target.ID)
-		if err != nil {
-			return nil, err
-		}
-		state.forgetTab(tab.Target.ID)
-		return map[string]any{"browser_id": tab.Browser.ID, "tab_id": tab.Target.ID, "closed": targetIndex(targets, tab.Target.ID), "result": result}, nil
-	case "tab_list":
-		browser, err := p.resolveBrowser(ctx, client, state, StringArg(args, "browser_id"))
-		if err != nil {
-			return nil, err
-		}
-		targets, err := p.listTargets(ctx, client, browser)
-		if err != nil {
-			return nil, err
-		}
-		_, selectedTab, _ := state.defaults()
-		return map[string]any{"browser_id": browser.ID, "tabs": publicTargets(targets), "selected_tab_id": selectedTab}, nil
-	default:
-		return nil, fmt.Errorf("unknown browser tab action: %s", action)
-	}
 }
 
 func (p *BrowserProvider) browserActionResult(ctx context.Context, session SessionContext, botID string, data map[string]any, args map[string]any) any {

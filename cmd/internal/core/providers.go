@@ -54,6 +54,7 @@ import (
 	"github.com/felinics/memoh/internal/channel/route"
 	"github.com/felinics/memoh/internal/chat/event"
 	"github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/chat/tabmark"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/config"
@@ -101,6 +102,7 @@ import (
 	"github.com/felinics/memoh/internal/workdir"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
+	"github.com/felinics/memoh/internal/workspace/cdpsession"
 	"github.com/felinics/memoh/internal/workspacedeps"
 	depcatalog "github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
@@ -808,11 +810,30 @@ func provideDisplayService(lc fx.Lifecycle, log *slog.Logger, manager *workspace
 	return service
 }
 
-func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, workspaceDeps *workspacedeps.Service) *handlers.ContainerdHandler {
+func provideContainerdHandler(log *slog.Logger, manager *workspace.Manager, cfg config.Config, rc *boot.RuntimeConfig, displayService *displaypkg.Service, botService *bots.Service, accountService *accounts.Service, policyService *policy.Service, workspaceDeps *workspacedeps.Service, cdpSessions *cdpsession.Store) *handlers.ContainerdHandler {
 	manager.SetSetupDiagnostics(botService)
 	h := handlers.NewContainerdHandler(log, manager, cfg.Workspace, rc.ContainerBackend, displayService, botService, accountService, policyService)
 	h.SetWorkspaceDependencyService(workspaceDeps)
+	h.SetCDPSessions(cdpSessions)
 	return h
+}
+
+// provideCDPSessions is the registry of revocable CDP sessions shared by the
+// browser_remote_session tool (which issues them) and the containerd
+// handler's proxy (which serves and revokes them).
+func provideCDPSessions() *cdpsession.Store {
+	return cdpsession.New(cdpsession.DefaultIdleTTL)
+}
+
+// provideTabMarks persists deliverable / handoff tab marks in the session
+// metadata.
+func provideTabMarks(sessionService *sessionpkg.Service) *tabmark.Service {
+	return tabmark.NewService(sessionService)
+}
+
+// ProvideGUITabMarksHandler builds the handler that lists and opens tab marks.
+func ProvideGUITabMarksHandler(log *slog.Logger, marks *tabmark.Service, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service, manager *workspace.Manager) *handlers.GUITabMarksHandler {
+	return handlers.NewGUITabMarksHandler(log, marks, sessionService, botService, accountService, manager)
 }
 
 // provideWorkspaceDependencyCatalog constructs the remote catalog without
@@ -977,7 +998,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool) []agenttools.ToolProvider {
+func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, emailService *emailpkg.Service, emailRuntime emailpkg.Runtime, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool, tabMarks *tabmark.Service, cdpSessions *cdpsession.Store) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -985,6 +1006,9 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 	channelMessaging := channelmessagingadapter.New(channelRuntime, registry, assetResolver)
 	historySessions := channelthreadadapter.NewLister(sessionService, routeService)
 	fedSource := mcpfederation.NewSource(log, fedGateway, mcpConnService, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
+	browserProvider := agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, displayService, config.DefaultDataMount)
+	browserProvider.SetTabMarks(tabMarks)
+	browserProvider.SetCDPSessions(cdpSessions)
 	return []agenttools.ToolProvider{
 		agenttools.NewAskUserProvider(log),
 		agenttools.NewMessageProvider(log, channelMessaging, channelMessaging, channelMessaging, assetResolver),
@@ -996,7 +1020,7 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewWebProvider(log, settingsService, searchProviderService),
 		agenttools.NewContainerProvider(log, manager, bgManager, config.DefaultDataMount, hookService),
 		agenttools.NewBackgroundProvider(log, bgManager),
-		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, displayService, config.DefaultDataMount),
+		browserProvider,
 		agenttools.NewEmailProvider(log, emailService, emailRuntime),
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
 		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),

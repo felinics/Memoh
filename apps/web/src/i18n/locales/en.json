@@ -1039,7 +1039,10 @@
         "reload": "Reload current page",
         "tab_new": "Open browser tab",
         "tab_select": "Switch browser tab",
-        "tab_close": "Close browser tab"
+        "tab_close": "Close browser tab",
+        "tab_get": "Inspect browser tab",
+        "tab_mark_deliverable": "Mark tab as deliverable",
+        "tab_mark_handoff": "Mark tab for handoff"
       },
       "browserObserve": {
         "snapshot": "Inspect page structure",
@@ -1458,6 +1461,17 @@
         "expired": "Browser session expired",
         "error": "Browser unavailable"
       }
+    },
+    "guiMarks": {
+      "deliverable": "Deliverable",
+      "handoff": "Needs you",
+      "open": "Open",
+      "openTitle": "Bring this tab to the front of the Desktop",
+      "dismiss": "Dismiss",
+      "closed": "Closed",
+      "unknown": "Unavailable",
+      "openFailed": "Could not open the tab",
+      "ariaLabel": "Marked browser tabs"
     },
     "display": {
       "title": "Desktop",

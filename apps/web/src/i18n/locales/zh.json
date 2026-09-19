@@ -1051,7 +1051,10 @@
         "reload": "重新加载当前页面",
         "tab_new": "打开浏览器标签页",
         "tab_select": "切换浏览器标签页",
-        "tab_close": "关闭浏览器标签页"
+        "tab_close": "关闭浏览器标签页",
+        "tab_get": "查看浏览器标签页",
+        "tab_mark_deliverable": "标记为交付标签页",
+        "tab_mark_handoff": "标记为需接手标签页"
       },
       "browserObserve": {
         "snapshot": "查看页面结构",
@@ -1470,6 +1473,17 @@
         "expired": "浏览器会话已过期",
         "error": "浏览器不可用"
       }
+    },
+    "guiMarks": {
+      "deliverable": "交付",
+      "handoff": "需要你接手",
+      "open": "打开",
+      "openTitle": "在桌面中把该标签页切到前台",
+      "dismiss": "移除",
+      "closed": "已关闭",
+      "unknown": "暂不可用",
+      "openFailed": "无法打开该标签页",
+      "ariaLabel": "已标记的浏览器标签页"
     },
     "display": {
       "title": "桌面",

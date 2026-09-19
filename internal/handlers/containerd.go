@@ -25,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/policy"
 	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/cdpsession"
 )
 
 type ContainerdHandler struct {
@@ -42,6 +43,7 @@ type ContainerdHandler struct {
 	policyService    *policy.Service
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
+	cdpSessions      *cdpsession.Store
 	workspaceDeps    workspaceDependencyService
 }
 
@@ -323,6 +325,7 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 	group.GET("/display/sessions", h.ListDisplaySessions)
 	group.DELETE("/display/sessions/:session_id", h.CloseDisplaySession)
 	group.POST("/display/webrtc/offer", h.HandleDisplayWebRTCOffer)
+	h.registerCDPProxy(group)
 	// File manager routes
 	group.GET("/fs", h.FSStat)
 	group.GET("/fs/list", h.FSList)

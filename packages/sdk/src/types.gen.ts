@@ -2268,6 +2268,37 @@ export type HandlersFsWriteRequest = {
     path?: string;
 };
 
+export type HandlersGuiTabMark = {
+    browser_id?: string;
+    closed_at?: string;
+    key?: string;
+    kind?: string;
+    marked_at?: string;
+    note?: string;
+    session_name?: string;
+    status?: HandlersGuiTabMarkStatus;
+    tab_id?: string;
+    title?: string;
+    updated_at?: string;
+    url?: string;
+};
+
+export type HandlersGuiTabMarkKeyRequest = {
+    key?: string;
+};
+
+export type HandlersGuiTabMarkOpenResponse = {
+    activated?: boolean;
+    key?: string;
+    status?: HandlersGuiTabMarkStatus;
+};
+
+export type HandlersGuiTabMarkStatus = 'active' | 'closed' | 'unknown';
+
+export type HandlersGuiTabMarksResponse = {
+    marks?: Array<HandlersGuiTabMark>;
+};
+
 export type HandlersGetContainerMetricsResponse = {
     backend?: string;
     metrics?: HandlersContainerMetricsPayloadResponse;
@@ -7436,6 +7467,119 @@ export type PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveResponses
 
 export type PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveResponse = PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveResponses[keyof PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveResponses];
 
+export type GetBotsByBotIdContainerCdpBySessionIdDevtoolsPageByTargetIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * CDP session ID
+         */
+        session_id: string;
+        /**
+         * Page target ID (must be the session's tab)
+         */
+        target_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/cdp/{session_id}/devtools/page/{target_id}';
+};
+
+export type GetBotsByBotIdContainerCdpBySessionIdDevtoolsPageByTargetIdErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerCdpBySessionIdDevtoolsPageByTargetIdError = GetBotsByBotIdContainerCdpBySessionIdDevtoolsPageByTargetIdErrors[keyof GetBotsByBotIdContainerCdpBySessionIdDevtoolsPageByTargetIdErrors];
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonListData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * CDP session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/cdp/{session_id}/json/list';
+};
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonListErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonListError = GetBotsByBotIdContainerCdpBySessionIdJsonListErrors[keyof GetBotsByBotIdContainerCdpBySessionIdJsonListErrors];
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonListResponses = {
+    /**
+     * OK
+     */
+    200: Array<{
+        [key: string]: unknown;
+    }>;
+};
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonListResponse = GetBotsByBotIdContainerCdpBySessionIdJsonListResponses[keyof GetBotsByBotIdContainerCdpBySessionIdJsonListResponses];
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonVersionData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * CDP session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/container/cdp/{session_id}/json/version';
+};
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonVersionErrors = {
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonVersionError = GetBotsByBotIdContainerCdpBySessionIdJsonVersionErrors[keyof GetBotsByBotIdContainerCdpBySessionIdJsonVersionErrors];
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonVersionResponses = {
+    /**
+     * OK
+     */
+    200: {
+        [key: string]: unknown;
+    };
+};
+
+export type GetBotsByBotIdContainerCdpBySessionIdJsonVersionResponse = GetBotsByBotIdContainerCdpBySessionIdJsonVersionResponses[keyof GetBotsByBotIdContainerCdpBySessionIdJsonVersionResponses];
+
 export type PostBotsByBotIdContainerDataRestoreData = {
     body?: never;
     path: {
@@ -12022,6 +12166,136 @@ export type PostBotsByBotIdSessionsBySessionIdForkResponses = {
 };
 
 export type PostBotsByBotIdSessionsBySessionIdForkResponse = PostBotsByBotIdSessionsBySessionIdForkResponses[keyof PostBotsByBotIdSessionsBySessionIdForkResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdGuiMarksData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/gui-marks';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdGuiMarksErrors = {
+    /**
+     * Unauthorized
+     */
+    401: HandlersErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdGuiMarksError = GetBotsByBotIdSessionsBySessionIdGuiMarksErrors[keyof GetBotsByBotIdSessionsBySessionIdGuiMarksErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdGuiMarksResponses = {
+    /**
+     * OK
+     */
+    200: HandlersGuiTabMarksResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdGuiMarksResponse = GetBotsByBotIdSessionsBySessionIdGuiMarksResponses[keyof GetBotsByBotIdSessionsBySessionIdGuiMarksResponses];
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksDismissData = {
+    /**
+     * Mark key
+     */
+    body: HandlersGuiTabMarkKeyRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/gui-marks/dismiss';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksDismissErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksDismissError = PostBotsByBotIdSessionsBySessionIdGuiMarksDismissErrors[keyof PostBotsByBotIdSessionsBySessionIdGuiMarksDismissErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksDismissResponses = {
+    /**
+     * No Content
+     */
+    204: unknown;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksOpenData = {
+    /**
+     * Mark key
+     */
+    body: HandlersGuiTabMarkKeyRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/gui-marks/open';
+};
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksOpenErrors = {
+    /**
+     * Bad Request
+     */
+    400: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: HandlersErrorResponse;
+    /**
+     * Conflict
+     */
+    409: HandlersErrorResponse;
+    /**
+     * Bad Gateway
+     */
+    502: HandlersErrorResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksOpenError = PostBotsByBotIdSessionsBySessionIdGuiMarksOpenErrors[keyof PostBotsByBotIdSessionsBySessionIdGuiMarksOpenErrors];
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksOpenResponses = {
+    /**
+     * OK
+     */
+    200: HandlersGuiTabMarkOpenResponse;
+};
+
+export type PostBotsByBotIdSessionsBySessionIdGuiMarksOpenResponse = PostBotsByBotIdSessionsBySessionIdGuiMarksOpenResponses[keyof PostBotsByBotIdSessionsBySessionIdGuiMarksOpenResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdQueueData = {
     body?: never;

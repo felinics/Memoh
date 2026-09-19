@@ -1020,7 +1020,10 @@
         "reload": "現在のページを再読み込み",
         "tab_new": "ブラウザーのタブを開く",
         "tab_select": "ブラウザーのタブを切り替え",
-        "tab_close": "ブラウザーのタブを閉じる"
+        "tab_close": "ブラウザーのタブを閉じる",
+        "tab_get": "ブラウザーのタブを確認",
+        "tab_mark_deliverable": "タブを成果物としてマーク",
+        "tab_mark_handoff": "タブを引き継ぎ待ちとしてマーク"
       },
       "browserObserve": {
         "snapshot": "ページの構造を確認",
@@ -1427,6 +1430,17 @@
         "expired": "ブラウザーセッションの有効期限が切れました",
         "error": "ブラウザーを使用できません"
       }
+    },
+    "guiMarks": {
+      "deliverable": "成果物",
+      "handoff": "引き継ぎが必要",
+      "open": "開く",
+      "openTitle": "このタブを Desktop の前面に表示",
+      "dismiss": "削除",
+      "closed": "閉じられました",
+      "unknown": "利用不可",
+      "openFailed": "タブを開けませんでした",
+      "ariaLabel": "マークされたブラウザータブ"
     },
     "display": {
       "title": "デスクトップ",

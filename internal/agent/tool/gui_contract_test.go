@@ -31,6 +31,11 @@ func TestBrowserContractRejectsBadCallsBeforeExecution(t *testing.T) {
 		{name: "drag without target", args: map[string]any{"action": "drag", "ref": "e1"}, want: "drag requires a drop target"},
 		{name: "drag with two targets", args: map[string]any{"action": "drag", "ref": "e1", "target_ref": "e2", "to_x": 1, "to_y": 2}, want: "either target_ref/target_selector or to_x/to_y"},
 		{name: "tab_select without index", args: map[string]any{"action": "tab_select"}, want: "tab_id (or the compatibility tab_index) is required for tab_select"},
+		{name: "tab_get without tab", args: map[string]any{"action": "tab_get"}, want: "tab_id (or the compatibility tab_index) is required for tab_get"},
+		{name: "mark without tab", args: map[string]any{"action": "tab_mark_deliverable", "note": "x"}, want: "tab_id (or the compatibility tab_index) is required for tab_mark_deliverable"},
+		{name: "mark with url", args: map[string]any{"action": "tab_mark_handoff", "tab_id": "T1", "url": "https://a"}, want: `action "tab_mark_handoff" does not accept parameter(s): url`},
+		{name: "tab_new with note", args: map[string]any{"action": "tab_new", "note": "x"}, want: `action "tab_new" does not accept parameter(s): note`},
+		{name: "tab_new visible not bool", args: map[string]any{"action": "tab_new", "visible": "yes"}, want: "visible must be a boolean"},
 		{name: "wrong type", args: map[string]any{"action": "click", "ref": "e1", "click_count": "two"}, want: "click_count must be a number"},
 	}
 	for _, tc := range cases {
@@ -203,5 +208,32 @@ func TestGUIContractDescriptionsMatchSpecs(t *testing.T) {
 		if !strings.Contains(doc, want) {
 			t.Fatalf("description missing %q:\n%s", want, doc)
 		}
+	}
+}
+
+func TestRemoteSessionContractProtocolTwo(t *testing.T) {
+	t.Parallel()
+
+	if _, err := browserRemoteSessionContract.normalize(map[string]any{"action": "create", "url": "https://a", "tab_id": "T1"}); err == nil || !strings.Contains(err.Error(), "url and tab_id are mutually exclusive") {
+		t.Fatalf("create must refuse url together with tab_id, got %v", err)
+	}
+	if _, err := browserRemoteSessionContract.normalize(map[string]any{"action": "close"}); err == nil || !strings.Contains(err.Error(), "session_id is required for close") {
+		t.Fatalf("close must require session_id, got %v", err)
+	}
+	if _, err := browserRemoteSessionContract.normalize(map[string]any{"action": "close", "session_id": "s", "close_tab": true}); err != nil {
+		t.Fatalf("close accepts close_tab: %v", err)
+	}
+	if _, err := browserRemoteSessionContract.normalize(map[string]any{"action": "status", "session_id": "s"}); err != nil {
+		t.Fatalf("status accepts session_id: %v", err)
+	}
+	if _, err := browserRemoteSessionContract.normalize(map[string]any{"action": "status", "close_tab": true}); err == nil {
+		t.Fatal("status must not accept close_tab")
+	}
+	spec, err := browserActionContract.normalize(map[string]any{"action": "tab_new", "url": "https://a", "visible": false, "session_name": "checkout"})
+	if err != nil || spec.Name != "tab_new" {
+		t.Fatalf("tab_new accepts visible and session_name: %v", err)
+	}
+	if _, err := browserActionContract.normalize(map[string]any{"action": "tab_mark_deliverable", "tab_id": "T1", "note": "the order page", "clear": false}); err != nil {
+		t.Fatalf("mark accepts note and clear: %v", err)
 	}
 }

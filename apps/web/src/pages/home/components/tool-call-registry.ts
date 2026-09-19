@@ -49,6 +49,8 @@ import {
   MoveUp,
   MoveVertical,
   Paperclip,
+  Hand,
+  PackageCheck,
   Plug,
   Plus,
   Power,
@@ -549,8 +551,11 @@ const BROWSER_ACTION_ICONS: Record<string, Component> = {
   go_forward: ArrowRight,
   reload: RotateCw,
   tab_new: Plus,
+  tab_get: AppWindow,
   tab_select: AppWindow,
   tab_close: X,
+  tab_mark_deliverable: PackageCheck,
+  tab_mark_handoff: Hand,
 }
 
 const BROWSER_OBSERVE_ICONS: Record<string, Component> = {

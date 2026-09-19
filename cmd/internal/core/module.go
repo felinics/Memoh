@@ -129,6 +129,8 @@ func ServerModule() fx.Option {
 			schedule.NewService,
 			compaction.NewService,
 			provideContainerdHandler,
+			provideCDPSessions,
+			provideTabMarks,
 			provideBotBackupService,
 			provideFederationGateway,
 			provideACPToolSource,

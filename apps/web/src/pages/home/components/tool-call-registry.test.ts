@@ -146,6 +146,13 @@ describe('tool call registry', () => {
     // An unknown modifier keeps the plain action rather than inventing a key.
     expect(getToolDisplay(toolBlock('browser_action', { action: 'scroll', direction: 'sideways' })).actionKey)
       .toBe('browserAction.scroll')
+    // Tab marks and tab_get are first-class actions with their own labels.
+    expect(getToolDisplay(toolBlock('browser_action', { action: 'tab_mark_handoff', tab_id: 'T1' })).actionKey)
+      .toBe('browserAction.tab_mark_handoff')
+    expect(getToolDisplay(toolBlock('browser_action', { action: 'tab_mark_deliverable', tab_id: 'T1' })).actionKey)
+      .toBe('browserAction.tab_mark_deliverable')
+    expect(getToolDisplay(toolBlock('browser_action', { action: 'tab_get', tab_id: 'T1' })).actionKey)
+      .toBe('browserAction.tab_get')
   })
 
   it.each([

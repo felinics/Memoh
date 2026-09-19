@@ -52,6 +52,10 @@ func browserActionParams() map[string]map[string]any {
 		"y":               {"type": "number", "minimum": 0, "description": "Viewport Y in CSS pixels; always paired with x."},
 		"to_x":            {"type": "number", "minimum": 0, "description": "Drop X in viewport CSS pixels for drag when no target element is given."},
 		"to_y":            {"type": "number", "minimum": 0, "description": "Drop Y in viewport CSS pixels; always paired with to_x."},
+		"visible":         {"type": "boolean", "default": true, "description": "tab_new: open the tab in the foreground (true) or in the background without taking focus from the current tab (false)."},
+		"session_name":    {"type": "string", "description": "tab_new: a task name to organise this tab under, reported by tab_list / tab_get and stored with marks. Organisation metadata only: no separate browser profile or account."},
+		"note":            {"type": "string", "description": "tab_mark_deliverable / tab_mark_handoff: a short note for the user about what the tab holds or what they need to do."},
+		"clear":           {"type": "boolean", "default": false, "description": "tab_mark_deliverable / tab_mark_handoff: remove the tab's mark instead of setting it."},
 	}
 }
 
@@ -115,12 +119,13 @@ func validateScrollAmount(args map[string]any) error {
 	return guiExclusive(args, "amount", "pages")
 }
 
-// validateTabPick requires exactly one of tab_id / tab_index for tab_select.
+// validateTabPick requires exactly one of tab_id / tab_index for the actions
+// that address a specific tab rather than the session's tab.
 func validateTabPick(args map[string]any) error {
 	hasID := guiArgPresent(args, "tab_id", false)
 	hasIndex := guiArgPresent(args, "tab_index", true)
 	if !hasID && !hasIndex {
-		return errors.New("tab_id (or the compatibility tab_index) is required for tab_select")
+		return fmt.Errorf("tab_id (or the compatibility tab_index) is required for %s", StringArg(args, "action"))
 	}
 	return nil
 }
@@ -167,9 +172,12 @@ var browserActionContract = newGUIContractWithCommon("action", browserElementKey
 	{Name: "go_back", Summary: "go back one history entry in the tab", Optional: []string{"timeout"}},
 	{Name: "go_forward", Summary: "go forward one history entry in the tab", Optional: []string{"timeout"}},
 	{Name: "reload", Summary: "reload the tab and wait until it is ready", Optional: []string{"timeout"}},
-	{Name: "tab_new", Summary: "open a new tab in the browser (browser_id) and make it the session's tab; returns its tab_id", Optional: []string{"url"}},
+	{Name: "tab_new", Summary: "open a new tab in the browser (browser_id) and make it the session's tab; returns its stable tab_id and initial state. visible=false opens it in the background; session_name labels it", Optional: []string{"url", "visible", "session_name"}},
+	{Name: "tab_get", Summary: "describe one tab by tab_id (or tab_index) without changing the session's tab: url, title, readiness, session_name, latest snapshot, and mark", Validate: validateTabPick},
 	{Name: "tab_select", Summary: "make a tab the session's tab by tab_id (or tab_index) and bring it to front", Validate: validateTabPick},
-	{Name: "tab_close", Summary: "close the tab given by tab_id or tab_index, or the session's tab"},
+	{Name: "tab_close", Summary: "close the tab given by tab_id or tab_index, or the session's tab; its marks are recorded as closed and its remote sessions revoked"},
+	{Name: "tab_mark_deliverable", Summary: "persist that this tab (tab_id) holds the task's result so the user can open it from the conversation; replaces a handoff mark; clear=true removes the mark", Optional: []string{"note", "clear"}, Validate: validateTabPick},
+	{Name: "tab_mark_handoff", Summary: "persist that the user must take over this tab (tab_id): a login, a captcha, a confirmation; it does not mean the task is done. Replaces a deliverable mark; clear=true removes the mark", Optional: []string{"note", "clear"}, Validate: validateTabPick},
 })
 
 func browserObserveParams() map[string]map[string]any {
@@ -209,16 +217,22 @@ var browserObserveContract = newGUIContractWithCommon("observe", browserElementK
 
 func browserRemoteSessionParams() map[string]map[string]any {
 	return map[string]map[string]any{
-		"session_id": {"type": "string", "description": "Target/session ID returned by create or status."},
-		"url":        {"type": "string", "description": "Optional URL to open when creating a target."},
-		"browser_id": {"type": "string", "description": "Browser instance id, e.g. chrome-9222. Defaults to the workspace browser."},
+		"session_id": {"type": "string", "description": "Session id returned by create (session protocol 2: a revocable secret, not a tab id)."},
+		"url":        {"type": "string", "description": "create: open a new tab at this URL for the session. Mutually exclusive with tab_id."},
+		"tab_id":     {"type": "string", "description": "create: expose this existing tab without navigating it. Mutually exclusive with url."},
+		"browser_id": {"type": "string", "description": "Browser instance id, e.g. chrome-9222. Defaults to the session's selected browser, then the workspace browser."},
+		"close_tab":  {"type": "boolean", "default": false, "description": "close: also close the tab behind the session. By default only the session (and its proxied connections) is revoked."},
 	}
 }
 
+func validateRemoteSessionCreate(args map[string]any) error {
+	return guiExclusive(args, "url", "tab_id")
+}
+
 var browserRemoteSessionContract = newGUIContract("action", nil, browserRemoteSessionParams(), []guiActionSpec{
-	{Name: "create", Summary: "expose a page target for CDP clients, creating one when url is given", Optional: []string{"url", "browser_id"}},
-	{Name: "status", Summary: "list the CDP endpoint and open page targets", Optional: []string{"browser_id"}},
-	{Name: "close", Summary: "close the target behind a session", Required: []string{"session_id"}, Optional: []string{"browser_id"}},
+	{Name: "create", Summary: "issue a CDP session for one page target: the given tab_id (unchanged), a new tab at url, or the session's tab (a blank tab when none). Returns a revocable proxied endpoint scoped to that tab plus the direct in-workspace endpoint with its scope", Optional: []string{"url", "tab_id", "browser_id"}, Validate: validateRemoteSessionCreate},
+	{Name: "status", Summary: "with session_id, that session only (its tab, connections, expiry); without, every live session of this bot and the browser's page targets", Optional: []string{"session_id", "browser_id"}},
+	{Name: "close", Summary: "revoke a session: proxied connections are dropped and the id stops working; the tab stays open unless close_tab=true", Required: []string{"session_id"}, Optional: []string{"close_tab", "browser_id"}},
 })
 
 // normalizeBrowserAction maps compatibility aliases to canonical action names.

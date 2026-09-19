@@ -354,3 +354,15 @@ func TestPageExceptionMessageDropsStackTrace(t *testing.T) {
 		t.Fatalf("expected text fallback, got %q", got)
 	}
 }
+
+func TestEscapeNewTargetURLKeepsSpacesAsPercent20(t *testing.T) {
+	t.Parallel()
+
+	got := escapeNewTargetURL("data:text/html,<title>Checkout result</title>")
+	if strings.Contains(got, "+") || !strings.Contains(got, "Checkout%20result") {
+		t.Fatalf("spaces must be %%20, not +: %s", got)
+	}
+	if got := escapeNewTargetURL("https://example.com/a b?q=1&r=2"); got != "https%3A%2F%2Fexample.com%2Fa%20b%3Fq%3D1%26r%3D2" {
+		t.Fatalf("unexpected encoding: %s", got)
+	}
+}

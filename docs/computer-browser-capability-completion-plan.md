@@ -361,19 +361,49 @@ P3 实施记录（2026-09-19，分支 `feat/computer-browser-p3`，基于 P1+P2�
 
 ### P4：浏览器会话与任务 UI
 
-- [ ] 新标签页 visible/session_name、tab_get 及稳定 ID 管理。
-- [ ] deliverable/handoff 工具、持久化、UI 展示和过期处理。
-- [ ] CDP session 与 target 分离、精确 status、关闭/撤销语义及连接权限范围。
-- [ ] 兼容旧 session ID 和关闭语义的明确迁移。
+- [x] 新标签页 visible/session_name、tab_get 及稳定 ID 管理。
+- [x] deliverable/handoff 工具、持久化、UI 展示和过期处理。
+- [x] CDP session 与 target 分离、精确 status、关闭/撤销语义及连接权限范围。
+- [x] 兼容旧 session ID 和关闭语义的明确迁移。
 
 验收：任务页面中的标记真实可见可打开；刷新仍存在；关闭目标后状态准确；撤销测试证明连接行为与声明一致。
 
+P4 实施记录（2026-09-19，分支 `feat/computer-browser-p4-p5`，基于 P3）：
+
+- 标签页（`internal/agent/tool/browser_tabs.go`）：`tab_new` 新增 `visible`（false 时经浏览器级 CDP 连接 `Target.createTarget background=true` 在后台打开，不抢焦点；不提供浏览器级 websocket 的后端明确报错）与 `session_name`（按会话保存在 GUI 状态里，`tab_list` / `tab_get` / 标记都会带出；只是任务组织元数据，不创建独立配置目录或账号），返回稳定 `tab_id`、`tab_index` 与初始状态（附着、`document.readyState`、URL、标题）；新增 `tab_get`（必须显式 `tab_id` / `tab_index`，不改变会话选中页）返回目标信息、是否为会话当前页、最近快照 id、标记与就绪状态；`tab_list` 每项带 `selected` / `session_name` / `mark`。
+- 交付与接手标记（`internal/chat/tabmark/`、`tab_mark_deliverable` / `tab_mark_handoff`、`internal/handlers/gui_marks.go`、`apps/web/.../gui-tab-marks.vue`）：标记以 `browser_id/tab_id` 为键持久化在会话 `metadata.gui_tab_marks`（重复标记幂等更新，交付 ↔ 接手切换是显式的重新标记，`clear=true` 移除；记录 URL、标题、session_name、note、浏览器进程身份与时间）；`tab_close` 与 `close_tab` 把对应标记记为 `closed` 并撤销绑定该页的远程会话；REST `GET /bots/{bot}/sessions/{session}/gui-marks` 返回带实时状态（`active` / `closed` / `unknown`）的列表，`POST .../gui-marks/open` 激活标签页，`POST .../gui-marks/dismiss` 移除；Web 聊天页在输入框上方展示标记条（交付 / 需要你接手、备注、状态徽标、「打开」把标签页切到前台并打开桌面面板、移除），会话结束流式时自动刷新，Desktop 客户端复用同一模块。已运行 `mise run swagger-generate` 与 `sdk-generate`。
+- CDP 会话协议 2（`internal/workspace/cdpsession/`、`browser_remote.go`、`internal/handlers/containerd_cdp.go`）：`create` 为一个页面 target（显式 `tab_id` 不导航；`url` 明确新建；都不给时用会话当前页，缺少时新建空白页）签发随机 `session_id`，同时返回受控代理端点（`/bots/{bot}/container/cdp/{session}/json/version|json/list|devtools/page/{tab}`，由 server 经 bridge 转发到工作区浏览器，`/json/list` 只列该 target、websocket 只能附着该 target、不暴露浏览器级 websocket；路径中的 session id 即凭据，JWT 中间件对该路径放行）与直连端点（标明「仅工作区内可达、浏览器级、不可独立撤销」）；`status` 按 `session_id` 精确返回（连接数、过期时间、target 是否仍在），不带参数列出本 bot 的全部会话并标注是否属于当前对话；`close` 撤销会话并断开其代理连接，标签页仅在 `close_tab=true` 时关闭；把标签页 id 当作 session id 传入时返回明确的迁移说明（协议 1 的 `session_id = tab_id` 与「close 直接关页」不再成立，改用 `browser_action tab_close`），而不是悄悄改变语义。会话在内存中按空闲 TTL 过期，标签页关闭时联动撤销。
+
 ### P5：端到端回归与文档发布
 
-- [ ] 更新工具 Usage、docs/agent-runtime.md 和必要 API 说明；文档与生成 schema 一致。
-- [ ] 必要时更新 workspace 镜像、a11y-cli 构建产物、协议版本和部署诊断。
-- [ ] 发生 REST/schema 变更时运行 swagger/sdk/sqlc 的对应生成任务。
-- [ ] 执行下节真实验证矩阵，归档可审阅证据。
+- [x] 更新工具 Usage、docs/agent-runtime.md 和必要 API 说明；文档与生成 schema 一致。
+- [x] 必要时更新 workspace 镜像、a11y-cli 构建产物、协议版本和部署诊断。
+- [x] 发生 REST/schema 变更时运行 swagger/sdk/sqlc 的对应生成任务。
+- [x] 执行下节真实验证矩阵，归档可审阅证据。
+
+P5 实施记录（2026-09-19，与 P4 同一 PR）：
+
+- 文档：`Usage()` 增补 `tab_new` 的 `session_name` / `visible`、`tab_get`、交付 / 接手标记的使用时机与 `browser_remote_session` 协议 2 的语义；`docs/agent-runtime.md` 新增「标签页、标记与 CDP 会话」一节并改写总述；`docs/codebase-map.md` 加入 `internal/chat/tabmark/` 与 `internal/workspace/cdpsession/`；本文各阶段勾选与实施记录。工具 schema 由契约生成，文档中的动作名与参数与 `documentation` 返回的契约一致。
+- 镜像与协议：P3 已把 `a11y-cli` 升到协议 4 并重建 dev 工作区镜像；P4 无 Rust 改动，镜像与协议不变；`computer_observe probe` 报告协议版本供部署诊断。
+- 生成任务：新增 REST（`gui-marks` 三个端点与 CDP 代理端点）后已运行 `mise run swagger-generate` 与 `mise run sdk-generate`；无数据库 schema 变更，未运行 sqlc。
+- 真实验证矩阵（P0–P4 各 PR 的验证记录汇总；均为脚本化模型驱动真实 Web 聊天 → Agent → 工具 → 工作区链路，不构成 Human QA）：
+
+| 场景 | 证据 |
+| --- | --- |
+| helper 协议 | P0/P3：真实 Rust 产物输出解码，协议不匹配返回版本错误；P3 桌面 `probe` 报告协议 4 |
+| schema 不合法调用 | P0 参数校验场景 8 个故意错误组合在执行前被拒绝；P4 `tab_mark_*` 缺 `tab_id`、`create` 同时给 `url` 与 `tab_id` 被拒 |
+| ref 生命周期 | P1+P2 稳定引用场景（导航 / 跨快照 / 跨会话拒绝）；P3 scope 快照后 carried ref 的指针动作被拒 |
+| 多目标 | P1+P2 目标发现场景（两终端、两浏览器、多标签页，显式 id 与会话缺省隔离） |
+| 文本操作 | P0 浏览器 / 桌面场景与 P1+P2 输入场景（清空、替换、光标、中文、emoji、重复匹配、富文本粘贴） |
+| 鼠标和按键 | P0（双击 / 右键 / 三连击）、P1+P2（keydown/up、拖动、滚动） |
+| AX 辅助动作 | P1+P2 桌面 `secondary_action` 只执行暴露的动作，未暴露返回可用列表 |
+| 快照 | P3 浏览器 / 桌面观察场景（层级、状态、增量、完整、分页、截断原因、DOM 降级标注） |
+| 截图 | P3：坐标元数据、图片进入模型输入、path 回退、刷新后仍可见 |
+| 故障 | P0 受控报错（无几何单元）；P3 carried ref；P4 关闭的标签页 `tab_get` 明确报错、撤销后的会话 `status` 明确报错 |
+| 权限 | `get_app launch` 按 exec 治理（P1+P2）；CDP 代理只暴露单一 target、无浏览器级 websocket、外部 target 404（P4） |
+| CDP 会话 | P4：`status` 按 session_id 精确、撤销后宿主机客户端连接被服务端断开、`/json/list` 404、重连被拒、标签页未被误关、旧 tab id 语义显式拒绝 |
+| 任务标记 | P4：标记条在聊天页展示、「打开」激活标签页并打开桌面面板、刷新后仍在、关闭后显示已关闭 |
+- 未覆盖：Cloud 仓库同步需要在 Cloud 侧核对本计划的改动是否完整落地（本仓库无法验证）；Desktop 客户端复用 Web 模块，未单独在 Electron 中截图。
 - [ ] OSS 实现完成后再核对 Cloud 同步范围和实际运行版本，不默认同步已覆盖。
 
 最终完成条件：本计划所有新增 action、参数和修复均有明确结果；不支持项有真实能力说明；没有因 JS 编排被延期而遗漏普通工具能力。
