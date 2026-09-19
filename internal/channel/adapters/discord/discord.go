@@ -184,7 +184,7 @@ func discordSessionCacheKey(configID, token string) string {
 
 func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
-		a.logger.Info("start", slog.String("config_id", cfg.ID))
+		a.logger.InfoContext(ctx, "start", slog.String("config_id", cfg.ID))
 	}
 
 	discordCfg, err := parseConfig(cfg.Credentials)
@@ -282,7 +282,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 		}
 
 		if a.logger != nil {
-			a.logger.Info("inbound received",
+			a.logger.InfoContext(ctx, "inbound received",
 				slog.String("config_id", cfg.ID),
 				slog.String("chat_type", chatType),
 				slog.String("user_id", m.Author.ID),
@@ -293,7 +293,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 
 		go func() {
 			if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-				a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+				a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 		}()
 	})
@@ -307,7 +307,7 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 
 	stop := func(_ context.Context) error {
 		if a.logger != nil {
-			a.logger.Info("stop", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "stop", slog.String("config_id", cfg.ID))
 		}
 		remove := a.clearSessionState(sessionKey)
 		if remove != nil {

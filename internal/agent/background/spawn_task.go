@@ -103,7 +103,7 @@ func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, ag
 	m.tasks[taskID] = task
 	m.mu.Unlock()
 
-	m.logger.Info("background agent task registered",
+	m.logger.InfoContext(parentCtx, "background agent task registered",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("agent_id", agentID),
@@ -308,7 +308,7 @@ func (m *Manager) StartSpawnTask(parentCtx context.Context, botID, sessionID, de
 	m.tasks[taskID] = task
 	m.mu.Unlock()
 
-	m.logger.Info("background spawn task started",
+	m.logger.InfoContext(parentCtx, "background spawn task started",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("description", truncate(description, 120)),

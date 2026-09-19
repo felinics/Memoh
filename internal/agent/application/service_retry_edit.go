@@ -348,7 +348,7 @@ func (s *Service) replacePersistedTurn(
 		replacementID,
 		reason,
 	); err != nil {
-		s.logger.Error("replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "replace history turn failed", slog.String("reason", reason), slog.Any("error", err))
 		s.cleanupReplacementMessages(ctx, persisted)
 		return fmt.Errorf("replace history turn: %w", err)
 	}
@@ -544,7 +544,7 @@ func (s *Service) cleanupReplacementMessages(ctx context.Context, persisted []me
 		return
 	}
 	if err := s.messageService.DeleteByIDs(context.WithoutCancel(ctx), ids); err != nil {
-		s.logger.Error("cleanup replacement messages failed", slog.Any("error", err), slog.Int("message_count", len(ids)))
+		s.logger.ErrorContext(ctx, "cleanup replacement messages failed", slog.Any("error", err), slog.Int("message_count", len(ids)))
 	}
 }
 

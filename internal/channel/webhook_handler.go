@@ -71,7 +71,7 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 		desc, _ := h.registry.GetDescriptor(channelType)
 		if desc.AckDisabledWebhook {
 			if h.logger != nil {
-				h.logger.Warn(
+				h.logger.WarnContext(c.Request().Context(),
 					"channel webhook ignored for disabled channel config",
 					slog.String("channel", channelType.String()),
 					slog.String("config_id", configID),
@@ -92,7 +92,7 @@ func (h *WebhookHandler) Handle(c echo.Context) error {
 			return httpErr
 		}
 		if h.logger != nil {
-			h.logger.Warn(
+			h.logger.WarnContext(c.Request().Context(),
 				"channel webhook failed",
 				slog.String("channel", channelType.String()),
 				slog.String("config_id", configID),

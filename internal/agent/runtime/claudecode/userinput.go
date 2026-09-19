@@ -109,7 +109,7 @@ func (t *turnRunner) requestUserInput(ctx context.Context, callID string, input 
 		UndeliveredReason:    "claude user input was not delivered", TimeoutReason: "claude user input timed out", AbortReason: "claude user input aborted",
 	})
 	if err != nil && ctx.Err() == nil {
-		t.logger.Error("claude user input failed", slog.Any("error", err))
+		t.logger.ErrorContext(ctx, "claude user input failed", slog.Any("error", err))
 	}
 	return flow.Request, err
 }

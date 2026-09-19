@@ -183,7 +183,7 @@ func (a *Agent) runTurnHook(ctx context.Context, cfg RunConfig, eventName, errMs
 		req.Turn["error"] = req.Error
 	}
 	if _, err := a.hookService.Run(ctx, req, nil); err != nil && a.logger != nil {
-		a.logger.Warn("turn hook failed",
+		a.logger.WarnContext(ctx, "turn hook failed",
 			slog.String("event", eventName),
 			slog.String("bot_id", cfg.Identity.BotID),
 			slog.String("session_id", cfg.Identity.SessionID),
@@ -241,7 +241,7 @@ func (a *Agent) wrapPrepareStepWithModelHook(ctx context.Context, cfg RunConfig,
 		res, err := a.hookService.Run(ctx, req, nil)
 		if err != nil {
 			if a.logger != nil {
-				a.logger.Warn("before model call hook failed",
+				a.logger.WarnContext(ctx, "before model call hook failed",
 					slog.String("bot_id", cfg.Identity.BotID),
 					slog.String("session_id", cfg.Identity.SessionID),
 					slog.Any("error", err),
@@ -280,7 +280,7 @@ func (a *Agent) runAfterModelCallHook(ctx context.Context, cfg RunConfig, step *
 	}
 	req.Turn = payload
 	if _, err := a.hookService.Run(context.WithoutCancel(ctx), req, nil); err != nil && a.logger != nil {
-		a.logger.Warn("after model call hook failed",
+		a.logger.WarnContext(ctx, "after model call hook failed",
 			slog.String("bot_id", cfg.Identity.BotID),
 			slog.String("session_id", cfg.Identity.SessionID),
 			slog.Any("error", err),

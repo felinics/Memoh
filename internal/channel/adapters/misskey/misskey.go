@@ -183,7 +183,7 @@ func (*MisskeyAdapter) DiscoverSelf(ctx context.Context, credentials map[string]
 // Connect starts a WebSocket streaming connection to receive Misskey mentions.
 func (a *MisskeyAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
-		a.logger.Info("start", slog.String("config_id", cfg.ID))
+		a.logger.InfoContext(ctx, "start", slog.String("config_id", cfg.ID))
 	}
 	mkCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
@@ -205,7 +205,7 @@ func (a *MisskeyAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 
 	stop := func(_ context.Context) error {
 		if a.logger != nil {
-			a.logger.Info("stop", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "stop", slog.String("config_id", cfg.ID))
 		}
 		cancel()
 		return nil
@@ -222,7 +222,7 @@ func (a *MisskeyAdapter) runStreamLoop(ctx context.Context, cfg channel.ChannelC
 		}
 		if err := a.runStream(ctx, cfg, mkCfg, me, handler); err != nil {
 			if a.logger != nil {
-				a.logger.Warn("stream disconnected", slog.String("config_id", cfg.ID), slog.Any("error", err))
+				a.logger.WarnContext(ctx, "stream disconnected", slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 		}
 		select {
@@ -248,7 +248,7 @@ func (a *MisskeyAdapter) runStream(ctx context.Context, cfg channel.ChannelConfi
 	defer func() { _ = conn.Close() }()
 
 	if a.logger != nil {
-		a.logger.Info("stream connected", slog.String("config_id", cfg.ID))
+		a.logger.InfoContext(ctx, "stream connected", slog.String("config_id", cfg.ID))
 	}
 
 	// Subscribe to main channel to receive mentions.
@@ -353,7 +353,7 @@ func (a *MisskeyAdapter) handleChannelEvent(ctx context.Context, cfg channel.Cha
 		var note misskeyNote
 		if err := json.Unmarshal(body.Body, &note); err != nil {
 			if a.logger != nil {
-				a.logger.Warn("parse note failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+				a.logger.WarnContext(ctx, "parse note failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 			return
 		}
@@ -368,7 +368,7 @@ func (a *MisskeyAdapter) handleChannelEvent(ctx context.Context, cfg channel.Cha
 		a.logInbound(cfg.ID, inbound)
 		go func() {
 			if err := handler(ctx, cfg, inbound); err != nil && a.logger != nil {
-				a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+				a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 		}()
 
@@ -394,7 +394,7 @@ func (a *MisskeyAdapter) handleChannelEvent(ctx context.Context, cfg channel.Cha
 		a.logInbound(cfg.ID, inbound)
 		go func() {
 			if err := handler(ctx, cfg, inbound); err != nil && a.logger != nil {
-				a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+				a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 		}()
 	}
@@ -570,7 +570,7 @@ func (a *MisskeyAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, ms
 	_, err = createNote(ctx, mkCfg, text, replyID, visibility)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Error("send note failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.ErrorContext(ctx, "send note failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		return err
 	}

@@ -167,13 +167,13 @@ func (s *Service) buildScanIndex(ctx context.Context, botID string) (map[string]
 		entryPath := memoryEntryPath(entry.GetPath())
 		content, readErr := s.readFile(ctx, botID, entryPath)
 		if readErr != nil {
-			s.logger.Warn("buildScanIndex: failed to read memory file",
+			s.logger.WarnContext(ctx, "buildScanIndex: failed to read memory file",
 				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", readErr))
 			continue
 		}
 		parsed, parseErr := parseMemoryFile(content)
 		if parseErr != nil {
-			s.logger.Warn("buildScanIndex: failed to parse memory file",
+			s.logger.WarnContext(ctx, "buildScanIndex: failed to parse memory file",
 				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", parseErr))
 			continue
 		}
@@ -273,7 +273,7 @@ func (s *Service) removeProjectionFiles(ctx context.Context, botID string) error
 		entryPath := memoryEntryPath(entry.GetPath())
 		content, readErr := s.readFile(ctx, botID, entryPath)
 		if readErr != nil {
-			s.logger.Warn("rebuild: failed to read memory file; preserving it",
+			s.logger.WarnContext(ctx, "rebuild: failed to read memory file; preserving it",
 				slog.String("bot_id", botID), slog.String("path", entryPath), slog.Any("error", readErr))
 			continue
 		}

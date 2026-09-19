@@ -148,7 +148,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 	var getUpdatesBuf string
 	var consecutiveFailures int
 
-	a.logger.Info("weixin poll loop started",
+	a.logger.InfoContext(ctx, "weixin poll loop started",
 		slog.String("config_id", cfg.ID),
 		slog.String("bot_id", cfg.BotID),
 		slog.String("base_url", parsed.BaseURL),
@@ -157,7 +157,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 	for {
 		select {
 		case <-ctx.Done():
-			a.logger.Info("weixin poll loop stopped", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "weixin poll loop stopped", slog.String("config_id", cfg.ID))
 			return
 		default:
 		}
@@ -168,7 +168,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 				return
 			}
 			consecutiveFailures++
-			a.logger.Error("weixin getupdates error",
+			a.logger.ErrorContext(ctx, "weixin getupdates error",
 				slog.String("config_id", cfg.ID),
 				slog.Any("error", err),
 				slog.Int("failures", consecutiveFailures),
@@ -186,7 +186,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 		isAPIError := (resp.Ret != 0) || (resp.ErrCode != 0)
 		if isAPIError {
 			if resp.ErrCode == sessionExpiredErrCode || resp.Ret == sessionExpiredErrCode {
-				a.logger.Error("weixin session expired, pausing",
+				a.logger.ErrorContext(ctx, "weixin session expired, pausing",
 					slog.String("config_id", cfg.ID),
 					slog.Int("errcode", resp.ErrCode),
 				)
@@ -195,7 +195,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 				continue
 			}
 			consecutiveFailures++
-			a.logger.Error("weixin getupdates api error",
+			a.logger.ErrorContext(ctx, "weixin getupdates api error",
 				slog.String("config_id", cfg.ID),
 				slog.Int("ret", resp.Ret),
 				slog.Int("errcode", resp.ErrCode),
@@ -231,7 +231,7 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 			inbound.BotID = cfg.BotID
 
 			if err := handler(ctx, cfg, inbound); err != nil {
-				a.logger.Error("weixin inbound handler error",
+				a.logger.ErrorContext(ctx, "weixin inbound handler error",
 					slog.String("config_id", cfg.ID),
 					slog.String("from", msg.FromUserID),
 					slog.Any("error", err),

@@ -184,7 +184,7 @@ func (m *Manager) RemoveAdapter(ctx context.Context, channelType ChannelType) {
 		if entry != nil && entry.config.ChannelType == channelType {
 			if entry.connection != nil {
 				if err := entry.connection.Stop(ctx); err != nil && !errors.Is(err, ErrStopNotSupported) && m.logger != nil {
-					m.logger.Warn("adapter stop failed", slog.String("config_id", id), slog.Any("error", err))
+					m.logger.WarnContext(ctx, "adapter stop failed", slog.String("config_id", id), slog.Any("error", err))
 				}
 			}
 			delete(m.connections, id)
@@ -207,7 +207,7 @@ func (m *Manager) Refresh(ctx context.Context) {
 // Start begins the periodic config refresh loop and inbound worker pool.
 func (m *Manager) Start(ctx context.Context) {
 	if m.logger != nil {
-		m.logger.Info("manager start")
+		m.logger.InfoContext(ctx, "manager start")
 	}
 	m.startInboundWorkers() //nolint:contextcheck // The shared pool intentionally owns a request-independent lifecycle context.
 	go func() {
@@ -218,7 +218,7 @@ func (m *Manager) Start(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				if m.logger != nil {
-					m.logger.Info("manager stop")
+					m.logger.InfoContext(ctx, "manager stop")
 				}
 				m.stopAll(ctx)
 				return
@@ -251,7 +251,7 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 		userCfg, err := m.service.GetChannelIdentityConfig(ctx, targetChannelIdentityID, channelType)
 		if err != nil {
 			if m.logger != nil {
-				m.logger.Warn("channel binding missing", slog.String("channel", channelType.String()), slog.String("channel_identity_id", targetChannelIdentityID))
+				m.logger.WarnContext(ctx, "channel binding missing", slog.String("channel", channelType.String()), slog.String("channel_identity_id", targetChannelIdentityID))
 			}
 			return errors.New("channel binding required")
 		}
@@ -268,7 +268,7 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 		return errors.New("message is required")
 	}
 	if m.logger != nil {
-		m.logger.Info("send outbound", slog.String("channel", channelType.String()), slog.String("bot_id", botID))
+		m.logger.InfoContext(ctx, "send outbound", slog.String("channel", channelType.String()), slog.String("bot_id", botID))
 	}
 	policy := m.resolveOutboundPolicy(channelType)
 	caps, hasCaps := m.registry.GetOutboundCapabilities(channelType, config, target)
@@ -281,7 +281,7 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	}
 	if err := m.sendAllWithConfig(ctx, sender, config, outbound, policy); err != nil {
 		if m.logger != nil {
-			m.logger.Error("send outbound failed", slog.String("channel", channelType.String()), slog.String("bot_id", botID), slog.Any("error", err))
+			m.logger.ErrorContext(ctx, "send outbound failed", slog.String("channel", channelType.String()), slog.String("bot_id", botID), slog.Any("error", err))
 		}
 		return err
 	}
@@ -333,7 +333,7 @@ func (m *Manager) React(ctx context.Context, botID string, channelType ChannelTy
 		return errors.New("emoji is required when adding a reaction")
 	}
 	if m.logger != nil {
-		m.logger.Info("react outbound",
+		m.logger.InfoContext(ctx, "react outbound",
 			slog.String("channel", channelType.String()),
 			slog.String("bot_id", botID),
 			slog.String("message_id", messageID),

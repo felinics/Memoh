@@ -1180,7 +1180,7 @@ return true;
 			return nil, captureErr
 		}
 		if removeErr != nil {
-			p.logger.Debug("remove browser annotations failed", slog.Any("error", removeErr))
+			p.logger.DebugContext(ctx, "remove browser annotations failed", slog.Any("error", removeErr))
 		}
 		return map[string]any{"screenshot": b64, "mimeType": "image/png", "annotations": annotations}, nil
 	case "snapshot":

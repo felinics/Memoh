@@ -581,13 +581,13 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 			Enable:   false,
 		})
 		if err != nil {
-			s.logger.Warn("failed to create default search provider",
+			s.logger.WarnContext(ctx, "failed to create default search provider",
 				slog.String("provider", string(dp.Name)),
 				slog.Any("error", err),
 			)
 			continue
 		}
-		s.logger.Info("created default search provider", slog.String("provider", string(dp.Name)))
+		s.logger.InfoContext(ctx, "created default search provider", slog.String("provider", string(dp.Name)))
 	}
 	return nil
 }

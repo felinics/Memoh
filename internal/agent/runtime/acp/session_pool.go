@@ -460,7 +460,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 		}
 	}
 	for _, victim := range victims {
-		p.logger.Info("evicting oldest unbound ACP runtime",
+		p.logger.InfoContext(ctx, "evicting oldest unbound ACP runtime",
 			slog.String("runtime_id", victim.id), slog.String("bot_id", botID))
 		p.tryCloseIdle(victim, 0) //nolint:contextcheck // lifecycle close uses the handle owner context.
 	}
@@ -1034,7 +1034,7 @@ func (p *SessionPool) publicationHeadMatches(ctx context.Context, h *runtimeHand
 		return false, err
 	}
 	if expectedEpoch != actualEpoch {
-		p.logger.Info("ACP warm runtime config epoch changed; restarting before prompt",
+		p.logger.InfoContext(ctx, "ACP warm runtime config epoch changed; restarting before prompt",
 			slog.String("bot_id", h.botID),
 			slog.String("session_id", sessionID),
 			slog.String("runtime_id", h.id),
@@ -1057,7 +1057,7 @@ func (p *SessionPool) publicationHeadMatches(ctx context.Context, h *runtimeHand
 	if publicationHeadsEqual(expected, expectedFound, actual, actualFound) {
 		return true, nil
 	}
-	p.logger.Info("ACP warm runtime canonical head changed; restarting before prompt",
+	p.logger.InfoContext(ctx, "ACP warm runtime canonical head changed; restarting before prompt",
 		slog.String("bot_id", h.botID),
 		slog.String("session_id", sessionID),
 		slog.String("runtime_id", h.id),
@@ -1104,7 +1104,7 @@ func (p *SessionPool) rememberedACPPair(ctx context.Context, sessionID string) (
 	}
 	desc, err := p.store.Get(ctx, sessionID)
 	if err != nil {
-		p.logger.Warn("load ACP remembered pair failed; using profile defaults",
+		p.logger.WarnContext(ctx, "load ACP remembered pair failed; using profile defaults",
 			slog.String("session_id", sessionID),
 			slog.Any("error", err))
 		return "", ""
@@ -1424,7 +1424,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		// Public surfaces return a stable, redacted runtime-operation error, so
 		// the underlying cause must be recorded here or it is lost entirely.
 		if err != nil {
-			p.logger.Warn("ACP runtime start failed",
+			p.logger.WarnContext(ctx, "ACP runtime start failed",
 				slog.String("bot_id", h.botID),
 				slog.String("agent_id", h.agentID),
 				slog.String("runtime_id", h.id),
@@ -1499,7 +1499,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 			// Snapshot capture was removed with the last locator-declaring
 			// profiles; a checkpoint head can only be a legacy row from before
 			// that. Start fresh instead of failing the session forever.
-			p.logger.Warn("ACP canonical head is a legacy checkpoint; starting a fresh native session",
+			p.logger.WarnContext(ctx, "ACP canonical head is a legacy checkpoint; starting a fresh native session",
 				slog.String("bot_id", h.botID),
 				slog.String("session_id", boundSession),
 				slog.String("run_id", canonicalHead.RunID))
@@ -1543,7 +1543,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if rememberedModel, rememberedEffort := p.rememberedACPPair(startCtx, boundSession); rememberedModel != "" || rememberedEffort != "" {
 		if rememberedModel != "" && strings.TrimSpace(sess.ModelState().CurrentModelID) != rememberedModel {
 			if _, err := sess.SetModel(startCtx, rememberedModel); err != nil {
-				p.logger.Warn("ACP remembered model rejected; keeping agent state",
+				p.logger.WarnContext(ctx, "ACP remembered model rejected; keeping agent state",
 					slog.String("runtime_id", h.id),
 					slog.String("session_id", boundSession),
 					slog.String("model_id", rememberedModel),
@@ -1552,7 +1552,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 		}
 		if rememberedEffort != "" && strings.TrimSpace(sess.ReasoningState().CurrentEffort) != rememberedEffort {
 			if _, err := sess.SetReasoningEffort(startCtx, rememberedEffort); err != nil {
-				p.logger.Warn("ACP remembered reasoning effort rejected; keeping agent state",
+				p.logger.WarnContext(ctx, "ACP remembered reasoning effort rejected; keeping agent state",
 					slog.String("runtime_id", h.id),
 					slog.String("session_id", boundSession),
 					slog.String("reasoning_effort", rememberedEffort),
@@ -1565,7 +1565,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	if h.closed {
 		h.state.Unlock()
 		if closeErr := sess.Close(); closeErr != nil {
-			p.logger.Warn("failed to close ACP session after startup cancellation",
+			p.logger.WarnContext(ctx, "failed to close ACP session after startup cancellation",
 				slog.Any("error", closeErr), slog.String("runtime_id", h.id))
 		}
 		return errors.New("ACP runtime was closed during startup")
@@ -2095,7 +2095,7 @@ func (p *SessionPool) cancelHandlePendingDecisions(parent context.Context, h *ru
 		return
 	}
 	if parent == nil {
-		p.logger.Error("skip pending ACP decision cleanup without normalized context",
+		p.logger.ErrorContext(parent, "skip pending ACP decision cleanup without normalized context",
 			slog.String("bot_id", h.botID), slog.String("session_id", sessionID))
 		return
 	}
@@ -2116,7 +2116,7 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 		return
 	}
 	if parent == nil {
-		p.logger.Error("skip pending ACP decision cleanup without normalized parent context",
+		p.logger.ErrorContext(parent, "skip pending ACP decision cleanup without normalized parent context",
 			slog.String("bot_id", botID), slog.String("session_id", sessionID))
 		return
 	}
@@ -2130,7 +2130,7 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 			defer cancel()
 			if _, err := approval.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
-				p.logger.Warn("cancel pending ACP approvals failed",
+				p.logger.WarnContext(parent, "cancel pending ACP approvals failed",
 					slog.Any("error", err),
 					slog.String("bot_id", botID),
 					slog.String("session_id", sessionID))
@@ -2144,7 +2144,7 @@ func (p *SessionPool) cancelPendingDecisions(parent context.Context, botID, sess
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 			defer cancel()
 			if _, err := p.userInput.CancelPendingForSession(ctx, botID, sessionID, reason); err != nil && !errors.Is(err, runtimefence.ErrStale) {
-				p.logger.Warn("cancel pending ACP user inputs failed",
+				p.logger.WarnContext(parent, "cancel pending ACP user inputs failed",
 					slog.Any("error", err),
 					slog.String("bot_id", botID),
 					slog.String("session_id", sessionID))
@@ -2733,6 +2733,6 @@ func (p *SessionPool) persistModelPreference(ctx context.Context, h *runtimeHand
 		return
 	}
 	if err := writer.SaveModelPreference(ctx, sessionID, strings.TrimSpace(sess.ModelState().CurrentModelID), strings.TrimSpace(sess.ReasoningState().CurrentEffort)); err != nil {
-		p.logger.Warn("persist ACP model preference", slog.String("session_id", sessionID), slog.Any("error", err))
+		p.logger.WarnContext(ctx, "persist ACP model preference", slog.String("session_id", sessionID), slog.Any("error", err))
 	}
 }

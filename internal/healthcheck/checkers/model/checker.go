@@ -71,7 +71,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 		return nil
 	}
 	if c.lookup == nil || c.prober == nil {
-		c.logger.Warn("model healthcheck dependencies unavailable", slog.String("bot_id", botID))
+		c.logger.WarnContext(ctx, "model healthcheck dependencies unavailable", slog.String("bot_id", botID))
 		return []healthcheck.CheckResult{{
 			ID:       checkTypeModelConnection + ".service",
 			Type:     checkTypeModelConnection,
@@ -83,7 +83,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 
 	botModels, err := c.lookup.GetBotModelIDs(ctx, botID)
 	if err != nil {
-		c.logger.Warn("model healthcheck lookup failed", slog.String("bot_id", botID), slog.Any("error", err))
+		c.logger.WarnContext(ctx, "model healthcheck lookup failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return []healthcheck.CheckResult{{
 			ID:       checkTypeModelConnection + ".lookup",
 			Type:     checkTypeModelConnection,

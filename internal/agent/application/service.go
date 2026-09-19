@@ -506,7 +506,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		HTTPClient:         modelHTTPClient,
 	})
 	if err != nil {
-		s.logger.Error("resolve: buildBaseRunConfig failed",
+		s.logger.ErrorContext(ctx, "resolve: buildBaseRunConfig failed",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
@@ -571,7 +571,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		if mode := s.effectiveSyncCompactionMode(); mode != syncCompactionModeOff && syncCompactionShouldRun(compactableTokens, contextTokenBudget) {
 			threshold := hardCompactionThreshold(contextTokenBudget)
 			if mode == syncCompactionModeShadow {
-				s.logger.Info("sync_compaction_backstop",
+				s.logger.InfoContext(ctx, "sync_compaction_backstop",
 					slog.String("path", "pipeline_chat"),
 					slog.String("mode", "shadow"),
 					slog.Bool("would_fire", true),
@@ -582,7 +582,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 			} else {
 				start := time.Now()
 				res := s.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget, chatModel.ID)
-				s.logger.Info("sync_compaction_backstop",
+				s.logger.InfoContext(ctx, "sync_compaction_backstop",
 					slog.String("path", "pipeline_chat"),
 					slog.String("mode", "active"),
 					slog.String("status", res.Status),
@@ -601,7 +601,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		historyFallback := historyScopeFallbackFromChatRequest(req)
 		prepared, loadErr := s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
 		if loadErr != nil {
-			s.logger.Error("resolve: prepare history context failed",
+			s.logger.ErrorContext(ctx, "resolve: prepare history context failed",
 				slog.String("bot_id", req.BotID),
 				slog.String("stage", "initial"),
 				slog.Any("error", loadErr),
@@ -618,7 +618,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		// self-sustaining once accumulated summaries cross the threshold.
 		if syncCompactionShouldRun(compactableTokens, contextTokenBudget) {
 			compactionThreshold := hardCompactionThreshold(contextTokenBudget)
-			s.logger.Warn("resolve: context reached compaction threshold, running synchronous compaction",
+			s.logger.WarnContext(ctx, "resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
 				slog.Int("estimated_tokens", estimatedTokens),
 				slog.Int("compactable_tokens", compactableTokens),
@@ -632,7 +632,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 			if res := s.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget, chatModel.ID); res.Status == compaction.StatusOK {
 				prepared, loadErr = s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
 				if loadErr != nil {
-					s.logger.Error("resolve: prepare history context failed",
+					s.logger.ErrorContext(ctx, "resolve: prepare history context failed",
 						slog.String("bot_id", req.BotID),
 						slog.String("stage", "post_compaction"),
 						slog.Any("error", loadErr),
@@ -969,7 +969,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 	if s.skillLoader != nil {
 		entries, skillErr := s.skillLoader.LoadSkills(ctx, p.BotID)
 		if skillErr != nil {
-			s.logger.Warn("failed to load skills", slog.String("bot_id", p.BotID), slog.Any("error", skillErr))
+			s.logger.WarnContext(ctx, "failed to load skills", slog.String("bot_id", p.BotID), slog.Any("error", skillErr))
 		} else {
 			for _, e := range entries {
 				if skill, ok := normalizeGatewaySkill(e); ok {
@@ -1297,7 +1297,7 @@ func (s *Service) resolveRunConfigSessionDescriptor(ctx context.Context, session
 	sess, err := s.sessionService.Get(ctx, sessionID)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("ResolveRunConfig: session lookup failed; falling back to chat session type",
+			s.logger.WarnContext(ctx, "ResolveRunConfig: session lookup failed; falling back to chat session type",
 				slog.String("session_id", sessionID),
 				slog.Any("error", err),
 			)
@@ -1428,7 +1428,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 	if s.platformIdentities != nil {
 		identities, err := s.platformIdentities.ListPlatformIdentities(ctx, cfg.Identity.BotID)
 		if err != nil {
-			s.logger.Warn("load bot platform identities failed",
+			s.logger.WarnContext(ctx, "load bot platform identities failed",
 				slog.String("bot_id", cfg.Identity.BotID),
 				slog.Any("error", err),
 			)

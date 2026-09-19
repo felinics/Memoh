@@ -150,14 +150,14 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	messageCount, err := h.queries.CountMessagesBySession(ctx, pgSessionID)
 	if err != nil {
-		h.logger.Error("count messages failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "count messages failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to count messages")
 	}
 
 	var usedTokens int64
 	latestUsage, err := h.queries.GetLatestAssistantUsage(ctx, pgSessionID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		h.logger.Error("get latest usage failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "get latest usage failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get latest usage")
 	}
 	if err == nil {
@@ -169,7 +169,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	cacheRow, err := h.queries.GetSessionCacheStats(ctx, pgSessionID)
 	if err != nil {
-		h.logger.Error("get cache stats failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "get cache stats failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get cache stats")
 	}
 
@@ -180,7 +180,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	skills, err := h.queries.GetSessionUsedSkills(ctx, pgSessionID)
 	if err != nil {
-		h.logger.Error("get used skills failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "get used skills failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get used skills")
 	}
 	if skills == nil {
@@ -191,7 +191,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	var toolDefs []ToolDefBucket
 	var budgetPlan *contextfrag.ContextBudgetPlan
 	if snapshot, ok, err := latestContextLifecycleSnapshot(ctx, h.queries, pgSessionID); err != nil {
-		h.logger.Warn("load latest context snapshot failed", slog.Any("error", err))
+		h.logger.WarnContext(c.Request().Context(), "load latest context snapshot failed", slog.Any("error", err))
 	} else if ok {
 		breakdown, toolDefs, budgetPlan = contextComposition(snapshot)
 		if !budgetPlanApplies(snapshot, resolvedModel, contextWindow) {
@@ -248,7 +248,7 @@ func (h *SessionInfoHandler) loadBotSettings(ctx context.Context, botID string) 
 	}
 	botSettings, err := h.settingsService.GetBot(ctx, botID)
 	if err != nil {
-		h.logger.Warn("load bot settings failed", slog.Any("error", err))
+		h.logger.WarnContext(ctx, "load bot settings failed", slog.Any("error", err))
 		return settings.Settings{}, false
 	}
 	return botSettings, true

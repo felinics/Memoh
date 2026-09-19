@@ -362,7 +362,7 @@ func (s *Service) loop(ctx context.Context) {
 		case <-s.kick:
 		}
 		if _, err := s.reconcileOnce(ctx, &wg); err != nil {
-			s.log.Error("reconcile pass failed", slog.Any("error", err))
+			s.log.ErrorContext(ctx, "reconcile pass failed", slog.Any("error", err))
 		}
 		if s.now().Sub(s.lastDrift) >= s.opts.DriftInterval {
 			s.lastDrift = s.now()
@@ -452,7 +452,7 @@ func (s *Service) reconcileOne(ctx context.Context, w Workspace) {
 				Observed: w.Observed, ObservedGeneration: w.DesiredGeneration,
 				Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 			}); err != nil {
-				log.Warn("catch up generation failed", slog.Any("error", err))
+				log.WarnContext(ctx, "catch up generation failed", slog.Any("error", err))
 			}
 			return
 		}
@@ -475,7 +475,7 @@ func (s *Service) provision(ctx context.Context, log *slog.Logger, w Workspace) 
 		Attempts: w.Attempts, NextAttemptAt: s.now(), ReleaseLease: false,
 	})
 	if err != nil {
-		log.Warn("enter provisioning failed", slog.Any("error", err))
+		log.WarnContext(ctx, "enter provisioning failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
 		return
 	}
@@ -507,13 +507,13 @@ func (s *Service) provision(ctx context.Context, log *slog.Logger, w Workspace) 
 		Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 	})
 	if err != nil {
-		log.Warn("record running failed", slog.Any("error", err))
+		log.WarnContext(ctx, "record running failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
 		return
 	}
 	s.deriveBotStatus(ctx, final)
 	s.publish(w.BotID, ProgressEvent{Type: EventReady, Workspace: &final})
-	log.Info("workspace provisioned")
+	log.InfoContext(ctx, "workspace provisioned")
 }
 
 func (s *Service) fail(ctx context.Context, log *slog.Logger, w Workspace, step *StepError) {
@@ -531,7 +531,7 @@ func (s *Service) fail(ctx context.Context, log *slog.Logger, w Workspace, step 
 		next = s.slowRetryAt()
 	}
 	message := sanitize(step.Err)
-	log.Error("workspace provisioning failed",
+	log.ErrorContext(ctx, "workspace provisioning failed",
 		slog.String("phase", step.Phase), slog.Bool("retryable", step.Retryable),
 		slog.Int("attempt", int(attempts)), slog.Time("next_attempt_at", next), slog.Any("error", step.Err))
 	final, err := s.writeObserved(ctx, w, ObservedWrite{
@@ -540,7 +540,7 @@ func (s *Service) fail(ctx context.Context, log *slog.Logger, w Workspace, step 
 		Attempts: attempts, NextAttemptAt: next, ReleaseLease: true,
 	})
 	if err != nil {
-		log.Warn("record failure failed", slog.Any("error", err))
+		log.WarnContext(ctx, "record failure failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
 		return
 	}
@@ -554,7 +554,7 @@ func (s *Service) teardown(ctx context.Context, log *slog.Logger, w Workspace) {
 		Attempts: w.Attempts, NextAttemptAt: s.now(), ReleaseLease: false,
 	})
 	if err != nil {
-		log.Warn("enter removing failed", slog.Any("error", err))
+		log.WarnContext(ctx, "enter removing failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
 		return
 	}
@@ -570,13 +570,13 @@ func (s *Service) teardown(ctx context.Context, log *slog.Logger, w Workspace) {
 			observed = ObservedFailed
 			next = s.slowRetryAt()
 		}
-		log.Error("workspace teardown failed", slog.Int("attempt", int(attempts)), slog.Any("error", err))
+		log.ErrorContext(ctx, "workspace teardown failed", slog.Int("attempt", int(attempts)), slog.Any("error", err))
 		if _, werr := s.writeObserved(ctx, cur, ObservedWrite{
 			Observed: observed, ObservedGeneration: cur.DesiredGeneration,
 			LastError: sanitize(err), LastErrorPhase: PhaseTeardown,
 			Attempts: attempts, NextAttemptAt: next, ReleaseLease: true,
 		}); werr != nil {
-			log.Warn("record teardown failure failed", slog.Any("error", werr))
+			log.WarnContext(ctx, "record teardown failure failed", slog.Any("error", werr))
 			s.release(ctx, w.BotID)
 		}
 		return
@@ -587,12 +587,12 @@ func (s *Service) teardown(ctx context.Context, log *slog.Logger, w Workspace) {
 		Attempts: 0, NextAttemptAt: s.now(), ReleaseLease: true,
 	})
 	if err != nil {
-		log.Warn("record absent failed", slog.Any("error", err))
+		log.WarnContext(ctx, "record absent failed", slog.Any("error", err))
 		s.release(ctx, w.BotID)
 		return
 	}
 	s.publish(w.BotID, ProgressEvent{Type: EventReady, Workspace: &final})
-	log.Info("workspace removed")
+	log.InfoContext(ctx, "workspace removed")
 }
 
 // detectDrift re-inspects settled workspaces that have not been touched for a
@@ -613,7 +613,7 @@ func (s *Service) detectDriftIn(ctx context.Context, observed string) {
 	rows, err := s.repo.ListByObserved(listCtx, observed, 500)
 	cancel()
 	if err != nil {
-		s.log.Warn("drift scan failed", slog.String("observed", observed), slog.Any("error", err))
+		s.log.WarnContext(ctx, "drift scan failed", slog.String("observed", observed), slog.Any("error", err))
 		return
 	}
 	cutoff := s.now().Add(-s.opts.DriftInterval)
@@ -623,7 +623,7 @@ func (s *Service) detectDriftIn(ctx context.Context, observed string) {
 		}
 		obsCtx, cancel := context.WithTimeout(ctx, s.opts.WriteTimeout)
 		if _, err := s.Observe(obsCtx, w.BotID); err != nil && !errors.Is(err, ErrNotFound) {
-			s.log.Warn("drift observe failed", slog.String("bot_id", w.BotID), slog.Any("error", err))
+			s.log.WarnContext(ctx, "drift observe failed", slog.String("bot_id", w.BotID), slog.Any("error", err))
 		}
 		cancel()
 	}
@@ -669,7 +669,7 @@ func (s *Service) release(ctx context.Context, botID string) {
 	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.opts.WriteTimeout)
 	defer cancel()
 	if err := s.repo.Release(rctx, botID, s.opts.Owner); err != nil {
-		s.log.Warn("release lease failed", slog.String("bot_id", botID), slog.Any("error", err))
+		s.log.WarnContext(ctx, "release lease failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}
 }
 
@@ -695,7 +695,7 @@ func (s *Service) leasedContext(parent context.Context, botID string, timeout ti
 				err := s.repo.Renew(rctx, botID, s.opts.Owner, s.opts.Lease)
 				rcancel()
 				if err != nil {
-					s.log.Warn("lease lost; abandoning operation", slog.String("bot_id", botID), slog.Any("error", err))
+					s.log.WarnContext(parent, "lease lost; abandoning operation", slog.String("bot_id", botID), slog.Any("error", err))
 					cancel()
 					return
 				}
@@ -724,7 +724,7 @@ func (s *Service) replaceStaleContainer(ctx context.Context, log *slog.Logger, w
 	if !insp.Exists || insp.Image == "" || config.NormalizeImageRef(insp.Image) == requested {
 		return nil
 	}
-	log.Info("replacing container built from a different image",
+	log.InfoContext(ctx, "replacing container built from a different image",
 		slog.String("current_image", insp.Image), slog.String("requested_image", w.Image))
 	return s.backend.Teardown(ctx, w.BotID, true)
 }
@@ -743,7 +743,7 @@ func (s *Service) deriveBotStatus(ctx context.Context, w Workspace) {
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.opts.WriteTimeout)
 	defer cancel()
 	if err := writer.SetBotStatusFromWorkspace(wctx, w.BotID, status); err != nil {
-		s.log.Warn("derive bot status failed", slog.String("bot_id", w.BotID), slog.String("status", status), slog.Any("error", err))
+		s.log.WarnContext(ctx, "derive bot status failed", slog.String("bot_id", w.BotID), slog.String("status", status), slog.Any("error", err))
 	}
 }
 

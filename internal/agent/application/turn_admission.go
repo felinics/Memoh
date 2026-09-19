@@ -226,10 +226,10 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 		case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
 			// Expected, not a failure: this process was superseded mid-run, so the
 			// terminal write was refused and the reaper names the outcome instead.
-			s.logger.Warn("skip finishing turn run after ownership loss",
+			s.logger.WarnContext(ctx, "skip finishing turn run after ownership loss",
 				slog.String("run_id", handle.RunID))
 		default:
-			s.logger.Error("finish turn run failed",
+			s.logger.ErrorContext(ctx, "finish turn run failed",
 				slog.Any("error", err),
 				slog.String("run_id", handle.RunID),
 				slog.String("status", status))

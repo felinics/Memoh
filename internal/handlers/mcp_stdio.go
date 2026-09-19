@@ -564,7 +564,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 		if strings.TrimSpace(req.Method) == "notifications/cancelled" {
 			sess.cancelInFlight(req)
 		} else {
-			h.logger.Debug("mcp stdio notification dropped",
+			h.logger.DebugContext(c.Request().Context(), "mcp stdio notification dropped",
 				slog.String("connection_id", connectionID),
 				slog.String("method", req.Method),
 			)
@@ -701,7 +701,7 @@ func (h *ContainerdHandler) startContainerdMCPCommandSession(ctx context.Context
 			output, err := execStream.Recv()
 			if err != nil {
 				if !errors.Is(err, io.EOF) {
-					h.logger.Debug("exec stream recv done", slog.Any("error", err))
+					h.logger.DebugContext(ctx, "exec stream recv done", slog.Any("error", err))
 				}
 				_ = stdoutW.Close()
 				_ = stderrW.Close()
@@ -748,7 +748,7 @@ func (h *ContainerdHandler) probeMCPTools(ctx context.Context, sess *mcpStdioCli
 	defer cancel()
 	result, err := sess.session.ListTools(probeCtx, &sdkmcp.ListToolsParams{})
 	if err != nil {
-		h.logger.Warn("mcp stdio tools probe failed",
+		h.logger.WarnContext(ctx, "mcp stdio tools probe failed",
 			slog.String("bot_id", botID),
 			slog.String("name", name),
 			slog.Any("error", sess.enrichError(err)),
@@ -766,12 +766,12 @@ func (h *ContainerdHandler) probeMCPTools(ctx context.Context, sess *mcpStdioCli
 	}
 	sort.Strings(tools)
 	if len(tools) == 0 {
-		h.logger.Warn("mcp stdio tools empty",
+		h.logger.WarnContext(ctx, "mcp stdio tools empty",
 			slog.String("bot_id", botID),
 			slog.String("name", name),
 		)
 	} else {
-		h.logger.Info("mcp stdio tools loaded",
+		h.logger.InfoContext(ctx, "mcp stdio tools loaded",
 			slog.String("bot_id", botID),
 			slog.String("name", name),
 			slog.Int("count", len(tools)),

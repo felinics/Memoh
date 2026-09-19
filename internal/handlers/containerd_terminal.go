@@ -117,7 +117,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	// Idle timer: closes the connection if no client activity for terminalIdleTimeout.
 	var idleMu sync.Mutex
 	idleTimer := time.AfterFunc(terminalIdleTimeout, func() {
-		h.logger.Info("terminal idle timeout reached, closing", slog.String("bot_id", botID))
+		h.logger.InfoContext(c.Request().Context(), "terminal idle timeout reached, closing", slog.String("bot_id", botID))
 		_ = conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseGoingAway, "idle timeout"),
 			time.Now().Add(5*time.Second))
@@ -174,7 +174,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 				var ctrl terminalControlMessage
 				if json.Unmarshal(data, &ctrl) == nil && ctrl.Type == "resize" && ctrl.Cols > 0 && ctrl.Rows > 0 {
 					if resizeErr := execStream.Resize(ctrl.Cols, ctrl.Rows); resizeErr != nil {
-						h.logger.Warn("terminal resize failed",
+						h.logger.WarnContext(c.Request().Context(), "terminal resize failed",
 							slog.String("bot_id", botID), slog.Any("error", resizeErr))
 					}
 				}

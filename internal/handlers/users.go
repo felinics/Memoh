@@ -559,7 +559,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	intent, err := h.workspaceSetup.EnsurePresent(intentCtx, bot.ID, workspaceImageFromCreateRequest(req))
 	cancelIntent()
 	if err != nil {
-		h.logger.Error("record workspace intent failed",
+		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed",
 			slog.String("bot_id", bot.ID),
 			slog.Any("error", err),
 		)
@@ -583,7 +583,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 
 	readyBot, err := h.botService.Get(streamCtx, bot.ID)
 	if err != nil {
-		h.logger.Error("load bot after workspace provisioning failed",
+		h.logger.ErrorContext(c.Request().Context(), "load bot after workspace provisioning failed",
 			slog.String("bot_id", bot.ID),
 			slog.Any("error", err),
 		)

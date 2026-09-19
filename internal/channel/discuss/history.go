@@ -40,11 +40,11 @@ func (r discussHistoryReader) Load(ctx context.Context, sessionID string) ([]tim
 		measure.TotalMessages = agg.MessageCount
 		measure.TotalBytes = agg.ContentBytes
 	} else {
-		r.logger.Warn("measure TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		r.logger.WarnContext(ctx, "measure TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 	}
 	messages, err := r.messages.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, r.maxBytes)
 	if err != nil {
-		r.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		r.logger.WarnContext(ctx, "load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil, measure
 	}
 	measure.Loaded = len(messages)

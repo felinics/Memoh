@@ -148,7 +148,7 @@ func (a *QQAdapter) runReceiver(ctx context.Context, cfg channel.ChannelConfig, 
 			return
 		}
 		if a.logger != nil {
-			a.logger.Warn("qq receiver reconnect", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.WarnContext(ctx, "qq receiver reconnect", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		delay, nextAttempt := nextReconnectDelay(backoffs, attempt, healthySession)
 		attempt = nextAttempt
@@ -342,7 +342,7 @@ func (a *QQAdapter) dispatchInbound(ctx context.Context, cfg channel.ChannelConf
 	}
 	go func() {
 		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.Error("qq handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.ErrorContext(ctx, "qq handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 	}()
 }

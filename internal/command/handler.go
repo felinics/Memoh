@@ -410,7 +410,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 	if h.roleResolver != nil && roleIdentityID != "" {
 		r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID)
 		if err != nil {
-			h.logger.Warn("failed to resolve member role",
+			h.logger.WarnContext(ctx, "failed to resolve member role",
 				slog.String("bot_id", input.BotID),
 				slog.String("role_identity_id", roleIdentityID),
 				slog.Any("error", err),
@@ -466,7 +466,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 	if resource != "link" && !writeAccess {
 		allowed, aclErr := h.chatACLAllows(cc)
 		if aclErr != nil {
-			h.logger.Warn("command acl evaluation failed",
+			h.logger.WarnContext(ctx, "command acl evaluation failed",
 				slog.String("bot_id", input.BotID),
 				slog.String("resource", resource),
 				slog.Any("error", aclErr),
@@ -680,7 +680,7 @@ func (h *Handler) CommandAccess(ctx context.Context, input ExecuteInput) (bool, 
 		r, err := h.roleResolver.GetMemberRole(ctx, input.BotID, roleIdentityID)
 		if err != nil {
 			if h.logger != nil {
-				h.logger.Warn("failed to resolve member role in CommandAccess",
+				h.logger.WarnContext(ctx, "failed to resolve member role in CommandAccess",
 					slog.String("bot_id", input.BotID),
 					slog.String("channel_identity_id", roleIdentityID),
 					slog.Any("error", err),

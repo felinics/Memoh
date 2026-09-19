@@ -39,7 +39,7 @@ func (a *FeishuAdapter) enrichQuotedMessage(ctx context.Context, cfg channel.Cha
 	resp, err := client.Im.Message.Get(lookupCtx, larkim.NewGetMessageReqBuilder().MessageId(parentID).Build())
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Debug("feishu quoted message fetch failed",
+			a.logger.DebugContext(ctx, "feishu quoted message fetch failed",
 				slog.String("parent_id", parentID),
 				slog.Any("error", err),
 			)
@@ -53,7 +53,7 @@ func (a *FeishuAdapter) enrichQuotedMessage(ctx context.Context, cfg channel.Cha
 				code = resp.Code
 				respMsg = resp.Msg
 			}
-			a.logger.Debug("feishu quoted message fetch empty",
+			a.logger.DebugContext(ctx, "feishu quoted message fetch empty",
 				slog.String("parent_id", parentID),
 				slog.Int("code", code),
 				slog.String("response_msg", respMsg),

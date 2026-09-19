@@ -515,11 +515,11 @@ func (m *Manager) Init(ctx context.Context) error {
 		StorageDriver: m.cfg.Snapshotter,
 	})
 	if err != nil {
-		m.logger.Warn("base image preparation failed", slog.String("image", image), slog.Any("error", err))
+		m.logger.WarnContext(ctx, "base image preparation failed", slog.String("image", image), slog.Any("error", err))
 		return err
 	}
 	if result.Mode == ImagePrepareDelegated {
-		m.logger.Info("base image pull delegated to container backend", slog.String("image", image))
+		m.logger.InfoContext(ctx, "base image pull delegated to container backend", slog.String("image", image))
 	}
 	return nil
 }
@@ -826,7 +826,7 @@ func (m *Manager) startWithResolvedConfig(ctx context.Context, botID, image stri
 	// regain outbound connectivity. Server communication still uses UDS.
 	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
 		if stopErr := m.service.StopContainer(ctx, containerID, &ctr.StopTaskOptions{Force: true}); stopErr != nil {
-			m.logger.Warn("cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", stopErr))
+			m.logger.WarnContext(ctx, "cleanup: stop task failed", slog.String("container_id", containerID), slog.Any("error", stopErr))
 		}
 		return err
 	}
@@ -878,11 +878,11 @@ func (m *Manager) Delete(ctx context.Context, botID string, preserveData bool) e
 	m.clearLegacyRoute(botID)
 
 	if err := m.removeContainerNetwork(ctx, botID, containerID); err != nil {
-		m.logger.Warn("delete: remove network failed",
+		m.logger.WarnContext(ctx, "delete: remove network failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-		m.logger.Warn("delete: delete task failed",
+		m.logger.WarnContext(ctx, "delete: delete task failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 	return m.service.DeleteContainer(ctx, containerID, &ctr.DeleteContainerOptions{

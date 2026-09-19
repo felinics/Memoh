@@ -184,24 +184,24 @@ func (r *Reaper) loop(ctx context.Context) {
 func (r *Reaper) tick(ctx context.Context) {
 	leader, err := r.liveness.AcquireLeaderLease(ctx, r.ownerID, r.tuning.reaperLeaderLeaseTTL)
 	if err != nil {
-		r.logger.Warn("acquire session runtime reaper leadership failed", slog.Any("error", err))
+		r.logger.WarnContext(ctx, "acquire session runtime reaper leadership failed", slog.Any("error", err))
 		return
 	}
 	if !leader {
 		return
 	}
 	if err := r.reapExpiredLeases(ctx); err != nil {
-		r.logger.Warn("reap expired session runtime leases failed", slog.Any("error", err))
+		r.logger.WarnContext(ctx, "reap expired session runtime leases failed", slog.Any("error", err))
 	}
 	if err := r.recoverLostBackendGeneration(ctx); err != nil {
-		r.logger.Warn("recover session runtime runs after backend loss failed", slog.Any("error", err))
+		r.logger.WarnContext(ctx, "recover session runtime runs after backend loss failed", slog.Any("error", err))
 	}
 	if err := r.repairOrphanedAdmissions(ctx); err != nil {
-		r.logger.Warn("repair orphaned session runtime admissions failed", slog.Any("error", err))
+		r.logger.WarnContext(ctx, "repair orphaned session runtime admissions failed", slog.Any("error", err))
 	}
 	if r.terminalReconciler != nil {
 		if err := r.terminalReconciler(context.WithoutCancel(ctx)); err != nil {
-			r.logger.Warn("reconcile session runtime terminal observations failed", slog.Any("error", err))
+			r.logger.WarnContext(ctx, "reconcile session runtime terminal observations failed", slog.Any("error", err))
 		}
 	}
 }
@@ -330,7 +330,7 @@ func (r *Reaper) refreshGeneration(ctx context.Context) error {
 	if generation == r.generation {
 		return nil
 	}
-	r.logger.Info("session runtime liveness generation changed",
+	r.logger.InfoContext(ctx, "session runtime liveness generation changed",
 		slog.String("previous_generation", r.generation),
 		slog.String("current_generation", generation),
 	)
@@ -404,7 +404,7 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 			// The run transition is authoritative and must not be rolled back.
 			// A later terminal reconciliation/reaper pass can retry decision
 			// cleanup without changing the lost outcome.
-			r.logger.Warn("cancel lost run decisions failed", slog.String("run_id", run.RunID), slog.Any("error", cancelErr))
+			r.logger.WarnContext(ctx, "cancel lost run decisions failed", slog.String("run_id", run.RunID), slog.Any("error", cancelErr))
 		}
 	}
 	if r.terminalObserver != nil {
@@ -414,21 +414,21 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 		return nil
 	}
 	if run.State == ledger.StateAborted {
-		r.logger.Info("session run finalized after abort intent",
+		r.logger.InfoContext(ctx, "session run finalized after abort intent",
 			slog.String("run_id", run.RunID),
 			slog.String("session_id", run.SessionID),
 		)
 		return nil
 	}
 	if run.State != ledger.StateLost {
-		r.logger.Info("session run finalized from durable finish proposal",
+		r.logger.InfoContext(ctx, "session run finalized from durable finish proposal",
 			slog.String("run_id", run.RunID),
 			slog.String("session_id", run.SessionID),
 			slog.String("state", string(run.State)),
 		)
 		return nil
 	}
-	r.logger.Info("session run marked lost",
+	r.logger.InfoContext(ctx, "session run marked lost",
 		slog.String("run_id", run.RunID),
 		slog.String("session_id", run.SessionID),
 		slog.String("error_code", errorCode),

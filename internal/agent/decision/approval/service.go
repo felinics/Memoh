@@ -540,7 +540,7 @@ func (s *Service) runApprovalHook(ctx context.Context, event string, input Creat
 			return err
 		}
 		if s.logger != nil {
-			s.logger.Warn("approval hook failed",
+			s.logger.WarnContext(ctx, "approval hook failed",
 				slog.String("event", event),
 				slog.String("bot_id", botID),
 				slog.String("session_id", sessionID),

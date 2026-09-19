@@ -96,7 +96,7 @@ func (s *Source) ListTools(ctx context.Context, session mcpgw.ToolSessionContext
 		}
 		inputSchema, err := schemaObject(tool.InputSchema)
 		if err != nil {
-			s.logger.Warn(
+			s.logger.WarnContext(ctx,
 				"skip connect-it tool with invalid input schema",
 				slog.String("tool", tool.Name),
 				slog.Any("error", err),

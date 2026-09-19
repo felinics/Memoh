@@ -524,7 +524,7 @@ func (m *Manager) sendPreparedWithConfig(ctx context.Context, sender Sender, cfg
 			err := item.editor.Update(ctx, cfg, item.target, strings.TrimSpace(item.message.ID), item.prepared.Message)
 			if err == nil {
 				if m.logger != nil {
-					m.logger.Debug("edit outbound success",
+					m.logger.DebugContext(ctx, "edit outbound success",
 						slog.String("channel", cfg.ChannelType.String()),
 						slog.String("bot_id", cfg.BotID),
 						slog.String("target", item.target),
@@ -534,7 +534,7 @@ func (m *Manager) sendPreparedWithConfig(ctx context.Context, sender Sender, cfg
 			}
 			lastErr = err
 			if m.logger != nil {
-				m.logger.Warn("edit outbound retry",
+				m.logger.WarnContext(ctx, "edit outbound retry",
 					slog.String("channel", cfg.ChannelType.String()),
 					slog.Int("attempt", i+1),
 					slog.Any("error", err))
@@ -550,7 +550,7 @@ func (m *Manager) sendPreparedWithConfig(ctx context.Context, sender Sender, cfg
 		err := sender.Send(ctx, cfg, item.prepared)
 		if err == nil {
 			if m.logger != nil {
-				m.logger.Debug("send outbound success",
+				m.logger.DebugContext(ctx, "send outbound success",
 					slog.String("channel", cfg.ChannelType.String()),
 					slog.String("bot_id", cfg.BotID),
 					slog.String("target", item.target),
@@ -560,7 +560,7 @@ func (m *Manager) sendPreparedWithConfig(ctx context.Context, sender Sender, cfg
 		}
 		lastErr = err
 		if m.logger != nil {
-			m.logger.Warn("send outbound retry",
+			m.logger.WarnContext(ctx, "send outbound retry",
 				slog.String("channel", cfg.ChannelType.String()),
 				slog.Int("attempt", i+1),
 				slog.Any("error", err))
@@ -1024,7 +1024,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	policy := s.policy
 	if policy.TextChunkLimit <= 0 {
 		if s.manager.logger != nil {
-			s.manager.logger.Debug("stream final chunking skipped: non-positive chunk limit",
+			s.manager.logger.DebugContext(ctx, "stream final chunking skipped: non-positive chunk limit",
 				slog.String("channel", s.channelType.String()),
 				slog.Int("chunk_limit", policy.TextChunkLimit),
 			)
@@ -1038,7 +1038,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	text := strings.TrimSpace(msg.PlainText())
 	textRunes := runeLen(text)
 	if s.manager.logger != nil {
-		s.manager.logger.Debug("stream final chunking evaluate",
+		s.manager.logger.DebugContext(ctx, "stream final chunking evaluate",
 			slog.String("channel", s.channelType.String()),
 			slog.Int("chunk_limit", policy.TextChunkLimit),
 			slog.Int("text_runes", textRunes),
@@ -1048,7 +1048,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	}
 	if text == "" || runeLen(text) <= policy.TextChunkLimit {
 		if s.manager.logger != nil {
-			s.manager.logger.Debug("stream final chunking skipped: text within limit",
+			s.manager.logger.DebugContext(ctx, "stream final chunking skipped: text within limit",
 				slog.String("channel", s.channelType.String()),
 				slog.Int("text_runes", textRunes),
 				slog.Int("chunk_limit", policy.TextChunkLimit),
@@ -1058,7 +1058,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	}
 	if len(msg.Parts) > 0 {
 		if s.manager.logger != nil {
-			s.manager.logger.Debug("stream final chunking skipped: rich parts preserve adapter renderer",
+			s.manager.logger.DebugContext(ctx, "stream final chunking skipped: rich parts preserve adapter renderer",
 				slog.String("channel", s.channelType.String()),
 				slog.Int("text_runes", textRunes),
 				slog.Int("chunk_limit", policy.TextChunkLimit),
@@ -1074,7 +1074,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	chunks := chunker(text, policy.TextChunkLimit)
 	if len(chunks) <= 1 {
 		if s.manager.logger != nil {
-			s.manager.logger.Debug("stream final chunking skipped: chunker returned single chunk",
+			s.manager.logger.DebugContext(ctx, "stream final chunking skipped: chunker returned single chunk",
 				slog.String("channel", s.channelType.String()),
 				slog.Int("chunks", len(chunks)),
 			)
@@ -1084,7 +1084,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 
 	hasAttachments := len(msg.Attachments) > 0
 	if s.manager.logger != nil {
-		s.manager.logger.Info("stream final chunking applied",
+		s.manager.logger.InfoContext(ctx, "stream final chunking applied",
 			slog.String("channel", s.channelType.String()),
 			slog.Int("chunks", len(chunks)),
 			slog.Bool("has_attachments", hasAttachments),
@@ -1110,7 +1110,7 @@ func (s *managerOutboundStream) pushFinalWithChunking(ctx context.Context, event
 	defer cancelFirstChunk()
 	if err := s.pushPrepared(firstChunkCtx, firstChunkEvent); err != nil {
 		if s.manager.logger != nil {
-			s.manager.logger.Warn("stream final first chunk push failed, fallback to direct sends",
+			s.manager.logger.WarnContext(ctx, "stream final first chunk push failed, fallback to direct sends",
 				slog.String("channel", s.channelType.String()),
 				slog.Duration("timeout", streamFinalFirstChunkTimeout),
 				slog.Any("error", err),
@@ -1148,7 +1148,7 @@ func (s *managerOutboundStream) sendPreparedChunkedFinal(ctx context.Context, de
 		for idx, item := range deliveries {
 			if err := s.manager.sendPreparedWithConfig(ctx, s.sender, s.config, item, s.policy); err != nil {
 				if s.manager.logger != nil {
-					s.manager.logger.Error("stream final overflow chunk send failed",
+					s.manager.logger.ErrorContext(ctx, "stream final overflow chunk send failed",
 						slog.String("channel", s.channelType.String()),
 						slog.Int("chunk_index", startIndex+idx+1),
 						slog.Int("total_chunks", totalChunks),
@@ -1162,7 +1162,7 @@ func (s *managerOutboundStream) sendPreparedChunkedFinal(ctx context.Context, de
 		for idx, item := range deliveries {
 			if err := s.send(ctx, OutboundMessage{Message: item.message}); err != nil {
 				if s.manager.logger != nil {
-					s.manager.logger.Error("stream final overflow chunk send failed",
+					s.manager.logger.ErrorContext(ctx, "stream final overflow chunk send failed",
 						slog.String("channel", s.channelType.String()),
 						slog.Int("chunk_index", startIndex+idx+1),
 						slog.Int("total_chunks", totalChunks),
@@ -1174,7 +1174,7 @@ func (s *managerOutboundStream) sendPreparedChunkedFinal(ctx context.Context, de
 		}
 	}
 	if s.manager.logger != nil {
-		s.manager.logger.Info("stream final chunking completed",
+		s.manager.logger.InfoContext(ctx, "stream final chunking completed",
 			slog.String("channel", s.channelType.String()),
 			slog.Int("chunks", totalChunks),
 			slog.Bool("has_attachments", hasAttachments),

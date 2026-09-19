@@ -108,7 +108,7 @@ func (s *Service) maybeGenerateSessionTitle(ctx context.Context, req ChatRequest
 
 	sess, err := s.sessionService.Get(ctx, sessionID)
 	if err != nil {
-		s.logger.Warn("title gen: failed to get session", slog.String("session_id", sessionID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "title gen: failed to get session", slog.String("session_id", sessionID), slog.Any("error", err))
 		return
 	}
 	// Only generate a title when the session doesn't have one yet. Reading the
@@ -131,19 +131,19 @@ func (s *Service) maybeGenerateSessionTitle(ctx context.Context, req ChatRequest
 
 	titleModelID, ownerUserID, err := s.resolveTitleModel(ctx, req.BotID)
 	if err != nil {
-		s.logger.Warn("title gen: failed to load owner profile", slog.String("bot_id", req.BotID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "title gen: failed to load owner profile", slog.String("bot_id", req.BotID), slog.Any("error", err))
 		return
 	}
 	if titleModelID == "" {
-		s.logger.Debug("title gen: no title model configured", slog.String("bot_id", req.BotID), slog.String("owner_user_id", ownerUserID))
+		s.logger.DebugContext(ctx, "title gen: no title model configured", slog.String("bot_id", req.BotID), slog.String("owner_user_id", ownerUserID))
 		return
 	}
 
-	s.logger.Info("title gen: generating title", slog.String("session_id", sessionID), slog.String("title_model_id", titleModelID))
+	s.logger.InfoContext(ctx, "title gen: generating title", slog.String("session_id", sessionID), slog.String("title_model_id", titleModelID))
 
 	titleModel, provider, err := s.fetchChatModel(ctx, titleModelID)
 	if err != nil {
-		s.logger.Warn("title gen: failed to resolve title model", slog.String("model_id", titleModelID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "title gen: failed to resolve title model", slog.String("model_id", titleModelID), slog.Any("error", err))
 		return
 	}
 
@@ -153,9 +153,9 @@ func (s *Service) maybeGenerateSessionTitle(ctx context.Context, req ChatRequest
 	}
 
 	if _, err := s.sessionService.UpdateTitle(ctx, sessionID, title); err != nil {
-		s.logger.Warn("title gen: failed to update session title", slog.String("session_id", sessionID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "title gen: failed to update session title", slog.String("session_id", sessionID), slog.Any("error", err))
 	} else {
-		s.logger.Info("title gen: session title updated", slog.String("session_id", sessionID), slog.String("title", title))
+		s.logger.InfoContext(ctx, "title gen: session title updated", slog.String("session_id", sessionID), slog.String("title", title))
 		s.publishSessionTitleUpdated(req.BotID, sessionID, title)
 	}
 }
@@ -271,7 +271,7 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 	authCtx := oauthctx.WithUserID(ctx, userID)
 	creds, err := authService.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
-		s.logger.Warn("title gen: failed to resolve provider credentials", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "title gen: failed to resolve provider credentials", slog.Any("error", err))
 		return ""
 	}
 
@@ -301,7 +301,7 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 		sdk.WithMaxTokens(titleGenerateMaxTokens),
 	)
 	if err != nil {
-		s.logger.Warn("title gen: LLM call failed", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "title gen: LLM call failed", slog.Any("error", err))
 		return ""
 	}
 
@@ -406,9 +406,9 @@ func (s *Service) applyFallbackTitle(ctx context.Context, req ChatRequest, sessi
 		return
 	}
 	if _, err := s.sessionService.UpdateTitle(ctx, sessionID, title); err != nil {
-		s.logger.Warn("title gen: failed to apply fallback title", slog.String("session_id", sessionID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "title gen: failed to apply fallback title", slog.String("session_id", sessionID), slog.Any("error", err))
 		return
 	}
-	s.logger.Info("title gen: applied fallback title", slog.String("session_id", sessionID), slog.String("title", title))
+	s.logger.InfoContext(ctx, "title gen: applied fallback title", slog.String("session_id", sessionID), slog.String("title", title))
 	s.publishSessionTitleUpdated(req.BotID, sessionID, title)
 }

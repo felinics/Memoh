@@ -484,7 +484,7 @@ func (a *MatrixAdapter) runSyncLoop(ctx context.Context, cfg channel.ChannelConf
 		bootstrapSince, err := a.bootstrapSinceToken(ctx, cfg, parsed)
 		if err != nil {
 			if a.logger != nil {
-				a.logger.Warn("matrix sync bootstrap failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+				a.logger.WarnContext(ctx, "matrix sync bootstrap failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 		} else if bootstrapSince != "" {
 			since = bootstrapSince
@@ -499,7 +499,7 @@ func (a *MatrixAdapter) runSyncLoop(ctx context.Context, cfg channel.ChannelConf
 		if err == nil && strings.TrimSpace(since) != "" && since != persistedSince {
 			if saveErr := a.persistSinceToken(ctx, cfg.ID, since); saveErr != nil {
 				if a.logger != nil {
-					a.logger.Warn("matrix sync cursor persist failed", slog.String("config_id", cfg.ID), slog.Bool("healthy", healthy), slog.Any("error", saveErr))
+					a.logger.WarnContext(ctx, "matrix sync cursor persist failed", slog.String("config_id", cfg.ID), slog.Bool("healthy", healthy), slog.Any("error", saveErr))
 				}
 			} else {
 				persistedSince = since
@@ -510,7 +510,7 @@ func (a *MatrixAdapter) runSyncLoop(ctx context.Context, cfg channel.ChannelConf
 			continue
 		}
 		if a.logger != nil {
-			a.logger.Warn("matrix sync reconnect", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.WarnContext(ctx, "matrix sync reconnect", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		delay, nextAttempt := nextReconnectDelay(backoffs, attempt, healthy)
 		attempt = nextAttempt
@@ -538,7 +538,7 @@ func (a *MatrixAdapter) bootstrapSinceToken(ctx context.Context, cfg channel.Cha
 		return "", err
 	}
 	if a.logger != nil {
-		a.logger.Info("matrix sync cursor bootstrapped", slog.String("config_id", cfg.ID))
+		a.logger.InfoContext(ctx, "matrix sync cursor bootstrapped", slog.String("config_id", cfg.ID))
 	}
 	return since, nil
 }
@@ -606,7 +606,7 @@ func (a *MatrixAdapter) handleInvites(ctx context.Context, cfg channel.ChannelCo
 		}
 		if !parsed.AutoJoinInvites {
 			if a.logger != nil {
-				a.logger.Info("matrix invite skipped",
+				a.logger.InfoContext(ctx, "matrix invite skipped",
 					slog.String("config_id", cfg.ID),
 					slog.String("room_id", roomID),
 					slog.String("reason", "auto_join_disabled"),
@@ -619,7 +619,7 @@ func (a *MatrixAdapter) handleInvites(ctx context.Context, cfg channel.ChannelCo
 		}
 		joinedAny = true
 		if a.logger != nil {
-			a.logger.Info("matrix room auto-joined",
+			a.logger.InfoContext(ctx, "matrix room auto-joined",
 				slog.String("config_id", cfg.ID),
 				slog.String("room_id", roomID),
 			)
@@ -659,7 +659,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 		repliedEvent, err := a.fetchRoomEvent(ctx, parsed, evt.RoomID, replyTo)
 		if err != nil {
 			if a.logger != nil {
-				a.logger.Warn("failed to fetch matrix replied event",
+				a.logger.WarnContext(ctx, "failed to fetch matrix replied event",
 					slog.String("config_id", cfg.ID),
 					slog.String("room_id", evt.RoomID),
 					slog.String("reply_to", replyTo),
@@ -734,7 +734,7 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 		}
 	}
 	if a.logger != nil {
-		a.logger.Info("inbound received",
+		a.logger.InfoContext(ctx, "inbound received",
 			slog.String("config_id", cfg.ID),
 			slog.String("room_id", evt.RoomID),
 			slog.String("sender", evt.Sender),
@@ -762,7 +762,7 @@ func (a *MatrixAdapter) resolveConversationType(ctx context.Context, configID st
 	isDirect, err := a.isDirectRoom(ctx, cfg, roomID)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Warn("failed to resolve matrix room type",
+			a.logger.WarnContext(ctx, "failed to resolve matrix room type",
 				slog.String("config_id", configID),
 				slog.String("room_id", strings.TrimSpace(roomID)),
 				slog.Any("error", err),
@@ -1490,7 +1490,7 @@ func (a *MatrixAdapter) ensureDirectRoom(ctx context.Context, cfg Config, userID
 			return roomID, nil
 		}
 	} else if a.logger != nil {
-		a.logger.Warn("matrix direct room lookup failed",
+		a.logger.WarnContext(ctx, "matrix direct room lookup failed",
 			slog.String("user_id", userID),
 			slog.Any("error", err),
 		)
@@ -1521,7 +1521,7 @@ func (a *MatrixAdapter) findExistingDirectRoom(ctx context.Context, cfg Config, 
 		matched, err := a.isDirectRoomForUser(ctx, cfg, roomID, userID)
 		if err != nil {
 			if a.logger != nil {
-				a.logger.Warn("matrix direct room candidate lookup failed",
+				a.logger.WarnContext(ctx, "matrix direct room candidate lookup failed",
 					slog.String("room_id", strings.TrimSpace(roomID)),
 					slog.String("user_id", strings.TrimSpace(userID)),
 					slog.Any("error", err),

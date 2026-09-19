@@ -223,7 +223,7 @@ func (w *SubagentWatchdog) run(ctx context.Context) {
 			}
 			timer.Reset(w.timeout)
 		case <-timer.C:
-			w.logger.Warn("subagent watchdog fired", slog.Duration("timeout", w.timeout))
+			w.logger.WarnContext(ctx, "subagent watchdog fired", slog.Duration("timeout", w.timeout))
 			w.cancel(ErrWatchdogTimedOut)
 			return
 		}
@@ -925,7 +925,7 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 	}
 	runCtx, ok, err := p.bgManager.MarkAgentTaskRunning(ctx, next.taskID)
 	if err != nil {
-		p.logger.Warn("start queued agent task failed", slog.String("task_id", next.taskID), slog.Any("error", err))
+		p.logger.WarnContext(ctx, "start queued agent task failed", slog.String("task_id", next.taskID), slog.Any("error", err))
 		p.finishAgentRequest(ctx, key, agentRunResult{
 			AgentID:   next.agentID,
 			SessionID: next.agentSessionID,
@@ -987,7 +987,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	}
 	defer func() {
 		if err := p.runSubagentHook(context.WithoutCancel(ctx), hooks.EventSubagentStop, req, res); err != nil && p.logger != nil {
-			p.logger.Warn("subagent stop hook failed",
+			p.logger.WarnContext(ctx, "subagent stop hook failed",
 				slog.String("bot_id", req.parentSession.BotID),
 				slog.String("agent_id", req.agentID),
 				slog.Any("error", err),
@@ -1430,7 +1430,7 @@ func (p *SpawnProvider) loadAgentMessages(ctx context.Context, sessionID string)
 	}
 	msgs, err := p.messageService.ListBySession(ctx, sessionID)
 	if err != nil {
-		p.logger.Warn("load subagent messages failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		p.logger.WarnContext(ctx, "load subagent messages failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil
 	}
 	out := make([]sdk.Message, 0, len(msgs))
@@ -1655,7 +1655,7 @@ func (p *SpawnProvider) persistMessages(
 			// the whole attempt would reproduce it and discard every later valid
 			// message. Preserve the legacy skip behavior, but make the defect
 			// observable. Actual storage failures below remain authoritative.
-			p.logger.Warn("marshal subagent message failed; skipping message",
+			p.logger.WarnContext(ctx, "marshal subagent message failed; skipping message",
 				slog.Any("error", err),
 				slog.Int("message_index", i))
 			continue
@@ -1690,7 +1690,7 @@ func (p *SpawnProvider) persistMessages(
 			TurnRequestMessageID: strings.TrimSpace(req.requestMessageID),
 		})
 		if err != nil {
-			p.logger.Warn("persist subagent message failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "persist subagent message failed", slog.Any("error", err))
 			return fmt.Errorf("persist subagent message: %w", err)
 		}
 		if i == lastAssistantIdx && result.ContextLifecycle != nil {
@@ -1723,7 +1723,7 @@ func (p *SpawnProvider) persistUserMessage(ctx context.Context, req *agentReques
 	}
 	persisted, err := p.messageService.Persist(ctx, input)
 	if err != nil {
-		p.logger.Warn("persist subagent user message failed", slog.Any("error", err))
+		p.logger.WarnContext(ctx, "persist subagent user message failed", slog.Any("error", err))
 		return "", false
 	}
 	return persisted.ID, true

@@ -50,7 +50,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 	}
 	if c.observer == nil {
 		if c.logger != nil {
-			c.logger.Warn(
+			c.logger.WarnContext(ctx,
 				"channel healthcheck dependency is unavailable",
 				slog.String("bot_id", botID),
 			)

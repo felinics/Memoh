@@ -93,7 +93,7 @@ func (p *MemoryProvider) Tools(ctx context.Context, session SessionContext) ([]s
 func (p *MemoryProvider) filterSourceRefs(ctx context.Context, session SessionContext, output any) any {
 	_, allowed, err := visibleHistorySessions(ctx, p.sessions, session)
 	if err != nil {
-		p.logger.Warn("memory source ref scope lookup failed", slog.Any("error", err))
+		p.logger.WarnContext(ctx, "memory source ref scope lookup failed", slog.Any("error", err))
 	}
 	return filterSourceRefsValue(output, allowed)
 }

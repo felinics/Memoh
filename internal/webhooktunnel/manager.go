@@ -212,7 +212,7 @@ func (m *Manager) startManaged(ctx context.Context) error {
 	)
 	cmd.Env = append(os.Environ(), "HOME="+homeDir)
 	if m.log != nil {
-		m.log.Info("starting cloudflared quick tunnel",
+		m.log.InfoContext(ctx, "starting cloudflared quick tunnel",
 			slog.String("target_url", targetURL),
 			slog.String("metrics_addr", metricsAddr),
 		)
@@ -247,7 +247,7 @@ func (m *Manager) startManaged(ctx context.Context) error {
 		}
 		m.mu.Unlock()
 		if err != nil && m.log != nil {
-			m.log.Warn("cloudflared exited", slog.Any("error", err))
+			m.log.WarnContext(ctx, "cloudflared exited", slog.Any("error", err))
 		}
 	}()
 	return nil

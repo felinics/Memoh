@@ -369,7 +369,7 @@ func (m *Manager) abandonClaim(ctx context.Context, runID string, token int64, c
 		ErrorMessage: cause.Error(),
 	})
 	if err != nil {
-		m.logger.Error("release unstartable runtime run failed; the reaper will finish it",
+		m.logger.ErrorContext(ctx, "release unstartable runtime run failed; the reaper will finish it",
 			slog.Any("error", err), slog.String("run_id", runID), slog.String("cause", cause.Error()))
 	}
 	return cause

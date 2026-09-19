@@ -222,7 +222,7 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 		NoStats: true,
 	})
 	if err != nil {
-		p.logger.Warn("memory search for context failed", slog.Any("error", err))
+		p.logger.WarnContext(ctx, "memory search for context failed", slog.Any("error", err))
 		return nil, err
 	}
 
@@ -286,7 +286,7 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 
 	if p.llm != nil {
 		result := runFormation(ctx, p.logger, p.llm, p.service, req)
-		p.logger.Debug("memory formation completed",
+		p.logger.DebugContext(ctx, "memory formation completed",
 			slog.String("bot_id", botID),
 			slog.Int("extracted", result.ExtractedFacts),
 			slog.Int("added", result.Added),
@@ -311,7 +311,7 @@ func (p *BuiltinProvider) OnAfterChat(ctx context.Context, req adapters.AfterCha
 		Filters:          filters,
 		SourceMessageIDs: sourceMessageIDsFromMessages(req.Messages),
 	}); err != nil {
-		p.logger.Warn("store memory failed", slog.String("bot_id", botID), slog.Any("error", err))
+		p.logger.WarnContext(ctx, "store memory failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}
 	return nil
 }

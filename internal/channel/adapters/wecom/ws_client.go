@@ -98,7 +98,7 @@ func (c *WSClient) Run(ctx context.Context, auth AuthCredentials, onFrame func(c
 		}
 		delay := c.backoff(attempt)
 		attempt++
-		c.logger.Warn("wecom websocket session ended; reconnecting",
+		c.logger.WarnContext(ctx, "wecom websocket session ended; reconnecting",
 			slog.Int("attempt", attempt),
 			slog.Duration("delay", delay),
 			slog.Any("error", err),
@@ -139,7 +139,7 @@ func (c *WSClient) runSession(ctx context.Context, auth AuthCredentials, onFrame
 		_ = conn.Close()
 		return err
 	}
-	c.logger.Info("wecom websocket authenticated")
+	c.logger.InfoContext(ctx, "wecom websocket authenticated")
 
 	go c.heartbeatLoop(sessionCtx)
 
@@ -189,12 +189,12 @@ func (c *WSClient) heartbeatLoop(ctx context.Context) {
 		case <-ticker.C:
 			frame, err := BuildFrame(WSCmdHeartbeat, NewReqID(WSCmdHeartbeat), nil)
 			if err != nil {
-				c.logger.Error("build heartbeat frame failed", slog.Any("error", err))
+				c.logger.ErrorContext(ctx, "build heartbeat frame failed", slog.Any("error", err))
 				continue
 			}
 			err = c.Send(ctx, frame)
 			if err != nil {
-				c.logger.Warn("wecom websocket heartbeat failed", slog.Any("error", err))
+				c.logger.WarnContext(ctx, "wecom websocket heartbeat failed", slog.Any("error", err))
 				if conn := c.getConn(); conn != nil {
 					_ = conn.Close()
 				}
@@ -221,7 +221,7 @@ func (c *WSClient) readLoop(ctx context.Context, onFrame func(context.Context, W
 		}
 		var frame WSFrame
 		if err := json.Unmarshal(payload, &frame); err != nil {
-			c.logger.Warn("decode websocket frame failed", slog.Any("error", err))
+			c.logger.WarnContext(ctx, "decode websocket frame failed", slog.Any("error", err))
 			continue
 		}
 		if c.dispatchAck(frame) {
@@ -231,7 +231,7 @@ func (c *WSClient) readLoop(ctx context.Context, onFrame func(context.Context, W
 			continue
 		}
 		if err := onFrame(ctx, frame); err != nil {
-			c.logger.Warn("wecom onFrame callback returned error", slog.Any("error", err))
+			c.logger.WarnContext(ctx, "wecom onFrame callback returned error", slog.Any("error", err))
 		}
 	}
 }

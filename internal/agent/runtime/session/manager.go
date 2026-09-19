@@ -569,7 +569,7 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 	key := Key{BotID: terminal.BotID, SessionID: terminal.SessionID}
 	current, ok, err := m.backend.Load(ctx, key)
 	if err != nil {
-		m.logger.Warn("load runtime snapshot for terminal reconciliation failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
+		m.logger.WarnContext(ctx, "load runtime snapshot for terminal reconciliation failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
 		return
 	}
 	if !ok || current.CurrentRunView == nil || current.CurrentRunView.RunID != terminal.RunID {
@@ -603,7 +603,7 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 	})
 	if err != nil {
 		if !errors.Is(err, ErrRunOwnershipLost) {
-			m.logger.Warn("reconcile durable runtime terminal to live state failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
+			m.logger.WarnContext(ctx, "reconcile durable runtime terminal to live state failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
 		}
 		return
 	}
@@ -612,7 +612,7 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 	}
 	delta := runtimeRunPatch(snapshot, true, true, true)
 	if err := m.publishRuntimeDelta(ctx, snapshot, terminal.RunID, delta); err != nil {
-		m.logger.Warn("publish reconciled runtime terminal failed; subscribers will reload snapshot", slog.Any("error", err), slog.String("run_id", terminal.RunID))
+		m.logger.WarnContext(ctx, "publish reconciled runtime terminal failed; subscribers will reload snapshot", slog.Any("error", err), slog.String("run_id", terminal.RunID))
 	}
 	m.forgetLocalControlForHandle(ctx, RunHandle{
 		BotID: terminal.BotID, SessionID: terminal.SessionID, RunID: terminal.RunID,
@@ -1150,7 +1150,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 		return RunHandle{}, Cursor{}, context.Canceled
 	}
 	if err := m.publishRuntimeDelta(context.WithoutCancel(ctx), claimedSnapshot, runID, RuntimeDelta{CurrentRunView: claimedSnapshot.CurrentRunView}); err != nil {
-		m.logger.Warn("publish admitting runtime checkpoint failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", runID))
+		m.logger.WarnContext(ctx, "publish admitting runtime checkpoint failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", runID))
 	}
 	if expiredRef.RunID != "" && m.distributed != nil {
 		_, _ = m.distributed.DeleteRunRef(context.WithoutCancel(ctx), expiredRef)
@@ -1492,7 +1492,7 @@ func (m *Manager) retryDurableFinish(
 		case <-retryCtx.Done():
 			timer.Stop()
 			if errors.Is(retryCtx.Err(), context.DeadlineExceeded) {
-				m.logger.Warn("durable runtime finish retry budget exhausted; handing convergence to reaper",
+				m.logger.WarnContext(ctx, "durable runtime finish retry budget exhausted; handing convergence to reaper",
 					slog.String("run_id", ctrl.runID),
 					slog.Duration("retry_budget", m.durableFinishRetryBudget))
 				m.forgetLocalControlForHandle(context.WithoutCancel(ctx), ctrl.handle())
@@ -1515,7 +1515,7 @@ func (m *Manager) retryDurableFinish(
 			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), ctrl.handle())
 			return
 		}
-		m.logger.Warn("retry durable runtime finish failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
+		m.logger.WarnContext(ctx, "retry durable runtime finish failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
 		if delay < time.Second {
 			delay *= 2
 			if delay > time.Second {
@@ -1628,7 +1628,7 @@ func (m *Manager) retryFinishRun(ctx context.Context, ctrl *runControl, status, 
 		changed, err := m.finishRunState(ctx, ctrl.handle(), status, errorCode, message)
 		if err == nil || changed {
 			if err != nil {
-				m.logger.Warn("publish runtime finish failed after state commit", slog.Any("error", err), slog.String("run_id", ctrl.runID))
+				m.logger.WarnContext(ctx, "publish runtime finish failed after state commit", slog.Any("error", err), slog.String("run_id", ctrl.runID))
 			}
 			m.cleanupFinishedRun(ctx, ctrl.handle())
 			return
@@ -1637,7 +1637,7 @@ func (m *Manager) retryFinishRun(ctx context.Context, ctrl *runControl, status, 
 			m.forgetLocalControlForHandle(ctx, ctrl.handle())
 			return
 		}
-		m.logger.Warn("retry runtime finish failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
+		m.logger.WarnContext(ctx, "retry runtime finish failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
 		if delay < time.Second {
 			delay *= 2
 			if delay > time.Second {
@@ -1659,7 +1659,7 @@ func (m *Manager) cleanupFinishedRun(ctx context.Context, handle RunHandle) {
 		ref = RunRef{BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID, OwnerID: m.ownerID, Generation: handle.Generation}
 	}
 	if _, err := m.distributed.DeleteRunRef(context.WithoutCancel(ctx), ref); err != nil {
-		m.logger.Warn("delete finished runtime stream reference failed", slog.Any("error", err), slog.String("run_id", handle.RunID))
+		m.logger.WarnContext(ctx, "delete finished runtime stream reference failed", slog.Any("error", err), slog.String("run_id", handle.RunID))
 	}
 }
 
@@ -1836,7 +1836,7 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		// proposal, keep the live run active and publish the event; FinishRun will
 		// retry the same durable transition, while a crash before then follows the
 		// documented running -> lost recovery path.
-		m.logger.Warn("prepare agent terminal proposal failed; deferring durable outcome to finish",
+		m.logger.WarnContext(ctx, "prepare agent terminal proposal failed; deferring durable outcome to finish",
 			slog.Any("error", err),
 			slog.String("run_id", handle.RunID),
 			slog.String("event_type", string(event.Type)))
@@ -2089,7 +2089,7 @@ func (m *Manager) hydrateSnapshotFromLedger(ctx context.Context, snapshot Snapsh
 	if err != nil {
 		// A session that never ran is the ordinary case, not a failure.
 		if !errors.Is(err, ledger.ErrRunNotFound) {
-			m.logger.Warn("hydrate runtime snapshot from ledger failed",
+			m.logger.WarnContext(ctx, "hydrate runtime snapshot from ledger failed",
 				slog.Any("error", err),
 				slog.String("session_id", sessionID))
 		}
@@ -2220,7 +2220,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 			snapshot, err := m.Snapshot(subCtx, key.BotID, key.SessionID)
 			if err != nil {
 				if subCtx.Err() == nil {
-					m.logger.Warn("reconcile runtime subscription failed", slog.Any("error", err), slog.String("session_id", key.SessionID), slog.String("reason", reason))
+					m.logger.WarnContext(ctx, "reconcile runtime subscription failed", slog.Any("error", err), slog.String("session_id", key.SessionID), slog.String("reason", reason))
 					terminalDrop(reason + ": snapshot unavailable")
 				}
 				return false
@@ -2339,7 +2339,7 @@ func (m *Manager) updateAndPublish(ctx context.Context, key Key, runID string, u
 		delta = buildDelta(snapshot)
 	}
 	if err := m.publishRuntimeDelta(ctx, snapshot, runID, delta); err != nil {
-		m.logger.Warn("publish runtime delta failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", runID))
+		m.logger.WarnContext(ctx, "publish runtime delta failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", runID))
 	}
 	return snapshot, true, nil
 }
@@ -2376,7 +2376,7 @@ func (m *Manager) updateActiveAndPublish(ctx context.Context, handle RunHandle, 
 		delta = buildDelta(snapshot)
 	}
 	if err := m.publishRuntimeDelta(ctx, snapshot, runID, delta); err != nil {
-		m.logger.Warn("publish runtime delta failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", runID))
+		m.logger.WarnContext(ctx, "publish runtime delta failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", runID))
 	}
 	return snapshot, true, nil
 }
@@ -2402,7 +2402,7 @@ func (m *Manager) releaseActiveAndPublish(ctx context.Context, handle RunHandle,
 		delta = buildDelta(snapshot)
 	}
 	if err := m.publishRuntimeDelta(ctx, snapshot, handle.RunID, delta); err != nil {
-		m.logger.Warn("publish runtime release delta failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", handle.RunID))
+		m.logger.WarnContext(ctx, "publish runtime release delta failed; subscribers will reconcile from snapshot", slog.Any("error", err), slog.String("run_id", handle.RunID))
 	}
 	return snapshot, true, nil
 }

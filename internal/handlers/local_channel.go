@@ -643,7 +643,7 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 	if err != nil {
 		public, ok := apperror.PublicFrom(err, "")
 		if !ok {
-			h.logger.Error("web queue command failed", slog.Any("error", err))
+			h.logger.ErrorContext(ctx, "web queue command failed", slog.Any("error", err))
 			public, _ = apperror.PublicFrom(apperror.New(apperror.CodeQueueAdmissionUnavailable, nil), "")
 		}
 		event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID)
@@ -1221,7 +1221,7 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	}
 	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
 	if err != nil {
-		h.logger.Warn("resolve deprecated message_id failed",
+		h.logger.WarnContext(ctx, "resolve deprecated message_id failed",
 			slog.String("session_id", sessionID),
 			slog.Any("error", err),
 		)
@@ -1402,7 +1402,7 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 						// later event would fail identically.
 						publisher = nil
 					}
-					h.logger.Warn("publish runtime run event failed",
+					h.logger.WarnContext(assetCtx, "publish runtime run event failed",
 						slog.Any("error", err),
 						slog.String("bot_id", botID),
 						slog.String("run_id", ref.RunID),
@@ -1599,10 +1599,10 @@ func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAd
 	case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
 		// Expected, not a failure: this process was superseded mid-run, so the
 		// terminal write was refused and the reaper names the outcome instead.
-		h.logger.Warn("skip finishing runtime run after ownership loss",
+		h.logger.WarnContext(ctx, "skip finishing runtime run after ownership loss",
 			slog.String("run_id", admission.RunID))
 	default:
-		h.logger.Error("finish runtime run failed",
+		h.logger.ErrorContext(ctx, "finish runtime run failed",
 			slog.Any("error", err),
 			slog.String("run_id", admission.RunID),
 			slog.String("status", status))
@@ -1643,7 +1643,7 @@ func (h *LocalChannelHandler) abortWSRun(ctx context.Context, writer *wsWriter, 
 		applied, err = controller.AbortControl(ctx, botID, sessionID, runID, controlID)
 	}
 	if err != nil {
-		h.logger.Warn("route ws abort failed",
+		h.logger.WarnContext(ctx, "route ws abort failed",
 			slog.Any("error", err),
 			slog.String("bot_id", botID),
 			slog.String("run_id", runID),
@@ -1734,7 +1734,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 			if cause := apperror.CauseOf(err); cause != nil {
 				privateErr = cause
 			}
-			h.logger.Error("ws stream error",
+			h.logger.ErrorContext(connCtx, "ws stream error",
 				slog.String("operation", logLabel),
 				slog.String("error_code", string(apperror.CodeOf(err))),
 				slog.Any("error", privateErr),
@@ -1812,7 +1812,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		_, raw, readErr := conn.ReadMessage()
 		if readErr != nil {
 			connCancel()
-			h.logger.Debug("ws disconnected; active stream can finish in background",
+			h.logger.DebugContext(c.Request().Context(), "ws disconnected; active stream can finish in background",
 				slog.String("bot_id", botID),
 				slog.Any("error", readErr),
 			)
@@ -1820,7 +1820,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		}
 		var msg wsClientMessage
 		if err := json.Unmarshal(raw, &msg); err != nil {
-			h.logger.Warn("ws: unmarshal failed",
+			h.logger.WarnContext(c.Request().Context(), "ws: unmarshal failed",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
@@ -1892,7 +1892,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				SuppressActivePromptAttach: true,
 			})
 			if err != nil {
-				h.logger.Warn("encode ws tool approval response failed", slog.Any("error", err))
+				h.logger.WarnContext(c.Request().Context(), "encode ws tool approval response failed", slog.Any("error", err))
 				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeToolApprovalOperationFailed))
 				continue
 			}
@@ -1904,7 +1904,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			code := ""
 			if err != nil {
 				code = string(apperror.CodeOf(toolApprovalHTTPError(err)))
-				h.logger.Warn("route ws tool approval response failed",
+				h.logger.WarnContext(c.Request().Context(), "route ws tool approval response failed",
 					slog.Any("error", err),
 					slog.String("bot_id", botID),
 					slog.String("run_id", runID),
@@ -1958,7 +1958,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				SuppressActivePromptAttach: true,
 			})
 			if err != nil {
-				h.logger.Warn("encode ws user input response failed", slog.Any("error", err))
+				h.logger.WarnContext(c.Request().Context(), "encode ws user input response failed", slog.Any("error", err))
 				sendWSControlAck(writer, ref, msg.Type, controlID, false, string(apperror.CodeUserInputOperationFailed))
 				continue
 			}
@@ -1970,7 +1970,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			code := ""
 			if err != nil {
 				code = string(apperror.CodeOf(userInputResponseAppError(err)))
-				h.logger.Warn("route ws user input response failed",
+				h.logger.WarnContext(c.Request().Context(), "route ws user input response failed",
 					slog.Any("error", err),
 					slog.String("bot_id", botID),
 					slog.String("run_id", runID),
@@ -2790,14 +2790,14 @@ func (h *LocalChannelHandler) processWSEvent(ctx context.Context, botID string, 
 		return []json.RawMessage{event}
 	}
 
-	h.logger.Debug("ws event", slog.String("type", envelope.Type), slog.String("bot_id", botID))
+	h.logger.DebugContext(ctx, "ws event", slog.String("type", envelope.Type), slog.String("bot_id", botID))
 
 	switch envelope.Type {
 	case "attachment_delta":
-		h.logger.Info("ws processing attachment_delta", slog.String("bot_id", botID))
+		h.logger.InfoContext(ctx, "ws processing attachment_delta", slog.String("bot_id", botID))
 		return h.wsIngestAttachments(ctx, botID, event)
 	case "speech_delta":
-		h.logger.Info("ws processing speech_delta", slog.String("bot_id", botID))
+		h.logger.InfoContext(ctx, "ws processing speech_delta", slog.String("bot_id", botID))
 		return h.wsSynthesizeSpeech(ctx, botID, event)
 	default:
 		return []json.RawMessage{event}
@@ -2841,11 +2841,11 @@ func (h *LocalChannelHandler) wsIngestAttachments(ctx context.Context, botID str
 	}
 
 	if !changed {
-		h.logger.Debug("ws attachment_delta: no items needed ingestion", slog.String("bot_id", botID))
+		h.logger.DebugContext(ctx, "ws attachment_delta: no items needed ingestion", slog.String("bot_id", botID))
 		return []json.RawMessage{original}
 	}
 
-	h.logger.Info("ws attachment_delta: ingested attachments", slog.String("bot_id", botID), slog.Int("count", len(rawItems)))
+	h.logger.InfoContext(ctx, "ws attachment_delta: ingested attachments", slog.String("bot_id", botID), slog.Int("count", len(rawItems)))
 
 	out, err := json.Marshal(event)
 	if err != nil {
@@ -2859,7 +2859,7 @@ func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID 
 	if bundle.Path != "" {
 		asset, err := h.mediaService.IngestContainerFile(ctx, botID, bundle.Path)
 		if err != nil {
-			h.logger.Warn("ws ingest container file failed", slog.String("path", bundle.Path), slog.Any("error", err))
+			h.logger.WarnContext(ctx, "ws ingest container file failed", slog.String("path", bundle.Path), slog.Any("error", err))
 			return attachmentpkg.Bundle{}, false
 		}
 		return bundle.WithAsset(botID, asset), true
@@ -2872,7 +2872,7 @@ func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID 
 		}
 		decoded, err := attachmentpkg.DecodeBase64(bundle.Base64, media.MaxAssetBytes)
 		if err != nil {
-			h.logger.Warn("ws decode data url failed", slog.Any("error", err))
+			h.logger.WarnContext(ctx, "ws decode data url failed", slog.Any("error", err))
 			return attachmentpkg.Bundle{}, false
 		}
 		asset, err := h.mediaService.Ingest(ctx, media.IngestInput{
@@ -2882,7 +2882,7 @@ func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID 
 			MaxBytes: media.MaxAssetBytes,
 		})
 		if err != nil {
-			h.logger.Warn("ws ingest data url failed", slog.Any("error", err))
+			h.logger.WarnContext(ctx, "ws ingest data url failed", slog.Any("error", err))
 			return attachmentpkg.Bundle{}, false
 		}
 		return bundle.WithAsset(botID, asset), true
@@ -2895,13 +2895,13 @@ func (h *LocalChannelHandler) ingestSingleAttachment(ctx context.Context, botID 
 // injecting attachment_delta events with the resulting voice attachments.
 func (h *LocalChannelHandler) wsSynthesizeSpeech(ctx context.Context, botID string, original json.RawMessage) []json.RawMessage {
 	if h.speechService == nil || h.speechModelResolver == nil {
-		h.logger.Warn("speech_delta received but TTS service not configured")
+		h.logger.WarnContext(ctx, "speech_delta received but TTS service not configured")
 		return nil
 	}
 
 	modelID, err := h.speechModelResolver.ResolveSpeechModelID(ctx, botID)
 	if err != nil || strings.TrimSpace(modelID) == "" {
-		h.logger.Warn("speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
+		h.logger.WarnContext(ctx, "speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
 		return nil
 	}
 
@@ -2923,7 +2923,7 @@ func (h *LocalChannelHandler) wsSynthesizeSpeech(ctx context.Context, botID stri
 
 		audioData, contentType, synthErr := h.speechService.Synthesize(ctx, modelID, text, nil)
 		if synthErr != nil {
-			h.logger.Warn("speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))
+			h.logger.WarnContext(ctx, "speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))
 			continue
 		}
 
@@ -2955,7 +2955,7 @@ func (h *LocalChannelHandler) buildTtsAttachment(ctx context.Context, botID, con
 		if err == nil {
 			return bundle.WithAsset(botID, asset).ToMap()
 		}
-		h.logger.Warn("ws tts ingest failed", slog.Any("error", err))
+		h.logger.WarnContext(ctx, "ws tts ingest failed", slog.Any("error", err))
 	}
 
 	bundle.Base64 = "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(audioData)

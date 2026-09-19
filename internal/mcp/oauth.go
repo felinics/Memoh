@@ -113,7 +113,7 @@ func (s *OAuthService) Discover(ctx context.Context, serverURL string) (*Discove
 	} else {
 		// Fallback: some MCP servers (e.g. Linear) don't serve PRM.
 		// Try the server origin directly as the authorization server.
-		s.logger.Info("PRM unavailable, falling back to direct ASM discovery",
+		s.logger.InfoContext(ctx, "PRM unavailable, falling back to direct ASM discovery",
 			slog.String("server_url", serverURL),
 			slog.Any("prm_error", prmErr),
 		)
@@ -218,7 +218,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 		// Attempt Dynamic Client Registration (RFC 7591)
 		regResult, regErr := s.registerClient(ctx, token.RegistrationEndpoint, callbackURL)
 		if regErr != nil {
-			s.logger.Warn("dynamic client registration failed", slog.Any("error", regErr))
+			s.logger.WarnContext(ctx, "dynamic client registration failed", slog.Any("error", regErr))
 		} else {
 			clientID = regResult.ClientID
 			dcrSecret := regResult.ClientSecret
@@ -229,7 +229,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 				ClientID:         clientID,
 				RedirectUri:      callbackURL,
 			}); err != nil {
-				s.logger.Warn("failed to save DCR client_id", slog.Any("error", err))
+				s.logger.WarnContext(ctx, "failed to save DCR client_id", slog.Any("error", err))
 			}
 			if dcrSecret != "" {
 				clientSecret = dcrSecret
@@ -238,7 +238,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 					ClientSecret: dcrSecret,
 				})
 			}
-			s.logger.Info("dynamic client registration succeeded", slog.String("client_id", clientID))
+			s.logger.InfoContext(ctx, "dynamic client registration succeeded", slog.String("client_id", clientID))
 		}
 	}
 	if clientID == "" {
@@ -396,7 +396,7 @@ func (s *OAuthService) GetValidToken(ctx context.Context, connectionID string) (
 			ExpiresAt:    expiresAt,
 			Scope:        refreshed.Scope,
 		}); err != nil {
-			s.logger.Warn("failed to save refreshed tokens", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "failed to save refreshed tokens", slog.Any("error", err))
 		}
 		return refreshed.AccessToken, nil
 	}
@@ -645,7 +645,7 @@ func (s *OAuthService) exchangeCode(ctx context.Context, tokenEndpoint, code, co
 		data.Set("resource", resourceURI)
 	}
 
-	s.logger.Info("exchangeCode request",
+	s.logger.InfoContext(ctx, "exchangeCode request",
 		slog.String("token_endpoint", tokenEndpoint),
 		slog.String("redirect_uri", redirectURI),
 		slog.String("client_id", clientID),

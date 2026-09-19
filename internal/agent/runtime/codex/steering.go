@@ -53,7 +53,7 @@ func startSteering(ctx context.Context, client *conn, turn *turnState) func() {
 			}
 			if err != nil {
 				if ctx.Err() == nil && (ok || workerCtx.Err() == nil) {
-					turn.logger.Warn("codex steer was not delivered", slog.Any("error", err))
+					turn.logger.WarnContext(ctx, "codex steer was not delivered", slog.Any("error", err))
 					public, _ := apperror.PublicFrom(apperror.New(apperror.CodeRuntimeControlSteerFailed, nil), "")
 					turn.emit(event.StreamEvent{Type: event.RuntimeNotice, Code: string(public.Code), Delta: public.Detail})
 				}

@@ -179,11 +179,11 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 		// enrich the picker, but must not invalidate a usable native catalog.
 		settings, err := turn.getSettings(ctx)
 		if err != nil {
-			d.logger.Warn("claude model defaults unavailable", slog.Any("error", err))
+			d.logger.WarnContext(ctx, "claude model defaults unavailable", slog.Any("error", err))
 		} else {
 			catalog = modelCatalogFromInitialize(firstNonEmpty(cfg.Model, settings.Applied.Model), response)
 			if err := turn.resolveModelDefaults(ctx, &catalog, request.ModelID, settings); err != nil {
-				d.logger.Warn("claude selected model defaults unavailable", slog.Any("error", err))
+				d.logger.WarnContext(ctx, "claude selected model defaults unavailable", slog.Any("error", err))
 			}
 		}
 	}
@@ -442,7 +442,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		// leaves the transcript's completeness unknown; the round still
 		// commits, but its head publishes a reset instead of a snapshot.
 		if turn.exitFailed() {
-			d.logger.Warn("claude checkpoint skipped after an unclean exit; the round publishes a reset head",
+			d.logger.WarnContext(ctx, "claude checkpoint skipped after an unclean exit; the round publishes a reset head",
 				slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID))
 			result.Checkpoint = external.CheckpointDeclined
 		} else {
@@ -478,7 +478,7 @@ func (d *Driver) stageTurnCheckpoint(ctx context.Context, fs checkpointFS, input
 		RuntimeMetadata: stageMeta,
 	})
 	if err != nil {
-		d.logger.Warn("claude checkpoint staging failed; the round publishes a reset head",
+		d.logger.WarnContext(ctx, "claude checkpoint staging failed; the round publishes a reset head",
 			slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID), slog.Any("error", err))
 		return external.CheckpointDeclined
 	}
@@ -499,7 +499,7 @@ func (d *Driver) ensureResumableSession(ctx context.Context, client checkpointFS
 	}
 	_, found, err := locateSessionTranscript(ctx, client, storedSessionID)
 	if err != nil {
-		d.logger.Warn("claude transcript lookup failed; attempting resume anyway",
+		d.logger.WarnContext(ctx, "claude transcript lookup failed; attempting resume anyway",
 			slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID), slog.Any("error", err))
 		return storedSessionID, nil
 	}
@@ -517,16 +517,16 @@ func (d *Driver) ensureResumableSession(ctx context.Context, client checkpointFS
 	}
 	if restoredID != "" {
 		if restoredID != storedSessionID {
-			d.logger.Warn("claude checkpoint names a different session than runtime metadata; resuming the checkpointed session",
+			d.logger.WarnContext(ctx, "claude checkpoint names a different session than runtime metadata; resuming the checkpointed session",
 				slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID),
 				slog.String("stored", storedSessionID), slog.String("checkpoint", restoredID))
 		} else {
-			d.logger.Info("claude transcript restored from database checkpoint",
+			d.logger.InfoContext(ctx, "claude transcript restored from database checkpoint",
 				slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID))
 		}
 		return restoredID, nil
 	}
-	d.logger.Warn("claude session transcript is gone and no checkpoint exists; starting a fresh session",
+	d.logger.WarnContext(ctx, "claude session transcript is gone and no checkpoint exists; starting a fresh session",
 		slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID))
 	return "", nil
 }

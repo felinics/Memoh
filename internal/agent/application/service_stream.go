@@ -191,7 +191,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		}
 		dispatch, err := s.resolveRuntimeDispatch(ctx, streamReq)
 		if err != nil {
-			s.logger.Error("StreamChat: runtime dispatch failed",
+			s.logger.ErrorContext(ctx, "StreamChat: runtime dispatch failed",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("session_id", streamReq.ThreadID),
 				slog.Any("error", err),
@@ -220,7 +220,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		if !streamReq.UserMessagePersisted {
 			streamReq, err = s.applyUserMessageHook(streamCtx, streamReq)
 			if err != nil {
-				s.logger.Error("agent stream user message hook failed",
+				s.logger.ErrorContext(ctx, "agent stream user message hook failed",
 					slog.String("bot_id", streamReq.BotID),
 					slog.String("chat_id", streamReq.ChatID),
 					slog.Any("error", err),
@@ -231,7 +231,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		}
 		rc, streamReq, err := s.resolve(streamCtx, streamReq)
 		if err != nil {
-			s.logger.Error("agent stream resolve failed",
+			s.logger.ErrorContext(ctx, "agent stream resolve failed",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("chat_id", streamReq.ChatID),
 				slog.Any("error", err),
@@ -295,7 +295,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				if agentStreamErr == nil {
 					agentStreamErr = eventErr
 				}
-				s.logger.Error("agent stream error",
+				s.logger.ErrorContext(ctx, "agent stream error",
 					slog.String("bot_id", streamReq.BotID),
 					slog.String("chat_id", streamReq.ChatID),
 					slog.String("model_id", rc.model.ID),
@@ -350,7 +350,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					terminal := event
 					deferredRuntimeTerminal = &terminal
 				} else if publishErr := s.publishTurnEvent(streamCtx, streamReq.RunHandle, event); publishErr != nil {
-					s.logger.Warn("continuation runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
+					s.logger.WarnContext(ctx, "continuation runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
 				}
 			}
 			if event.IsTerminal() && len(event.Messages) > 0 {
@@ -372,7 +372,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 							if lifecycleCause == nil {
 								lifecycleCause = terminalPersistErr
 							}
-							s.logger.Error("stream step finalization failed", slog.Any("error", storeErr))
+							s.logger.ErrorContext(ctx, "stream step finalization failed", slog.Any("error", storeErr))
 						} else {
 							stored = true
 						}
@@ -385,7 +385,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 							if lifecycleCause == nil {
 								lifecycleCause = terminalPersistErr
 							}
-							s.logger.Error("stream persist failed", slog.Any("error", storeErr))
+							s.logger.ErrorContext(ctx, "stream persist failed", slog.Any("error", storeErr))
 						} else {
 							stored = true
 						}
@@ -449,12 +449,12 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				if lifecycleCause == nil {
 					lifecycleCause = storeErr
 				}
-				s.logger.Error("stream step finalization failed", slog.Any("error", storeErr))
+				s.logger.ErrorContext(ctx, "stream step finalization failed", slog.Any("error", storeErr))
 			}
 		} else if !stored {
 			switch {
 			case runOwnershipLost(streamCtx):
-				s.logger.Warn("skip persisting stream after run ownership loss",
+				s.logger.WarnContext(ctx, "skip persisting stream after run ownership loss",
 					slog.String("bot_id", streamReq.BotID),
 					slog.String("chat_id", streamReq.ChatID),
 				)
@@ -463,10 +463,10 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			default:
 				if code := snapshotFailureCode(idleCancel.DidFire(), lifecycleCause); code != "" {
 					if _, storeErr := s.persistTurnFailure(context.WithoutCancel(streamCtx), streamReq, rc, code); storeErr != nil {
-						s.logger.Error("stream timeout persist failed", slog.Any("error", storeErr))
+						s.logger.ErrorContext(ctx, "stream timeout persist failed", slog.Any("error", storeErr))
 					}
 				} else {
-					s.logger.Info("skip persisting failed startup stream",
+					s.logger.InfoContext(ctx, "skip persisting failed startup stream",
 						slog.String("bot_id", streamReq.BotID),
 						slog.String("chat_id", streamReq.ChatID),
 					)
@@ -475,7 +475,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		}
 		if deferredRuntimeTerminal != nil && streamReq.PublishRuntimeEvents && s.publishTurnEvent != nil {
 			if publishErr := s.publishTurnEvent(context.WithoutCancel(streamCtx), streamReq.RunHandle, *deferredRuntimeTerminal); publishErr != nil {
-				s.logger.Warn("continuation terminal runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
+				s.logger.WarnContext(ctx, "continuation terminal runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
 			}
 		}
 		if commitErr := stepCommitter.err(); commitErr != nil && streamCtx.Err() == nil {
@@ -486,7 +486,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		}
 
 		if idleCancel.DidFire() {
-			s.logger.Warn("agent stream aborted: idle timeout (no events from provider)",
+			s.logger.WarnContext(ctx, "agent stream aborted: idle timeout (no events from provider)",
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("chat_id", streamReq.ChatID),
 				slog.String("model_id", rc.model.ID),
@@ -547,7 +547,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	}
 	dispatch, err := s.resolveRuntimeDispatch(ctx, req)
 	if err != nil {
-		s.logger.Error("StreamChatWS: runtime dispatch failed",
+		s.logger.ErrorContext(ctx, "StreamChatWS: runtime dispatch failed",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.ThreadID),
 			slog.Any("error", err),
@@ -584,7 +584,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	if !req.UserMessagePersisted && !req.ReusePersistedUserMessage {
 		req, err = s.applyUserMessageHook(ctx, req)
 		if err != nil {
-			s.logger.Error("StreamChatWS: user message hook failed",
+			s.logger.ErrorContext(ctx, "StreamChatWS: user message hook failed",
 				slog.String("bot_id", req.BotID),
 				slog.Any("error", err),
 			)
@@ -593,7 +593,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	}
 	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
-		s.logger.Error("StreamChatWS: resolve failed",
+		s.logger.ErrorContext(ctx, "StreamChatWS: resolve failed",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
@@ -664,7 +664,7 @@ func (s *Service) streamChatWSResultWithHooks(
 			if lifecycleCause == nil {
 				lifecycleCause = eventErr
 			}
-			s.logger.Error("agent stream error",
+			s.logger.ErrorContext(ctx, "agent stream error",
 				slog.String("bot_id", req.BotID),
 				slog.String("chat_id", req.ChatID),
 				slog.String("model_id", modelID),
@@ -725,7 +725,7 @@ func (s *Service) streamChatWSResultWithHooks(
 						if lifecycleCause == nil {
 							lifecycleCause = storeErr
 						}
-						s.logger.Error("ws step finalization failed", slog.Any("error", storeErr))
+						s.logger.ErrorContext(ctx, "ws step finalization failed", slog.Any("error", storeErr))
 					} else {
 						persistedMessages = stepCommitter.persistedMessages()
 						stored = true
@@ -736,7 +736,7 @@ func (s *Service) streamChatWSResultWithHooks(
 						if lifecycleCause == nil {
 							lifecycleCause = storeErr
 						}
-						s.logger.Error("ws persist failed", slog.Any("error", storeErr))
+						s.logger.ErrorContext(ctx, "ws persist failed", slog.Any("error", storeErr))
 					} else {
 						persistedMessages = persisted
 						stored = true
@@ -779,14 +779,14 @@ func (s *Service) streamChatWSResultWithHooks(
 			if lifecycleCause == nil {
 				lifecycleCause = storeErr
 			}
-			s.logger.Error("ws step finalization failed", slog.Any("error", storeErr))
+			s.logger.ErrorContext(ctx, "ws step finalization failed", slog.Any("error", storeErr))
 		} else {
 			persistedMessages = stepCommitter.persistedMessages()
 		}
 	} else if !stored {
 		switch {
 		case runOwnershipLost(ctx):
-			s.logger.Warn("skip persisting ws stream after run ownership loss",
+			s.logger.WarnContext(ctx, "skip persisting ws stream after run ownership loss",
 				slog.String("bot_id", req.BotID),
 				slog.String("chat_id", req.ChatID),
 			)
@@ -796,12 +796,12 @@ func (s *Service) streamChatWSResultWithHooks(
 			if code := snapshotFailureCode(idleCancel.DidFire(), lifecycleCause); code != "" {
 				persisted, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, code)
 				if storeErr != nil {
-					s.logger.Error("ws timeout persist failed", slog.Any("error", storeErr))
+					s.logger.ErrorContext(ctx, "ws timeout persist failed", slog.Any("error", storeErr))
 				} else {
 					persistedMessages = persisted
 				}
 			} else {
-				s.logger.Info("skip persisting failed startup ws stream",
+				s.logger.InfoContext(ctx, "skip persisting failed startup ws stream",
 					slog.String("bot_id", req.BotID),
 					slog.String("chat_id", req.ChatID),
 				)
@@ -810,7 +810,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	}
 
 	if idleCancel.DidFire() {
-		s.logger.Warn("agent ws stream aborted: idle timeout (no events from provider)",
+		s.logger.WarnContext(ctx, "agent ws stream aborted: idle timeout (no events from provider)",
 			slog.String("bot_id", req.BotID),
 			slog.String("chat_id", req.ChatID),
 			slog.String("model_id", modelID),
@@ -861,7 +861,7 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 		return s.persistTurnFailure(ctx, req, rc, snap.failureCode)
 	}
 	if snap.aborted && !snap.visibleOutput {
-		s.logger.Info("skip persisting aborted terminal snapshot before visible output",
+		s.logger.InfoContext(ctx, "skip persisting aborted terminal snapshot before visible output",
 			slog.String("bot_id", req.BotID),
 			slog.String("chat_id", req.ChatID),
 			slog.Int("messages", len(outputMessages)),
@@ -869,7 +869,7 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 		return nil, nil
 	}
 	if !hasPersistableAssistantOutput(outputMessages) {
-		s.logger.Info("skip persisting terminal snapshot without assistant output",
+		s.logger.InfoContext(ctx, "skip persisting terminal snapshot without assistant output",
 			slog.String("bot_id", req.BotID),
 			slog.String("chat_id", req.ChatID),
 			slog.Int("messages", len(outputMessages)),
@@ -958,7 +958,7 @@ func (s *Service) persistPartialResult(
 			failureCode:             failureCode,
 		})
 		if err == nil {
-			s.logger.Info("persisted partial agent result",
+			s.logger.InfoContext(ctx, "persisted partial agent result",
 				slog.String("bot_id", req.BotID),
 				slog.Int("tool_calls", toolCallCount),
 				slog.Int("partial_messages", len(partialMessages)),
@@ -972,7 +972,7 @@ func (s *Service) persistPartialResult(
 			}
 			return persisted
 		}
-		s.logger.Error("failed to persist partial agent messages",
+		s.logger.ErrorContext(ctx, "failed to persist partial agent messages",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
@@ -983,13 +983,13 @@ func (s *Service) persistPartialResult(
 		if err == nil {
 			return persisted
 		}
-		s.logger.Error("failed to persist turn-level stream failure",
+		s.logger.ErrorContext(ctx, "failed to persist turn-level stream failure",
 			slog.String("bot_id", req.BotID),
 			slog.Any("error", err),
 		)
 	}
 
-	s.logger.Info("skip persisting failed stream without terminal snapshot",
+	s.logger.InfoContext(ctx, "skip persisting failed stream without terminal snapshot",
 		slog.String("bot_id", req.BotID),
 		slog.Int("tool_calls", toolCallCount),
 		slog.Bool("idle_timeout", wasIdleTimeout),
@@ -1039,7 +1039,7 @@ func (s *Service) persistTurnFailure(ctx context.Context, req ChatRequest, rc re
 	if err != nil {
 		return nil, err
 	}
-	s.logger.Info("persisted turn-level stream failure",
+	s.logger.InfoContext(ctx, "persisted turn-level stream failure",
 		slog.String("bot_id", req.BotID),
 		slog.String("chat_id", req.ChatID),
 		slog.String("code", string(code)),

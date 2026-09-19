@@ -55,7 +55,7 @@ func (a *FeishuAdapter) enrichSenderProfile(ctx context.Context, cfg channel.Cha
 	profile, err := a.lookupSenderProfile(lookupCtx, cfg, openID, userID, chatID)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Debug("feishu sender profile lookup failed",
+			a.logger.DebugContext(ctx, "feishu sender profile lookup failed",
 				slog.String("config_id", cfg.ID),
 				slog.String("open_id", openID),
 				slog.String("user_id", userID),

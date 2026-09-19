@@ -87,7 +87,7 @@ func (q *queueStepCoordinator) allocateSteerTurn(ctx context.Context) *messagepk
 	slot, err := allocator.AllocateTurnSlot(context.WithoutCancel(ctx), q.run.SessionID)
 	if err != nil {
 		if q.service.logger != nil {
-			q.service.logger.Warn("allocate steer turn slot failed",
+			q.service.logger.WarnContext(ctx, "allocate steer turn slot failed",
 				slog.String("session_id", q.run.SessionID), slog.Any("error", err))
 		}
 		return nil

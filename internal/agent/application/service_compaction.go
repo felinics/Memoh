@@ -79,35 +79,35 @@ func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int
 func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolvedContext, inputTokens int) {
 	inputTokens = asyncCompactionInputTokens(rc, inputTokens)
 	if s.compactionService == nil || s.settingsService == nil {
-		s.logger.Info("compaction: skipped, service or settings nil")
+		s.logger.InfoContext(ctx, "compaction: skipped, service or settings nil")
 		return
 	}
 	botSettings, err := s.settingsService.GetBot(ctx, req.BotID)
 	if err != nil {
-		s.logger.Warn("compaction: failed to load settings", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "compaction: failed to load settings", slog.Any("error", err))
 		return
 	}
 	if !botSettings.CompactionEnabled {
-		s.logger.Info("compaction: skipped, disabled")
+		s.logger.InfoContext(ctx, "compaction: skipped, disabled")
 		return
 	}
 	threshold := AutoCompactionThreshold(botSettings.CompactionThreshold, rc.contextTokenBudget)
 	if threshold <= 0 {
-		s.logger.Info("compaction: skipped, no usable threshold",
+		s.logger.InfoContext(ctx, "compaction: skipped, no usable threshold",
 			slog.Int("configured_threshold", botSettings.CompactionThreshold),
 			slog.Int("context_token_budget", rc.contextTokenBudget),
 		)
 		return
 	}
 	if !compaction.ShouldCompact(inputTokens, threshold) {
-		s.logger.Info("compaction: skipped, below threshold",
+		s.logger.InfoContext(ctx, "compaction: skipped, below threshold",
 			slog.Int("input_tokens", inputTokens),
 			slog.Int("threshold", threshold),
 		)
 		return
 	}
 
-	s.logger.Info("compaction: triggering",
+	s.logger.InfoContext(ctx, "compaction: triggering",
 		slog.String("bot_id", req.BotID),
 		slog.String("session_id", req.ThreadID),
 		slog.Int("input_tokens", inputTokens),
@@ -116,7 +116,7 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 
 	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens, rc.model.ID)
 	if err != nil {
-		s.logger.Warn("compaction: failed to build config", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "compaction: failed to build config", slog.Any("error", err))
 		return
 	}
 	if cfg.ModelID == "" {
@@ -130,7 +130,7 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 	cfg.ContextWindowTokens = rc.contextTokenBudget
 	cfg.HardPressure = syncCompactionShouldRun(inputTokens, rc.contextTokenBudget)
 	if err := s.drainCompactionBacklog(ctx, cfg); err != nil {
-		s.logger.Error("compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "compaction failed", slog.String("bot_id", cfg.BotID), slog.String("session_id", cfg.SessionID), slog.Any("error", err))
 	}
 }
 
@@ -170,21 +170,21 @@ func (s *Service) runCompactionPass(ctx context.Context, cfg compaction.TriggerC
 // possibly still above the threshold, and the next turn re-evaluates.
 func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string) compaction.Result {
 	if s.compactionService == nil || s.settingsService == nil {
-		s.logger.Warn("compaction sync: skipped, service or settings nil")
+		s.logger.WarnContext(ctx, "compaction sync: skipped, service or settings nil")
 		return compaction.Result{}
 	}
 	botSettings, err := s.settingsService.GetBot(ctx, req.BotID)
 	if err != nil {
-		s.logger.Warn("compaction sync: failed to load settings", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "compaction sync: failed to load settings", slog.Any("error", err))
 		return compaction.Result{}
 	}
 	if !botSettings.CompactionEnabled {
-		s.logger.Warn("compaction sync: compaction disabled, skipping")
+		s.logger.WarnContext(ctx, "compaction sync: compaction disabled, skipping")
 		return compaction.Result{}
 	}
 	cfg, err := s.buildCompactionConfig(ctx, req, botSettings, inputTokens, turnModelID)
 	if err != nil {
-		s.logger.Warn("compaction sync: failed to build config", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "compaction sync: failed to build config", slog.Any("error", err))
 		return compaction.Result{}
 	}
 	if cfg.ModelID == "" {
@@ -196,7 +196,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 	cfg.ContextWindowTokens = contextTokenBudget
 	cfg.HardPressure = syncCompactionShouldRun(inputTokens, contextTokenBudget)
 
-	s.logger.Info("compaction sync: running synchronously",
+	s.logger.InfoContext(ctx, "compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),
 		slog.String("session_id", req.ThreadID),
 		slog.Int("input_tokens", inputTokens),
@@ -207,10 +207,10 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 	defer done()
 	res, err := s.compactionService.RunCompactionSync(ctx, cfg)
 	if err != nil {
-		s.logger.Warn("compaction sync: failed", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "compaction sync: failed", slog.Any("error", err))
 		return compaction.Result{}
 	}
-	s.logger.Info("compaction sync: finished",
+	s.logger.InfoContext(ctx, "compaction sync: finished",
 		slog.String("bot_id", req.BotID),
 		slog.String("session_id", req.ThreadID),
 		slog.String("status", res.Status),
@@ -238,7 +238,7 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 		sessionModelID,
 	)
 	if models.IsCompactionModelUnavailable(err) {
-		s.logger.Info("compaction: skipped",
+		s.logger.InfoContext(ctx, "compaction: skipped",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.ThreadID),
 			slog.Any("reason", err),

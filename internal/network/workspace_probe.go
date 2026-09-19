@@ -28,7 +28,7 @@ func (s *Service) workspaceRuntimeStatus(ctx context.Context, botID string) Work
 		if errors.Is(err, pgx.ErrNoRows) {
 			return WorkspaceRuntimeStatus{State: "workspace_missing"}
 		}
-		s.logger.Warn("workspace runtime status db lookup failed",
+		s.logger.WarnContext(ctx, "workspace runtime status db lookup failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		return WorkspaceRuntimeStatus{State: "unknown", Message: "workspace status is unavailable"}
 	}
@@ -46,7 +46,7 @@ func (s *Service) workspaceRuntimeStatus(ctx context.Context, botID string) Work
 			out.State = "task_stopped"
 			return out
 		}
-		s.logger.Warn("workspace runtime status query failed",
+		s.logger.WarnContext(ctx, "workspace runtime status query failed",
 			slog.String("bot_id", botID),
 			slog.String("container_id", row.ContainerID),
 			slog.Any("error", err))

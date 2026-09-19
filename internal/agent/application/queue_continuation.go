@@ -114,7 +114,7 @@ func (s *Service) closeSteerQueueForRun(ctx context.Context, terminal sessionrun
 	}
 	key := sessionruntime.Key{BotID: terminal.BotID, SessionID: terminal.SessionID}
 	if err := s.sessionManager.CloseSteerRun(ctx, key, terminal.RunID); err != nil && !errors.Is(err, sessionruntime.ErrLiveQueueUnavailable) && s.logger != nil {
-		s.logger.Warn("close steer queue for terminal run failed",
+		s.logger.WarnContext(ctx, "close steer queue for terminal run failed",
 			slog.String("run_id", terminal.RunID), slog.Any("error", err))
 	}
 }
@@ -205,13 +205,13 @@ func (s *Service) admitFollowUp(ctx context.Context, key sessionruntime.Key, ter
 		// The item stays accepted; the next terminal boundary claims it again.
 		_ = s.sessionManager.ReleaseFollowUp(ctx, key, claim)
 		if !errors.Is(err, turn.ErrSessionBusy) && s.logger != nil {
-			s.logger.Warn("start follow-up turn failed",
+			s.logger.WarnContext(ctx, "start follow-up turn failed",
 				slog.String("item_id", string(item.ID)), slog.Any("error", err))
 		}
 		return nil
 	}
 	if err := s.sessionManager.ApplyFollowUp(ctx, key, claim); err != nil && s.logger != nil {
-		s.logger.Warn("apply transient follow-up failed",
+		s.logger.WarnContext(ctx, "apply transient follow-up failed",
 			slog.String("item_id", string(item.ID)),
 			slog.String("trigger_run_id", terminal.RunID),
 			slog.Any("error", err),

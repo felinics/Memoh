@@ -124,7 +124,7 @@ func (h *PublicMediaHandler) ServePreview(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "media is too large")
 		}
 		if h.logger != nil {
-			h.logger.Warn("public media preview failed",
+			h.logger.WarnContext(c.Request().Context(), "public media preview failed",
 				slog.String("bot_id", botID),
 				slog.String("content_hash", contentHash),
 				slog.Any("error", err),

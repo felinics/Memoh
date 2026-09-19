@@ -80,7 +80,7 @@ func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID st
 	}
 	artifacts, err := compaction.NewTimelineArtifactSource(s.queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
 	if err != nil {
-		s.logger.Warn("context_admission_degraded",
+		s.logger.WarnContext(ctx, "context_admission_degraded",
 			slog.String("path", "pipeline_chat"),
 			slog.String("reason", "artifact_load_failed"),
 			slog.String("session_id", sessionID),
@@ -145,7 +145,7 @@ func (s *Service) loadTurnResponses(ctx context.Context, sessionID string, conte
 	since := time.Now().UTC().Add(-24 * time.Hour)
 	msgs, err := s.messageService.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, s.historyLoadMaxBytes(contextTokenBudget))
 	if err != nil {
-		s.logger.Warn("load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil
 	}
 	return timeline.DecodeTurnResponseEntries(msgs)

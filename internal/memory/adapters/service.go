@@ -200,7 +200,7 @@ func (s *Service) InstantiateAll(ctx context.Context) (int, error) {
 	for _, row := range rows {
 		resp := s.toGetResponse(row)
 		if _, err := s.registry.Instantiate(ctx, resp.ID, resp.Provider, resp.Config); err != nil {
-			s.logger.Warn("auto-instantiate memory provider failed",
+			s.logger.WarnContext(ctx, "auto-instantiate memory provider failed",
 				slog.String("id", resp.ID), slog.String("provider", resp.Provider), slog.Any("error", err))
 			continue
 		}
@@ -301,7 +301,7 @@ func (s *Service) tryInstantiate(ctx context.Context, id, providerType string, c
 		return
 	}
 	if _, err := s.registry.Instantiate(ctx, id, providerType, config); err != nil {
-		s.logger.Warn("auto-instantiate memory provider failed",
+		s.logger.WarnContext(ctx, "auto-instantiate memory provider failed",
 			slog.String("id", id), slog.String("provider", providerType), slog.Any("error", err))
 	}
 }
@@ -311,7 +311,7 @@ func (s *Service) tryEvictAndReinstantiate(ctx context.Context, id, providerType
 		return
 	}
 	if err := s.registry.Remove(ctx, id); err != nil {
-		s.logger.Warn("evict memory provider failed", slog.String("id", id), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "evict memory provider failed", slog.String("id", id), slog.Any("error", err))
 		return
 	}
 	s.tryInstantiate(ctx, id, providerType, config)

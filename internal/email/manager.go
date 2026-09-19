@@ -40,14 +40,14 @@ func (m *Manager) Start(ctx context.Context) error {
 	for _, p := range providers {
 		bindings, err := m.service.ListReadableBindingsByProvider(ctx, p.ID)
 		if err != nil {
-			m.logger.Error("failed to list bindings", slog.String("provider", p.ID), slog.Any("error", err))
+			m.logger.ErrorContext(ctx, "failed to list bindings", slog.String("provider", p.ID), slog.Any("error", err))
 			continue
 		}
 		if len(bindings) == 0 {
 			continue
 		}
 		if err := m.startProvider(ctx, p); err != nil {
-			m.logger.Error("failed to start provider", slog.String("provider", p.ID), slog.Any("error", err))
+			m.logger.ErrorContext(ctx, "failed to start provider", slog.String("provider", p.ID), slog.Any("error", err))
 		}
 	}
 	return nil
@@ -81,7 +81,7 @@ func (m *Manager) startProvider(ctx context.Context, p ProviderResponse) error {
 	}
 
 	m.conns[p.ID] = stopper
-	m.logger.Info("started email receiving", slog.String("provider_id", p.ID), slog.String("type", p.Provider))
+	m.logger.InfoContext(ctx, "started email receiving", slog.String("provider_id", p.ID), slog.String("type", p.Provider))
 	return nil
 }
 
@@ -115,7 +115,7 @@ func (m *Manager) stopProvider(ctx context.Context, providerID string) {
 
 	if exists && stopper != nil {
 		if err := stopper.Stop(ctx); err != nil {
-			m.logger.Error("failed to stop provider", slog.String("provider_id", providerID), slog.Any("error", err))
+			m.logger.ErrorContext(ctx, "failed to stop provider", slog.String("provider_id", providerID), slog.Any("error", err))
 		}
 	}
 }
@@ -133,7 +133,7 @@ func (m *Manager) Stop(ctx context.Context) {
 
 	for id, stopper := range conns {
 		if err := stopper.Stop(ctx); err != nil {
-			m.logger.Error("failed to stop provider", slog.String("provider_id", id), slog.Any("error", err))
+			m.logger.ErrorContext(ctx, "failed to stop provider", slog.String("provider_id", id), slog.Any("error", err))
 		}
 	}
 }

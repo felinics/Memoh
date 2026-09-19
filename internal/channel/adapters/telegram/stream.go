@@ -59,12 +59,12 @@ type telegramToolCallMessage struct {
 	hasActions bool
 }
 
-func (s *telegramOutboundStream) getBot(_ context.Context) (bot *tele.Bot, err error) {
+func (s *telegramOutboundStream) getBot(ctx context.Context) (bot *tele.Bot, err error) {
 	telegramCfg, err := parseConfig(s.cfg.Credentials)
 	if err != nil {
 		return nil, err
 	}
-	bot, err = s.adapter.getOrCreateBot(telegramCfg, s.cfg.ID)
+	bot, err = s.adapter.getOrCreateBot(ctx, telegramCfg, s.cfg.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (s *telegramOutboundStream) ensureStreamMessage(ctx context.Context, text s
 		defer s.wg.Done()
 		if err := s.refreshTypingAction(ctx, typingChatID); err != nil {
 			if s.adapter != nil && s.adapter.logger != nil {
-				s.adapter.logger.Debug("refresh typing action failed", slog.Any("error", err))
+				s.adapter.logger.DebugContext(ctx, "refresh typing action failed", slog.Any("error", err))
 			}
 		}
 	}()
@@ -411,7 +411,7 @@ func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context, tc *chan
 		if bufText != "" {
 			if err := s.sendPermanentMessage(ctx, bufText, s.parseMode); err != nil {
 				if s.adapter != nil && s.adapter.logger != nil {
-					s.adapter.logger.Warn("telegram: draft permanent message failed", slog.Any("error", err))
+					s.adapter.logger.WarnContext(ctx, "telegram: draft permanent message failed", slog.Any("error", err))
 				}
 			}
 		}
@@ -518,7 +518,7 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 				return nil
 			}
 			if s.adapter != nil && s.adapter.logger != nil {
-				s.adapter.logger.Warn("telegram: tool-call end edit failed, falling back to new message",
+				s.adapter.logger.WarnContext(ctx, "telegram: tool-call end edit failed, falling back to new message",
 					slog.String("call_id", callID),
 					slog.Any("error", editErr),
 				)
@@ -551,7 +551,7 @@ func (s *telegramOutboundStream) sendToolCallMessage(
 		// replies, and post-restart rehydration all resolve the same request
 		// via prompt_external_message_id.
 		if _, err := s.adapter.userInput.UpdatePromptMessage(ctx, askUserRequestID, "", strconv.Itoa(msgID)); err != nil && s.adapter.logger != nil {
-			s.adapter.logger.Warn("telegram: ask_user prompt message bind failed", slog.Any("error", err))
+			s.adapter.logger.WarnContext(ctx, "telegram: ask_user prompt message bind failed", slog.Any("error", err))
 		}
 	}
 	if isTelegramToolCallStartStatus(p.Status) && callID != "" {
@@ -623,7 +623,7 @@ func (s *telegramOutboundStream) pushAttachment(ctx context.Context, event chann
 	for _, att := range event.Attachments {
 		if sendErr := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", replyTo, "", nil); sendErr != nil {
 			if s.adapter != nil && s.adapter.logger != nil {
-				s.adapter.logger.Warn("telegram: stream attachment send failed",
+				s.adapter.logger.WarnContext(ctx, "telegram: stream attachment send failed",
 					slog.String("config_id", s.cfg.ID),
 					slog.String("type", string(att.Logical.Type)),
 					slog.Any("error", sendErr),
@@ -691,7 +691,7 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 			bufText = s.formatStreamContent(bufText)
 			if err := s.deliverFinalText(ctx, bufText, s.parseMode); err != nil {
 				if s.adapter != nil && s.adapter.logger != nil {
-					s.adapter.logger.Warn("telegram: deliver buffered final text failed", slog.Any("error", err))
+					s.adapter.logger.WarnContext(ctx, "telegram: deliver buffered final text failed", slog.Any("error", err))
 				}
 			}
 		}
@@ -765,7 +765,7 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 			}
 			if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, actions); err != nil {
 				if s.adapter.logger != nil {
-					s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
+					s.adapter.logger.ErrorContext(ctx, "stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
 				}
 				return err
 			}
@@ -898,7 +898,7 @@ func (s *telegramOutboundStream) pushFinalAttachments(ctx context.Context, msg c
 			to = 0
 		}
 		if err := sendTelegramAttachmentWithAssets(ctx, bot, s.target, att, "", to, parseMode, nil); err != nil && s.adapter != nil && s.adapter.logger != nil {
-			s.adapter.logger.Error("stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
+			s.adapter.logger.ErrorContext(ctx, "stream final attachment failed", slog.String("config_id", s.cfg.ID), slog.Any("error", err))
 		}
 	}
 	return nil

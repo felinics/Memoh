@@ -651,9 +651,9 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 		case errors.Is(err, workspacedeps.ErrBusy):
 			// Operations never queue: a second request for the
 			// same dependency is refused by design, not failed.
-			h.logger.Info("workspace dependency operation refused: another operation is in progress", attrs...)
+			h.logger.InfoContext(c.Request().Context(), "workspace dependency operation refused: another operation is in progress", attrs...)
 		default:
-			h.logger.Warn("workspace dependency operation failed", attrs...)
+			h.logger.WarnContext(c.Request().Context(), "workspace dependency operation failed", attrs...)
 		}
 		stream.send(newWorkspaceDependencyErrorEvent(err, requestID))
 		return nil

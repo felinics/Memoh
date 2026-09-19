@@ -59,7 +59,7 @@ func (g *EmailChatGateway) TriggerBotChat(ctx context.Context, botID, content st
 		return fmt.Errorf("trigger chat: %w", err)
 	}
 
-	g.logger.Info("email trigger chat completed",
+	g.logger.InfoContext(ctx, "email trigger chat completed",
 		slog.String("bot_id", botID))
 	return nil
 }

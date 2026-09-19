@@ -167,7 +167,7 @@ func (s *Service) item(ctx context.Context, inst Installation, entries map[strin
 			release = normalizeRelease(release)
 			item.Release = &release
 		} else {
-			s.logger.Warn("decode cached App release", slog.String("installation_id", inst.ID), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "decode cached App release", slog.String("installation_id", inst.ID), slog.Any("error", err))
 		}
 	}
 	depRefs, err := s.store.ListDependencyRefs(ctx, inst.ID)
@@ -204,7 +204,7 @@ func (s *Service) connectionsByID(ctx context.Context, botID string) map[string]
 	}
 	items, err := s.connectors.List(ctx, botID)
 	if err != nil {
-		s.logger.Warn("list bot connectors", slog.String("bot_id", botID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "list bot connectors", slog.String("bot_id", botID), slog.Any("error", err))
 		return result
 	}
 	for _, item := range items {
@@ -243,7 +243,7 @@ func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, e
 	if s.dependencies != nil {
 		deps, err = s.dependencies.CheckUpdates(ctx, botID)
 		if err != nil {
-			s.logger.Warn("check dependency updates", slog.String("bot_id", botID), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "check dependency updates", slog.String("bot_id", botID), slog.Any("error", err))
 			deps, err = s.dependencies.List(ctx, botID)
 			if err != nil {
 				return ListResult{}, err

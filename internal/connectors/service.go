@@ -361,7 +361,7 @@ func (s *Service) createBindingOrRollback(
 		defer cancel()
 		rollbackErr := s.client.DeleteConnection(rollbackCtx, connectionID)
 		if rollbackErr != nil && !isConnectItStatus(rollbackErr, http.StatusNotFound) {
-			s.logger.Warn(
+			s.logger.WarnContext(ctx,
 				"failed to roll back Connect-It connection after binding failed",
 				slog.String("connection_id", connectionID),
 				slog.Any("error", rollbackErr),

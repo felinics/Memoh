@@ -1263,7 +1263,7 @@ func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 		return errors.New("admin username/password required in config.toml")
 	}
 	if password == "change-your-password-here" {
-		log.Warn("admin password uses default placeholder; please update config.toml")
+		log.WarnContext(ctx, "admin password uses default placeholder; please update config.toml")
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -1297,7 +1297,7 @@ func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 			return fmt.Errorf("ensure admin gmail provider: %w", err)
 		}
 	}
-	log.Info("Admin user created", slog.String("username", username))
+	log.InfoContext(ctx, "Admin user created", slog.String("username", username))
 	return nil
 }
 

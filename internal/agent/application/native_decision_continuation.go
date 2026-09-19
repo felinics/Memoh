@@ -147,7 +147,7 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 		lifecycleCause = context.Cause(idleCtx)
 		if !stored {
 			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, resolvedContext{runConfig: cfg, model: models.GetResponse{ID: modelID}}, snapshotFailureCode(true, lifecycleCause)); storeErr != nil {
-				s.logger.Error("decision continuation timeout persist failed", slog.Any("error", storeErr))
+				s.logger.ErrorContext(ctx, "decision continuation timeout persist failed", slog.Any("error", storeErr))
 			}
 		}
 		if eventCh != nil && !failureEventForwarded {

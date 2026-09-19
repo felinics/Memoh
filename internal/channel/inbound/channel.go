@@ -409,7 +409,7 @@ func (p *ChannelInboundProcessor) shouldShowToolCallsInIM(ctx context.Context, b
 	show, err := p.imDisplayOptions.ShowToolCallsInIM(ctx, botID)
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Debug(
+			p.logger.DebugContext(ctx,
 				"show_tool_calls_in_im lookup failed, defaulting to hidden",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
@@ -431,7 +431,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	sender = p.withDecisionReceipts(sender, cfg)
 	text := strings.TrimSpace(msg.Message.PlainText())
 	if p.logger != nil {
-		p.logger.Debug("inbound handle start",
+		p.logger.DebugContext(ctx, "inbound handle start",
 			slog.String("channel", msg.Channel.String()),
 			slog.String("message_id", strings.TrimSpace(msg.Message.ID)),
 			slog.String("query", strings.TrimSpace(text)),
@@ -442,7 +442,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 	if strings.TrimSpace(msg.Message.PlainText()) == "" && len(msg.Message.Attachments) == 0 {
 		if p.logger != nil {
-			p.logger.Debug("inbound dropped empty", slog.String("channel", msg.Channel.String()))
+			p.logger.DebugContext(ctx, "inbound dropped empty", slog.String("channel", msg.Channel.String()))
 		}
 		return nil
 	}
@@ -461,7 +461,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			})
 		}
 		if p.logger != nil {
-			p.logger.Info(
+			p.logger.InfoContext(ctx,
 				"inbound dropped by identity policy (no reply sent)",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("bot_id", strings.TrimSpace(state.Identity.BotID)),
@@ -541,7 +541,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		})
 		if accErr != nil || !ok {
 			if p.logger != nil {
-				p.logger.Info("mode command denied by acl",
+				p.logger.InfoContext(ctx, "mode command denied by acl",
 					slog.String("channel", msg.Channel.String()),
 					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 					slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
@@ -586,7 +586,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		var outMsg channel.Message
 		if err != nil {
 			if p.logger != nil {
-				p.logger.Warn("command execution failed", slog.Any("error", err))
+				p.logger.WarnContext(ctx, "command execution failed", slog.Any("error", err))
 			}
 			outMsg = plainTextMessage(friendlyOps(loc, "ops.verb.completeCommand"), caps)
 		} else {
@@ -654,7 +654,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			sessionRuntime = sess.Runtime
 			sessionRuntimeOwner = sess.RuntimeOwnerAccountID
 		} else if p.logger != nil {
-			p.logger.Debug("no active session for route; will create after gates if needed",
+			p.logger.DebugContext(ctx, "no active session for route; will create after gates if needed",
 				slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
 				slog.Any("error", sessErr))
 		}
@@ -690,7 +690,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 		if p.logger != nil {
-			p.logger.Info(
+			p.logger.InfoContext(ctx,
 				"inbound denied by acl — event not ingested",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
@@ -714,7 +714,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				Target:  strings.TrimSpace(msg.ReplyTarget),
 				Message: out,
 			}); sendErr != nil && p.logger != nil {
-				p.logger.Warn("send acl-denied hint failed", slog.Any("error", sendErr))
+				p.logger.WarnContext(ctx, "send acl-denied hint failed", slog.Any("error", sendErr))
 			}
 		}
 		return nil
@@ -756,7 +756,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			spec, shouldCreate, specErr := p.defaultSessionSpecForInbound(ctx, identity, msg)
 			if specErr != nil {
 				if p.logger != nil {
-					p.logger.Warn("resolve default session spec failed", slog.Any("error", specErr))
+					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
 				}
 				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, specErr)
 			}
@@ -809,7 +809,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			spec, shouldCreate, specErr = p.defaultSessionSpecForInbound(ctx, identity, msg)
 			if specErr != nil {
 				if p.logger != nil {
-					p.logger.Warn("resolve default session spec failed", slog.Any("error", specErr))
+					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
 				}
 				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, specErr)
 			}
@@ -821,7 +821,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			sess, createErr := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 			if createErr != nil {
 				if p.logger != nil {
-					p.logger.Warn("auto-create session failed", slog.Any("error", createErr))
+					p.logger.WarnContext(ctx, "auto-create session failed", slog.Any("error", createErr))
 				}
 				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, createErr)
 			}
@@ -929,7 +929,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	if !shouldTrigger {
 		p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, eventID)
 		if p.logger != nil {
-			p.logger.Info(
+			p.logger.InfoContext(ctx,
 				"inbound not triggering assistant (group trigger condition not met)",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
@@ -956,7 +956,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}, p.jwtSecret, p.tokenTTL)
 		if err != nil {
 			if p.logger != nil {
-				p.logger.Warn("issue chat token failed", slog.Any("error", err))
+				p.logger.WarnContext(ctx, "issue chat token failed", slog.Any("error", err))
 			}
 		} else {
 			chatToken = signed
@@ -1034,7 +1034,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		if closeErr := closeStream(); closeErr != nil {
 			if p.logger != nil {
-				p.logger.Error(
+				p.logger.ErrorContext(ctx,
 					"reply stream close failed",
 					slog.String("channel", msg.Channel.String()),
 					slog.String("channel_identity_id", identity.ChannelIdentityID),
@@ -1149,7 +1149,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			// marker added above must still be cleared — on Feishu it is a
 			// reaction on the source message that otherwise sticks forever.
 			if p.logger != nil {
-				p.logger.Info(
+				p.logger.InfoContext(ctx,
 					"duplicate inbound turn dropped",
 					slog.String("channel", msg.Channel.String()),
 					slog.String("external_message_id", sourceMessageID),
@@ -1168,7 +1168,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			// dropping a message the runtime never admitted. Webhook channels
 			// retain their existing adapter retry contract.
 			if p.logger != nil {
-				p.logger.Info(
+				p.logger.InfoContext(ctx,
 					"inbound turn deferred: thread busy",
 					slog.String("channel", msg.Channel.String()),
 					slog.String("external_message_id", sourceMessageID),
@@ -1196,7 +1196,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return nil
 		}
 		if p.logger != nil {
-			p.logger.Error(
+			p.logger.ErrorContext(ctx,
 				"start turn failed",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("channel_identity_id", identity.ChannelIdentityID),
@@ -1236,7 +1236,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			events, messages, parseErr := mapStreamChunkToChannelEvents(turnEvent.Payload)
 			if parseErr != nil {
 				if p.logger != nil {
-					p.logger.Warn(
+					p.logger.WarnContext(ctx,
 						"stream chunk parse failed",
 						slog.String("channel", msg.Channel.String()),
 						slog.String("channel_identity_id", identity.ChannelIdentityID),
@@ -1295,7 +1295,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	if streamErr != nil {
 		if p.logger != nil {
-			p.logger.Error(
+			p.logger.ErrorContext(ctx,
 				"chat gateway stream failed",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("channel_identity_id", identity.ChannelIdentityID),
@@ -1524,7 +1524,7 @@ func (p *ChannelInboundProcessor) handleQueueCommand(
 		if code == "" {
 			code = QueueCommandCodeUnavailable
 			if p.logger != nil {
-				p.logger.Warn("queue command admission failed",
+				p.logger.WarnContext(ctx, "queue command admission failed",
 					slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 					slog.String("route_id", strings.TrimSpace(routeID)),
 					slog.String("operation", resource),
@@ -1546,7 +1546,7 @@ func (p *ChannelInboundProcessor) accessDeniedRole(ctx context.Context, identity
 	role, err := p.commandHandler.MemberRole(ctx, identity.BotID, identity.ChannelIdentityID)
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Warn("resolve acl-denied role failed",
+			p.logger.WarnContext(ctx, "resolve acl-denied role failed",
 				slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 				slog.String("channel_identity_id", strings.TrimSpace(identity.ChannelIdentityID)),
 				slog.Any("error", err),
@@ -2018,7 +2018,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 	serialized, err := json.Marshal(modelMsg)
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Warn("marshal passive message failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "marshal passive message failed", slog.Any("error", err))
 		}
 		return
 	}
@@ -2071,7 +2071,7 @@ func (p *ChannelInboundProcessor) persistPassiveMessage(
 		EventID:                 eventID,
 		DisplayText:             trimmedText,
 	}); err != nil && p.logger != nil {
-		p.logger.Warn("persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
+		p.logger.WarnContext(ctx, "persist passive message failed", slog.Any("error", err), slog.String("bot_id", botID))
 	}
 }
 
@@ -2760,7 +2760,7 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 		payload, err := p.loadInboundAttachmentPayload(ctx, cfg, msg, item)
 		if err != nil {
 			if p.logger != nil {
-				p.logger.Warn(
+				p.logger.WarnContext(ctx,
 					"inbound attachment ingest skipped",
 					slog.Any("error", err),
 					slog.String("attachment_type", strings.TrimSpace(string(item.Type))),
@@ -2788,7 +2788,7 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 				_ = payload.reader.Close()
 			}
 			if p.logger != nil {
-				p.logger.Warn(
+				p.logger.WarnContext(ctx,
 					"inbound attachment mime prepare failed",
 					slog.Any("error", err),
 					slog.String("attachment_type", strings.TrimSpace(string(item.Type))),
@@ -2813,7 +2813,7 @@ func (p *ChannelInboundProcessor) ingestInboundAttachments(
 		}
 		if err != nil {
 			if p.logger != nil {
-				p.logger.Warn(
+				p.logger.WarnContext(ctx,
 					"inbound attachment ingest failed",
 					slog.Any("error", err),
 					slog.String("attachment_type", strings.TrimSpace(string(item.Type))),
@@ -2930,7 +2930,7 @@ func (p *ChannelInboundProcessor) transcribeInboundAttachments(ctx context.Conte
 		reader, asset, err := p.mediaService.Open(ctx, botID, strings.TrimSpace(att.ContentHash))
 		if err != nil {
 			if p.logger != nil {
-				p.logger.Warn("open inbound audio for transcription failed", slog.Any("error", err), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
+				p.logger.WarnContext(ctx, "open inbound audio for transcription failed", slog.Any("error", err), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
 			}
 			continue
 		}
@@ -2938,7 +2938,7 @@ func (p *ChannelInboundProcessor) transcribeInboundAttachments(ctx context.Conte
 		_ = reader.Close()
 		if readErr != nil || len(audio) == 0 {
 			if p.logger != nil {
-				p.logger.Warn("read inbound audio for transcription failed", slog.Any("error", readErr), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
+				p.logger.WarnContext(ctx, "read inbound audio for transcription failed", slog.Any("error", readErr), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
 			}
 			continue
 		}
@@ -2953,7 +2953,7 @@ func (p *ChannelInboundProcessor) transcribeInboundAttachments(ctx context.Conte
 		result, txErr := p.transcriber.Transcribe(ctx, modelID, audio, filename, contentType, nil)
 		if txErr != nil {
 			if p.logger != nil {
-				p.logger.Warn("inbound attachment transcription failed", slog.Any("error", txErr), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
+				p.logger.WarnContext(ctx, "inbound attachment transcription failed", slog.Any("error", txErr), slog.String("bot_id", botID), slog.String("content_hash", att.ContentHash))
 			}
 			continue
 		}
@@ -3060,7 +3060,7 @@ func (p *ChannelInboundProcessor) ingestOutboundAttachments(ctx context.Context,
 	})
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Warn("prepare outbound attachments failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "prepare outbound attachments failed", slog.Any("error", err))
 		}
 		return attachments
 	}
@@ -3097,14 +3097,14 @@ func (p *ChannelInboundProcessor) replayPipelineSession(ctx context.Context, bot
 	events, err := p.eventStore.LoadEventsForReplay(ctx, botID, sessionID)
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Warn("pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
+			p.logger.WarnContext(ctx, "pipeline replay failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		}
 		return
 	}
 	if len(events) > 0 {
 		p.pipeline.ReplaySession(sessionID, events)
 		if p.logger != nil {
-			p.logger.Info("pipeline session replayed", slog.String("session_id", sessionID), slog.Int("events", len(events)))
+			p.logger.InfoContext(ctx, "pipeline session replayed", slog.String("session_id", sessionID), slog.Int("events", len(events)))
 		}
 	}
 }
@@ -3249,14 +3249,14 @@ func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
 ) {
 	if p.speechService == nil || p.speechModelResolver == nil {
 		if p.logger != nil {
-			p.logger.Warn("speech_delta received but TTS service not configured")
+			p.logger.WarnContext(ctx, "speech_delta received but TTS service not configured")
 		}
 		return
 	}
 	modelID, err := p.speechModelResolver.ResolveSpeechModelID(ctx, botID)
 	if err != nil || strings.TrimSpace(modelID) == "" {
 		if p.logger != nil {
-			p.logger.Warn("speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
+			p.logger.WarnContext(ctx, "speech_delta: bot has no TTS model configured", slog.String("bot_id", botID))
 		}
 		return
 	}
@@ -3268,7 +3268,7 @@ func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
 		audioData, contentType, synthErr := p.speechService.Synthesize(ctx, modelID, text, nil)
 		if synthErr != nil {
 			if p.logger != nil {
-				p.logger.Warn("speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))
+				p.logger.WarnContext(ctx, "speech synthesis failed", slog.String("bot_id", botID), slog.Any("error", synthErr))
 			}
 			continue
 		}
@@ -3289,7 +3289,7 @@ func (p *ChannelInboundProcessor) synthesizeAndPushVoice(
 		assets.add(ingested)
 		if pushErr := stream.Push(ctx, voiceEvent); pushErr != nil {
 			if p.logger != nil {
-				p.logger.Warn("push voice attachment failed", slog.String("bot_id", botID), slog.Any("error", pushErr))
+				p.logger.WarnContext(ctx, "push voice attachment failed", slog.String("bot_id", botID), slog.Any("error", pushErr))
 			}
 			return
 		}
@@ -3389,7 +3389,7 @@ func (p *ChannelInboundProcessor) dispatchReactions(
 	sourceMessageID = strings.TrimSpace(sourceMessageID)
 	if target == "" || sourceMessageID == "" {
 		if p.logger != nil {
-			p.logger.Warn("cannot dispatch reactions: missing target or source message ID",
+			p.logger.WarnContext(ctx, "cannot dispatch reactions: missing target or source message ID",
 				slog.String("bot_id", botID),
 				slog.String("channel", channelType.String()),
 			)
@@ -3404,7 +3404,7 @@ func (p *ChannelInboundProcessor) dispatchReactions(
 		}
 		if err := p.reactor.React(ctx, strings.TrimSpace(botID), channelType, req); err != nil {
 			if p.logger != nil {
-				p.logger.Warn("inline reaction failed",
+				p.logger.WarnContext(ctx, "inline reaction failed",
 					slog.String("bot_id", botID),
 					slog.String("channel", channelType.String()),
 					slog.String("emoji", reaction.Emoji),
@@ -3475,7 +3475,7 @@ func (p *ChannelInboundProcessor) enrichConversationAvatar(ctx context.Context, 
 	entry, err := directoryAdapter.ResolveEntry(lookupCtx, cfg, convID, channel.DirectoryEntryGroup)
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Debug("resolve conversation directory entry failed",
+			p.logger.DebugContext(ctx, "resolve conversation directory entry failed",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("conversation_id", convID),
 				slog.Any("error", err),
@@ -3532,7 +3532,7 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 	})
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Warn("resolve route for /stop command failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "resolve route for /stop command failed", slog.Any("error", err))
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -3565,7 +3565,7 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 			})
 			if stopErr != nil {
 				if p.logger != nil {
-					p.logger.Warn("stop durable turn failed", slog.Any("error", stopErr))
+					p.logger.WarnContext(ctx, "stop durable turn failed", slog.Any("error", stopErr))
 				}
 				return sender.Send(ctx, channel.OutboundMessage{
 					Target:  target,
@@ -3592,7 +3592,7 @@ func (p *ChannelInboundProcessor) handleStopCommand(
 
 	cancelFn()
 	if p.logger != nil {
-		p.logger.Info("agent stream aborted via /stop command",
+		p.logger.InfoContext(ctx, "agent stream aborted via /stop command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 			slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
 			slog.String("channel", msg.Channel.String()),
@@ -3899,7 +3899,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
 			if parseErr != nil {
 				if p.logger != nil {
-					p.logger.Warn("approval stream chunk parse failed", slog.Any("error", parseErr))
+					p.logger.WarnContext(ctx, "approval stream chunk parse failed", slog.Any("error", parseErr))
 				}
 				continue
 			}
@@ -3942,7 +3942,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 			return continuationErr
 		}
 		if p.logger != nil {
-			p.logger.Warn("accepted decision delivery interrupted", slog.Any("error", continuationErr))
+			p.logger.WarnContext(ctx, "accepted decision delivery interrupted", slog.Any("error", continuationErr))
 		}
 		public, _ := apperror.PublicFrom(apperror.Wrap(apperror.CodeAgentResponseInterrupted, continuationErr, nil), "")
 		if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: public.Detail}); err != nil {
@@ -4020,7 +4020,7 @@ func (p *ChannelInboundProcessor) issueChannelBearerToken(ctx context.Context, i
 		if ownerID, err := p.policy.BotOwnerUserID(ctx, identity.BotID); err == nil && strings.TrimSpace(ownerID) != "" {
 			tokenUserID = strings.TrimSpace(ownerID)
 		} else if p.logger != nil {
-			p.logger.Warn("resolve bot owner for token failed, falling back to caller identity",
+			p.logger.WarnContext(ctx, "resolve bot owner for token failed, falling back to caller identity",
 				slog.String("bot_id", identity.BotID), slog.Any("error", err))
 		}
 	}
@@ -4028,7 +4028,7 @@ func (p *ChannelInboundProcessor) issueChannelBearerToken(ctx context.Context, i
 		signed, _, err := auth.GenerateToken(tokenUserID, p.jwtSecret, p.tokenTTL)
 		if err != nil {
 			if p.logger != nil {
-				p.logger.Warn("issue channel token failed", slog.Any("error", err))
+				p.logger.WarnContext(ctx, "issue channel token failed", slog.Any("error", err))
 			}
 		} else {
 			return "Bearer " + signed
@@ -4047,7 +4047,7 @@ func (p *ChannelInboundProcessor) issueSessionBearerToken(ctx context.Context, i
 	return p.issueChannelBearerToken(ctx, identity, fallbackChatToken)
 }
 
-func (p *ChannelInboundProcessor) issueRuntimeBearerToken(_ context.Context, identity InboundIdentity, runtimeOwnerAccountID, fallbackChatToken string) string {
+func (p *ChannelInboundProcessor) issueRuntimeBearerToken(ctx context.Context, identity InboundIdentity, runtimeOwnerAccountID, fallbackChatToken string) string {
 	if p.jwtSecret == "" {
 		if strings.TrimSpace(fallbackChatToken) != "" {
 			return "Bearer " + strings.TrimSpace(fallbackChatToken)
@@ -4062,7 +4062,7 @@ func (p *ChannelInboundProcessor) issueRuntimeBearerToken(_ context.Context, ide
 		signed, _, err := auth.GenerateToken(tokenUserID, p.jwtSecret, p.tokenTTL)
 		if err != nil {
 			if p.logger != nil {
-				p.logger.Warn("issue ACP runtime token failed", slog.Any("error", err))
+				p.logger.WarnContext(ctx, "issue ACP runtime token failed", slog.Any("error", err))
 			}
 		} else {
 			return "Bearer " + signed
@@ -4330,7 +4330,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	})
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Warn("resolve route for /new command failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "resolve route for /new command failed", slog.Any("error", err))
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -4349,7 +4349,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Warn("create new session via /new command failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "create new session via /new command failed", slog.Any("error", err))
 		}
 		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
 			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
@@ -4363,7 +4363,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 
 	modeLabel = newSessionDisplayModeLabel(loc, spec, p.acpProfiles)
 	if p.logger != nil {
-		p.logger.Info("new session created via /new command",
+		p.logger.InfoContext(ctx, "new session created via /new command",
 			slog.String("bot_id", strings.TrimSpace(identity.BotID)),
 			slog.String("route_id", strings.TrimSpace(resolved.RouteID)),
 			slog.String("session_id", strings.TrimSpace(sess.ID)),
@@ -4994,7 +4994,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 	})
 	if err != nil {
 		if p.logger != nil {
-			p.logger.Warn("resolve route for /status command failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "resolve route for /status command failed", slog.Any("error", err))
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -5008,7 +5008,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		if sessErr == nil {
 			sessionID = strings.TrimSpace(sess.ID)
 		} else if p.logger != nil {
-			p.logger.Debug("resolve active session for /status command failed", slog.Any("error", sessErr))
+			p.logger.DebugContext(ctx, "resolve active session for /status command failed", slog.Any("error", sessErr))
 		}
 	}
 
@@ -5027,7 +5027,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 	})
 	if execErr != nil {
 		if p.logger != nil {
-			p.logger.Warn("execute /status command failed", slog.Any("error", execErr))
+			p.logger.WarnContext(ctx, "execute /status command failed", slog.Any("error", execErr))
 		}
 		reply = friendlyOps(loc, "ops.verb.loadStatus")
 	}

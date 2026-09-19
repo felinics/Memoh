@@ -75,7 +75,7 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 
 	botSettings, err := h.settingsService.GetBot(c.Request().Context(), botID)
 	if err != nil {
-		h.logger.Error("failed to load bot settings", slog.String("bot_id", botID), slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "failed to load bot settings", slog.String("bot_id", botID), slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load bot settings")
 	}
 	if botSettings.TtsModelID == "" {
@@ -84,19 +84,19 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 
 	tempID, f, err := h.tempStore.Create()
 	if err != nil {
-		h.logger.Error("failed to create temp file", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "failed to create temp file", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create temp file")
 	}
 
 	contentType, streamErr := h.audioService.StreamToFile(c.Request().Context(), botSettings.TtsModelID, text, f)
 	closeErr := f.Close()
 	if streamErr != nil {
-		h.logger.Error("speech synthesis failed", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID), slog.Any("error", streamErr))
+		h.logger.ErrorContext(c.Request().Context(), "speech synthesis failed", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID), slog.Any("error", streamErr))
 		h.tempStore.Delete(tempID)
 		return echo.NewHTTPError(http.StatusInternalServerError, streamErr.Error())
 	}
 	if closeErr != nil {
-		h.logger.Error("failed to finalize audio file", slog.String("bot_id", botID), slog.Any("error", closeErr))
+		h.logger.ErrorContext(c.Request().Context(), "failed to finalize audio file", slog.String("bot_id", botID), slog.Any("error", closeErr))
 		h.tempStore.Delete(tempID)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to finalize audio file")
 	}

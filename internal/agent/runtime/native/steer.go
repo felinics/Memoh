@@ -60,7 +60,7 @@ func (a *Agent) watchSteer(ctx context.Context, cfg RunConfig, gate *modelSteerG
 		pending, err := cfg.PendingSteer(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
-				a.logger.Warn("check pending steer failed", slog.Any("error", err))
+				a.logger.WarnContext(ctx, "check pending steer failed", slog.Any("error", err))
 			}
 			continue
 		}

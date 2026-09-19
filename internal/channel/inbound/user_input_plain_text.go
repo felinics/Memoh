@@ -186,7 +186,7 @@ func (p *ChannelInboundProcessor) updateUserInputCard(ctx context.Context, cfg c
 	}
 	updated, err := updater.UpdateUserInputCard(ctx, cfg, requestID, loc)
 	if err != nil {
-		p.logger.Warn("update user input card failed", slog.Any("error", err))
+		p.logger.WarnContext(ctx, "update user input card failed", slog.Any("error", err))
 		return false
 	}
 	return updated

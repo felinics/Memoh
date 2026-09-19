@@ -370,7 +370,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 			sessionMetadataString(sess.Metadata, "project_path"),
 			sessionMetadataString(sess.Metadata, "runtime_owner_account_id"),
 		); bindErr != nil {
-			h.logger.Warn("failed to bind ACP runtime to new session; first prompt will cold start",
+			h.logger.WarnContext(c.Request().Context(), "failed to bind ACP runtime to new session; first prompt will cold start",
 				slog.String("session_id", sess.ID),
 				slog.String("runtime_id", runtimeID),
 				slog.Any("error", bindErr),
