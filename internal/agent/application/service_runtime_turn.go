@@ -89,7 +89,11 @@ func (s *Service) resolveRuntimeDispatch(ctx context.Context, req ChatRequest) (
 // claude SIGINT grace) can still be executing against the workspace for
 // several seconds. Returning early let a stopped turn overlap the next one.
 // The drivers bound their own interrupt windows, so this wait is bounded.
-func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Driver, req ChatRequest, chunkCh chan<- StreamChunk, errCh chan<- error) {
+// fail reports the turn's failure; it is a callback rather than the error
+// channel itself so that this path cannot bypass the caller's bookkeeping —
+// writing the channel directly here once left the turn's span reporting
+// success for a run the caller was told had failed.
+func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Driver, req ChatRequest, chunkCh chan<- StreamChunk, fail func(error)) {
 	eventCh := make(chan WSStreamEvent)
 	done := make(chan error, 1)
 	go func() {
@@ -116,7 +120,7 @@ func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Drive
 			case <-ctxDone:
 				cancelled = true
 				ctxDone = nil
-				errCh <- ctx.Err()
+				fail(ctx.Err())
 			}
 		case err, ok := <-done:
 			if !ok {
@@ -124,12 +128,12 @@ func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Drive
 				continue
 			}
 			if err != nil && !cancelled {
-				errCh <- err
+				fail(err)
 			}
 		case <-ctxDone:
 			cancelled = true
 			ctxDone = nil
-			errCh <- ctx.Err()
+			fail(ctx.Err())
 		}
 	}
 }
