@@ -32,7 +32,7 @@ struct SnapshotItem {
     width: i32,
     height: i32,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    states: Vec<&'static str>,
+    states: Vec<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -53,6 +53,12 @@ struct Diagnostics {
 #[derive(Serialize)]
 struct SnapshotOutput {
     ok: bool,
+    /// Contract version; see `crate::PROTOCOL_VERSION`.
+    protocol_version: u32,
+    helper_version: &'static str,
+    /// The `--limit` that was in effect, echoed so the caller can tell a
+    /// short list from a capped one.
+    limit: usize,
     truncated: bool,
     items: Vec<SnapshotItem>,
     lines: Vec<String>,
@@ -76,12 +82,15 @@ pub async fn run(limit: usize) -> Result<()> {
             y: entry.y,
             width: entry.width,
             height: entry.height,
-            states: Vec::new(),
+            states: entry.states.clone(),
         })
         .collect();
 
     let out = SnapshotOutput {
         ok: true,
+        protocol_version: crate::PROTOCOL_VERSION,
+        helper_version: env!("CARGO_PKG_VERSION"),
+        limit,
         truncated,
         items,
         lines,
@@ -100,13 +109,45 @@ fn format_line(entry: &RefEntry) -> String {
         line.push_str(&json_quote(name));
     }
     line.push_str(&format!(" [ref={}]", entry.ref_id));
-    if entry.width > 0 && entry.height > 0 {
+    if entry.has_geometry() {
         line.push_str(&format!(
             " @{},{} {}x{}",
             entry.x, entry.y, entry.width, entry.height
         ));
     }
+    if !entry.states.is_empty() {
+        line.push_str(&format!(" ({})", entry.states.join(", ")));
+    }
     line
+}
+
+/// States worth surfacing to the model: they change what an action can do
+/// (editable, focused) or describe a toggle's current value (checked,
+/// selected, expanded). Everything else stays out to keep lines short.
+fn interesting_states(states: &StateSet) -> Vec<String> {
+    let mut out = Vec::new();
+    if states.contains(State::Focused) {
+        out.push("focused".to_string());
+    }
+    if states.contains(State::Editable) {
+        out.push("editable".to_string());
+    }
+    if states.contains(State::Checked) {
+        out.push("checked".to_string());
+    }
+    if states.contains(State::Selected) {
+        out.push("selected".to_string());
+    }
+    if states.contains(State::Expanded) {
+        out.push("expanded".to_string());
+    }
+    if states.contains(State::Pressed) {
+        out.push("pressed".to_string());
+    }
+    if !states.contains(State::Sensitive) || !states.contains(State::Enabled) {
+        out.push("disabled".to_string());
+    }
+    out
 }
 
 fn json_quote(value: &str) -> String {
@@ -255,6 +296,7 @@ async fn describe(
         y,
         width,
         height,
+        states: interesting_states(&states),
     })
 }
 
@@ -297,7 +339,35 @@ mod tests {
             y,
             width: w,
             height: h,
+            states: Vec::new(),
         }
+    }
+
+    #[test]
+    fn format_line_appends_states_when_present() {
+        let mut e = entry("text", "Search", 10, 20, 200, 24);
+        e.states = vec!["focused".to_string(), "editable".to_string()];
+        let line = format_line(&e);
+        assert_eq!(
+            line,
+            "- text \"Search\" [ref=e3] @10,20 200x24 (focused, editable)"
+        );
+    }
+
+    #[test]
+    fn interesting_states_reports_disabled_when_insensitive() {
+        let mut set = StateSet::empty();
+        set.insert(State::Showing);
+        set.insert(State::Visible);
+        assert_eq!(interesting_states(&set), vec!["disabled".to_string()]);
+        set.insert(State::Sensitive);
+        set.insert(State::Enabled);
+        set.insert(State::Editable);
+        set.insert(State::Focused);
+        assert_eq!(
+            interesting_states(&set),
+            vec!["focused".to_string(), "editable".to_string()]
+        );
     }
 
     #[test]
