@@ -1,7 +1,11 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/png"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -208,7 +212,7 @@ func TestWrapRuntimeExpressionScopesHelper(t *testing.T) {
 	if !strings.HasPrefix(wrapped, "(async () => {") {
 		t.Fatalf("expected async wrapper, got: %s", wrapped)
 	}
-	if !strings.Contains(wrapped, "const memohInteractiveSelector") {
+	if !strings.Contains(wrapped, "const memohInteractiveSelector = ") {
 		t.Fatalf("expected helper in wrapper: %s", wrapped)
 	}
 	if strings.Contains(wrapped, "eval(") {
@@ -229,15 +233,24 @@ func TestBrowserSchemasAreStrict(t *testing.T) {
 	}
 }
 
-func TestBuildScreenshotResultDropsShareMetadata(t *testing.T) {
-	p := &BrowserProvider{dataRoot: "/data"}
-	result := p.buildScreenshotBytesResult(t.Context(), "", []byte("png-bytes"), "image/png", "/data/.memoh/screenshots", nil)
+func TestScreenshotResultPathOnlyWithoutImageInput(t *testing.T) {
+	p := &BrowserProvider{dataRoot: "/data", logger: slog.Default()}
+	result := p.screenshotResult(t.Context(), SessionContext{}, "bot", testPNG(t), "image/png", map[string]any{"screenshot": "IGNORED", "viewport": "v"}, map[string]any{})
 	asMap, ok := result.(map[string]any)
 	if !ok {
-		t.Fatalf("expected map result, got %T", result)
+		t.Fatalf("expected map result without image input, got %T", result)
 	}
 	if _, exists := asMap["shared"]; exists {
 		t.Fatalf("expected shared field to be removed, got %#v", asMap)
+	}
+	if _, exists := asMap["screenshot"]; exists {
+		t.Fatalf("base64 payload must not reach the model-facing result: %#v", asMap)
+	}
+	if asMap["image_delivery"] != "path_only" || asMap["image_mode"] != "auto" || asMap["viewport"] != "v" {
+		t.Fatalf("unexpected delivery fields: %#v", asMap)
+	}
+	if asMap["image_width"] != 2 || asMap["image_height"] != 3 {
+		t.Fatalf("expected decoded image size 2x3, got %#v", asMap)
 	}
 	content, ok := asMap["content"].([]map[string]any)
 	if !ok || len(content) == 0 {
@@ -247,6 +260,39 @@ func TestBuildScreenshotResultDropsShareMetadata(t *testing.T) {
 	if !strings.HasPrefix(text, "Screenshot saved to ") && !strings.HasPrefix(text, "Screenshot captured") {
 		t.Fatalf("unexpected screenshot text: %q", text)
 	}
+}
+
+func TestScreenshotResultInjectsImageForVisionModels(t *testing.T) {
+	p := &BrowserProvider{dataRoot: "/data", logger: slog.Default()}
+	result := p.screenshotResult(t.Context(), SessionContext{SupportsImageInput: true}, "bot", testPNG(t), "image/png", map[string]any{}, map[string]any{})
+	media, ok := result.(MediaToolOutput)
+	if !ok {
+		t.Fatalf("expected MediaToolOutput for a vision model, got %T", result)
+	}
+	if media.ImageBase64 == "" || media.ImageMediaType != "image/png" {
+		t.Fatalf("expected an image payload, got %#v", media.ImageMediaType)
+	}
+	if media.Public["image_delivery"] != "model_input" {
+		t.Fatalf("public result must say the image was delivered: %#v", media.Public)
+	}
+	if _, exists := media.Public["screenshot"]; exists {
+		t.Fatal("public result must not carry the base64 payload")
+	}
+	path := p.screenshotResult(t.Context(), SessionContext{SupportsImageInput: true}, "bot", testPNG(t), "image/png", map[string]any{}, map[string]any{"image_mode": "path"})
+	if asMap, ok := path.(map[string]any); !ok || asMap["image_delivery"] != "path_only" {
+		t.Fatalf("image_mode path must not inject: %#v", path)
+	}
+}
+
+// testPNG returns a 2x3 PNG so image size decoding has something real.
+func testPNG(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 2, 3))
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
 }
 
 func TestScreenshotDirUsesSharedMemohDirectory(t *testing.T) {

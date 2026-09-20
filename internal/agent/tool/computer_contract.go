@@ -92,14 +92,22 @@ var computerActionContract = newGUIContractWithCommon("action", computerElementK
 
 func computerObserveParams() map[string]map[string]any {
 	return map[string]map[string]any{
-		"limit":  {"type": "integer", "minimum": 1, "maximum": a11ySnapshotMaxLimit, "default": a11ySnapshotDefaultLimit, "description": "Maximum number of elements to return from snapshot."},
-		"app_id": {"type": "string", "description": "Restrict snapshot to one application instance (app:<pid>). Defaults to the session's selected application, or the whole desktop when none is selected."},
+		"limit":           {"type": "integer", "minimum": 1, "maximum": a11ySnapshotMaxLimit, "default": a11ySnapshotDefaultLimit, "description": "Maximum number of lines returned per page of a snapshot."},
+		"app_id":          {"type": "string", "description": "Restrict snapshot to one application instance (app:<pid>). Defaults to the session's selected application, or the whole desktop when none is selected."},
+		"scope_ref":       {"type": "string", "description": "Ref from the latest desktop snapshot; the new snapshot lists only that element's subtree."},
+		"cursor":          {"type": "string", "description": "next_cursor from the previous snapshot result: continue reading that same snapshot instead of taking a new one. Not combined with scope_ref or disable_diffing."},
+		"disable_diffing": {"type": "boolean", "default": false, "description": "Return the full listing even when a previous snapshot of the same target exists (by default only added, updated, and removed elements are listed)."},
+		"image_mode":      {"type": "string", "enum": []string{"auto", "path"}, "default": "auto", "description": "auto: the screenshot is saved and, when the model accepts images, also sent to the model as its next input; path: saved only."},
 	}
 }
 
+var computerSnapshotParams = []string{"limit", "app_id", "scope_ref", "cursor", "disable_diffing"}
+
 var computerObserveContract = newGUIContractWithCommon("observe", nil, computerObserveParams(), nil, validateComputerTargetParams, []guiActionSpec{
-	{Name: "snapshot", Summary: "accessibility listing of on-screen elements with refs, geometry, states, and actions, bound to a new snapshot_id", Optional: []string{"limit", "app_id"}},
-	{Name: "screenshot", Summary: "save a desktop screenshot to the workspace"},
+	{Name: "snapshot", Summary: "accessibility tree of the desktop or one application (roles, names, values, states, actions, hierarchy) with refs bound to a new snapshot_id; incremental against the previous snapshot of the same target unless disable_diffing", Optional: computerSnapshotParams},
+	{Name: "screenshot", Summary: "capture the desktop to the workspace and, by default, into the model's next input; the result states the pixel size and coordinate space", Optional: []string{"image_mode"}},
+	{Name: "state_and_screenshot", Summary: "snapshot and screenshot of the desktop or application in one call, each with its capture time and a consistency check", Optional: append(append([]string{}, computerSnapshotParams...), "image_mode")},
+	{Name: "probe", Summary: "what the desktop backends can do right now: accessibility bus, display, screenshot, input, clipboard", Optional: []string{"app_id"}},
 })
 
 func computerWaitDuration(args map[string]any) (int, error) {

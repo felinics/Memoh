@@ -1055,6 +1055,8 @@
       },
       "browserObserve": {
         "snapshot": "查看页面结构",
+        "state_and_screenshot": "采集页面结构与截图",
+        "probe": "探测浏览器能力",
         "get_content": "读取页面内容",
         "screenshot_annotate": "截取带标注的页面截图",
         "screenshot": "截取页面截图",
@@ -1067,6 +1069,8 @@
       },
       "computerObserve": {
         "snapshot": "桌面快照",
+        "state_and_screenshot": "采集桌面结构与截图",
+        "probe": "探测桌面能力",
         "screenshot": "桌面截图"
       },
       "computerAction": {

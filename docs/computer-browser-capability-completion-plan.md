@@ -342,12 +342,22 @@ P2 实施记录（2026-09-19，同一分支）：
 
 ### P3：观察、真实 AX 与截图媒体
 
-- [ ] Browser 真实 AX、Computer 结构化树与辅助动作。
-- [ ] 完整/增量快照、limit、scope、cursor、截断与失效规则。
-- [ ] state_and_screenshot、probe、坐标元数据。
-- [ ] 截图直接媒体输入、路径回退、输出限制和历史恢复。
+- [x] Browser 真实 AX、Computer 结构化树与辅助动作。
+- [x] 完整/增量快照、limit、scope、cursor、截断与失效规则。
+- [x] state_and_screenshot、probe、坐标元数据。
+- [x] 截图直接媒体输入、路径回退、输出限制和历史恢复。
 
 验收：超过 300 个节点及巨大原生表格可有界观察；截图与引用对应同一目标；模型实际收到图片；Web/Desktop 刷新后仍可查看。
+
+P3 实施记录（2026-09-19，分支 `feat/computer-browser-p3`，基于 P1+P2）：
+
+- Browser 真实 AX（`internal/agent/tool/browser_ax.go`）：`Accessibility.getFullAXTree` 提供角色、计算名、值、状态（checked/disabled/expanded/focused/required/invalid、heading 级别、haspopup）与层级；通过 `DOM.getDocument` + `DOM.querySelectorAll` 与页面脚本的同一选择器按文档顺序对齐，把 AX 节点和可交互 DOM 元素按 backend node id 关联，交互元素带 ref 与视口几何，密码框显示 `value="•••"`；命名的地标/表单/列表/对话框等结构节点作为层级上下文输出。AX 域不可用时退化为平面 DOM 扫描并标注 `source: dom`。
+- Computer 结构化树（`a11y-cli snapshot` 协议 4）：每个节点带 `depth`（行首缩进）、`value`（EditableText 文本、Value 接口数值，密码角色掩码）、`states` 与 `actions=`；`--scope <ref>` 只遍历子树，`--reuse` 按 bus name + object path 复用上一索引的 ref id、新元素从上一最大值之后编号。
+- 完整/增量与分页（`gui_snapshot.go`）：两端 ref 跨快照稳定（Web 按 backend node id，桌面按对象身份），同一目标的第二次快照默认增量：只列出新增（`+`）、更新（`~`）与移除的 ref，`full_because` 说明返回完整列表的原因（首次、目标或 scope 变化、`disable_diffing`）；`limit` 为每页行数，`next_cursor` 在同一快照内续读（`cursor` 与刷新参数互斥），另有 64 KB 字节预算；`scope_ref` 对子树重新观察；后端遍历预算耗尽或分页截断都在 `truncated_reason` 说明。基线与分页存于会话 GUI 状态，导航或关闭标签页时丢弃。
+- `state_and_screenshot`、`probe`、坐标元数据：两端截图都返回像素尺寸与坐标空间（浏览器视口 CSS 像素 + device_pixel_ratio + 滚动偏移，整页截图为文档坐标；桌面为 scale 1 的桌面像素、原点左上角）；`state_and_screenshot` 一次调用返回同目标的结构与截图及各自时间，并用文档 generation（Web）/ 应用集合（桌面）校验 `consistent`；`probe` 报告 CDP/AX/截图/视口（Web）与无障碍总线/显示/输入/截图/剪贴板（桌面）的可用性，不含私有诊断。
+- 截图媒体链路（`media_output.go`、`gui_screenshot.go`、native `decorateReadMediaTools`）：`image_mode: auto` 默认在模型支持图片时把截图作为下一步模型输入注入（复用 `read` 的 `ReadMediaToolOutput` 装饰通路，新增通用 `MediaToolOutput`，base64 不进入模型可见结果与历史），并通过附件事件在会话中展示、随消息持久化到媒体库；模型不支持图片或 `image_mode: path` 时结果标明 `image_delivery: path_only` 与原因。
+- 真实验证（脚本化模型，模型配置含 `vision`）：浏览器侧 `probe` 报告 AX 277 节点；首个快照 `limit 12` 返回带层级的 AX 树（navigation/main/heading h1/form/textbox value/password 掩码/checkbox checked/button disabled）并给出 `next_cursor`，`cursor` 续读同一快照的后续 80 行；页面自身变化后第二次快照为增量（`~ button "Sign in"` 去掉 disabled、`+ link "Added later"`，46 个 ref 复用、0 移除），之后用第一次快照的 `e3` 直接 `fill` 成功；`scope_ref` 只返回该元素子树并显示新值；`screenshot` 返回 1050×853、视口坐标说明，`image_delivery: model_input`，脚本化模型在下一次请求里实际收到 1 张图片；`state_and_screenshot`（`image_mode: path`）返回 `consistent: true` 与 `path_only`；聊天页实时显示截图附件，重新载入会话后 3 张截图仍从媒体库渲染。桌面侧（协议 4 helper 的重建镜像）：`probe` 报告无障碍总线 14 个应用、显示/输入/截图/剪贴板可用；`get_app xfce4-appfinder` 返回 130 个 ref 的应用级树（缩进层级、`value=`、`actions=`）；随后 `snapshot limit=15` 为增量且「无变化」（130 个 ref 复用）；`disable_diffing` 全量分页得 `next_cursor: 15`，`cursor` 续读同一快照其余节点；`fill` 输入框后增量快照报告 `~ text value="term"` 等 26 处更新、81 个被过滤行移除、23 处不变；`scope_ref` 只返回输入框子树（`carried_refs: 47`），随后对子树外 ref 的右键被明确拒绝并说明原因，再次全量快照 `reused_refs: 49`、窗口仍为 e1；`screenshot` 1280×960、`image_delivery: model_input`，脚本化模型下一次请求实际收到 1 张图片；`state_and_screenshot image_mode=path` 返回 `consistent: true` 与 `path_only`。
+- 验证中发现并修复：桌面 `scope_ref` 快照曾覆盖 helper 的引用索引，使随后的全量快照把子树之外的元素重新编号（同一窗口从 e1 变成 e56）；现在子树快照把上一索引中未观察的条目按 `carried` 标记保留（`carried_refs`），ref 编号跨 scope 稳定、AT-SPI 动作仍可解析，但在重新观察前不作为指针目标；Go 侧基线改为按「目标 + scope」隔离，子树观察不再替换整目标基线，`cursor` 续读最近一次观察。
 
 ### P4：浏览器会话与任务 UI
 

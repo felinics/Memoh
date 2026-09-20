@@ -558,6 +558,8 @@ const BROWSER_OBSERVE_ICONS: Record<string, Component> = {
   get_content: FileText,
   screenshot_annotate: Camera,
   screenshot: Camera,
+  state_and_screenshot: Camera,
+  probe: Activity,
   get_html: Code,
   evaluate: Braces,
   get_url: Link,
@@ -569,6 +571,8 @@ const BROWSER_OBSERVE_ICONS: Record<string, Component> = {
 const COMPUTER_OBSERVE_ICONS: Record<string, Component> = {
   snapshot: ScanEye,
   screenshot: Camera,
+  state_and_screenshot: Camera,
+  probe: Activity,
 }
 
 const COMPUTER_CONTEXT_ICONS: Record<string, Component> = {

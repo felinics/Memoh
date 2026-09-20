@@ -785,72 +785,27 @@ func (p *cdpPage) captureScreenshot(ctx context.Context, fullPage bool) (string,
 	return out.Data, nil
 }
 
-// browserSnapshotItem is one interactive element as listed by a snapshot.
-type browserSnapshotItem struct {
-	Ref      string `json:"ref"`
-	Role     string `json:"role"`
-	Name     string `json:"name"`
-	Tag      string `json:"tag"`
-	Selector string `json:"selector"`
-}
-
-// takeSnapshot assigns refs to the page's interactive elements and stores
-// them on the page under snapshotID, so later refs resolve to those exact
-// elements and never to whatever now sits at the same index.
-func (p *cdpPage) takeSnapshot(ctx context.Context, snapshotID string, limit int) ([]browserSnapshotItem, bool, error) {
-	var out struct {
-		Items     []browserSnapshotItem `json:"items"`
-		Truncated bool                  `json:"truncated"`
-	}
-	err := p.evaluateObject(ctx, fmt.Sprintf(`(() => {
-const items = memohTakeSnapshot(%s);
-return { items: items.slice(0, %d).map(({ ref, role, name, tag, selector }) => ({ ref, role, name, tag, selector })), truncated: items.length > %d };
-})()`, jsQuote(snapshotID), limit, limit), &out)
-	if err != nil {
-		return nil, false, err
-	}
-	p.snapshotID = snapshotID
-	return out.Items, out.Truncated, nil
-}
-
-func formatBrowserSnapshot(items []browserSnapshotItem, truncated bool) string {
-	var lines []string
-	for _, item := range items {
-		role := strings.TrimSpace(item.Role)
-		name := strings.TrimSpace(item.Name)
-		ref := strings.TrimSpace(item.Ref)
-		line := "- " + role
-		if name != "" {
-			line += " " + jsQuote(name)
-		}
-		if ref != "" {
-			line += " [ref=" + ref + "]"
-		}
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		return "(empty page)"
-	}
-	if truncated {
-		lines = append(lines, "- ...")
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (p *cdpPage) annotate(ctx context.Context, snapshotID string) (any, error) {
-	return p.evaluate(ctx, fmt.Sprintf(`(() => {
+// annotatePinned draws each pinned ref's label over its element so a
+// screenshot shows which ref addresses what. removeAnnotations must follow.
+func (p *cdpPage) annotatePinned(ctx context.Context) (any, error) {
+	return p.evaluate(ctx, `(() => {
+const store = window.__memohSnapshot;
+if (!store) return [];
 const result = [];
-for (const item of memohTakeSnapshot(%s)) {
-  const rect = item.rect;
-  result.push({ ref: item.ref, tag: item.tag, role: item.role, name: item.name });
+for (const ref of Object.keys(store.byRef)) {
+  const el = store.byRef[ref];
+  if (!el || !el.isConnected) continue;
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) continue;
+  result.push({ ref, tag: el.tagName.toLowerCase(), role: memohRole(el), name: memohElementName(el) });
   const label = document.createElement('div');
   label.className = '__memoh_annotation__';
-  label.textContent = item.ref;
+  label.textContent = ref;
   label.style.cssText = 'position:fixed;left:' + rect.left + 'px;top:' + Math.max(0, rect.top - 18) + 'px;z-index:2147483647;background:#e63946;color:#fff;font:bold 11px/16px monospace;padding:0 4px;border-radius:3px;pointer-events:none;';
   document.body.appendChild(label);
 }
 return result;
-})()`, jsQuote(snapshotID)))
+})()`)
 }
 
 func (p *cdpPage) removeAnnotations(ctx context.Context) error {

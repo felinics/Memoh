@@ -32,6 +32,21 @@ type guiSessionState struct {
 	// heldButtons is the RFB button mask the session last left pressed via
 	// mouse_move / pointer, released on the next terminal error.
 	heldButtons byte
+
+	// baselines holds the latest observation per target and scope (see
+	// baselineKey) for ref reuse, diffing, and cursor paging. A subtree
+	// observation therefore never replaces the whole-target baseline.
+	baselines map[string]*guiSnapshotBaseline
+	// latestObservation maps a target ("browser:<tab>", "computer:<app>") to
+	// the baseline key of its most recent observation at any scope, which is
+	// what a cursor continues and what browser ref reuse starts from.
+	latestObservation map[string]string
+}
+
+// baselineKey names one observation configuration: a target plus the scope
+// ref it was restricted to ("" for the whole target).
+func baselineKey(target, scope string) string {
+	return target + "|" + scope
 }
 
 // guiSnapshotRecord identifies one observation of one target.
@@ -74,6 +89,7 @@ func (s *guiSessionStore) get(session SessionContext) *guiSessionState {
 		state = &guiSessionState{
 			browserSnapshots: make(map[string]guiSnapshotRecord),
 			heldKeys:         make(map[string]struct{}),
+			baselines:        make(map[string]*guiSnapshotBaseline),
 		}
 		s.states[key] = state
 	}
@@ -113,9 +129,58 @@ func (st *guiSessionState) forgetTab(tabID string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	delete(st.browserSnapshots, tabID)
+	st.dropBaselinesLocked("browser:" + tabID)
 	if st.tabID == tabID {
 		st.tabID = ""
 	}
+}
+
+// snapshotBaseline returns the latest observation of target at scope, nil
+// when there is none.
+func (st *guiSessionState) snapshotBaseline(target, scope string) *guiSnapshotBaseline {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.baselines == nil {
+		return nil
+	}
+	return st.baselines[baselineKey(target, scope)]
+}
+
+// latestBaseline returns the most recent observation of target at any
+// scope, nil when the target has not been observed in this session.
+func (st *guiSessionState) latestBaseline(target string) *guiSnapshotBaseline {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.baselines == nil || st.latestObservation == nil {
+		return nil
+	}
+	return st.baselines[st.latestObservation[target]]
+}
+
+func (st *guiSessionState) setSnapshotBaseline(target, scope string, baseline *guiSnapshotBaseline) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.baselines == nil {
+		st.baselines = make(map[string]*guiSnapshotBaseline)
+	}
+	if st.latestObservation == nil {
+		st.latestObservation = make(map[string]string)
+	}
+	key := baselineKey(target, scope)
+	st.baselines[key] = baseline
+	st.latestObservation[target] = key
+}
+
+// dropBaselinesLocked forgets every observation of target, whatever its
+// scope. The caller holds st.mu.
+func (st *guiSessionState) dropBaselinesLocked(target string) {
+	prefix := baselineKey(target, "")
+	for key := range st.baselines {
+		if strings.HasPrefix(key, prefix) {
+			delete(st.baselines, key)
+		}
+	}
+	delete(st.latestObservation, target)
 }
 
 func (st *guiSessionState) recordBrowserSnapshot(rec guiSnapshotRecord) {
@@ -130,6 +195,7 @@ func (st *guiSessionState) invalidateBrowserSnapshot(tabID string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	delete(st.browserSnapshots, tabID)
+	st.dropBaselinesLocked("browser:" + tabID)
 }
 
 func (st *guiSessionState) browserSnapshot(tabID string) (guiSnapshotRecord, bool) {

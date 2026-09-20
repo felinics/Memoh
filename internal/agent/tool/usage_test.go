@@ -920,8 +920,8 @@ func TestBrowserProviderUsageGatesRegisteredTools(t *testing.T) {
 
 	got = provider.Usage(context.Background(), SessionContext{SupportsImageInput: true}, availableToolsForTest(ToolComputerObserve(), ToolRead()))
 	assertUsageItemsAreBulleted(t, got)
-	if !strings.Contains(got, "`computer_observe`") || !strings.Contains(got, "`read`") || !strings.Contains(got, "when you need the image") {
-		t.Fatalf("Usage with observe/read and image input support should mention image read path, got:\n%s", got)
+	if !strings.Contains(got, "`computer_observe`") || !strings.Contains(got, "`read`") || !strings.Contains(got, "when you need the image") || !strings.Contains(got, "shows it to you on your next step") {
+		t.Fatalf("Usage with observe/read and image input support should mention automatic delivery and the read path, got:\n%s", got)
 	}
 
 	got = provider.Usage(context.Background(), SessionContext{}, availableToolsForTest(ToolBrowserAction()))

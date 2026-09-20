@@ -240,22 +240,23 @@ func matchApps(apps []a11yAppInfo, selector string) []a11yAppInfo {
 
 // selectApp records the application as the session default and returns it
 // with an initial, application-scoped snapshot.
-func (*BrowserProvider) selectApp(ctx context.Context, client *bridge.Client, state *guiSessionState, app a11yAppInfo, launched bool) (any, error) {
-	snapshot, err := computerA11ySnapshot(ctx, client, a11ySnapshotDefaultLimit, app.AppID)
+func (p *BrowserProvider) selectApp(ctx context.Context, client *bridge.Client, state *guiSessionState, app a11yAppInfo, launched bool) (any, error) {
+	state.selectApp(app.AppID)
+	opts := guiSnapshotOptions{Limit: a11ySnapshotDefaultLimit, DisableDiffing: true}
+	snapshot, err := p.computerSnapshot(ctx, "", client, state, map[string]any{"app_id": app.AppID}, opts)
 	if err != nil {
 		return nil, err
 	}
-	state.selectApp(app.AppID)
-	state.recordComputerSnapshot(guiSnapshotRecord{ID: snapshot.SnapshotID, AppID: app.AppID, Taken: time.Now()})
 	out := map[string]any{
 		"app":         app.publicMap(),
 		"app_id":      app.AppID,
 		"selected":    true,
-		"snapshot_id": snapshot.SnapshotID,
-		"snapshot":    snapshot.text(),
-		"ref_count":   len(snapshot.Items),
-		"truncated":   snapshot.Truncated,
 		"was_running": !launched,
+	}
+	for k, v := range snapshot {
+		if _, exists := out[k]; !exists {
+			out[k] = v
+		}
 	}
 	return out, nil
 }

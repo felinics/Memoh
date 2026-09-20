@@ -4,6 +4,7 @@
 //! same file to resolve `eN` back into a `(bus_name, object_path)` pair and
 //! refuse refs that were taken in a different snapshot.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -44,6 +45,20 @@ pub struct RefEntry {
     /// Process id of the application that owns the element (0 if unknown).
     #[serde(default)]
     pub app_pid: u32,
+    /// Depth below the walk root (the application, or the scope ref).
+    #[serde(default)]
+    pub depth: u32,
+    /// Current value for editable text and Value-interface controls, when
+    /// readable. Password fields carry a mask, never the secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// Set when the entry was not observed by the snapshot that wrote the
+    /// index but carried over from the previous one because that snapshot
+    /// was scoped to a subtree. Its id stays reserved and the object still
+    /// resolves for AT-SPI actions, but its box was not re-read, so it is
+    /// never a pointer target.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub carried: bool,
 }
 
 impl RefEntry {
@@ -66,6 +81,12 @@ impl RefEntry {
         (cx, cy)
     }
 
+    /// Identity of the underlying AT-SPI object, stable while the widget
+    /// lives: refs are reused across snapshots by this key.
+    pub fn object_key(&self) -> String {
+        format!("{}|{}", self.bus_name, self.object_path)
+    }
+
     /// Rebuild an `ObjectRefOwned` so we can construct proxies again.
     pub fn to_object_ref(&self) -> Result<ObjectRefOwned> {
         let name = UniqueName::try_from(self.bus_name.clone())
@@ -86,6 +107,30 @@ pub struct RefIndex {
     #[serde(default)]
     pub app_pid: u32,
     pub entries: Vec<RefEntry>,
+}
+
+impl RefIndex {
+    /// Map object key → ref id, used to keep refs stable across snapshots.
+    pub fn ref_by_object(&self) -> HashMap<String, String> {
+        self.entries
+            .iter()
+            .map(|e| (e.object_key(), e.ref_id.clone()))
+            .collect()
+    }
+
+    /// Highest `eN` number in the index (0 when empty).
+    pub fn max_ref_number(&self) -> u32 {
+        self.entries
+            .iter()
+            .filter_map(|e| ref_number(&e.ref_id))
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+/// Numeric part of a canonical `eN` ref.
+pub fn ref_number(ref_id: &str) -> Option<u32> {
+    ref_id.strip_prefix('e')?.parse::<u32>().ok()
 }
 
 fn refs_path() -> PathBuf {
@@ -126,6 +171,12 @@ fn write_to(path: &Path, snapshot_id: &str, app_pid: u32, entries: &[RefEntry]) 
         }
     }
     std::fs::write(path, data).with_context(|| format!("write refs index to {}", path.display()))
+}
+
+/// Load the persisted index, if any.
+pub fn load() -> Result<RefIndex> {
+    let (_, index) = read_index()?;
+    Ok(index)
 }
 
 fn read_index() -> Result<(PathBuf, RefIndex)> {
@@ -206,6 +257,9 @@ mod tests {
             states: Vec::new(),
             actions: Vec::new(),
             app_pid: 0,
+            depth: 0,
+            value: None,
+            carried: false,
         }
     }
 
@@ -258,6 +312,37 @@ mod tests {
         assert!(index.entries[0].states.is_empty());
         assert!(index.entries[0].actions.is_empty());
         assert!(index.snapshot_id.is_empty());
+        assert_eq!(index.entries[0].depth, 0);
+        assert!(index.entries[0].value.is_none());
+    }
+
+    #[test]
+    fn ref_reuse_maps_by_object_identity() {
+        let index = RefIndex {
+            snapshot_id: "s1".to_string(),
+            app_pid: 0,
+            entries: vec![
+                RefEntry {
+                    ref_id: "e7".to_string(),
+                    ..sample_entry()
+                },
+                RefEntry {
+                    ref_id: "e12".to_string(),
+                    object_path: "/b".to_string(),
+                    ..sample_entry()
+                },
+            ],
+        };
+        let map = index.ref_by_object();
+        assert_eq!(
+            map.get(":1.42|/org/a11y/atspi/accessible/root")
+                .map(String::as_str),
+            Some("e7")
+        );
+        assert_eq!(map.get(":1.42|/b").map(String::as_str), Some("e12"));
+        assert_eq!(index.max_ref_number(), 12);
+        assert_eq!(ref_number("e42"), Some(42));
+        assert_eq!(ref_number("x"), None);
     }
 
     #[test]
@@ -354,6 +439,7 @@ mod tests {
         assert!(err.to_string().contains("observe again"), "{err}");
 
         assert!(lookup("e99", None).is_err(), "missing refs should error");
+        assert_eq!(load().expect("load").snapshot_id, "s123");
 
         let _ = std::fs::remove_file(&path);
         unsafe { std::env::remove_var("A11Y_CLI_REFS") };

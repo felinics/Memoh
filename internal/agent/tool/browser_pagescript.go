@@ -1,34 +1,27 @@
 package tools
 
+// memohInteractiveSelectorCSS is the interactive-element query shared by the
+// page script and the CDP DOM.querySelectorAll call that maps those elements
+// to backend node ids; both must issue exactly the same selector.
+const memohInteractiveSelectorCSS = `a[href],button,input,select,textarea,summary,[contenteditable="true"],[role="button"],[role="link"],[role="tab"],[role="menuitem"],[role="checkbox"],[role="radio"],[role="option"],[onclick],[tabindex]:not([tabindex="-1"])`
+
 // mustElementHelper is injected into every Runtime.evaluate call. It owns the
-// element listing (memohInteractiveElements), snapshot-bound refs
-// (memohTakeSnapshot / elementByRef / mustTarget), and the editing helpers
-// used by fill, set_value, paste, and select_text.
-const mustElementHelper = `
+// element listing (memohListInteractive / memohInteractiveElements),
+// snapshot-bound refs (memohPinSnapshot / elementByRef / mustTarget), and the
+// editing helpers used by fill, set_value, paste, and select_text. The
+// interactive selector is spliced in from memohInteractiveSelectorCSS so the
+// page and the CDP query can never disagree.
+var mustElementHelper = mustElementHelperPrefix + "const memohInteractiveSelector = " + jsQuote(memohInteractiveSelectorCSS) + ";\n" + mustElementHelperBody
+
+const mustElementHelperPrefix = `
 function mustElement(selector) {
   const el = document.querySelector(selector);
   if (!el) throw new Error("element not found: " + selector);
   return el;
 }
+`
 
-const memohInteractiveSelector = [
-  'a[href]',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  'summary',
-  '[contenteditable="true"]',
-  '[role="button"]',
-  '[role="link"]',
-  '[role="tab"]',
-  '[role="menuitem"]',
-  '[role="checkbox"]',
-  '[role="radio"]',
-  '[role="option"]',
-  '[onclick]',
-  '[tabindex]:not([tabindex="-1"])'
-].join(',');
+const mustElementHelperBody = `
 
 function memohVisible(el) {
   const rect = el.getBoundingClientRect();
@@ -122,25 +115,68 @@ function memohInteractiveElements() {
   return result;
 }
 
-// memohTakeSnapshot lists the interactive elements and pins them on the page
-// under a snapshot id. Refs resolve through this pinned list, so a ref never
-// drifts onto another element when the page changes; a navigation discards
-// the list with the document.
+// memohListInteractive lists the visible interactive elements without
+// assigning refs. allIndex is the element's position in the unfiltered
+// querySelectorAll result, which the server joins with the same query issued
+// over CDP to learn each element's backend DOM node id.
+function memohListInteractive() {
+  const result = [];
+  const seen = new Set();
+  const all = document.querySelectorAll(memohInteractiveSelector);
+  for (let i = 0; i < all.length; i++) {
+    const el = all[i];
+    if (seen.has(el)) continue;
+    seen.add(el);
+    const rect = memohVisible(el);
+    if (!rect) continue;
+    result.push({
+      allIndex: i,
+      tag: el.tagName.toLowerCase(),
+      type: (el.getAttribute('type') || '').toLowerCase(),
+      password: el instanceof HTMLInputElement && (el.type || '').toLowerCase() === 'password',
+      role: memohRole(el),
+      name: memohElementName(el),
+      selector: memohCssPath(el),
+      left: rect.left, top: rect.top, width: rect.width, height: rect.height
+    });
+  }
+  return result;
+}
+
+// memohPinSnapshot pins elements under their assigned refs for one snapshot
+// id. Refs resolve through this map, so a ref never drifts onto another
+// element when the page changes; a navigation discards the map with the
+// document.
+function memohPinSnapshot(snapshotId, assignments) {
+  const all = document.querySelectorAll(memohInteractiveSelector);
+  const byRef = {};
+  for (const a of assignments || []) {
+    const el = all[a.allIndex];
+    if (el) byRef[String(a.ref)] = el;
+  }
+  window.__memohSnapshot = { id: String(snapshotId || ''), byRef, taken: Date.now() };
+  return Object.keys(byRef).length;
+}
+
+// memohTakeSnapshot is the single-call form used by annotations: list, assign
+// dense refs, and pin.
 function memohTakeSnapshot(snapshotId) {
   const items = memohInteractiveElements();
-  window.__memohSnapshot = { id: String(snapshotId || ''), elements: items.map(item => item.element), taken: Date.now() };
+  const byRef = {};
+  for (const item of items) byRef[item.ref] = item.element;
+  window.__memohSnapshot = { id: String(snapshotId || ''), byRef, taken: Date.now() };
   return items;
 }
 
 function elementByRef(ref, snapshotId) {
-  const value = String(ref || '').trim().toLowerCase().replace(/^ref=/, '').replace(/^e/, '');
-  const index = Number.parseInt(value, 10);
-  if (!Number.isInteger(index) || index < 1) throw new Error('invalid element ref: ' + ref);
+  const value = String(ref || '').trim().toLowerCase().replace(/^ref=/, '');
+  const normalized = value.startsWith('e') ? value : 'e' + value;
+  if (!/^e[1-9][0-9]*$/.test(normalized)) throw new Error('invalid element ref: ' + ref);
   const store = window.__memohSnapshot;
   if (!store) throw new Error('no element refs exist on this page (it was navigated or never observed); observe again');
   const expected = String(snapshotId || '');
   if (expected && store.id !== expected) throw new Error('ref ' + ref + ' belongs to snapshot ' + expected + ' but this page currently holds snapshot ' + store.id + '; observe again');
-  const el = store.elements[index - 1];
+  const el = store.byRef[normalized];
   if (!el) throw new Error('element ref not found in snapshot ' + store.id + ': ' + ref + ' (observe again)');
   if (!el.isConnected) throw new Error('ref ' + ref + ' is stale: the element was removed from the page; observe again');
   return el;
@@ -173,7 +209,9 @@ function memohSelectAll(el) {
   if (!kind || kind === 'select') throw new Error('element is not an editable text field: ' + memohCssPath(el));
   el.focus();
   if (kind === 'field') {
-    el.setSelectionRange(0, el.value.length);
+    // email/number/date inputs have no selection API; select() still works
+    // for the ones that render text.
+    try { el.setSelectionRange(0, el.value.length); } catch (_) { el.select(); }
     return { kind, length: el.value.length };
   }
   const range = document.createRange();
@@ -188,6 +226,12 @@ function memohDeleteSelection(el) {
   const kind = memohEditableKind(el);
   if (kind === 'field') {
     const start = el.selectionStart, end = el.selectionEnd;
+    if (start == null || end == null) {
+      // No selection API (email, number, ...): clear through the native
+      // setter so framework listeners still see the change.
+      memohSetValue(el, '');
+      return el.value;
+    }
     if (start !== end) {
       el.setRangeText('', start, end, 'start');
       el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
@@ -254,9 +298,13 @@ function memohSelectText(el, text, prefix, suffix, mode) {
   const end = start + text.length;
   el.focus();
   if (kind === 'field') {
-    if (mode === 'cursor_before') el.setSelectionRange(start, start);
-    else if (mode === 'cursor_after') el.setSelectionRange(end, end);
-    else el.setSelectionRange(start, end);
+    try {
+      if (mode === 'cursor_before') el.setSelectionRange(start, start);
+      else if (mode === 'cursor_after') el.setSelectionRange(end, end);
+      else el.setSelectionRange(start, end);
+    } catch (_) {
+      throw new Error('input type ' + JSON.stringify(el.type) + ' does not support text selection; use set_value or fill instead');
+    }
     return { start, end, mode, kind, selected: el.value.slice(el.selectionStart, el.selectionEnd) };
   }
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);

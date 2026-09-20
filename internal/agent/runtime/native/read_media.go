@@ -25,7 +25,7 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 	found := false
 
 	for _, tool := range tools {
-		if tool.Name != agenttools.ReadMediaToolName().String() || tool.Execute == nil {
+		if !mediaDecoratedTool(tool.Name) || tool.Execute == nil {
 			wrapped = append(wrapped, tool)
 			continue
 		}
@@ -215,6 +215,18 @@ func preparedAdmissionsContainIndex(admissions []admittedPreparedMessage, index 
 	return false
 }
 
+// mediaDecoratedTool lists the tools whose execution result may carry an
+// image for the model's next step: read (files) and the GUI observation tools
+// (screenshots with image_mode auto).
+func mediaDecoratedTool(name string) bool {
+	switch name {
+	case agenttools.ReadMediaToolName().String(), agenttools.ToolBrowserObserve().String(), agenttools.ToolComputerObserve().String():
+		return true
+	default:
+		return false
+	}
+}
+
 func normalizeReadMediaOutput(output any, clientType string) (any, sdk.MessagePart, bool) {
 	switch value := output.(type) {
 	case agenttools.ReadMediaToolOutput:
@@ -224,6 +236,13 @@ func normalizeReadMediaOutput(output any, clientType string) (any, sdk.MessagePa
 			return nil, nil, false
 		}
 		return value.Public, buildReadMediaPart(clientType, *value), true
+	case agenttools.MediaToolOutput:
+		return value.Public, buildReadMediaImagePart(clientType, value.ImageBase64, value.ImageMediaType), true
+	case *agenttools.MediaToolOutput:
+		if value == nil {
+			return nil, nil, false
+		}
+		return value.Public, buildReadMediaImagePart(clientType, value.ImageBase64, value.ImageMediaType), true
 	default:
 		return nil, nil, false
 	}

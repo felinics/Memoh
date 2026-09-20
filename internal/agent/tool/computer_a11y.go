@@ -17,7 +17,7 @@ const (
 	// a11yProtocolVersion must match PROTOCOL_VERSION in
 	// crates/a11y-cli/src/main.rs. Output from any other version is refused
 	// instead of being decoded into a plausible-looking but wrong result.
-	a11yProtocolVersion      = 3
+	a11yProtocolVersion      = 4
 	a11ySnapshotDefaultLimit = 300
 	a11ySnapshotMaxLimit     = 2000
 )
@@ -49,9 +49,25 @@ type a11ySnapshotItem struct {
 	Y       int      `json:"y"`
 	Width   int      `json:"width"`
 	Height  int      `json:"height"`
+	Depth   int      `json:"depth"`
+	Value   *string  `json:"value,omitempty"`
 	States  []string `json:"states,omitempty"`
 	Actions []string `json:"actions,omitempty"`
 	AppPID  int      `json:"app_pid,omitempty"`
+}
+
+// fingerprint is what a diff compares: everything the model sees on the line
+// except the ref itself.
+func (it a11ySnapshotItem) fingerprint() string {
+	value := ""
+	if it.Value != nil {
+		value = *it.Value
+	}
+	fields := []string{
+		it.Role, it.Name, value, strings.Join(it.States, ","), strings.Join(it.Actions, ","),
+		strconv.Itoa(it.X), strconv.Itoa(it.Y), strconv.Itoa(it.Width), strconv.Itoa(it.Height), strconv.Itoa(it.Depth),
+	}
+	return strings.Join(fields, "\x1f")
 }
 
 // center returns the on-screen centre of the element, or false when the
@@ -107,8 +123,11 @@ type a11ySnapshotOutput struct {
 	HelperVersion   string             `json:"helper_version"`
 	SnapshotID      string             `json:"snapshot_id"`
 	App             *a11ySnapshotApp   `json:"app,omitempty"`
+	Scope           string             `json:"scope,omitempty"`
 	Limit           int                `json:"limit"`
 	Truncated       bool               `json:"truncated"`
+	ReusedRefs      int                `json:"reused_refs"`
+	CarriedRefs     int                `json:"carried_refs"`
 	Items           []a11ySnapshotItem `json:"items"`
 	Lines           []string           `json:"lines"`
 	RefsPath        string             `json:"refs_path"`
@@ -138,6 +157,10 @@ type a11yActionOutput struct {
 	Error           string         `json:"error,omitempty"`
 	Unsupported     bool           `json:"unsupported,omitempty"`
 	Selection       *a11ySelection `json:"selection,omitempty"`
+	// Carried is set when the ref was not part of the latest (subtree)
+	// snapshot but carried over from the previous index; the helper then
+	// offers no pointer fallback because its box was not re-read.
+	Carried bool `json:"carried,omitempty"`
 }
 
 // fallbackPoint returns the helper's pointer fallback only when it is a real
@@ -151,10 +174,14 @@ func (o *a11yActionOutput) fallbackPoint() (a11yPoint, bool) {
 
 // failure renders a failed helper action as an error for the model.
 func (o *a11yActionOutput) failure(what, ref string) error {
-	if o.Error != "" {
-		return fmt.Errorf("a11y %s %s failed: %s", what, ref, o.Error)
+	hint := ""
+	if o.Carried {
+		hint = "; the ref was carried over from an earlier observation (the latest snapshot was scoped to a subtree), so observe the whole target again before retrying"
 	}
-	return fmt.Errorf("a11y %s %s failed without diagnostic", what, ref)
+	if o.Error != "" {
+		return fmt.Errorf("a11y %s %s failed: %s%s", what, ref, o.Error, hint)
+	}
+	return fmt.Errorf("a11y %s %s failed without diagnostic%s", what, ref, hint)
 }
 
 type a11yLocateOutput struct {
@@ -171,6 +198,16 @@ type a11yLocateOutput struct {
 	States          []string   `json:"states,omitempty"`
 	Actions         []string   `json:"actions,omitempty"`
 	AppPID          int        `json:"app_pid,omitempty"`
+	Carried         bool       `json:"carried,omitempty"`
+}
+
+// noCenterError explains why a located ref cannot be turned into pointer
+// coordinates.
+func (o *a11yLocateOutput) noCenterError(ref, what string) error {
+	if o.Carried {
+		return fmt.Errorf("ref %s was not part of the latest snapshot (it was scoped to a subtree), so its position was not re-read; observe the whole target again before a %s, or pass x/y", ref, what)
+	}
+	return fmt.Errorf("ref %s has no on-screen box, and a %s cannot be expressed as an accessibility action; observe again or pass x/y", ref, what)
 }
 
 type a11yAppWindow struct {
@@ -304,15 +341,23 @@ func computerA11yApps(ctx context.Context, client *bridge.Client) (*a11yAppsOutp
 	return &out, nil
 }
 
-// computerA11ySnapshot walks the desktop, or only the application selected
-// by app (an app_id such as app:1234) when it is non-empty.
-func computerA11ySnapshot(ctx context.Context, client *bridge.Client, limit int, app string) (*a11ySnapshotOutput, error) {
+// computerA11ySnapshot walks the desktop, only the application selected by
+// app (an app_id such as app:1234) when it is non-empty, or only the subtree
+// below scope (a ref from the current index). reuse keeps the ref ids of
+// elements that were in the previous index.
+func computerA11ySnapshot(ctx context.Context, client *bridge.Client, limit int, app, scope string, reuse bool) (*a11ySnapshotOutput, error) {
 	if limit <= 0 {
 		limit = a11ySnapshotDefaultLimit
 	}
 	args := []string{"snapshot", "--limit", strconv.Itoa(limit)}
 	if app = strings.TrimSpace(app); app != "" {
 		args = append(args, "--app", app)
+	}
+	if scope = strings.TrimSpace(scope); scope != "" {
+		args = append(args, "--scope", scope)
+	}
+	if reuse {
+		args = append(args, "--reuse")
 	}
 	raw, err := execA11y(ctx, client, args...)
 	if err != nil {
