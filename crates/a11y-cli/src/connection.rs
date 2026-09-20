@@ -5,9 +5,11 @@ use anyhow::{anyhow, Context, Result};
 use atspi::object_ref::ObjectRefOwned;
 use atspi::proxy::accessible::AccessibleProxy;
 use atspi::proxy::action::ActionProxy;
+use atspi::proxy::application::ApplicationProxy;
 use atspi::proxy::component::ComponentProxy;
 use atspi::proxy::editable_text::EditableTextProxy;
 use atspi::proxy::text::TextProxy;
+use atspi::proxy::value::ValueProxy;
 use atspi::zbus::names::{BusName, UniqueName};
 use atspi::zbus::zvariant::ObjectPath;
 use atspi::zbus::Address;
@@ -318,6 +320,35 @@ pub async fn editable_for<'a>(
         .build()
         .await
         .context("failed to build editable text proxy")
+}
+
+/// Build an `ApplicationProxy` for an application root node.
+pub async fn application_for<'a>(
+    conn: &'a AccessibilityConnection,
+    accessible: &AccessibleProxy<'_>,
+) -> Result<ApplicationProxy<'a>> {
+    let (destination, path) = proxy_endpoints(accessible);
+    ApplicationProxy::builder(conn.connection())
+        .destination(destination)?
+        .path(path)?
+        .build()
+        .await
+        .context("failed to build application proxy")
+}
+
+/// Build a `ValueProxy` for an object that exposes the Value interface
+/// (sliders, spin buttons, progress bars).
+pub async fn value_for<'a>(
+    conn: &'a AccessibilityConnection,
+    accessible: &AccessibleProxy<'_>,
+) -> Result<ValueProxy<'a>> {
+    let (destination, path) = proxy_endpoints(accessible);
+    ValueProxy::builder(conn.connection())
+        .destination(destination)?
+        .path(path)?
+        .build()
+        .await
+        .context("failed to build value proxy")
 }
 
 /// Build a `TextProxy` for an object that exposes the Text interface.

@@ -194,6 +194,7 @@ func TestBuiltInToolsHaveUsageGuidanceOrExplicitExemption(t *testing.T) {
 		ToolComputerObserve():      "browser",
 		ToolComputerAction():       "browser",
 		ToolBrowserRemoteSession(): "browser",
+		ToolComputerContext():      "browser",
 
 		ToolAskUser(): "user-input",
 

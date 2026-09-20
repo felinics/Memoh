@@ -4,6 +4,7 @@ const GUI_TOOL_NAMES = new Set([
   'browser_remote_session',
   'computer_action',
   'computer_observe',
+  'computer_context',
 ])
 
 export function isGuiToolName(toolName: string): boolean {

@@ -3,22 +3,15 @@ package tools
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
-	"net"
-	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
-	"github.com/gorilla/websocket"
 
 	displaypkg "github.com/felinics/memoh/internal/display"
 	"github.com/felinics/memoh/internal/settings"
@@ -26,8 +19,7 @@ import (
 )
 
 const (
-	browserCDPAddress                   = "127.0.0.1:9222"
-	browserCDPBaseURL                   = "http://" + browserCDPAddress
+	browserCDPPort                      = 9222
 	browserToolTimeout                  = 45 * time.Second
 	browserStartupTimeout               = 12 * time.Second
 	computerDisplayStartupTimeout int32 = 1200
@@ -49,6 +41,10 @@ type BrowserProvider struct {
 	containers bridge.Provider
 	display    *displaypkg.Service
 	dataRoot   string
+	sessions   *guiSessionStore
+	// clipboards serialises desktop clipboard use per bot: paste saves,
+	// replaces, and restores the X clipboard, which only works one at a time.
+	clipboards sync.Map
 }
 
 func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, containers bridge.Provider, displaySvc *displaypkg.Service, dataRoot string) *BrowserProvider {
@@ -64,6 +60,7 @@ func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, contain
 		containers: containers,
 		display:    displaySvc,
 		dataRoot:   dataRoot,
+		sessions:   newGUISessionStore(),
 	}
 }
 
@@ -71,10 +68,13 @@ func NewBrowserProvider(log *slog.Logger, settingsSvc *settings.Service, contain
 // these tools are registered (display-enabled sessions).
 func (*BrowserProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
 	var parts []string
+	if ref, ok := available.Ref(ToolComputerContext()); ok {
+		parts = append(parts, "**Targets** ("+ref+"): list_apps/get_app select an application (app_id) and list_browsers/get_browser select a browser (browser_id) for this conversation; get_state shows both with the current selection, documentation returns the exact contract. Selection is per conversation and never navigates or launches unless get_app is called with launch=true.")
+	}
 	browserRefs := available.Refs(ToolBrowserObserve(), ToolBrowserAction())
 	switch len(browserRefs) {
 	case 2:
-		parts = append(parts, "**Browser** ("+strings.Join(browserRefs, ", ")+"): Web pages in Chrome. Observe before acting; prefer element refs from snapshot over CSS selectors.")
+		parts = append(parts, "**Browser** ("+strings.Join(browserRefs, ", ")+"): Web pages in Chrome. Observe before acting; refs from a snapshot are bound to that snapshot_id and that tab, so observe again after navigation or when a ref is refused. Pass tab_id to address a specific tab; the conversation's selected tab is used otherwise.")
 	case 1:
 		if ref, ok := available.Ref(ToolBrowserObserve()); ok {
 			parts = append(parts, "**Browser** ("+ref+"): Web pages in Chrome. Observe before acting; prefer element refs from snapshot over CSS selectors.")
@@ -85,7 +85,7 @@ func (*BrowserProvider) Usage(_ context.Context, session SessionContext, availab
 	desktopRefs := available.Refs(ToolComputerObserve(), ToolComputerAction())
 	switch len(desktopRefs) {
 	case 2:
-		parts = append(parts, "**Computer** ("+strings.Join(desktopRefs, ", ")+"): Whole-desktop fallback for native dialogs, non-browser apps, or when the browser path fails. Start with a snapshot to get an accessibility tree with element refs, then drive actions with those refs; raw coordinates are a last-resort fallback.")
+		parts = append(parts, "**Computer** ("+strings.Join(desktopRefs, ", ")+"): Native applications and dialogs on the workspace desktop. Select an application first when several are open, take a snapshot to get refs (with geometry, states, and actions=), then act with those refs; raw coordinates are a last-resort fallback.")
 	case 1:
 		if ref, ok := available.Ref(ToolComputerObserve()); ok {
 			parts = append(parts, "**Computer** ("+ref+"): Whole-desktop fallback for native dialogs, non-browser apps, or when the browser path fails.")
@@ -114,7 +114,7 @@ func (*BrowserProvider) Usage(_ context.Context, session SessionContext, availab
 		return ""
 	}
 	return usageSection("Workspace browser & desktop", append([]string{
-		"This bot has a headed workspace display (Chrome on a virtual desktop). Use GUI tools only when the task needs on-screen interaction.",
+		"This bot has a headed workspace display (Chrome on a virtual desktop). Use GUI tools only when the task needs on-screen interaction. They always act on the bot's native workspace, never on a connected computer.",
 	}, parts...))
 }
 
@@ -136,8 +136,16 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 	sess := session
 	return []sdk.Tool{
 		{
+			Name:        ToolComputerContext().String(),
+			Description: "Discover and select the targets of the GUI tools: running applications on the workspace desktop (app_id) and workspace browsers with their tabs (browser_id, tab_id). get_app and get_browser make a target this conversation's default and return an initial observation; get_state reports everything with per-domain errors; documentation returns the exact action contracts and backend capabilities. Nothing here clicks, types, or navigates.",
+			Parameters:  computerContextContract.schema(computerContextContract.actionDescription("Context action to perform:")),
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				return p.execComputerContext(ctx.Context, sess, inputAsMap(input))
+			},
+		},
+		{
 			Name:        ToolBrowserAction().String(),
-			Description: "Operate the current workspace browser tab. Prefer element refs from an observation result over CSS selectors; use selectors only as a fallback and viewport x/y only when no element target applies. Use fill to replace or clear a value, type to insert at the caret, and press for shortcuts or submit keys. Each action accepts only the parameters listed for it; anything else is rejected before the browser is touched. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
+			Description: "Operate a workspace browser tab. Prefer element refs from an observation of the same tab over CSS selectors; use selectors only as a fallback and viewport x/y only when no element target applies. Use fill to replace or clear a value, set_value to set it programmatically, type to insert at the caret, paste for clipboard-style input, select_text to select or place the caret, and press for shortcuts or submit keys. Each action accepts only the parameters listed for it; anything else is rejected before the browser is touched. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
 			Parameters:  browserActionContract.schema(browserActionContract.actionDescription("Browser action to perform:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execBrowserAction(ctx.Context, sess, inputAsMap(input))
@@ -145,7 +153,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        ToolBrowserObserve().String(),
-			Description: "Inspect the current workspace browser without changing page state. Prefer snapshot for interactive elements and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are saved to a workspace path and are not attached automatically.",
+			Description: "Inspect a workspace browser tab without changing page state. Prefer snapshot for interactive elements (it returns a snapshot_id that its refs belong to) and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are saved to a workspace path and are not attached automatically.",
 			Parameters:  browserObserveContract.schema(browserObserveContract.actionDescription("What to observe from the page:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execBrowserObserve(ctx.Context, sess, inputAsMap(input))
@@ -153,7 +161,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        ToolComputerObserve().String(),
-			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility listing of on-screen UI elements with refs, geometry, and states for later desktop actions. Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and is not attached automatically.",
+			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility listing of on-screen UI elements with refs, geometry, states, and available actions, bound to a snapshot_id; pass app_id to scope it to one application. Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and is not attached automatically.",
 			Parameters:  computerObserveContract.schema(computerObserveContract.actionDescription("What to observe from the desktop:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execComputerObserve(ctx.Context, sess, inputAsMap(input))
@@ -161,7 +169,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        ToolComputerAction().String(),
-			Description: "Drive the workspace desktop. Prefer refs from a desktop observation snapshot for click/double_click/type/fill/scroll; coordinates (x, y) are only a fallback when no ref applies (native dialogs, raw drags, pointer hovers). Each action accepts only the parameters listed for it. For in-page browser targets, prefer browser-specific actions when they are available.",
+			Description: "Drive the workspace desktop. Prefer refs from a desktop observation snapshot (they are bound to that snapshot_id and application); coordinates (x, y) are only a fallback when no ref applies (native dialogs, raw drags, pointer hovers). Each action accepts only the parameters listed for it. For in-page browser targets, prefer browser-specific actions when they are available.",
 			Parameters:  computerActionContract.schema(computerActionContract.actionDescription("Desktop action to perform:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execComputerAction(ctx.Context, sess, inputAsMap(input))
@@ -169,7 +177,7 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 		},
 		{
 			Name:        ToolBrowserRemoteSession().String(),
-			Description: "Advanced escape hatch for code-driven automation. Exposes the workspace Chrome CDP endpoint for chromium.connectOverCDP or other CDP clients.",
+			Description: "Advanced escape hatch for code-driven automation. Exposes a workspace browser's CDP endpoint for chromium.connectOverCDP or other CDP clients running inside the workspace. The endpoint is browser-wide: it is not scoped to one tab and cannot be revoked independently of the browser.",
 			Parameters:  browserRemoteSessionContract.schema(browserRemoteSessionContract.actionDescription("Session action to perform:")),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execRemoteSession(ctx.Context, sess, inputAsMap(input))
@@ -214,10 +222,13 @@ func (p *BrowserProvider) execBrowserObserve(ctx context.Context, session Sessio
 		return nil, err
 	}
 	payload := map[string]any{"action": spec.Name}
-	for _, key := range []string{"ref", "selector", "script"} {
+	for _, key := range []string{"ref", "selector", "script", "browser_id", "tab_id", "snapshot_id"} {
 		if v := StringArg(args, key); v != "" {
 			payload[key] = v
 		}
+	}
+	if v, ok, _ := IntArg(args, "tab_index"); ok {
+		payload["tab_index"] = v
 	}
 	if v, ok, _ := BoolArg(args, "full_page"); ok {
 		payload["full_page"] = v
@@ -234,9 +245,17 @@ func (p *BrowserProvider) runBrowser(ctx context.Context, session SessionContext
 	if err := p.ensureDisplayEnabled(ctx, botID); err != nil {
 		return nil, err
 	}
+	if p.containers == nil {
+		return nil, errors.New("workspace runtime provider is not configured")
+	}
+	client, err := p.containers.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	state := p.sessions.get(session)
 	runCtx, cancel := context.WithTimeout(ctx, browserToolTimeout)
 	defer cancel()
-	data, err := p.runCDPAction(runCtx, botID, args)
+	data, err := p.runCDPAction(runCtx, client, state, args)
 	if err != nil {
 		return nil, err
 	}
@@ -255,43 +274,714 @@ func (p *BrowserProvider) execRemoteSession(ctx context.Context, session Session
 	if err := p.ensureDisplayEnabled(ctx, botID); err != nil {
 		return nil, err
 	}
-	client, err := p.ensureCDP(ctx, botID)
+	if p.containers == nil {
+		return nil, errors.New("workspace runtime provider is not configured")
+	}
+	client, err := p.containers.MCPClient(ctx, botID)
+	if err != nil {
+		return nil, err
+	}
+	state := p.sessions.get(session)
+	browser, err := p.resolveBrowser(ctx, client, state, StringArg(args, "browser_id"))
 	if err != nil {
 		return nil, err
 	}
 	switch spec.Name {
 	case "create":
 		targetURL := StringArg(args, "url")
-		target, err := p.createOrActiveTarget(ctx, client, targetURL)
+		var target cdpTarget
+		created := false
+		if strings.TrimSpace(targetURL) != "" {
+			target, err = p.createTarget(ctx, client, browser, targetURL)
+			created = true
+		} else {
+			var tab resolvedTab
+			tab, err = p.resolveTab(ctx, client, state, map[string]any{"browser_id": browser.ID})
+			target = tab.Target
+		}
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{
 			"id":                      target.ID,
 			"session_id":              target.ID,
+			"browser_id":              browser.ID,
+			"tab_id":                  target.ID,
+			"created_tab":             created,
 			"status":                  "active",
-			"cdp_url":                 browserCDPBaseURL,
+			"scope":                   "browser-wide CDP endpoint; not revocable independently of the browser",
+			"cdp_url":                 browser.baseURL(),
 			"ws_endpoint":             target.WebSocketDebuggerURL,
 			"web_socket_debugger_url": target.WebSocketDebuggerURL,
-			"connect_over_cdp":        browserCDPBaseURL,
+			"connect_over_cdp":        browser.baseURL(),
 			"target":                  target.publicMap(),
 		}, nil
 	case "status":
-		targets, err := p.listTargets(ctx, client)
+		targets, err := p.listTargets(ctx, client, browser)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{
 			"status":           "active",
-			"cdp_url":          browserCDPBaseURL,
-			"connect_over_cdp": browserCDPBaseURL,
+			"browser_id":       browser.ID,
+			"cdp_url":          browser.baseURL(),
+			"connect_over_cdp": browser.baseURL(),
 			"targets":          publicTargets(targets),
 		}, nil
 	case "close":
-		return p.closeTarget(ctx, client, StringArg(args, "session_id"))
+		id := StringArg(args, "session_id")
+		result, err := p.closeTarget(ctx, client, browser, id)
+		if err != nil {
+			return nil, err
+		}
+		state.forgetTab(id)
+		return result, nil
 	default:
 		return nil, fmt.Errorf("unknown session action: %s", spec.Name)
 	}
+}
+
+// runCDPAction dispatches one validated browser call. Tab-management
+// actions resolve their own targets; page actions freeze one tab first.
+func (p *BrowserProvider) runCDPAction(ctx context.Context, client *bridge.Client, state *guiSessionState, args map[string]any) (map[string]any, error) {
+	action := normalizeBrowserAction(StringArg(args, "action"))
+	if isCDPTabAction(action) {
+		return p.runCDPTabAction(ctx, client, state, action, args)
+	}
+	tab, page, err := p.connectTab(ctx, client, state, args)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = page.conn.Close() }()
+	result, err := p.runPageAction(ctx, state, tab, page, action, args)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range tab.identity() {
+		if _, exists := result[k]; !exists {
+			result[k] = v
+		}
+	}
+	return result, nil
+}
+
+func (p *BrowserProvider) runPageAction(ctx context.Context, state *guiSessionState, tab resolvedTab, page *cdpPage, action string, args map[string]any) (map[string]any, error) {
+	switch action {
+	case "navigate":
+		targetURL := StringArg(args, "url")
+		timeout, err := browserReadyTimeout(args)
+		if err != nil {
+			return nil, err
+		}
+		result, err := page.conn.Call(ctx, "Page.navigate", map[string]any{"url": targetURL})
+		if err != nil {
+			return nil, err
+		}
+		state.invalidateBrowserSnapshot(tab.Target.ID)
+		nav := map[string]any{}
+		_ = jsonUnmarshalLoose(result, &nav)
+		if errText, ok := nav["errorText"].(string); ok && strings.TrimSpace(errText) != "" {
+			return nil, fmt.Errorf("navigate to %s failed: %s", targetURL, errText)
+		}
+		if err := page.waitReady(ctx, timeout); err != nil {
+			return nil, fmt.Errorf("navigate to %s: %w", targetURL, err)
+		}
+		currentURL, _ := page.evaluateString(ctx, "location.href")
+		nav["url"] = currentURL
+		nav["timeout_ms"] = timeout
+		return nav, nil
+	case "click", "double_click":
+		count, err := guiClickCount(args, action)
+		if err != nil {
+			return nil, err
+		}
+		button := browserButton(args)
+		target, point, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
+		if err != nil {
+			return nil, err
+		}
+		if err := page.mouseClick(ctx, point.X, point.Y, button, count); err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"clicked": target.labelOr("point"), "x": point.X, "y": point.Y, "button": button, "click_count": count}), nil
+	case "focus":
+		target := browserTargetArg(args, "selector", "ref")
+		var out struct {
+			Focused bool   `json:"focused"`
+			Active  string `json:"active"`
+		}
+		if err := page.evaluateObject(ctx, fmt.Sprintf(`memohFocus(%s)`, page.expr(target)), &out); err != nil {
+			return nil, err
+		}
+		if !out.Focused {
+			return nil, fmt.Errorf("%s did not receive focus; the active element is %s", target.label(), out.Active)
+		}
+		return target.withResult(map[string]any{"focused": target.label(), "active": out.Active}), nil
+	case "type":
+		target := browserTargetArg(args, "selector", "ref")
+		text := rawStringArg(args, "text")
+		if _, err := page.evaluate(ctx, fmt.Sprintf(`(() => { const el = %s; el.focus(); return true })()`, page.expr(target))); err != nil {
+			return nil, err
+		}
+		if err := page.insertText(ctx, text); err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"typed": text}), nil
+	case "fill":
+		target := browserTargetArg(args, "selector", "ref")
+		text := rawStringArg(args, "text")
+		var selected struct {
+			Kind   string `json:"kind"`
+			Length int    `json:"length"`
+		}
+		if err := page.evaluateObject(ctx, fmt.Sprintf(`memohSelectAll(%s)`, page.expr(target)), &selected); err != nil {
+			return nil, err
+		}
+		if text == "" {
+			if _, err := page.evaluate(ctx, fmt.Sprintf(`memohDeleteSelection(%s)`, page.expr(target))); err != nil {
+				return nil, err
+			}
+		} else if err := page.insertText(ctx, text); err != nil {
+			return nil, err
+		}
+		value, err := page.evaluateString(ctx, fmt.Sprintf(`memohCurrentValue(%s)`, page.expr(target)))
+		if err != nil {
+			return nil, err
+		}
+		if value != text {
+			return nil, fmt.Errorf("fill did not take: %s now holds %q instead of %q (the page may have rewritten it); try set_value", target.label(), value, text)
+		}
+		return target.withResult(map[string]any{"filled": text, "value": value, "kind": selected.Kind, "replaced_chars": selected.Length}), nil
+	case "set_value":
+		target := browserTargetArg(args, "selector", "ref")
+		value := rawStringArg(args, "value")
+		var out struct {
+			Kind  string `json:"kind"`
+			Value string `json:"value"`
+		}
+		if err := page.evaluateObject(ctx, fmt.Sprintf(`memohSetValue(%s, %s)`, page.expr(target), jsQuote(value)), &out); err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"set_value": value, "value": out.Value, "kind": out.Kind}), nil
+	case "paste":
+		return p.browserPaste(ctx, page, args)
+	case "select_text":
+		target := browserTargetArg(args, "selector", "ref")
+		mode := StringArg(args, "selection_type")
+		if mode == "" {
+			mode = "text"
+		}
+		var out map[string]any
+		if err := page.evaluateObject(ctx, fmt.Sprintf(`memohSelectText(%s, %s, %s, %s, %s)`, page.expr(target), jsQuote(rawStringArg(args, "text")), jsQuote(rawStringArg(args, "prefix")), jsQuote(rawStringArg(args, "suffix")), jsQuote(mode)), &out); err != nil {
+			return nil, err
+		}
+		if out == nil {
+			out = map[string]any{}
+		}
+		out["selection_type"] = mode
+		return target.withResult(out), nil
+	case "secondary_action":
+		target := browserTargetArg(args, "selector", "ref")
+		return nil, fmt.Errorf("the browser backend exposes no secondary actions for %s (name %q): the DOM carries no accessibility actions; use click, press, or the element's own controls", target.label(), StringArg(args, "name"))
+	case "press":
+		key := StringArg(args, "key")
+		if err := page.pressKey(ctx, key, state.heldModifiers()); err != nil {
+			return nil, err
+		}
+		return map[string]any{"pressed": key}, nil
+	case "keyboard_type":
+		text := rawStringArg(args, "text")
+		if err := page.insertText(ctx, text); err != nil {
+			return nil, err
+		}
+		return map[string]any{"inserted_text": text}, nil
+	case "keydown":
+		key := StringArg(args, "key")
+		state.holdKey(key)
+		if err := page.dispatchKeyWithModifiers(ctx, key, true, state.heldModifiers()); err != nil {
+			state.releaseKey(key)
+			return nil, err
+		}
+		return map[string]any{"keydown": key, "held": heldKeyList(state)}, nil
+	case "keyup":
+		key := StringArg(args, "key")
+		state.releaseKey(key)
+		if err := page.dispatchKeyWithModifiers(ctx, key, false, state.heldModifiers()); err != nil {
+			return nil, err
+		}
+		return map[string]any{"keyup": key, "held": heldKeyList(state)}, nil
+	case "hover":
+		target, point, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
+		if err != nil {
+			return nil, err
+		}
+		if err := page.mouseMove(ctx, point.X, point.Y); err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"hovered": target.labelOr("point"), "x": point.X, "y": point.Y}), nil
+	case "select":
+		target := browserTargetArg(args, "selector", "ref")
+		value := rawStringArg(args, "value")
+		result, err := page.evaluate(ctx, fmt.Sprintf(`(() => {
+const el = %s;
+const value = %s;
+if (!(el instanceof HTMLSelectElement)) throw new Error("element is not a select: " + %s);
+const option = Array.from(el.options).find(o => o.value === value);
+if (!option) throw new Error("select has no option with value " + JSON.stringify(value));
+el.value = value;
+el.dispatchEvent(new Event("input", { bubbles: true }));
+el.dispatchEvent(new Event("change", { bubbles: true }));
+return el.value;
+})()`, page.expr(target), jsQuote(value), jsQuote(target.label())))
+		if err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"selected": result}), nil
+	case "check", "uncheck":
+		target := browserTargetArg(args, "selector", "ref")
+		checked := action == "check"
+		result, err := page.evaluate(ctx, fmt.Sprintf(`(() => {
+const el = %s;
+if (!(el instanceof HTMLInputElement) || (el.type !== "checkbox" && el.type !== "radio")) throw new Error("element is not a checkbox or radio: " + %s);
+if (el.checked !== %t) {
+  el.click();
+}
+if (el.checked !== %t) throw new Error("control did not change to checked=" + %t);
+return el.checked;
+})()`, page.expr(target), jsQuote(target.label()), checked, checked, checked))
+		if err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{action + "ed": target.label(), "checked": result}), nil
+	case "screenshot":
+		fullPage, _, _ := BoolArg(args, "full_page")
+		b64, err := page.captureScreenshot(ctx, fullPage)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"screenshot": b64, "mimeType": "image/png", "full_page": fullPage}, nil
+	case "screenshot_annotate":
+		snapshotID := newBrowserSnapshotID()
+		annotations, err := page.annotate(ctx, snapshotID)
+		if err != nil {
+			return nil, err
+		}
+		b64, captureErr := page.captureScreenshot(ctx, false)
+		removeErr := page.removeAnnotations(ctx)
+		if captureErr != nil {
+			return nil, captureErr
+		}
+		if removeErr != nil {
+			p.logger.Debug("remove browser annotations failed", slog.Any("error", removeErr))
+		}
+		state.recordBrowserSnapshot(guiSnapshotRecord{ID: snapshotID, BrowserID: tab.Browser.ID, TabID: tab.Target.ID, Taken: time.Now()})
+		return map[string]any{"screenshot": b64, "mimeType": "image/png", "annotations": annotations, "snapshot_id": snapshotID}, nil
+	case "snapshot":
+		snapshotID := newBrowserSnapshotID()
+		items, truncated, err := page.takeSnapshot(ctx, snapshotID, 300)
+		if err != nil {
+			return nil, err
+		}
+		state.recordBrowserSnapshot(guiSnapshotRecord{ID: snapshotID, BrowserID: tab.Browser.ID, TabID: tab.Target.ID, Taken: time.Now()})
+		return map[string]any{"snapshot": formatBrowserSnapshot(items, truncated), "snapshot_id": snapshotID, "ref_count": len(items), "truncated": truncated}, nil
+	case "get_content":
+		target := browserTargetArg(args, "selector", "ref")
+		expr := `document.body ? document.body.innerText : ""`
+		if target.present() {
+			expr = page.expr(target) + `.innerText`
+		}
+		text, err := page.evaluateString(ctx, expr)
+		if err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"content": text}), nil
+	case "get_html":
+		target := browserTargetArg(args, "selector", "ref")
+		expr := `document.documentElement ? document.documentElement.outerHTML : ""`
+		if target.present() {
+			expr = page.expr(target) + `.innerHTML`
+		}
+		html, err := page.evaluateString(ctx, expr)
+		if err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"html": html}), nil
+	case "evaluate":
+		result, err := page.evaluate(ctx, StringArg(args, "script"))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"result": result}, nil
+	case "scroll":
+		return page.scroll(ctx, args)
+	case "scroll_into_view":
+		target := browserTargetArg(args, "selector", "ref")
+		_, err := page.evaluate(ctx, fmt.Sprintf(`(() => { %s.scrollIntoView({ block: "center", inline: "center" }); return true })()`, page.expr(target)))
+		if err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"scrolled_into_view": target.label()}), nil
+	case "drag":
+		sourceTarget, source, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
+		if err != nil {
+			return nil, err
+		}
+		dropTarget, drop, err := page.resolvePoint(ctx, args, "target_selector", "target_ref", "to_x", "to_y")
+		if err != nil {
+			return nil, err
+		}
+		button := browserButton(args)
+		if err := page.mouseDrag(ctx, source.X, source.Y, drop.X, drop.Y, button); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"dragged": sourceTarget.labelOr("point"), "target": dropTarget.labelOr("point"), "button": button,
+			"ref": sourceTarget.Ref, "selector": sourceTarget.Selector, "x": source.X, "y": source.Y,
+			"target_ref": dropTarget.Ref, "target_selector": dropTarget.Selector, "to_x": drop.X, "to_y": drop.Y,
+		}, nil
+	case "upload":
+		target := browserTargetArg(args, "selector", "ref")
+		files := stringSliceArg(args, "files")
+		if len(files) == 0 {
+			return nil, errors.New("files is required for upload")
+		}
+		if err := page.setInputFiles(ctx, target, files); err != nil {
+			return nil, err
+		}
+		return target.withResult(map[string]any{"uploaded": files}), nil
+	case "wait":
+		target := browserTargetArg(args, "selector", "ref")
+		if target.present() {
+			timeout, err := browserReadyTimeout(args)
+			if err != nil {
+				return nil, err
+			}
+			if err := page.waitTarget(ctx, target, timeout); err != nil {
+				return nil, err
+			}
+			return target.withResult(map[string]any{"waited_for": target.label(), "timeout_ms": timeout}), nil
+		}
+		ms, err := browserWaitDuration(args)
+		if err != nil {
+			return nil, err
+		}
+		if err := sleepContext(ctx, time.Duration(ms)*time.Millisecond); err != nil {
+			return nil, err
+		}
+		return map[string]any{"waited_ms": ms}, nil
+	case "go_back", "go_forward":
+		timeout, err := browserReadyTimeout(args)
+		if err != nil {
+			return nil, err
+		}
+		if err := page.navigateHistory(ctx, action == "go_forward"); err != nil {
+			return nil, err
+		}
+		state.invalidateBrowserSnapshot(tab.Target.ID)
+		if err := page.waitReady(ctx, timeout); err != nil {
+			return nil, fmt.Errorf("%s: %w", action, err)
+		}
+		currentURL, _ := page.evaluateString(ctx, "location.href")
+		return map[string]any{"url": currentURL, "timeout_ms": timeout}, nil
+	case "reload":
+		timeout, err := browserReadyTimeout(args)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := page.conn.Call(ctx, "Page.reload", nil); err != nil {
+			return nil, err
+		}
+		state.invalidateBrowserSnapshot(tab.Target.ID)
+		if err := page.waitReady(ctx, timeout); err != nil {
+			return nil, fmt.Errorf("reload: %w", err)
+		}
+		currentURL, _ := page.evaluateString(ctx, "location.href")
+		return map[string]any{"url": currentURL, "timeout_ms": timeout}, nil
+	case "get_url":
+		currentURL, err := page.evaluateString(ctx, "location.href")
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"url": currentURL}, nil
+	case "get_title":
+		title, err := page.evaluateString(ctx, "document.title")
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"title": title}, nil
+	case "pdf":
+		result, err := page.conn.Call(ctx, "Page.printToPDF", map[string]any{"printBackground": true})
+		if err != nil {
+			return nil, err
+		}
+		var out struct {
+			Data string `json:"data"`
+		}
+		if err := jsonUnmarshalLoose(result, &out); err != nil {
+			return nil, err
+		}
+		return map[string]any{"pdf": out.Data, "mimeType": "application/pdf"}, nil
+	default:
+		return nil, fmt.Errorf("unknown browser action: %s", action)
+	}
+}
+
+func heldKeyList(state *guiSessionState) []string {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	keys := make([]string, 0, len(state.heldKeys))
+	for key := range state.heldKeys {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// scroll scrolls the page, an element, or at a point by pixels or by pages
+// of the target's visible area.
+func (p *cdpPage) scroll(ctx context.Context, args map[string]any) (map[string]any, error) {
+	direction := StringArg(args, "direction")
+	if direction == "" {
+		direction = "down"
+	}
+	target := browserTargetArg(args, "selector", "ref")
+	pages, hasPages, err := floatArg(args, "pages")
+	if err != nil {
+		return nil, err
+	}
+	amount, err := intArgOr(args, "amount", browserDefaultScrollAmount)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]any{"direction": direction}
+	if hasPages {
+		// Convert pages into pixels using the target's own visible size.
+		sizeExpr := `({ w: window.innerWidth, h: window.innerHeight })`
+		if target.present() {
+			sizeExpr = fmt.Sprintf(`(() => { const el = %s; return { w: el.clientWidth, h: el.clientHeight }; })()`, p.expr(target))
+		}
+		var size struct {
+			W float64 `json:"w"`
+			H float64 `json:"h"`
+		}
+		if err := p.evaluateObject(ctx, sizeExpr, &size); err != nil {
+			return nil, err
+		}
+		extent := size.H
+		if direction == "left" || direction == "right" {
+			extent = size.W
+		}
+		if extent <= 0 {
+			return nil, errors.New("the scroll target has no visible area to measure pages against")
+		}
+		amount = int(math.Round(pages * extent))
+		if amount < 1 {
+			amount = 1
+		}
+		result["pages"] = pages
+		result["page_extent"] = extent
+	}
+	result["amount"] = amount
+	if target.present() {
+		var out struct {
+			Before float64 `json:"before"`
+			After  float64 `json:"after"`
+		}
+		if err := p.evaluateObject(ctx, fmt.Sprintf(`(() => {
+const el = %s;
+const dx = %d, dy = %d;
+const before = dx !== 0 ? el.scrollLeft : el.scrollTop;
+el.scrollBy(dx, dy);
+const after = dx !== 0 ? el.scrollLeft : el.scrollTop;
+return { before, after };
+})()`, p.expr(target), scrollDeltaX(direction, amount), scrollDeltaY(direction, amount)), &out); err != nil {
+			return nil, err
+		}
+		result["scrolled"] = target.label()
+		result["scroll_before"] = out.Before
+		result["scroll_after"] = out.After
+		return target.withResult(result), nil
+	}
+	var point elementPoint
+	if x, y, ok := optionalFloatPoint(args, "x", "y"); ok {
+		point = elementPoint{X: x, Y: y}
+		result["scrolled"] = "point"
+	} else {
+		point, err = p.viewportCenter(ctx)
+		if err != nil {
+			return nil, err
+		}
+		result["scrolled"] = "page"
+	}
+	if err := p.mouseWheel(ctx, point.X, point.Y, scrollDeltaX(direction, amount), scrollDeltaY(direction, amount)); err != nil {
+		return nil, err
+	}
+	result["x"], result["y"] = point.X, point.Y
+	return result, nil
+}
+
+// browserPaste pastes text into a page element or the focused element. It
+// dispatches a real paste event first (so editors that handle paste get the
+// rich payload); when nothing consumes it, html is inserted through
+// insertHTML for contenteditable targets and plain text is inserted through
+// the input pipeline otherwise.
+func (*BrowserProvider) browserPaste(ctx context.Context, page *cdpPage, args map[string]any) (map[string]any, error) {
+	target := browserTargetArg(args, "selector", "ref")
+	text := rawStringArg(args, "text")
+	format := StringArg(args, "format")
+	if format == "" {
+		format = "text"
+	}
+	html := ""
+	if format == "html" {
+		html = text
+	}
+	targetExpr := "null"
+	if target.present() {
+		targetExpr = page.expr(target)
+	}
+	var pasted struct {
+		Consumed bool   `json:"consumed"`
+		Kind     string `json:"kind"`
+		Target   string `json:"target"`
+	}
+	plain := text
+	if format == "html" {
+		plain = htmlToText(text)
+	}
+	if err := page.evaluateObject(ctx, fmt.Sprintf(`memohPaste(%s, %s, %s)`, targetExpr, jsQuote(plain), jsQuote(html)), &pasted); err != nil {
+		return nil, err
+	}
+	result := target.withResult(map[string]any{"pasted": text, "format": format, "target": pasted.Target})
+	switch {
+	case pasted.Consumed:
+		result["via"] = "paste_event"
+	case format == "html" && pasted.Kind == "contenteditable":
+		var inserted struct {
+			Inserted bool `json:"inserted"`
+		}
+		if err := page.evaluateObject(ctx, fmt.Sprintf(`memohInsertHTML(%s, %s)`, targetExpr, jsQuote(html)), &inserted); err != nil {
+			return nil, err
+		}
+		if !inserted.Inserted {
+			return nil, errors.New("the editable target did not accept rich text (insertHTML refused) and no paste handler consumed it")
+		}
+		result["via"] = "insert_html"
+	case pasted.Kind == "":
+		return nil, fmt.Errorf("%s is not editable and nothing on the page consumed the paste event", pasted.Target)
+	default:
+		if format == "html" {
+			result["rich_text"] = "not supported by this target; pasted as plain text"
+		}
+		if err := page.insertText(ctx, plain); err != nil {
+			return nil, err
+		}
+		result["via"] = "insert_text"
+	}
+	return result, nil
+}
+
+// htmlToText is the plain-text companion of an html paste: tags dropped,
+// block boundaries kept as newlines.
+func htmlToText(html string) string {
+	replacer := strings.NewReplacer("<br>", "\n", "<br/>", "\n", "<br />", "\n", "</p>", "\n", "</div>", "\n", "</li>", "\n", "</h1>", "\n", "</h2>", "\n", "</h3>", "\n")
+	text := replacer.Replace(html)
+	var b strings.Builder
+	inTag := false
+	for _, r := range text {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	out := strings.NewReplacer("&nbsp;", " ", "&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'").Replace(b.String())
+	return strings.TrimSpace(out)
+}
+
+func isCDPTabAction(action string) bool {
+	switch action {
+	case "tab_new", "tab_select", "tab_close", "tab_list":
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Client, state *guiSessionState, action string, args map[string]any) (map[string]any, error) {
+	switch action {
+	case "tab_new":
+		browser, err := p.resolveBrowser(ctx, client, state, StringArg(args, "browser_id"))
+		if err != nil {
+			return nil, err
+		}
+		newTarget, err := p.createTarget(ctx, client, browser, StringArg(args, "url"))
+		if err != nil {
+			return nil, err
+		}
+		state.selectTab(browser.ID, newTarget.ID)
+		targets, _ := p.listTargets(ctx, client, browser)
+		return map[string]any{"browser_id": browser.ID, "tab_id": newTarget.ID, "tab_index": targetIndex(targets, newTarget.ID), "target": newTarget.publicMap(), "url": newTarget.URL, "selected": true}, nil
+	case "tab_select":
+		tab, err := p.resolveTab(ctx, client, state, args)
+		if err != nil {
+			return nil, err
+		}
+		if err := p.activateTarget(ctx, client, tab.Browser, tab.Target.ID); err != nil {
+			return nil, err
+		}
+		state.selectTab(tab.Browser.ID, tab.Target.ID)
+		targets, _ := p.listTargets(ctx, client, tab.Browser)
+		return map[string]any{"browser_id": tab.Browser.ID, "tab_id": tab.Target.ID, "tab_index": targetIndex(targets, tab.Target.ID), "target": tab.Target.publicMap(), "url": tab.Target.URL, "title": tab.Target.Title, "activated": true}, nil
+	case "tab_close":
+		tab, err := p.resolveTab(ctx, client, state, args)
+		if err != nil {
+			return nil, err
+		}
+		targets, _ := p.listTargets(ctx, client, tab.Browser)
+		result, err := p.closeTarget(ctx, client, tab.Browser, tab.Target.ID)
+		if err != nil {
+			return nil, err
+		}
+		state.forgetTab(tab.Target.ID)
+		return map[string]any{"browser_id": tab.Browser.ID, "tab_id": tab.Target.ID, "closed": targetIndex(targets, tab.Target.ID), "result": result}, nil
+	case "tab_list":
+		browser, err := p.resolveBrowser(ctx, client, state, StringArg(args, "browser_id"))
+		if err != nil {
+			return nil, err
+		}
+		targets, err := p.listTargets(ctx, client, browser)
+		if err != nil {
+			return nil, err
+		}
+		_, selectedTab, _ := state.defaults()
+		return map[string]any{"browser_id": browser.ID, "tabs": publicTargets(targets), "selected_tab_id": selectedTab}, nil
+	default:
+		return nil, fmt.Errorf("unknown browser tab action: %s", action)
+	}
+}
+
+func (p *BrowserProvider) browserActionResult(ctx context.Context, botID string, data map[string]any) any {
+	if b64, ok := data["screenshot"].(string); ok && b64 != "" {
+		return p.buildScreenshotResult(ctx, botID, b64, p.screenshotDir(), data)
+	}
+	return data
+}
+
+var browserSnapshotCounter struct {
+	mu sync.Mutex
+	n  uint64
+}
+
+// newBrowserSnapshotID mints a per-process unique snapshot id for a browser
+// observation: time-based so ids from different server runs never collide.
+func newBrowserSnapshotID() string {
+	browserSnapshotCounter.mu.Lock()
+	defer browserSnapshotCounter.mu.Unlock()
+	browserSnapshotCounter.n++
+	return fmt.Sprintf("b%x-%x", time.Now().UnixMilli(), browserSnapshotCounter.n)
 }
 
 func (p *BrowserProvider) execComputerObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
@@ -307,7 +997,7 @@ func (p *BrowserProvider) execComputerObserve(ctx context.Context, session Sessi
 		if err != nil {
 			return nil, err
 		}
-		return p.execComputerSnapshot(ctx, session, limit)
+		return p.execComputerSnapshot(ctx, session, limit, StringArg(args, "app_id"))
 	default:
 		return nil, fmt.Errorf("unknown computer observe: %s", spec.Name)
 	}
@@ -328,7 +1018,9 @@ func (p *BrowserProvider) execComputerScreenshot(ctx context.Context, session Se
 	return p.buildScreenshotBytesResult(ctx, botID, img, mime, p.screenshotDir(), nil), nil
 }
 
-func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session SessionContext, limit int) (any, error) {
+// execComputerSnapshot observes the desktop or one application. Without an
+// explicit app_id the session's selected application (if any) is used.
+func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session SessionContext, limit int, appID string) (any, error) {
 	botID, err := p.requireComputerDisplay(session)
 	if err != nil {
 		return nil, err
@@ -337,26 +1029,73 @@ func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session Sess
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := computerA11ySnapshot(ctx, client, limit)
+	state := p.sessions.get(session)
+	if appID = strings.TrimSpace(appID); appID == "" {
+		_, _, appID = state.defaults()
+	}
+	snapshot, err := computerA11ySnapshot(ctx, client, limit, appID)
 	if err != nil {
 		return nil, err
 	}
+	state.recordComputerSnapshot(guiSnapshotRecord{ID: snapshot.SnapshotID, AppID: appID, Taken: time.Now()})
 	p.logger.Debug("computer snapshot",
 		slog.String("bot_id", botID),
 		slog.String("helper_version", snapshot.HelperVersion),
+		slog.String("snapshot_id", snapshot.SnapshotID),
+		slog.String("app_id", appID),
 		slog.String("bus_address", snapshot.Diagnostics.BusAddress),
 		slog.String("display", snapshot.Diagnostics.Display),
 		slog.Int("accepted", snapshot.Diagnostics.Accepted),
 		slog.Bool("truncated", snapshot.Truncated),
 	)
-	return map[string]any{
+	out := map[string]any{
 		"snapshot":       snapshot.text(),
+		"snapshot_id":    snapshot.SnapshotID,
 		"ref_count":      len(snapshot.Items),
 		"limit":          snapshot.Limit,
 		"truncated":      snapshot.Truncated,
 		"helper_version": snapshot.HelperVersion,
 		"diagnostics":    snapshot.Diagnostics.public(),
-	}, nil
+	}
+	if snapshot.App != nil {
+		out["app_id"] = snapshot.App.AppID
+		out["app_name"] = snapshot.App.Name
+	} else {
+		out["scope"] = "desktop"
+	}
+	return out, nil
+}
+
+// computerActionTarget resolves the application and snapshot a ref-based
+// desktop action is bound to. Refs are only accepted together with the
+// snapshot they came from: the explicit snapshot_id, else the session's
+// latest desktop snapshot, which must have covered the requested application.
+func (*BrowserProvider) computerActionTarget(state *guiSessionState, args map[string]any, needsRef bool) (appID, snapshotID string, err error) {
+	appID = strings.TrimSpace(StringArg(args, "app_id"))
+	_, _, sessionApp := state.defaults()
+	if appID == "" {
+		appID = sessionApp
+	}
+	snapshotID = strings.TrimSpace(StringArg(args, "snapshot_id"))
+	if !needsRef {
+		return appID, snapshotID, nil
+	}
+	if snapshotID != "" {
+		return appID, snapshotID, nil
+	}
+	rec, ok := state.lastComputerSnapshot()
+	if !ok {
+		return "", "", errors.New("no desktop snapshot has been taken in this conversation; observe with computer_observe snapshot (or computer_context get_app) before using refs")
+	}
+	if appID != "" && rec.AppID != "" && rec.AppID != appID {
+		return "", "", fmt.Errorf("the latest snapshot in this conversation covered %s, not %s; observe %s before using its refs", rec.AppID, appID, appID)
+	}
+	if appID != "" && rec.AppID == "" {
+		// A whole-desktop snapshot covers every application; refs from it
+		// stay valid for the selected app.
+		return appID, rec.ID, nil
+	}
+	return appID, rec.ID, nil
 }
 
 func (p *BrowserProvider) execComputerAction(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
@@ -369,10 +1108,48 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		return nil, err
 	}
 	action := spec.Name
-	if _, err := p.ensureComputerDisplay(ctx, botID); err != nil {
+	client, err := p.ensureComputerDisplay(ctx, botID)
+	if err != nil {
 		return nil, err
 	}
+	state := p.sessions.get(session)
 	ref := normalizeBrowserRef(StringArg(args, "ref"))
+	appID, snapshotID, err := p.computerActionTarget(state, args, ref != "")
+	if err != nil {
+		return nil, err
+	}
+	result, err := p.runComputerAction(ctx, botID, client, state, action, args, ref, snapshotID)
+	if err != nil {
+		p.releaseHeldPointer(ctx, botID, state)
+		return nil, err
+	}
+	if appID != "" {
+		if _, exists := result["app_id"]; !exists {
+			result["app_id"] = appID
+		}
+	}
+	if ref != "" {
+		result["snapshot_id"] = snapshotID
+	}
+	return result, nil
+}
+
+// releaseHeldPointer sends a release for any pointer button the session left
+// held (mouse_move / pointer with a button mask) after an action failed, so a
+// timeout never leaves the desktop dragging.
+func (p *BrowserProvider) releaseHeldPointer(ctx context.Context, botID string, state *guiSessionState) {
+	mask := state.takeHeldButtons()
+	if mask == 0 {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if err := p.sendDisplayInputs(releaseCtx, botID, displaypkg.ControlInput{Type: "pointer", X: defaultComputerWidth / 2, Y: defaultComputerHeight / 2, ButtonMask: 0}); err != nil {
+		p.logger.Debug("release held pointer failed", slog.String("bot_id", botID), slog.Any("error", err))
+	}
+}
+
+func (p *BrowserProvider) runComputerAction(ctx context.Context, botID string, client *bridge.Client, state *guiSessionState, action string, args map[string]any, ref, snapshotID string) (map[string]any, error) {
 	switch action {
 	case "mouse_move", "pointer":
 		x, y, err := requiredPoint(args)
@@ -388,7 +1165,8 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		if err := p.sendDisplayInputs(ctx, botID, displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: mask}); err != nil {
 			return nil, err
 		}
-		return map[string]any{"moved": true, "x": x, "y": y, "button_mask": mask}, nil
+		state.setHeldButtons(mask)
+		return map[string]any{"moved": true, "x": x, "y": y, "button_mask": mask, "held": mask != 0}, nil
 	case "click", "double_click":
 		count, err := guiClickCount(args, action)
 		if err != nil {
@@ -396,7 +1174,7 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		}
 		mask := mouseButtonMask(StringArg(args, "button"))
 		if ref != "" {
-			return p.clickByRef(ctx, botID, ref, mask, count)
+			return p.clickByRef(ctx, botID, client, ref, snapshotID, mask, count)
 		}
 		x, y, err := requiredPoint(args)
 		if err != nil {
@@ -410,7 +1188,7 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		text := rawStringArg(args, "text")
 		replace := action == "fill"
 		if ref != "" {
-			return p.editByRef(ctx, botID, ref, text, replace)
+			return p.editByRef(ctx, botID, client, ref, snapshotID, text, replace)
 		}
 		if replace {
 			if err := p.replaceFocusedText(ctx, botID, text); err != nil {
@@ -422,6 +1200,54 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 			return nil, err
 		}
 		return map[string]any{"typed": text, "target": "focus", "via": "rfb"}, nil
+	case "set_value":
+		result, err := computerA11ySetValue(ctx, client, ref, rawStringArg(args, "value"), snapshotID)
+		if err != nil {
+			return nil, err
+		}
+		if !result.OK {
+			if result.Unsupported {
+				return nil, fmt.Errorf("set_value is not supported for %s: %s", ref, result.Error)
+			}
+			return nil, result.failure("set_value", ref)
+		}
+		return map[string]any{"set_value": rawStringArg(args, "value"), "ref": ref, "via": "a11y", "detail": result.Detail}, nil
+	case "paste":
+		return p.computerPaste(ctx, botID, client, args, ref, snapshotID)
+	case "select_text":
+		mode := StringArg(args, "selection_type")
+		if mode == "" {
+			mode = "text"
+		}
+		result, err := computerA11ySelectText(ctx, client, ref, rawStringArg(args, "text"), rawStringArg(args, "prefix"), rawStringArg(args, "suffix"), mode, snapshotID)
+		if err != nil {
+			return nil, err
+		}
+		if !result.OK {
+			if result.Unsupported {
+				return nil, fmt.Errorf("select_text is not supported for %s: %s", ref, result.Error)
+			}
+			return nil, result.failure("select_text", ref)
+		}
+		out := map[string]any{"ref": ref, "via": "a11y", "selection_type": mode, "detail": result.Detail}
+		if result.Selection != nil {
+			out["start"] = result.Selection.Start
+			out["end"] = result.Selection.End
+		}
+		return out, nil
+	case "secondary_action":
+		name := StringArg(args, "name")
+		result, err := computerA11yNamedAction(ctx, client, ref, name, snapshotID)
+		if err != nil {
+			return nil, err
+		}
+		if !result.OK {
+			if result.Unsupported {
+				return nil, fmt.Errorf("secondary action %q is not available on %s: %s", name, ref, result.Error)
+			}
+			return nil, result.failure("action", ref)
+		}
+		return map[string]any{"ran": result.Detail, "ref": ref, "via": "a11y"}, nil
 	case "drag":
 		x, y, err := requiredPoint(args)
 		if err != nil {
@@ -440,11 +1266,7 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		x, y := optionalPoint(args, defaultComputerWidth/2, defaultComputerHeight/2)
 		target := "point"
 		if ref != "" {
-			client, err := p.containers.MCPClient(ctx, botID)
-			if err != nil {
-				return nil, err
-			}
-			located, err := computerA11yLocate(ctx, client, ref)
+			located, err := computerA11yLocate(ctx, client, ref, snapshotID)
 			if err != nil {
 				return nil, err
 			}
@@ -494,36 +1316,28 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 // (double or triple click, middle or right button) has no AT-SPI equivalent:
 // the default action fires once and carries no button, so the ref is resolved
 // to its on-screen centre and real pointer events are replayed instead.
-func (p *BrowserProvider) clickByRef(ctx context.Context, botID, ref string, mask byte, count int) (map[string]any, error) {
-	client, err := p.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
+func (p *BrowserProvider) clickByRef(ctx context.Context, botID string, client *bridge.Client, ref, snapshotID string, mask byte, count int) (map[string]any, error) {
 	if mask == rfbButtonLeft && count == 1 {
-		result, err := computerA11yClick(ctx, client, ref)
+		result, err := computerA11yClick(ctx, client, ref, snapshotID)
 		if err != nil {
 			return nil, err
 		}
-		switch {
-		case result.OK:
+		if result.OK {
 			out := map[string]any{"clicked": true, "ref": ref, "button": "left", "click_count": 1, "via": "a11y"}
 			if result.Detail != "" {
 				out["a11y_action"] = result.Detail
 			}
 			return out, nil
-		case result.Fallback != nil && a11yPointerCoordValid(*result.Fallback):
-			if err := p.pointerMultiClick(ctx, botID, result.Fallback.X, result.Fallback.Y, mask, 1); err != nil {
+		}
+		if point, ok := result.fallbackPoint(); ok {
+			if err := p.pointerMultiClick(ctx, botID, point.X, point.Y, mask, 1); err != nil {
 				return nil, err
 			}
-			return map[string]any{"clicked": true, "ref": ref, "x": result.Fallback.X, "y": result.Fallback.Y, "button": "left", "click_count": 1, "via": "rfb_fallback"}, nil
-		default:
-			if result.Error != "" {
-				return nil, fmt.Errorf("a11y click %s failed: %s", ref, result.Error)
-			}
-			return nil, fmt.Errorf("a11y click %s failed without diagnostic", ref)
+			return map[string]any{"clicked": true, "ref": ref, "x": point.X, "y": point.Y, "button": "left", "click_count": 1, "via": "rfb_fallback"}, nil
 		}
+		return nil, result.failure("click", ref)
 	}
-	located, err := computerA11yLocate(ctx, client, ref)
+	located, err := computerA11yLocate(ctx, client, ref, snapshotID)
 	if err != nil {
 		return nil, err
 	}
@@ -551,12 +1365,8 @@ func clickCountName(count int) string {
 // AT-SPI cannot edit the widget and reports a pointer fallback, the widget is
 // focused by clicking it; a replace then clears it before typing, so fill
 // keeps its "replace everything" meaning on the fallback path too.
-func (p *BrowserProvider) editByRef(ctx context.Context, botID, ref, text string, replace bool) (map[string]any, error) {
-	client, err := p.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	result, err := computerA11yEdit(ctx, client, ref, text, replace)
+func (p *BrowserProvider) editByRef(ctx context.Context, botID string, client *bridge.Client, ref, snapshotID, text string, replace bool) (map[string]any, error) {
+	result, err := computerA11yEdit(ctx, client, ref, text, replace, snapshotID)
 	if err != nil {
 		return nil, err
 	}
@@ -564,31 +1374,154 @@ func (p *BrowserProvider) editByRef(ctx context.Context, botID, ref, text string
 	if replace {
 		key = "filled"
 	}
-	switch {
-	case result.OK:
+	if result.OK {
 		return map[string]any{key: text, "ref": ref, "via": "a11y"}, nil
-	case result.Fallback != nil && a11yPointerCoordValid(*result.Fallback):
-		if err := p.pointerMultiClick(ctx, botID, result.Fallback.X, result.Fallback.Y, rfbButtonLeft, 1); err != nil {
-			return nil, err
-		}
-		out := map[string]any{key: text, "ref": ref, "x": result.Fallback.X, "y": result.Fallback.Y, "via": "rfb_fallback"}
-		if replace {
-			if err := p.replaceFocusedText(ctx, botID, text); err != nil {
-				return nil, err
-			}
-			out["cleared_with"] = "select_all"
-			return out, nil
-		}
-		if err := p.typeText(ctx, botID, text); err != nil {
-			return nil, err
-		}
-		return out, nil
-	default:
-		if result.Error != "" {
-			return nil, fmt.Errorf("a11y edit %s failed: %s", ref, result.Error)
-		}
-		return nil, fmt.Errorf("a11y edit %s failed without diagnostic", ref)
 	}
+	point, ok := result.fallbackPoint()
+	if !ok {
+		return nil, result.failure("edit", ref)
+	}
+	if err := p.pointerMultiClick(ctx, botID, point.X, point.Y, rfbButtonLeft, 1); err != nil {
+		return nil, err
+	}
+	out := map[string]any{key: text, "ref": ref, "x": point.X, "y": point.Y, "via": "rfb_fallback"}
+	if replace {
+		if err := p.replaceFocusedText(ctx, botID, text); err != nil {
+			return nil, err
+		}
+		out["cleared_with"] = "select_all"
+		return out, nil
+	}
+	if err := p.typeText(ctx, botID, text); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// computerPaste pastes through the desktop clipboard: the current clipboard
+// is saved, replaced with the text (as text/plain or text/html), the target
+// is focused, Ctrl+V is sent, and the previous clipboard is restored unless
+// something else changed it meanwhile. Clipboard use is serialised per bot.
+func (p *BrowserProvider) computerPaste(ctx context.Context, botID string, client *bridge.Client, args map[string]any, ref, snapshotID string) (map[string]any, error) {
+	text := rawStringArg(args, "text")
+	format := StringArg(args, "format")
+	if format == "" {
+		format = "text"
+	}
+	mimeTarget := "UTF8_STRING"
+	if format == "html" {
+		mimeTarget = "text/html"
+	}
+	if capability := p.clipboardCapability(ctx, client); capability["available"] != true {
+		return nil, fmt.Errorf("desktop paste is unavailable: %v", capability["reason"])
+	}
+	lockAny, _ := p.clipboards.LoadOrStore(botID, &sync.Mutex{})
+	lock := lockAny.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	saved, savedTarget := p.readClipboard(ctx, client)
+	if err := p.writeClipboard(ctx, client, mimeTarget, text); err != nil {
+		return nil, fmt.Errorf("set desktop clipboard: %w", err)
+	}
+	// Restore (or clear) the previous clipboard on every exit path, but only
+	// if it still holds what this paste put there.
+	restore := func() (string, string) {
+		current, _ := p.readClipboard(ctx, client)
+		if current != text {
+			return "kept", "the clipboard changed during the paste, so it was left as is"
+		}
+		if saved == "" && savedTarget == "" {
+			if err := p.writeClipboard(ctx, client, "UTF8_STRING", ""); err != nil {
+				return "failed", err.Error()
+			}
+			return "cleared", "the clipboard was empty before the paste"
+		}
+		if err := p.writeClipboard(ctx, client, savedTarget, saved); err != nil {
+			return "failed", err.Error()
+		}
+		return "restored", ""
+	}
+	result := map[string]any{"pasted": text, "format": format, "via": "clipboard"}
+	target := "focus"
+	if ref != "" {
+		located, err := computerA11yLocate(ctx, client, ref, snapshotID)
+		if err != nil {
+			status, note := restore()
+			result["clipboard"] = status
+			_ = note
+			return nil, err
+		}
+		if located.Center == nil {
+			restore()
+			return nil, fmt.Errorf("ref %s has no on-screen box to focus for pasting; observe again or paste into the focused widget", ref)
+		}
+		if err := p.pointerMultiClick(ctx, botID, located.Center.X, located.Center.Y, rfbButtonLeft, 1); err != nil {
+			restore()
+			return nil, err
+		}
+		target = ref
+		result["ref"] = ref
+	}
+	if err := p.typeKeyChord(ctx, botID, "Control+v"); err != nil {
+		restore()
+		return nil, err
+	}
+	if err := sleepContext(ctx, 250*time.Millisecond); err != nil {
+		restore()
+		return nil, err
+	}
+	status, note := restore()
+	result["target"] = target
+	result["clipboard"] = status
+	if note != "" {
+		result["clipboard_note"] = note
+	}
+	if format == "html" {
+		result["rich_text"] = "clipboard offered text/html only; targets that read plain text get nothing"
+	}
+	return result, nil
+}
+
+// readClipboard returns the clipboard text and the target it was read with
+// (text/html when the owner offers it, else UTF8_STRING). Empty when there
+// is no clipboard owner.
+func (*BrowserProvider) readClipboard(ctx context.Context, client *bridge.Client) (string, string) {
+	const script = `export DISPLAY=:99
+targets="$(timeout 2 xclip -o -selection clipboard -t TARGETS 2>/dev/null || true)"
+[ -n "$targets" ] || exit 0
+if printf '%s\n' "$targets" | grep -qx 'text/html'; then
+  printf 'text/html\n'; timeout 2 xclip -o -selection clipboard -t text/html 2>/dev/null; exit 0
+fi
+printf 'UTF8_STRING\n'; timeout 2 xclip -o -selection clipboard -t UTF8_STRING 2>/dev/null || true`
+	result, err := client.Exec(ctx, script, "/", 6)
+	if err != nil || result == nil {
+		return "", ""
+	}
+	out := result.Stdout
+	target, rest, ok := strings.Cut(out, "\n")
+	if !ok {
+		return "", ""
+	}
+	return rest, strings.TrimSpace(target)
+}
+
+func (*BrowserProvider) writeClipboard(ctx context.Context, client *bridge.Client, target, text string) error {
+	if target == "" {
+		target = "UTF8_STRING"
+	}
+	// xclip forks a background owner; its stdio must be detached or the
+	// bridge exec waits on it forever.
+	cmd := "export DISPLAY=:99; printf '%s' " + shellQuote(text) + " | xclip -i -selection clipboard -t " + shellQuote(target) + " >/dev/null 2>&1 </dev/stdin"
+	cmd = strings.Replace(cmd, "printf '%s' ", "printf %s ", 1)
+	result, err := client.Exec(ctx, cmd, "/", 6)
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("xclip exited with code %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+	}
+	return nil
 }
 
 func (p *BrowserProvider) requireComputerDisplay(session SessionContext) (string, error) {
@@ -665,1387 +1598,6 @@ func (p *BrowserProvider) ensureDisplayEnabled(ctx context.Context, botID string
 	return nil
 }
 
-func (p *BrowserProvider) ensureCDP(ctx context.Context, botID string) (*bridge.Client, error) {
-	if p.containers == nil {
-		return nil, errors.New("workspace runtime provider is not configured")
-	}
-	client, err := p.containers.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	if p.cdpReachable(ctx, client) {
-		return client, nil
-	}
-	if err := p.startDesktopBrowser(ctx, client); err != nil {
-		return nil, err
-	}
-	deadline := time.Now().Add(browserStartupTimeout)
-	for time.Now().Before(deadline) {
-		if p.cdpReachable(ctx, client) {
-			return client, nil
-		}
-		if err := sleepContext(ctx, 300*time.Millisecond); err != nil {
-			return nil, err
-		}
-	}
-	return nil, errors.New("workspace desktop browser CDP endpoint is not reachable")
-}
-
-func (p *BrowserProvider) cdpReachable(ctx context.Context, client *bridge.Client) bool {
-	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	body, status, err := p.cdpHTTP(reqCtx, client, http.MethodGet, "/json/version", nil)
-	if err != nil || status >= 400 || len(body) == 0 {
-		return false
-	}
-	return true
-}
-
-func (*BrowserProvider) startDesktopBrowser(ctx context.Context, client *bridge.Client) error {
-	const script = `set -eu
-export DISPLAY=:99
-if [ ! -S /tmp/.X11-unix/X99 ]; then
-  echo "workspace desktop X socket is not ready; open or prepare the bot desktop first" >&2
-  exit 2
-fi
-BROWSER=""
-for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
-  if command -v "$candidate" >/dev/null 2>&1; then
-    BROWSER="$(command -v "$candidate")"
-    break
-  fi
-done
-if [ -z "$BROWSER" ]; then
-  echo "Chrome or Chromium is not installed in the workspace desktop" >&2
-  exit 3
-fi
-BROWSER_PIDS=""
-HAS_CDP=0
-for proc_dir in /proc/[0-9]*; do
-  [ -d "$proc_dir" ] || continue
-  pid="${proc_dir#/proc/}"
-  cmdline="$(tr '\000' '\n' <"$proc_dir/cmdline" 2>/dev/null || true)"
-  printf '%s\n' "$cmdline" | grep -Eq '(^|/)(google-chrome-stable|google-chrome|chromium|chromium-browser|chrome)$' || continue
-  BROWSER_PIDS="$BROWSER_PIDS $pid"
-  if ! printf '%s\n' "$cmdline" | grep -Eq '^--type=' && printf '%s\n' "$cmdline" | grep -Fq -- '--remote-debugging-port=9222'; then
-    HAS_CDP=1
-  fi
-done
-if [ "$HAS_CDP" = "1" ]; then
-  exit 0
-fi
-for pid in $BROWSER_PIDS; do
-  kill "$pid" 2>/dev/null || true
-done
-sleep 1
-for pid in $BROWSER_PIDS; do
-  kill -9 "$pid" 2>/dev/null || true
-done
-rm -f /tmp/memoh-display-browser/SingletonLock /tmp/memoh-display-browser/SingletonSocket /tmp/memoh-display-browser/SingletonCookie
-nohup "$BROWSER" \
-  --no-sandbox \
-  --disable-dev-shm-usage \
-  --disable-gpu \
-  --no-first-run \
-  --no-default-browser-check \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-debugging-port=9222 \
-  --remote-allow-origins='*' \
-  --user-data-dir=/tmp/memoh-display-browser \
-  about:blank >/tmp/memoh-browser.log 2>&1 &
-`
-	result, err := client.Exec(ctx, script, "/", 20)
-	if err != nil {
-		return err
-	}
-	if result.ExitCode != 0 {
-		msg := strings.TrimSpace(result.Stderr)
-		if msg == "" {
-			msg = strings.TrimSpace(result.Stdout)
-		}
-		return fmt.Errorf("start workspace desktop browser failed: %s", msg)
-	}
-	return nil
-}
-
-func (*BrowserProvider) cdpHTTP(ctx context.Context, client *bridge.Client, method, path string, body io.Reader) ([]byte, int, error) {
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return client.DialContext(ctx, network, address)
-		},
-		DisableKeepAlives: true,
-	}
-	defer transport.CloseIdleConnections()
-	httpClient := &http.Client{Transport: transport, Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, method, browserCDPBaseURL+path, body)
-	if err != nil {
-		return nil, 0, err
-	}
-	resp, err := httpClient.Do(req) //nolint:gosec // request is tunneled to the bot workspace loopback CDP endpoint.
-	if err != nil {
-		return nil, 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	data, readErr := io.ReadAll(resp.Body)
-	return data, resp.StatusCode, readErr
-}
-
-type cdpTarget struct {
-	ID                   string `json:"id"`
-	Type                 string `json:"type"`
-	URL                  string `json:"url"`
-	Title                string `json:"title"`
-	WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
-}
-
-func (t cdpTarget) publicMap() map[string]any {
-	return map[string]any{
-		"id":                      t.ID,
-		"type":                    t.Type,
-		"url":                     t.URL,
-		"title":                   t.Title,
-		"web_socket_debugger_url": t.WebSocketDebuggerURL,
-	}
-}
-
-func publicTargets(targets []cdpTarget) []map[string]any {
-	out := make([]map[string]any, 0, len(targets))
-	for _, target := range targets {
-		if target.Type == "page" {
-			out = append(out, target.publicMap())
-		}
-	}
-	return out
-}
-
-func (p *BrowserProvider) listTargets(ctx context.Context, client *bridge.Client) ([]cdpTarget, error) {
-	body, status, err := p.cdpHTTP(ctx, client, http.MethodGet, "/json/list", nil)
-	if err != nil {
-		return nil, err
-	}
-	if status >= 400 {
-		return nil, fmt.Errorf("list CDP targets failed (HTTP %d): %s", status, string(body))
-	}
-	var targets []cdpTarget
-	if err := json.Unmarshal(body, &targets); err != nil {
-		return nil, err
-	}
-	return targets, nil
-}
-
-func (p *BrowserProvider) activeTarget(ctx context.Context, client *bridge.Client) (cdpTarget, error) {
-	targets, err := p.listTargets(ctx, client)
-	if err != nil {
-		return cdpTarget{}, err
-	}
-	for _, target := range targets {
-		if target.Type == "page" {
-			return target, nil
-		}
-	}
-	return p.createTarget(ctx, client, "about:blank")
-}
-
-func (p *BrowserProvider) createOrActiveTarget(ctx context.Context, client *bridge.Client, targetURL string) (cdpTarget, error) {
-	if strings.TrimSpace(targetURL) != "" {
-		return p.createTarget(ctx, client, targetURL)
-	}
-	return p.activeTarget(ctx, client)
-}
-
-func (p *BrowserProvider) createTarget(ctx context.Context, client *bridge.Client, targetURL string) (cdpTarget, error) {
-	if strings.TrimSpace(targetURL) == "" {
-		targetURL = "about:blank"
-	}
-	body, status, err := p.cdpHTTP(ctx, client, http.MethodPut, "/json/new?"+url.QueryEscape(targetURL), nil)
-	if err != nil {
-		return cdpTarget{}, err
-	}
-	if status >= 400 {
-		return cdpTarget{}, fmt.Errorf("create CDP target failed (HTTP %d): %s", status, string(body))
-	}
-	var target cdpTarget
-	if err := json.Unmarshal(body, &target); err != nil {
-		return cdpTarget{}, err
-	}
-	return target, nil
-}
-
-func (p *BrowserProvider) activateTarget(ctx context.Context, client *bridge.Client, id string) error {
-	body, status, err := p.cdpHTTP(ctx, client, http.MethodGet, "/json/activate/"+url.PathEscape(id), nil)
-	if err != nil {
-		return err
-	}
-	if status >= 400 {
-		return fmt.Errorf("activate CDP target failed (HTTP %d): %s", status, string(body))
-	}
-	return nil
-}
-
-func (p *BrowserProvider) closeTarget(ctx context.Context, client *bridge.Client, id string) (any, error) {
-	body, status, err := p.cdpHTTP(ctx, client, http.MethodGet, "/json/close/"+url.PathEscape(id), nil)
-	if err != nil {
-		return nil, err
-	}
-	if status >= 400 {
-		return nil, fmt.Errorf("close CDP target failed (HTTP %d): %s", status, string(body))
-	}
-	return map[string]any{"success": true, "message": strings.TrimSpace(string(body))}, nil
-}
-
-type cdpConn struct {
-	conn   *websocket.Conn
-	mu     sync.Mutex
-	nextID int
-}
-
-type cdpResponse struct {
-	ID     int             `json:"id"`
-	Result json.RawMessage `json:"result"`
-	Error  *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-func (*BrowserProvider) dialCDP(ctx context.Context, client *bridge.Client, target cdpTarget) (*cdpConn, error) {
-	if strings.TrimSpace(target.WebSocketDebuggerURL) == "" {
-		return nil, errors.New("CDP target does not expose a websocket debugger URL")
-	}
-	dialer := websocket.Dialer{
-		NetDialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return client.DialContext(ctx, network, address)
-		},
-		HandshakeTimeout: 10 * time.Second,
-	}
-	conn, _, err := dialer.DialContext(ctx, target.WebSocketDebuggerURL, nil) //nolint:bodyclose // gorilla websocket owns the response body.
-	if err != nil {
-		return nil, err
-	}
-	return &cdpConn{conn: conn}, nil
-}
-
-func (c *cdpConn) Close() error {
-	return c.conn.Close()
-}
-
-func (c *cdpConn) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.nextID++
-	id := c.nextID
-	msg := map[string]any{
-		"id":     id,
-		"method": method,
-	}
-	if params != nil {
-		msg["params"] = params
-	}
-	deadline, hasDeadline := ctx.Deadline()
-	if hasDeadline {
-		_ = c.conn.SetReadDeadline(deadline)
-		_ = c.conn.SetWriteDeadline(deadline)
-	}
-	if err := c.conn.WriteJSON(msg); err != nil {
-		return nil, err
-	}
-	for {
-		_, data, err := c.conn.ReadMessage()
-		if err != nil {
-			return nil, err
-		}
-		var resp cdpResponse
-		if err := json.Unmarshal(data, &resp); err != nil {
-			return nil, err
-		}
-		if resp.ID != id {
-			continue
-		}
-		if resp.Error != nil {
-			return nil, fmt.Errorf("CDP %s failed: %s", method, resp.Error.Message)
-		}
-		return resp.Result, nil
-	}
-}
-
-type cdpPage struct {
-	conn *cdpConn
-}
-
-func (p *BrowserProvider) connectPage(ctx context.Context, botID string) (*bridge.Client, cdpTarget, *cdpPage, error) {
-	client, err := p.ensureCDP(ctx, botID)
-	if err != nil {
-		return nil, cdpTarget{}, nil, err
-	}
-	target, err := p.activeTarget(ctx, client)
-	if err != nil {
-		return nil, cdpTarget{}, nil, err
-	}
-	if err := p.activateTarget(ctx, client, target.ID); err != nil {
-		return nil, cdpTarget{}, nil, err
-	}
-	conn, err := p.dialCDP(ctx, client, target)
-	if err != nil {
-		return nil, cdpTarget{}, nil, err
-	}
-	page := &cdpPage{conn: conn}
-	if _, err := page.conn.Call(ctx, "Page.enable", nil); err != nil {
-		_ = conn.Close()
-		return nil, cdpTarget{}, nil, err
-	}
-	if _, err := page.conn.Call(ctx, "Runtime.enable", nil); err != nil {
-		_ = conn.Close()
-		return nil, cdpTarget{}, nil, err
-	}
-	_, _ = page.conn.Call(ctx, "DOM.enable", nil)
-	return client, target, page, nil
-}
-
-func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args map[string]any) (map[string]any, error) {
-	action := normalizeBrowserAction(StringArg(args, "action"))
-	if isCDPTabAction(action) {
-		client, err := p.ensureCDP(ctx, botID)
-		if err != nil {
-			return nil, err
-		}
-		return p.runCDPTabAction(ctx, client, action, args)
-	}
-	_, _, page, err := p.connectPage(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = page.conn.Close() }()
-
-	switch action {
-	case "navigate":
-		targetURL := StringArg(args, "url")
-		timeout, err := browserReadyTimeout(args)
-		if err != nil {
-			return nil, err
-		}
-		result, err := page.conn.Call(ctx, "Page.navigate", map[string]any{"url": targetURL})
-		if err != nil {
-			return nil, err
-		}
-		nav := map[string]any{}
-		_ = json.Unmarshal(result, &nav)
-		if errText, ok := nav["errorText"].(string); ok && strings.TrimSpace(errText) != "" {
-			return nil, fmt.Errorf("navigate to %s failed: %s", targetURL, errText)
-		}
-		if err := page.waitReady(ctx, timeout); err != nil {
-			return nil, fmt.Errorf("navigate to %s: %w", targetURL, err)
-		}
-		currentURL, _ := page.evaluateString(ctx, "location.href")
-		nav["url"] = currentURL
-		nav["timeout_ms"] = timeout
-		return nav, nil
-	case "click", "double_click":
-		count, err := guiClickCount(args, action)
-		if err != nil {
-			return nil, err
-		}
-		button := browserButton(args)
-		target, point, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
-		if err != nil {
-			return nil, err
-		}
-		if err := page.mouseClick(ctx, point.X, point.Y, button, count); err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"clicked": target.labelOr("point"), "x": point.X, "y": point.Y, "button": button, "click_count": count}), nil
-	case "focus":
-		target := browserTargetArg(args, "selector", "ref")
-		if err := target.require("focus"); err != nil {
-			return nil, err
-		}
-		_, err := page.evaluate(ctx, fmt.Sprintf(`(() => { const el = mustTarget(%s, %s); el.focus(); return true })()`, jsQuote(target.Selector), jsQuote(target.Ref)))
-		if err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"focused": target.label()}), nil
-	case "type":
-		target := browserTargetArg(args, "selector", "ref")
-		text := rawStringArg(args, "text")
-		if _, err := page.evaluate(ctx, fmt.Sprintf(`(() => { const el = mustTarget(%s, %s); el.focus(); return true })()`, jsQuote(target.Selector), jsQuote(target.Ref))); err != nil {
-			return nil, err
-		}
-		if err := page.insertText(ctx, text); err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"typed": text}), nil
-	case "fill":
-		target := browserTargetArg(args, "selector", "ref")
-		text := rawStringArg(args, "text")
-		result, err := page.evaluate(ctx, fmt.Sprintf(`(() => {
-const el = mustTarget(%s, %s);
-const text = %s;
-el.focus();
-if ("value" in el && !(el instanceof HTMLButtonElement)) {
-  el.value = text;
-  el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: text === "" ? "deleteContentBackward" : "insertText" }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
-  return { value: el.value, kind: "value" };
-}
-if (el.isContentEditable) {
-  el.textContent = text;
-  el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: text === "" ? "deleteContentBackward" : "insertText" }));
-  return { value: el.textContent, kind: "contenteditable" };
-}
-throw new Error("element is not editable: " + %s);
-})()`, jsQuote(target.Selector), jsQuote(target.Ref), jsQuote(text), jsQuote(target.label())))
-		if err != nil {
-			return nil, err
-		}
-		out := map[string]any{"filled": text}
-		if fields, ok := result.(map[string]any); ok {
-			out["value"] = fields["value"]
-			out["kind"] = fields["kind"]
-		}
-		return target.withResult(out), nil
-	case "press":
-		key := StringArg(args, "key")
-		if err := page.pressKey(ctx, key); err != nil {
-			return nil, err
-		}
-		return map[string]any{"pressed": key}, nil
-	case "keyboard_type":
-		text := rawStringArg(args, "text")
-		if err := page.insertText(ctx, text); err != nil {
-			return nil, err
-		}
-		return map[string]any{"inserted_text": text}, nil
-	case "keydown", "keyup":
-		key := StringArg(args, "key")
-		if err := page.dispatchKey(ctx, key, action == "keydown"); err != nil {
-			return nil, err
-		}
-		return map[string]any{action: key}, nil
-	case "hover":
-		target, point, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
-		if err != nil {
-			return nil, err
-		}
-		if err := page.mouseMove(ctx, point.X, point.Y); err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"hovered": target.labelOr("point"), "x": point.X, "y": point.Y}), nil
-	case "select":
-		target := browserTargetArg(args, "selector", "ref")
-		value := rawStringArg(args, "value")
-		result, err := page.evaluate(ctx, fmt.Sprintf(`(() => {
-const el = mustTarget(%s, %s);
-const value = %s;
-if (!(el instanceof HTMLSelectElement)) throw new Error("element is not a select: " + %s);
-const option = Array.from(el.options).find(o => o.value === value);
-if (!option) throw new Error("select has no option with value " + JSON.stringify(value));
-el.value = value;
-el.dispatchEvent(new Event("input", { bubbles: true }));
-el.dispatchEvent(new Event("change", { bubbles: true }));
-return el.value;
-})()`, jsQuote(target.Selector), jsQuote(target.Ref), jsQuote(value), jsQuote(target.label())))
-		if err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"selected": result}), nil
-	case "check", "uncheck":
-		target := browserTargetArg(args, "selector", "ref")
-		if err := target.require(action); err != nil {
-			return nil, err
-		}
-		checked := action == "check"
-		_, err := page.evaluate(ctx, fmt.Sprintf(`(() => {
-const el = mustTarget(%s, %s);
-el.checked = %t;
-el.dispatchEvent(new Event("input", { bubbles: true }));
-el.dispatchEvent(new Event("change", { bubbles: true }));
-return true;
-})()`, jsQuote(target.Selector), jsQuote(target.Ref), checked))
-		if err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{action + "ed": target.label()}), nil
-	case "screenshot":
-		fullPage, _, _ := BoolArg(args, "full_page")
-		b64, err := page.captureScreenshot(ctx, fullPage)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"screenshot": b64, "mimeType": "image/png"}, nil
-	case "screenshot_annotate":
-		annotations, err := page.annotate(ctx)
-		if err != nil {
-			return nil, err
-		}
-		b64, captureErr := page.captureScreenshot(ctx, false)
-		removeErr := page.removeAnnotations(ctx)
-		if captureErr != nil {
-			return nil, captureErr
-		}
-		if removeErr != nil {
-			p.logger.Debug("remove browser annotations failed", slog.Any("error", removeErr))
-		}
-		return map[string]any{"screenshot": b64, "mimeType": "image/png", "annotations": annotations}, nil
-	case "snapshot":
-		snapshot, err := page.accessibilitySnapshot(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"snapshot": snapshot}, nil
-	case "get_content":
-		target := browserTargetArg(args, "selector", "ref")
-		expr := `document.body ? document.body.innerText : ""`
-		if target.present() {
-			expr = fmt.Sprintf(`mustTarget(%s, %s).innerText`, jsQuote(target.Selector), jsQuote(target.Ref))
-		}
-		text, err := page.evaluateString(ctx, expr)
-		if err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"content": text}), nil
-	case "get_html":
-		target := browserTargetArg(args, "selector", "ref")
-		expr := `document.documentElement ? document.documentElement.outerHTML : ""`
-		if target.present() {
-			expr = fmt.Sprintf(`mustTarget(%s, %s).innerHTML`, jsQuote(target.Selector), jsQuote(target.Ref))
-		}
-		html, err := page.evaluateString(ctx, expr)
-		if err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"html": html}), nil
-	case "evaluate":
-		script := StringArg(args, "script")
-		if script == "" {
-			return nil, errors.New("script is required for evaluate")
-		}
-		result, err := page.evaluate(ctx, script)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"result": result}, nil
-	case "scroll":
-		direction := StringArg(args, "direction")
-		if direction == "" {
-			direction = "down"
-		}
-		amount, err := intArgOr(args, "amount", browserDefaultScrollAmount)
-		if err != nil {
-			return nil, err
-		}
-		target := browserTargetArg(args, "selector", "ref")
-		scrolled := "page"
-		if target.present() {
-			_, err = page.evaluate(ctx, fmt.Sprintf(`(() => {
-const el = mustTarget(%s, %s);
-const dx = %d;
-const dy = %d;
-el.scrollBy(dx, dy);
-return true;
-})()`, jsQuote(target.Selector), jsQuote(target.Ref), scrollDeltaX(direction, amount), scrollDeltaY(direction, amount)))
-			scrolled = target.label()
-		} else {
-			var point elementPoint
-			if x, y, ok := optionalFloatPoint(args, "x", "y"); ok {
-				point = elementPoint{X: x, Y: y}
-				scrolled = "point"
-			} else {
-				point, err = page.viewportCenter(ctx)
-				if err != nil {
-					return nil, err
-				}
-			}
-			err = page.mouseWheel(ctx, point.X, point.Y, scrollDeltaX(direction, amount), scrollDeltaY(direction, amount))
-		}
-		if err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"scrolled": scrolled, "direction": direction, "amount": amount}), nil
-	case "scroll_into_view":
-		target := browserTargetArg(args, "selector", "ref")
-		_, err := page.evaluate(ctx, fmt.Sprintf(`(() => { mustTarget(%s, %s).scrollIntoView({ block: "center", inline: "center" }); return true })()`, jsQuote(target.Selector), jsQuote(target.Ref)))
-		if err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"scrolled_into_view": target.label()}), nil
-	case "drag":
-		sourceTarget, source, err := page.resolvePoint(ctx, args, "selector", "ref", "x", "y")
-		if err != nil {
-			return nil, err
-		}
-		dropTarget, drop, err := page.resolvePoint(ctx, args, "target_selector", "target_ref", "to_x", "to_y")
-		if err != nil {
-			return nil, err
-		}
-		button := browserButton(args)
-		if err := page.mouseDrag(ctx, source.X, source.Y, drop.X, drop.Y, button); err != nil {
-			return nil, err
-		}
-		return map[string]any{
-			"dragged": sourceTarget.labelOr("point"), "target": dropTarget.labelOr("point"), "button": button,
-			"ref": sourceTarget.Ref, "selector": sourceTarget.Selector, "x": source.X, "y": source.Y,
-			"target_ref": dropTarget.Ref, "target_selector": dropTarget.Selector, "to_x": drop.X, "to_y": drop.Y,
-		}, nil
-	case "upload":
-		target := browserTargetArg(args, "selector", "ref")
-		files := stringSliceArg(args, "files")
-		if len(files) == 0 {
-			return nil, errors.New("files is required for upload")
-		}
-		if err := page.setInputFiles(ctx, target, files); err != nil {
-			return nil, err
-		}
-		return target.withResult(map[string]any{"uploaded": files}), nil
-	case "wait":
-		target := browserTargetArg(args, "selector", "ref")
-		if target.present() {
-			timeout, err := browserReadyTimeout(args)
-			if err != nil {
-				return nil, err
-			}
-			if err := page.waitTarget(ctx, target, timeout); err != nil {
-				return nil, err
-			}
-			return target.withResult(map[string]any{"waited_for": target.label(), "timeout_ms": timeout}), nil
-		}
-		ms, err := browserWaitDuration(args)
-		if err != nil {
-			return nil, err
-		}
-		if err := sleepContext(ctx, time.Duration(ms)*time.Millisecond); err != nil {
-			return nil, err
-		}
-		return map[string]any{"waited_ms": ms}, nil
-	case "go_back", "go_forward":
-		timeout, err := browserReadyTimeout(args)
-		if err != nil {
-			return nil, err
-		}
-		if err := page.navigateHistory(ctx, action == "go_forward"); err != nil {
-			return nil, err
-		}
-		if err := page.waitReady(ctx, timeout); err != nil {
-			return nil, fmt.Errorf("%s: %w", action, err)
-		}
-		currentURL, _ := page.evaluateString(ctx, "location.href")
-		return map[string]any{"url": currentURL, "timeout_ms": timeout}, nil
-	case "reload":
-		timeout, err := browserReadyTimeout(args)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := page.conn.Call(ctx, "Page.reload", nil); err != nil {
-			return nil, err
-		}
-		if err := page.waitReady(ctx, timeout); err != nil {
-			return nil, fmt.Errorf("reload: %w", err)
-		}
-		currentURL, _ := page.evaluateString(ctx, "location.href")
-		return map[string]any{"url": currentURL, "timeout_ms": timeout}, nil
-	case "get_url":
-		currentURL, err := page.evaluateString(ctx, "location.href")
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"url": currentURL}, nil
-	case "get_title":
-		title, err := page.evaluateString(ctx, "document.title")
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"title": title}, nil
-	case "pdf":
-		result, err := page.conn.Call(ctx, "Page.printToPDF", map[string]any{"printBackground": true})
-		if err != nil {
-			return nil, err
-		}
-		var out struct {
-			Data string `json:"data"`
-		}
-		if err := json.Unmarshal(result, &out); err != nil {
-			return nil, err
-		}
-		return map[string]any{"pdf": out.Data, "mimeType": "application/pdf"}, nil
-	default:
-		return nil, fmt.Errorf("unknown browser action: %s", action)
-	}
-}
-
-func isCDPTabAction(action string) bool {
-	switch action {
-	case "tab_new", "tab_select", "tab_close", "tab_list":
-		return true
-	default:
-		return false
-	}
-}
-
-func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Client, action string, args map[string]any) (map[string]any, error) {
-	switch action {
-	case "tab_new":
-		targetURL := StringArg(args, "url")
-		newTarget, err := p.createTarget(ctx, client, targetURL)
-		if err != nil {
-			return nil, err
-		}
-		targets, _ := p.listTargets(ctx, client)
-		return map[string]any{"tab_index": targetIndex(targets, newTarget.ID), "target": newTarget.publicMap(), "url": newTarget.URL}, nil
-	case "tab_select":
-		tabIndex, ok, err := IntArg(args, "tab_index")
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, errors.New("tab_index is required for tab_select")
-		}
-		targets, err := p.listTargets(ctx, client)
-		if err != nil {
-			return nil, err
-		}
-		target, err := pageTargetAt(targets, tabIndex)
-		if err != nil {
-			return nil, err
-		}
-		if err := p.activateTarget(ctx, client, target.ID); err != nil {
-			return nil, err
-		}
-		return map[string]any{"tab_index": tabIndex, "target": target.publicMap(), "url": target.URL, "title": target.Title}, nil
-	case "tab_close":
-		targets, err := p.listTargets(ctx, client)
-		if err != nil {
-			return nil, err
-		}
-		tabIndex, ok, err := IntArg(args, "tab_index")
-		if err != nil {
-			return nil, err
-		}
-		var closeTarget cdpTarget
-		if ok {
-			closeTarget, err = pageTargetAt(targets, tabIndex)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			closeTarget, err = p.activeTarget(ctx, client)
-			if err != nil {
-				return nil, err
-			}
-		}
-		result, err := p.closeTarget(ctx, client, closeTarget.ID)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"closed": targetIndex(targets, closeTarget.ID), "result": result}, nil
-	case "tab_list":
-		targets, err := p.listTargets(ctx, client)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"tabs": publicTargets(targets)}, nil
-	default:
-		return nil, fmt.Errorf("unknown browser tab action: %s", action)
-	}
-}
-
-func (p *BrowserProvider) browserActionResult(ctx context.Context, botID string, data map[string]any) any {
-	if b64, ok := data["screenshot"].(string); ok && b64 != "" {
-		return p.buildScreenshotResult(ctx, botID, b64, p.screenshotDir(), data)
-	}
-	return data
-}
-
-type remoteObject struct {
-	Type                string          `json:"type"`
-	Subtype             string          `json:"subtype"`
-	Value               json.RawMessage `json:"value"`
-	UnserializableValue string          `json:"unserializableValue"`
-	Description         string          `json:"description"`
-}
-
-type runtimeEvaluateResponse struct {
-	Result           remoteObject `json:"result"`
-	ExceptionDetails *struct {
-		Text      string `json:"text"`
-		Exception struct {
-			Description string `json:"description"`
-		} `json:"exception"`
-	} `json:"exceptionDetails"`
-}
-
-func (p *cdpPage) evaluate(ctx context.Context, expression string) (any, error) {
-	wrapped := wrapRuntimeExpression(expression)
-	result, err := p.conn.Call(ctx, "Runtime.evaluate", map[string]any{
-		"expression":    wrapped,
-		"awaitPromise":  true,
-		"returnByValue": true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	var out runtimeEvaluateResponse
-	if err := json.Unmarshal(result, &out); err != nil {
-		return nil, err
-	}
-	if out.ExceptionDetails != nil {
-		msg := strings.TrimSpace(out.ExceptionDetails.Exception.Description)
-		if msg == "" {
-			msg = strings.TrimSpace(out.ExceptionDetails.Text)
-		}
-		return nil, errors.New(msg)
-	}
-	return remoteObjectValue(out.Result), nil
-}
-
-func wrapRuntimeExpression(expression string) string {
-	expr := strings.TrimSpace(expression)
-	for strings.HasSuffix(expr, ";") {
-		expr = strings.TrimSpace(strings.TrimSuffix(expr, ";"))
-	}
-	return "(async () => {\n" + mustElementHelper + "\nreturn await (\n" + expr + "\n);\n})()"
-}
-
-func (p *cdpPage) evaluateString(ctx context.Context, expression string) (string, error) {
-	value, err := p.evaluate(ctx, expression)
-	if err != nil {
-		return "", err
-	}
-	if value == nil {
-		return "", nil
-	}
-	if s, ok := value.(string); ok {
-		return s, nil
-	}
-	return fmt.Sprintf("%v", value), nil
-}
-
-func remoteObjectValue(obj remoteObject) any {
-	if len(obj.Value) > 0 && string(obj.Value) != "null" {
-		var value any
-		if err := json.Unmarshal(obj.Value, &value); err == nil {
-			return value
-		}
-		return string(obj.Value)
-	}
-	if obj.UnserializableValue != "" {
-		return obj.UnserializableValue
-	}
-	if obj.Description != "" {
-		return obj.Description
-	}
-	return nil
-}
-
-type browserTarget struct {
-	Selector string
-	Ref      string
-}
-
-func browserTargetArg(args map[string]any, selectorKey, refKey string) browserTarget {
-	return browserTarget{
-		Selector: StringArg(args, selectorKey),
-		Ref:      normalizeBrowserRef(StringArg(args, refKey)),
-	}
-}
-
-func normalizeBrowserRef(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	index, err := browserRefIndex(ref)
-	if err != nil {
-		return ref
-	}
-	return fmt.Sprintf("e%d", index)
-}
-
-func browserRefIndex(ref string) (int, error) {
-	ref = strings.TrimSpace(strings.ToLower(ref))
-	ref = strings.TrimPrefix(ref, "ref=")
-	ref = strings.TrimPrefix(ref, "e")
-	if ref == "" {
-		return 0, errors.New("ref is empty")
-	}
-	index, err := strconv.Atoi(ref)
-	if err != nil || index <= 0 {
-		return 0, fmt.Errorf("invalid element ref %q", ref)
-	}
-	return index, nil
-}
-
-func (t browserTarget) present() bool {
-	return strings.TrimSpace(t.Ref) != "" || strings.TrimSpace(t.Selector) != ""
-}
-
-func (t browserTarget) require(action string) error {
-	if t.present() {
-		return nil
-	}
-	return fmt.Errorf("ref or selector is required for %s", action)
-}
-
-func (t browserTarget) label() string {
-	if t.Ref != "" {
-		return t.Ref
-	}
-	return t.Selector
-}
-
-// labelOr returns the target label, or fallback when the action was
-// addressed by coordinates instead of an element.
-func (t browserTarget) labelOr(fallback string) string {
-	if t.present() {
-		return t.label()
-	}
-	return fallback
-}
-
-// browserButton returns the CDP mouse button name for the call (validation
-// has already restricted it to left, middle, or right).
-func browserButton(args map[string]any) string {
-	button := strings.ToLower(strings.TrimSpace(StringArg(args, "button")))
-	if button == "" {
-		return "left"
-	}
-	return button
-}
-
-// cdpButtonsMask maps a CDP button name to the Input.dispatchMouseEvent
-// "buttons" bitmask reported while it is held.
-func cdpButtonsMask(button string) int {
-	switch button {
-	case "right":
-		return 2
-	case "middle":
-		return 4
-	default:
-		return 1
-	}
-}
-
-// optionalFloatPoint reads a coordinate pair when both halves are present.
-func optionalFloatPoint(args map[string]any, xKey, yKey string) (float64, float64, bool) {
-	x, okX, errX := IntArg(args, xKey)
-	y, okY, errY := IntArg(args, yKey)
-	if errX != nil || errY != nil || !okX || !okY {
-		return 0, 0, false
-	}
-	return float64(x), float64(y), true
-}
-
-// resolvePoint resolves an element target (ref/selector keys) or an explicit
-// coordinate pair to a viewport point. The contract guarantees exactly one of
-// them is present for actions that call this.
-func (p *cdpPage) resolvePoint(ctx context.Context, args map[string]any, selectorKey, refKey, xKey, yKey string) (browserTarget, elementPoint, error) {
-	target := browserTargetArg(args, selectorKey, refKey)
-	if target.present() {
-		point, err := p.elementPoint(ctx, target)
-		return target, point, err
-	}
-	if x, y, ok := optionalFloatPoint(args, xKey, yKey); ok {
-		return target, elementPoint{X: x, Y: y}, nil
-	}
-	return target, elementPoint{}, fmt.Errorf("%s/%s or %s/%s is required", refKey, selectorKey, xKey, yKey)
-}
-
-func (p *cdpPage) viewportCenter(ctx context.Context) (elementPoint, error) {
-	value, err := p.evaluate(ctx, `({ x: window.innerWidth / 2, y: window.innerHeight / 2 })`)
-	if err != nil {
-		return elementPoint{}, err
-	}
-	var point elementPoint
-	raw, _ := json.Marshal(value)
-	if err := json.Unmarshal(raw, &point); err != nil {
-		return elementPoint{}, err
-	}
-	if point.X <= 0 || point.Y <= 0 {
-		point = elementPoint{X: defaultComputerWidth / 2, Y: defaultComputerHeight / 2}
-	}
-	return point, nil
-}
-
-func (t browserTarget) withResult(result map[string]any) map[string]any {
-	if result == nil {
-		result = map[string]any{}
-	}
-	if t.Ref != "" {
-		result["ref"] = t.Ref
-	}
-	if t.Selector != "" {
-		result["selector"] = t.Selector
-	}
-	return result
-}
-
-type elementPoint struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
-}
-
-func (p *cdpPage) elementPoint(ctx context.Context, target browserTarget) (elementPoint, error) {
-	value, err := p.evaluate(ctx, fmt.Sprintf(`(() => {
-const el = mustTarget(%s, %s);
-el.scrollIntoView({ block: "center", inline: "center" });
-const rect = el.getBoundingClientRect();
-if (rect.width === 0 || rect.height === 0) throw new Error("element has no visible box: " + %s);
-return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-})()`, jsQuote(target.Selector), jsQuote(target.Ref), jsQuote(target.label())))
-	if err != nil {
-		return elementPoint{}, err
-	}
-	var point elementPoint
-	raw, _ := json.Marshal(value)
-	if err := json.Unmarshal(raw, &point); err != nil {
-		return elementPoint{}, err
-	}
-	return point, nil
-}
-
-func (p *cdpPage) mouseMove(ctx context.Context, x, y float64) error {
-	_, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{
-		"type": "mouseMoved",
-		"x":    x,
-		"y":    y,
-	})
-	return err
-}
-
-func (p *cdpPage) mouseClick(ctx context.Context, x, y float64, button string, clickCount int) error {
-	if err := p.mouseMove(ctx, x, y); err != nil {
-		return err
-	}
-	if _, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{
-		"type":       "mousePressed",
-		"x":          x,
-		"y":          y,
-		"button":     button,
-		"clickCount": clickCount,
-	}); err != nil {
-		return err
-	}
-	_, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{
-		"type":       "mouseReleased",
-		"x":          x,
-		"y":          y,
-		"button":     button,
-		"clickCount": clickCount,
-	})
-	return err
-}
-
-// mouseDrag presses, moves in steps, and releases. The release is attempted
-// even when an intermediate move fails so the page is not left with a button
-// held down.
-func (p *cdpPage) mouseDrag(ctx context.Context, fromX, fromY, toX, toY float64, button string) (err error) {
-	if err := p.mouseMove(ctx, fromX, fromY); err != nil {
-		return err
-	}
-	if _, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": fromX, "y": fromY, "button": button, "clickCount": 1}); err != nil {
-		return err
-	}
-	lastX, lastY := fromX, fromY
-	defer func() {
-		if _, releaseErr := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": lastX, "y": lastY, "button": button, "clickCount": 1}); releaseErr != nil && err == nil {
-			err = releaseErr
-		}
-	}()
-	buttons := cdpButtonsMask(button)
-	for i := 1; i <= 8; i++ {
-		t := float64(i) / 8
-		x := fromX + (toX-fromX)*t
-		y := fromY + (toY-fromY)*t
-		if _, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y, "button": button, "buttons": buttons}); err != nil {
-			return err
-		}
-		lastX, lastY = x, y
-	}
-	return nil
-}
-
-func (p *cdpPage) mouseWheel(ctx context.Context, x, y float64, deltaX, deltaY int) error {
-	_, err := p.conn.Call(ctx, "Input.dispatchMouseEvent", map[string]any{
-		"type":   "mouseWheel",
-		"x":      x,
-		"y":      y,
-		"deltaX": deltaX,
-		"deltaY": deltaY,
-	})
-	return err
-}
-
-func (p *cdpPage) insertText(ctx context.Context, text string) error {
-	_, err := p.conn.Call(ctx, "Input.insertText", map[string]any{"text": text})
-	return err
-}
-
-func (p *cdpPage) pressKey(ctx context.Context, key string) error {
-	parts := splitKeyChord(key)
-	if len(parts) == 0 {
-		return errors.New("key is required")
-	}
-	modifiers := 0
-	for _, part := range parts[:len(parts)-1] {
-		modifiers |= cdpModifier(part)
-		if err := p.dispatchKeyWithModifiers(ctx, part, true, modifiers); err != nil {
-			return err
-		}
-	}
-	mainKey := parts[len(parts)-1]
-	if err := p.dispatchKeyWithModifiers(ctx, mainKey, true, modifiers); err != nil {
-		return err
-	}
-	if err := p.dispatchKeyWithModifiers(ctx, mainKey, false, modifiers); err != nil {
-		return err
-	}
-	for i := len(parts) - 2; i >= 0; i-- {
-		modifiers &^= cdpModifier(parts[i])
-		if err := p.dispatchKeyWithModifiers(ctx, parts[i], false, modifiers); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *cdpPage) dispatchKey(ctx context.Context, key string, down bool) error {
-	return p.dispatchKeyWithModifiers(ctx, key, down, 0)
-}
-
-func (p *cdpPage) dispatchKeyWithModifiers(ctx context.Context, key string, down bool, modifiers int) error {
-	info := keyInfoForCDP(key)
-	eventType := "keyUp"
-	if down {
-		eventType = "keyDown"
-	}
-	params := map[string]any{
-		"type":                  eventType,
-		"key":                   info.Key,
-		"code":                  info.Code,
-		"windowsVirtualKeyCode": info.KeyCode,
-		"nativeVirtualKeyCode":  info.KeyCode,
-		"modifiers":             modifiers,
-	}
-	if len([]rune(info.Text)) == 1 && down {
-		params["text"] = info.Text
-		params["unmodifiedText"] = info.Text
-	}
-	_, err := p.conn.Call(ctx, "Input.dispatchKeyEvent", params)
-	return err
-}
-
-func (p *cdpPage) captureScreenshot(ctx context.Context, fullPage bool) (string, error) {
-	params := map[string]any{
-		"format":      "png",
-		"fromSurface": true,
-	}
-	if fullPage {
-		metricsRaw, err := p.conn.Call(ctx, "Page.getLayoutMetrics", nil)
-		if err == nil {
-			var metrics struct {
-				ContentSize struct {
-					X      float64 `json:"x"`
-					Y      float64 `json:"y"`
-					Width  float64 `json:"width"`
-					Height float64 `json:"height"`
-				} `json:"contentSize"`
-			}
-			if json.Unmarshal(metricsRaw, &metrics) == nil && metrics.ContentSize.Width > 0 && metrics.ContentSize.Height > 0 {
-				params["captureBeyondViewport"] = true
-				params["clip"] = map[string]any{
-					"x":      metrics.ContentSize.X,
-					"y":      metrics.ContentSize.Y,
-					"width":  metrics.ContentSize.Width,
-					"height": metrics.ContentSize.Height,
-					"scale":  1,
-				}
-			}
-		}
-	}
-	raw, err := p.conn.Call(ctx, "Page.captureScreenshot", params)
-	if err != nil {
-		return "", err
-	}
-	var out struct {
-		Data string `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", err
-	}
-	return out.Data, nil
-}
-
-func (p *cdpPage) annotate(ctx context.Context) (any, error) {
-	return p.evaluate(ctx, `(() => {
-const result = [];
-for (const item of memohInteractiveElements()) {
-  const el = item.element;
-  const rect = item.rect;
-  result.push({ ref: item.ref, tag: item.tag, role: item.role, name: item.name });
-  const label = document.createElement('div');
-  label.className = '__memoh_annotation__';
-  label.textContent = item.ref;
-  label.style.cssText = 'position:fixed;left:' + rect.left + 'px;top:' + Math.max(0, rect.top - 18) + 'px;z-index:2147483647;background:#e63946;color:#fff;font:bold 11px/16px monospace;padding:0 4px;border-radius:3px;pointer-events:none;';
-  document.body.appendChild(label);
-}
-return result;
-})()`)
-}
-
-func (p *cdpPage) removeAnnotations(ctx context.Context) error {
-	_, err := p.evaluate(ctx, `(() => { document.querySelectorAll('.__memoh_annotation__').forEach(el => el.remove()); return true })()`)
-	return err
-}
-
-func (p *cdpPage) accessibilitySnapshot(ctx context.Context) (string, error) {
-	value, err := p.evaluate(ctx, `(() => memohInteractiveElements().slice(0, 300).map(({ ref, role, name, tag, selector }) => ({ ref, role, name, tag, selector })))()`)
-	if err != nil {
-		return "", err
-	}
-	raw, _ := json.Marshal(value)
-	var items []struct {
-		Ref      string `json:"ref"`
-		Role     string `json:"role"`
-		Name     string `json:"name"`
-		Tag      string `json:"tag"`
-		Selector string `json:"selector"`
-	}
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return "", err
-	}
-	var lines []string
-	for _, item := range items {
-		role := strings.TrimSpace(item.Role)
-		name := strings.TrimSpace(item.Name)
-		ref := strings.TrimSpace(item.Ref)
-		line := "- " + role
-		if name != "" {
-			line += " " + jsQuote(name)
-		}
-		if ref != "" {
-			line += " [ref=" + ref + "]"
-		}
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		return "(empty page)", nil
-	}
-	if len(items) >= 300 {
-		lines = append(lines, "- ...")
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-func (p *cdpPage) setInputFiles(ctx context.Context, target browserTarget, files []string) error {
-	if target.Ref != "" {
-		value, err := p.evaluate(ctx, fmt.Sprintf(`(() => {
-const el = mustTarget("", %s);
-return memohCssPath(el);
-})()`, jsQuote(target.Ref)))
-		if err != nil {
-			return err
-		}
-		selector, ok := value.(string)
-		if !ok || strings.TrimSpace(selector) == "" {
-			return fmt.Errorf("could not resolve upload target ref %s to a selector", target.Ref)
-		}
-		target.Selector = selector
-	}
-	selector := strings.TrimSpace(target.Selector)
-	if selector == "" {
-		return errors.New("selector or ref is required for upload")
-	}
-	rawDoc, err := p.conn.Call(ctx, "DOM.getDocument", map[string]any{"depth": 1})
-	if err != nil {
-		return err
-	}
-	var doc struct {
-		Root struct {
-			NodeID int `json:"nodeId"`
-		} `json:"root"`
-	}
-	if err := json.Unmarshal(rawDoc, &doc); err != nil {
-		return err
-	}
-	rawNode, err := p.conn.Call(ctx, "DOM.querySelector", map[string]any{"nodeId": doc.Root.NodeID, "selector": selector})
-	if err != nil {
-		return err
-	}
-	var node struct {
-		NodeID int `json:"nodeId"`
-	}
-	if err := json.Unmarshal(rawNode, &node); err != nil {
-		return err
-	}
-	if node.NodeID == 0 {
-		return fmt.Errorf("element not found: %s", selector)
-	}
-	_, err = p.conn.Call(ctx, "DOM.setFileInputFiles", map[string]any{"nodeId": node.NodeID, "files": files})
-	return err
-}
-
-func (p *cdpPage) waitTarget(ctx context.Context, target browserTarget, timeoutMS int) error {
-	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
-	for {
-		value, err := p.evaluate(ctx, fmt.Sprintf(`(() => {
-try {
-  return Boolean(mustTarget(%s, %s));
-} catch (_) {
-  return false;
-}
-})()`, jsQuote(target.Selector), jsQuote(target.Ref)))
-		if err == nil {
-			if ok, _ := value.(bool); ok {
-				return nil
-			}
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("wait for target timed out: %s", target.label())
-		}
-		if err := sleepContext(ctx, 200*time.Millisecond); err != nil {
-			return err
-		}
-	}
-}
-
-func (p *cdpPage) waitReady(ctx context.Context, timeoutMS int) error {
-	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
-	for {
-		state, err := p.evaluateString(ctx, "document.readyState")
-		if err == nil && (state == "interactive" || state == "complete") {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("page did not become ready within %d ms", timeoutMS)
-		}
-		if err := sleepContext(ctx, 200*time.Millisecond); err != nil {
-			return err
-		}
-	}
-}
-
-func (p *cdpPage) navigateHistory(ctx context.Context, forward bool) error {
-	raw, err := p.conn.Call(ctx, "Page.getNavigationHistory", nil)
-	if err != nil {
-		return err
-	}
-	var history struct {
-		CurrentIndex int `json:"currentIndex"`
-		Entries      []struct {
-			ID int `json:"id"`
-		} `json:"entries"`
-	}
-	if err := json.Unmarshal(raw, &history); err != nil {
-		return err
-	}
-	next := history.CurrentIndex - 1
-	if forward {
-		next = history.CurrentIndex + 1
-	}
-	if next < 0 || next >= len(history.Entries) {
-		return errors.New("no navigation history entry in requested direction")
-	}
-	_, err = p.conn.Call(ctx, "Page.navigateToHistoryEntry", map[string]any{"entryId": history.Entries[next].ID})
-	return err
-}
-
 func (p *BrowserProvider) buildScreenshotResult(ctx context.Context, botID, base64Data string, dir string, data map[string]any) any {
 	imgBytes, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
@@ -2074,6 +1626,11 @@ func (p *BrowserProvider) buildScreenshotBytesResult(ctx context.Context, botID 
 	result := map[string]any{"content": content, "path": containerPath, "mimeType": mimeType}
 	if saveErr != nil {
 		result["save_error"] = saveErr.Error()
+	}
+	for _, key := range []string{"snapshot_id", "browser_id", "tab_id", "tab_source", "full_page"} {
+		if v, ok := data[key]; ok {
+			result[key] = v
+		}
 	}
 	return result
 }
@@ -2156,6 +1713,9 @@ func (p *BrowserProvider) replaceFocusedText(ctx context.Context, botID, text st
 	return p.sendDisplayInputs(ctx, botID, events...)
 }
 
+// pointerDrag presses, moves in steps, and releases in one batch; if the batch
+// fails the button is released with a second best-effort batch so the
+// desktop is never left dragging.
 func (p *BrowserProvider) pointerDrag(ctx context.Context, botID string, fromX, fromY, toX, toY int, mask byte) error {
 	events := []displaypkg.ControlInput{{Type: "pointer", X: fromX, Y: fromY, ButtonMask: mask}}
 	for i := 1; i <= 12; i++ {
@@ -2165,7 +1725,13 @@ func (p *BrowserProvider) pointerDrag(ctx context.Context, botID string, fromX, 
 		events = append(events, displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: mask})
 	}
 	events = append(events, displaypkg.ControlInput{Type: "pointer", X: toX, Y: toY, ButtonMask: 0})
-	return p.sendDisplayInputs(ctx, botID, events...)
+	if err := p.sendDisplayInputs(ctx, botID, events...); err != nil {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		_ = p.sendDisplayInputs(releaseCtx, botID, displaypkg.ControlInput{Type: "pointer", X: toX, Y: toY, ButtonMask: 0})
+		return err
+	}
+	return nil
 }
 
 // pointerScroll turns a pixel amount into discrete RFB wheel steps (about
@@ -2313,396 +1879,3 @@ func buttonName(mask byte) string {
 		return "left"
 	}
 }
-
-func keysymForRune(r rune) uint32 {
-	if r >= 0x20 && r <= 0x7e {
-		return uint32(r)
-	}
-	return 0x01000000 | uint32(r) //nolint:gosec // runes are Unicode code points and this branch uses the X11 UCS keysym encoding.
-}
-
-func namedKeysym(key string) uint32 {
-	switch normalizeKeyName(key) {
-	case "backspace":
-		return 0xff08
-	case "tab":
-		return 0xff09
-	case "enter", "return":
-		return 0xff0d
-	case "escape", "esc":
-		return 0xff1b
-	case "delete":
-		return 0xffff
-	case "home":
-		return 0xff50
-	case "left", "arrowleft":
-		return 0xff51
-	case "up", "arrowup":
-		return 0xff52
-	case "right", "arrowright":
-		return 0xff53
-	case "down", "arrowdown":
-		return 0xff54
-	case "pageup":
-		return 0xff55
-	case "pagedown":
-		return 0xff56
-	case "end":
-		return 0xff57
-	case "shift":
-		return 0xffe1
-	case "control", "ctrl":
-		return 0xffe3
-	case "alt", "option":
-		return 0xffe9
-	case "meta", "cmd", "command", "super":
-		return 0xffeb
-	case "space":
-		return 0x20
-	default:
-		rs := []rune(key)
-		if len(rs) == 1 {
-			return keysymForRune(rs[0])
-		}
-		return 0
-	}
-}
-
-type cdpKeyInfo struct {
-	Key     string
-	Code    string
-	KeyCode int
-	Text    string
-}
-
-func keyInfoForCDP(key string) cdpKeyInfo {
-	normalized := normalizeKeyName(key)
-	switch normalized {
-	case "enter", "return":
-		return cdpKeyInfo{Key: "Enter", Code: "Enter", KeyCode: 13}
-	case "tab":
-		return cdpKeyInfo{Key: "Tab", Code: "Tab", KeyCode: 9}
-	case "escape", "esc":
-		return cdpKeyInfo{Key: "Escape", Code: "Escape", KeyCode: 27}
-	case "backspace":
-		return cdpKeyInfo{Key: "Backspace", Code: "Backspace", KeyCode: 8}
-	case "delete":
-		return cdpKeyInfo{Key: "Delete", Code: "Delete", KeyCode: 46}
-	case "arrowleft", "left":
-		return cdpKeyInfo{Key: "ArrowLeft", Code: "ArrowLeft", KeyCode: 37}
-	case "arrowup", "up":
-		return cdpKeyInfo{Key: "ArrowUp", Code: "ArrowUp", KeyCode: 38}
-	case "arrowright", "right":
-		return cdpKeyInfo{Key: "ArrowRight", Code: "ArrowRight", KeyCode: 39}
-	case "arrowdown", "down":
-		return cdpKeyInfo{Key: "ArrowDown", Code: "ArrowDown", KeyCode: 40}
-	case "control", "ctrl":
-		return cdpKeyInfo{Key: "Control", Code: "ControlLeft", KeyCode: 17}
-	case "shift":
-		return cdpKeyInfo{Key: "Shift", Code: "ShiftLeft", KeyCode: 16}
-	case "alt", "option":
-		return cdpKeyInfo{Key: "Alt", Code: "AltLeft", KeyCode: 18}
-	case "meta", "cmd", "command", "super":
-		return cdpKeyInfo{Key: "Meta", Code: "MetaLeft", KeyCode: 91}
-	case "space":
-		return cdpKeyInfo{Key: " ", Code: "Space", KeyCode: 32, Text: " "}
-	default:
-		rs := []rune(key)
-		if len(rs) == 1 {
-			r := rs[0]
-			upper := strings.ToUpper(string(r))
-			code := "Key" + upper
-			keyCode := int([]rune(upper)[0])
-			if r >= '0' && r <= '9' {
-				code = "Digit" + string(r)
-				keyCode = int(r)
-			}
-			return cdpKeyInfo{Key: string(r), Code: code, KeyCode: keyCode, Text: string(r)}
-		}
-		return cdpKeyInfo{Key: key, Code: key, KeyCode: 0}
-	}
-}
-
-func cdpModifier(key string) int {
-	switch normalizeKeyName(key) {
-	case "alt", "option":
-		return 1
-	case "control", "ctrl":
-		return 2
-	case "meta", "cmd", "command", "super":
-		return 4
-	case "shift":
-		return 8
-	default:
-		return 0
-	}
-}
-
-func normalizeKeyName(key string) string {
-	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), " ", ""))
-}
-
-func splitKeyChord(key string) []string {
-	parts := strings.FieldsFunc(key, func(r rune) bool { return r == '+' })
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
-}
-
-func intArgOr(args map[string]any, key string, fallback int) (int, error) {
-	value, _, err := IntArg(args, key)
-	if err != nil {
-		return 0, err
-	}
-	if value <= 0 {
-		return fallback, nil
-	}
-	return value, nil
-}
-
-func scrollDeltaX(direction string, amount int) int {
-	switch direction {
-	case "left":
-		return -amount
-	case "right":
-		return amount
-	default:
-		return 0
-	}
-}
-
-func scrollDeltaY(direction string, amount int) int {
-	switch direction {
-	case "up":
-		return -amount
-	case "down", "":
-		return amount
-	default:
-		return 0
-	}
-}
-
-func stringSliceArg(args map[string]any, key string) []string {
-	raw, ok := args[key]
-	if !ok || raw == nil {
-		return nil
-	}
-	switch values := raw.(type) {
-	case []string:
-		return values
-	case []any:
-		out := make([]string, 0, len(values))
-		for _, value := range values {
-			if s := strings.TrimSpace(fmt.Sprintf("%v", value)); s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func pageTargetAt(targets []cdpTarget, index int) (cdpTarget, error) {
-	if index < 0 {
-		return cdpTarget{}, fmt.Errorf("tab index %d out of range", index)
-	}
-	i := 0
-	for _, target := range targets {
-		if target.Type != "page" {
-			continue
-		}
-		if i == index {
-			return target, nil
-		}
-		i++
-	}
-	return cdpTarget{}, fmt.Errorf("tab index %d out of range (%d tabs)", index, i)
-}
-
-func targetIndex(targets []cdpTarget, id string) int {
-	i := 0
-	for _, target := range targets {
-		if target.Type != "page" {
-			continue
-		}
-		if target.ID == id {
-			return i
-		}
-		i++
-	}
-	return -1
-}
-
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func clamp(value, minValue, maxValue int) int {
-	if value < minValue {
-		return minValue
-	}
-	if value > maxValue {
-		return maxValue
-	}
-	return value
-}
-
-func clampByte(value int) byte {
-	if value <= 0 {
-		return 0
-	}
-	if value >= 255 {
-		return 255
-	}
-	return byte(value) //nolint:gosec // value is manually bounded to the uint8 range above.
-}
-
-func jsQuote(value string) string {
-	raw, _ := json.Marshal(value)
-	return string(raw)
-}
-
-const mustElementHelper = `
-function mustElement(selector) {
-  const el = document.querySelector(selector);
-  if (!el) throw new Error("element not found: " + selector);
-  return el;
-}
-
-const memohInteractiveSelector = [
-  'a[href]',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  'summary',
-  '[contenteditable="true"]',
-  '[role="button"]',
-  '[role="link"]',
-  '[role="tab"]',
-  '[role="menuitem"]',
-  '[role="checkbox"]',
-  '[role="radio"]',
-  '[onclick]',
-  '[tabindex]:not([tabindex="-1"])'
-].join(',');
-
-function memohVisible(el) {
-  const rect = el.getBoundingClientRect();
-  const style = getComputedStyle(el);
-  if (rect.width === 0 || rect.height === 0) return null;
-  if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return null;
-  return rect;
-}
-
-function memohRole(el) {
-  const explicit = (el.getAttribute('role') || '').trim();
-  if (explicit) return explicit;
-  const tag = el.tagName.toLowerCase();
-  if (tag === 'a') return 'link';
-  if (tag === 'button') return 'button';
-  if (tag === 'select') return 'combobox';
-  if (tag === 'textarea') return 'textbox';
-  if (tag === 'summary') return 'button';
-  if (tag === 'input') {
-    const type = (el.getAttribute('type') || 'text').toLowerCase();
-    if (type === 'checkbox') return 'checkbox';
-    if (type === 'radio') return 'radio';
-    if (type === 'submit' || type === 'button' || type === 'reset') return 'button';
-    return 'textbox';
-  }
-  return 'element';
-}
-
-function memohElementName(el) {
-  const tag = el.tagName.toLowerCase();
-  const type = (el.getAttribute('type') || '').toLowerCase();
-  const candidates = [
-    el.getAttribute('aria-label'),
-    el.getAttribute('alt'),
-    el.getAttribute('title'),
-    el.getAttribute('placeholder')
-  ];
-  if (tag === 'input' && ['button', 'submit', 'reset'].includes(type)) {
-    candidates.push(el.value);
-  }
-  candidates.push(el.innerText, el.textContent);
-  for (const candidate of candidates) {
-    const text = String(candidate || '').replace(/\s+/g, ' ').trim();
-    if (text) return text.slice(0, 80);
-  }
-  return '';
-}
-
-function memohCssEscape(value) {
-  if (globalThis.CSS && typeof CSS.escape === 'function') return CSS.escape(value);
-  return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
-}
-
-function memohCssPath(el) {
-  if (el.id) return '#' + memohCssEscape(el.id);
-  const parts = [];
-  let node = el;
-  while (node && node.nodeType === Node.ELEMENT_NODE && node !== document.body && node !== document.documentElement) {
-    let part = node.tagName.toLowerCase();
-    const parent = node.parentElement;
-    if (!parent) break;
-    const sameTag = Array.from(parent.children).filter(child => child.tagName === node.tagName);
-    if (sameTag.length > 1) {
-      part += ':nth-of-type(' + (sameTag.indexOf(node) + 1) + ')';
-    }
-    parts.unshift(part);
-    node = parent;
-  }
-  return parts.length ? parts.join(' > ') : el.tagName.toLowerCase();
-}
-
-function memohInteractiveElements() {
-  const result = [];
-  const seen = new Set();
-  for (const el of document.querySelectorAll(memohInteractiveSelector)) {
-    if (seen.has(el)) continue;
-    seen.add(el);
-    const rect = memohVisible(el);
-    if (!rect) continue;
-    const ref = 'e' + (result.length + 1);
-    result.push({
-      ref,
-      element: el,
-      rect,
-      tag: el.tagName.toLowerCase(),
-      role: memohRole(el),
-      name: memohElementName(el),
-      selector: memohCssPath(el)
-    });
-  }
-  return result;
-}
-
-function elementByRef(ref) {
-  const value = String(ref || '').trim().toLowerCase().replace(/^ref=/, '').replace(/^e/, '');
-  const index = Number.parseInt(value, 10);
-  if (!Number.isInteger(index) || index < 1) throw new Error('invalid element ref: ' + ref);
-  const item = memohInteractiveElements()[index - 1];
-  if (!item) throw new Error('element ref not found: ' + ref + ' (observe again; the page may have changed)');
-  return item.element;
-}
-
-function mustTarget(selector, ref) {
-  if (String(ref || '').trim()) return elementByRef(ref);
-  return mustElement(selector);
-}
-`
