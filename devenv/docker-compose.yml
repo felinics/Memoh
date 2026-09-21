@@ -195,6 +195,16 @@ services:
       CONFIG_PATH: /workspace/devenv/app.dev.toml
       GOFLAGS: -buildvcs=false
       TZ: "${MEMOH_DEV_TZ:-UTC}"
+      # Tracing, same switch as the server. Without this the channel half of
+      # a split-mode trace is missing: an inbound message is received here and
+      # the turn it starts runs over on the server, so a collector that only
+      # hears from one of them sees half the story.
+      #
+      # No OTEL_SERVICE_NAME: each process names itself (memoh-server,
+      # memoh-channel) and one value here would file both under one name,
+      # which is the distinction worth keeping in a split deployment.
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "${OTEL_EXPORTER_OTLP_PROTOCOL:-}"
       # The channel process makes the outbound platform connections
       # (Telegram, Discord, ...), so it needs the same proxy plumbing as
       # the server.
