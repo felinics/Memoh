@@ -28,6 +28,20 @@ var errEOFPattern = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
 // serverErrPattern matches "api error 5XX" where XX is any two digits.
 var serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
 
+type stepCommitError struct {
+	cause error
+}
+
+func (e stepCommitError) Error() string { return e.cause.Error() }
+func (e stepCommitError) Unwrap() error { return e.cause }
+
+func tagStepCommitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return stepCommitError{cause: err}
+}
+
 // DefaultRetryConfig returns the default retry strategy: 5 attempts total.
 // Only the first retry fires immediately — it absorbs network blips and
 // instant upstream rejections. Later attempts back off 1s→8s with jitter, so
@@ -45,6 +59,10 @@ func DefaultRetryConfig() RetryConfig {
 // isRetryableStreamError returns true for errors worth retrying.
 func isRetryableStreamError(err error) bool {
 	if err == nil {
+		return false
+	}
+	var commitErr stepCommitError
+	if errors.As(err, &commitErr) {
 		return false
 	}
 	// Context cancelled/expired — do NOT retry (check first since
