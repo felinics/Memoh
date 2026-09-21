@@ -15,6 +15,7 @@ import (
 	openaicodex "github.com/felinics/twilight/provider/openai/codex"
 	openaicompletions "github.com/felinics/twilight/provider/openai/completions"
 	openairesponses "github.com/felinics/twilight/provider/openai/responses"
+	opencodego "github.com/felinics/twilight/provider/opencode/go"
 	sdk "github.com/felinics/twilight/sdk"
 
 	memohcopilot "github.com/felinics/memoh/internal/copilot"
@@ -147,6 +148,16 @@ func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientTyp
 	}
 
 	switch clientType {
+	case ClientTypeOpenCodeGo:
+		opts := []opencodego.Option{
+			opencodego.WithAPIKey(apiKey),
+			opencodego.WithHTTPClient(httpClient),
+		}
+		if baseURL != "" {
+			opts = append(opts, opencodego.WithBaseURL(baseURL))
+		}
+		return withOpenCodeGoSession(opencodego.New(opts...))
+
 	case ClientTypeOpenAIResponses:
 		opts := []openairesponses.Option{
 			openairesponses.WithAPIKey(apiKey),

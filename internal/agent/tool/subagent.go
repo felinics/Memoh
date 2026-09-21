@@ -1974,6 +1974,7 @@ func (p *SpawnProvider) resolveSubagentReasoning(
 	modelInfo models.GetResponse,
 	clientType string,
 ) (*models.ReasoningConfig, error) {
+	clientType = models.ResolveModelClientType(clientType, modelInfo.ModelID)
 	stored := strings.TrimSpace(session.ReasoningStoredEffort)
 	requested := strings.TrimSpace(session.ReasoningRequestedEffort)
 	if stored == "" {

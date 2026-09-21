@@ -791,6 +791,47 @@ func serverURL(r *http.Request) string {
 func TestFetchRemoteModelsViaSDK(t *testing.T) {
 	t.Parallel()
 
+	t.Run("opencode go only imports routable agent models", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{
+				{"id": "glm-5.2"}, {"id": "minimax-m2.7"}, {"id": "gpt-5.6-luna"}, {"id": "future-model"},
+			}})
+		}))
+		defer server.Close()
+		s := &Service{}
+		items, err := s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeOpenCodeGo),
+			Config:     []byte(`{"base_url":"` + server.URL + `"}`),
+		})
+		if err != nil || len(items) != 3 {
+			t.Fatalf("models = %v, error = %v", items, err)
+		}
+		for _, item := range items {
+			if !item.CapabilitiesKnown || strings.Join(item.Compatibilities, ",") != "tool-call,reasoning" || item.ThinkingMode != models.ThinkingModeAlways {
+				t.Fatalf("missing agent capabilities or unsafe synthetic thinking control: %+v", item)
+			}
+		}
+		// A preset must retain curated capabilities when discovery uses the
+		// live endpoint. Conservative custom-provider defaults must not erase
+		// Luna's reasoning controls, vision support, or context window.
+		s.templatesDir = "../../conf/providers"
+		items, err = s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeOpenCodeGo),
+			Config:     []byte(`{"base_url":"` + server.URL + `"}`),
+			Metadata:   []byte(`{"preset":{"source":"opencode-go.yaml"}}`),
+		})
+		if err != nil || len(items) != 3 {
+			t.Fatalf("preset models = %v, error = %v", items, err)
+		}
+		luna := items[2]
+		if luna.ID != "gpt-5.6-luna" || luna.ThinkingMode != models.ThinkingModeToggle ||
+			len(luna.ReasoningEfforts) == 0 || luna.ContextWindow == nil || *luna.ContextWindow != 1050000 ||
+			!strings.Contains(strings.Join(luna.Compatibilities, ","), "vision") {
+			t.Fatalf("preset capabilities were overwritten: %+v", luna)
+		}
+	})
+
 	t.Run("anthropic", func(t *testing.T) {
 		t.Parallel()
 
@@ -1144,6 +1185,26 @@ type providerTestQueries struct {
 
 func (s providerTestQueries) GetProviderByID(context.Context, pgtype.UUID) (sqlc.Provider, error) {
 	return s.provider, nil
+}
+
+func TestOpenCodeGoPublicCatalogDoesNotVerifyCredentials(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Errorf("provider connectivity check unexpectedly generated text: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "glm-5.2"}}})
+	}))
+	defer server.Close()
+	providerID := pgtype.UUID{Bytes: [16]byte{0x13, 0x10}, Valid: true}
+	service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+		ID: providerID, ClientType: string(models.ClientTypeOpenCodeGo),
+		Config: []byte(`{"api_key":"invalid","base_url":"` + server.URL + `"}`),
+	}}}
+	resp, err := service.Test(context.Background(), providerID.String())
+	if err != nil || resp.Status != TestStatusUnverified || !resp.Reachable {
+		t.Fatalf("public catalog falsely verified credentials: %+v, %v", resp, err)
+	}
 }
 
 // Regression for #1042: a successful models list is conclusive for
