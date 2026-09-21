@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -213,10 +214,17 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsProviderAbort(t *testing.T) {
 func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 	repeatedChunk := strings.Repeat("abcd", 64)
 	var observedCancel atomic.Bool
+	// Waits for the provider goroutines to finish deciding. The assertions
+	// below read what they stored, and the run can return before a goroutine
+	// has been scheduled again after the cancellation. A WaitGroup rather than
+	// a channel because a retrying run calls the provider more than once.
+	var providers sync.WaitGroup
 	provider := &atomicMockProvider{
 		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
 			parts := make(chan sdk.StreamPart, 16)
+			providers.Add(1)
 			go func() {
+				defer providers.Done()
 				defer close(parts)
 				send := func(part sdk.StreamPart) bool {
 					select {
@@ -272,6 +280,7 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 	if outerCtx.Err() != nil {
 		t.Fatalf("owning context was canceled: %v", outerCtx.Err())
 	}
+	providers.Wait()
 	if !observedCancel.Load() {
 		t.Fatal("stream provider did not observe child cancellation")
 	}

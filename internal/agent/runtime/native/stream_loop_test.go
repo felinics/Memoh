@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -132,10 +133,17 @@ func TestAgentStreamMarksTerminalTextLoopAsAbort(t *testing.T) {
 
 	repeatedChunk := strings.Repeat("abcd", 64)
 	var observedCancel atomic.Bool
+	// Waits for the provider goroutines to finish deciding. The assertions
+	// below read what they stored, and the run can return before a goroutine
+	// has been scheduled again after the cancellation. A WaitGroup rather than
+	// a channel because a retrying run calls the provider more than once.
+	var providers sync.WaitGroup
 	modelProvider := &atomicMockProvider{
 		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
 			ch := make(chan sdk.StreamPart, 16)
+			providers.Add(1)
 			go func() {
+				defer providers.Done()
 				defer close(ch)
 				send := func(part sdk.StreamPart) bool {
 					select {
@@ -193,6 +201,7 @@ func TestAgentStreamMarksTerminalTextLoopAsAbort(t *testing.T) {
 		}
 	}
 
+	providers.Wait()
 	if !observedCancel.Load() {
 		t.Fatal("expected stream provider to observe context cancellation from text-loop abort")
 	}
@@ -207,11 +216,18 @@ func TestAgentStreamMarksRetryTextLoopAsAbort(t *testing.T) {
 	repeatedChunk := strings.Repeat("abcd", 64)
 	var streamCalls atomic.Int32
 	var observedCancel atomic.Bool
+	// Waits for the provider goroutines to finish deciding. The assertions
+	// below read what they stored, and the run can return before a goroutine
+	// has been scheduled again after the cancellation. A WaitGroup rather than
+	// a channel because a retrying run calls the provider more than once.
+	var providers sync.WaitGroup
 	modelProvider := &atomicMockProvider{
 		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
 			call := streamCalls.Add(1)
 			ch := make(chan sdk.StreamPart, 16)
+			providers.Add(1)
 			go func() {
+				defer providers.Done()
 				defer close(ch)
 				send := func(part sdk.StreamPart) bool {
 					select {
@@ -279,6 +295,7 @@ func TestAgentStreamMarksRetryTextLoopAsAbort(t *testing.T) {
 	if streamCalls.Load() != 2 {
 		t.Fatalf("expected one retry stream attempt, got %d stream calls", streamCalls.Load())
 	}
+	providers.Wait()
 	if !observedCancel.Load() {
 		t.Fatal("expected retry stream provider to observe context cancellation from text-loop abort")
 	}
@@ -372,10 +389,17 @@ func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 
 	repeatedChunk := strings.Repeat("abcd", 64)
 	var observedCancel atomic.Bool
+	// Waits for the provider goroutines to finish deciding. The assertions
+	// below read what they stored, and the run can return before a goroutine
+	// has been scheduled again after the cancellation. A WaitGroup rather than
+	// a channel because a retrying run calls the provider more than once.
+	var providers sync.WaitGroup
 	modelProvider := &atomicMockProvider{
 		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
 			ch := make(chan sdk.StreamPart)
+			providers.Add(1)
 			go func() {
+				defer providers.Done()
 				defer close(ch)
 				send := func(part sdk.StreamPart) bool {
 					select {
@@ -455,6 +479,7 @@ func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
 	if retryResult == nil {
 		t.Fatal("expected retry result")
 	}
+	providers.Wait()
 	if !observedCancel.Load() {
 		t.Fatal("expected retry stream provider to observe context cancellation from text-loop abort")
 	}
