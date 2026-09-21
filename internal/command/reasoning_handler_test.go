@@ -98,7 +98,7 @@ func newReasoningCommandHarness(
 		nil,
 		models.NewService(logger, queries),
 		providers.NewService(logger, queries, ""),
-		nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil,
 	)
 	return handler, queries, botID
 }

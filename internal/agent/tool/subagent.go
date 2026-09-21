@@ -339,7 +339,7 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 		canStartBackground = true
 		parts = append(parts,
 			"Use "+spawnRef+" to create a managed subagent for an independent task.",
-			"Subagents can use the bot's configured tools, including workspace, web, memory, skills, browser, email, media, and MCP tools. They cannot ask the user, send direct chat messages or reactions, or create more subagents.",
+			"Subagents can use the bot's configured tools, including workspace, web, memory, skills, browser, media, and MCP tools. They cannot ask the user, send direct chat messages or reactions, or create more subagents.",
 			"Subagents use an enabled chat model from the current session's provider. `model_id` selects a model within that provider; omitting it uses the current session model.",
 			"Set `fork: true` when the worker needs the parent model's current message context; otherwise it starts with only the assigned task.",
 			"Use subagents when work benefits from isolated context or can proceed while you continue. Don't use one for simple single-step work — just do it directly.",

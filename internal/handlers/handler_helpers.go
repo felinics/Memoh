@@ -71,3 +71,11 @@ func parseOffsetLimit(c echo.Context) (limit, offset int) {
 	}
 	return limit, offset
 }
+
+func firstHeaderValue(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Split(raw, ",")
+	return strings.TrimSpace(parts[0])
+}

@@ -120,16 +120,16 @@ func TestFallbackTrailer_List(t *testing.T) {
 			empty: true,
 		},
 		{
-			name: "display-only with cross-nav extras (email)",
+			name: "display-only with cross-nav extras (models)",
 			iv: &Interactive{Kind: InteractiveList, List: &ListView{
-				Resource: "email", Action: "providers",
-				Items: []ListItem{{Label: "smtp.gmail.com"}},
+				Resource: "models", Action: "list",
+				Items: []ListItem{{Label: "Example model"}},
 				ExtraActions: []ListItem{
-					{Label: "Bindings", Action: &ItemAction{Resource: "email", Action: "bindings"}},
-					{Label: "Outbox", Action: &ItemAction{Resource: "email", Action: "outbox"}},
+					{Label: "Details", Action: &ItemAction{Resource: "models", Action: "get"}},
+					{Label: "Variants", Action: &ItemAction{Resource: "models", Action: "variants"}},
 				},
 			}},
-			contains: []string{"Open:", "/email bindings", "/email outbox"},
+			contains: []string{"Open:", "/models get", "/models variants"},
 		},
 		{
 			name: "HintVerb=details override (mcp)",
@@ -583,8 +583,8 @@ func TestHasAnyArgs(t *testing.T) {
 // contract: with one command the joiner emits " /cmd" (leading space) so the
 // template "Open:{commands}" renders as "Open: /cmd" — not "Open:/cmd".
 func TestJoinActionCmdsSingleItemHasSpace(t *testing.T) {
-	got := joinActionCmds([]*ItemAction{{Resource: "email", Action: "outbox"}})
-	if got != " `/email outbox`" {
+	got := joinActionCmds([]*ItemAction{{Resource: "models", Action: "variants"}})
+	if got != " `/models variants`" {
 		t.Errorf("single-item joiner = %q, want leading-space form", got)
 	}
 	multi := joinActionCmds([]*ItemAction{

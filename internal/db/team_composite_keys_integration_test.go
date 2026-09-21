@@ -98,7 +98,6 @@ func TestRuntimeResourceIDsRemainGlobalUUIDKeys(t *testing.T) {
 		"bots",
 		"channel_identities",
 		"containers",
-		"email_providers",
 		"fetch_providers",
 		"mcp_connections",
 		"models",

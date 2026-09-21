@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/email"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 )
@@ -24,8 +23,6 @@ const (
 	MethodSend         = "channel.message.send"
 	MethodReact        = "channel.message.react"
 	MethodStatuses     = "channel.connection.statuses"
-	MethodRefreshEmail = "channel.email.refresh"
-	MethodSendEmail    = "channel.email.send"
 	MethodTunnelStatus = "channel.tunnel.status"
 
 	reasonConfigNotFound     = "channel.config_not_found"
@@ -84,19 +81,6 @@ func (c *Client) ConnectionStatusesByBot(botID string) []channel.ConnectionStatu
 		return nil
 	}
 	return out
-}
-
-func (c *Client) RefreshProvider(ctx context.Context, providerID string) error {
-	return c.call(ctx, MethodRefreshEmail, providerID, nil)
-}
-
-func (c *Client) SendEmail(ctx context.Context, botID, providerID string, msg email.OutboundEmail) (string, error) {
-	in := struct {
-		BotID, ProviderID string
-		Message           email.OutboundEmail
-	}{botID, providerID, msg}
-	var out string
-	return out, c.call(ctx, MethodSendEmail, in, &out)
 }
 
 func (c *Client) Status() webhooktunnel.Status {
@@ -188,7 +172,7 @@ func reasonStatus(code codes.Code, reason string, err error) error {
 	return status.Error(code, reason+reasonDetailSep+err.Error())
 }
 
-func Handlers(channelRuntime channel.Runtime, emailRuntime email.Runtime, tunnel *webhooktunnel.Manager) map[string]runtimeRpc.Handler {
+func Handlers(channelRuntime channel.Runtime, tunnel *webhooktunnel.Manager) map[string]runtimeRpc.Handler {
 	decode := func(raw json.RawMessage, dst any) error { return json.Unmarshal(raw, dst) }
 	return map[string]runtimeRpc.Handler{
 		MethodUpsertConfig: func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -247,31 +231,8 @@ func Handlers(channelRuntime channel.Runtime, emailRuntime email.Runtime, tunnel
 			}
 			return channelRuntime.ConnectionStatusesByBot(botID), nil
 		},
-		MethodRefreshEmail: func(ctx context.Context, raw json.RawMessage) (any, error) {
-			var id string
-			if err := decode(raw, &id); err != nil {
-				return nil, err
-			}
-			return nil, runtimeRpc.Public(emailRuntime.RefreshProvider(ctx, id))
-		},
-		MethodSendEmail: func(ctx context.Context, raw json.RawMessage) (any, error) {
-			var in struct {
-				BotID, ProviderID string
-				Message           email.OutboundEmail
-			}
-			if err := decode(raw, &in); err != nil {
-				return nil, err
-			}
-			// Public: SMTP/Mailgun failure detail feeds the send_email
-			// tool's self-correction loop.
-			out, err := emailRuntime.SendEmail(ctx, in.BotID, in.ProviderID, in.Message)
-			return out, runtimeRpc.Public(err)
-		},
 		MethodTunnelStatus: func(context.Context, json.RawMessage) (any, error) { return tunnel.Status(), nil },
 	}
 }
 
-var (
-	_ channel.Runtime = (*Client)(nil)
-	_ email.Runtime   = (*Client)(nil)
-)
+var _ channel.Runtime = (*Client)(nil)

@@ -123,7 +123,6 @@ import {
   Globe,
   Info,
   Keyboard,
-  Mail,
   MousePointer2,
   Store,
   Users,
@@ -266,7 +265,7 @@ function filterItems(items: NavItem[]): NavItem[] {
 // Four groups, ordered by what the user came here to do: the things they own
 // (bots, computers, the market they install from), the service providers those
 // things draw on, the org-level view (who is in it, what it consumes), and
-// their own preferences. `providers`/`memory` sit with search/voice/video/email
+// their own preferences. `providers`/`memory` sit with search/voice/video
 // because all six are the same page: a provider gallery you configure once and
 // then pick from inside a bot — splitting them across groups only hid that.
 // Groups that end up empty after filtering drop out entirely.
@@ -288,7 +287,6 @@ const navGroups = computed<NavGroup[]>(() => [
       { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
       { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
       { title: t('sidebar.video'), name: 'video', icon: Video },
-      { title: t('sidebar.email'), name: 'email', icon: Mail },
     ],
   },
   {

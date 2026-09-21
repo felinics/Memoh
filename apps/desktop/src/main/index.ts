@@ -364,7 +364,6 @@ const SETTINGS_TRAY_ITEMS: TraySettingsItem[] = [
   { label: 'Memory', target: '/settings/memory' },
   { label: 'Web Search', target: '/settings/web-search' },
   { label: 'Voice', target: '/settings/voice' },
-  { label: 'Email', target: '/settings/email' },
   { label: 'Supermarket', target: '/settings/supermarket' },
   { label: 'Usage', target: '/settings/usage' },
   { label: 'Members', target: '/settings/people' },

@@ -58,7 +58,6 @@
 /internal/chat/message/          @felinics/channel
 /internal/command/               @felinics/channel
 /internal/commandsyntax/         @felinics/channel
-/internal/email/                 @felinics/channel
 /internal/healthcheck/checkers/channel/ @felinics/channel
 /internal/i18n/                  @felinics/channel
 /internal/identity/              @felinics/channel

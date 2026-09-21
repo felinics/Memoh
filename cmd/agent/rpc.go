@@ -21,7 +21,6 @@ import (
 	"github.com/felinics/memoh/internal/channel/inbound"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/config"
-	"github.com/felinics/memoh/internal/email"
 	"github.com/felinics/memoh/internal/handlers"
 	intrpc "github.com/felinics/memoh/internal/rpc"
 	"github.com/felinics/memoh/internal/rpc/channelruntime"
@@ -56,7 +55,6 @@ func provideChannelRuntimeClient(client *runtimeRpc.Client) *channelruntime.Clie
 func provideChannelRuntime(client *channelruntime.Client, manager *channel.Manager) channel.Runtime {
 	return &localFirstChannelRuntime{local: manager, remote: client}
 }
-func provideEmailRuntime(client *channelruntime.Client) email.Runtime { return client }
 
 // channelSendRuntime is the slice of *channel.Manager the local route needs.
 type channelSendRuntime interface {

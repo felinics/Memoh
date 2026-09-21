@@ -17,7 +17,6 @@ const pageWebSearch = () => import('@/pages/web-search/index.vue')
 const pageMemory = () => import('@/pages/memory/index.vue')
 const pageVoice = () => import('@/pages/voice/index.vue')
 const pageVideo = () => import('@/pages/video/index.vue')
-const pageEmail = () => import('@/pages/email/index.vue')
 const pageUsage = () => import('@/pages/usage/index.vue')
 const pagePeople = () => import('@/pages/people/index.vue')
 const pageAppearance = () => import('@/pages/appearance/index.vue')
@@ -38,7 +37,7 @@ const pageAbout = () => import('@/pages/about/index.vue')
 export const settingsPageLoaders = [
   pageSettings,
   pageBots, pageProviders, pageRuntimes, pageWebSearch, pageMemory, pageVoice,
-  pageVideo, pageEmail, pageUsage, pagePeople, pageAppearance, pageKeyboard,
+  pageVideo, pageUsage, pagePeople, pageAppearance, pageKeyboard,
   pageProfile, pageSupermarket, pageAbout,
   pageBotNew, pageBotCreateProgress, pageBotDetail,
   pageSupermarketCategory, pageSupermarketAppDetail,
@@ -234,14 +233,6 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
         {
           path: 'transcription',
           redirect: { name: 'voice' },
-        },
-        {
-          name: 'email',
-          path: 'email',
-          component: pageEmail,
-          meta: {
-            breadcrumb: i18nRef('sidebar.email'),
-          },
         },
         {
           name: 'usage',

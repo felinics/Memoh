@@ -73,7 +73,7 @@ func TestBuildPagedListResultButtonTextOmitsCommandHintForActionRows(t *testing.
 }
 
 func TestBuildPagedListResultButtonTextKeepsPlainHintForDisplayRows(t *testing.T) {
-	res := buildPagedListResult("T", "email", "outbox", nil, sampleRecords(2), 0, 12, 2, "Use the Web UI for older sent messages.")
+	res := buildPagedListResult("T", "usage", "list", nil, sampleRecords(2), 0, 12, 2, "Use the Web UI for older usage records.")
 	if !strings.Contains(res.Interactive.List.ButtonText, "Use the Web UI") {
 		t.Fatalf("button text should keep non-action guidance: %q", res.Interactive.List.ButtonText)
 	}

@@ -27,7 +27,6 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	emailpkg "github.com/felinics/memoh/internal/email"
 	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/mcp"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
@@ -62,7 +61,6 @@ type Service struct {
 	channels        *channel.Store
 	mcp             *mcp.ConnectionService
 	schedules       *schedule.Service
-	email           *emailpkg.Service
 	providers       *providerpkg.Service
 	models          *modelpkg.Service
 	searchProviders *searchpkg.Service
@@ -92,7 +90,6 @@ type Params struct {
 	Channels        *channel.Store
 	MCP             *mcp.ConnectionService
 	Schedules       *schedule.Service
-	Email           *emailpkg.Service
 	Providers       *providerpkg.Service
 	Models          *modelpkg.Service
 	SearchProviders *searchpkg.Service
@@ -118,7 +115,6 @@ func New(params Params) *Service {
 		channels:        params.Channels,
 		mcp:             params.MCP,
 		schedules:       params.Schedules,
-		email:           params.Email,
 		providers:       params.Providers,
 		models:          params.Models,
 		searchProviders: params.SearchProviders,
@@ -205,14 +201,8 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 			return err
 		}
 	}
-	if opts.wants(SectionEmail) {
-		if err := writer.writeJSON("bot/email_bindings.json", "bot_email_bindings", data.EmailBindings, opts); err != nil {
-			return err
-		}
-	}
-	// Dependencies back the model config (providers/models/search/memory) and
-	// email bindings (email providers); include them when either is exported.
-	if opts.wants(SectionModels) || opts.wants(SectionEmail) {
+	// Dependencies back the model configuration (providers/models/search/memory).
+	if opts.wants(SectionModels) {
 		if err := writer.writeJSON("dependencies/providers.json", "providers", data.Dependencies.Providers, opts); err != nil {
 			return err
 		}
@@ -226,9 +216,6 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 			return err
 		}
 		if err := writer.writeJSON("dependencies/memory_providers.json", "memory_providers", data.Dependencies.MemoryProviders, opts); err != nil {
-			return err
-		}
-		if err := writer.writeJSON("dependencies/email_providers.json", "email_providers", data.Dependencies.EmailProviders, opts); err != nil {
 			return err
 		}
 	}
@@ -351,14 +338,7 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 			warnings = append(warnings, "schedule export failed: "+err.Error())
 		}
 	}
-	if s.email != nil {
-		if rows, err := s.email.ListBindings(ctx, botID); err == nil {
-			data.EmailBindings = rows
-		} else {
-			warnings = append(warnings, "email binding export failed: "+err.Error())
-		}
-	}
-	deps, depWarnings := s.collectDependencies(ctx, cfg, data)
+	deps, depWarnings := s.collectDependencies(ctx, cfg)
 	data.Dependencies = deps
 	warnings = append(warnings, depWarnings...)
 	if opts.wants(SectionHistory) || opts.wants(SectionAssets) {
@@ -433,7 +413,7 @@ func backupWorkspaceResourceLimitsFromRow(row dbsqlc.BotWorkspaceResourceLimit) 
 	}
 }
 
-func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings, data backupData) (backupDependencies, []string) {
+func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings) (backupDependencies, []string) {
 	var warnings []string
 	modelIDs := uniqueStrings([]string{
 		cfg.ChatModelID,
@@ -493,38 +473,13 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 			warnings = append(warnings, "memory provider dependency missing: "+cfg.MemoryProviderID)
 		}
 	}
-	emailProviders := s.collectEmailProviderDependencies(ctx, data)
 	return backupDependencies{
 		Providers:       providers,
 		Models:          models,
 		SearchProviders: searchProviders,
 		FetchProviders:  fetchProviders,
 		MemoryProviders: memoryProviders,
-		EmailProviders:  emailProviders,
 	}, warnings
-}
-
-func (s *Service) collectEmailProviderDependencies(ctx context.Context, data backupData) []emailpkg.ProviderResponse {
-	bindings, err := roundTripJSON[[]emailpkg.BindingResponse](data.EmailBindings)
-	if err != nil || s.email == nil {
-		return nil
-	}
-	out := make([]emailpkg.ProviderResponse, 0, len(bindings))
-	seen := map[string]struct{}{}
-	for _, binding := range bindings {
-		id := strings.TrimSpace(binding.EmailProviderID)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		if provider, err := s.email.GetProviderInternal(ctx, id); err == nil {
-			out = append(out, provider)
-		}
-	}
-	return out
 }
 
 func (s *Service) collectHistory(ctx context.Context, botID string, includeAssets bool) (backupHistory, []string) {

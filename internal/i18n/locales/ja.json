@@ -243,11 +243,6 @@
           "summary": "Token使用量の概要",
           "by-model": "Modelごとにグループ化されたTokenの使用状況"
         },
-        "email": {
-          "providers": "電子EmailProviderをリストする",
-          "bindings": "Bot電子Emailバインディングをリストする",
-          "outbox": "最近送信したEmailを一覧表示する"
-        },
         "skill": {
           "list": "すべてのSkillをリストする"
         },
@@ -387,27 +382,6 @@
       "back": "◀ MCP",
       "notFound": "{name} という名前の MCP 接続がありません。 {command} との接続を参照してください。",
       "deleted": "✅ MCP 接続 {name} が削除されました。"
-    },
-    "email": {
-      "providersTitle": "電子EmailProvider",
-      "bindingsTitle": "電子Emailのバインド",
-      "outboxTitle": "送信ボックス",
-      "providersEmpty": "電子EmailProviderはまだありません。\n\n電子Email Providerを使用すると、BotはEmailを送受信できます。 Web ダッシュボードに 1 つ追加します。",
-      "bindingsEmpty": "電子Emailのバインドはまだありません。\n\nバインディングにより、このBotに送信元の電子Email アドレスが与えられます。 Web ダッシュボードに 1 つ追加します。",
-      "outboxEmpty": "まだEmailは送信されていません。\n\nBotが送信したEmailがここに表示されます。",
-      "section": {
-        "providers": "Provider",
-        "bindings": "バインディング",
-        "outbox": "送信ボックス"
-      },
-      "fieldAddress": "住所",
-      "fieldPermissions": "権限",
-      "fieldSubject": "主題",
-      "fieldTo": "に",
-      "fieldSent": "送信済み",
-      "permRead": "読む",
-      "permWrite": "書く",
-      "permDelete": "削除"
     },
     "usage": {
       "unavailable": "現在、Tokenの使用は利用できません。",
@@ -555,7 +529,6 @@
     "schedule": "スケジュールされたタスクを管理する",
     "mcp": "管理MCP接続",
     "usage": "Tokenの使用状況を表示する",
-    "email": "電子Email設定を表示する",
     "skill": "BotのSkillを表示する",
     "fs": "Workspace のファイルを参照する",
     "access": "ID と権限を検査する",
