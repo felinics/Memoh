@@ -175,10 +175,33 @@ func (cfg *Config) applyTelemetryEnvOverrides() {
 	if name := strings.TrimSpace(os.Getenv("OTEL_SERVICE_NAME")); name != "" {
 		cfg.Telemetry.ServiceName = name
 	}
-	// An http:// endpoint cannot be reached over TLS whatever the file says.
+	// Without a scheme on the endpoint, whether to use TLS is this setting
+	// and nothing else. Reading it from the environment matters because the
+	// endpoint usually comes from the environment too: a deployment that
+	// pointed OTEL_EXPORTER_OTLP_ENDPOINT at a plaintext collector by host
+	// and port had no way to say so, so the exporter negotiated TLS against
+	// it and reported a handshake error that names neither the setting nor
+	// the endpoint.
+	if insecure, err := strconv.ParseBool(strings.TrimSpace(
+		firstNonEmpty(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_INSECURE"), os.Getenv("OTEL_EXPORTER_OTLP_INSECURE")),
+	)); err == nil {
+		cfg.Telemetry.Insecure = insecure
+	}
+	// An http:// endpoint cannot be reached over TLS whatever the file or the
+	// environment says, and it is the more specific statement of the two.
 	if strings.HasPrefix(cfg.Telemetry.Endpoint, "http://") {
 		cfg.Telemetry.Insecure = true
 	}
+}
+
+// firstNonEmpty returns the first value that is not empty after trimming.
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // parseOTLPHeaders reads the W3C Baggage-style list the OTLP specification

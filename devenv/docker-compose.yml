@@ -141,7 +141,11 @@ services:
       MEMOH_CONNECT_IT_BASE_URL: "${MEMOH_CONNECT_IT_BASE_URL:-}"
       MEMOH_CONNECT_IT_API_TOKEN: "${MEMOH_CONNECT_IT_API_TOKEN:-}"
       # Tracing is off unless you point this at a collector, e.g.
-      #   OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317 mise run dev
+      #   OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 mise run dev
+      # Keep the scheme. Without one the exporter falls back to the insecure
+      # setting, and against a plaintext collector that means it negotiates
+      # TLS and reports a handshake error naming neither. Set
+      # OTEL_EXPORTER_OTLP_INSECURE=true instead if you must use host:port.
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
       OTEL_EXPORTER_OTLP_PROTOCOL: "${OTEL_EXPORTER_OTLP_PROTOCOL:-}"
       OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:-}"
