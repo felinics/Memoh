@@ -705,3 +705,44 @@ func TestPublicURLRejectsCredentialsAndNonHTTPLinks(t *testing.T) {
 		})
 	}
 }
+
+// Whether to use TLS has to be settable from the environment, because the
+// endpoint it applies to usually comes from the environment too. Without
+// this, a deployment pointing OTEL_EXPORTER_OTLP_ENDPOINT at a plaintext
+// collector by host and port could not say so, and the exporter negotiated
+// TLS against it.
+func TestTelemetryInsecureComesFromTheEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		generic  string
+		traces   string
+		endpoint string
+		file     bool
+		want     bool
+	}{
+		{name: "unset keeps the file's answer", file: true, endpoint: "collector:4317", want: true},
+		{name: "generic variable turns it on", generic: "true", endpoint: "collector:4317", want: true},
+		{name: "generic variable turns it off", generic: "false", file: true, endpoint: "collector:4317"},
+		// The traces-specific variable is the more specific of the two and
+		// wins, which is what every other OTLP consumer does with this pair.
+		{name: "traces variable wins over the generic one", generic: "false", traces: "true", endpoint: "collector:4317", want: true},
+		{name: "unparseable value is ignored", generic: "yes-please", endpoint: "collector:4317"},
+		// A scheme is a statement about this endpoint rather than a default
+		// for whichever endpoint is configured, so it is the last word.
+		{name: "http endpoint overrides the variable", generic: "false", endpoint: "http://collector:4317", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", tc.generic)
+			t.Setenv("OTEL_EXPORTER_OTLP_TRACES_INSECURE", tc.traces)
+
+			cfg := Config{}
+			cfg.Telemetry.Endpoint = tc.endpoint
+			cfg.Telemetry.Insecure = tc.file
+			cfg.applyTelemetryEnvOverrides()
+
+			if cfg.Telemetry.Insecure != tc.want {
+				t.Errorf("Insecure = %v, want %v", cfg.Telemetry.Insecure, tc.want)
+			}
+		})
+	}
+}
