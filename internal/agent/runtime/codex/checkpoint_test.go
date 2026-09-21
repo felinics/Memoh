@@ -258,6 +258,23 @@ func TestCheckpointDistinguishesLegacyAndUncommittedNewThreads(t *testing.T) {
 	}
 }
 
+func TestCheckpointDegradesWhenTheWorkspaceCannotHostOne(t *testing.T) {
+	d, _, store, input, ctx := checkpointFixture(t)
+	store.head = agentstate.SessionPublicationHead{RunID: "committed", Kind: agentstate.SessionPublicationCheckpoint}
+	input.RuntimeMetadata = map[string]any{metadataThreadIDKey: "native"}
+	// A workspace without the no-follow reads checkpoints require leaves the
+	// session where one with no state store already is: codex's own files
+	// still hold the conversation. Refusing the turn would brick the thread,
+	// and the condition repeats on every later turn.
+	h, err := d.prepareCheckpoint(ctx, &appServer{}, nil, input)
+	if err != nil || h != (checkpointHandle{NativeID: "native"}) {
+		t.Fatalf("unhostable checkpoint: %+v, %v", h, err)
+	}
+	if _, err := checkpointFSFor(nil); !errors.Is(err, errCheckpointFSUnsupported) {
+		t.Fatalf("absent workspace client: %v", err)
+	}
+}
+
 func TestCheckpointRequiresThisTurnsTerminalRecord(t *testing.T) {
 	d, fs, store, input, ctx := checkpointFixture(t)
 	full := path.Join(codexHome(input.BotAgentID), testRollout)

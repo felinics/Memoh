@@ -419,7 +419,12 @@ func (*Driver) turnResultAfterError(turn *turnState, isNewThread bool, threadID 
 func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, input external.PromptInput) (threadID string, isNew bool, err error) {
 	recoveryCtx, cancel := context.WithTimeout(ctx, checkpointTimeout)
 	defer cancel()
-	checkpoint, err := d.prepareCheckpoint(recoveryCtx, srv, srv.client, input)
+	fs, fsErr := checkpointFSFor(srv.client)
+	if fsErr != nil {
+		d.logger.WarnContext(ctx, "codex workspace cannot host checkpoints; continuing from codex's own files",
+			slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID), slog.Any("error", fsErr))
+	}
+	checkpoint, err := d.prepareCheckpoint(recoveryCtx, srv, fs, input)
 	if err != nil {
 		return "", false, checkpointError(err)
 	}
@@ -733,7 +738,14 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID, sourceThread
 			d.logger.WarnContext(ctx, "remove codex fork checkpoint", slog.Any("error", err))
 		}
 	}()
-	checkpoint, err := d.prepareCheckpointAt(recoveryCtx, nil, srv.client, external.PromptInput{BotID: botID, BotAgentID: botAgentID, ThreadID: sourceThreadID, RuntimeMetadata: runtimeMetadata}, forkRoot)
+	// A workspace that cannot host checkpoints has no snapshot to restore into
+	// the fork root; the fork falls back to codex's own copy of the thread.
+	fs, fsErr := checkpointFSFor(srv.client)
+	if fsErr != nil {
+		d.logger.WarnContext(ctx, "codex workspace cannot host checkpoints; forking from codex's own files",
+			slog.String("bot_id", botID), slog.String("session_id", sourceThreadID), slog.Any("error", fsErr))
+	}
+	checkpoint, err := d.prepareCheckpointAt(recoveryCtx, nil, fs, external.PromptInput{BotID: botID, BotAgentID: botAgentID, ThreadID: sourceThreadID, RuntimeMetadata: runtimeMetadata}, forkRoot)
 	if err != nil {
 		return nil, checkpointError(err)
 	}
