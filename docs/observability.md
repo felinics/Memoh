@@ -68,6 +68,12 @@ than either keeping or dropping them whole.
 | Model call | One span per provider call | `providerCallObserver`, in `internal/agent/runtime/native` |
 | Tool call | One span per tool execution | `wrapToolTracing`, in `assembleTools` |
 
+The liveness probe is the one request that gets no span at all. It runs every
+few seconds forever and says the same thing every time, so tracing it fills a
+backend with probes. `/ping` is not in that category: it reports the server's
+capabilities and the desktop app calls it to decide whether a server is
+usable.
+
 A turn therefore reads as a tree:
 
 ```
