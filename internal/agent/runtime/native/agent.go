@@ -504,7 +504,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	onStepCommitted := func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
 		if cfg.OnStepCommitted != nil {
 			if err := cfg.OnStepCommitted(readMediaState.withMessageOrigins(ctx, stepIndex), cfg.StepIndexOffset+stepIndex, committedStepMessages.decorate(stepIndex, step, toolExecutionMetadata)); err != nil {
-				return err
+				return tagStepCommitError(err)
 			}
 		}
 		nextDurableStep = stepIndex + 1

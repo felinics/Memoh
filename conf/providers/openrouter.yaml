@@ -844,7 +844,8 @@ models:
     config:
       compatibilities: [tool-call]
       context_window: 196608
-      thinking_mode: none
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "mistralai/codestral-2508"
     name: "Mistral: Codestral 2508"
     type: chat
@@ -1468,6 +1469,8 @@ models:
     config:
       compatibilities: [vision, tool-call]
       context_window: 400000
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "openai/gpt-oss-120b"
     name: "OpenAI: gpt-oss-120b"
     type: chat
@@ -1907,6 +1910,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "qwen/qwen3.5-27b"
     name: "Qwen: Qwen3.5-27B"
     type: chat
@@ -1961,12 +1966,16 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "qwen/qwen3.6-35b-a3b"
     name: "Qwen: Qwen3.6 35B A3B"
     type: chat
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "qwen/qwen3.6-flash"
     name: "Qwen: Qwen3.6 Flash"
     type: chat
@@ -1979,6 +1988,8 @@ models:
     config:
       compatibilities: [tool-call, reasoning]
       context_window: 262144
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "qwen/qwen3.6-plus"
     name: "Qwen: Qwen3.6 Plus"
     type: chat
@@ -2293,6 +2304,8 @@ models:
     config:
       compatibilities: [vision, tool-call, reasoning]
       context_window: 202752
+      thinking_mode: toggle
+      reasoning_efforts: [low, medium, high]
   - model_id: "~anthropic/claude-haiku-latest"
     name: "Anthropic Claude Haiku Latest"
     type: chat
