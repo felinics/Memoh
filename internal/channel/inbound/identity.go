@@ -194,7 +194,7 @@ func (r *IdentityResolver) accountUserIDForChannelIdentity(ctx context.Context, 
 		return strings.TrimSpace(userIDs[0]), nil
 	}
 	if len(userIDs) > 1 && r.logger != nil {
-		r.logger.Warn("channel identity has multiple linked users; account principal is ambiguous",
+		r.logger.WarnContext(ctx, "channel identity has multiple linked users; account principal is ambiguous",
 			slog.String("channel_identity_id", strings.TrimSpace(channelIdentityID)),
 			slog.Int("linked_user_count", len(userIDs)))
 	}
@@ -317,7 +317,7 @@ func (r *IdentityResolver) resolveProfileFromDirectory(ctx context.Context, cfg 
 	entry, err := directoryAdapter.ResolveEntry(lookupCtx, cfg, subjectID, channel.DirectoryEntryUser)
 	if err != nil {
 		if r.logger != nil {
-			r.logger.Debug(
+			r.logger.DebugContext(ctx,
 				"resolve profile from directory failed",
 				slog.String("channel", msg.Channel.String()),
 				slog.String("subject_id", subjectID),

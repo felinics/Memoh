@@ -143,7 +143,7 @@ func (a *DingTalkAdapter) DiscoverSelf(ctx context.Context, credentials map[stri
 	}
 	info, err := cli.getBotInfo(callCtx, cfg.AppKey)
 	if err != nil {
-		a.logger.Warn("dingtalk: getBotInfo failed, using appKey as identity",
+		a.logger.WarnContext(ctx, "dingtalk: getBotInfo failed, using appKey as identity",
 			slog.String("app_key", cfg.AppKey),
 			slog.Any("error", err),
 		)
@@ -265,7 +265,7 @@ func (a *DingTalkAdapter) sendViaAPI(
 	if !ok {
 		return errors.New("dingtalk: invalid target")
 	}
-	a.logger.Debug("dingtalk: sendViaAPI",
+	a.logger.DebugContext(ctx, "dingtalk: sendViaAPI",
 		slog.String("target", target),
 		slog.String("kind", kind),
 		slog.String("id", id),

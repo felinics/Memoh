@@ -164,7 +164,7 @@ func (i *Installer) PublishSkills(ctx context.Context, botID string, pkg AppDesc
 		return nil, apperror.Wrap(apperror.CodeRegistryAppInstallFailed, fmt.Errorf("recover Registry App state: %w", err), nil)
 	}
 	if !consistent && i.logger != nil {
-		i.logger.Warn("Skill App files did not match the recorded revision; replacing them",
+		i.logger.WarnContext(ctx, "Skill App files did not match the recorded revision; replacing them",
 			slog.String("registry_id", pkg.RegistryID), slog.String("app_id", pkg.AppID),
 		)
 	}
@@ -204,7 +204,7 @@ func (i *Installer) RemoveSkills(ctx context.Context, botID, registryID, appID, 
 		return nil, fmt.Errorf("recover Skill App state: %w", err)
 	}
 	if !consistent && i.logger != nil {
-		i.logger.Warn("Skill App files did not match the recorded revision; removing the managed path",
+		i.logger.WarnContext(ctx, "Skill App files did not match the recorded revision; removing the managed path",
 			slog.String("registry_id", registryID), slog.String("app_id", appID),
 			slog.String("recorded_revision", revision),
 		)

@@ -326,7 +326,7 @@ func (s *Service) list(ctx context.Context, botID string, force bool) (ListResul
 		// still say what the user asked for, so report them with the problem
 		// instead of failing the whole list. A stopped workspace never gets
 		// here; it keeps its own semantics above.
-		s.logger.Warn("workspace dependency discovery failed; listing records only",
+		s.logger.WarnContext(ctx, "workspace dependency discovery failed; listing records only",
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
 		)
@@ -443,7 +443,7 @@ func (s *Service) reconcile(ctx context.Context, key InstallationKey, dep catalo
 		if err != nil {
 			return Entry{}, fmt.Errorf("workspacedeps: mark interrupted %s failed: %w", dep.ID, err)
 		}
-		s.logger.Warn("interrupted dependency operation marked failed",
+		s.logger.WarnContext(ctx, "interrupted dependency operation marked failed",
 			slog.String("bot_id", key.BotID),
 			slog.String("dependency_id", key.DependencyID),
 			slog.String("status", string(rec.Status)),
@@ -1318,7 +1318,7 @@ func (s *Service) runScript(ctx context.Context, op *operation, action catalog.A
 	if s.scriptEnv != nil {
 		spec.ExtraEnv = s.scriptEnv(ctx)
 	}
-	s.logger.Info("execute dependency definition", slog.String("bot_id", op.key.BotID), slog.String("dependency_id", op.dep.ID), slog.String("action", string(action)), slog.String("definition_revision", op.dep.Revision))
+	s.logger.InfoContext(ctx, "execute dependency definition", slog.String("bot_id", op.key.BotID), slog.String("dependency_id", op.dep.ID), slog.String("action", string(action)), slog.String("definition_revision", op.dep.Revision))
 	spec.Receipt = &OperationReceipt{
 		ID: op.operationID, DependencyID: op.dep.ID, Action: action, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID,
 		DefinitionRevision: op.dep.Revision, ManifestDigest: op.dep.ManifestDigest,
@@ -1412,7 +1412,7 @@ func (s *Service) fail(ctx context.Context, op *operation, cause error) error {
 		_, err = s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
 	}
 	if err != nil {
-		s.logger.Warn("record failed dependency operation",
+		s.logger.WarnContext(ctx, "record failed dependency operation",
 			slog.String("bot_id", op.key.BotID),
 			slog.String("dependency_id", op.dep.ID),
 			slog.Any("error", err),
@@ -1430,7 +1430,7 @@ func (s *Service) restore(ctx context.Context, op *operation) {
 	defer cancel()
 	_, err := s.store.FinishOperation(storeCtx, op.key, op.operationID, op.prior)
 	if err != nil {
-		s.logger.Warn("restore dependency record after busy verdict",
+		s.logger.WarnContext(ctx, "restore dependency record after busy verdict",
 			slog.String("bot_id", op.key.BotID),
 			slog.String("dependency_id", op.dep.ID),
 			slog.Any("error", err),
@@ -1468,7 +1468,7 @@ func (s *Service) readStateBestEffort(ctx context.Context, op *operation) *State
 	state, err := op.readState(ctx)
 	op.previous = state
 	if err != nil {
-		s.logger.Warn("ignoring unreadable dependency state",
+		s.logger.WarnContext(ctx, "ignoring unreadable dependency state",
 			slog.String("bot_id", op.key.BotID),
 			slog.String("dependency_id", op.dep.ID),
 			slog.Any("error", err),

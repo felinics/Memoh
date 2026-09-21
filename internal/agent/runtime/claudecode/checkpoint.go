@@ -174,7 +174,7 @@ func (d *Driver) stageWithFS(ctx context.Context, fs checkpointFS, input checkpo
 	defer reader.close()
 	if err := d.stateStore.Replace(ctx, input.BotID, input.ThreadID, state, reader.next); err != nil {
 		if errors.Is(err, agentstate.ErrSessionStateDivergent) {
-			d.logger.Warn("claude transcript diverged from the canonical checkpoint; publishing a reset instead",
+			d.logger.WarnContext(ctx, "claude transcript diverged from the canonical checkpoint; publishing a reset instead",
 				slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID))
 			return false, nil
 		}

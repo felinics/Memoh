@@ -765,7 +765,7 @@ func (s *Service) pollGitHubCopilotProviderAuthorization(ctx context.Context, pr
 
 	account, err := s.fetchGitHubOAuthAccount(ctx, resp.AccessToken)
 	if err != nil {
-		s.logger.Warn("fetch github oauth account failed", oauthLogAttrs(providerID, err)...)
+		s.logger.WarnContext(ctx, "fetch github oauth account failed", oauthLogAttrs(providerID, err)...)
 	}
 
 	if err := s.saveOAuthToken(ctx, providerID, oauthTokenRecord{
@@ -1123,7 +1123,7 @@ func (s *Service) resolveGitHubOAuthAccount(ctx context.Context, providerID stri
 
 	refreshedAccount, err := s.fetchGitHubOAuthAccount(ctx, token.AccessToken)
 	if err != nil {
-		s.logger.Warn("refresh github oauth account metadata failed", oauthLogAttrs(providerID, err)...)
+		s.logger.WarnContext(ctx, "refresh github oauth account metadata failed", oauthLogAttrs(providerID, err)...)
 		return nil, nil
 	}
 
@@ -1179,7 +1179,7 @@ func (s *Service) fetchGitHubOAuthAccount(ctx context.Context, accessToken strin
 	if account.Email == "" {
 		email, err := s.fetchGitHubPrimaryEmail(ctx, accessToken)
 		if err != nil {
-			s.logger.Warn("fetch github oauth primary email failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "fetch github oauth primary email failed", slog.Any("error", err))
 		} else {
 			account.Email = email
 		}

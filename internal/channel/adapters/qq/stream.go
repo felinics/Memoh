@@ -222,7 +222,7 @@ func (s *qqOutboundStream) pushShard(ctx context.Context, state int, content str
 		logger := s.logger
 		s.mu.Unlock()
 		if logger != nil {
-			logger.Warn("qq stream shard failed", slog.String("target", s.target), slog.Int("index", req.Index), slog.Any("error", err))
+			logger.WarnContext(ctx, "qq stream shard failed", slog.String("target", s.target), slog.Int("index", req.Index), slog.Any("error", err))
 		}
 		return err
 	}

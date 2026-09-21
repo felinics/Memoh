@@ -201,7 +201,7 @@ func (m *Manager) rememberControlResult(ctx context.Context, commandID, botID, s
 		RunID:     strings.TrimSpace(runID),
 	}
 	if storeErr := m.distributed.StoreCommandResult(storeCtx, result, m.commandResultTTL()); storeErr != nil {
-		m.logger.Warn("store runtime abort control result failed",
+		m.logger.WarnContext(ctx, "store runtime abort control result failed",
 			slog.Any("error", storeErr), slog.String("command_id", commandID))
 	}
 }
@@ -215,7 +215,7 @@ func (m *Manager) recordAbortIntent(ctx context.Context, runID string) {
 		return
 	}
 	if _, _, err := m.runs.RequestAbort(ctx, runID); err != nil {
-		m.logger.Warn("record runtime abort intent failed",
+		m.logger.WarnContext(ctx, "record runtime abort intent failed",
 			slog.Any("error", err), slog.String("run_id", runID))
 	}
 }
@@ -988,12 +988,12 @@ func (m *Manager) persistCommandResult(ctx context.Context, request Command, err
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.commandTimeout())
 	defer cancel()
 	if storeErr := m.storeCommandResult(persistCtx, result); storeErr != nil {
-		m.logger.Warn("store runtime command result failed", slog.Any("error", storeErr), slog.String("command_id", request.ID))
+		m.logger.WarnContext(ctx, "store runtime command result failed", slog.Any("error", storeErr), slog.String("command_id", request.ID))
 		return result
 	}
 	stored, ok, loadErr := m.loadCommandResult(persistCtx, request.ID)
 	if loadErr != nil {
-		m.logger.Warn("reload runtime command result failed", slog.Any("error", loadErr), slog.String("command_id", request.ID))
+		m.logger.WarnContext(ctx, "reload runtime command result failed", slog.Any("error", loadErr), slog.String("command_id", request.ID))
 		return result
 	}
 	if ok {
@@ -1020,7 +1020,7 @@ func (m *Manager) publishCommandResult(ctx context.Context, request Command, err
 	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.commandTimeout())
 	defer cancel()
 	if publishErr := m.distributed.PublishCommand(publishCtx, replyOwnerID, result); publishErr != nil {
-		m.logger.Warn("publish runtime command result failed", slog.Any("error", publishErr), slog.String("command_id", request.ID))
+		m.logger.WarnContext(ctx, "publish runtime command result failed", slog.Any("error", publishErr), slog.String("command_id", request.ID))
 	}
 }
 
@@ -1039,7 +1039,7 @@ func (m *Manager) publishStoredCommandResult(ctx context.Context, request, resul
 	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.commandTimeout())
 	defer cancel()
 	if err := m.distributed.PublishCommand(publishCtx, request.ReplyOwnerID, result); err != nil {
-		m.logger.Warn("republish stored runtime command result failed", slog.Any("error", err), slog.String("command_id", request.ID))
+		m.logger.WarnContext(ctx, "republish stored runtime command result failed", slog.Any("error", err), slog.String("command_id", request.ID))
 	}
 }
 
@@ -1107,7 +1107,7 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 			}
 		case <-retry:
 			if err := m.distributed.PublishCommand(waitCtx, retryOwnerID, request); err != nil && waitCtx.Err() == nil {
-				m.logger.Debug("retry runtime command publish failed", slog.Any("error", err), slog.String("command_id", request.ID))
+				m.logger.DebugContext(ctx, "retry runtime command publish failed", slog.Any("error", err), slog.String("command_id", request.ID))
 			}
 		}
 	}

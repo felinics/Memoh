@@ -55,11 +55,11 @@ func newPGVectorIndex(ctx context.Context, logger *slog.Logger, providerConfig m
 		logger = slog.Default()
 	}
 	if vectorStore == nil || vectorStore.Queries() == nil {
-		logger.Debug("graph: pgvector semantic index unavailable", slog.String("embedding_model_id", modelRef))
+		logger.DebugContext(ctx, "graph: pgvector semantic index unavailable", slog.String("embedding_model_id", modelRef))
 		return nil, nil
 	}
 	if queries == nil {
-		logger.Debug("graph: pgvector semantic index disabled without relational query store", slog.String("embedding_model_id", modelRef))
+		logger.DebugContext(ctx, "graph: pgvector semantic index disabled without relational query store", slog.String("embedding_model_id", modelRef))
 		return nil, nil
 	}
 	if resolver == nil {

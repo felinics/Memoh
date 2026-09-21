@@ -99,6 +99,7 @@ import (
 	"github.com/felinics/memoh/internal/storage/providers/localfs"
 	"github.com/felinics/memoh/internal/supermarket"
 	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/telemetry"
 	"github.com/felinics/memoh/internal/userruntime"
 	videopkg "github.com/felinics/memoh/internal/video"
 	"github.com/felinics/memoh/internal/workdir"
@@ -109,8 +110,35 @@ import (
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
-	logger.Init(cfg.Log.Level, cfg.Log.Format)
-	return logger.L
+	log := logger.New(os.Stdout, cfg.Log.Level, cfg.Log.Format)
+	// Point slog's package-level logger and the standard log package at the
+	// same handler, so output from dependencies lands in the same stream.
+	// Application code takes the returned logger; it does not reach for this.
+	logger.SetDefault(log)
+	return log
+}
+
+// setupTelemetry installs context propagation and, when a collector is
+// configured, trace export. It is an fx.Invoke rather than a provider because
+// nothing depends on its result: it configures OpenTelemetry's globals, which
+// is how the instrumentation in libraries and in internal/telemetry finds it.
+//
+// Failing to reach a collector at startup must not stop the process. The
+// exporter retries in the background, and a deployment whose collector is
+// down should keep serving requests without telemetry rather than refuse to
+// boot.
+func setupTelemetry(lc fx.Lifecycle, cfg config.Config, svc telemetry.Service, log *slog.Logger) {
+	svc.InstanceID = cfg.InstanceID
+	shutdown, err := telemetry.Setup(context.Background(), cfg.Telemetry, svc, log)
+	if err != nil {
+		log.Error("tracing setup failed; continuing without it", slog.Any("error", err))
+		return
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return shutdown(ctx)
+		},
+	})
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {
@@ -1303,7 +1331,7 @@ func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 		return errors.New("admin username/password required in config.toml")
 	}
 	if password == "change-your-password-here" {
-		log.Warn("admin password uses default placeholder; please update config.toml")
+		log.WarnContext(ctx, "admin password uses default placeholder; please update config.toml")
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -1337,7 +1365,7 @@ func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 			return fmt.Errorf("ensure admin gmail provider: %w", err)
 		}
 	}
-	log.Info("Admin user created", slog.String("username", username))
+	log.InfoContext(ctx, "Admin user created", slog.String("username", username))
 	return nil
 }
 

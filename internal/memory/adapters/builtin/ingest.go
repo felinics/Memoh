@@ -72,7 +72,7 @@ func (r *graphRuntime) IngestMarkdownFiles(ctx context.Context, botID string) (I
 		item.ID = qualifyIngestID(botID, item.ID)
 		spec := nodeSpecFromIngestItem(botID, now, item)
 		if _, err := r.store.UpsertNode(ctx, spec); err != nil {
-			r.logger.Warn("graph ingest: upsert node failed", slog.String("bot_id", botID), slog.String("node_id", spec.ID), slog.Any("err", err))
+			r.logger.WarnContext(ctx, "graph ingest: upsert node failed", slog.String("bot_id", botID), slog.String("node_id", spec.ID), slog.Any("err", err))
 			result.Skipped++
 			continue
 		}

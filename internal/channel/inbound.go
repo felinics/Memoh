@@ -49,7 +49,7 @@ func (m *Manager) handleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 	sender := m.newReplySender(cfg, msg.Channel)
 	if err := m.processor.HandleInbound(ctx, cfg, msg, sender); err != nil {
 		if m.logger != nil {
-			m.logger.Error("inbound processing failed", slog.String("channel", msg.Channel.String()), slog.Any("error", err))
+			m.logger.ErrorContext(ctx, "inbound processing failed", slog.String("channel", msg.Channel.String()), slog.Any("error", err))
 		}
 		return err
 	}
@@ -76,7 +76,7 @@ func (m *Manager) runInboundWorker(ctx context.Context) {
 		case task := <-m.inboundQueue:
 			if err := m.handleInbound(ctx, task.cfg, task.msg); err != nil {
 				if m.logger != nil {
-					m.logger.Error("inbound processing failed", slog.String("channel", task.msg.Channel.String()), slog.Any("error", err))
+					m.logger.ErrorContext(ctx, "inbound processing failed", slog.String("channel", task.msg.Channel.String()), slog.Any("error", err))
 				}
 			}
 		}

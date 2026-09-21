@@ -96,7 +96,7 @@ func (p *WebFetchProvider) execWebFetch(ctx context.Context, session SessionCont
 			if configured, err := p.fetchProviders.GetRawByID(ctx, providerID); err == nil {
 				provider = configured
 			} else {
-				p.logger.Warn("configured fetch provider not found, falling back to native",
+				p.logger.WarnContext(ctx, "configured fetch provider not found, falling back to native",
 					slog.String("bot_id", session.BotID),
 					slog.String("provider_id", providerID),
 					slog.Any("error", err),

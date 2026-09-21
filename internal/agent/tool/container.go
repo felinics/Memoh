@@ -1407,7 +1407,7 @@ func (p *ContainerProvider) flipToBackground(
 		p.bgManager.RecordOutput(taskID, stream, chunk)
 	})
 
-	p.logger.Info("foreground exec flipped to background",
+	p.logger.InfoContext(ctx, "foreground exec flipped to background",
 		slog.String("task_id", taskID),
 		slog.String("command", truncateStr(command, 120)),
 		slog.Int("soft_timeout_seconds", int(softTimeout)),

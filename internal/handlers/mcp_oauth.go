@@ -101,7 +101,7 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 	}
 
 	if err := h.oauthService.SaveDiscovery(c.Request().Context(), connID, result); err != nil {
-		h.logger.Error("failed to save discovery result", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "failed to save discovery result", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save discovery result")
 	}
 
@@ -176,7 +176,7 @@ func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 
 	_, err := h.oauthService.HandleCallback(c.Request().Context(), state, code)
 	if err != nil {
-		h.logger.Warn("oauth exchange failed", slog.Any("error", err))
+		h.logger.WarnContext(c.Request().Context(), "oauth exchange failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
@@ -214,7 +214,7 @@ func (h *MCPOAuthHandler) Callback(c echo.Context) error {
 	}
 
 	if _, err := h.oauthService.HandleCallback(c.Request().Context(), state, code); err != nil {
-		h.logger.Warn("oauth callback failed", slog.Any("error", err))
+		h.logger.WarnContext(c.Request().Context(), "oauth callback failed", slog.Any("error", err))
 		return renderMCPOAuthCallbackResult(c, http.StatusBadRequest, "error", err.Error())
 	}
 	return renderMCPOAuthCallbackResult(c, http.StatusOK, "success", "")

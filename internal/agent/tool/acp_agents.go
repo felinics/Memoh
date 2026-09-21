@@ -146,7 +146,7 @@ func (p *ACPAgentsProvider) describeAgent(ctx context.Context, botID, agentID st
 	}
 	defer func() {
 		if closeErr := p.pool.CloseAgentRuntime(botID, status.RuntimeID); closeErr != nil {
-			p.logger.Warn("close temporary ACP runtime failed",
+			p.logger.WarnContext(ctx, "close temporary ACP runtime failed",
 				slog.String("bot_id", botID),
 				slog.String("runtime_id", status.RuntimeID),
 				slog.Any("error", closeErr))

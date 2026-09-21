@@ -178,7 +178,7 @@ func (c *imapConn) run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			c.logger.Error("imap connection error, retrying in 30s", slog.Any("error", err))
+			c.logger.ErrorContext(ctx, "imap connection error, retrying in 30s", slog.Any("error", err))
 			select {
 			case <-ctx.Done():
 				return
@@ -234,15 +234,15 @@ func (c *imapConn) connectAndReceive(ctx context.Context) error {
 		return fmt.Errorf("select inbox: %w", err)
 	}
 
-	c.logger.Info("imap connected, fetching initial messages", slog.String("host", c.host), slog.Int("port", c.port))
+	c.logger.InfoContext(ctx, "imap connected, fetching initial messages", slog.String("host", c.host), slog.Int("port", c.port))
 	c.fetchNewMessages(ctx, client)
 
 	idleCmd, idleErr := client.Idle()
 	if idleErr != nil {
-		c.logger.Warn("IDLE not supported, falling back to polling", slog.Any("error", idleErr))
+		c.logger.WarnContext(ctx, "IDLE not supported, falling back to polling", slog.Any("error", idleErr))
 		return c.pollLoop(ctx, client)
 	}
-	c.logger.Info("IDLE mode active")
+	c.logger.InfoContext(ctx, "IDLE mode active")
 
 	// Even with IDLE, periodically check for new mail as a safety net
 	// (some servers accept IDLE but don't push EXISTS notifications)
@@ -257,7 +257,7 @@ func (c *imapConn) connectAndReceive(ctx context.Context) error {
 			_ = idleCmd.Close()
 			return nil
 		case <-newMailCh:
-			c.logger.Info("IDLE: new mail notification received")
+			c.logger.InfoContext(ctx, "IDLE: new mail notification received")
 			_ = idleCmd.Close()
 			c.fetchNewMessages(ctx, client)
 			idleCmd, idleErr = client.Idle()
@@ -334,11 +334,11 @@ func (c *imapConn) fetchNewMessages(ctx context.Context, client *imapclient.Clie
 		processed++
 
 		if err := c.handler(ctx, c.providerID, *inbound); err != nil {
-			c.logger.Error("inbound handler failed", slog.Any("error", err))
+			c.logger.ErrorContext(ctx, "inbound handler failed", slog.Any("error", err))
 		}
 	}
 
-	c.logger.Info("imap fetch completed", slog.Int("processed", processed), slog.Uint64("last_uid", uint64(c.lastUID)))
+	c.logger.InfoContext(ctx, "imap fetch completed", slog.Int("processed", processed), slog.Uint64("last_uid", uint64(c.lastUID)))
 }
 
 func (*imapConn) bufToInbound(buf *imapclient.FetchMessageBuffer) *email.InboundEmail {

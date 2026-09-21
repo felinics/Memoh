@@ -158,13 +158,13 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 
 	chat, discuss, acpAgent, schedule, err := h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID, pgSessionType)
 	if err != nil {
-		h.logger.Error("fetch token usage failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "fetch token usage failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage")
 	}
 
 	byModel, err := h.fetchUsageByModel(ctx, pgBotID, fromTS, toTS, pgSessionType)
 	if err != nil {
-		h.logger.Error("fetch token usage by model failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "fetch token usage by model failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage by model")
 	}
 
@@ -351,7 +351,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		PageLimit:   limit,
 	})
 	if err != nil {
-		h.logger.Error("list token usage records failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "list token usage records failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list token usage records")
 	}
 
@@ -363,7 +363,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		SessionType: pgSessionType,
 	})
 	if err != nil {
-		h.logger.Error("count token usage records failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "count token usage records failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to count token usage records")
 	}
 

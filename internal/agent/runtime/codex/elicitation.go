@@ -116,7 +116,7 @@ func (t *turnState) runElicitation(ctx context.Context, params *protocol.McpServ
 		}
 		return t.runURLElicitation(ctx, params.URL)
 	default:
-		t.logger.Warn("codex: declining MCP elicitation with unsupported mode", slog.String("mode", params.Tag))
+		t.logger.WarnContext(ctx, "codex: declining MCP elicitation with unsupported mode", slog.String("mode", params.Tag))
 		t.emitElicitationDeclinedNotice("the requested interaction format is not supported")
 		return decline
 	}
@@ -128,14 +128,14 @@ func (t *turnState) runElicitation(ctx context.Context, params *protocol.McpServ
 		return t.runMCPToolConsent(ctx, message, meta)
 	}
 	if schema == nil {
-		t.logger.Warn("codex: declining MCP elicitation with unreadable schema", slog.String("mode", params.Tag))
+		t.logger.WarnContext(ctx, "codex: declining MCP elicitation with unreadable schema", slog.String("mode", params.Tag))
 		t.emitElicitationDeclinedNotice("the requested form cannot be read")
 		return decline
 	}
 
 	input, mapping, err := userinput.ElicitationFormInput(message, schema)
 	if err != nil {
-		t.logger.Warn("codex: declining unsupported MCP elicitation form",
+		t.logger.WarnContext(ctx, "codex: declining unsupported MCP elicitation form",
 			slog.String("mode", params.Tag), slog.Any("error", err))
 		t.emitElicitationDeclinedNotice("the requested form cannot be rendered safely")
 		return decline
@@ -148,7 +148,7 @@ func (t *turnState) runElicitation(ctx context.Context, params *protocol.McpServ
 	case userinput.StatusSubmitted:
 		content, err := mapping.Content(flow)
 		if err != nil {
-			t.logger.Warn("codex: elicitation answers did not satisfy the form schema", slog.Any("error", err))
+			t.logger.WarnContext(ctx, "codex: elicitation answers did not satisfy the form schema", slog.Any("error", err))
 			return cancel
 		}
 		return protocol.McpServerElicitationRequestResponse{
@@ -242,7 +242,7 @@ func (t *turnState) runElicitationFlow(ctx context.Context, input any) (userinpu
 	})
 	if err != nil {
 		if ctx.Err() == nil {
-			t.logger.Error("codex MCP elicitation flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
+			t.logger.ErrorContext(ctx, "codex MCP elicitation flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
 		}
 		return userinput.Request{}, false
 	}

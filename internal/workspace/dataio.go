@@ -177,14 +177,14 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 
 	backupPath := m.backupPath(botID)
 	if err := os.MkdirAll(filepath.Dir(backupPath), 0o750); err != nil {
-		m.logger.Warn("recover orphaned snapshot: mkdir failed",
+		m.logger.WarnContext(ctx, "recover orphaned snapshot: mkdir failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		return false
 	}
 
 	f, err := createPrivateWorkspaceArchive(backupPath)
 	if err != nil {
-		m.logger.Warn("recover orphaned snapshot: create backup file failed",
+		m.logger.WarnContext(ctx, "recover orphaned snapshot: create backup file failed",
 			slog.String("bot_id", botID), slog.Any("error", err))
 		return false
 	}
@@ -200,7 +200,7 @@ func (m *Manager) recoverOrphanedSnapshot(ctx context.Context, botID string) boo
 	closeErr := f.Close()
 	if writeErr != nil {
 		_ = os.Remove(backupPath)
-		m.logger.Warn("recover orphaned snapshot: export failed",
+		m.logger.WarnContext(ctx, "recover orphaned snapshot: export failed",
 			slog.String("bot_id", botID), slog.Any("error", writeErr))
 		return false
 	}
@@ -301,12 +301,12 @@ func (m *Manager) snapshotMounts(ctx context.Context, info ctr.ContainerInfo) ([
 func (m *Manager) restartContainer(ctx context.Context, botID, containerID string) {
 	m.resetBridge(botID)
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil && !ctr.IsNotFound(err) {
-		m.logger.Warn("cleanup stale task after data operation failed",
+		m.logger.WarnContext(ctx, "cleanup stale task after data operation failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
 	}
 	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
-		m.logger.Error("restart after data operation failed",
+		m.logger.ErrorContext(ctx, "restart after data operation failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 		return
 	}

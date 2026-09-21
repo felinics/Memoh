@@ -158,7 +158,7 @@ func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 		if releaseErr == nil {
 			releaseErr = err
 		}
-		m.logger.Warn("release runtime run during shutdown failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
+		m.logger.WarnContext(ctx, "release runtime run during shutdown failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
 	}
 	return releaseErr
 }
@@ -391,7 +391,7 @@ func (m *Manager) startLeaseRenewal(ctx context.Context, ctrl *runControl) {
 				if ctx.Err() != nil {
 					return
 				}
-				m.logger.Warn("renew runtime owner lease failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
+				m.logger.WarnContext(ctx, "renew runtime owner lease failed", slog.Any("error", err), slog.String("run_id", ctrl.runID))
 				if errors.Is(err, ErrRunOwnershipLost) || !ctrl.leaseIsValidAt(time.Now()) {
 					m.cancelRunControl(ctrl)
 					return

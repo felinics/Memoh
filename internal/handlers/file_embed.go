@@ -86,7 +86,7 @@ func (h *EmbeddedWebHandler) serveKnownGzip(c echo.Context, targetPath, contentT
 	content, err := fs.ReadFile(h.webFS, gzipPath)
 	if err != nil {
 		if targetPath == "index.html" {
-			h.log.Error("read embedded index.html.gz failed", slog.Any("error", err))
+			h.log.ErrorContext(c.Request().Context(), "read embedded index.html.gz failed", slog.Any("error", err))
 		}
 		return echo.ErrNotFound
 	}

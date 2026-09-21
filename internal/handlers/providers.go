@@ -423,7 +423,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 				}
 				continue
 			}
-			h.logger.Warn("failed to import model", slog.String("model_id", m.ID), slog.Any("error", err))
+			h.logger.WarnContext(c.Request().Context(), "failed to import model", slog.String("model_id", m.ID), slog.Any("error", err))
 			continue
 		}
 
@@ -449,7 +449,7 @@ func importedCompatibilities(remote providers.RemoteModel, modelType models.Mode
 func (h *ProvidersHandler) markUnavailableManagedModels(ctx context.Context, providerID string, available map[string]struct{}) {
 	existingModels, err := h.modelsService.ListByProviderID(ctx, providerID)
 	if err != nil {
-		h.logger.Warn("failed to list managed models for catalog reconciliation", slog.Any("error", err))
+		h.logger.WarnContext(ctx, "failed to list managed models for catalog reconciliation", slog.Any("error", err))
 		return
 	}
 	for _, existing := range existingModels {
@@ -469,7 +469,7 @@ func (h *ProvidersHandler) markUnavailableManagedModels(ctx context.Context, pro
 			Type:       existing.Type,
 			Config:     config,
 		}); err != nil {
-			h.logger.Warn("failed to mark stale managed model unavailable", slog.String("model_id", existing.ModelID), slog.Any("error", err))
+			h.logger.WarnContext(ctx, "failed to mark stale managed model unavailable", slog.String("model_id", existing.ModelID), slog.Any("error", err))
 		}
 	}
 }
@@ -504,7 +504,7 @@ func (h *ProvidersHandler) fillExistingModel(ctx context.Context, providerID, mo
 		Type:       existing.Type,
 		Config:     merged,
 	}); err != nil {
-		h.logger.Warn("failed to fill model capabilities", slog.String("model_id", modelID), slog.Any("error", err))
+		h.logger.WarnContext(ctx, "failed to fill model capabilities", slog.String("model_id", modelID), slog.Any("error", err))
 		return false
 	}
 	return true

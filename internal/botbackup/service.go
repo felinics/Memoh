@@ -290,7 +290,7 @@ func (s *Service) pauseBotForExport(ctx context.Context, botID string) (bots.Bot
 	return bot, func() {
 		active := true
 		if _, err := s.bots.Update(context.WithoutCancel(ctx), botID, bots.UpdateBotRequest{IsActive: &active}); err != nil {
-			s.logger.Warn("failed to restore bot active state after export", slog.String("bot_id", botID), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "failed to restore bot active state after export", slog.String("bot_id", botID), slog.Any("error", err))
 		}
 	}, nil
 }

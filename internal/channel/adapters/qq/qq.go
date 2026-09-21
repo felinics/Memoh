@@ -333,7 +333,7 @@ func (a *QQAdapter) renewInputHint(ctx context.Context, client *qqClient, openID
 			return
 		case <-ticker.C:
 			if err := client.sendInputHint(ctx, openID, replyTo); err != nil && a.logger != nil {
-				a.logger.Debug("qq input hint renewal failed", slog.String("error", err.Error()))
+				a.logger.DebugContext(ctx, "qq input hint renewal failed", slog.String("error", err.Error()))
 			}
 		}
 	}

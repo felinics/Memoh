@@ -371,7 +371,7 @@ func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {
 		defer cancel()
 		p.finalizeErr = p.lease.finalize(ctx)
 		if p.finalizeErr != nil && p.logger != nil {
-			p.logger.Warn("failed to finalize ACP runtime state",
+			p.logger.WarnContext(parent, "failed to finalize ACP runtime state",
 				slog.String("agent_id", p.lease.agentID),
 				slog.String("bot_id", p.lease.botID),
 				slog.Any("error", p.finalizeErr))

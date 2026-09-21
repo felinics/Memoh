@@ -243,7 +243,7 @@ func (a *SlackAdapter) getOrCreateConnection(channelCfg channel.ChannelConfig, c
 
 func (a *SlackAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
-		a.logger.Info("start", slog.String("config_id", cfg.ID))
+		a.logger.InfoContext(ctx, "start", slog.String("config_id", cfg.ID))
 	}
 
 	slackCfg, err := parseConfig(cfg.Credentials)
@@ -328,7 +328,7 @@ func (a *SlackAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, h
 				signalStartupError(fmt.Errorf("slack socket mode run: %w", err))
 			}
 			if a.logger != nil && !errors.Is(err, context.Canceled) {
-				a.logger.Error("socket mode run error", slog.String("config_id", cfg.ID), slog.Any("error", err))
+				a.logger.ErrorContext(ctx, "socket mode run error", slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 		}
 	}()
@@ -347,7 +347,7 @@ func (a *SlackAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, h
 
 	stop := func(_ context.Context) error {
 		if a.logger != nil {
-			a.logger.Info("stop", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "stop", slog.String("config_id", cfg.ID))
 		}
 		cancel()
 		a.clearConnection(cfg.ID)
@@ -388,17 +388,17 @@ func (a *SlackAdapter) handleSocketModeEvent(
 
 	case socketmode.EventTypeConnecting:
 		if a.logger != nil {
-			a.logger.Info("connecting to Slack Socket Mode", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "connecting to Slack Socket Mode", slog.String("config_id", cfg.ID))
 		}
 
 	case socketmode.EventTypeConnected:
 		if a.logger != nil {
-			a.logger.Info("connected to Slack Socket Mode", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "connected to Slack Socket Mode", slog.String("config_id", cfg.ID))
 		}
 
 	case socketmode.EventTypeConnectionError:
 		if a.logger != nil {
-			a.logger.Error("Slack Socket Mode connection error", slog.String("config_id", cfg.ID))
+			a.logger.ErrorContext(ctx, "Slack Socket Mode connection error", slog.String("config_id", cfg.ID))
 		}
 
 	case socketmode.EventTypeInteractive:
@@ -507,7 +507,7 @@ func (a *SlackAdapter) handleMessageEvent(
 	}
 
 	if a.logger != nil {
-		a.logger.Info("inbound received",
+		a.logger.InfoContext(ctx, "inbound received",
 			slog.String("config_id", cfg.ID),
 			slog.String("chat_type", chatType),
 			slog.String("user_id", ev.User),
@@ -517,7 +517,7 @@ func (a *SlackAdapter) handleMessageEvent(
 
 	go func() {
 		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 	}()
 }
@@ -589,7 +589,7 @@ func (a *SlackAdapter) handleAppMentionEvent(
 	}
 
 	if a.logger != nil {
-		a.logger.Info("app mention received",
+		a.logger.InfoContext(ctx, "app mention received",
 			slog.String("config_id", cfg.ID),
 			slog.String("user_id", ev.User),
 			slog.String("text", common.SummarizeText(text)),
@@ -598,7 +598,7 @@ func (a *SlackAdapter) handleAppMentionEvent(
 
 	go func() {
 		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 	}()
 }
@@ -661,7 +661,7 @@ func (a *SlackAdapter) sendSlackMessage(ctx context.Context, api *slack.Client, 
 		for _, att := range msg.Message.Attachments {
 			if err := a.uploadPreparedAttachment(ctx, api, channelID, threadTS, att); err != nil {
 				if a.logger != nil {
-					a.logger.Error("upload attachment failed", slog.Any("error", err))
+					a.logger.ErrorContext(ctx, "upload attachment failed", slog.Any("error", err))
 				}
 				return err
 			}
@@ -1416,7 +1416,7 @@ func (a *SlackAdapter) lookupConversationInfo(ctx context.Context, api *slack.Cl
 	name, chatType, err := a.fetchConversationInfo(ctx, api, channelID)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Debug("resolve slack conversation name failed",
+			a.logger.DebugContext(ctx, "resolve slack conversation name failed",
 				slog.String("channel_id", channelID),
 				slog.Any("error", err),
 			)

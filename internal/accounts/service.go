@@ -97,7 +97,7 @@ func (s *Service) Login(ctx context.Context, identity, password string) (Account
 	}
 	if err := s.store.UpdateLastLogin(ctx, row.ID); err != nil {
 		if s.logger != nil {
-			s.logger.Warn("touch last login failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "touch last login failed", slog.Any("error", err))
 		}
 	}
 	return toAccount(row), nil

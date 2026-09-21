@@ -47,12 +47,12 @@ func startReaper(ctx context.Context, reapPass func(context.Context) (int, error
 			case err != nil && loopCtx.Err() != nil:
 				// Shutting down; the interrupted pass is not a fault.
 			case err != nil:
-				logger.Warn("stale dependency reaper pass finished with errors",
+				logger.WarnContext(ctx, "stale dependency reaper pass finished with errors",
 					slog.Int("reaped", reaped),
 					slog.Any("error", err),
 				)
 			case reaped > 0:
-				logger.Info("interrupted dependency operations reconciled", slog.Int("reaped", reaped))
+				logger.InfoContext(ctx, "interrupted dependency operations reconciled", slog.Int("reaped", reaped))
 			}
 		}
 		reap()

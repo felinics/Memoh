@@ -89,7 +89,11 @@ func (s *Service) resolveRuntimeDispatch(ctx context.Context, req ChatRequest) (
 // claude SIGINT grace) can still be executing against the workspace for
 // several seconds. Returning early let a stopped turn overlap the next one.
 // The drivers bound their own interrupt windows, so this wait is bounded.
-func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Driver, req ChatRequest, chunkCh chan<- StreamChunk, errCh chan<- error) {
+// fail reports the turn's failure; it is a callback rather than the error
+// channel itself so that this path cannot bypass the caller's bookkeeping —
+// writing the channel directly here once left the turn's span reporting
+// success for a run the caller was told had failed.
+func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Driver, req ChatRequest, chunkCh chan<- StreamChunk, fail func(error)) {
 	eventCh := make(chan WSStreamEvent)
 	done := make(chan error, 1)
 	go func() {
@@ -116,7 +120,7 @@ func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Drive
 			case <-ctxDone:
 				cancelled = true
 				ctxDone = nil
-				errCh <- ctx.Err()
+				fail(ctx.Err())
 			}
 		case err, ok := <-done:
 			if !ok {
@@ -124,12 +128,12 @@ func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Drive
 				continue
 			}
 			if err != nil && !cancelled {
-				errCh <- err
+				fail(err)
 			}
 		case <-ctxDone:
 			cancelled = true
 			ctxDone = nil
-			errCh <- ctx.Err()
+			fail(ctx.Err())
 		}
 	}
 }
@@ -408,7 +412,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	// and a retry runs against the stored anchor.
 	if len(result.RuntimeMetadata) > 0 {
 		if _, mergeErr := s.sessionService.MergeRuntimeMetadata(context.WithoutCancel(ctx), req.ThreadID, runtimeType, result.RuntimeMetadata); mergeErr != nil {
-			s.logger.Error("external runtime metadata merge failed",
+			s.logger.ErrorContext(ctx, "external runtime metadata merge failed",
 				slog.String("session_id", req.ThreadID), slog.String("runtime", runtimeType), slog.Any("error", mergeErr))
 			cancelPending()
 			cleanupProjections()
@@ -423,7 +427,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	}
 
 	if err != nil {
-		s.logger.Error("external runtime prompt failed",
+		s.logger.ErrorContext(ctx, "external runtime prompt failed",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.ThreadID),
 			slog.String("runtime", runtimeType),
@@ -444,7 +448,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 			abortedReq.SkipMemoryExtraction = true
 			if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), abortedReq, runtimeType, projectPath, result, nil, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
 				lifecycleCause = persistErr
-				s.logger.Error("external abort persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
+				s.logger.ErrorContext(ctx, "external abort persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 				if s.resolveRuntimeRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) != runtimeRoundUnresolved {
 					cleanupProjections()
 				}
@@ -461,7 +465,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		}
 		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, failedResult, err, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
 			lifecycleCause = runtimeHistoryError(persistErr)
-			s.logger.Error("external failure persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
+			s.logger.ErrorContext(ctx, "external failure persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 			switch s.resolveRuntimeRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
 			case runtimeRoundCommitted:
 				lifecycleCause = err
@@ -502,7 +506,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		abortedReq.SkipMemoryExtraction = true
 		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), abortedReq, runtimeType, projectPath, result, nil, result.TurnCompleted, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
 			lifecycleCause = persistErr
-			s.logger.Error("external abort persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
+			s.logger.ErrorContext(ctx, "external abort persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 			switch s.resolveRuntimeRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
 			case runtimeRoundCommitted:
 				lifecycleCause = nil
@@ -526,7 +530,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	emit(native.StreamEvent{Type: native.EventTextEnd})
 	if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, result, nil, true, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentEnd)); persistErr != nil {
 		lifecycleCause = runtimeHistoryError(persistErr)
-		s.logger.Error("external persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
+		s.logger.ErrorContext(ctx, "external persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 		switch s.resolveRuntimeRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
 		case runtimeRoundCommitted:
 			lifecycleCause = nil
@@ -665,7 +669,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	// runtime session anchor, or later fires resume the pre-round context.
 	if len(result.RuntimeMetadata) > 0 {
 		if _, mergeErr := s.sessionService.MergeRuntimeMetadata(context.WithoutCancel(ctx), payload.SessionID, runtimeType, result.RuntimeMetadata); mergeErr != nil {
-			s.logger.Error("external runtime metadata merge failed",
+			s.logger.ErrorContext(ctx, "external runtime metadata merge failed",
 				slog.String("session_id", payload.SessionID), slog.String("runtime", runtimeType), slog.Any("error", mergeErr))
 			s.cancelPendingRuntimeApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
 			if leadingUser != nil {
@@ -693,7 +697,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		abortedReq.SkipMemoryExtraction = true
 		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), abortedReq, runtimeType, projectPath, result, nil, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
 			lifecycleCause = runtimeHistoryError(persistErr)
-			s.logger.Error("external schedule abort persist failed", slog.Any("error", persistErr), slog.String("session_id", payload.SessionID))
+			s.logger.ErrorContext(ctx, "external schedule abort persist failed", slog.Any("error", persistErr), slog.String("session_id", payload.SessionID))
 			return schedule.TriggerResult{}, persistErr
 		}
 		return schedule.TriggerResult{}, cause
@@ -711,14 +715,14 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		failedResult, _ := runtimeFailureResult(result, promptErr)
 		if err := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, failedResult, promptErr, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); err != nil {
 			lifecycleCause = runtimeHistoryError(err)
-			s.logger.Error("external schedule failure persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
+			s.logger.ErrorContext(ctx, "external schedule failure persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
 		}
 		return schedule.TriggerResult{}, promptErr
 	}
 
 	if err := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, result, nil, result.TurnCompleted, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentEnd)); err != nil {
 		lifecycleCause = runtimeHistoryError(err)
-		s.logger.Error("external schedule persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
+		s.logger.ErrorContext(ctx, "external schedule persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
 		return schedule.TriggerResult{}, err
 	}
 

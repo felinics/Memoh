@@ -136,7 +136,7 @@ func (h *EmailOAuthHandler) Callback(c echo.Context) error {
 
 	stored, err := h.tokenStore.GetByState(ctx, state)
 	if err != nil {
-		h.logger.Error("oauth callback: state not found", slog.String("state", state), slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "oauth callback: state not found", slog.String("state", state), slog.Any("error", err))
 		return renderEmailOAuthCallbackResult(c, http.StatusBadRequest, "", "error", "invalid or expired state")
 	}
 
@@ -154,11 +154,11 @@ func (h *EmailOAuthHandler) Callback(c echo.Context) error {
 		redirectURI = adapter.EffectiveRedirectURI(h.effectiveCallbackURL(c))
 	}
 	if err := adapter.ExchangeCode(ctx, provider.Config, stored.ProviderID, code, redirectURI); err != nil {
-		h.logger.Error("gmail code exchange failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "gmail code exchange failed", slog.Any("error", err))
 		return renderEmailOAuthCallbackResult(c, http.StatusInternalServerError, stored.ProviderID, "error", "token exchange failed")
 	}
 
-	h.logger.Info("email oauth authorized", slog.String("provider_id", stored.ProviderID), slog.String("provider", provider.Provider))
+	h.logger.InfoContext(c.Request().Context(), "email oauth authorized", slog.String("provider_id", stored.ProviderID), slog.String("provider", provider.Provider))
 	return renderEmailOAuthCallbackResult(c, http.StatusOK, stored.ProviderID, "success", "")
 }
 
@@ -199,7 +199,7 @@ func (h *EmailOAuthHandler) Status(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return c.JSON(http.StatusOK, resp)
 		}
-		h.logger.Error("email oauth status failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "email oauth status failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load oauth status")
 	}
 
@@ -242,7 +242,7 @@ func (h *EmailOAuthHandler) Revoke(c echo.Context) error {
 	}
 
 	if err := h.tokenStore.Delete(ctx, providerID); err != nil {
-		h.logger.Error("email oauth revoke failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "email oauth revoke failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to revoke oauth token")
 	}
 

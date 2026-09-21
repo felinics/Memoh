@@ -368,7 +368,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if contextViewErr != nil {
 		publicError := contextViewStreamError(contextViewErr)
 		turnError = publicError.Error
-		a.logger.Warn("context view preflight failed", slog.Any("error", contextViewErr))
+		a.logger.WarnContext(ctx, "context view preflight failed", slog.Any("error", contextViewErr))
 		sendEvent(ctx, ch, publicError)
 		return
 	}
@@ -404,7 +404,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		textLoopProbeBuffer = NewTextLoopProbeBuffer(LoopDetectedProbeChars, func(text string) {
 			result := textLoopGuard.Inspect(text)
 			if result.Abort {
-				a.logger.Warn("text loop detected, will abort")
+				a.logger.WarnContext(ctx, "text loop detected, will abort")
 				aborted = true
 				cancel(ErrTextLoopDetected)
 			}
@@ -453,7 +453,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 						p.Messages = append(p.Messages, sdk.UserMessage(text, extra...))
 						cfg.ContextMutations.Record(contextfrag.MutationInjectedMessage, fmt.Sprintf("bytes=%d", len(text)))
 						injectedMessages.record(step, messageIndex, text)
-						a.logger.Info("injected user message into agent stream",
+						a.logger.InfoContext(ctx, "injected user message into agent stream",
 							slog.String("bot_id", cfg.Identity.BotID),
 							slog.Int("after_step", step-1),
 							slog.Int("image_parts", len(extra)),
@@ -523,9 +523,26 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	var streamResult *sdk.StreamResult
+	// Timing only: the span's context is deliberately discarded and streamCtx
+	// is what the SDK gets. The SDK keeps the context it is called with for
+	// the whole stream, tool execution included, so handing it the span's
+	// context would make every tool call a child of this span rather than of
+	// the turn.
+	_, streamSpan := traceModelCall(streamCtx, spanModelFirstPart, cfg.Model)
+	attemptsUsed := 0
+	var establishErr error
+	// Closed when the first part arrives — see the drain loop below — because
+	// StreamText returns as soon as it has launched its goroutine, so closing
+	// it here would time that launch and nothing else. The deferred call is
+	// the safety net for the paths that never reach a first part: a span that
+	// never ends never leaves the process.
+	endFirstPart := sync.OnceFunc(func() { endModelCall(streamSpan, attemptsUsed, establishErr) })
+	defer endFirstPart()
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
 		var err error
+		attemptsUsed = attempt + 1
 		streamResult, err = a.client.StreamText(streamCtx, opts...)
+		establishErr = err
 		if err == nil {
 			break
 		}
@@ -534,7 +551,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
 			return
 		}
-		a.logger.Warn("stream start failed, retrying",
+		a.logger.WarnContext(ctx, "stream start failed, retrying",
 			slog.Int("attempt", attempt+1),
 			slog.Int("max_attempts", retryCfg.MaxAttempts),
 			slog.String("error", err.Error()),
@@ -588,6 +605,17 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			part = next
 		}
 		interruptedStep.observe(part)
+
+		// The provider has said something only once a part carries content.
+		// StartPart and the step bookkeeping around it are emitted by the SDK
+		// as soon as it has a goroutine, so ending on those would time our own
+		// plumbing — which is what the first two attempts at this span did.
+		switch part.(type) {
+		case *sdk.TextStartPart, *sdk.TextDeltaPart,
+			*sdk.ReasoningStartPart, *sdk.ReasoningDeltaPart,
+			*sdk.ToolInputStartPart, *sdk.StreamToolCallPart:
+			endFirstPart()
+		}
 
 		switch p := part.(type) {
 		case *sdk.StartPart:
@@ -733,7 +761,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				aborted = true
 			}
 			if shouldAbort {
-				a.logger.Warn("tool loop abort triggered", slog.String("tool_call_id", p.ToolCallID))
+				a.logger.WarnContext(ctx, "tool loop abort triggered", slog.String("tool_call_id", p.ToolCallID))
 				cancel(ErrToolLoopDetected)
 				aborted = true
 			}
@@ -752,7 +780,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 				aborted = true
 			}
 			if shouldAbort {
-				a.logger.Warn("tool loop abort triggered", slog.String("tool_call_id", p.ToolCallID))
+				a.logger.WarnContext(ctx, "tool loop abort triggered", slog.String("tool_call_id", p.ToolCallID))
 				cancel(ErrToolLoopDetected)
 				aborted = true
 			}
@@ -866,7 +894,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			a.runStream(ctx, cfg, ch)
 			return
 		} else {
-			a.logger.Error("checkpoint steered model invocation failed", slog.Any("error", err))
+			a.logger.ErrorContext(ctx, "checkpoint steered model invocation failed", slog.Any("error", err))
 		}
 	}
 	if steered && ctx.Err() == nil {
@@ -894,7 +922,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			if err := cfg.OnStepInterrupted(readMediaState.withMessageOrigins(ctx, stepIndex), cfg.StepIndexOffset+stepIndex, step); err != nil {
 				// An owner that lost its lease, or a run another writer already
 				// finalized, is an expected outcome of racing an abort.
-				a.logger.Warn("persist interrupted model step failed", slog.Any("error", err))
+				a.logger.WarnContext(ctx, "persist interrupted model step failed", slog.Any("error", err))
 			} else {
 				interruptedMessages = step.Messages
 				interruptedFeedbackIndexes = InternalFeedbackIndexes(readMediaState.withMessageOrigins(ctx, stepIndex))
@@ -953,7 +981,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		termEvent.Type = EventAgentEnd
 		// Warn if LLM produced no text and no tool calls — likely a context overflow.
 		if allText.Len() == 0 && stepNumber == 0 {
-			a.logger.Warn("agent produced empty response (no text, no tool calls)",
+			a.logger.WarnContext(ctx, "agent produced empty response (no text, no tool calls)",
 				slog.String("bot_id", cfg.Identity.BotID),
 				slog.Int("input_messages", len(cfg.Messages)),
 				slog.Int("input_tokens", totalUsage.InputTokens),
@@ -1208,6 +1236,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		return nil
 	}))
 
+	genCtx, genSpan := traceModelCall(genCtx, spanModelGenerate, cfg.Model)
 	genResult, err := a.client.GenerateTextResult(genCtx, opts...)
 	capabilitiesChanged := errors.Is(err, errCapabilitiesChanged)
 	if capabilitiesChanged {
@@ -1217,6 +1246,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		}
 		err = nil
 	}
+	endModelCall(genSpan, 1, err)
 	if stepErr := contextStepBudgetError(genCtx); stepErr != nil {
 		return nil, stepErr
 	}
@@ -1796,7 +1826,7 @@ func (a *Agent) assembleTools(
 	for _, provider := range a.toolProviders {
 		providerTools, err := provider.Tools(ctx, session)
 		if err != nil {
-			a.logger.Warn("tool provider failed", slog.Any("error", err))
+			a.logger.WarnContext(ctx, "tool provider failed", slog.Any("error", err))
 			continue
 		}
 		if session.IsSubagent {
@@ -1809,7 +1839,7 @@ func (a *Agent) assembleTools(
 				continue
 			}
 			if _, exists := seenToolNames[name]; exists {
-				a.logger.Warn("duplicate tool name skipped", slog.String("tool", name))
+				a.logger.WarnContext(ctx, "duplicate tool name skipped", slog.String("tool", name))
 				continue
 			}
 			seenToolNames[name] = struct{}{}
@@ -1861,7 +1891,7 @@ func (a *Agent) assembleTools(
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
-	return allTools, usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
+	return wrapToolTracing(allTools), usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
 }
 
 func appendToolUsageToSystem(system, toolUsage string) string {
@@ -2171,7 +2201,7 @@ func (a *Agent) runMidStreamRetry(
 		retryCfg = DefaultRetryConfig()
 	}
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
-		a.logger.Warn("mid-stream error, retrying",
+		a.logger.WarnContext(sendCtx, "mid-stream error, retrying",
 			slog.Int("step", stepNumber),
 			slog.Int("attempt", attempt+1),
 			slog.Int("max_attempts", retryCfg.MaxAttempts),
@@ -2216,9 +2246,15 @@ func (a *Agent) runMidStreamRetry(
 			return failResult(), true
 		}
 
+		// streamCtx, not the span's context, for the same reason as the first
+		// attempt: the SDK keeps what it is given for the whole stream, so
+		// passing the span's would reparent this retry's tool calls under a
+		// span that is about to end.
+		_, retrySpan := traceModelCall(streamCtx, spanModelRetry, retryCfgCopy.Model)
 		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)
+		endModelCall(retrySpan, attempt+1, retryErr)
 		if retryErr != nil {
-			a.logger.Warn("mid-stream retry failed to start",
+			a.logger.WarnContext(sendCtx, "mid-stream retry failed to start",
 				slog.Int("attempt", attempt+1),
 				slog.String("error", retryErr.Error()),
 			)
@@ -2304,7 +2340,7 @@ func (a *Agent) runMidStreamRetry(
 					aborted = true
 				}
 				if shouldAbort {
-					a.logger.Warn("tool loop abort triggered", slog.String("tool_call_id", rp.ToolCallID))
+					a.logger.WarnContext(sendCtx, "tool loop abort triggered", slog.String("tool_call_id", rp.ToolCallID))
 					cancel(ErrToolLoopDetected)
 					aborted = true
 				}
@@ -2321,7 +2357,7 @@ func (a *Agent) runMidStreamRetry(
 					aborted = true
 				}
 				if shouldAbort {
-					a.logger.Warn("tool loop abort triggered", slog.String("tool_call_id", rp.ToolCallID))
+					a.logger.WarnContext(sendCtx, "tool loop abort triggered", slog.String("tool_call_id", rp.ToolCallID))
 					cancel(ErrToolLoopDetected)
 					aborted = true
 				}

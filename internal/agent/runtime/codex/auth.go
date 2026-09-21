@@ -76,7 +76,7 @@ func readChatGPTCredential(ctx context.Context, client *bridge.Client, botAgentI
 func (d *Driver) persistChatGPTCredential(ctx context.Context, client *bridge.Client, input external.PromptInput, stored agentcredential.ResolvedCredential) {
 	current, err := readChatGPTCredential(context.WithoutCancel(ctx), client, input.BotAgentID)
 	if err != nil {
-		d.logger.Warn("read refreshed codex credential failed", slog.Any("error", err))
+		d.logger.WarnContext(ctx, "read refreshed codex credential failed", slog.Any("error", err))
 		return
 	}
 	if current.accessToken == stored.Secret["access_token"] &&
@@ -103,6 +103,6 @@ func (d *Driver) persistChatGPTCredential(ctx context.Context, client *bridge.Cl
 		stored.ExpiresAt,
 	)
 	if err != nil {
-		d.logger.Warn("persist refreshed codex credential failed", slog.Any("error", err))
+		d.logger.WarnContext(ctx, "persist refreshed codex credential failed", slog.Any("error", err))
 	}
 }

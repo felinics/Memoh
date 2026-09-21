@@ -61,7 +61,7 @@ func (s *Service) newAgentStepCommitter(ctx context.Context, req ChatRequest, rc
 		if err := s.sessionManager.EnableSteer(ctx, req.RunHandle); err != nil {
 			queueStep.steerEnabled = false
 			if s.logger != nil {
-				s.logger.Warn("steer consumer could not be published", slog.String("run_id", req.RunID), slog.Any("error", err))
+				s.logger.WarnContext(ctx, "steer consumer could not be published", slog.String("run_id", req.RunID), slog.Any("error", err))
 			}
 		}
 	}
@@ -338,7 +338,7 @@ func (c *agentStepCommitter) publishQueueUserTurns(ctx context.Context, stepInde
 		return
 	}
 	if err := c.service.sessionManager.PublishQueueUserTurns(ctx, c.req.RunHandle, update); err != nil && c.service.logger != nil {
-		c.service.logger.Warn("publish runtime queue user turns failed",
+		c.service.logger.WarnContext(ctx, "publish runtime queue user turns failed",
 			slog.String("run_id", c.req.RunID), slog.Any("error", err))
 	}
 }

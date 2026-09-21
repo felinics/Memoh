@@ -137,7 +137,7 @@ func (s *Service) ListBotNodes(ctx context.Context, botID string) (NodeListRespo
 	}
 	items, err := provider.ListNodes(ctx, botID, cfg)
 	if err != nil {
-		s.logger.Warn("list network provider nodes failed",
+		s.logger.WarnContext(ctx, "list network provider nodes failed",
 			slog.String("bot_id", botID),
 			slog.String("provider", cfg.Provider),
 			slog.Any("error", err))
@@ -196,7 +196,7 @@ func (s *Service) executeLogout(ctx context.Context, botID string, cfg BotOverla
 	if s.networkStateRoot != "" && strings.TrimSpace(cfg.Provider) != "" {
 		stateDir := filepath.Join(s.networkStateRoot, "network", botID, cfg.Provider)
 		if err := os.RemoveAll(stateDir); err != nil {
-			s.logger.Warn("failed to wipe network state directory on logout",
+			s.logger.WarnContext(ctx, "failed to wipe network state directory on logout",
 				slog.String("bot_id", botID),
 				slog.String("provider", cfg.Provider),
 				slog.Any("error", err))
@@ -214,7 +214,7 @@ func (s *Service) executeLogout(ctx context.Context, botID string, cfg BotOverla
 
 func (s *Service) ReconcileBot(ctx context.Context, botID string, previous, next BotOverlayConfig) error {
 	if previous.Enabled && strings.TrimSpace(previous.Provider) != "" {
-		s.logger.Info("detach previous overlay", slog.String("bot_id", botID), slog.String("provider", previous.Provider))
+		s.logger.InfoContext(ctx, "detach previous overlay", slog.String("bot_id", botID), slog.String("provider", previous.Provider))
 		if err := s.detachOverlayBot(ctx, botID, previous); err != nil && !errors.Is(err, ErrWorkspaceContainerMissing) {
 			return err
 		}
@@ -222,10 +222,10 @@ func (s *Service) ReconcileBot(ctx context.Context, botID string, previous, next
 	if !next.Enabled || strings.TrimSpace(next.Provider) == "" {
 		return nil
 	}
-	s.logger.Info("attach current overlay", slog.String("bot_id", botID), slog.String("provider", next.Provider))
+	s.logger.InfoContext(ctx, "attach current overlay", slog.String("bot_id", botID), slog.String("provider", next.Provider))
 	_, ensureErr := s.ensureOverlayBot(ctx, botID, next)
 	if errors.Is(ensureErr, ErrWorkspaceContainerMissing) {
-		s.logger.Info("skip overlay attach because workspace container is missing", slog.String("bot_id", botID))
+		s.logger.InfoContext(ctx, "skip overlay attach because workspace container is missing", slog.String("bot_id", botID))
 		return nil
 	}
 	return ensureErr
@@ -336,11 +336,11 @@ func (s *Service) ensureOverlayBot(ctx context.Context, botID string, cfg BotOve
 		return OverlayStatus{}, err
 	}
 	if s.overlayRuntimeUnsupported() {
-		s.logger.Info("skip overlay ensure because current runtime backend does not support provider sidecars", slog.String("bot_id", botID), slog.String("provider", cfg.Provider), slog.String("runtime", s.runtimeKind))
+		s.logger.InfoContext(ctx, "skip overlay ensure because current runtime backend does not support provider sidecars", slog.String("bot_id", botID), slog.String("provider", cfg.Provider), slog.String("runtime", s.runtimeKind))
 		return unsupportedOverlayStatus(cfg), nil
 	}
 	if strings.TrimSpace(req.Runtime.JoinTarget.Path) == "" {
-		s.logger.Info("skip overlay ensure because workspace task is not running", slog.String("bot_id", botID), slog.String("provider", cfg.Provider))
+		s.logger.InfoContext(ctx, "skip overlay ensure because workspace task is not running", slog.String("bot_id", botID), slog.String("provider", cfg.Provider))
 		attachmentStatus, statusErr := s.controller.Status(ctx, req)
 		if statusErr != nil {
 			return OverlayStatus{}, statusErr

@@ -70,7 +70,7 @@ func (c *ThreadCoordinator) CreateNew(ctx context.Context, input session.CreateI
 		return session.Thread{}, fmt.Errorf("create new session: %w", err)
 	}
 	if err := c.routes.SetActiveThread(ctx, input.RouteID, thread.ID); err != nil {
-		c.logger.Warn("failed to set active session on route", slog.Any("error", err))
+		c.logger.WarnContext(ctx, "failed to set active session on route", slog.Any("error", err))
 	}
 	return thread, nil
 }

@@ -329,7 +329,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			if turnID := turn.currentTurnID(); turnID != "" {
 				d.interruptTurn(srv, threadID, turnID)
 			} else {
-				d.logger.Warn("codex turn/start cancelled before a turn id arrived; draining app-server",
+				d.logger.WarnContext(ctx, "codex turn/start cancelled before a turn id arrived; draining app-server",
 					slog.String("thread_id", threadID))
 				d.ResetBotAgent(input.BotID, input.BotAgentID)
 			}
@@ -367,7 +367,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 			// finish on the draining process, new work cold-starts a fresh
 			// one, and the wedged turn dies with the displaced process once
 			// its last user releases it.
-			d.logger.Warn("codex turn did not settle after interrupt; draining app-server",
+			d.logger.WarnContext(ctx, "codex turn did not settle after interrupt; draining app-server",
 				slog.String("thread_id", threadID))
 			d.ResetBotAgent(input.BotID, input.BotAgentID)
 		case <-srv.proc.Done():
@@ -730,7 +730,7 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID, sourceThread
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := srv.client.DeleteFile(cleanupCtx, forkRoot, true); err != nil {
-			d.logger.Warn("remove codex fork checkpoint", slog.Any("error", err))
+			d.logger.WarnContext(ctx, "remove codex fork checkpoint", slog.Any("error", err))
 		}
 	}()
 	checkpoint, err := d.prepareCheckpointAt(recoveryCtx, nil, srv.client, external.PromptInput{BotID: botID, BotAgentID: botAgentID, ThreadID: sourceThreadID, RuntimeMetadata: runtimeMetadata}, forkRoot)

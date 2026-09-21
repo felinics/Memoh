@@ -36,7 +36,7 @@ func (m *Manager) ContainerID(ctx context.Context, botID string) (string, error)
 				return row.ContainerID, nil
 			}
 			if dbErr != nil && !errors.Is(dbErr, pgx.ErrNoRows) {
-				m.logger.Warn("ContainerID: db lookup failed",
+				m.logger.WarnContext(ctx, "ContainerID: db lookup failed",
 					slog.String("bot_id", botID), slog.Any("error", dbErr))
 			}
 		}
@@ -114,7 +114,7 @@ func (m *Manager) ensureContainerNetworkAndGetIP(ctx context.Context, botID, con
 		result, err := m.networkController.EnsureAttached(ctx, m.networkAttachmentRequest(ctx, botID, containerID))
 		if err != nil {
 			lastErr = err
-			m.logger.Warn("network setup attempt failed",
+			m.logger.WarnContext(ctx, "network setup attempt failed",
 				slog.String("container_id", containerID),
 				slog.Int("attempt", attempt+1),
 				slog.Any("error", err))
@@ -214,7 +214,7 @@ func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 		}
 		if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
 			if !ctr.IsNotFound(err) {
-				m.logger.Warn("cleanup: delete task failed",
+				m.logger.WarnContext(ctx, "cleanup: delete task failed",
 					slog.String("container_id", containerID), slog.Any("error", err))
 				return err
 			}
@@ -240,11 +240,11 @@ func (m *Manager) StopBot(ctx context.Context, botID string) error {
 		return err
 	}
 	if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
-		m.logger.Warn("cleanup: delete task failed",
+		m.logger.WarnContext(ctx, "cleanup: delete task failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 	if err := m.removeContainerNetwork(ctx, botID, containerID); err != nil {
-		m.logger.Warn("cleanup: remove network failed",
+		m.logger.WarnContext(ctx, "cleanup: remove network failed",
 			slog.String("container_id", containerID), slog.Any("error", err))
 	}
 
@@ -376,7 +376,7 @@ func (m *Manager) CleanupBotContainer(ctx context.Context, botID string, preserv
 		if !ctr.IsNotFound(err) {
 			return err
 		}
-		m.logger.Warn("cleanup: container not found in containerd, continuing",
+		m.logger.WarnContext(ctx, "cleanup: container not found in containerd, continuing",
 			slog.String("bot_id", botID))
 	}
 
@@ -397,22 +397,22 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 	}
 	rows, err := m.queries.ListAutoStartContainers(ctx)
 	if err != nil {
-		m.logger.Error("reconcile: failed to list containers from DB", slog.Any("error", err))
+		m.logger.ErrorContext(ctx, "reconcile: failed to list containers from DB", slog.Any("error", err))
 		return
 	}
 	if len(rows) == 0 {
-		m.logger.Info("reconcile: no auto-start containers in DB")
+		m.logger.InfoContext(ctx, "reconcile: no auto-start containers in DB")
 		return
 	}
 
-	m.logger.Info("reconcile: checking containers", slog.Int("count", len(rows)))
+	m.logger.InfoContext(ctx, "reconcile: checking containers", slog.Int("count", len(rows)))
 	for _, row := range rows {
 		containerID := row.ContainerID
 		botID := uuid.UUID(row.BotID.Bytes).String()
 		_, err := m.service.GetContainer(ctx, containerID)
 		if err != nil {
 			if !ctr.IsNotFound(err) {
-				m.logger.Error("reconcile: failed to get container",
+				m.logger.ErrorContext(ctx, "reconcile: failed to get container",
 					slog.String("container_id", containerID), slog.Any("error", err))
 				continue
 			}
@@ -420,7 +420,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 			// botworkspace reconciler's job (drift detection observes the
 			// workspace as absent and provisions it again without deleting
 			// anything); here we only record what we saw.
-			m.logger.Warn("reconcile: container missing; left to the workspace reconciler",
+			m.logger.WarnContext(ctx, "reconcile: container missing; left to the workspace reconciler",
 				slog.String("bot_id", botID), slog.String("container_id", containerID))
 			m.markContainerStatus(ctx, botID, "missing")
 			continue
@@ -429,23 +429,23 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 		// --- legacy container support (mcp- prefix, TCP gRPC) ---
 		// Remove when all deployments have migrated to workspace- containers.
 		if m.IsLegacyContainer(ctx, containerID) {
-			m.logger.Warn("reconcile: legacy container (pre-bridge), using TCP fallback",
+			m.logger.WarnContext(ctx, "reconcile: legacy container (pre-bridge), using TCP fallback",
 				slog.String("bot_id", botID), slog.String("container_id", containerID))
 
 			running := m.isTaskRunning(ctx, containerID)
 			if !running {
 				if err := m.EnsureNativeRunning(ctx, botID); err != nil {
-					m.logger.Error("reconcile: failed to start legacy container",
+					m.logger.ErrorContext(ctx, "reconcile: failed to start legacy container",
 						slog.String("bot_id", botID), slog.Any("error", err))
 					continue
 				}
 			}
 			if ip, netErr := m.ensureContainerNetworkAndGetIP(ctx, botID, containerID); netErr != nil {
-				m.logger.Error("reconcile: network setup failed for legacy container",
+				m.logger.ErrorContext(ctx, "reconcile: network setup failed for legacy container",
 					slog.String("bot_id", botID), slog.Any("error", netErr))
 			} else {
 				m.SetLegacyIP(botID, ip)
-				m.logger.Info("reconcile: legacy container reachable via TCP",
+				m.logger.InfoContext(ctx, "reconcile: legacy container reachable via TCP",
 					slog.String("bot_id", botID), slog.String("ip", ip))
 			}
 			continue
@@ -458,12 +458,12 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 				m.markContainerStarted(ctx, botID)
 			}
 			if netErr := m.ensureContainerNetwork(ctx, containerID, botID); netErr != nil {
-				m.logger.Error("reconcile: network setup failed for running task, container unreachable",
+				m.logger.ErrorContext(ctx, "reconcile: network setup failed for running task, container unreachable",
 					slog.String("bot_id", botID),
 					slog.String("container_id", containerID),
 					slog.Any("error", netErr))
 			} else {
-				m.logger.Info("reconcile: container healthy",
+				m.logger.InfoContext(ctx, "reconcile: container healthy",
 					slog.String("bot_id", botID), slog.String("container_id", containerID))
 				m.reconcileNativeWorkspace(ctx, botID)
 			}
@@ -471,10 +471,10 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 		}
 
 		// Task not running — try to start it.
-		m.logger.Warn("reconcile: task not running, starting",
+		m.logger.WarnContext(ctx, "reconcile: task not running, starting",
 			slog.String("bot_id", botID), slog.String("container_id", containerID))
 		if err := m.EnsureNativeRunning(ctx, botID); err != nil {
-			m.logger.Error("reconcile: failed to start task",
+			m.logger.ErrorContext(ctx, "reconcile: failed to start task",
 				slog.String("bot_id", botID), slog.Any("error", err))
 			m.markContainerStopped(ctx, botID)
 		} else {
@@ -482,7 +482,7 @@ func (m *Manager) ReconcileContainers(ctx context.Context) {
 			m.reconcileNativeWorkspace(ctx, botID)
 		}
 	}
-	m.logger.Info("reconcile: completed")
+	m.logger.InfoContext(ctx, "reconcile: completed")
 }
 
 func (m *Manager) reconcileNativeWorkspace(ctx context.Context, botID string) {
@@ -496,7 +496,7 @@ func (m *Manager) reconcileNativeWorkspace(ctx context.Context, botID string) {
 	}
 	if m.setupDiagnostics != nil {
 		if err := m.setupDiagnostics.ClearContainerSetupFailure(ctx, botID); err != nil {
-			m.logger.Warn("reconcile: clear workspace setup diagnostic failed",
+			m.logger.WarnContext(ctx, "reconcile: clear workspace setup diagnostic failed",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
@@ -505,7 +505,7 @@ func (m *Manager) reconcileNativeWorkspace(ctx context.Context, botID string) {
 }
 
 func (m *Manager) recordReconcileSetupFailure(ctx context.Context, botID, phase string, setupErr error) {
-	m.logger.Warn("reconcile: workspace initialization degraded",
+	m.logger.WarnContext(ctx, "reconcile: workspace initialization degraded",
 		slog.String("bot_id", botID),
 		slog.String("phase", phase),
 		slog.Any("error", setupErr),
@@ -514,7 +514,7 @@ func (m *Manager) recordReconcileSetupFailure(ctx context.Context, botID, phase 
 		return
 	}
 	if err := m.setupDiagnostics.RecordContainerSetupFailure(ctx, botID, phase, setupErr); err != nil {
-		m.logger.Warn("reconcile: record workspace setup diagnostic failed",
+		m.logger.WarnContext(ctx, "reconcile: record workspace setup diagnostic failed",
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
 		)
@@ -555,7 +555,7 @@ func (m *Manager) upsertContainerRecord(ctx context.Context, botID, containerID,
 		ContainerPath:    config.DefaultDataMount,
 		WorkspaceBackend: bridge.WorkspaceBackendContainer,
 	}); dbErr != nil {
-		m.logger.Error("failed to upsert container record",
+		m.logger.ErrorContext(ctx, "failed to upsert container record",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
 	}
 	if status == "running" {
@@ -582,7 +582,7 @@ func (m *Manager) deleteContainerRecord(ctx context.Context, botID string) {
 		return
 	}
 	if dbErr := m.queries.DeleteContainerByBotID(ctx, pgBotID); dbErr != nil {
-		m.logger.Error("failed to delete container record",
+		m.logger.ErrorContext(ctx, "failed to delete container record",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
 	}
 }
@@ -596,7 +596,7 @@ func (m *Manager) markContainerStarted(ctx context.Context, botID string) {
 		return
 	}
 	if dbErr := m.queries.UpdateContainerStarted(ctx, pgBotID); dbErr != nil {
-		m.logger.Error("failed to update container started status",
+		m.logger.ErrorContext(ctx, "failed to update container started status",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
 	}
 }
@@ -610,7 +610,7 @@ func (m *Manager) markContainerStopped(ctx context.Context, botID string) {
 		return
 	}
 	if dbErr := m.queries.UpdateContainerStopped(ctx, pgBotID); dbErr != nil {
-		m.logger.Error("failed to update container stopped status",
+		m.logger.ErrorContext(ctx, "failed to update container stopped status",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
 	}
 }
@@ -627,7 +627,7 @@ func (m *Manager) markContainerStatus(ctx context.Context, botID, status string)
 		Status: status,
 		BotID:  pgBotID,
 	}); dbErr != nil {
-		m.logger.Error("failed to update container status",
+		m.logger.ErrorContext(ctx, "failed to update container status",
 			slog.String("bot_id", botID), slog.Any("error", dbErr))
 	}
 }

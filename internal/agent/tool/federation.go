@@ -38,7 +38,7 @@ func (f *FederationProvider) Tools(ctx context.Context, session SessionContext) 
 	mcpSession := toMCPSession(session)
 	descriptors, err := f.source.ListTools(ctx, mcpSession)
 	if err != nil {
-		f.logger.Warn("federation list tools failed", slog.Any("error", err))
+		f.logger.WarnContext(ctx, "federation list tools failed", slog.Any("error", err))
 		return nil, nil
 	}
 	tools := make([]sdk.Tool, 0, len(descriptors))

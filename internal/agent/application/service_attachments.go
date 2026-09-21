@@ -48,7 +48,7 @@ func (s *Service) routeAndMergeAttachments(ctx context.Context, model models.Get
 		fallbackPath := strings.TrimSpace(routed.Fallback[i].FallbackPath)
 		if fallbackPath == "" {
 			if s != nil && s.logger != nil {
-				s.logger.Warn(
+				s.logger.WarnContext(ctx,
 					"drop attachment without fallback path",
 					slog.String("type", strings.TrimSpace(routed.Fallback[i].Type)),
 					slog.String("transport", strings.TrimSpace(routed.Fallback[i].Transport)),
@@ -136,7 +136,7 @@ func (s *Service) prepareGatewayAttachments(ctx context.Context, req ChatRequest
 		if item.ContentHash != "" && strings.TrimSpace(item.FallbackPath) == "" {
 			if accessPath, err := s.assetAccessPath(ctx, strings.TrimSpace(req.BotID), item.ContentHash); err != nil {
 				if s != nil && s.logger != nil {
-					s.logger.Warn(
+					s.logger.WarnContext(ctx,
 						"resolve gateway attachment access path failed",
 						slog.Any("error", err),
 						slog.String("bot_id", strings.TrimSpace(req.BotID)),
@@ -414,7 +414,7 @@ func (s *Service) inlineFileAttachmentAssetIfNeeded(ctx context.Context, botID s
 	dataURL, mime, err := s.inlineAssetAsDataURL(ctx, botID, contentHash, item.Type, item.Mime)
 	if err != nil {
 		if s != nil && s.logger != nil {
-			s.logger.Warn(
+			s.logger.WarnContext(ctx,
 				"inline gateway file attachment failed",
 				slog.Any("error", err),
 				slog.String("bot_id", botID),

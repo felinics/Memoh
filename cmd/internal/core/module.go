@@ -57,6 +57,7 @@ func FoundationModule() fx.Option {
 			provideSessionService,
 			provideMessageService,
 		),
+		fx.Invoke(setupTelemetry),
 	)
 }
 

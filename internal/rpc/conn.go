@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
@@ -29,6 +30,10 @@ func Dial(target, secret string) (*grpc.ClientConn, error) {
 	return grpc.NewClient(
 		target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		// A stats handler rather than interceptors: otelgrpc deprecated the
+		// interceptor constructors, and only the handler sees streaming
+		// message events, which is most of what this connection carries.
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithUnaryInterceptor(UnaryClientAuth(secret)),
 		grpc.WithStreamInterceptor(StreamClientAuth(secret)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -45,6 +50,7 @@ func Dial(target, secret string) (*grpc.ClientConn, error) {
 
 func NewServer(secret string, opts ...grpc.ServerOption) *grpc.Server {
 	base := []grpc.ServerOption{
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(UnaryServerAuth(secret)),
 		grpc.ChainStreamInterceptor(StreamServerAuth(secret)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{

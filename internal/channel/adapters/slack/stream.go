@@ -216,7 +216,7 @@ func (s *slackOutboundStream) updateMessage(ctx context.Context) error {
 		s.nextUpdate = time.Now().Add(delay)
 		s.mu.Unlock()
 		if s.adapter != nil && s.adapter.logger != nil {
-			s.adapter.logger.Warn("slack stream update throttled",
+			s.adapter.logger.WarnContext(ctx, "slack stream update throttled",
 				slog.String("config_id", s.cfg.ID),
 				slog.String("target", s.target),
 				slog.Duration("retry_after", delay),
@@ -226,7 +226,7 @@ func (s *slackOutboundStream) updateMessage(ctx context.Context) error {
 		return nil
 	}
 	if s.adapter != nil && s.adapter.logger != nil {
-		s.adapter.logger.Warn("slack stream update failed",
+		s.adapter.logger.WarnContext(ctx, "slack stream update failed",
 			slog.String("config_id", s.cfg.ID),
 			slog.String("target", s.target),
 			slog.Any("error", err),
@@ -293,7 +293,7 @@ func (s *slackOutboundStream) finalizeMessageBody(ctx context.Context, body slac
 	}
 
 	if s.adapter != nil && s.adapter.logger != nil {
-		s.adapter.logger.Warn("slack stream final update failed, falling back to new message",
+		s.adapter.logger.WarnContext(ctx, "slack stream final update failed, falling back to new message",
 			slog.String("config_id", s.cfg.ID),
 			slog.String("target", s.target),
 			slog.Any("error", err),

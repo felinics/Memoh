@@ -538,7 +538,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		defer func() {
 			if !committed {
 				if delErr := s.bots.Delete(context.WithoutCancel(ctx), targetBotID); delErr != nil {
-					s.logger.Warn("import compensation: delete bot failed",
+					s.logger.WarnContext(ctx, "import compensation: delete bot failed",
 						slog.String("bot_id", targetBotID), slog.Any("error", delErr))
 				}
 			}

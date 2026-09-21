@@ -218,7 +218,7 @@ func (c *pollConn) pollEvents(ctx context.Context) {
 	var evts []events.Event
 	if !iter.Next(ctx, &evts) {
 		if err := iter.Err(); err != nil {
-			c.logger.Error("mailgun events poll failed", slog.Any("error", err))
+			c.logger.ErrorContext(ctx, "mailgun events poll failed", slog.Any("error", err))
 		}
 		return
 	}
@@ -243,7 +243,7 @@ func (c *pollConn) pollEvents(ctx context.Context) {
 		}
 
 		if err := c.handler(ctx, c.providerID, inbound); err != nil {
-			c.logger.Error("inbound handler failed", slog.Any("error", err))
+			c.logger.ErrorContext(ctx, "inbound handler failed", slog.Any("error", err))
 		}
 	}
 }

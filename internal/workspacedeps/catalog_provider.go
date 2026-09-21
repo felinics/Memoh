@@ -195,7 +195,7 @@ func (p *RemoteCatalog) Snapshot(ctx context.Context, refresh bool) (CatalogResu
 			return CatalogResult{}, cacheErr
 		}
 		cached.Stale = true
-		p.logger.Warn("using cached dependency catalog", slog.Any("error", err))
+		p.logger.WarnContext(ctx, "using cached dependency catalog", slog.Any("error", err))
 		return cached, nil
 	}
 	return CatalogResult{}, err
@@ -300,7 +300,7 @@ func (p *RemoteCatalog) refresh(ctx context.Context, previous CachedCatalog) (Ca
 		PruneDefinitions(context.Context, string) error
 	}); ok {
 		if err := pruner.PruneDefinitions(ctx, p.sourceURL); err != nil {
-			p.logger.Warn("prune unused dependency definitions", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "prune unused dependency definitions", slog.Any("error", err))
 		}
 	}
 	return p.catalogResult(updated, validatedCatalog), nil
@@ -492,7 +492,7 @@ func (p *RemoteCatalog) Start(ctx context.Context) func() {
 			_, err := p.Snapshot(runCtx, true)
 			stop()
 			if err != nil && ctx.Err() == nil {
-				p.logger.Warn("refresh dependency catalog", slog.Any("error", err))
+				p.logger.WarnContext(ctx, "refresh dependency catalog", slog.Any("error", err))
 			}
 			select {
 			case <-ctx.Done():

@@ -760,7 +760,7 @@ func (s *DBService) finishPersistedMessage(ctx context.Context, result Message, 
 		}
 		contentHash := strings.TrimSpace(ref.ContentHash)
 		if contentHash == "" {
-			s.logger.Warn("skip asset ref without content_hash")
+			s.logger.WarnContext(ctx, "skip asset ref without content_hash")
 			continue
 		}
 		if ref.Ordinal < math.MinInt32 || ref.Ordinal > math.MaxInt32 {
@@ -819,7 +819,7 @@ func (s *DBService) cleanupPersistedMessage(ctx context.Context, messageID pgtyp
 		return
 	}
 	if err := cleanup.DeleteMessagesByIDs(ctx, []pgtype.UUID{messageID}); err != nil {
-		s.logger.Error("cleanup message after history turn failure failed", slog.String("message_id", messageID.String()), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "cleanup message after history turn failure failed", slog.String("message_id", messageID.String()), slog.Any("error", err))
 	}
 }
 
@@ -2590,7 +2590,7 @@ func (s *DBService) enrichAssets(ctx context.Context, messages []Message) {
 	}
 	rows, err := s.queries.ListMessageAssetsBatch(ctx, ids)
 	if err != nil {
-		s.logger.Warn("enrich assets failed, returning messages without assets", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "enrich assets failed, returning messages without assets", slog.Any("error", err))
 		ensureAssetsSlice(messages)
 		return
 	}

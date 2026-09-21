@@ -438,7 +438,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	intent, err := h.workspaces.EnsurePresent(intentCtx, botID, imageOverride)
 	cancelIntent()
 	if err != nil {
-		h.logger.Error("record workspace intent failed", slog.String("bot_id", botID), slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed", slog.String("bot_id", botID), slog.Any("error", err))
 		sendError("workspace_create_failed", "bots.container.createFailed", "workspace creation could not be scheduled")
 		return nil
 	}
@@ -461,7 +461,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if req.RestoreData && h.manager.HasPreservedData(botID) {
 		send(createContainerRestoringEvent{Type: "restoring"})
 		if err := h.manager.RestorePreservedData(streamCtx, botID); err != nil {
-			h.logger.Error("restore preserved data failed", slog.String("bot_id", botID), slog.Any("error", err))
+			h.logger.ErrorContext(c.Request().Context(), "restore preserved data failed", slog.String("bot_id", botID), slog.Any("error", err))
 			sendError("workspace_restore_failed", "bots.container.createFailed", "restore preserved data failed: "+err.Error())
 			return nil
 		}
@@ -722,7 +722,7 @@ func (h *ContainerdHandler) observeWorkspace(ctx context.Context, botID string) 
 	obsCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
 	if _, err := h.workspaces.Observe(obsCtx, botID); err != nil && !errors.Is(err, botworkspace.ErrNotFound) {
-		h.logger.Warn("refresh workspace observation failed", slog.String("bot_id", botID), slog.Any("error", err))
+		h.logger.WarnContext(ctx, "refresh workspace observation failed", slog.String("bot_id", botID), slog.Any("error", err))
 	}
 }
 
@@ -805,7 +805,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 	resp, ok := buildSnapshotListResponse(data)
 	if !ok {
-		h.logger.Warn("container snapshot chain root not found",
+		h.logger.WarnContext(c.Request().Context(), "container snapshot chain root not found",
 			slog.String("container_id", data.ContainerID),
 			slog.String("snapshotter", data.Snapshotter),
 			slog.String("snapshot_key", snapshotKey),

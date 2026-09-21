@@ -33,7 +33,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 	rows := uncompactedRowsFromBounded(boundedRows)
 	if len(rows) == 0 {
-		s.logger.Warn("compaction: no candidate fits the database read budget",
+		s.logger.WarnContext(ctx, "compaction: no candidate fits the database read budget",
 			slog.String("session_id", cfg.SessionID),
 			slog.Int64("candidate_count", measure.CandidateCount),
 			slog.Int64("candidate_bytes", measure.CandidateBytes),
@@ -48,7 +48,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	candidateCount := boundedRows[0].CandidateCount
 	candidateBytes := boundedRows[0].CandidateBytes
 	truncatedRead := candidateCount > int64(len(rows))
-	s.logger.Info("compaction: bounded candidate read",
+	s.logger.InfoContext(ctx, "compaction: bounded candidate read",
 		slog.String("session_id", cfg.SessionID),
 		slog.Int("loaded_messages", len(rows)),
 		slog.Int64("candidate_count", candidateCount),
@@ -59,7 +59,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	messages, barrierCount := itemsFromRows(rows)
 	if barrierCount > 0 {
-		s.logger.Warn("compaction: kept unparseable history rows as span barriers",
+		s.logger.WarnContext(ctx, "compaction: kept unparseable history rows as span barriers",
 			slog.Int("barrier_count", barrierCount),
 			slog.String("session_id", cfg.SessionID),
 		)
@@ -116,11 +116,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{}, err
 	}
 	for _, issue := range frontier.Issues {
-		s.logger.Warn("compaction: ignored invalid artifact lineage", slog.String("issue", issue.Error()))
+		s.logger.WarnContext(ctx, "compaction: ignored invalid artifact lineage", slog.String("issue", issue.Error()))
 	}
 	fusing := shouldFuseFrontier(cfg, frontier.Artifacts, maxCompactTokens)
 	if fusing && !frontierHasPersistedCoverage(frontier.Artifacts) {
-		s.logger.Warn("compaction: frontier fusion skipped",
+		s.logger.WarnContext(ctx, "compaction: frontier fusion skipped",
 			slog.String("reason", "legacy_parent_missing_coverage"),
 			slog.String("session_id", cfg.SessionID),
 		)
@@ -164,7 +164,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		}
 	}
 
-	s.logger.Info("compaction: before trim",
+	s.logger.InfoContext(ctx, "compaction: before trim",
 		slog.Int("messages", len(toCompact)),
 		slog.Int("total_uncompacted", len(messages)),
 		slog.Int("max_compact_tokens", maxCompactTokens),
@@ -179,7 +179,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens-entriesCost)
 		priorTokens = priorContextTokens(priorSummaries)
 	}
-	s.logger.Info("compaction: after trim",
+	s.logger.InfoContext(ctx, "compaction: after trim",
 		slog.Int("messages", len(toCompact)),
 		slog.Int("prior_summaries", len(priorSummaries)),
 		slog.Int("absorbed_segments", len(absorbedSegments)),
@@ -433,7 +433,7 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 		AnchorEndMs:   anchorEndMs,
 	})
 	if err != nil {
-		s.logger.Error("failed to complete compaction log", slog.String("error", err.Error()))
+		s.logger.ErrorContext(ctx, "failed to complete compaction log", slog.String("error", err.Error()))
 		return err
 	}
 	return nil
@@ -471,7 +471,7 @@ func (s *Service) completeRollupLog(
 		Parents:       parentIDs,
 	})
 	if err != nil {
-		s.logger.Error("failed to complete compaction rollup", slog.String("error", err.Error()))
+		s.logger.ErrorContext(ctx, "failed to complete compaction rollup", slog.String("error", err.Error()))
 		return err
 	}
 	return nil

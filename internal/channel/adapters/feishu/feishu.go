@@ -395,24 +395,24 @@ func (*FeishuAdapter) BuildUserConfig(identity channel.Identity) map[string]any 
 // Connect establishes a WebSocket connection to Feishu and forwards inbound messages to the handler.
 func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler) (channel.Connection, error) {
 	if a.logger != nil {
-		a.logger.Info("start", slog.String("config_id", cfg.ID))
+		a.logger.InfoContext(ctx, "start", slog.String("config_id", cfg.ID))
 	}
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Error("decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.ErrorContext(ctx, "decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		return nil, err
 	}
 	if feishuCfg.InboundMode == inboundModeWebhook {
 		if a.logger != nil {
-			a.logger.Info("webhook mode enabled; websocket connect skipped", slog.String("config_id", cfg.ID))
+			a.logger.InfoContext(ctx, "webhook mode enabled; websocket connect skipped", slog.String("config_id", cfg.ID))
 		}
 		return channel.NewConnection(cfg, func(context.Context) error { return nil }), nil
 	}
 	botOpenID := a.resolveBotOpenID(ctx, cfg)
 	if a.logger != nil {
-		a.logger.Info("bot identity", slog.String("config_id", cfg.ID), slog.String("bot_open_id", botOpenID))
+		a.logger.InfoContext(ctx, "bot identity", slog.String("config_id", cfg.ID), slog.String("bot_open_id", botOpenID))
 	}
 	connCtx, cancel := context.WithCancel(ctx)
 	feishuCfg.registerIMErrorSecrets()
@@ -433,7 +433,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 			// start a replacement while the old goroutine may
 			// still hold a websocket.
 			if a.logger != nil {
-				a.logger.Warn("stop timed out waiting for goroutine to exit",
+				a.logger.WarnContext(ctx, "stop timed out waiting for goroutine to exit",
 					slog.String("config_id", cfg.ID),
 					slog.Any("error", stopCtx.Err()),
 				)
@@ -467,7 +467,7 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 				var ce *larkws.ClientError
 				if errors.As(err, &ce) {
 					if a.logger != nil {
-						a.logger.Error("websocket client error; not reconnecting",
+						a.logger.ErrorContext(ctx, "websocket client error; not reconnecting",
 							slog.String("config_id", cfg.ID),
 							slog.Int("code", ce.Code),
 							slog.Any("error", err),
@@ -477,10 +477,10 @@ func (a *FeishuAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 					return
 				}
 				if a.logger != nil {
-					a.logger.Error("websocket client exited", slog.String("config_id", cfg.ID), slog.Any("error", err))
+					a.logger.ErrorContext(ctx, "websocket client exited", slog.String("config_id", cfg.ID), slog.Any("error", err))
 				}
 			} else if a.logger != nil {
-				a.logger.Warn("websocket client exited without error; reconnecting", slog.String("config_id", cfg.ID))
+				a.logger.WarnContext(ctx, "websocket client exited without error; reconnecting", slog.String("config_id", cfg.ID))
 			}
 			timer := time.NewTimer(reconnectDelay)
 			select {
@@ -529,7 +529,7 @@ func (a *FeishuAdapter) buildEventDispatcher(
 			}
 		}
 		if a.logger != nil {
-			a.logger.Debug("feishu inbound extracted",
+			a.logger.DebugContext(connCtx, "feishu inbound extracted",
 				slog.String("config_id", cfg.ID),
 				slog.String("message_id", rawMessageID),
 				slog.String("message_type", rawMessageType),
@@ -540,7 +540,7 @@ func (a *FeishuAdapter) buildEventDispatcher(
 		}
 		if text == "" && len(msg.Message.Attachments) == 0 {
 			if a.logger != nil {
-				a.logger.Info(
+				a.logger.InfoContext(connCtx,
 					"inbound ignored empty payload",
 					slog.String("config_id", cfg.ID),
 					slog.String("message_id", rawMessageID),
@@ -560,7 +560,7 @@ func (a *FeishuAdapter) buildEventDispatcher(
 					isMentioned = v
 				}
 			}
-			a.logger.Info(
+			a.logger.InfoContext(connCtx,
 				"inbound received",
 				slog.String("config_id", cfg.ID),
 				slog.String("message_id", rawMessageID),
@@ -573,7 +573,7 @@ func (a *FeishuAdapter) buildEventDispatcher(
 		}
 		go func() {
 			if err := handler(connCtx, cfg, msg); err != nil && a.logger != nil {
-				a.logger.Error("handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+				a.logger.ErrorContext(connCtx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 			}
 		}()
 		return nil
@@ -597,7 +597,7 @@ func (a *FeishuAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Error("decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.ErrorContext(ctx, "decode config failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		return err
 	}

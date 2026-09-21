@@ -200,7 +200,7 @@ func (c *gmailImapConn) run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			c.logger.Error("gmail imap error, retrying in 60s", slog.Any("error", err))
+			c.logger.ErrorContext(ctx, "gmail imap error, retrying in 60s", slog.Any("error", err))
 			select {
 			case <-ctx.Done():
 				return
@@ -227,15 +227,15 @@ func (c *gmailImapConn) connectAndReceive(ctx context.Context) error {
 
 	_ = notifyNewMail
 
-	c.logger.Info("gmail imap connected, fetching initial messages")
+	c.logger.InfoContext(ctx, "gmail imap connected, fetching initial messages")
 	c.fetchNewMessages(ctx, client)
 
 	idleCmd, idleErr := client.Idle()
 	if idleErr != nil {
-		c.logger.Warn("gmail IDLE not available, falling back to polling", slog.Any("error", idleErr))
+		c.logger.WarnContext(ctx, "gmail IDLE not available, falling back to polling", slog.Any("error", idleErr))
 		return c.pollLoop(ctx, client)
 	}
-	c.logger.Info("gmail IDLE mode active")
+	c.logger.InfoContext(ctx, "gmail IDLE mode active")
 
 	checkInterval := 2 * time.Minute
 
@@ -313,11 +313,11 @@ func (c *gmailImapConn) fetchNewMessages(ctx context.Context, client *imapclient
 		}
 		processed++
 		if err := c.handler(ctx, c.providerID, *inbound); err != nil {
-			c.logger.Error("inbound handler failed", slog.Any("error", err))
+			c.logger.ErrorContext(ctx, "inbound handler failed", slog.Any("error", err))
 		}
 	}
 
-	c.logger.Info("gmail imap fetch completed", slog.Int("processed", processed), slog.Uint64("last_uid", uint64(c.lastUID)))
+	c.logger.InfoContext(ctx, "gmail imap fetch completed", slog.Int("processed", processed), slog.Uint64("last_uid", uint64(c.lastUID)))
 }
 
 // ---- MailboxReader ----

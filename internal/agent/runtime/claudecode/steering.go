@@ -64,7 +64,7 @@ func (t *turnRunner) startSteering(ctx context.Context) func() {
 			}
 			if err != nil {
 				if ctx.Err() == nil && (ok || workerCtx.Err() == nil) {
-					t.logger.Warn("claude steer was not delivered", slog.Any("error", err))
+					t.logger.WarnContext(ctx, "claude steer was not delivered", slog.Any("error", err))
 					public, _ := apperror.PublicFrom(apperror.New(apperror.CodeRuntimeControlSteerFailed, nil), "")
 					t.emit(event.StreamEvent{Type: event.RuntimeNotice, Code: string(public.Code), Delta: public.Detail})
 				}

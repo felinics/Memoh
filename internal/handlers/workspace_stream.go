@@ -176,7 +176,7 @@ func workspaceCompleteEvent(ctx context.Context, log *slog.Logger, status worksp
 		switch {
 		case err != nil:
 			if log != nil {
-				log.Warn("describe workspace after provisioning failed", slog.String("bot_id", botID), slog.Any("error", err))
+				log.WarnContext(ctx, "describe workspace after provisioning failed", slog.String("bot_id", botID), slog.Any("error", err))
 			}
 			response.HasPreservedData = status.HasPreservedData(botID)
 		default:

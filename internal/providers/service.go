@@ -412,7 +412,7 @@ func (s *Service) fetchTemplateModels(ctx context.Context, provider sqlc.Provide
 			return remoteModelsFromCatalog(models), true
 		}
 		if s.logger != nil {
-			s.logger.Warn("failed to load provider template model catalog", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "failed to load provider template model catalog", slog.Any("error", err))
 		}
 	}
 	source := metadataSectionSource(providerMetadata(provider.Metadata), "preset")
@@ -427,7 +427,7 @@ func (s *Service) fetchTemplateModels(ctx context.Context, provider sqlc.Provide
 	defs, err := registry.Load(s.logger, s.templatesDir)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("failed to load provider template models", slog.String("template_source", source), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "failed to load provider template models", slog.String("template_source", source), slog.Any("error", err))
 		}
 		return nil, false
 	}
@@ -566,7 +566,7 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 					if logger == nil {
 						logger = slog.Default()
 					}
-					logger.Warn("skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
+					logger.WarnContext(ctx, "skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
 					continue
 				}
 				dimensions = &dim

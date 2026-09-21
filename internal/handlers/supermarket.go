@@ -46,7 +46,7 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 	}
 	resp, err := h.upstream.Get(c.Request().Context(), requestPath, "application/json")
 	if err != nil {
-		h.logger.Error("supermarket proxy failed", slog.String("path", requestPath), slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "supermarket proxy failed", slog.String("path", requestPath), slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}
 	defer func() { _ = resp.Body.Close() }()

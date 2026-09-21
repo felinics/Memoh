@@ -147,7 +147,7 @@ func (h *VideoHandler) ImportModels(c echo.Context) error {
 				resp.Skipped++
 				continue
 			}
-			h.logger.Warn("failed to import video model", slog.String("model_id", model.ID), slog.Any("error", err))
+			h.logger.WarnContext(c.Request().Context(), "failed to import video model", slog.String("model_id", model.ID), slog.Any("error", err))
 			continue
 		}
 		resp.Created++

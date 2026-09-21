@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
@@ -57,6 +58,7 @@ func (*DirectPipe) ClientConn(ctx context.Context, conn net.Conn) (*grpc.ClientC
 		"passthrough:///remote-runtime",
 		grpc.WithContextDialer(dialer.DialContext),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithNoProxy(),
 		grpc.WithDisableRetry(),
 		// Entering grpc-go's idle state tears down the only transport and would

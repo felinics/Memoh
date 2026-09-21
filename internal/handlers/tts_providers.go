@@ -205,7 +205,7 @@ func (h *AudioHandler) ImportModels(c echo.Context) error {
 				resp.Skipped++
 				continue
 			}
-			h.logger.Warn("failed to import speech model", slog.String("model_id", model.ID), slog.Any("error", err))
+			h.logger.WarnContext(c.Request().Context(), "failed to import speech model", slog.String("model_id", model.ID), slog.Any("error", err))
 			continue
 		}
 		resp.Created++
@@ -284,7 +284,7 @@ func (h *AudioHandler) ImportTranscriptionModels(c echo.Context) error {
 				resp.Skipped++
 				continue
 			}
-			h.logger.Warn("failed to import transcription model", slog.String("model_id", model.ID), slog.Any("error", err))
+			h.logger.WarnContext(c.Request().Context(), "failed to import transcription model", slog.String("model_id", model.ID), slog.Any("error", err))
 			continue
 		}
 		resp.Created++
@@ -525,7 +525,7 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	defer func(src multipart.File) {
 		err := src.Close()
 		if err != nil {
-			h.logger.Warn("failed to close uploaded file", slog.Any("error", err))
+			h.logger.WarnContext(c.Request().Context(), "failed to close uploaded file", slog.Any("error", err))
 		}
 	}(src)
 	audio, err := io.ReadAll(src)

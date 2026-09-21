@@ -50,7 +50,7 @@ func (m *Manager) PrepareImageForCreate(ctx context.Context, image string, opts 
 				return ImagePrepareResult{Mode: ImagePrepareDelegated, ImageRef: primary, Message: "runtime backend handles image pulling"}, nil
 			}
 			if !ctr.IsNotFound(err) {
-				m.logger.Info("image lookup failed, attempting pull",
+				m.logger.InfoContext(ctx, "image lookup failed, attempting pull",
 					slog.String("image", candidate),
 					slog.Any("error", err))
 			}
@@ -72,7 +72,7 @@ func (m *Manager) PrepareImageForCreate(ctx context.Context, image string, opts 
 		}
 		lastErr = err
 		if i+1 < len(candidates) {
-			m.logger.Warn("image pull failed, trying fallback image",
+			m.logger.WarnContext(ctx, "image pull failed, trying fallback image",
 				slog.String("image", candidate),
 				slog.String("fallback_image", candidates[i+1]),
 				slog.Any("error", err))

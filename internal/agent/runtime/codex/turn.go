@@ -624,7 +624,7 @@ func (t *turnState) decide(ctx context.Context, callID, toolName string, input m
 		if ctx.Err() != nil {
 			return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "the turn ended before a decision arrived"}
 		}
-		t.logger.Error("codex approval flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
+		t.logger.ErrorContext(ctx, "codex approval flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
 		return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "approval flow failed"}
 	}
 	return result

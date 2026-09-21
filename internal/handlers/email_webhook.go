@@ -79,12 +79,12 @@ func (h *EmailWebhookHandler) HandleMailgun(c echo.Context) error {
 
 	inbound, err := webhookReceiver.HandleWebhook(c.Request().Context(), configMap, c.Request())
 	if err != nil {
-		h.logger.Error("webhook handling failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "webhook handling failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusForbidden, err.Error())
 	}
 
 	if err := h.trigger.HandleInbound(c.Request().Context(), configID, *inbound); err != nil {
-		h.logger.Error("inbound processing failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "inbound processing failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "processing failed")
 	}
 

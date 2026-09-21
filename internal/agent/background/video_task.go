@@ -29,7 +29,7 @@ func (m *Manager) StartVideoTask(parentCtx context.Context, botID, sessionID, de
 	m.tasks[taskID] = task
 	m.mu.Unlock()
 
-	m.logger.Info("background video task started",
+	m.logger.InfoContext(parentCtx, "background video task started",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("description", truncate(description, 120)),

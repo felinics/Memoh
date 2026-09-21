@@ -159,7 +159,7 @@ func (c *clientConnection) handle(ctx context.Context, method string, params jso
 		return nil, acp.NewInternalError(map[string]any{"error": "ACP client callbacks not configured"})
 	}
 	if c.client.logger != nil && method != acp.ClientMethodSessionUpdate {
-		c.client.logger.Debug("ACP client method called", slog.String("method", method))
+		c.client.logger.DebugContext(ctx, "ACP client method called", slog.String("method", method))
 	}
 	switch method {
 	case acp.ClientMethodFsReadTextFile:

@@ -153,7 +153,7 @@ func (p *TranscriptionProvider) loadAudio(ctx context.Context, botID, pathValue,
 	}
 	defer func(body io.ReadCloser) {
 		if closeErr := body.Close(); closeErr != nil {
-			p.logger.Warn("failed to close audio response body", slog.Any("error", closeErr))
+			p.logger.WarnContext(ctx, "failed to close audio response body", slog.Any("error", closeErr))
 		}
 	}(resp.Body)
 	audio, err := io.ReadAll(resp.Body)
@@ -182,7 +182,7 @@ func (p *TranscriptionProvider) loadAudioFromPath(ctx context.Context, botID, pa
 	}
 	defer func(reader io.ReadCloser) {
 		if closeErr := reader.Close(); closeErr != nil {
-			p.logger.Warn("failed to close media reader", slog.Any("error", closeErr))
+			p.logger.WarnContext(ctx, "failed to close media reader", slog.Any("error", closeErr))
 		}
 	}(reader)
 	audio, err := io.ReadAll(reader)

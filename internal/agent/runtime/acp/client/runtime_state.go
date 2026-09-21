@@ -165,7 +165,7 @@ func (l *runtimeLease) applyShellPath(ctx context.Context, logger *slog.Logger) 
 	containerPath, err := shellenv.ResolvePath(ctx, l.client, defaultContainerPath, l.agentEnv, l.unsetEnv)
 	if err != nil {
 		if logger != nil {
-			logger.Warn("workspace shell PATH probe failed; ACP agent runs with the default PATH",
+			logger.WarnContext(ctx, "workspace shell PATH probe failed; ACP agent runs with the default PATH",
 				slog.String("agent_id", l.agentID),
 				slog.String("bot_id", l.botID),
 				slog.Any("error", err))

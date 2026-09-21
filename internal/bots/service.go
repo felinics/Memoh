@@ -685,13 +685,13 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 		revertCtx, cancelRevert := context.WithTimeout(context.WithoutCancel(lifecycleCtx), botLifecycleStatusWriteTimeout)
 		defer cancelRevert()
 		if err := s.updateStatus(revertCtx, botID, revertStatus); err != nil {
-			s.logger.Error("revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))
+			s.logger.ErrorContext(ctx, "revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))
 		}
 	}
 
 	if s.connectorLifecycle != nil {
 		if err := s.connectorLifecycle.CleanupBotConnectors(lifecycleCtx, botID); err != nil {
-			s.logger.Error("bot connector cleanup failed",
+			s.logger.ErrorContext(ctx, "bot connector cleanup failed",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
 			)
@@ -709,13 +709,13 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 	if s.workspaceIntents != nil {
 		generation, err := s.workspaceIntents.RequestAbsent(lifecycleCtx, botID, false)
 		if err != nil {
-			s.logger.Error("record workspace removal intent failed", slog.String("bot_id", botID), slog.Any("error", err))
+			s.logger.ErrorContext(ctx, "record workspace removal intent failed", slog.String("bot_id", botID), slog.Any("error", err))
 			revertToReady()
 			return
 		}
 		outcome, err := s.workspaceIntents.AwaitSettled(lifecycleCtx, botID, generation)
 		if err != nil || outcome.Observed != WorkspaceObservedAbsent {
-			s.logger.Error("bot workspace removal did not complete within the delete budget",
+			s.logger.ErrorContext(ctx, "bot workspace removal did not complete within the delete budget",
 				slog.String("bot_id", botID),
 				slog.String("observed", outcome.Observed),
 				slog.String("last_error", outcome.LastError),
@@ -728,7 +728,7 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		s.logger.Error("invalid bot id while finalizing delete",
+		s.logger.ErrorContext(ctx, "invalid bot id while finalizing delete",
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
 		)
@@ -743,7 +743,7 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 	// secrets forever. Treat it like the other blocking cleanups and keep a
 	// retry path by reverting to ready.
 	if err := s.queries.RevokeAgentCredentialsForBot(lifecycleCtx, botUUID); err != nil {
-		s.logger.Error("revoke agent credentials for deleted bot failed",
+		s.logger.ErrorContext(ctx, "revoke agent credentials for deleted bot failed",
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
 		)
@@ -751,7 +751,7 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 		return
 	}
 	if err := s.queries.DeleteBotByID(lifecycleCtx, botUUID); err != nil {
-		s.logger.Error("failed to delete bot after cleanup",
+		s.logger.ErrorContext(ctx, "failed to delete bot after cleanup",
 			slog.String("bot_id", botID),
 			slog.Any("error", err),
 		)
@@ -1101,7 +1101,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 		dataCheck.Status = BotCheckStatusUnknown
 		dataCheck.Summary = "Workspace reachability check is not configured."
 	} else if err := s.containerReachability(ctx, row.ID.String()); err != nil {
-		s.logger.Warn("workspace reachability check failed",
+		s.logger.WarnContext(ctx, "workspace reachability check failed",
 			slog.String("bot_id", row.ID.String()), slog.Any("error", err))
 		dataCheck.Status = BotCheckStatusError
 		dataCheck.Summary = "Workspace is not reachable via gRPC."
@@ -1132,7 +1132,7 @@ func (s *Service) appendDynamicChecks(ctx context.Context, botID string, checks 
 				} else {
 					item.ID = "runtime.unknown"
 					if s.logger != nil {
-						s.logger.Warn("runtime checker returned check without id and type",
+						s.logger.WarnContext(ctx, "runtime checker returned check without id and type",
 							slog.String("bot_id", botID))
 					}
 				}
@@ -1179,7 +1179,7 @@ func (s *Service) workspaceOutcome(ctx context.Context, botID string) (Workspace
 	}
 	outcome, ok, err := s.workspaceIntents.Current(ctx, botID)
 	if err != nil {
-		s.logger.Warn("load workspace observation failed", slog.String("bot_id", botID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "load workspace observation failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return WorkspaceOutcome{}, false
 	}
 	return outcome, ok

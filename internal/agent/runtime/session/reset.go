@@ -96,7 +96,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 			live = acquiredLive
 			liveHeld = true
 		} else {
-			m.logger.Warn("live history reset marker unavailable; continuing on the durable lease",
+			m.logger.WarnContext(ctx, "live history reset marker unavailable; continuing on the durable lease",
 				slog.Any("error", liveErr),
 				slog.String("scope", scope.kind()),
 				slog.String("bot_id", scope.BotID),
@@ -128,7 +128,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 			if liveHeld {
 				if resetBackend, hasLive := m.backend.(HistoryResetBackend); hasLive {
 					if released, err := resetBackend.ReleaseHistoryReset(releaseCtx, live); err != nil || !released {
-						m.logger.Warn("release live history reset marker failed",
+						m.logger.WarnContext(ctx, "release live history reset marker failed",
 							slog.Any("error", err),
 							slog.String("scope", scope.kind()),
 							slog.String("bot_id", scope.BotID),
@@ -138,7 +138,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 				}
 			}
 			if released, err := resetStore.ReleaseReset(releaseCtx, durable); err != nil || !released {
-				m.logger.Warn("release PostgreSQL history reset fence failed",
+				m.logger.WarnContext(ctx, "release PostgreSQL history reset fence failed",
 					slog.Any("error", err),
 					slog.String("scope", scope.kind()),
 					slog.String("bot_id", scope.BotID),
@@ -194,7 +194,7 @@ func (m *Manager) renewHistoryReset(
 				// A token-CAS miss is authoritative loss: a successor owns the
 				// scope now, or the row is gone.
 				cancel(ErrHistoryResetLeaseLost)
-				m.logger.Error("history reset lease was taken over or expired")
+				m.logger.ErrorContext(ctx, "history reset lease was taken over or expired")
 				return
 			default:
 				// Transport errors and timeouts are not loss. The renew may be
@@ -204,7 +204,7 @@ func (m *Manager) renewHistoryReset(
 				// every destructive statement re-validates the token under the
 				// parent lock, so a genuinely lost lease fails closed there
 				// while the next successful renew tick observes the CAS miss.
-				m.logger.Warn("history reset lease renewal will retry",
+				m.logger.WarnContext(ctx, "history reset lease renewal will retry",
 					slog.Any("error", durableErr),
 					slog.Time("durable_expires_at", durable.ExpiresAt),
 				)
