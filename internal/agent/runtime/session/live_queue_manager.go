@@ -191,7 +191,7 @@ func (m *Manager) notifySteer(ctx context.Context, key Key, runID string) {
 		err = m.dispatchRemoteCommand(ctx, run.OwnerID, cmd)
 	}
 	if err != nil {
-		m.logger.Warn("notify accepted steer failed", slog.String("run_id", runID), slog.Any("error", err))
+		m.logger.WarnContext(ctx, "notify accepted steer failed", slog.String("run_id", runID), slog.Any("error", err))
 	}
 }
 

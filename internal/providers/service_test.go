@@ -975,6 +975,165 @@ func TestFetchRemoteModelsViaSDK(t *testing.T) {
 	})
 }
 
+// Regression for the New API "import 0 models" report: a provider linked to a
+// template (even an EMPTY one) must still list models from the live endpoint;
+// the template only enriches matching IDs with curated capabilities.
+func TestFetchRemoteModelsViaSDKMergesTemplateCapabilities(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "newapi.yaml"), []byte(`
+name: New API
+client_type: openai-completions
+base_url: https://example.invalid/v1
+
+models:
+  - model_id: curated-chat
+    name: Curated Chat
+    type: chat
+    config:
+      compatibilities: [tool-call]
+      context_window: 128000
+  - model_id: curated-embed
+    name: Curated Embed
+    type: embedding
+    config:
+      dimensions: 1536
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models path, got %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "curated-chat", "object": "model"},
+				{"id": "curated-embed", "object": "model"},
+				{"id": "endpoint-only", "object": "model"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil, "", dir)
+	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"base_url":"` + server.URL + `/v1","api_key":"sk-test"}`),
+		Metadata:   []byte(`{"preset":{"source":"newapi.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	if len(remoteModels) != 3 {
+		t.Fatalf("expected the endpoint's 3 models (template must not short-circuit), got %d", len(remoteModels))
+	}
+
+	var curated, embed, endpointOnly *RemoteModel
+	for i := range remoteModels {
+		switch remoteModels[i].ID {
+		case "curated-chat":
+			curated = &remoteModels[i]
+		case "curated-embed":
+			embed = &remoteModels[i]
+		case "endpoint-only":
+			endpointOnly = &remoteModels[i]
+		}
+	}
+	if curated == nil || embed == nil || endpointOnly == nil {
+		t.Fatalf("missing expected models: %#v", remoteModels)
+	}
+	if curated.Name != "Curated Chat" {
+		t.Fatalf("expected curated template name, got %q", curated.Name)
+	}
+	if !curated.CapabilitiesKnown {
+		t.Fatal("expected CapabilitiesKnown for a template-matched model")
+	}
+	if curated.ContextWindow == nil || *curated.ContextWindow != 128000 {
+		t.Fatalf("expected template context window, got %#v", curated.ContextWindow)
+	}
+	if got := strings.Join(curated.Compatibilities, ","); got != "tool-call" {
+		t.Fatalf("compatibilities = %q", got)
+	}
+	// The OpenAI wire has no per-model type (the SDK defaults everything to
+	// chat): the template's curated embedding type and dimensions must win,
+	// and the server must never see a dimensions probe.
+	if embed.Type != string(models.ModelTypeEmbedding) {
+		t.Fatalf("expected template embedding type, got %q", embed.Type)
+	}
+	if embed.Dimensions == nil || *embed.Dimensions != 1536 {
+		t.Fatalf("expected template dimensions 1536, got %#v", embed.Dimensions)
+	}
+	if endpointOnly.CapabilitiesKnown {
+		t.Fatal("endpoint-only model must stay CapabilitiesKnown=false")
+	}
+	if endpointOnly.Name != "endpoint-only" {
+		t.Fatalf("expected ID fallback name, got %q", endpointOnly.Name)
+	}
+}
+
+// A template that curates an embedding model's dimensions spares the live
+// dimensions probe entirely: probing spends tokens and fails spuriously on
+// gateways whose key lacks embedding permission.
+func TestFetchRemoteModelsViaSDKTemplateDimensionsSkipProbe(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gemini-gw.yaml"), []byte(`
+name: Gemini Gateway
+client_type: google-generative-ai
+
+models:
+  - model_id: gemini-embedding-001
+    name: Gemini Embedding 001
+    type: embedding
+    config:
+      dimensions: 768
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Fatalf("unexpected request (probe should have been skipped): %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{
+					"name":                       "models/gemini-embedding-001",
+					"displayName":                "Gemini Embedding 001",
+					"supportedGenerationMethods": []string{"embedContent"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil, "", dir)
+	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeGoogleGenerativeAI),
+		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"gm-test"}`),
+		Metadata:   []byte(`{"preset":{"source":"gemini-gw.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	if len(remoteModels) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(remoteModels))
+	}
+	got := remoteModels[0]
+	if got.Dimensions == nil || *got.Dimensions != 768 {
+		t.Fatalf("expected template dimensions 768, got %#v", got.Dimensions)
+	}
+	if got.Type != string(models.ModelTypeEmbedding) {
+		t.Fatalf("expected embedding type, got %q", got.Type)
+	}
+	if !got.CapabilitiesKnown {
+		t.Fatal("expected CapabilitiesKnown for a template-matched model")
+	}
+}
+
 // providerTestQueries stubs dbstore.Queries with the single row Test needs;
 // every other method nil-panics, which keeps this test honest about how
 // little the probe path is allowed to touch the database.

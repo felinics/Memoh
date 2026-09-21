@@ -199,7 +199,7 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 	}
 	threshold := hardCompactionThreshold(budget)
 	if mode == syncCompactionModeShadow {
-		s.logger.Info("sync_compaction_backstop",
+		s.logger.InfoContext(ctx, "sync_compaction_backstop",
 			slog.String("path", "discuss"),
 			slog.String("mode", "shadow"),
 			slog.Bool("would_fire", true),
@@ -216,7 +216,7 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 		ThreadID: cmd.ThreadID,
 		RunID:    runID,
 	}, compactable, budget, resolved.ModelID)
-	s.logger.Info("sync_compaction_backstop",
+	s.logger.InfoContext(ctx, "sync_compaction_backstop",
 		slog.String("path", "discuss"),
 		slog.String("mode", "active"),
 		slog.String("status", res.Status),
@@ -237,7 +237,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	}
 	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, budgetTokens)
 	if admission.ProtectedOverflow {
-		s.logger.Error("context_admission_rejected",
+		s.logger.ErrorContext(ctx, "context_admission_rejected",
 			slog.String("path", "discuss_turn"),
 			slog.String("bot_id", cmd.BotID),
 			slog.String("session_id", cmd.ThreadID),
@@ -253,7 +253,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		return
 	}
 	if admission.DroppedMessages > 0 {
-		s.logger.Info("context_admission",
+		s.logger.InfoContext(ctx, "context_admission",
 			slog.String("path", "discuss_turn"),
 			slog.String("bot_id", cmd.BotID),
 			slog.String("session_id", cmd.ThreadID),
@@ -526,7 +526,7 @@ func (s *Service) collectDiscussSourceFrags(
 	)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("collect typed discuss context failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "collect typed discuss context failed", slog.Any("error", err))
 		}
 		return nil
 	}
@@ -590,7 +590,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 	// the absolute cap before any concatenation (CM-ADM-001).
 	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, s.contextAbsoluteMaxTokens())
 	if admission.ProtectedOverflow {
-		s.logger.Error("context_admission_rejected",
+		s.logger.ErrorContext(ctx, "context_admission_rejected",
 			slog.String("path", "discuss_agent"),
 			slog.String("bot_id", cmd.BotID),
 			slog.String("session_id", cmd.ThreadID),
@@ -611,7 +611,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 		return
 	}
 	if admission.DroppedMessages > 0 {
-		s.logger.Info("context_admission",
+		s.logger.InfoContext(ctx, "context_admission",
 			slog.String("path", "discuss_agent"),
 			slog.String("bot_id", cmd.BotID),
 			slog.String("session_id", cmd.ThreadID),

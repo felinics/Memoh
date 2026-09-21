@@ -94,6 +94,7 @@ func (h *ACPRuntimeHandler) Register(e *echo.Echo) {
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
 // @Failure 429 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acp-runtimes [post].
@@ -526,7 +527,10 @@ func runtimePoolError(err error) error {
 	if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
 		return acpRuntimeHTTPError(feedbackErr)
 	}
+	var commandNotFound *acpclient.CommandNotFoundError
 	switch {
+	case errors.As(err, &commandNotFound):
+		return apperror.Wrap(apperror.CodeACPCommandNotFound, err, map[string]string{"command": commandNotFound.Command})
 	case errors.Is(err, acpagent.ErrRuntimeNotFound):
 		return apperror.New(apperror.CodeACPRuntimeNotFound, nil)
 	case errors.Is(err, acpagent.ErrRuntimeConfigUpdateFailed):

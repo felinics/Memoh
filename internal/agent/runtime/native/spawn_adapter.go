@@ -164,6 +164,7 @@ func runConfigFromSpawnRunConfig(cfg tools.SpawnRunConfig) RunConfig {
 		CurrentModelUUID:               cfg.ModelUUID,
 		CurrentModelID:                 cfg.ModelID,
 		CurrentModelProvider:           cfg.ModelProvider,
+		CurrentModelProviderID:         cfg.ModelProviderID,
 		System:                         cfg.System,
 		Query:                          cfg.Query,
 		ContextQueryMaterialized:       cfg.Query != "",

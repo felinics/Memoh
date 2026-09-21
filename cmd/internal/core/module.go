@@ -57,6 +57,7 @@ func FoundationModule() fx.Option {
 			provideSessionService,
 			provideMessageService,
 		),
+		fx.Invoke(setupTelemetry),
 	)
 }
 
@@ -84,6 +85,7 @@ func ServerModule() fx.Option {
 			provideUserRuntimePipe,
 			provideWikiStore,
 			provideWorkspaceManager,
+			provideBotWorkspaceService,
 			workdir.NewService,
 			provideBridgeProvider,
 			provideMemoryLLM,
@@ -142,13 +144,14 @@ func ServerModule() fx.Option {
 			injectBackgroundTaskEvents,
 			injectACPToolProviders,
 			injectBotConnectorLifecycle,
-			injectBotContainerLifecycle,
+			injectBotWorkspaceIntents,
 			configureMemoryProviderRegistry,
 			injectScheduleBotAgents,
 			injectScheduleEvents,
 			startProviderTemplateSync,
 			startScheduleService,
 			startContainerReconciliation,
+			startBotWorkspaceReconciler,
 			startWorkspaceDependencyMaintenance,
 			startBackgroundTaskCleanup,
 			startAudioTempStoreCleanup,

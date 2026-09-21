@@ -313,7 +313,7 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 		return result, s.failInstallation(ctx, inst, errors.Join(fail("record release", err), rollbackErr))
 	}
 	if err := tx.Commit(ctx); err != nil {
-		s.logger.Warn("cleanup replaced App Skills failed", slog.String("app_id", release.AppID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "cleanup replaced App Skills failed", slog.String("app_id", release.AppID), slog.Any("error", err))
 	}
 	record(StepResult{Kind: KindSkills, ID: release.AppID, Status: StepInstalled, Version: strconv.Itoa(len(installed))})
 
@@ -360,10 +360,10 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 // failInstallation records a failed operation. last_error keeps only the
 // public description; the cause with its infrastructure detail is logged.
 func (s *Service) failInstallation(ctx context.Context, inst Installation, cause error) error {
-	s.logger.Warn("App operation failed",
+	s.logger.WarnContext(ctx, "App operation failed",
 		slog.String("installation_id", inst.ID), slog.String("app_id", inst.AppID), slog.Any("error", cause))
 	if _, err := s.store.SetStatus(ctx, inst.BotID, inst.ID, StatusFailed, truncateMessage(publicMessage(cause))); err != nil {
-		s.logger.Warn("record failed App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "record failed App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
 	}
 	return cause
 }
@@ -409,7 +409,7 @@ func (s *Service) activeConnections(ctx context.Context, botID string) map[strin
 	}
 	items, err := s.connectors.List(ctx, botID)
 	if err != nil {
-		s.logger.Warn("list bot connectors", slog.String("bot_id", botID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "list bot connectors", slog.String("bot_id", botID), slog.Any("error", err))
 		return result
 	}
 	for _, item := range items {
@@ -499,7 +499,7 @@ func (s *Service) reconcileStatus(ctx context.Context, inst Installation) {
 		}
 	}
 	if _, err := s.store.SetStatus(ctx, inst.BotID, inst.ID, StatusInstalled, ""); err != nil {
-		s.logger.Warn("promote App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "promote App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
 	}
 }
 

@@ -424,7 +424,7 @@ func (s *feishuOutboundStream) renderToolCallCard(
 				return nil
 			}
 			if s.adapter != nil && s.adapter.logger != nil {
-				s.adapter.logger.Warn("feishu: tool-call end patch failed, falling back to new card",
+				s.adapter.logger.WarnContext(ctx, "feishu: tool-call end patch failed, falling back to new card",
 					slog.String("call_id", callID),
 					slog.Any("error", patchErr),
 				)

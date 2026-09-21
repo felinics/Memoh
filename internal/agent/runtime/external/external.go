@@ -149,7 +149,7 @@ type RoundRollbackHandler interface {
 // identifies the fork — only the driver-owned session keys — which the
 // caller overlays on the source session's runtime metadata.
 type ThreadForker interface {
-	ForkThread(ctx context.Context, botID, botAgentID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error)
+	ForkThread(ctx context.Context, botID, botAgentID, sourceThreadID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error)
 }
 
 // ModelCatalog is the runtime-owned model picker contract.

@@ -68,7 +68,7 @@ func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityV
 	messageXML, err := decodeInboundXML(verifier, mode, r, raw)
 	if err != nil {
 		if a.logger != nil {
-			a.logger.Warn("decode wechatoa inbound failed", slog.Any("error", err))
+			a.logger.WarnContext(ctx, "decode wechatoa inbound failed", slog.Any("error", err))
 		}
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte("forbidden"))
@@ -84,7 +84,7 @@ func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityV
 		if ok {
 			msg.BotID = cfg.BotID
 			if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-				a.logger.Warn("handle inbound failed", slog.Any("error", err))
+				a.logger.WarnContext(ctx, "handle inbound failed", slog.Any("error", err))
 			}
 		}
 	}

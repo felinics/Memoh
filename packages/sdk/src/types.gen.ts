@@ -1882,6 +1882,7 @@ export type HandlersChannelMeta = {
     config_schema?: ChannelConfigSchema;
     configless?: boolean;
     display_name?: string;
+    owner_only?: boolean;
     target_spec?: ChannelTargetSpec;
     type?: string;
     user_config_schema?: ChannelConfigSchema;
@@ -2055,8 +2056,13 @@ export type HandlersContextUsage = {
 export type HandlersCreateContainerRequest = {
     gpu?: HandlersContainerGpuRequest;
     image?: string;
+    /**
+     * RestoreData imports the preserved /data archive into the new workspace
+     * once it is running. Backends that expose snapshot mounts restore the
+     * archive while starting regardless of this flag; the flag matters for
+     * backends that restore through the bridge.
+     */
     restore_data?: boolean;
-    snapshotter?: string;
 };
 
 export type HandlersCreateContainerResponse = {
@@ -3919,7 +3925,6 @@ export type SettingsSettings = {
     display_enabled?: boolean;
     fetch_provider_id?: string;
     image_model_id?: string;
-    language?: string;
     memory_provider_id?: string;
     overlay_config?: {
         [key: string]: unknown;
@@ -3988,11 +3993,6 @@ export type SettingsUpsertRequest = {
     display_enabled?: boolean;
     fetch_provider_id?: string;
     image_model_id?: string;
-    /**
-     * Language follows the same pointer rule; "" normalizes to DefaultLanguage
-     * ("auto") rather than clearing the column.
-     */
-    language?: string;
     memory_provider_id?: string;
     overlay_config?: {
         [key: string]: unknown;
@@ -5222,6 +5222,10 @@ export type PostBotsByBotIdAcpRuntimesErrors = {
      * Not Found
      */
     404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
     /**
      * Too Many Requests
      */

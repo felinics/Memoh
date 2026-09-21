@@ -100,7 +100,7 @@ func mustJSON(value map[string]any) []byte {
 func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) != 20 {
+			if len(dest) != 19 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -111,18 +111,17 @@ func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) 
 			*dest[5].(*pgtype.Text) = pgtype.Text{}
 			*dest[6].(*bool) = true
 			*dest[7].(*string) = BotStatusReady
-			*dest[8].(*string) = "en"
-			*dest[9].(*string) = "medium"
+			*dest[8].(*string) = "medium"
+			*dest[9].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[13].(*bool) = false
-			*dest[14].(*int32) = 100000
-			*dest[15].(*pgtype.Int4) = pgtype.Int4{}
-			*dest[16].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[17].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[12].(*bool) = false
+			*dest[13].(*int32) = 100000
+			*dest[14].(*pgtype.Int4) = pgtype.Int4{}
+			*dest[15].(*pgtype.UUID) = pgtype.UUID{}
+			*dest[16].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}
@@ -131,7 +130,7 @@ func makeGetBotRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) 
 func makeUpdateBotProfileRowWithMetadata(botID, ownerUserID pgtype.UUID, metadata []byte) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) != 16 {
+			if len(dest) != 15 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -142,14 +141,13 @@ func makeUpdateBotProfileRowWithMetadata(botID, ownerUserID pgtype.UUID, metadat
 			*dest[5].(*pgtype.Text) = pgtype.Text{}
 			*dest[6].(*bool) = true
 			*dest[7].(*string) = BotStatusCreating
-			*dest[8].(*string) = "en"
-			*dest[9].(*string) = "medium"
+			*dest[8].(*string) = "medium"
+			*dest[9].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 			*dest[11].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-			*dest[13].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[12].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[15].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}

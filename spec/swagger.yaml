@@ -3382,6 +3382,8 @@ definitions:
         type: boolean
       display_name:
         type: string
+      owner_only:
+        type: boolean
       target_spec:
         $ref: '#/definitions/channel.TargetSpec'
       type:
@@ -3644,9 +3646,12 @@ definitions:
       image:
         type: string
       restore_data:
+        description: |-
+          RestoreData imports the preserved /data archive into the new workspace
+          once it is running. Backends that expose snapshot mounts restore the
+          archive while starting regardless of this flag; the flag matters for
+          backends that restore through the bridge.
         type: boolean
-      snapshotter:
-        type: string
     type: object
   handlers.CreateContainerResponse:
     properties:
@@ -6718,8 +6723,6 @@ definitions:
         type: string
       image_model_id:
         type: string
-      language:
-        type: string
       memory_provider_id:
         type: string
       overlay_config:
@@ -6841,11 +6844,6 @@ definitions:
       fetch_provider_id:
         type: string
       image_model_id:
-        type: string
-      language:
-        description: |-
-          Language follows the same pointer rule; "" normalizes to DefaultLanguage
-          ("auto") rather than clearing the column.
         type: string
       memory_provider_id:
         type: string
@@ -7957,6 +7955,10 @@ paths:
             $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
           schema:
             $ref: '#/definitions/apperror.Problem'
         "429":
@@ -9629,6 +9631,7 @@ paths:
       tags:
       - containerd
     post:
+      description: Records the intent for a running workspace and streams the
       parameters:
       - description: Bot ID
         in: path
@@ -9654,7 +9657,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create and start workspace for bot
+      summary: Create workspace for bot
       tags:
       - containerd
   /bots/{bot_id}/container/browser/sessions:
@@ -13849,8 +13852,8 @@ paths:
       description: |-
         Lightweight SSE for sidebar live-sort. Carries only session
         identifiers and minimal metadata (touched timestamps, titles).
-        Never includes message bodies. Filters out internal session
-        types such as schedule and subagent.
+        Never includes message bodies. Filters out sessions with
+        internal visibility, such as managed subagent work.
       parameters:
       - description: Bot ID
         in: path

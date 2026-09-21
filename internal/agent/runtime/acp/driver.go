@@ -148,7 +148,10 @@ func DriverPromptResult(result client.PromptResult, agentID string) external.Pro
 // shapes: user-facing feedback for input-class failures, apperror codes for
 // configuration-class failures, and the raw error otherwise.
 func normalizePromptError(err error) error {
+	var commandNotFound *client.CommandNotFoundError
 	switch {
+	case errors.As(err, &commandNotFound):
+		return apperror.Wrap(apperror.CodeACPCommandNotFound, err, map[string]string{"command": commandNotFound.Command})
 	case errors.Is(err, ErrAgentCommandUnavailable):
 		// The runtime that admission matched was replaced (or updated its
 		// command set) before the prompt; the turn fails closed exactly like

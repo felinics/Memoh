@@ -79,7 +79,7 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}
-		h.logger.Error("bot Agent model catalog failed", slog.String("runtime", agent.Runtime), slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "bot Agent model catalog failed", slog.String("runtime", agent.Runtime), slog.Any("error", err))
 		return apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": agent.Runtime})
 	}
 	return c.JSON(http.StatusOK, catalog)

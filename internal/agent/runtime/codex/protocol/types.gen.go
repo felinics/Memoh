@@ -1502,6 +1502,10 @@ const (
 	ThreadActiveFlagWaitingOnUserInput ThreadActiveFlag = "waitingOnUserInput"
 )
 
+type ThreadClosedNotification struct {
+	ThreadID string `json:"threadId"`
+}
+
 type ThreadCompactStartParams struct {
 	ThreadID string `json:"threadId"`
 }
@@ -1869,6 +1873,22 @@ type ThreadTokenUsageUpdatedNotification struct {
 	TokenUsage ThreadTokenUsage `json:"tokenUsage"`
 	TurnID     string           `json:"turnId"`
 }
+
+type ThreadUnsubscribeParams struct {
+	ThreadID string `json:"threadId"`
+}
+
+type ThreadUnsubscribeResponse struct {
+	Status ThreadUnsubscribeStatus `json:"status"`
+}
+
+type ThreadUnsubscribeStatus string
+
+const (
+	ThreadUnsubscribeStatusNotLoaded     ThreadUnsubscribeStatus = "notLoaded"
+	ThreadUnsubscribeStatusNotSubscribed ThreadUnsubscribeStatus = "notSubscribed"
+	ThreadUnsubscribeStatusUnsubscribed  ThreadUnsubscribeStatus = "unsubscribed"
+)
 
 type TokenUsageBreakdown struct {
 	CacheWriteInputTokens *int64 `json:"cacheWriteInputTokens,omitempty"`

@@ -44,7 +44,7 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, ru
 		TimezoneLocation: req.TimezoneLocation,
 	})
 	if err != nil {
-		logger.Warn("memory formation: extract failed", slog.String("bot_id", botID), slog.Any("error", err))
+		logger.WarnContext(ctx, "memory formation: extract failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return result
 	}
 	facts, factSourceMessageIDs := normalizeExtractedFacts(extracted)
@@ -61,7 +61,7 @@ func runFormation(ctx context.Context, logger *slog.Logger, llm adapters.LLM, ru
 		Candidates: candidates,
 	})
 	if err != nil {
-		logger.Warn("memory formation: decide failed", slog.String("bot_id", botID), slog.Any("error", err))
+		logger.WarnContext(ctx, "memory formation: decide failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return result
 	}
 
@@ -99,7 +99,7 @@ func gatherCandidates(ctx context.Context, logger *slog.Logger, runtime Runtime,
 			NoStats: true,
 		})
 		if err != nil {
-			logger.Debug("memory formation: search candidates failed", slog.String("bot_id", botID), slog.Any("error", err))
+			logger.DebugContext(ctx, "memory formation: search candidates failed", slog.String("bot_id", botID), slog.Any("error", err))
 			continue
 		}
 		for _, item := range resp.Results {
@@ -168,7 +168,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 		case actionADD:
 			text := strings.TrimSpace(action.Text)
 			if text == "" {
-				logger.Debug("memory formation: ADD skipped (empty text)", slog.String("bot_id", botID))
+				logger.DebugContext(ctx, "memory formation: ADD skipped (empty text)", slog.String("bot_id", botID))
 				result.Skipped++
 				continue
 			}
@@ -179,7 +179,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 				Filters:          filters,
 				SourceMessageIDs: sourceMessageIDs,
 			}); err != nil {
-				logger.Warn("memory formation: ADD failed", slog.String("bot_id", botID), slog.Any("error", err))
+				logger.WarnContext(ctx, "memory formation: ADD failed", slog.String("bot_id", botID), slog.Any("error", err))
 			} else {
 				result.Added++
 			}
@@ -188,7 +188,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 			id := strings.TrimSpace(action.ID)
 			text := strings.TrimSpace(action.Text)
 			if id == "" || text == "" {
-				logger.Debug("memory formation: UPDATE skipped (missing id or text)", slog.String("bot_id", botID))
+				logger.DebugContext(ctx, "memory formation: UPDATE skipped (missing id or text)", slog.String("bot_id", botID))
 				result.Skipped++
 				continue
 			}
@@ -201,7 +201,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 				Memory:           text,
 				SourceMessageIDs: sourceMessageIDs,
 			}); err != nil {
-				logger.Warn("memory formation: UPDATE failed", slog.String("bot_id", botID), slog.String("memory_id", id), slog.Any("error", err))
+				logger.WarnContext(ctx, "memory formation: UPDATE failed", slog.String("bot_id", botID), slog.String("memory_id", id), slog.Any("error", err))
 			} else {
 				updated[id] = struct{}{}
 				result.Updated++
@@ -210,7 +210,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 		case actionDELETE:
 			id := strings.TrimSpace(action.ID)
 			if id == "" {
-				logger.Debug("memory formation: DELETE skipped (missing id)", slog.String("bot_id", botID))
+				logger.DebugContext(ctx, "memory formation: DELETE skipped (missing id)", slog.String("bot_id", botID))
 				result.Skipped++
 				continue
 			}
@@ -219,7 +219,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 				continue
 			}
 			if _, err := runtime.Delete(ctx, id); err != nil {
-				logger.Warn("memory formation: DELETE failed", slog.String("bot_id", botID), slog.String("memory_id", id), slog.Any("error", err))
+				logger.WarnContext(ctx, "memory formation: DELETE failed", slog.String("bot_id", botID), slog.String("memory_id", id), slog.Any("error", err))
 			} else {
 				deleted[id] = struct{}{}
 				result.Deleted++
@@ -229,7 +229,7 @@ func applyActions(ctx context.Context, logger *slog.Logger, runtime Runtime, bot
 			result.Skipped++
 
 		default:
-			logger.Debug("memory formation: unknown action event", slog.String("bot_id", botID), slog.String("event", event))
+			logger.DebugContext(ctx, "memory formation: unknown action event", slog.String("bot_id", botID), slog.String("event", event))
 			result.Skipped++
 		}
 	}

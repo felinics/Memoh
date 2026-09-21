@@ -118,6 +118,8 @@ func TestResolveModelResolvesReasoningForTheSubagentModel(t *testing.T) {
 // not advertise, or an adaptive flag for a legacy model.
 func TestSubagentMayRunADifferentModelThanParent(t *testing.T) {
 	queries, modelAUUID, modelBUUID := newSubagentModelCatalog(t)
+	queries.models[0].ProviderID = queries.models[1].ProviderID
+	queries.models[0].ModelID = "other-model"
 	agent := &fakeSpawnAgent{}
 	provider, _, _, _ := newAgentControlProvider(t, agent)
 	provider.models = models.NewService(slog.Default(), queries)
@@ -134,20 +136,20 @@ func TestSubagentMayRunADifferentModelThanParent(t *testing.T) {
 		CurrentModelProvider: "provider-b",
 	}
 
-	// The caller pins the subagent to provider-a instead.
+	// The caller selects another model within the same provider.
 	mustExecuteAgentTool(t, provider, session, ToolSpawnAgent().String(), map[string]any{
 		"id":       "worker",
 		"task":     "inspect",
-		"model_id": "worker-model",
-		"provider": "provider-a",
+		"model_id": "other-model",
+		"provider": "provider-b",
 	})
 
 	call, ok := agent.callAt(0)
 	if !ok {
 		t.Fatal("expected the subagent run to reach the spawn agent")
 	}
-	if call.ModelUUID != modelAUUID || call.ModelProvider != "provider-a" {
-		t.Fatalf("expected the subagent to run provider-a's model, got uuid=%q provider=%q",
+	if call.ModelUUID != modelAUUID || call.ModelProvider != "provider-b" {
+		t.Fatalf("expected the subagent to run the other model on provider-b, got uuid=%q provider=%q",
 			call.ModelUUID, call.ModelProvider)
 	}
 	if session.CurrentModelUUID == call.ModelUUID {

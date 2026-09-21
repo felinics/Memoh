@@ -210,7 +210,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			}
 		}
 		if eventErr := agentStreamEventError(event); eventErr != nil {
-			s.logger.Error("triggered run stream error",
+			s.logger.ErrorContext(ctx, "triggered run stream error",
 				slog.String("bot_id", req.BotID),
 				slog.String("session_id", req.ThreadID),
 				slog.Any("error", eventErr),
@@ -271,7 +271,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 						if streamErr == nil {
 							streamErr = terminalPersistErr
 						}
-						s.logger.Error("triggered run step finalization failed", slog.Any("error", storeErr))
+						s.logger.ErrorContext(ctx, "triggered run step finalization failed", slog.Any("error", storeErr))
 					} else {
 						stored = true
 					}
@@ -281,7 +281,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 						if streamErr == nil {
 							streamErr = terminalPersistErr
 						}
-						s.logger.Error("triggered run terminal persist failed", slog.Any("error", storeErr))
+						s.logger.ErrorContext(ctx, "triggered run terminal persist failed", slog.Any("error", storeErr))
 					} else {
 						stored = true
 					}
@@ -332,7 +332,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			if streamErr == nil {
 				streamErr = storeErr
 			}
-			s.logger.Error("triggered run step finalization failed", slog.Any("error", storeErr))
+			s.logger.ErrorContext(ctx, "triggered run step finalization failed", slog.Any("error", storeErr))
 		}
 	}
 
@@ -350,7 +350,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 	case streamErr != nil && !hasSnapshot:
 		if idle != nil && idle.DidFire() {
 			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(true, streamErr)); storeErr != nil {
-				s.logger.Error("triggered run timeout persist failed", slog.Any("error", storeErr))
+				s.logger.ErrorContext(ctx, "triggered run timeout persist failed", slog.Any("error", storeErr))
 			}
 		}
 		return schedule.TriggerResult{}, streamErr

@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/db"
 	pgvectorsqlc "github.com/felinics/memoh/internal/db/pgvector/sqlc"
+	"github.com/felinics/memoh/internal/telemetry"
 )
 
 // Store is the shared typed connection to the optional pgvector database.
@@ -31,6 +32,7 @@ func Open(ctx context.Context, logger *slog.Logger, cfg config.PGVectorConfig) (
 		return nil, fmt.Errorf("pgvector: parse dsn: %w", err)
 	}
 	poolCfg.AfterConnect = pgxvec.RegisterTypes
+	poolCfg.ConnConfig.Tracer = telemetry.PgxTracer{}
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("pgvector: connect: %w", err)

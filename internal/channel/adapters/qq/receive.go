@@ -137,7 +137,10 @@ func (a *QQAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, hand
 }
 
 func (a *QQAdapter) runReceiver(ctx context.Context, cfg channel.ChannelConfig, parsed Config, handler channel.InboundHandler) {
-	backoffs := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
+	// Cap at 5 minutes: gateway/token endpoints rate-limit aggressively
+	// (400 接口调用超过频率限制), and persistent failures like an IP
+	// whitelist 401 are resolved out-of-band, so fast retries only burn quota.
+	backoffs := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second, time.Minute, 5 * time.Minute}
 	attempt := 0
 	for ctx.Err() == nil {
 		healthySession, err := a.serveConnection(ctx, cfg, parsed, handler)
@@ -145,7 +148,7 @@ func (a *QQAdapter) runReceiver(ctx context.Context, cfg channel.ChannelConfig, 
 			return
 		}
 		if a.logger != nil {
-			a.logger.Warn("qq receiver reconnect", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.WarnContext(ctx, "qq receiver reconnect", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		delay, nextAttempt := nextReconnectDelay(backoffs, attempt, healthySession)
 		attempt = nextAttempt
@@ -339,7 +342,7 @@ func (a *QQAdapter) dispatchInbound(ctx context.Context, cfg channel.ChannelConf
 	}
 	go func() {
 		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.Error("qq handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.ErrorContext(ctx, "qq handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 	}()
 }

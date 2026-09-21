@@ -59,7 +59,7 @@ type QRStartResponse struct {
 func (h *QRHandler) Start(c echo.Context) error {
 	qr, err := h.client.FetchQRCode(c.Request().Context(), defaultBaseURL)
 	if err != nil {
-		h.logger.Error("weixin qr start failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "weixin qr start failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch QR code: "+err.Error())
 	}
 
@@ -108,7 +108,7 @@ func (h *QRHandler) Poll(c echo.Context) error {
 
 	status, err := h.client.PollQRStatus(c.Request().Context(), defaultBaseURL, qrCode)
 	if err != nil {
-		h.logger.Error("weixin qr poll failed", slog.Any("error", err))
+		h.logger.ErrorContext(c.Request().Context(), "weixin qr poll failed", slog.Any("error", err))
 		return echo.NewHTTPError(http.StatusInternalServerError, "Poll failed: "+err.Error())
 	}
 
@@ -139,13 +139,13 @@ func (h *QRHandler) Poll(c echo.Context) error {
 				},
 			)
 			if saveErr != nil {
-				h.logger.Error("weixin qr save credentials failed",
+				h.logger.ErrorContext(c.Request().Context(), "weixin qr save credentials failed",
 					slog.String("bot_id", botID),
 					slog.Any("error", saveErr),
 				)
 				return echo.NewHTTPError(http.StatusInternalServerError, "Login succeeded but failed to save credentials: "+saveErr.Error())
 			}
-			h.logger.Info("weixin qr login saved",
+			h.logger.InfoContext(c.Request().Context(), "weixin qr login saved",
 				slog.String("bot_id", botID),
 				slog.String("account_id", status.ILinkBotID),
 			)

@@ -50,6 +50,7 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/botbackup"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/route"
 	"github.com/felinics/memoh/internal/chat/event"
@@ -95,6 +96,7 @@ import (
 	"github.com/felinics/memoh/internal/storage/providers/fallback"
 	"github.com/felinics/memoh/internal/storage/providers/localfs"
 	"github.com/felinics/memoh/internal/team"
+	"github.com/felinics/memoh/internal/telemetry"
 	"github.com/felinics/memoh/internal/userruntime"
 	videopkg "github.com/felinics/memoh/internal/video"
 	"github.com/felinics/memoh/internal/workdir"
@@ -105,8 +107,35 @@ import (
 )
 
 func provideLogger(cfg config.Config) *slog.Logger {
-	logger.Init(cfg.Log.Level, cfg.Log.Format)
-	return logger.L
+	log := logger.New(os.Stdout, cfg.Log.Level, cfg.Log.Format)
+	// Point slog's package-level logger and the standard log package at the
+	// same handler, so output from dependencies lands in the same stream.
+	// Application code takes the returned logger; it does not reach for this.
+	logger.SetDefault(log)
+	return log
+}
+
+// setupTelemetry installs context propagation and, when a collector is
+// configured, trace export. It is an fx.Invoke rather than a provider because
+// nothing depends on its result: it configures OpenTelemetry's globals, which
+// is how the instrumentation in libraries and in internal/telemetry finds it.
+//
+// Failing to reach a collector at startup must not stop the process. The
+// exporter retries in the background, and a deployment whose collector is
+// down should keep serving requests without telemetry rather than refuse to
+// boot.
+func setupTelemetry(lc fx.Lifecycle, cfg config.Config, svc telemetry.Service, log *slog.Logger) {
+	svc.InstanceID = cfg.InstanceID
+	shutdown, err := telemetry.Setup(context.Background(), cfg.Telemetry, svc, log)
+	if err != nil {
+		log.Error("tracing setup failed; continuing without it", slog.Any("error", err))
+		return
+	}
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return shutdown(ctx)
+		},
+	})
 }
 
 func provideContainerService(lc fx.Lifecycle, log *slog.Logger, cfg config.Config, rc *boot.RuntimeConfig) (ctr.Service, error) {
@@ -551,8 +580,74 @@ func injectBotConnectorLifecycle(botService *bots.Service, connectorService *con
 	botService.SetConnectorLifecycle(connectorService)
 }
 
-func injectBotContainerLifecycle(botService *bots.Service, manager *workspace.Manager) {
-	botService.SetContainerLifecycle(manager)
+// provideBotWorkspaceService builds the workspace reconciler over the bot
+// workspace table and the native workspace manager as its backend.
+func provideBotWorkspaceService(log *slog.Logger, queries dbstore.Queries, manager *workspace.Manager) *botworkspace.Service {
+	return botworkspace.New(botworkspace.NewRepository(queries), manager, log, botworkspace.Options{})
+}
+
+// injectBotWorkspaceIntents connects the bots service and the reconciler in
+// both directions: bots records intents, the reconciler derives bots.status.
+func injectBotWorkspaceIntents(botService *bots.Service, workspaces *botworkspace.Service, containerdHandler *handlers.ContainerdHandler) {
+	botService.SetWorkspaceIntents(botWorkspaceIntents{svc: workspaces})
+	workspaces.SetBotStatusWriter(botService)
+	containerdHandler.SetWorkspaceIntents(workspaces)
+}
+
+// botWorkspaceIntents adapts the reconciler to the bots.WorkspaceIntents port
+// without either package importing the other.
+type botWorkspaceIntents struct {
+	svc *botworkspace.Service
+}
+
+func (a botWorkspaceIntents) EnsurePresent(ctx context.Context, botID, image string) (int64, error) {
+	w, err := a.svc.EnsurePresent(ctx, botID, image)
+	if err != nil {
+		return 0, err
+	}
+	return w.DesiredGeneration, nil
+}
+
+func (a botWorkspaceIntents) RequestAbsent(ctx context.Context, botID string, preserve bool) (int64, error) {
+	w, err := a.svc.RequestAbsent(ctx, botID, preserve)
+	if err != nil {
+		return 0, err
+	}
+	return w.DesiredGeneration, nil
+}
+
+func (a botWorkspaceIntents) AwaitSettled(ctx context.Context, botID string, generation int64) (bots.WorkspaceOutcome, error) {
+	w, err := a.svc.Await(ctx, botID, generation)
+	return toWorkspaceOutcome(w), err
+}
+
+func (a botWorkspaceIntents) Current(ctx context.Context, botID string) (bots.WorkspaceOutcome, bool, error) {
+	w, err := a.svc.Get(ctx, botID)
+	if err != nil {
+		if errors.Is(err, botworkspace.ErrNotFound) {
+			return bots.WorkspaceOutcome{}, false, nil
+		}
+		return bots.WorkspaceOutcome{}, false, err
+	}
+	return toWorkspaceOutcome(w), true, nil
+}
+
+func toWorkspaceOutcome(w botworkspace.Workspace) bots.WorkspaceOutcome {
+	return bots.WorkspaceOutcome{
+		Desired:        w.Desired,
+		Observed:       w.Observed,
+		LastError:      w.LastError,
+		LastErrorPhase: w.LastErrorPhase,
+		EverReady:      w.EverReady,
+	}
+}
+
+// startBotWorkspaceReconciler runs the reconciler for the Server's lifetime.
+func startBotWorkspaceReconciler(lc fx.Lifecycle, workspaces *botworkspace.Service) {
+	lc.Append(fx.Hook{
+		OnStart: workspaces.Start,
+		OnStop:  workspaces.Stop,
+	})
 }
 
 func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.Runner {
@@ -581,13 +676,14 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
+func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
 	driver := codexruntime.NewDriver(
 		workspaceManager,
 		botAgents,
 		credentials,
 		toolApproval,
 		userInput,
+		agentsessionadapter.NewStateStore(queries),
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
 		log,
 	)
@@ -1188,7 +1284,7 @@ func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 		return errors.New("admin username/password required in config.toml")
 	}
 	if password == "change-your-password-here" {
-		log.Warn("admin password uses default placeholder; please update config.toml")
+		log.WarnContext(ctx, "admin password uses default placeholder; please update config.toml")
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -1217,7 +1313,7 @@ func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 	if err != nil {
 		return err
 	}
-	log.Info("Admin user created", slog.String("username", username))
+	log.InfoContext(ctx, "Admin user created", slog.String("username", username))
 	return nil
 }
 

@@ -301,24 +301,25 @@ type MessageSnapshotEntry struct {
 
 // SessionContext carries request-scoped identity for tool execution.
 type SessionContext struct {
-	BotID                string
-	ChatID               string
-	SessionID            string
-	SessionType          string
-	UserID               string
-	ChannelIdentityID    string
-	SessionToken         string //nolint:gosec // carries session credential material at runtime
-	CurrentPlatform      string
-	ReplyTarget          string
-	ConversationType     string
-	CanRequestUserInput  bool
-	CanListUserInput     bool
-	SupportsImageInput   bool
-	SupportsFileInput    bool
-	IsSubagent           bool
-	CurrentModelUUID     string
-	CurrentModelID       string
-	CurrentModelProvider string
+	BotID                  string
+	ChatID                 string
+	SessionID              string
+	SessionType            string
+	UserID                 string
+	ChannelIdentityID      string
+	SessionToken           string //nolint:gosec // carries session credential material at runtime
+	CurrentPlatform        string
+	ReplyTarget            string
+	ConversationType       string
+	CanRequestUserInput    bool
+	CanListUserInput       bool
+	SupportsImageInput     bool
+	SupportsFileInput      bool
+	IsSubagent             bool
+	CurrentModelUUID       string
+	CurrentModelID         string
+	CurrentModelProvider   string
+	CurrentModelProviderID string
 	// ReasoningStoredEffort and ReasoningRequestedEffort are the unresolved
 	// parent-turn inputs. A tool that selects another model must resolve them for
 	// that model rather than inheriting the parent's provider-specific decision.

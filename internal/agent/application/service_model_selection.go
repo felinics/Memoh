@@ -146,7 +146,7 @@ func (s *Service) writeBackSessionModelPreference(ctx context.Context, sessionID
 		PreferredChatModelID:     modelID,
 		PreferredReasoningEffort: pgtype.Text{String: effort, Valid: effort != ""},
 	}); err != nil {
-		s.logger.Warn("write-back session model preference",
+		s.logger.WarnContext(ctx, "write-back session model preference",
 			slog.String("session_id", sessionIDRaw),
 			slog.Any("error", err),
 		)

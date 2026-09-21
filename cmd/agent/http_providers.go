@@ -24,6 +24,7 @@ import (
 	"github.com/felinics/memoh/internal/boot"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/local"
 	"github.com/felinics/memoh/internal/channel/route"
@@ -108,8 +109,9 @@ func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botSe
 	return handlers.NewBotAgentsHandler(log, service, botService, accountService, runtimes)
 }
 
-func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaceManager *workspace.Manager, acpPool *acpagent.SessionPool, agentDrivers external.Drivers, credentialService *agentcredential.Service) *handlers.UsersHandler {
-	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaceManager)
+func provideUsersHandler(log *slog.Logger, accountService *accounts.Service, botService *bots.Service, routeService *route.DBService, channelStore *channel.Store, channelRuntime channel.Runtime, registry *channel.Registry, workspaces *botworkspace.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, agentDrivers external.Drivers, credentialService *agentcredential.Service) *handlers.UsersHandler {
+	handler := handlers.NewUsersHandler(log, accountService, botService, routeService, channelStore, channelRuntime, registry, workspaces)
+	handler.SetWorkspaceStatus(manager)
 	handler.SetRuntimeResetService(botRuntimeResets{pool: acpPool, agents: agentDrivers})
 	handler.SetCredentialService(credentialService)
 	return handler

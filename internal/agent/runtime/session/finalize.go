@@ -104,7 +104,7 @@ func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, statu
 		// Already terminal, or superseded by a newer owner. Both mean this
 		// token has nothing left to write, which is an ordinary outcome for a
 		// retried finish rather than a failure to report.
-		m.logger.Debug("runtime run terminal write did not apply",
+		m.logger.DebugContext(ctx, "runtime run terminal write did not apply",
 			slog.String("run_id", handle.RunID),
 			slog.String("state", string(state)))
 		run, err = m.runs.Get(ctx, handle.RunID)

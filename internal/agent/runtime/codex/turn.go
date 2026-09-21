@@ -624,7 +624,7 @@ func (t *turnState) decide(ctx context.Context, callID, toolName string, input m
 		if ctx.Err() != nil {
 			return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "the turn ended before a decision arrived"}
 		}
-		t.logger.Error("codex approval flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
+		t.logger.ErrorContext(ctx, "codex approval flow failed", slog.String("thread_id", t.threadID), slog.Any("error", err))
 		return approval.FlowResult{Status: approval.StatusCancelled, DecisionReason: "approval flow failed"}
 	}
 	return result
@@ -674,6 +674,7 @@ func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
 		out.RuntimeMetadata = map[string]any{}
 		if newThreadID != "" {
 			out.RuntimeMetadata[metadataThreadIDKey] = newThreadID
+			out.RuntimeMetadata[metadataCheckpointRequiredKey] = true
 		}
 		// Context-occupancy data for the session UI: the thread's cumulative
 		// token count against its model context window.

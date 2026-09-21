@@ -151,7 +151,7 @@ func (h *Hub) unregister(runtimeID string, connection *Connection, reason string
 
 // Shutdown atomically prevents new registrations and closes every online
 // generation. Hijacked WebSockets are not closed by http.Server.Shutdown.
-func (h *Hub) Shutdown(_ context.Context) error {
+func (h *Hub) Shutdown(ctx context.Context) error {
 	if h == nil {
 		return nil
 	}
@@ -167,6 +167,6 @@ func (h *Hub) Shutdown(_ context.Context) error {
 	for _, connection := range connections {
 		connection.close("server shutting down")
 	}
-	h.log.Info("runtime hub stopped", slog.Int("connections", len(connections)))
+	h.log.InfoContext(ctx, "runtime hub stopped", slog.Int("connections", len(connections)))
 	return nil
 }

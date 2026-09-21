@@ -982,6 +982,24 @@ func TestRuntimePoolConfigFailureUsesApplicationError(t *testing.T) {
 	}
 }
 
+func TestRuntimePoolMissingCommandNamesTheCommand(t *testing.T) {
+	cause := fmt.Errorf("start devin acp: %w", &acpclient.CommandNotFoundError{Command: "devin"})
+	err := runtimePoolError(cause)
+	problem, ok := apperror.ProblemFrom(err, "")
+	if !ok || problem.Status != http.StatusConflict || problem.Code != string(apperror.CodeACPCommandNotFound) {
+		t.Fatalf("runtimePoolError() = %v, want %d %s", err, http.StatusConflict, apperror.CodeACPCommandNotFound)
+	}
+	if got := apperror.ArgsOf(err)["command"]; got != "devin" {
+		t.Fatalf("runtimePoolError() command arg = %q, want the command the user must install", got)
+	}
+	if strings.Contains(problem.Detail, "/opt/memoh") {
+		t.Fatalf("missing command problem leaked the private diagnostic: %q", problem.Detail)
+	}
+	if got := apperror.CauseOf(err); !errors.Is(got, cause) {
+		t.Fatalf("runtimePoolError() cause = %v, want private cause", got)
+	}
+}
+
 func TestRuntimePoolSelectionErrorsUseApplicationErrors(t *testing.T) {
 	t.Parallel()
 

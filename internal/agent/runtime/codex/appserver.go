@@ -43,6 +43,8 @@ type appServer struct {
 	// resuming an already-loaded thread is a no-op server-side but tracking
 	// avoids redundant calls.
 	loadedThreads  map[string]bool
+	checkpoints    map[string]checkpointHandle
+	threadClosed   map[string]chan struct{}
 	threadSettings map[string]protocol.Settings
 	// toollessThreads marks threads whose start-time config carried no Memoh
 	// tool gateway; the driver re-emits a notice for them every turn.
@@ -123,7 +125,7 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 		// binary usually still speaks a compatible superset (unknown fields
 		// and methods are tolerated by design), so warn loudly instead of
 		// refusing service; the toolkit pin and this check must converge.
-		logger.Warn("codex CLI version differs from the pinned protocol snapshot",
+		logger.WarnContext(ctx, "codex CLI version differs from the pinned protocol snapshot",
 			slog.String("bot_id", botID),
 			slog.String("cli_version", srv.codexVersion),
 			slog.String("pinned", protocol.PinnedCodexVersion),
@@ -260,15 +262,15 @@ func (s *appServer) threadToolless(threadID string) bool {
 
 // HandleServerRequest routes app-server → Memoh requests to the owning turn.
 // It runs on the read loop, so decisions are dispatched to goroutines.
-func (s *appServer) HandleServerRequest(_ context.Context, req *protocol.Inbound) {
+func (s *appServer) HandleServerRequest(ctx context.Context, req *protocol.Inbound) {
 	decoded, known, err := protocol.DecodeServerRequestParams(req.Method, req.Params)
 	if err != nil {
-		s.logger.Error("codex: undecodable server request", slog.String("method", req.Method), slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "codex: undecodable server request", slog.String("method", req.Method), slog.Any("error", err))
 		_ = s.conn.RespondError(req.ID, -32602, "memoh could not decode this request")
 		return
 	}
 	if !known {
-		s.logger.Warn("codex: unhandled server request method", slog.String("method", req.Method))
+		s.logger.WarnContext(ctx, "codex: unhandled server request method", slog.String("method", req.Method))
 		_ = s.conn.RespondError(req.ID, -32601, "memoh does not handle this request")
 		return
 	}
@@ -285,7 +287,7 @@ func (s *appServer) HandleServerRequest(_ context.Context, req *protocol.Inbound
 	turn := s.turnForThread(threadID)
 	if turn == nil {
 		// Fail closed: an approval with no live turn has nobody to decide it.
-		s.logger.Warn("codex: server request for idle thread", slog.String("method", req.Method), slog.String("thread_id", threadID))
+		s.logger.WarnContext(ctx, "codex: server request for idle thread", slog.String("method", req.Method), slog.String("thread_id", threadID))
 		_ = s.conn.RespondError(req.ID, -32000, "no active turn for this thread")
 		return
 	}
@@ -295,16 +297,20 @@ func (s *appServer) HandleServerRequest(_ context.Context, req *protocol.Inbound
 }
 
 // HandleNotification routes app-server notifications to the owning turn.
-func (s *appServer) HandleNotification(_ context.Context, note *protocol.Inbound) {
+func (s *appServer) HandleNotification(ctx context.Context, note *protocol.Inbound) {
 	decoded, known, err := protocol.DecodeServerNotificationParams(note.Method, note.Params)
 	if err != nil {
-		s.logger.Warn("codex: undecodable notification", slog.String("method", note.Method), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "codex: undecodable notification", slog.String("method", note.Method), slog.Any("error", err))
 		return
 	}
 	if !known {
 		return
 	}
 	s.cacheControlNotification(decoded)
+	if closed, ok := decoded.(*protocol.ThreadClosedNotification); ok {
+		s.forgetThread(closed.ThreadID)
+		return
+	}
 	threadID := notificationThreadID(decoded)
 	if threadID == "" {
 		s.handleGlobalNotification(note.Method, decoded)

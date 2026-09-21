@@ -4,23 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const (
 	botWorkspaceMetadataKey       = "workspace"
 	botLastSetupErrorMetadataKey  = "last_setup_error"
 	botSetupFailureMessageMaxRune = 4096
-)
-
-var (
-	diagnosticURLUserinfoPattern = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)([^/\s:@]+):([^/\s@]+)@`)
-	diagnosticSecretParamPattern = regexp.MustCompile(`(?i)\b(token|password|passwd|pwd|secret|api_key|access_token)=([^&\s]+)`)
 )
 
 type containerSetupFailure struct {
@@ -165,8 +160,7 @@ func sanitizeDiagnosticMessage(message, fallback string) string {
 	if message == "" {
 		message = fallback
 	}
-	message = diagnosticURLUserinfoPattern.ReplaceAllString(message, "${1}***:***@")
-	message = diagnosticSecretParamPattern.ReplaceAllString(message, "${1}=***")
+	message = redact.Diagnostic(message)
 	runes := []rune(message)
 	if len(runes) > botSetupFailureMessageMaxRune {
 		message = string(runes[:botSetupFailureMessageMaxRune])

@@ -25,7 +25,7 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 	})
 	g.Register(SubCommand{
 		Name:    "update",
-		Usage:   "update [--language L] [--acl_default_effect allow|deny] ... - Update settings",
+		Usage:   "update [--acl_default_effect allow|deny] ... - Update settings",
 		IsWrite: true,
 		ResultHandler: func(cc CommandContext) (*Result, error) {
 			if len(cc.Args) == 0 {
@@ -38,9 +38,6 @@ func (h *Handler) buildSettingsGroup() *CommandGroup {
 					return &Result{Text: cc.T("cmd.settings.missingValue", map[string]any{"option": args[i], "usage": cc.T("cmd.settings.updateUsage")})}, nil
 				}
 				switch args[i] {
-				case "--language":
-					i++
-					req.Language = &args[i]
 				case "--acl_default_effect":
 					i++
 					req.AclDefaultEffect = args[i]

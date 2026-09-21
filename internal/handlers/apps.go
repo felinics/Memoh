@@ -612,7 +612,7 @@ func (h *AppsHandler) stream(c echo.Context, action string, run appOperation) er
 	})
 	if _, err := run(ctx, sink); err != nil {
 		requestID := httpx.RequestID(c)
-		h.logger.Warn("app operation failed",
+		h.logger.WarnContext(c.Request().Context(), "app operation failed",
 			slog.String("action", action), slog.String("request_id", requestID), slog.Any("error", err))
 		stream.send(newAppErrorEvent(h.httpError(err), requestID))
 	}

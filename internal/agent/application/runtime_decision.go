@@ -169,7 +169,7 @@ func (s *Service) routeToolApprovalResponse(ctx context.Context, input ToolAppro
 	if err != nil {
 		if result.Applied && eventCh != nil {
 			if s.logger != nil {
-				s.logger.Warn("accepted decision output interrupted", slog.Any("error", err))
+				s.logger.WarnContext(ctx, "accepted decision output interrupted", slog.Any("error", err))
 			}
 			raw, _ := json.Marshal(agentFailureStreamEvent(err))
 			select {
@@ -212,7 +212,7 @@ func (s *Service) routeUserInputResponse(ctx context.Context, input UserInputRes
 	if err != nil {
 		if result.Applied && eventCh != nil {
 			if s.logger != nil {
-				s.logger.Warn("accepted decision output interrupted", slog.Any("error", err))
+				s.logger.WarnContext(ctx, "accepted decision output interrupted", slog.Any("error", err))
 			}
 			raw, _ := json.Marshal(agentFailureStreamEvent(err))
 			select {
@@ -366,7 +366,7 @@ func (s *Service) ackInlineRuntimeDecision(ctx context.Context, command sessionr
 	if err := s.decisionRuntime.PublishDecisionOutput(ackCtx, command, 1, nil); err != nil && s.logger != nil {
 		// The answer is already durable. An output transport failure must not
 		// fail the independently running producer or undo the accepted answer.
-		s.logger.Warn("close inline decision output failed", slog.Any("error", err),
+		s.logger.WarnContext(ctx, "close inline decision output failed", slog.Any("error", err),
 			slog.String("run_id", command.RunID), slog.String("decision_id", command.TargetID))
 	}
 }
@@ -387,7 +387,7 @@ func (s *Service) publishCommittedRuntimeDecision(ctx context.Context, command s
 		Generation: command.Generation,
 	}
 	if _, err := s.decisionRuntime.HandleAgentEvent(ctx, handle, event); err != nil && s.logger != nil {
-		s.logger.Warn("publish committed runtime decision failed",
+		s.logger.WarnContext(ctx, "publish committed runtime decision failed",
 			slog.Any("error", err),
 			slog.String("run_id", command.RunID),
 			slog.String("decision_id", command.TargetID),
@@ -416,7 +416,7 @@ func (s *Service) continueRuntimeDecision(
 		}
 		if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, nil); err != nil {
 			if s.logger != nil {
-				s.logger.Warn("close decision output failed", slog.Any("error", err))
+				s.logger.WarnContext(ctx, "close decision output failed", slog.Any("error", err))
 			}
 			// A failed checkpoint write must not leave a parked run owning an output
 			// subscription that can never finish. Use the normal run failure lifecycle.

@@ -38,7 +38,7 @@ type discussRunOutcome struct {
 func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, command turn.StartTurnCommand, log *slog.Logger) (discussRunOutcome, bool) {
 	handle, err := service.StartTurn(ctx, command)
 	if err != nil {
-		log.Error("discuss: start turn failed", slog.Any("error", err))
+		log.ErrorContext(ctx, "discuss: start turn failed", slog.Any("error", err))
 		return discussRunOutcome{}, false
 	}
 
@@ -64,14 +64,14 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 			default:
 				var streamEvent agentevent.StreamEvent
 				if decodeErr := json.Unmarshal(event.Payload, &streamEvent); decodeErr != nil {
-					log.Warn("discuss: decode stream event failed", slog.Any("error", decodeErr))
+					log.WarnContext(ctx, "discuss: decode stream event failed", slog.Any("error", decodeErr))
 					outcome.failed = true
 					continue
 				}
 				outcome.streamed = true
 				if streamEvent.Type == agentevent.Error {
 					outcome.failed = true
-					log.Error("discuss stream error", slog.String("error", streamEvent.Error))
+					log.ErrorContext(ctx, "discuss stream error", slog.String("error", streamEvent.Error))
 				}
 				if streamEvent.Type == agentevent.AgentEnd || streamEvent.Type == agentevent.AgentAbort {
 					outcome.terminal = true
@@ -87,11 +87,11 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 				continue
 			}
 			if streamErr != nil {
-				log.Error("discuss turn failed", slog.Any("error", streamErr))
+				log.ErrorContext(ctx, "discuss turn failed", slog.Any("error", streamErr))
 				outcome.failed = true
 			}
 		case <-ctx.Done():
-			log.Warn("discuss turn cancelled", slog.Any("error", ctx.Err()))
+			log.WarnContext(ctx, "discuss turn cancelled", slog.Any("error", ctx.Err()))
 			outcome.cancelled = true
 			return outcome, true
 		}

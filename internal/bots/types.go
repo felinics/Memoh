@@ -82,11 +82,40 @@ type ListChecksResponse struct {
 	Items []BotCheck `json:"items"`
 }
 
-// ContainerLifecycle handles container lifecycle events bound to bot operations.
-type ContainerLifecycle interface {
-	SetupBotContainer(ctx context.Context, botID string) error
-	CleanupBotContainer(ctx context.Context, botID string, preserveData bool) error
+// WorkspaceIntents records the desired workspace state of a bot; the
+// botworkspace reconciler converges the actual workspace toward it and derives
+// bots.status. The bots service never drives provisioning itself.
+type WorkspaceIntents interface {
+	// EnsurePresent asks for a running workspace built from image (empty keeps
+	// the previous or default image) and returns the intent generation.
+	EnsurePresent(ctx context.Context, botID, image string) (int64, error)
+	// RequestAbsent asks for the workspace to be removed, optionally exporting
+	// its data first, and returns the intent generation.
+	RequestAbsent(ctx context.Context, botID string, preserve bool) (int64, error)
+	// AwaitSettled blocks until the workspace has answered the given intent
+	// generation (running, stopped, failed, or absent).
+	AwaitSettled(ctx context.Context, botID string, generation int64) (WorkspaceOutcome, error)
+	// Current returns the latest observation; ok is false when the bot has no
+	// workspace row.
+	Current(ctx context.Context, botID string) (WorkspaceOutcome, bool, error)
 }
+
+// WorkspaceOutcome is the bots-facing projection of a workspace observation.
+type WorkspaceOutcome struct {
+	Desired        string
+	Observed       string
+	LastError      string
+	LastErrorPhase string
+	EverReady      bool
+}
+
+// Workspace observation values the bots service branches on.
+const (
+	WorkspaceObservedAbsent  = "absent"
+	WorkspaceObservedRunning = "running"
+	WorkspaceObservedFailed  = "failed"
+	WorkspacePhaseBootstrap  = "bootstrap"
+)
 
 // ConnectorLifecycle removes external connector credentials before the local
 // bot row and its bindings are deleted.
@@ -104,6 +133,10 @@ const (
 	BotStatusCreating = "creating"
 	BotStatusReady    = "ready"
 	BotStatusDeleting = "deleting"
+	// BotStatusFailed marks a bot whose workspace never became ready. It is
+	// derived by the workspace reconciler; the bot stays visible so the user
+	// can retry the workspace or delete the bot.
+	BotStatusFailed = "failed"
 )
 
 const (

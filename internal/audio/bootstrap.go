@@ -21,14 +21,14 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries dbstore.Quer
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				if logger != nil {
-					logger.Warn("audio registry skipped provider without template",
+					logger.WarnContext(ctx, "audio registry skipped provider without template",
 						slog.String("provider", string(def.ClientType)),
 						slog.String("display_name", def.DisplayName))
 				}
 				continue
 			}
 			if logger != nil {
-				logger.Warn("audio registry failed to load provider template",
+				logger.WarnContext(ctx, "audio registry failed to load provider template",
 					slog.String("provider", string(def.ClientType)),
 					slog.String("display_name", def.DisplayName),
 					slog.Any("error", err))
@@ -94,7 +94,7 @@ func SyncRegistry(ctx context.Context, logger *slog.Logger, queries dbstore.Quer
 		}
 
 		if logger != nil {
-			logger.Info("speech registry synced", slog.String("provider", string(def.ClientType)), slog.Int("models", synced))
+			logger.InfoContext(ctx, "speech registry synced", slog.String("provider", string(def.ClientType)), slog.Int("models", synced))
 		}
 	}
 	return nil

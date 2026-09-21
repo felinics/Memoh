@@ -48,7 +48,7 @@ func appServerCommand(launcher string) string {
 	if launcher == "" {
 		launcher = defaultLauncherPath
 	}
-	return escapeShellArg(launcher) + " app-server -c features.goals=true"
+	return escapeShellArg(launcher) + " app-server -c features.goals=true -c thread_unload_delay_secs=0"
 }
 
 // escapeShellArg single-quotes value for a POSIX shell when it carries any

@@ -117,15 +117,15 @@ func (s *Service) ensureHealthy(ctx context.Context) error {
 	if ok, _ := s.client.IsServing(ctx); ok {
 		return nil
 	}
-	s.logger.Warn("socktainer not responding, restarting")
+	s.logger.WarnContext(ctx, "socktainer not responding, restarting")
 	_ = s.client.Close()
 	_ = s.manager.Stop()
 	_ = os.Remove(s.socketPath)
 	if err := s.startSocktainer(ctx); err != nil {
-		s.logger.Error("socktainer restart failed", slog.Any("error", err))
+		s.logger.ErrorContext(ctx, "socktainer restart failed", slog.Any("error", err))
 		return err
 	}
-	s.logger.Info("socktainer restarted successfully")
+	s.logger.InfoContext(ctx, "socktainer restarted successfully")
 	return nil
 }
 
@@ -214,7 +214,7 @@ func (s *Service) CreateContainer(ctx context.Context, req CreateContainerReques
 		return ContainerInfo{}, err
 	}
 	if _, err := s.client.GetImage(ctx, req.ImageRef); err != nil {
-		s.logger.Info("image not found locally, pulling", slog.String("image", req.ImageRef))
+		s.logger.InfoContext(ctx, "image not found locally, pulling", slog.String("image", req.ImageRef))
 		if _, pullErr := s.client.Pull(ctx, req.ImageRef); pullErr != nil {
 			return ContainerInfo{}, fmt.Errorf("pull image %s: %w", req.ImageRef, pullErr)
 		}

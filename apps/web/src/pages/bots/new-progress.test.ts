@@ -69,8 +69,24 @@ vi.mock('@felinic/ui', async () => {
 
 const nextStep = vi.fn()
 const prevStep = vi.fn()
+const getBot = vi.fn()
+const getBotChecks = vi.fn()
+const putSettings = vi.fn()
 vi.mock('@/composables/useOnboarding', () => ({ useOnboarding: () => ({ nextStep, prevStep }) }))
 vi.mock('@/store/install-created-agent', () => ({ installCreatedAgent: vi.fn() }))
+vi.mock('@memohai/sdk', () => ({
+  getBotsById: (...args: unknown[]) => getBot(...args),
+  getBotsByIdChecks: (...args: unknown[]) => getBotChecks(...args),
+  putBotsByBotIdSettings: (...args: unknown[]) => putSettings(...args),
+  getAgentAuthorizationsById: vi.fn(),
+  getBotsByBotIdAgents: vi.fn(),
+  getBotsByBotIdAgentsById: vi.fn(),
+  patchBotsByBotIdAgentsById: vi.fn(),
+  postBotsByBotIdAgents: vi.fn(),
+  postBotsByBotIdAgentsByIdCredentialClaim: vi.fn(),
+  postBotsByBotIdUserAccess: vi.fn(),
+}))
+vi.mock('@/composables/api/useContainerStream', () => ({ postBotsByBotIdContainerStream: vi.fn() }))
 
 function setupStore() {
   const pinia = createPinia()
@@ -115,6 +131,30 @@ async function mountKeptProgress(onboarding = false) {
   }
 }
 
+async function mountIdleProgress(onboarding = false) {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const store = useBotCreateProgressStore()
+  const ProgressPage = (await import('./new-progress.vue')).default
+  const app = createApp({
+    name: 'ProgressRefreshTestHost',
+    setup() {
+      return () => h(ProgressPage, { onboarding })
+    },
+  })
+  const root = document.createElement('div')
+  document.body.append(root)
+  app.use(pinia)
+  app.config.globalProperties.$t = translate
+  app.mount(root)
+  await nextTick()
+  return { app, root, store }
+}
+
+function buttonLabels(root: HTMLElement) {
+  return Array.from(root.querySelectorAll('button')).map(button => button.textContent?.trim())
+}
+
 describe('bot create progress route', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -125,6 +165,9 @@ describe('bot create progress route', () => {
     // Real vue-router returns a Promise that resolves when navigation commits.
     routerReplace.mockResolvedValue(undefined)
     invalidateQueries.mockReset()
+    getBot.mockReset().mockResolvedValue({ data: { id: 'bot-1', name: 'prog', display_name: 'Prog', status: 'ready' } })
+    getBotChecks.mockReset().mockResolvedValue({ data: { items: [] } })
+    putSettings.mockReset().mockResolvedValue({ data: {} })
     document.body.innerHTML = ''
   })
 
@@ -211,13 +254,98 @@ describe('bot create progress route', () => {
     mounted.app.unmount(); mounted.root.remove()
   })
 
-  it('keeps installation failures on the progress page with a retry action', async () => {
+  it('keeps installation failures on the progress page with a retry and a way out', async () => {
     const mounted = await mountKeptProgress()
     mounted.store.status = 'setup-error'
     await nextTick()
     await vi.advanceTimersByTimeAsync(1000)
     expect(routerReplace).not.toHaveBeenCalled()
-    expect(mounted.root.querySelector('button')?.textContent).toBe('bots.create.retry')
+    expect(buttonLabels(mounted.root)).toEqual(['bots.create.continueLater', 'bots.create.retry'])
+    mounted.app.unmount(); mounted.root.remove()
+  })
+
+  it('offers a workspace retry and leaves the failed Bot behind on continue later', async () => {
+    const mounted = await mountKeptProgress()
+    mounted.store.status = 'workspace-error'
+    mounted.store.setupError = 'workspace setup failed'
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(routerReplace).not.toHaveBeenCalled()
+    expect(buttonLabels(mounted.root)).toEqual(['bots.create.continueLater', 'bots.create.retryWorkspace'])
+
+    mounted.root.querySelector('button')!.click()
+    await nextTick()
+    await nextTick()
+    // The Bot keeps its failed workspace; its detail page owns the next attempt.
+    expect(routerReplace).toHaveBeenCalledWith({ name: 'bot-detail', params: { botName: 'prog' } })
+    expect(invalidateQueries).toHaveBeenCalled()
+    mounted.app.unmount(); mounted.root.remove()
+  })
+
+  it('lets onboarding continue past a failed workspace with the created Bot', async () => {
+    const mounted = await mountKeptProgress(true)
+    mounted.store.status = 'workspace-error'
+    await nextTick()
+    expect(buttonLabels(mounted.root)).toEqual(['bots.create.continueLater', 'bots.create.retryWorkspace'])
+
+    mounted.root.querySelector('button')!.click()
+    await nextTick()
+    expect(nextStep).toHaveBeenCalledTimes(1)
+    expect(routerReplace).not.toHaveBeenCalled()
+    expect(JSON.parse(sessionStorage.getItem('memoh:onboarding:bot-result') ?? 'null')).toMatchObject({ botId: 'bot-1', modelConfigured: false })
+    expect(mounted.store.status).toBe('idle')
+    mounted.app.unmount(); mounted.root.remove()
+  })
+
+  it('opens the Bot that already owns a taken name instead of stopping at the error', async () => {
+    const mounted = await mountKeptProgress()
+    mounted.store.bot = null
+    mounted.store.status = 'error'
+    mounted.store.errorCode = 'bot.name_taken'
+    await nextTick()
+    expect(buttonLabels(mounted.root)).toEqual(['bots.create.back', 'bots.create.openExisting'])
+
+    mounted.root.querySelectorAll('button')[1]!.click()
+    await nextTick()
+    await nextTick()
+    expect(routerReplace).toHaveBeenCalledWith({ name: 'bot-detail', params: { botName: 'prog' } })
+    expect(mounted.store.status).toBe('idle')
+    mounted.app.unmount(); mounted.root.remove()
+  })
+
+  it('hides the retry when a resumed Bot turned out to be gone', async () => {
+    const mounted = await mountKeptProgress()
+    mounted.store.bot = null
+    mounted.store.status = 'error'
+    mounted.store.errorCode = null
+    await nextTick()
+    expect(buttonLabels(mounted.root)).toEqual(['bots.create.back'])
+    mounted.app.unmount(); mounted.root.remove()
+  })
+
+  it('resumes the persisted Bot after a refresh instead of returning to the form', async () => {
+    sessionStorage.setItem('memoh:new-bot:authorization', JSON.stringify({ botId: 'bot-1', botName: 'prog', displayName: 'Prog', setupError: null, settings: { chat_model_id: 'm1' } }))
+    const mounted = await mountIdleProgress()
+    expect(routerReplace).not.toHaveBeenCalledWith({ name: 'bot-new' })
+    expect(getBot).toHaveBeenCalledWith(expect.objectContaining({ path: { id: 'bot-1' } }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(putSettings).toHaveBeenCalledWith(expect.objectContaining({ path: { bot_id: 'bot-1' }, body: { chat_model_id: 'm1' } }))
+    expect(mounted.store.status).toBe('ready')
+    await vi.advanceTimersByTimeAsync(700)
+    expect(routerReplace).toHaveBeenCalledWith({ name: 'bot-detail', params: { botName: 'prog' } })
+    mounted.app.unmount(); mounted.root.remove()
+  })
+
+  it('shows the failed workspace after an onboarding refresh without creating again', async () => {
+    sessionStorage.setItem('memoh:onboarding:creation', JSON.stringify({ botId: 'bot-1', botName: 'prog', displayName: 'Prog', setupError: null }))
+    getBot.mockResolvedValue({ data: { id: 'bot-1', name: 'prog', display_name: 'Prog', status: 'failed' } })
+    getBotChecks.mockResolvedValue({ data: { items: [{ type: 'container.init', status: 'error', detail: 'image pull failed' }] } })
+    const mounted = await mountIdleProgress(true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(prevStep).not.toHaveBeenCalled()
+    expect(mounted.store.status).toBe('workspace-error')
+    expect(mounted.root.textContent).toContain('image pull failed')
+    expect(buttonLabels(mounted.root)).toEqual(['bots.create.continueLater', 'bots.create.retryWorkspace'])
     mounted.app.unmount(); mounted.root.remove()
   })
 

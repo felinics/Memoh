@@ -67,7 +67,7 @@ func syncLocked(ctx context.Context, logger *slog.Logger, queries dbstore.Querie
 		if err := syncModels(ctx, queries, row.ID, definition.Models); err != nil {
 			return fmt.Errorf("sync provider template models %s: %w", key, err)
 		}
-		logger.Info("provider template synced", slog.String("domain", row.Domain), slog.String("key", row.Key))
+		logger.InfoContext(ctx, "provider template synced", slog.String("domain", row.Domain), slog.String("key", row.Key))
 	}
 	for _, row := range existing {
 		if _, ok := seen[identity(row.Domain, row.Key)]; ok {

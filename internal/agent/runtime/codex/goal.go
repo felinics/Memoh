@@ -186,7 +186,7 @@ func (d *Driver) pauseGoalOnExit(ctx context.Context, srv *appServer, turn *turn
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := srv.setGoalStatus(cleanup, turn.threadID, protocol.ThreadGoalStatusPaused); err != nil {
-		d.logger.Warn("codex goal pause failed; draining app-server", slog.Any("error", err))
+		d.logger.WarnContext(ctx, "codex goal pause failed; draining app-server", slog.Any("error", err))
 		d.ResetBotAgent(turn.input.BotID, turn.input.BotAgentID)
 	}
 }

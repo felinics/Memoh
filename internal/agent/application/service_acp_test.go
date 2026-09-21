@@ -1264,7 +1264,6 @@ func (*acpContextBudgetQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.G
 func (q *acpContextBudgetSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
 		BotID:                   botID,
-		Language:                "auto",
 		ReasoningEffort:         "medium",
 		CompactionTargetPercent: pgtype.Int4{Int32: 20, Valid: true},
 		ChatModelID:             flowTestUUID(q.chatModelID),
@@ -2270,7 +2269,6 @@ type storeRoundSettingsQueries struct {
 func (*storeRoundSettingsQueries) GetSettingsByBotID(_ context.Context, botID pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
 		BotID:                   botID,
-		Language:                "auto",
 		ReasoningEffort:         "medium",
 		CompactionTargetPercent: pgtype.Int4{},
 		MemoryProviderID:        flowTestUUID(storeRoundMemoryProviderID),

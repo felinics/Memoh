@@ -18,6 +18,7 @@ const (
 	MethodThreadSettingsUpdate  = "thread/settings/update"
 	MethodThreadFork            = "thread/fork"
 	MethodThreadRead            = "thread/read"
+	MethodThreadUnsubscribe     = "thread/unsubscribe"
 	MethodThreadGoalSet         = "thread/goal/set"
 	MethodThreadGoalGet         = "thread/goal/get"
 	MethodThreadGoalClear       = "thread/goal/clear"
@@ -53,6 +54,7 @@ const (
 	MethodConfigWarning                   = "configWarning"
 	MethodDeprecationNotice               = "deprecationNotice"
 	MethodThreadStarted                   = "thread/started"
+	MethodThreadClosed                    = "thread/closed"
 	MethodThreadStatusChanged             = "thread/status/changed"
 	MethodThreadTokenUsageUpdated         = "thread/tokenUsage/updated"
 	MethodThreadCompacted                 = "thread/compacted"
@@ -90,6 +92,8 @@ func NewResponseForMethod(method string) (resp any, ok bool) {
 		return new(ThreadForkResponse), true
 	case "thread/read":
 		return new(ThreadReadResponse), true
+	case "thread/unsubscribe":
+		return new(ThreadUnsubscribeResponse), true
 	case "thread/goal/set":
 		return new(ThreadGoalSetResponse), true
 	case "thread/goal/get":
@@ -182,6 +186,10 @@ func DecodeServerNotificationParams(method string, params []byte) (decoded any, 
 		return v, true, err
 	case "thread/started":
 		v := new(ThreadStartedNotification)
+		err = jsonUnmarshal(params, v)
+		return v, true, err
+	case "thread/closed":
+		v := new(ThreadClosedNotification)
 		err = jsonUnmarshal(params, v)
 		return v, true, err
 	case "thread/status/changed":

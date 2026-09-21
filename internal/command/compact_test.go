@@ -31,7 +31,6 @@ type compactConfigQueries struct {
 
 func (q *compactConfigQueries) GetSettingsByBotID(context.Context, pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
-		Language:                settings.DefaultLanguage,
 		ReasoningEffort:         settings.DefaultReasoningEffort,
 		CompactionTargetPercent: pgtype.Int4{},
 		ChatModelID:             q.chatModel.ID,

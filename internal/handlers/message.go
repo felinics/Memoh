@@ -848,7 +848,7 @@ func (h *MessageHandler) ServeMedia(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "private, max-age=86400")
 	c.Response().WriteHeader(http.StatusOK)
 	if _, err := io.Copy(c.Response().Writer, reader); err != nil {
-		h.logger.Warn("serve media stream failed", slog.Any("error", err))
+		h.logger.WarnContext(c.Request().Context(), "serve media stream failed", slog.Any("error", err))
 	}
 	return nil
 }

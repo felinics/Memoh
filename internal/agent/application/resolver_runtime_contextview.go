@@ -40,7 +40,7 @@ func runtimeContextViaContextView(ctx context.Context, logger *slog.Logger, sect
 	})
 	if err != nil {
 		if logger != nil {
-			logger.Error("runtime context view build failed; assembling sections directly", slog.Any("error", err))
+			logger.ErrorContext(ctx, "runtime context view build failed; assembling sections directly", slog.Any("error", err))
 		}
 		return finalizeRuntimeSectionsWithAudit(sections, ledger), runtimeContextURI, runtimeContextFallbackManifest("build_error", ledger)
 	}
@@ -48,7 +48,7 @@ func runtimeContextViaContextView(ctx context.Context, logger *slog.Logger, sect
 	payload, ok := rendered.Data.(*contextview.RuntimeRenderedPayload)
 	if !ok {
 		if logger != nil {
-			logger.Error("runtime context view rendered unexpected payload; assembling sections directly")
+			logger.ErrorContext(ctx, "runtime context view rendered unexpected payload; assembling sections directly")
 		}
 		return finalizeRuntimeSectionsWithAudit(sections, ledger), runtimeContextURI, runtimeContextFallbackManifest("render_payload_mismatch", ledger)
 	}

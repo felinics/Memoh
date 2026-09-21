@@ -137,7 +137,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if err != nil {
 		return Settings{}, err
 	}
-	current := normalizeBotSetting(botRow.Language, "", aclDefaultEffect, botRow.ReasoningEffort, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
+	current := normalizeBotSetting("", aclDefaultEffect, botRow.ReasoningEffort, botRow.CompactionEnabled, botRow.CompactionThreshold, botRow.CompactionTargetPercent)
 	// A read error here must abort: falling through would leave `current` at the
 	// model defaults and silently overwrite a saved chat_runtime=acp_agent (and
 	// its agent id) on the next save. ErrNoRows is impossible because the bot
@@ -162,12 +162,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	current.OverlayEnabled = overlayBindingRow.OverlayEnabled
 	current.OverlayProvider = strings.TrimSpace(overlayBindingRow.OverlayProvider)
 	current.OverlayConfig = normalizeJSONObject(overlayBindingRow.OverlayConfig)
-	if req.Language != nil {
-		current.Language = strings.TrimSpace(*req.Language)
-		if current.Language == "" {
-			current.Language = DefaultLanguage
-		}
-	}
 	if strings.TrimSpace(req.CommandUILanguage) != "" {
 		current.CommandUILanguage = strings.TrimSpace(req.CommandUILanguage)
 	}
@@ -435,7 +429,6 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	upsertParams := sqlc.UpsertBotSettingsParams{
 		ID:                         pgID,
 		Timezone:                   timezoneValue,
-		Language:                   current.Language,
 		CommandUiLanguage:          current.CommandUILanguage,
 		ReasoningEffort:            current.ReasoningEffort,
 		CompactionEnabled:          current.CompactionEnabled,
@@ -546,9 +539,8 @@ func (s *Service) Delete(ctx context.Context, botID string) error {
 	return nil
 }
 
-func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEffect string, reasoningEffort string, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
+func normalizeBotSetting(commandUILanguage string, aclDefaultEffect string, reasoningEffort string, compactionEnabled bool, compactionThreshold int32, compactionTargetPercent pgtype.Int4) Settings {
 	settings := Settings{
-		Language:                strings.TrimSpace(language),
 		CommandUILanguage:       strings.TrimSpace(commandUILanguage),
 		AclDefaultEffect:        strings.TrimSpace(aclDefaultEffect),
 		ReasoningEffort:         strings.TrimSpace(reasoningEffort),
@@ -559,9 +551,6 @@ func normalizeBotSetting(language string, commandUILanguage string, aclDefaultEf
 		ChatRuntime:             ChatRuntimeModel,
 		ChatACPProjectPath:      DefaultACPProjectPath,
 		ChatACPProjectMode:      DefaultACPProjectMode,
-	}
-	if settings.Language == "" {
-		settings.Language = DefaultLanguage
 	}
 	if settings.CommandUILanguage == "" {
 		settings.CommandUILanguage = DefaultCommandUILanguage
@@ -679,7 +668,6 @@ func normalizeDormantReasoningEffort(effort string) string {
 
 func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 	return normalizeBotSettingsFields(
-		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
 		row.CompactionEnabled,
@@ -712,7 +700,6 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 
 func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 	return normalizeBotSettingsFields(
-		row.Language,
 		row.CommandUiLanguage,
 		row.ReasoningEffort,
 		row.CompactionEnabled,
@@ -744,7 +731,6 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 }
 
 func normalizeBotSettingsFields(
-	language string,
 	commandUILanguage string,
 	reasoningEffort string,
 	compactionEnabled bool,
@@ -773,7 +759,7 @@ func normalizeBotSettingsFields(
 	overlayEnabled bool,
 	overlayConfig []byte,
 ) Settings {
-	settings := normalizeBotSetting(language, commandUILanguage, "", reasoningEffort, compactionEnabled, compactionThreshold, compactionTargetPercent)
+	settings := normalizeBotSetting(commandUILanguage, "", reasoningEffort, compactionEnabled, compactionThreshold, compactionTargetPercent)
 	if timezone.Valid {
 		settings.Timezone = timezone.String
 	}

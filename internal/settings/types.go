@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	DefaultLanguage          = "auto"
 	DefaultCommandUILanguage = "auto"
 	DefaultReasoningEffort   = "medium"
 	ChatRuntimeModel         = string(runtimekind.Model)
@@ -33,7 +32,6 @@ type Settings struct {
 	TtsModelID           string `json:"tts_model_id"`
 	TranscriptionModelID string `json:"transcription_model_id"`
 	VideoModelID         string `json:"video_model_id"`
-	Language             string `json:"language"`
 	CommandUILanguage    string `json:"command_ui_language"`
 	AclDefaultEffect     string `json:"acl_default_effect"`
 	Timezone             string `json:"timezone"`
@@ -60,22 +58,19 @@ type UpsertRequest struct {
 	// service mirrors each into a `<field>_set` SQL flag (same pattern as
 	// FetchProviderID / CompactionModelID); plain strings would make ""
 	// indistinguishable from "not sent".
-	ChatModelID          *string `json:"chat_model_id,omitempty"`
-	DefaultBotAgentID    *string `json:"default_bot_agent_id,omitempty"`
-	ChatRuntime          *string `json:"chat_runtime,omitempty"`
-	ChatACPAgentID       *string `json:"chat_acp_agent_id,omitempty"`
-	ChatACPProjectPath   *string `json:"chat_acp_project_path,omitempty"`
-	ChatACPProjectMode   *string `json:"chat_acp_project_mode,omitempty"`
-	ImageModelID         *string `json:"image_model_id,omitempty"`
-	SearchProviderID     *string `json:"search_provider_id,omitempty"`
-	FetchProviderID      *string `json:"fetch_provider_id,omitempty"`
-	MemoryProviderID     *string `json:"memory_provider_id,omitempty"`
-	TtsModelID           *string `json:"tts_model_id,omitempty"`
-	TranscriptionModelID *string `json:"transcription_model_id,omitempty"`
-	VideoModelID         *string `json:"video_model_id,omitempty"`
-	// Language follows the same pointer rule; "" normalizes to DefaultLanguage
-	// ("auto") rather than clearing the column.
-	Language                *string             `json:"language,omitempty"`
+	ChatModelID             *string             `json:"chat_model_id,omitempty"`
+	DefaultBotAgentID       *string             `json:"default_bot_agent_id,omitempty"`
+	ChatRuntime             *string             `json:"chat_runtime,omitempty"`
+	ChatACPAgentID          *string             `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath      *string             `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode      *string             `json:"chat_acp_project_mode,omitempty"`
+	ImageModelID            *string             `json:"image_model_id,omitempty"`
+	SearchProviderID        *string             `json:"search_provider_id,omitempty"`
+	FetchProviderID         *string             `json:"fetch_provider_id,omitempty"`
+	MemoryProviderID        *string             `json:"memory_provider_id,omitempty"`
+	TtsModelID              *string             `json:"tts_model_id,omitempty"`
+	TranscriptionModelID    *string             `json:"transcription_model_id,omitempty"`
+	VideoModelID            *string             `json:"video_model_id,omitempty"`
 	CommandUILanguage       string              `json:"command_ui_language,omitempty"`
 	AclDefaultEffect        string              `json:"acl_default_effect,omitempty"`
 	Timezone                *string             `json:"timezone,omitempty"`

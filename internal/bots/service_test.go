@@ -53,14 +53,14 @@ func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Ro
 
 // makeBotRow creates a fakeRow that populates a sqlc.GetBotByIDRow via Scan.
 // Column order: id, owner_user_id, name, display_name, avatar_url, timezone, is_active, status,
-// language, reasoning_effort,
+// reasoning_effort,
 // chat_model_id, search_provider_id, memory_provider_id,
 // compaction_enabled, compaction_threshold, compaction_target_percent, compaction_model_id,
 // metadata, created_at, updated_at.
 func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 	return &fakeRow{
 		scanFunc: func(dest ...any) error {
-			if len(dest) < 20 {
+			if len(dest) < 19 {
 				return pgx.ErrNoRows
 			}
 			*dest[0].(*pgtype.UUID) = botID
@@ -71,18 +71,17 @@ func makeBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
 			*dest[5].(*pgtype.Text) = pgtype.Text{}
 			*dest[6].(*bool) = true
 			*dest[7].(*string) = BotStatusReady
-			*dest[8].(*string) = "en"                // Language
-			*dest[9].(*string) = "medium"            // ReasoningEffort
-			*dest[10].(*pgtype.UUID) = pgtype.UUID{} // ChatModelID
-			*dest[11].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
-			*dest[12].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
-			*dest[13].(*bool) = false                // CompactionEnabled
-			*dest[14].(*int32) = 100000              // CompactionThreshold
-			*dest[15].(*pgtype.Int4) = pgtype.Int4{} // CompactionTargetPercent
-			*dest[16].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
-			*dest[17].(*[]byte) = []byte(`{}`)
+			*dest[8].(*string) = "medium"            // ReasoningEffort
+			*dest[9].(*pgtype.UUID) = pgtype.UUID{}  // ChatModelID
+			*dest[10].(*pgtype.UUID) = pgtype.UUID{} // SearchProviderID
+			*dest[11].(*pgtype.UUID) = pgtype.UUID{} // MemoryProviderID
+			*dest[12].(*bool) = false                // CompactionEnabled
+			*dest[13].(*int32) = 100000              // CompactionThreshold
+			*dest[14].(*pgtype.Int4) = pgtype.Int4{} // CompactionTargetPercent
+			*dest[15].(*pgtype.UUID) = pgtype.UUID{} // CompactionModelID
+			*dest[16].(*[]byte) = []byte(`{}`)
+			*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
-			*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{}
 			return nil
 		},
 	}
@@ -92,24 +91,6 @@ func mustParseUUID(s string) pgtype.UUID {
 	var u pgtype.UUID
 	_ = u.Scan(s)
 	return u
-}
-
-type fakeContainerLifecycle struct {
-	onSetup    func()
-	setupBotID string
-	setupErr   error
-}
-
-func (f *fakeContainerLifecycle) SetupBotContainer(_ context.Context, botID string) error {
-	if f.onSetup != nil {
-		f.onSetup()
-	}
-	f.setupBotID = botID
-	return f.setupErr
-}
-
-func (*fakeContainerLifecycle) CleanupBotContainer(context.Context, string, bool) error {
-	return nil
 }
 
 func TestAuthorizeAccess(t *testing.T) {
@@ -230,184 +211,6 @@ func TestCreateTreatsStoreNotFoundAsMissingOwner(t *testing.T) {
 	}
 	if createCalled {
 		t.Fatal("bot row should not be created when owner is missing")
-	}
-}
-
-func TestRunCreateLifecycleSetsUpContainerBeforeReady(t *testing.T) {
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	botID := botUUID.String()
-	events := make([]string, 0, 2)
-
-	db := &fakeDBTX{
-		execFunc: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-			if strings.Contains(sql, "UPDATE bots") && strings.Contains(sql, "SET status = $2") {
-				events = append(events, "status")
-				if got := args[0].(pgtype.UUID); got != botUUID {
-					t.Fatalf("expected status update for %s, got %s", botUUID, got)
-				}
-				if got := args[1].(string); got != BotStatusReady {
-					t.Fatalf("expected status %q, got %q", BotStatusReady, got)
-				}
-			}
-			return pgconn.CommandTag{}, nil
-		},
-	}
-	lifecycle := &fakeContainerLifecycle{
-		onSetup: func() {
-			events = append(events, "setup")
-		},
-	}
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
-	svc.SetContainerLifecycle(lifecycle)
-
-	if err := svc.runCreateLifecycle(context.Background(), botID); err != nil {
-		t.Fatalf("run create lifecycle: %v", err)
-	}
-	if lifecycle.setupBotID != botID {
-		t.Fatalf("expected setup for bot %s, got %s", botID, lifecycle.setupBotID)
-	}
-	if len(events) != 2 || events[0] != "setup" || events[1] != "status" {
-		t.Fatalf("expected setup before ready status update, got events %v", events)
-	}
-}
-
-func TestRunCreateLifecycleRecordsSetupFailureAndLeavesBotReady(t *testing.T) {
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
-	botID := botUUID.String()
-	events := make([]string, 0, 3)
-	var persisted []byte
-
-	db := &fakeDBTX{
-		queryRowFunc: func(_ context.Context, query string, args ...any) pgx.Row {
-			switch {
-			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
-				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/felinics/workspace:latest"},"keep":true}`))
-			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
-				events = append(events, "metadata")
-				if got := args[1].(string); got != "test-bot" {
-					t.Fatalf("expected update to preserve bot name, got %q", got)
-				}
-				payload, ok := args[6].([]byte)
-				if !ok {
-					t.Fatalf("metadata arg type = %T, want []byte", args[6])
-				}
-				persisted = append([]byte(nil), payload...)
-				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)
-			default:
-				t.Fatalf("unexpected query: %s", query)
-				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
-			}
-		},
-		execFunc: func(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
-			if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2") {
-				events = append(events, "status")
-				if got := args[1].(string); got != BotStatusReady {
-					t.Fatalf("expected bot to remain %q, got %q", BotStatusReady, got)
-				}
-			}
-			return pgconn.CommandTag{}, nil
-		},
-	}
-	lifecycle := &fakeContainerLifecycle{
-		onSetup: func() {
-			events = append(events, "setup")
-		},
-		setupErr: errors.New("pull https://user:pass@registry.example.test/image?token=abc123 failed: proxyconnect tcp: dial tcp 127.0.0.1:7897: connect: connection refused"),
-	}
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
-	svc.SetContainerLifecycle(lifecycle)
-
-	if err := svc.runCreateLifecycle(context.Background(), botID); err != nil {
-		t.Fatalf("run create lifecycle: %v", err)
-	}
-	if len(events) != 3 || events[0] != "setup" || events[1] != "metadata" || events[2] != "status" {
-		t.Fatalf("expected setup, metadata, status events, got %v", events)
-	}
-
-	setupError := requireLastSetupError(t, persisted)
-	if setupError["phase"] != "setup" {
-		t.Fatalf("phase = %#v, want setup", setupError["phase"])
-	}
-	message, _ := setupError["message"].(string)
-	if !strings.Contains(message, "127.0.0.1:7897") {
-		t.Fatalf("message = %q, want proxy failure details", message)
-	}
-	if strings.Contains(message, "user:pass") || strings.Contains(message, "abc123") {
-		t.Fatalf("message should redact credentials and tokens, got %q", message)
-	}
-}
-
-func TestRunCreateLifecycleReturnsBootstrapErrorAfterLeavingBotReady(t *testing.T) {
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	botID := botUUID.String()
-	status := ""
-
-	db := &fakeDBTX{
-		queryRowFunc: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
-		},
-		execFunc: func(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
-			if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2") {
-				status = args[1].(string)
-			}
-			return pgconn.CommandTag{}, nil
-		},
-	}
-	setupErr := errors.Join(
-		workspace.ErrWorkspaceTemplateBootstrapFailed,
-		errors.New("write /data/AGENTS.md: permission denied"),
-	)
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
-	svc.SetContainerLifecycle(&fakeContainerLifecycle{setupErr: setupErr})
-
-	err := svc.runCreateLifecycle(context.Background(), botID)
-	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
-		t.Fatalf("run create lifecycle error = %v, want template bootstrap failure", err)
-	}
-	if status != BotStatusReady {
-		t.Fatalf("bot status = %q, want %q", status, BotStatusReady)
-	}
-}
-
-func TestRunCreateLifecycleClearsSetupFailureAfterSuccess(t *testing.T) {
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
-	botID := botUUID.String()
-	var persisted []byte
-
-	db := &fakeDBTX{
-		queryRowFunc: func(_ context.Context, query string, args ...any) pgx.Row {
-			switch {
-			case strings.Contains(query, "SELECT id, owner_user_id") && strings.Contains(query, "FROM bots"):
-				return makeGetBotRowWithMetadata(botUUID, ownerUUID, []byte(`{"workspace":{"image":"ghcr.io/felinics/workspace:latest","last_setup_error":{"phase":"setup","message":"old failure","at":"2026-06-08T10:00:00Z"}}}`))
-			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "metadata = $7"):
-				payload, ok := args[6].([]byte)
-				if !ok {
-					t.Fatalf("metadata arg type = %T, want []byte", args[6])
-				}
-				persisted = append([]byte(nil), payload...)
-				return makeUpdateBotProfileRowWithMetadata(botUUID, ownerUUID, payload)
-			default:
-				t.Fatalf("unexpected query: %s", query)
-				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
-			}
-		},
-	}
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
-	svc.SetContainerLifecycle(&fakeContainerLifecycle{})
-
-	if err := svc.runCreateLifecycle(context.Background(), botID); err != nil {
-		t.Fatalf("run create lifecycle: %v", err)
-	}
-
-	metadata := decodePersistedMetadata(t, persisted)
-	workspace := metadata["workspace"].(map[string]any)
-	if _, ok := workspace["last_setup_error"]; ok {
-		t.Fatalf("last_setup_error should be cleared, metadata=%#v", metadata)
-	}
-	if workspace["image"] != "ghcr.io/felinics/workspace:latest" {
-		t.Fatalf("workspace image was not preserved: %#v", workspace)
 	}
 }
 
@@ -583,5 +386,168 @@ func TestResolveNameSuffixesDerivedNameCollisions(t *testing.T) {
 	// Explicitly requested names still fail when taken.
 	if _, err := svc.resolveName(context.Background(), "neko", "", ""); !errors.Is(err, ErrBotNameTaken) {
 		t.Fatalf("expected ErrBotNameTaken, got %v", err)
+	}
+}
+
+// fakeWorkspaceIntents records intents and answers awaits from a script.
+type fakeWorkspaceIntents struct {
+	ensured  []string
+	images   []string
+	absent   []string
+	preserve []bool
+	outcome  WorkspaceOutcome
+	awaitErr error
+}
+
+func (f *fakeWorkspaceIntents) EnsurePresent(_ context.Context, botID, image string) (int64, error) {
+	f.ensured = append(f.ensured, botID)
+	f.images = append(f.images, image)
+	return int64(len(f.ensured)), nil
+}
+
+func (f *fakeWorkspaceIntents) RequestAbsent(_ context.Context, botID string, preserve bool) (int64, error) {
+	f.absent = append(f.absent, botID)
+	f.preserve = append(f.preserve, preserve)
+	return int64(len(f.absent)), nil
+}
+
+func (f *fakeWorkspaceIntents) AwaitSettled(context.Context, string, int64) (WorkspaceOutcome, error) {
+	return f.outcome, f.awaitErr
+}
+
+func (f *fakeWorkspaceIntents) Current(context.Context, string) (WorkspaceOutcome, bool, error) {
+	return f.outcome, true, nil
+}
+
+func TestWorkspaceOutcomeErrorKeepsBootstrapSentinel(t *testing.T) {
+	err := workspaceOutcomeError(WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: WorkspacePhaseBootstrap, LastError: "write AGENTS.md: permission denied"})
+	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("bootstrap failure must map to the template sentinel, got %v", err)
+	}
+	err = workspaceOutcomeError(WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: "image_prepare", LastError: "pull access denied"})
+	if errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("image failure must not map to the template sentinel, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "image_prepare") || !strings.Contains(err.Error(), "pull access denied") {
+		t.Fatalf("error should carry phase and message, got %v", err)
+	}
+}
+
+func TestWorkspaceImageFromMetadata(t *testing.T) {
+	if got := workspaceImageFromMetadata(map[string]any{"workspace": map[string]any{"image": "  ghcr.io/x/y:1 "}}); got != "ghcr.io/x/y:1" {
+		t.Fatalf("image = %q", got)
+	}
+	if got := workspaceImageFromMetadata(map[string]any{"workspace": "nope"}); got != "" {
+		t.Fatalf("malformed section should yield empty image, got %q", got)
+	}
+	if got := workspaceImageFromMetadata(nil); got != "" {
+		t.Fatalf("nil metadata should yield empty image, got %q", got)
+	}
+}
+
+func TestSetBotStatusFromWorkspaceRespectsDeleting(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	current := BotStatusDeleting
+	updates := 0
+	db := &fakeDBTX{
+		queryRowFunc: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			row := makeBotRow(botUUID, ownerUUID)
+			inner := row.scanFunc
+			row.scanFunc = func(dest ...any) error {
+				if err := inner(dest...); err != nil {
+					return err
+				}
+				*dest[7].(*string) = current
+				return nil
+			}
+			return row
+		},
+		execFunc: func(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+			if strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2") {
+				updates++
+				current = args[1].(string)
+			}
+			return pgconn.CommandTag{}, nil
+		},
+	}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	if err := svc.SetBotStatusFromWorkspace(context.Background(), botUUID.String(), BotStatusReady); err != nil {
+		t.Fatal(err)
+	}
+	if updates != 0 || current != BotStatusDeleting {
+		t.Fatalf("a deleting bot must keep its status; updates=%d status=%q", updates, current)
+	}
+	current = BotStatusCreating
+	if err := svc.SetBotStatusFromWorkspace(context.Background(), botUUID.String(), BotStatusFailed); err != nil {
+		t.Fatal(err)
+	}
+	if updates != 1 || current != BotStatusFailed {
+		t.Fatalf("creating -> failed should be written once; updates=%d status=%q", updates, current)
+	}
+	if err := svc.SetBotStatusFromWorkspace(context.Background(), botUUID.String(), BotStatusFailed); err != nil {
+		t.Fatal(err)
+	}
+	if updates != 1 {
+		t.Fatalf("unchanged status must not be rewritten; updates=%d", updates)
+	}
+}
+
+func TestRunDeleteLifecycleWaitsForWorkspaceAbsent(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	botID := botUUID.String()
+	var exec []string
+	db := &fakeDBTX{
+		execFunc: func(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+			switch {
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2"):
+				exec = append(exec, "status:"+args[1].(string))
+			case strings.Contains(query, "DELETE FROM bots"):
+				exec = append(exec, "delete")
+			}
+			return pgconn.CommandTag{}, nil
+		},
+	}
+	intents := &fakeWorkspaceIntents{outcome: WorkspaceOutcome{Desired: "absent", Observed: WorkspaceObservedAbsent}}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	svc.SetWorkspaceIntents(intents)
+
+	svc.runDeleteLifecycle(context.Background(), botID, BotStatusReady)
+	if len(intents.absent) != 1 || intents.absent[0] != botID || intents.preserve[0] {
+		t.Fatalf("delete must request a non-preserving absent workspace, got %v/%v", intents.absent, intents.preserve)
+	}
+	if len(exec) == 0 || exec[len(exec)-1] != "delete" {
+		t.Fatalf("bot row should be deleted after the workspace is absent; exec=%v", exec)
+	}
+	for _, e := range exec {
+		if strings.HasPrefix(e, "status:") {
+			t.Fatalf("no status revert expected on success; exec=%v", exec)
+		}
+	}
+}
+
+func TestRunDeleteLifecycleRevertsToPreviousStatusWhenWorkspaceLingers(t *testing.T) {
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	botID := botUUID.String()
+	var exec []string
+	db := &fakeDBTX{
+		execFunc: func(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+			switch {
+			case strings.Contains(query, "UPDATE bots") && strings.Contains(query, "SET status = $2"):
+				exec = append(exec, "status:"+args[1].(string))
+			case strings.Contains(query, "DELETE FROM bots"):
+				exec = append(exec, "delete")
+			}
+			return pgconn.CommandTag{}, nil
+		},
+	}
+	// The reconciler is still fighting a transient backend error.
+	intents := &fakeWorkspaceIntents{outcome: WorkspaceOutcome{Desired: "absent", Observed: "removing", LastError: "operation in flight"}}
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
+	svc.SetWorkspaceIntents(intents)
+
+	svc.runDeleteLifecycle(context.Background(), botID, BotStatusFailed)
+	if len(exec) != 1 || exec[0] != "status:"+BotStatusFailed {
+		t.Fatalf("a failed bot whose deletion lingers must revert to failed, not ready, and not be deleted; exec=%v", exec)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
+	"github.com/felinics/memoh/internal/workspace/shellenv"
 )
 
 // terminalIdleTimeout closes inactive terminal WebSocket sessions to
@@ -116,7 +117,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	// Idle timer: closes the connection if no client activity for terminalIdleTimeout.
 	var idleMu sync.Mutex
 	idleTimer := time.AfterFunc(terminalIdleTimeout, func() {
-		h.logger.Info("terminal idle timeout reached, closing", slog.String("bot_id", botID))
+		h.logger.InfoContext(c.Request().Context(), "terminal idle timeout reached, closing", slog.String("bot_id", botID))
 		_ = conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseGoingAway, "idle timeout"),
 			time.Now().Add(5*time.Second))
@@ -173,7 +174,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 				var ctrl terminalControlMessage
 				if json.Unmarshal(data, &ctrl) == nil && ctrl.Type == "resize" && ctrl.Cols > 0 && ctrl.Rows > 0 {
 					if resizeErr := execStream.Resize(ctrl.Cols, ctrl.Rows); resizeErr != nil {
-						h.logger.Warn("terminal resize failed",
+						h.logger.WarnContext(c.Request().Context(), "terminal resize failed",
 							slog.String("bot_id", botID), slog.Any("error", resizeErr))
 					}
 				}
@@ -186,10 +187,10 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 }
 
 // detectShell returns the interactive shell launcher used for browser terminals.
-// The bash-vs-sh decision happens inside the PTY process so terminal startup
-// does not depend on a separate, potentially flaky probe exec.
+// It is shellenv's launch line so launchers that probe the user's shell PATH
+// read the same rc files this terminal does.
 func detectShell(_ context.Context, _ *bridge.Client) string {
-	return `if [ -x /bin/bash ]; then exec /bin/bash; elif [ -x /usr/bin/bash ]; then exec /usr/bin/bash; elif command -v bash >/dev/null 2>&1; then exec bash; else exec /bin/sh; fi`
+	return shellenv.TerminalCommand()
 }
 
 func parseUint32Query(c echo.Context, name string, fallback uint32) uint32 {

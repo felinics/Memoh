@@ -1,4 +1,4 @@
--- 0153_remove_email
+-- 0154_remove_email
 -- Restore the previous email schema. Deleted data cannot be recovered.
 
 CREATE TABLE IF NOT EXISTS public.email_providers (

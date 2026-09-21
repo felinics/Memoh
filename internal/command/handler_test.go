@@ -32,10 +32,21 @@ func (f *fakeRoleResolver) GetMemberRole(_ context.Context, _, _ string) (string
 type fakeAccessEvaluator struct {
 	allow bool
 	err   error
+	// ownerOnlyChannels mirrors the production wiring, where the predicate is
+	// keyed by channel type (weixin), not a blanket flag.
+	ownerOnlyChannels map[string]bool
 }
 
-func (f *fakeAccessEvaluator) Evaluate(_ context.Context, _ acl.EvaluateRequest) (bool, error) {
+func (f *fakeAccessEvaluator) Evaluate(_ context.Context, req acl.EvaluateRequest) (bool, error) {
+	// Mirror acl.Service.Evaluate: owner-only channels short-circuit to allow.
+	if f.ownerOnlyChannels[req.ChannelType] {
+		return true, nil
+	}
 	return f.allow, f.err
+}
+
+func (f *fakeAccessEvaluator) OwnerOnlyChannel(channelType string) bool {
+	return f.ownerOnlyChannels[channelType]
 }
 
 type fakeScheduleService struct {
@@ -346,25 +357,42 @@ func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {
 	}
 }
 
-func TestExecute_WritePermissionDeniedForQQAndWeixinWithoutLinkedUser(t *testing.T) {
+func TestExecute_WritePermissionDeniedForQQWithoutLinkedUser(t *testing.T) {
 	t.Parallel()
 	h := newTestHandler(&fakeRoleResolver{role: ""})
-	for _, channelType := range []string{"qq", "weixin"} {
-		t.Run(channelType, func(t *testing.T) {
-			t.Parallel()
-			result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
-				BotID:             "bot-1",
-				ChannelIdentityID: "channel-id-1",
-				Text:              "/model set",
-				ChannelType:       channelType,
-			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if !strings.Contains(result, "Only the bot owner") {
-				t.Fatalf("%s unlinked write command should be denied, got: %s", channelType, result)
-			}
-		})
+	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
+		BotID:             "bot-1",
+		ChannelIdentityID: "channel-id-1",
+		Text:              "/model set",
+		ChannelType:       "qq",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Only the bot owner") {
+		t.Fatalf("qq unlinked write command should be denied, got: %s", result)
+	}
+}
+
+// On owner-only channels (weixin) every reachable sender is the operator, so
+// write commands must run without /link — even when the chat ACL would deny.
+func TestExecute_WritePermissionAllowedForOwnerOnlyChannelWithoutLink(t *testing.T) {
+	t.Parallel()
+	h := newTestHandlerWithACL(&fakeRoleResolver{role: ""}, &fakeAccessEvaluator{allow: false, ownerOnlyChannels: map[string]bool{"weixin": true}})
+	result, err := h.ExecuteWithInput(context.Background(), ExecuteInput{
+		BotID:             "bot-1",
+		ChannelIdentityID: "channel-id-1",
+		Text:              "/settings update",
+		ChannelType:       "weixin",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(result, "Only the bot owner") {
+		t.Fatalf("owner-only channel must not require /link for write commands, got: %s", result)
+	}
+	if !strings.Contains(result, "Usage:") {
+		t.Fatalf("expected the write command to reach its handler (usage hint), got: %s", result)
 	}
 }
 
@@ -1018,13 +1046,13 @@ func TestCommandAccess(t *testing.T) {
 		{name: "outsider denied", role: "", allow: false, text: "/new", wantOK: false},
 		{name: "outsider allowed by chat acl", role: "", allow: true, text: "/status", wantOK: true},
 		{name: "qq unbound denied by chat acl", role: "", channel: "qq", allow: false, text: "/new", wantOK: false},
-		{name: "weixin unbound denied by chat acl", role: "", channel: "weixin", allow: false, text: "/stop", wantOK: false},
+		{name: "weixin unbound allowed on owner-only channel", role: "", channel: "weixin", allow: false, text: "/stop", wantOK: true},
 		{name: "eval error propagates", role: "", allow: false, evalErr: errors.New("boom"), text: "/new", wantOK: false, wantError: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := newTestHandlerWithACL(&fakeRoleResolver{role: tc.role}, &fakeAccessEvaluator{allow: tc.allow, err: tc.evalErr})
+			h := newTestHandlerWithACL(&fakeRoleResolver{role: tc.role}, &fakeAccessEvaluator{allow: tc.allow, err: tc.evalErr, ownerOnlyChannels: map[string]bool{"weixin": true}})
 			ch := tc.channel
 			if ch == "" {
 				ch = "discord"

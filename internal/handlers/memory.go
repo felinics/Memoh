@@ -108,7 +108,7 @@ func (h *MemoryHandler) resolveProvider(ctx context.Context, botID string) (memp
 				if getErr == nil {
 					return p, nil
 				}
-				h.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", getErr))
+				h.logger.WarnContext(ctx, "memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", getErr))
 				return nil, fmt.Errorf("configured memory provider is unavailable: %w", getErr)
 			}
 		}
@@ -262,7 +262,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 		}
 		resp, searchErr := provider.Search(c.Request().Context(), req)
 		if searchErr != nil {
-			h.logger.Warn("search namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", searchErr))
+			h.logger.WarnContext(c.Request().Context(), "search namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", searchErr))
 			continue
 		}
 		results = append(results, resp.Results...)
@@ -308,7 +308,7 @@ func (h *MemoryHandler) ChatGetAll(c echo.Context) error {
 		}
 		resp, getAllErr := provider.GetAll(c.Request().Context(), req)
 		if getAllErr != nil {
-			h.logger.Warn("getall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", getAllErr))
+			h.logger.WarnContext(c.Request().Context(), "getall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", getAllErr))
 			continue
 		}
 		allResults = append(allResults, resp.Results...)
@@ -745,7 +745,7 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 			Filters: buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil),
 		}
 		if _, delErr := provider.DeleteAll(c.Request().Context(), req); delErr != nil {
-			h.logger.Warn("deleteall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", delErr))
+			h.logger.WarnContext(c.Request().Context(), "deleteall namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", delErr))
 		}
 	}
 	return c.JSON(http.StatusOK, memprovider.DeleteResponse{Message: "All memories deleted successfully!"})
@@ -938,7 +938,7 @@ func (h *MemoryHandler) ChatUsage(c echo.Context) error {
 		filters := buildNamespaceFilters(scope.Namespace, scope.ScopeID, nil)
 		usage, usageErr := provider.Usage(c.Request().Context(), filters)
 		if usageErr != nil {
-			h.logger.Warn("usage namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", usageErr))
+			h.logger.WarnContext(c.Request().Context(), "usage namespace failed", slog.String("namespace", scope.Namespace), slog.Any("error", usageErr))
 			continue
 		}
 		totalUsage.Count += usage.Count

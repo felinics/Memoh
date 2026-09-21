@@ -45,7 +45,7 @@ func (s *Service) resolveMemoryProviderWithID(ctx context.Context, botID string)
 	}
 	p, err := s.memoryRegistry.Get(ctx, providerID)
 	if err != nil {
-		s.logger.Warn("memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "memory provider lookup failed", slog.String("provider_id", providerID), slog.Any("error", err))
 		return "", nil
 	}
 	return providerID, p
@@ -103,7 +103,7 @@ func (s *Service) loadMemoryContext(ctx context.Context, req ChatRequest) memory
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(searchCtx.Err(), context.DeadlineExceeded) {
 			fallbackReason = "timeout"
 		}
-		s.logger.Warn("memory provider OnBeforeChat failed",
+		s.logger.WarnContext(ctx, "memory provider OnBeforeChat failed",
 			slog.String("bot_id", req.BotID),
 			slog.String("fallback_reason", fallbackReason),
 			slog.Any("error", err),
@@ -262,7 +262,7 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		userMessage, err := s.messageService.GetByIDBySession(ctx, req.ThreadID, req.PersistedUserMessageID)
 		if err != nil {
-			s.logger.Warn("load persisted user message for memory failed",
+			s.logger.WarnContext(ctx, "load persisted user message for memory failed",
 				slog.String("session_id", req.ThreadID),
 				slog.String("message_id", req.PersistedUserMessageID),
 				slog.Any("error", err),
@@ -301,7 +301,7 @@ func (s *Service) storeMemory(ctx context.Context, req ChatRequest, persisted []
 		DisplayName:       s.resolveDisplayName(ctx, req),
 		TimezoneLocation:  tzLoc,
 	}); err != nil {
-		s.logger.Warn("memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "memory provider OnAfterChat failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return
 	}
 	_, _ = s.runChatHook(ctx, req, hooks.EventMemoryExtracted, func(hreq *hooks.Request) {

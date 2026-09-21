@@ -1082,7 +1082,9 @@ export const getBotsByBotIdContainerQuery = defineQueryOptions<Options<GetBotsBy
 }));
 
 /**
- * Create and start workspace for bot
+ * Create workspace for bot
+ *
+ * Records the intent for a running workspace and streams the
  */
 export const postBotsByBotIdContainerMutation = (options?: Partial<Options<PostBotsByBotIdContainerData>>): UseMutationOptions<PostBotsByBotIdContainerResponse, Options<PostBotsByBotIdContainerData>, PostBotsByBotIdContainerError> => ({
     mutation: async (vars) => {

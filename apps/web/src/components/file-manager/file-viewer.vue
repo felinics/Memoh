@@ -53,6 +53,8 @@ const originalContent = ref('')
 const baseRevision = ref('')
 const loading = ref(false)
 const saving = ref(false)
+const savingContent = ref<string | null>(null)
+let fileGeneration = 0
 const imageUrl = ref('')
 // True once the file has been read at least once for the current path. Used
 // to suppress the full-area spinner on subsequent reloads — the editor / image
@@ -103,7 +105,8 @@ const filename = computed(() => props.file.name ?? '')
 const filePath = computed(() => props.file.path ?? '')
 const isText = computed(() => isTextFile(filename.value))
 const isImage = computed(() => isImageFile(filename.value))
-const isDirty = computed(() => content.value !== originalContent.value)
+const isDirty = computed(() => content.value !== originalContent.value
+  || (savingContent.value !== null && content.value !== savingContent.value))
 
 const chatStore = useChatStore()
 const { fsChangedAt, currentBotId, bots } = storeToRefs(chatStore)
@@ -470,6 +473,14 @@ async function handleSave(force = false): Promise<boolean> {
       return false
     }
   }
+  const snapshot = {
+    botId: props.botId,
+    path: filePath.value,
+    content: content.value,
+    revision: baseRevision.value,
+    generation: fileGeneration,
+  }
+  savingContent.value = snapshot.content
   saving.value = true
   // Snapshot pre-save chip context so we can:
   //   a) detect an agent bump that lands inside the POST window (the
@@ -484,17 +495,18 @@ async function handleSave(force = false): Promise<boolean> {
     // "expect file absent". The bypass path already drops the field; this
     // covers the normal-save-with-no-known-baseline case (e.g. saving on top
     // of a stale read that never returned a revision).
-    const sendBaseline = !behavior.bypassConflictGuard && baseRevision.value !== ''
+    const sendBaseline = !behavior.bypassConflictGuard && snapshot.revision !== ''
     const requestBody = sendBaseline
-      ? { path: filePath.value, content: content.value, expectedRevision: baseRevision.value }
-      : { path: filePath.value, content: content.value }
+      ? { path: snapshot.path, content: snapshot.content, expectedRevision: snapshot.revision }
+      : { path: snapshot.path, content: snapshot.content }
     const { data } = await postBotsByBotIdContainerFsWrite({
-      path: { bot_id: props.botId },
+      path: { bot_id: snapshot.botId },
       body: requestBody,
       throwOnError: true,
     })
-    originalContent.value = content.value
-    baseRevision.value = data.revision ?? baseRevision.value
+    if (snapshot.generation !== fileGeneration) return false
+    originalContent.value = snapshot.content
+    baseRevision.value = data.revision ?? snapshot.revision
     observedExternalRevision.value = ''
     diskState.value = 'available'
     // An agent bump observed during our POST window means the disk diverged
@@ -514,8 +526,9 @@ async function handleSave(force = false): Promise<boolean> {
     }
     toast.success(t('bots.files.saveSuccess'))
     emit('saved')
-    return true
+    return !isDirty.value
   } catch (error) {
+    if (snapshot.generation !== fileGeneration) return false
     if (isHttpStatus(error, 409)) {
       // A 409 means our baseline is stale; bumping the disk state surfaces
       // "Try again" (Reload) as the chip's primary affordance and prevents a
@@ -533,6 +546,7 @@ async function handleSave(force = false): Promise<boolean> {
     toast.error(resolveApiErrorMessage(error, t('bots.files.saveFailed')))
     return false
   } finally {
+    if (snapshot.generation === fileGeneration) savingContent.value = null
     saving.value = false
   }
 }
@@ -562,7 +576,11 @@ function cleanupImageUrl() {
   }
 }
 
-watch(() => props.file.path, () => {
+watch([() => props.botId, () => props.file.path], () => {
+  fileGeneration++
+  savingContent.value = null
+  externalPollController?.abort()
+  externalPollController = null
   // Tear down any in-flight load and the compare snapshot before the new
   // path's loaders kick off — otherwise a slow previous-path read could
   // resolve onto the new path's empty buffer and silently surface a chip on a
@@ -732,6 +750,7 @@ onDeactivated(() => {
 })
 
 onBeforeUnmount(() => {
+  fileGeneration++
   externalPollingActive = false
   if (nowTickInterval) clearInterval(nowTickInterval)
   nowTickInterval = null

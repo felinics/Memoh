@@ -408,7 +408,7 @@ func (s *NativeToolSource) loadTools(ctx context.Context, session mcp.ToolSessio
 	for providerIndex, provider := range providers {
 		providerTools, err := provider.Tools(ctx, toolSession)
 		if err != nil {
-			s.logger.Warn("native tool provider failed", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "native tool provider failed", slog.Any("error", err))
 			continue
 		}
 		var usageProvider ToolUsage

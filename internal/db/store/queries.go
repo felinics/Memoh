@@ -35,6 +35,15 @@ type Queries interface {
 	LockAgentAuthorizationOwner(context.Context, string) error
 
 	ClaimBotDependencyOperation(ctx context.Context, arg dbsqlc.ClaimBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
+	ClaimBotWorkspace(ctx context.Context, arg dbsqlc.ClaimBotWorkspaceParams) (dbsqlc.BotWorkspace, error)
+	ClaimBotWorkspaces(ctx context.Context, arg dbsqlc.ClaimBotWorkspacesParams) ([]dbsqlc.BotWorkspace, error)
+	CountBotWorkspacesByObservedState(ctx context.Context) ([]dbsqlc.CountBotWorkspacesByObservedStateRow, error)
+	GetBotWorkspace(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotWorkspace, error)
+	ListBotWorkspacesByObservedState(ctx context.Context, arg dbsqlc.ListBotWorkspacesByObservedStateParams) ([]dbsqlc.BotWorkspace, error)
+	ReleaseBotWorkspaceLease(ctx context.Context, arg dbsqlc.ReleaseBotWorkspaceLeaseParams) (int64, error)
+	RenewBotWorkspaceLease(ctx context.Context, arg dbsqlc.RenewBotWorkspaceLeaseParams) (int64, error)
+	UpdateBotWorkspaceObserved(ctx context.Context, arg dbsqlc.UpdateBotWorkspaceObservedParams) (dbsqlc.BotWorkspace, error)
+	UpsertBotWorkspaceIntent(ctx context.Context, arg dbsqlc.UpsertBotWorkspaceIntentParams) (dbsqlc.BotWorkspace, error)
 	FinishBotDependencyOperation(ctx context.Context, arg dbsqlc.FinishBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
 	DeleteBotDependencyOperation(ctx context.Context, arg dbsqlc.DeleteBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
 	PruneWorkspaceDependencyDefinitions(ctx context.Context, sourceURL string) (int64, error)

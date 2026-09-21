@@ -397,18 +397,14 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return s.fetchGitHubCopilotModels(ctx, provider)
 	}
 
-	if models, ok := s.fetchTemplateModels(ctx, provider); ok {
-		return models, nil
-	}
-
-	remoteModels, err := s.fetchRemoteModelsViaSDK(ctx, provider)
-	if err != nil {
-		return nil, err
-	}
-
-	return remoteModels, nil
+	return s.fetchRemoteModelsViaSDK(ctx, provider)
 }
 
+// fetchTemplateModels returns the curated template/catalog entries for a
+// provider, when one is associated. The list describes CAPABILITIES of known
+// models, never which models this endpoint actually serves: callers must treat
+// it as lookup-by-ID metadata, not as the model list (an empty template like
+// New API must not short-circuit the remote /models call).
 func (s *Service) fetchTemplateModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, bool) {
 	if provider.ProviderTemplateID.Valid {
 		models, err := s.queries.ListProviderTemplateModels(ctx, provider.ProviderTemplateID)
@@ -416,7 +412,7 @@ func (s *Service) fetchTemplateModels(ctx context.Context, provider sqlc.Provide
 			return remoteModelsFromCatalog(models), true
 		}
 		if s.logger != nil {
-			s.logger.Warn("failed to load provider template model catalog", slog.Any("error", err))
+			s.logger.WarnContext(ctx, "failed to load provider template model catalog", slog.Any("error", err))
 		}
 	}
 	source := metadataSectionSource(providerMetadata(provider.Metadata), "preset")
@@ -431,7 +427,7 @@ func (s *Service) fetchTemplateModels(ctx context.Context, provider sqlc.Provide
 	defs, err := registry.Load(s.logger, s.templatesDir)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("failed to load provider template models", slog.String("template_source", source), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "failed to load provider template models", slog.String("template_source", source), slog.Any("error", err))
 		}
 		return nil, false
 	}
@@ -521,9 +517,30 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 		return nil, fmt.Errorf("list models: %w", err)
 	}
 
+	// Best-effort capability lookup: template/catalog entries keyed by model ID
+	// enrich the models the endpoint actually serves; they never add, remove,
+	// or substitute entries (a gateway like New API decides its own list).
+	templatesByID := make(map[string]RemoteModel)
+	if templateModels, ok := s.fetchTemplateModels(ctx, provider); ok {
+		for _, model := range templateModels {
+			templatesByID[model.ID] = model
+		}
+	}
+
 	remoteModels := make([]RemoteModel, 0, len(sdkModels))
 	for _, m := range sdkModels {
+		template, found := templatesByID[m.ID]
 		modelType := m.Type
+		if found {
+			switch template.Type {
+			case string(sdk.ModelTypeChat), string(sdk.ModelTypeEmbedding):
+				// List endpoints often lack real per-model types (the OpenAI
+				// protocol has none, so completions/responses hardcode chat);
+				// the curated template type wins for a known model ID, e.g.
+				// text-embedding-* must survive as embedding with dimensions.
+				modelType = sdk.ModelType(template.Type)
+			}
+		}
 		if modelType == "" {
 			modelType = sdk.ModelTypeChat
 		}
@@ -536,23 +553,49 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 		}
 		var dimensions *int
 		if modelType == sdk.ModelTypeEmbedding {
-			dim, err := models.InferEmbeddingDimensions(ctx, string(clientType), baseURL, creds.APIKey, m.ID, probeTimeout, nil)
-			if err != nil {
-				logger := s.logger
-				if logger == nil {
-					logger = slog.Default()
+			switch {
+			case found && template.Dimensions != nil:
+				// The template already curates this model's dimensions; a live
+				// probe would spend tokens and can spuriously fail on gateways
+				// whose key lacks embedding permission.
+				dimensions = template.Dimensions
+			default:
+				dim, err := models.InferEmbeddingDimensions(ctx, string(clientType), baseURL, creds.APIKey, m.ID, probeTimeout, nil)
+				if err != nil {
+					logger := s.logger
+					if logger == nil {
+						logger = slog.Default()
+					}
+					logger.WarnContext(ctx, "skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
+					continue
 				}
-				logger.Warn("skip embedding model import because dimensions probe failed", slog.String("model_id", m.ID), slog.Any("error", err))
-				continue
+				dimensions = &dim
 			}
-			dimensions = &dim
 		}
-		remoteModels = append(remoteModels, RemoteModel{
+		remote := RemoteModel{
 			ID:         m.ID,
 			Name:       name,
 			Type:       string(modelType),
 			Dimensions: dimensions,
-		})
+		}
+		if found {
+			// The live endpoint keeps deciding the list; curated fields fill in.
+			if template.Name != "" {
+				remote.Name = template.Name
+			}
+			remote.Description = template.Description
+			remote.Compatibilities = template.Compatibilities
+			remote.ReasoningEfforts = template.ReasoningEfforts
+			remote.ThinkingMode = template.ThinkingMode
+			remote.ReasoningDialect = template.ReasoningDialect
+			remote.ReasoningOffSupport = template.ReasoningOffSupport
+			remote.ReasoningDefaultOn = template.ReasoningDefaultOn
+			remote.ThinkingBudgetMin = template.ThinkingBudgetMin
+			remote.ThinkingBudgetMax = template.ThinkingBudgetMax
+			remote.ContextWindow = template.ContextWindow
+			remote.CapabilitiesKnown = true
+		}
+		remoteModels = append(remoteModels, remote)
 	}
 	return remoteModels, nil
 }

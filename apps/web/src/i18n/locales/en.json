@@ -235,6 +235,7 @@
       "runtime_conflict": "The Agent runtime is not ready for this operation. Refresh and try again.",
       "runtime_limit_reached": "Too many Agent runtimes are active. Close one and try again.",
       "operation_failed": "The Agent runtime operation failed. Please try again.",
+      "command_not_found": "The command \"{command}\" was not found in the workspace. Install it from the workspace terminal, or set the Agent command to its absolute path.",
       "model_selection_unsupported": "This external agent does not support model selection.",
       "model_id_required": "Choose a model and try again.",
       "model_unavailable": "The selected model is no longer available for this external agent.",
@@ -1661,6 +1662,30 @@
       "githubConnectHint": "Sign in with GitHub to use Copilot models.",
       "revokeConfirm": "Revoke authorization for this account?",
       "connecting": "Connecting"
+    },
+    "saveSuccess": "Provider saved",
+    "saveBeforeTest": "Save changes before testing the connection."
+  },
+  "providerConnect": {
+    "title": "Add Provider",
+    "description": "A third-party service wants to add the following provider to Memoh. It will only be saved after your confirmation.",
+    "name": "Name",
+    "baseUrl": "Base URL",
+    "clientType": "Client Type",
+    "apiKey": "API Key",
+    "confirm": "Add Provider",
+    "decline": "Cancel",
+    "createFailed": "Failed to add provider",
+    "invalidTitle": "Invalid Link",
+    "backToProviders": "Back to Providers",
+    "error": {
+      "missing": "The link is missing its payload.",
+      "decode": "The link payload could not be parsed.",
+      "kind": "The link is not a provider import link.",
+      "version": "The link version is not supported.",
+      "baseUrl": "The link contains no valid base URL.",
+      "apiKey": "The link contains no API key.",
+      "clientType": "The link specifies an unsupported client type."
     }
   },
   "webSearch": {
@@ -2144,6 +2169,10 @@
       "failedTitle": "Setup failed",
       "retry": "Retry",
       "back": "Back to form",
+      "retryWorkspace": "Retry workspace",
+      "continueLater": "Continue later",
+      "openExisting": "Open existing bot",
+      "stillProvisioning": "The workspace is still being set up. Keep waiting on the bot's workspace page, or retry now.",
       "line": {
         "command": "Creating bot \"{name}\"",
         "botCreated": "Bot record created",
@@ -2177,9 +2206,9 @@
     "avatarUrl": "Avatar URL",
     "avatarUrlPlaceholder": "Enter avatar image URL",
     "timezone": "Timezone",
+    "timezoneHint": "Scheduled tasks use this timezone to determine when to run.",
     "timezonePlaceholder": "e.g. America/New_York",
     "timezoneInherited": "Inherited from user/system",
-    "timezoneInheritedHint": "Leave empty to inherit the user's timezone, or fall back to the system timezone.",
     "aclPreset": "IM App Policy",
     "aclPresetDescription": "Start with a standard ACL preset. You can tweak it later in Channel Access.",
     "aclPresetHint": "Tip: use 'Private Only' for personal bots, 'Group Only' or 'Group and Thread' for community bots, and 'Allow All' to stay completely open.",
@@ -2212,8 +2241,6 @@
     "editTimezoneDescription": "Set a timezone override for this bot.",
     "avatarUpdateSuccess": "Avatar updated",
     "avatarUpdateFailed": "Failed to update avatar",
-    "timezoneUpdateSuccess": "Timezone updated",
-    "timezoneUpdateFailed": "Failed to update timezone",
     "typePlaceholder": "Select bot type",
     "types": {
       "personal": "Personal",
@@ -2897,13 +2924,9 @@
     "settings": {
       "blocks": {
         "context": "Context & Memory",
-        "global": "Global Settings",
         "interaction": "Interaction",
-        "multimedia": "Multimedia",
-        "acp": "Agent"
+        "multimedia": "Multimedia"
       },
-      "chatLanguage": "Language",
-      "chatLanguagePlaceholder": "e.g., English, zh-CN",
       "chatModel": "Chat Model",
       "chatModelDescription": "Used by the Memoh Agent.",
       "chatModelPlaceholder": "Select model",
@@ -3673,9 +3696,6 @@
       "fieldRequired": "{field} is required",
       "fieldInvalid": "{field} is invalid"
     }
-  },
-  "languages": {
-    "auto": "Auto"
   },
   "onboarding": {
     "prev": "Previous",

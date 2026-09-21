@@ -533,6 +533,10 @@ func (f *fakeChatACL) Evaluate(_ context.Context, req acl.EvaluateRequest) (bool
 	return f.allowed, nil
 }
 
+func (*fakeChatACL) OwnerOnlyChannel(_ string) bool {
+	return false
+}
+
 type fakeMediaIngestor struct {
 	nextID          string
 	nextMime        string

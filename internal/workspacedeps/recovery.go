@@ -21,7 +21,7 @@ func (s *Service) cleanupReceipt(ctx context.Context, op *operation) {
 	cleanupCtx, cancel := finalizeContext(ctx)
 	defer cancel()
 	if err := CleanupReceipt(cleanupCtx, op.client, op.receipt); err != nil {
-		s.logger.Warn("clean completed dependency receipt", slog.String("dependency_id", op.dep.ID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "clean completed dependency receipt", slog.String("dependency_id", op.dep.ID), slog.Any("error", err))
 	}
 }
 

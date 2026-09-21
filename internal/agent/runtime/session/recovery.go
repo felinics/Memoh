@@ -232,7 +232,7 @@ func (m *Manager) reserveRecoveredWaitingDecision(ctx context.Context, run ledge
 	if err := m.publishRuntimeDelta(context.WithoutCancel(ctx), snapshot, handle.RunID, RuntimeDelta{
 		CurrentRunView: snapshot.CurrentRunView,
 	}); err != nil {
-		m.logger.Warn("publish recovered waiting-decision checkpoint failed",
+		m.logger.WarnContext(ctx, "publish recovered waiting-decision checkpoint failed",
 			slog.Any("error", err), slog.String("run_id", handle.RunID))
 	}
 	return nil

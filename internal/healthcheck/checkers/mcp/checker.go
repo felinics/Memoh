@@ -59,7 +59,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 	}
 	if c.connections == nil || c.tools == nil {
 		if c.logger != nil {
-			c.logger.Warn(
+			c.logger.WarnContext(ctx,
 				"mcp healthcheck dependencies are unavailable",
 				slog.String("bot_id", botID),
 				slog.Bool("has_connection_lister", c.connections != nil),
@@ -81,7 +81,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 	items, err := c.connections.ListActiveByBot(ctx, botID)
 	if err != nil {
 		if c.logger != nil {
-			c.logger.Warn(
+			c.logger.WarnContext(ctx,
 				"mcp healthcheck list connections failed",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),
@@ -117,7 +117,7 @@ func (c *Checker) ListChecks(ctx context.Context, botID string) []healthcheck.Ch
 	tools, err := c.tools.ListTools(probeCtx, mcp.ToolSessionContext{BotID: botID})
 	if err != nil {
 		if c.logger != nil {
-			c.logger.Warn(
+			c.logger.WarnContext(ctx,
 				"mcp healthcheck list tools failed",
 				slog.String("bot_id", botID),
 				slog.Any("error", err),

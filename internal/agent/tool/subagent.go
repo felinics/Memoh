@@ -52,17 +52,18 @@ const (
 
 // SpawnRunConfig mirrors agent.RunConfig fields needed by subagent controls.
 type SpawnRunConfig struct {
-	RunID         string
-	Model         *sdk.Model
-	ModelUUID     string
-	ModelID       string
-	ModelProvider string
-	System        string
-	Query         string
-	SessionType   string
-	Identity      SpawnIdentity
-	LoopDetection SpawnLoopConfig
-	Messages      []sdk.Message
+	RunID           string
+	Model           *sdk.Model
+	ModelUUID       string
+	ModelID         string
+	ModelProvider   string
+	ModelProviderID string
+	System          string
+	Query           string
+	SessionType     string
+	Identity        SpawnIdentity
+	LoopDetection   SpawnLoopConfig
+	Messages        []sdk.Message
 	// ReasoningConfig is the thinking decision resolved for the subagent's own
 	// model. It replaces a lone effort string that was never assigned, which is
 	// how subagents came to run with no reasoning configuration at all (#983).
@@ -222,7 +223,7 @@ func (w *SubagentWatchdog) run(ctx context.Context) {
 			}
 			timer.Reset(w.timeout)
 		case <-timer.C:
-			w.logger.Warn("subagent watchdog fired", slog.Duration("timeout", w.timeout))
+			w.logger.WarnContext(ctx, "subagent watchdog fired", slog.Duration("timeout", w.timeout))
 			w.cancel(ErrWatchdogTimedOut)
 			return
 		}
@@ -241,6 +242,7 @@ type resolvedSubagentModel struct {
 	UUID         string
 	ModelID      string
 	ProviderName string
+	ProviderID   string
 	// ReasoningConfig is resolved against this model, not inherited from the
 	// parent: a subagent may run a different model, whose advertised tiers and
 	// off-ability differ. Before #983 it was neither inherited nor resolved, so
@@ -338,13 +340,13 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 		parts = append(parts,
 			"Use "+spawnRef+" to create a managed subagent for an independent task.",
 			"Subagents can use the bot's configured tools, including workspace, web, memory, skills, browser, media, and MCP tools. They cannot ask the user, send direct chat messages or reactions, or create more subagents.",
-			"Choose `model_id` when another enabled chat model is better for the task. Add `provider` only when the same model_id exists under multiple providers. Omit `model_id` to reuse the current session model.",
+			"Subagents use an enabled chat model from the current session's provider. `model_id` selects a model within that provider; omitting it uses the current session model.",
 			"Set `fork: true` when the worker needs the parent model's current message context; otherwise it starts with only the assigned task.",
 			"Use subagents when work benefits from isolated context or can proceed while you continue. Don't use one for simple single-step work — just do it directly.",
 		)
 	}
 	if ref, ok := available.Ref(ToolListModels()); ok {
-		parts = append(parts, "Use "+ref+" to inspect the enabled chat models, provider names, and descriptions before choosing a model for a subagent.")
+		parts = append(parts, ref+" lists enabled chat models, provider names, and descriptions. Only models from the current session's provider are available to subagents.")
 	}
 	if ref, ok := available.Ref(ToolSendMessage()); ok {
 		canStartBackground = true
@@ -374,8 +376,10 @@ func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]sd
 	}
 	sess := session
 	spawnDescription := "Create one managed subagent for an independent task. Returns a memorable agent_id."
-	if catalog, err := p.listModelCatalog(ctx); err == nil {
-		spawnDescription = appendModelCatalogToSpawnDescription(spawnDescription, catalog, session)
+	if parent, err := p.parentModel(ctx, session); err == nil {
+		if catalog, err := p.listModelCatalog(ctx, parent.ProviderID); err == nil {
+			spawnDescription = appendModelCatalogToSpawnDescription(spawnDescription, catalog, session)
+		}
 	}
 	return []sdk.Tool{
 		{
@@ -394,11 +398,11 @@ func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]sd
 					},
 					"model_id": map[string]any{
 						"type":        "string",
-						"description": "Optional external model name from list_models. Omit to use the current session model.",
+						"description": "Optional external model name from the current session's provider. Omit to use the current session model.",
 					},
 					"provider": map[string]any{
 						"type":        "string",
-						"description": "Optional provider name used only to disambiguate duplicate model_id values.",
+						"description": "Optional provider name. Must match the current session's provider.",
 					},
 					"fork": map[string]any{
 						"type":        "boolean",
@@ -453,7 +457,7 @@ func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]sd
 		},
 		{
 			Name:        ToolListModels().String(),
-			Description: "List enabled chat models available for managed subagents, including model_id, provider, description, and the current session model marker.",
+			Description: "List enabled chat models, including model_id, provider, description, and the current session model marker. Subagents can only use models from the current session's provider.",
 			Parameters:  emptyObjectSchema(),
 			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
 				return p.execListModels(ctx.Context, sess, inputAsMap(input))
@@ -655,7 +659,7 @@ func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionCont
 }
 
 func (p *SpawnProvider) execListModels(ctx context.Context, session SessionContext, _ map[string]any) (any, error) {
-	catalog, err := p.listModelCatalog(ctx)
+	catalog, err := p.listModelCatalog(ctx, "")
 	if err != nil {
 		return nil, err
 	}
@@ -921,7 +925,7 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 	}
 	runCtx, ok, err := p.bgManager.MarkAgentTaskRunning(ctx, next.taskID)
 	if err != nil {
-		p.logger.Warn("start queued agent task failed", slog.String("task_id", next.taskID), slog.Any("error", err))
+		p.logger.WarnContext(ctx, "start queued agent task failed", slog.String("task_id", next.taskID), slog.Any("error", err))
 		p.finishAgentRequest(ctx, key, agentRunResult{
 			AgentID:   next.agentID,
 			SessionID: next.agentSessionID,
@@ -983,7 +987,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	}
 	defer func() {
 		if err := p.runSubagentHook(context.WithoutCancel(ctx), hooks.EventSubagentStop, req, res); err != nil && p.logger != nil {
-			p.logger.Warn("subagent stop hook failed",
+			p.logger.WarnContext(ctx, "subagent stop hook failed",
 				slog.String("bot_id", req.parentSession.BotID),
 				slog.String("agent_id", req.agentID),
 				slog.Any("error", err),
@@ -1017,6 +1021,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		ModelUUID:                 req.runtime.UUID,
 		ModelID:                   req.runtime.ModelID,
 		ModelProvider:             req.runtime.ProviderName,
+		ModelProviderID:           req.runtime.ProviderID,
 		ReasoningConfig:           req.runtime.ReasoningConfig,
 		ReasoningStoredEffort:     req.parentSession.ReasoningStoredEffort,
 		ReasoningRequestedEffort:  req.parentSession.ReasoningRequestedEffort,
@@ -1425,7 +1430,7 @@ func (p *SpawnProvider) loadAgentMessages(ctx context.Context, sessionID string)
 	}
 	msgs, err := p.messageService.ListBySession(ctx, sessionID)
 	if err != nil {
-		p.logger.Warn("load subagent messages failed", slog.String("session_id", sessionID), slog.Any("error", err))
+		p.logger.WarnContext(ctx, "load subagent messages failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil
 	}
 	out := make([]sdk.Message, 0, len(msgs))
@@ -1650,7 +1655,7 @@ func (p *SpawnProvider) persistMessages(
 			// the whole attempt would reproduce it and discard every later valid
 			// message. Preserve the legacy skip behavior, but make the defect
 			// observable. Actual storage failures below remain authoritative.
-			p.logger.Warn("marshal subagent message failed; skipping message",
+			p.logger.WarnContext(ctx, "marshal subagent message failed; skipping message",
 				slog.Any("error", err),
 				slog.Int("message_index", i))
 			continue
@@ -1685,7 +1690,7 @@ func (p *SpawnProvider) persistMessages(
 			TurnRequestMessageID: strings.TrimSpace(req.requestMessageID),
 		})
 		if err != nil {
-			p.logger.Warn("persist subagent message failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "persist subagent message failed", slog.Any("error", err))
 			return fmt.Errorf("persist subagent message: %w", err)
 		}
 		if i == lastAssistantIdx && result.ContextLifecycle != nil {
@@ -1718,13 +1723,13 @@ func (p *SpawnProvider) persistUserMessage(ctx context.Context, req *agentReques
 	}
 	persisted, err := p.messageService.Persist(ctx, input)
 	if err != nil {
-		p.logger.Warn("persist subagent user message failed", slog.Any("error", err))
+		p.logger.WarnContext(ctx, "persist subagent user message failed", slog.Any("error", err))
 		return "", false
 	}
 	return persisted.ID, true
 }
 
-func (p *SpawnProvider) listModelCatalog(ctx context.Context) ([]subagentModelCatalogItem, error) {
+func (p *SpawnProvider) listModelCatalog(ctx context.Context, providerID string) ([]subagentModelCatalogItem, error) {
 	if p.models == nil || p.queries == nil {
 		return nil, errors.New("model catalog services not configured")
 	}
@@ -1734,6 +1739,9 @@ func (p *SpawnProvider) listModelCatalog(ctx context.Context) ([]subagentModelCa
 	}
 	items := make([]subagentModelCatalogItem, 0, len(modelList))
 	for _, model := range modelList {
+		if providerID != "" && model.ProviderID != providerID {
+			continue
+		}
 		provider, fetchErr := models.FetchProviderByID(ctx, p.queries, model.ProviderID)
 		if fetchErr != nil {
 			return nil, fetchErr
@@ -1779,8 +1787,36 @@ func appendModelCatalogToSpawnDescription(base string, catalog []subagentModelCa
 		}
 		lines = append(lines, fmt.Sprintf("- %s | %s | %s%s", item.ModelID, item.ProviderName, description, marker))
 	}
-	lines = append(lines, "Use list_models for the same catalog as structured data.")
+	lines = append(lines, "list_models includes models from all providers; subagents are limited to the current session's provider.")
 	return strings.Join(lines, "\n")
+}
+
+func (p *SpawnProvider) parentModel(ctx context.Context, session SessionContext) (models.GetResponse, error) {
+	if p.models == nil {
+		return models.GetResponse{}, errors.New("model resolution services not configured")
+	}
+	modelUUID := strings.TrimSpace(session.CurrentModelUUID)
+	if modelUUID == "" {
+		if p.settings == nil {
+			return models.GetResponse{}, errors.New("no current model and bot settings service is not configured")
+		}
+		botSettings, err := p.settings.GetBot(ctx, session.BotID)
+		if err != nil {
+			return models.GetResponse{}, err
+		}
+		modelUUID = strings.TrimSpace(botSettings.ChatModelID)
+	}
+	if modelUUID == "" {
+		return models.GetResponse{}, errors.New("no current or default chat model is configured")
+	}
+	model, err := p.models.GetByID(ctx, modelUUID)
+	if err != nil {
+		return models.GetResponse{}, err
+	}
+	if providerID := strings.TrimSpace(session.CurrentModelProviderID); providerID != "" && model.ProviderID != providerID {
+		return models.GetResponse{}, errors.New("current session model provider changed during the turn")
+	}
+	return model, nil
 }
 
 func (p *SpawnProvider) resolveModel(
@@ -1796,9 +1832,12 @@ func (p *SpawnProvider) resolveModel(
 	modelUUID = strings.TrimSpace(modelUUID)
 	requestedModelID = strings.TrimSpace(requestedModelID)
 	requestedProvider = strings.TrimSpace(requestedProvider)
+	parent, err := p.parentModel(ctx, session)
+	if err != nil {
+		return resolvedSubagentModel{}, err
+	}
 
 	var modelInfo models.GetResponse
-	var err error
 	switch {
 	case modelUUID != "":
 		modelInfo, err = p.models.GetByID(ctx, modelUUID)
@@ -1806,7 +1845,7 @@ func (p *SpawnProvider) resolveModel(
 			return resolvedSubagentModel{}, fmt.Errorf("pinned model %s (%s) is unavailable: %w", requestedModelID, requestedProvider, err)
 		}
 	case requestedModelID != "":
-		catalog, catalogErr := p.listModelCatalog(ctx)
+		catalog, catalogErr := p.listModelCatalog(ctx, parent.ProviderID)
 		if catalogErr != nil {
 			return resolvedSubagentModel{}, catalogErr
 		}
@@ -1831,24 +1870,13 @@ func (p *SpawnProvider) resolveModel(
 		}
 		modelInfo, err = p.models.GetByID(ctx, matches[0].UUID)
 	default:
-		defaultModelUUID := strings.TrimSpace(session.CurrentModelUUID)
-		if defaultModelUUID == "" {
-			if p.settings == nil {
-				return resolvedSubagentModel{}, errors.New("no current model and bot settings service is not configured")
-			}
-			botSettings, settingsErr := p.settings.GetBot(ctx, session.BotID)
-			if settingsErr != nil {
-				return resolvedSubagentModel{}, settingsErr
-			}
-			defaultModelUUID = strings.TrimSpace(botSettings.ChatModelID)
-		}
-		if defaultModelUUID == "" {
-			return resolvedSubagentModel{}, errors.New("no current or default chat model is configured")
-		}
-		modelInfo, err = p.models.GetByID(ctx, defaultModelUUID)
+		modelInfo = parent
 	}
 	if err != nil {
 		return resolvedSubagentModel{}, err
+	}
+	if modelInfo.ProviderID != parent.ProviderID {
+		return resolvedSubagentModel{}, errors.New("subagent model must use the current session's provider")
 	}
 	if modelInfo.Type != models.ModelTypeChat {
 		return resolvedSubagentModel{}, fmt.Errorf("model %s is not a chat model", modelInfo.ModelID)
@@ -1910,6 +1938,7 @@ func (p *SpawnProvider) resolveModel(
 		UUID:                   modelInfo.ID,
 		ModelID:                modelInfo.ModelID,
 		ProviderName:           provider.Name,
+		ProviderID:             modelInfo.ProviderID,
 		PromptCacheTTL:         providers.ProviderConfigString(provider, "prompt_cache_ttl"),
 		ChatCompletionsCompat:  chatCompletionsCompat,
 		SupportsImageInput:     modelInfo.HasCompatibility(models.CompatVision),

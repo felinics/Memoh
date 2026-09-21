@@ -75,6 +75,7 @@ const (
 	CodeACPRuntimeConflict                       Code = "acp.runtime_conflict"
 	CodeACPRuntimeLimitReached                   Code = "acp.runtime_limit_reached"
 	CodeACPOperationFailed                       Code = "acp.operation_failed"
+	CodeACPCommandNotFound                       Code = "acp.command_not_found"
 	CodeExternalAgentTurnReplacementUnsupported  Code = "external_agent.turn_replacement_unsupported"
 	CodeACPModelSelectionUnsupported             Code = "acp.model_selection_unsupported"
 	CodeACPModelIDRequired                       Code = "acp.model_id_required"
@@ -456,6 +457,11 @@ var catalog = map[Code]Definition{
 	CodeACPOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Agent runtime operation failed. Please try again.",
+	},
+	CodeACPCommandNotFound: {
+		HTTPStatus:  http.StatusConflict,
+		Detail:      "The Agent command was not found in the workspace. Install it from the workspace terminal, or set the Agent command to an absolute path.",
+		AllowedArgs: []string{"command"},
 	},
 	CodeExternalAgentTurnReplacementUnsupported: {
 		HTTPStatus: http.StatusBadRequest,

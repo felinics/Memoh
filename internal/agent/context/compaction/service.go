@@ -280,7 +280,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 	// the cooldown, and sync callers should reuse its result).
 	run, ok := s.beginSessionCompaction(cfg.SessionID)
 	if !ok {
-		s.logger.Info("compaction: already in flight for session",
+		s.logger.InfoContext(ctx, "compaction: already in flight for session",
 			slog.String("bot_id", cfg.BotID),
 			slog.String("session_id", cfg.SessionID),
 		)
@@ -305,7 +305,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		cooling = s.inHardPressureCooldown(cfg.SessionID)
 	}
 	if !cfg.Manual && cooling {
-		s.logger.Info("compaction: session in failure cooldown, skipping",
+		s.logger.InfoContext(ctx, "compaction: session in failure cooldown, skipping",
 			slog.String("bot_id", cfg.BotID),
 			slog.String("session_id", cfg.SessionID),
 		)
@@ -380,7 +380,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 func (s *Service) runPostCompactHook(ctx context.Context, cfg TriggerConfig, compactErr error) {
 	defer func() {
 		if r := recover(); r != nil && s.logger != nil {
-			s.logger.Warn("post compaction hook panicked", slog.String("bot_id", cfg.BotID), slog.Any("panic", r))
+			s.logger.WarnContext(ctx, "post compaction hook panicked", slog.String("bot_id", cfg.BotID), slog.Any("panic", r))
 		}
 	}()
 	extra := map[string]any{}
@@ -388,7 +388,7 @@ func (s *Service) runPostCompactHook(ctx context.Context, cfg TriggerConfig, com
 		extra["error"] = compactErr.Error()
 	}
 	if err := s.runCompactionHook(ctx, hooks.EventPostCompact, cfg, extra); err != nil && s.logger != nil {
-		s.logger.Warn("post compaction hook failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
+		s.logger.WarnContext(ctx, "post compaction hook failed", slog.String("bot_id", cfg.BotID), slog.Any("error", err))
 	}
 }
 

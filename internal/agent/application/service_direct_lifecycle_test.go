@@ -46,7 +46,6 @@ func (q *directLifecycleQueries) GetSettingsByBotID(
 ) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
 		BotID:           botID,
-		Language:        "auto",
 		ReasoningEffort: "medium",
 		ChatModelID:     q.modelID,
 	}, nil

@@ -133,7 +133,7 @@ func sendMediaBytes(ctx context.Context, client *Client, cfg adapterConfig, targ
 	}
 
 	if logger != nil {
-		logger.Debug("weixin media uploaded",
+		logger.DebugContext(ctx, "weixin media uploaded",
 			slog.String("filekey", filekeyHex),
 			slog.Int("raw_size", len(data)),
 			slog.Int("cipher_size", fileSize),
@@ -205,7 +205,7 @@ func sendMediaBytesAsFile(ctx context.Context, client *Client, cfg adapterConfig
 	}
 
 	if logger != nil {
-		logger.Debug("weixin file uploaded",
+		logger.DebugContext(ctx, "weixin file uploaded",
 			slog.String("filekey", filekeyHex),
 			slog.String("filename", fileName),
 			slog.Int("raw_size", len(data)),

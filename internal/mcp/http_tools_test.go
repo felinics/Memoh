@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -124,6 +127,88 @@ func TestToolSessionContextFromHTTPParsesSupportsImageInput(t *testing.T) {
 	session := ToolSessionContextFromHTTP(req, "bot-1")
 	if !session.SupportsImageInput {
 		t.Fatalf("SupportsImageInput = false, want true")
+	}
+}
+
+// Driving the middleware directly cannot see this: the SDK decides what reaches
+// the wire after the middleware returns, so only a real HTTP exchange shows
+// whether a sessionless client gets the resultType it requires.
+func TestServeToolMCPHTTPResultTypeFollowsProtocolRevision(t *testing.T) {
+	provider := &gatewayTestProvider{
+		tools:      []ToolDescriptor{{Name: "echo_tool", InputSchema: map[string]any{"type": "object"}}},
+		callResult: map[string]map[string]any{"echo_tool": BuildToolSuccessResult(map[string]any{"ok": true})},
+		callErr:    map[string]error{},
+	}
+	service := NewToolGatewayService(nil, []ToolSource{provider})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ServeToolMCPHTTP(w, req, slog.New(slog.DiscardHandler), service, nil, ToolSessionContext{BotID: "bot-1"})
+	}))
+	defer server.Close()
+
+	callTool := func(t *testing.T, params string, headers map[string]string) map[string]any {
+		t.Helper()
+		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":` + params + `}`
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL, strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("NewRequest error = %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
+		resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704: test-only URL from the local httptest server
+		if err != nil {
+			t.Fatalf("tools/call request error = %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read response error = %v", err)
+		}
+		var envelope struct {
+			Result map[string]any `json:"result"`
+		}
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			t.Fatalf("decode response %s: %v", raw, err)
+		}
+		if resp.StatusCode != http.StatusOK || envelope.Result == nil {
+			t.Fatalf("tools/call status = %d, body = %s", resp.StatusCode, raw)
+		}
+		if content, _ := envelope.Result["content"].([]any); len(content) == 0 {
+			t.Fatalf("tools/call result lost its content: %s", raw)
+		}
+		return envelope.Result
+	}
+
+	t.Run("sessionless revision carries resultType", func(t *testing.T) {
+		result := callTool(t,
+			`{"name":"echo_tool","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}`,
+			map[string]string{"Mcp-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/call", "Mcp-Name": "echo_tool"},
+		)
+		if result["resultType"] != "complete" {
+			t.Fatalf("resultType = %#v, want \"complete\"", result["resultType"])
+		}
+	})
+
+	t.Run("handshake revision stays unchanged", func(t *testing.T) {
+		result := callTool(t, `{"name":"echo_tool","arguments":{}}`, map[string]string{"Mcp-Protocol-Version": "2025-11-25"})
+		if value, ok := result["resultType"]; ok {
+			t.Fatalf("resultType = %#v, want it absent", value)
+		}
+	})
+}
+
+func TestConvertGatewayCallResultToSDKKeepsUpstreamResultType(t *testing.T) {
+	upstream := BuildToolSuccessResult(map[string]any{"ok": true})
+	upstream["resultType"] = "input_required"
+
+	converted, err := ConvertGatewayCallResultToSDK(upstream, true)
+	if err != nil {
+		t.Fatalf("convert error = %v", err)
+	}
+	if !converted.NeedsInput() {
+		t.Fatal("federated resultType was overwritten, want it preserved")
 	}
 }
 

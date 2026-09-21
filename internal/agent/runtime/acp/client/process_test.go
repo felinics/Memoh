@@ -98,6 +98,137 @@ func TestStartBridgeProcessPassesUnsetEnv(t *testing.T) {
 	}
 }
 
+func TestPrepareRuntimeLeaseUsesWorkspaceShellPath(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	shellPath := "/data/.local/bin:" + defaultContainerPath
+	server.setShellPath(shellPath)
+	lease, err := prepareRuntimeLease(context.Background(), client, processOptions{
+		AgentID:   "acp",
+		SetupMode: SetupModeAPIKey,
+		Env:       []string{"PATH=/host/bin", "CUSTOM_FLAG=1"},
+		UnsetEnv:  []string{"OPENAI_API_KEY"},
+	})
+	if err != nil {
+		t.Fatalf("prepareRuntimeLease() error = %v", err)
+	}
+	defer func() { _ = lease.finalize(context.Background()) }()
+
+	for name, env := range map[string][]string{"agent": lease.agentEnv, "tool": lease.toolEnv} {
+		if got := envValues(env, "PATH"); len(got) != 1 || got[0] != shellPath {
+			t.Fatalf("%s env PATH = %q, want only the workspace shell PATH %q", name, got, shellPath)
+		}
+	}
+
+	var probe *execRecord
+	for _, record := range server.records() {
+		if isShellPathProbe(record) {
+			probe = &record
+			break
+		}
+	}
+	if probe == nil {
+		t.Fatalf("missing shell PATH probe exec: %#v", server.records())
+	}
+	// rc files key their PATH additions off HOME, so the probe must see the
+	// agent's HOME and start from the launcher's default PATH, never the host's.
+	if got := envValues(probe.Env, "HOME"); len(got) != 1 || got[0] != dataMountPath {
+		t.Fatalf("probe HOME = %q, want only %q", got, dataMountPath)
+	}
+	if got := envValues(probe.Env, "PATH"); len(got) != 1 || got[0] != defaultContainerPath {
+		t.Fatalf("probe PATH = %q, want only the default %q", got, defaultContainerPath)
+	}
+	assertEnvHas(t, probe.Env, "CUSTOM_FLAG=1")
+	for _, name := range []string{"PATH", "HOME", "OPENAI_API_KEY"} {
+		if !hasString(probe.UnsetEnv, name) {
+			t.Fatalf("probe UnsetEnv = %#v, want %q scrubbed from the bridge environment", probe.UnsetEnv, name)
+		}
+	}
+}
+
+func TestPrepareRuntimeLeaseProbesShellPathOutsideSyncGuard(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	server.setShellPath("/data/.local/bin:" + defaultContainerPath)
+	execsInsideGuard := -1
+	lease, err := prepareRuntimeLease(context.Background(), client, processOptions{
+		AgentID:   "acp",
+		SetupMode: SetupModeAPIKey,
+		RuntimeSyncGuard: func(ctx context.Context, fn func(context.Context) error) error {
+			err := fn(ctx)
+			execsInsideGuard = len(server.records())
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("prepareRuntimeLease() error = %v", err)
+	}
+	defer func() { _ = lease.finalize(context.Background()) }()
+	if execsInsideGuard < 1 {
+		t.Fatalf("execs inside the sync guard = %d, want the lease setup to run guarded", execsInsideGuard)
+	}
+
+	// The guard holds the bot generation lock; the probe runs the user's rc
+	// files and may take seconds, so it must only start after the guard returns.
+	probed := false
+	for index, record := range server.records() {
+		if !isShellPathProbe(record) {
+			continue
+		}
+		probed = true
+		if index < execsInsideGuard {
+			t.Fatalf("shell PATH probe ran as exec %d, inside the sync guard (%d guarded execs)", index, execsInsideGuard)
+		}
+	}
+	if !probed {
+		t.Fatalf("missing shell PATH probe exec: %#v", server.records())
+	}
+}
+
+func TestPrepareRuntimeLeaseFallsBackToDefaultPathWhenShellNeverAnswers(t *testing.T) {
+	client, _ := newRecordingBridgeClient(t)
+	lease, err := prepareRuntimeLease(context.Background(), client, processOptions{
+		AgentID:   "acp",
+		SetupMode: SetupModeAPIKey,
+	})
+	if err != nil {
+		t.Fatalf("prepareRuntimeLease() error = %v, want a failed PATH probe not to block the launch", err)
+	}
+	defer func() { _ = lease.finalize(context.Background()) }()
+	for name, env := range map[string][]string{"agent": lease.agentEnv, "tool": lease.toolEnv} {
+		if got := envValues(env, "PATH"); len(got) != 1 || got[0] != defaultContainerPath {
+			t.Fatalf("%s env PATH = %q, want only the default %q", name, got, defaultContainerPath)
+		}
+	}
+}
+
+func TestStartBridgeProcessFindsCommandOnWorkspaceShellPath(t *testing.T) {
+	client, server := newRecordingBridgeClient(t)
+	shellPath := "/data/.local/bin:" + defaultContainerPath
+	server.setShellPath(shellPath)
+	proc, err := startBridgeProcess(context.Background(), client, "devin", []string{"acp"}, "/data", time.Minute, processOptions{
+		AgentID:   "acp",
+		SetupMode: SetupModeAPIKey,
+	})
+	if err != nil {
+		t.Fatalf("startBridgeProcess() error = %v", err)
+	}
+	server.waitForRecordWithTimeout(t, int32(time.Minute.Seconds()), 2*time.Second)
+	_ = proc.Close()
+
+	checked := false
+	for _, record := range server.records() {
+		if !strings.HasPrefix(record.Command, "command -v devin") && record.Command != "devin acp" {
+			continue
+		}
+		checked = checked || record.Command == "devin acp"
+		if got := envValues(record.Env, "PATH"); len(got) != 1 || got[0] != shellPath {
+			t.Fatalf("%q PATH = %q, want only the workspace shell PATH %q", record.Command, got, shellPath)
+		}
+	}
+	if !checked {
+		t.Fatalf("missing agent process exec: %#v", server.records())
+	}
+}
+
 func TestCreateTerminalFiltersBlockedEnv(t *testing.T) {
 	client, server := newRecordingBridgeClient(t)
 	manager := newTerminalManager(
@@ -307,6 +438,9 @@ type recordingBridgeServer struct {
 	exits map[string]int32
 	seqs  map[string][]int32
 	fs    map[string]recordingFSNode
+	// shellPath is the PATH the workspace shell reports to a PATH probe; empty
+	// means the shell never answers.
+	shellPath string
 }
 
 func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInput, pb.ExecOutput]) error {
@@ -328,11 +462,30 @@ func (s *recordingBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.ExecInpu
 		UnsetEnv: append([]string(nil), input.GetUnsetEnv()...),
 		Timeout:  input.GetTimeoutSeconds(),
 	})
+	output := ""
+	if isShellPathProbe(execRecord{Command: input.GetCommand()}) {
+		output = s.shellPath
+	}
 	s.mu.Unlock()
+	if output != "" {
+		if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_STDOUT, Data: []byte(output)}); err != nil {
+			return err
+		}
+	}
 	if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: exitCode}); err != nil {
 		return err
 	}
 	return nil
+}
+
+func isShellPathProbe(record execRecord) bool {
+	return strings.Contains(record.Command, `printf "%s" "$PATH"`)
+}
+
+func (s *recordingBridgeServer) setShellPath(shellPath string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.shellPath = shellPath
 }
 
 func (s *recordingBridgeServer) setExitCodes(command string, codes ...int32) {
@@ -708,6 +861,17 @@ func envValue(env []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func envValues(env []string, key string) []string {
+	prefix := key + "="
+	values := []string{}
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			values = append(values, strings.TrimPrefix(item, prefix))
+		}
+	}
+	return values
 }
 
 func envHasKeyValue(env []string, key, value string) bool {

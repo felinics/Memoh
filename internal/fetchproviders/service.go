@@ -260,7 +260,7 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 					Enable:   true,
 				})
 				if err != nil {
-					s.logger.Warn("failed to enable native fetch provider", slog.Any("error", err))
+					s.logger.WarnContext(ctx, "failed to enable native fetch provider", slog.Any("error", err))
 				}
 			}
 			continue
@@ -272,13 +272,13 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 			Enable:   dp.Enable,
 		})
 		if err != nil {
-			s.logger.Warn("failed to create default fetch provider",
+			s.logger.WarnContext(ctx, "failed to create default fetch provider",
 				slog.String("provider", string(dp.Name)),
 				slog.Any("error", err),
 			)
 			continue
 		}
-		s.logger.Info("created default fetch provider", slog.String("provider", string(dp.Name)))
+		s.logger.InfoContext(ctx, "created default fetch provider", slog.String("provider", string(dp.Name)))
 	}
 	return nil
 }

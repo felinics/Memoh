@@ -1,4 +1,4 @@
--- 0153_remove_email
+-- 0154_remove_email
 -- Remove built-in bot email configuration, credentials, bindings, and sent mail.
 -- This permanently deletes the data; rollback can restore only empty tables.
 

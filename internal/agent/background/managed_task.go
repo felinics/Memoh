@@ -45,7 +45,7 @@ func (m *Manager) SpawnManaged(parentCtx context.Context, botID, sessionID, desc
 	m.tasks[taskID] = task
 	m.mu.Unlock()
 
-	m.logger.Info("background managed task started",
+	m.logger.InfoContext(parentCtx, "background managed task started",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("description", truncate(description, 120)),

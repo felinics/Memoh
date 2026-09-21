@@ -4,7 +4,7 @@
     :title="$t('bots.tabs.settings')"
   >
     <div class="space-y-8">
-      <!-- URL Name -->
+      <!-- Bot identity and timezone -->
       <SettingsSection>
         <SettingsRow
           :label="$t('bots.name')"
@@ -46,9 +46,24 @@
             </p>
           </div>
         </SettingsRow>
+        <SettingsRow
+          :label="$t('bots.timezone')"
+          :description="$t('bots.timezoneHint')"
+          stack="sm"
+        >
+          <div class="w-full sm:w-52">
+            <TimezoneSelect
+              :model-value="form.timezone || emptyTimezoneValue"
+              :placeholder="$t('bots.timezonePlaceholder')"
+              allow-empty
+              :empty-label="$t('bots.timezoneInherited')"
+              popover-class="min-w-[var(--reka-popover-trigger-width)] w-72"
+              popover-align="end"
+              @update:model-value="(val: string) => form.timezone = val === emptyTimezoneValue ? '' : val"
+            />
+          </div>
+        </SettingsRow>
       </SettingsSection>
-
-      <SettingsGlobalCard :form="form" />
 
       <SettingsInteractionCard
         :form="form"
@@ -112,7 +127,8 @@ import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import SettingsGlobalCard from './settings-global-card.vue'
+import TimezoneSelect from '@/components/timezone-select/index.vue'
+import { emptyTimezoneValue } from '@/utils/timezones'
 import SettingsInteractionCard from './settings-interaction-card.vue'
 import SettingsContextCard from './settings-context-card.vue'
 import SettingsMultimediaCard from './settings-multimedia-card.vue'
@@ -356,7 +372,6 @@ const form = reactive<SettingsForm>({
   transcription_model_id: '',
   video_model_id: '',
   timezone: '',
-  language: '',
   reasoning_effort: 'medium',
   show_tool_calls_in_im: false,
   name: '',
@@ -377,7 +392,6 @@ const SETTINGS_FIELD_KEYS = [
   'tts_model_id',
   'transcription_model_id',
   'video_model_id',
-  'language',
   'reasoning_effort',
   'show_tool_calls_in_im',
 ] as const satisfies readonly (keyof SettingsForm)[]
@@ -404,7 +418,6 @@ watch(settings, (val) => {
     tts_model_id: val.tts_model_id ?? '',
     transcription_model_id: val.transcription_model_id ?? '',
     video_model_id: val.video_model_id ?? '',
-    language: val.language ?? '',
     reasoning_effort: val.reasoning_effort || 'medium',
     show_tool_calls_in_im: val.show_tool_calls_in_im ?? false,
   }

@@ -19,9 +19,9 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 	initialConfig := d.sessionConfigSnapshot(sess)
 	sessionID := initialConfig.ThreadID
 	log := d.logger.With(slog.String("session_id", sessionID), slog.String("bot_id", initialConfig.BotID))
-	log.Info("discuss session started")
+	log.InfoContext(ctx, "discuss session started")
 	defer func() {
-		log.Info("discuss session stopped")
+		log.InfoContext(ctx, "discuss session stopped")
 		d.mu.Lock()
 		if cur, ok := d.sessions[sessionID]; ok && cur == sess {
 			delete(d.sessions, sessionID)
@@ -38,7 +38,7 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 		case <-sess.stopCh:
 			return
 		case <-idle.C:
-			log.Info("discuss session idle timeout, exiting")
+			log.InfoContext(ctx, "discuss session idle timeout, exiting")
 			return
 		case rc := <-sess.rcCh:
 			latestRC = rc
@@ -86,7 +86,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 	cfg := d.sessionConfigSnapshot(sess)
 	trs, historyMeasure := d.history.Load(ctx, cfg.ThreadID)
 	if historyMeasure.TotalMessages > int64(historyMeasure.Loaded) {
-		log.Info("context_admission",
+		log.InfoContext(ctx, "context_admission",
 			slog.String("path", "discuss_history_load"),
 			slog.Int64("history_total_messages", historyMeasure.TotalMessages),
 			slog.Int64("history_total_bytes", historyMeasure.TotalBytes),
@@ -106,7 +106,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 	}
 
 	if turnSvc == nil {
-		log.Error("discuss driver: turn service not configured")
+		log.ErrorContext(ctx, "discuss driver: turn service not configured")
 		return
 	}
 
@@ -118,7 +118,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 	for attempt := 1; attempt <= maxDiscussRecomposeAttempts; attempt++ {
 		artifacts, artifactsErr := d.loadArtifacts(ctx, cfg)
 		if artifactsErr != nil {
-			log.Warn("context_admission_degraded",
+			log.WarnContext(ctx, "context_admission_degraded",
 				slog.String("reason", "artifact_load_failed"),
 				slog.Any("error", artifactsErr))
 		}
@@ -128,7 +128,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 				// Fail closed without advancing the cursor: nothing was
 				// materialized, and a later compaction can shrink the
 				// protected set enough for the next attempt to pass.
-				log.Error("context_admission_rejected",
+				log.ErrorContext(ctx, "context_admission_rejected",
 					slog.String("code", "context.protected_overflow"),
 					slog.Int("estimated_tokens", admission.EstimatedTokens),
 					slog.Int("budget_tokens", d.admissionMaxTokens()))
@@ -136,7 +136,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 			return
 		}
 		if admission.DroppedEntries > 0 {
-			log.Info("context_admission",
+			log.InfoContext(ctx, "context_admission",
 				slog.String("path", "discuss_compose"),
 				slog.Int("estimated_tokens", admission.EstimatedTokens),
 				slog.Int("selected_tokens", admission.SelectedTokens),
@@ -145,7 +145,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 				slog.Int("total_entries", admission.TotalEntries),
 				slog.Bool("degraded_artifacts", artifactsErr != nil))
 		}
-		log.Info("triggering discuss LLM call",
+		log.InfoContext(ctx, "triggering discuss LLM call",
 			slog.Int("messages", plan.messageCount),
 			slog.Int("estimated_tokens", plan.estimatedTokens))
 
@@ -155,11 +155,11 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 		}
 		if outcome.recomposeRequested {
 			if attempt == maxDiscussRecomposeAttempts {
-				log.Warn("discuss recompose limit reached, deferring to next trigger",
+				log.WarnContext(ctx, "discuss recompose limit reached, deferring to next trigger",
 					slog.Int("attempts", attempt))
 				return
 			}
-			log.Info("discuss recompose requested, rebuilding context",
+			log.InfoContext(ctx, "discuss recompose requested, rebuilding context",
 				slog.Int("attempt", attempt))
 			continue
 		}

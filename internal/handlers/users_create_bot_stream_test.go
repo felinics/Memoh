@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	ctr "github.com/felinics/memoh/internal/container"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -236,31 +238,28 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	if message != "workspace setup failed" {
 		t.Fatalf("error message = %q, want stable workspace setup failure", message)
 	}
-	setupError := requireStreamLastSetupError(t, streamDB.persistedMetadata)
-	if setupError["phase"] != "setup" {
-		t.Fatalf("phase = %#v, want setup", setupError["phase"])
+	if strings.Contains(message, "image pull failed") {
+		t.Fatalf("backend error leaked into the stream message %q", message)
 	}
-	if got, _ := setupError["message"].(string); !strings.Contains(got, "image pull failed") {
-		t.Fatalf("persisted message = %q, want setup failure", got)
-	}
-	if streamDB.status != bots.BotStatusReady {
-		t.Fatalf("bot status = %q, want %q", streamDB.status, bots.BotStatusReady)
+	// The handler only records intent; bots.status is derived by the
+	// reconciler, so the request path must not touch it.
+	if streamDB.status != "" {
+		t.Fatalf("handler wrote bot status %q; the reconciler owns it", streamDB.status)
 	}
 }
 
-func TestCreateBotStreamReportsStableBootstrapErrorAndLeavesBotReady(t *testing.T) {
+func TestCreateBotStreamReportsStableBootstrapError(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000108"
 	botID := "00000000-0000-0000-0000-000000000208"
 	streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
-	setupErr := errors.Join(
-		workspace.ErrWorkspaceTemplateBootstrapFailed,
-		errors.New("write /data/AGENTS.md: permission denied"),
-	)
 	handler := &UsersHandler{
-		logger:         slog.Default(),
-		service:        newTestCreateBotAccountService(ownerID),
-		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
-		workspaceSetup: &createBotStreamWorkspace{err: setupErr},
+		logger:     slog.Default(),
+		service:    newTestCreateBotAccountService(ownerID),
+		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{
+			err:   errors.New("write /data/AGENTS.md: permission denied"),
+			phase: botworkspace.PhaseBootstrap,
+		},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -288,9 +287,6 @@ func TestCreateBotStreamReportsStableBootstrapErrorAndLeavesBotReady(t *testing.
 	message, _ := last["message"].(string)
 	if strings.Contains(message, "/data/AGENTS.md") {
 		t.Fatalf("private workspace path leaked in message %q", message)
-	}
-	if streamDB.status != bots.BotStatusReady {
-		t.Fatalf("bot status = %q, want %q", streamDB.status, bots.BotStatusReady)
 	}
 }
 
@@ -403,16 +399,106 @@ func newTestCreateBotAccountService(userID string) *accounts.Service {
 	return accounts.NewService(nil, createBotAccountStore{userID: userID})
 }
 
+// createBotStreamWorkspace stands in for the botworkspace reconciler: every
+// EnsurePresent runs a fake provisioning in the background that relays the
+// scripted progress events to subscribers and settles on running or failed.
 type createBotStreamWorkspace struct {
 	events []workspace.ContainerSetupEvent
 	err    error
+	phase  string
+
+	mu      sync.Mutex
+	subs    map[string][]chan botworkspace.ProgressEvent
+	final   map[string]botworkspace.Workspace
+	settled map[string]chan struct{}
+	intents []string
 }
 
-func (w *createBotStreamWorkspace) SetupBotContainerWithProgress(_ context.Context, _ string, progress workspace.ContainerSetupProgress) error {
-	for _, event := range w.events {
-		progress(event)
+func (w *createBotStreamWorkspace) EnsurePresent(_ context.Context, botID, image string) (botworkspace.Workspace, error) {
+	w.mu.Lock()
+	if w.final == nil {
+		w.final = map[string]botworkspace.Workspace{}
+		w.settled = map[string]chan struct{}{}
 	}
-	return w.err
+	w.intents = append(w.intents, botID)
+	done := make(chan struct{})
+	w.settled[botID] = done
+	w.mu.Unlock()
+
+	go func() {
+		for _, ev := range w.events {
+			w.publish(botID, botworkspace.ProgressEvent{
+				Type: ev.Type, Image: ev.Image, Message: ev.Message, Layers: ev.Layers,
+				ContainerID: ev.ContainerID, WorkspaceBackend: ev.WorkspaceBackend, RuntimeBackend: ev.RuntimeBackend,
+				ContainerPath: ev.ContainerPath, CDIDevices: ev.CDIDevices, Snapshotter: ev.Snapshotter, Started: ev.Started,
+				DataRestored: ev.DataRestored, HasPreservedData: ev.HasPreservedData,
+			})
+		}
+		final := botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1, ObservedGeneration: 1, Image: image}
+		if w.err != nil {
+			final.Observed = botworkspace.ObservedFailed
+			final.LastError = w.err.Error()
+			final.LastErrorPhase = w.phase
+			if final.LastErrorPhase == "" {
+				final.LastErrorPhase = botworkspace.PhaseStart
+			}
+		} else {
+			final.Observed = botworkspace.ObservedRunning
+			final.EverReady = true
+		}
+		w.mu.Lock()
+		w.final[botID] = final
+		w.mu.Unlock()
+		close(done)
+	}()
+	return botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1}, nil
+}
+
+func (w *createBotStreamWorkspace) publish(botID string, ev botworkspace.ProgressEvent) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, ch := range w.subs[botID] {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+}
+
+func (w *createBotStreamWorkspace) Subscribe(botID string) (<-chan botworkspace.ProgressEvent, func()) {
+	ch := make(chan botworkspace.ProgressEvent, 64)
+	w.mu.Lock()
+	if w.subs == nil {
+		w.subs = map[string][]chan botworkspace.ProgressEvent{}
+	}
+	w.subs[botID] = append(w.subs[botID], ch)
+	w.mu.Unlock()
+	return ch, func() {}
+}
+
+func (w *createBotStreamWorkspace) Await(ctx context.Context, botID string, _ int64) (botworkspace.Workspace, error) {
+	w.mu.Lock()
+	done := w.settled[botID]
+	w.mu.Unlock()
+	if done == nil {
+		return botworkspace.Workspace{}, botworkspace.ErrNotFound
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return botworkspace.Workspace{}, ctx.Err()
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.final[botID], nil
+}
+
+func (*createBotStreamWorkspace) RequestAbsent(context.Context, string, bool) (botworkspace.Workspace, error) {
+	return botworkspace.Workspace{}, nil
+}
+
+func (*createBotStreamWorkspace) Observe(context.Context, string) (botworkspace.Workspace, error) {
+	return botworkspace.Workspace{}, nil
 }
 
 type createBotAccountStore struct {
@@ -491,7 +577,7 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		metadata = []byte(`{}`)
 	}
 	return &createBotStreamRow{scanFunc: func(dest ...any) error {
-		if len(dest) < 16 {
+		if len(dest) < 15 {
 			return pgx.ErrNoRows
 		}
 		*dest[0].(*pgtype.UUID) = botID
@@ -502,43 +588,25 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[5].(*pgtype.Text) = pgtype.Text{}
 		*dest[6].(*bool) = true
 		*dest[7].(*string) = status
-		*dest[8].(*string) = "en"
-		*dest[9].(*string) = "medium"
+		*dest[8].(*string) = "medium"
+		*dest[9].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[10].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[11].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[12].(*pgtype.UUID) = pgtype.UUID{}
-		if len(dest) == 16 {
-			*dest[13].(*[]byte) = append([]byte(nil), metadata...)
+		if len(dest) == 15 {
+			*dest[12].(*[]byte) = append([]byte(nil), metadata...)
+			*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-			*dest[15].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			return nil
 		}
-		*dest[13].(*bool) = false
-		*dest[14].(*int32) = 200
-		*dest[15].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
-		*dest[16].(*pgtype.UUID) = pgtype.UUID{}
-		*dest[17].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[12].(*bool) = false
+		*dest[13].(*int32) = 200
+		*dest[14].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
+		*dest[15].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[16].(*[]byte) = append([]byte(nil), metadata...)
+		*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
-		*dest[19].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		return nil
 	}}
-}
-
-func requireStreamLastSetupError(t *testing.T, payload []byte) map[string]any {
-	t.Helper()
-	var metadata map[string]any
-	if err := json.Unmarshal(payload, &metadata); err != nil {
-		t.Fatalf("decode metadata: %v", err)
-	}
-	workspace, ok := metadata["workspace"].(map[string]any)
-	if !ok {
-		t.Fatalf("workspace metadata missing: %#v", metadata)
-	}
-	setupError, ok := workspace["last_setup_error"].(map[string]any)
-	if !ok {
-		t.Fatalf("last_setup_error missing: %#v", workspace)
-	}
-	return setupError
 }
 
 type createBotStreamRow struct {

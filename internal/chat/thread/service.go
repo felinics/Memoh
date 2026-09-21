@@ -841,7 +841,7 @@ func (s *Service) runThreadStartHook(ctx context.Context, thread Thread) {
 		},
 	}
 	if _, err := s.hookService.Run(ctx, req, nil); err != nil {
-		s.logger.Warn("session start hook failed",
+		s.logger.WarnContext(ctx, "session start hook failed",
 			slog.String("bot_id", thread.BotID),
 			slog.String("session_id", thread.ID),
 			slog.Any("error", err),

@@ -232,6 +232,7 @@
       "runtime_conflict": "Agent ランタイムはこの操作を実行できる状態ではありません。更新してからもう一度お試しください。",
       "runtime_limit_reached": "実行中の Agent ランタイムが多すぎます。1 つ終了してからもう一度お試しください。",
       "operation_failed": "Agent ランタイムの操作に失敗しました。もう一度お試しください。",
+      "command_not_found": "ワークスペースでコマンド「{command}」が見つかりません。ワークスペースのターミナルでインストールするか、Agent のコマンドを絶対パスで指定してください。",
       "model_selection_unsupported": "この外部Agentはモデルの切り替えに対応していません。",
       "model_id_required": "モデルを選択して、もう一度お試しください。",
       "model_unavailable": "選択したモデルはこの外部Agentで利用できなくなりました。",
@@ -1630,6 +1631,30 @@
       "githubConnectHint": "GitHub アカウントでサインインすると、Copilot のモデルを利用できます。",
       "revokeConfirm": "このアカウントの認可を取り消しますか?",
       "connecting": "接続中"
+    },
+    "saveSuccess": "プロバイダー設定を保存しました",
+    "saveBeforeTest": "変更を保存してから接続をテストしてください。"
+  },
+  "providerConnect": {
+    "title": "プロバイダーを追加",
+    "description": "外部サービスが以下のプロバイダーを Memoh に追加しようとしています。確認するまで保存されません。",
+    "name": "名前",
+    "baseUrl": "ベース URL",
+    "clientType": "クライアントタイプ",
+    "apiKey": "API キー",
+    "confirm": "追加",
+    "decline": "キャンセル",
+    "createFailed": "プロバイダーの追加に失敗しました",
+    "invalidTitle": "無効なリンク",
+    "backToProviders": "プロバイダー一覧に戻る",
+    "error": {
+      "missing": "リンクに payload がありません。",
+      "decode": "リンクの内容を解析できませんでした。",
+      "kind": "プロバイダーインポートリンクではありません。",
+      "version": "サポートされていないリンクのバージョンです。",
+      "baseUrl": "リンクに有効なベース URL がありません。",
+      "apiKey": "リンクに API キーがありません。",
+      "clientType": "サポートされていないクライアントタイプが指定されています。"
     }
   },
   "webSearch": {
@@ -2142,6 +2167,10 @@
       "failedTitle": "セットアップに失敗しました",
       "retry": "リトライ",
       "back": "フォームに戻る",
+      "retryWorkspace": "Workspace をリトライ",
+      "continueLater": "あとで対応",
+      "openExisting": "既存の Bot を開く",
+      "stillProvisioning": "Workspace はまだ準備中です。Bot の Workspace ページで待つか、今すぐリトライしてください。",
       "line": {
         "command": "Bot「{name}」を作成しています",
         "botCreated": "Botレコードが作成されました",
@@ -2175,9 +2204,9 @@
     "avatarUrl": "アバターURL",
     "avatarUrlPlaceholder": "アバター画像を入力してくださいURL",
     "timezone": "タイムゾーン",
+    "timezoneHint": "スケジュールタスクはこのタイムゾーンに基づいて実行時刻を決定します。",
     "timezonePlaceholder": "例: America/New_York",
     "timezoneInherited": "ユーザー/システムから継承",
-    "timezoneInheritedHint": "ユーザーのタイムゾーンを継承する場合は空のままにするか、システムのタイムゾーンにフォールバックします。",
     "aclPreset": "IM アプリポリシー",
     "aclPresetDescription": "標準から始めるACLプリセット。後でChannel アクセスで調整できます。",
     "aclPresetHint": "ヒント: 個人Botには「プライベートのみ」を使用し、コミュニティBotには「グループのみ」または「グループとスレッド」を使用し、完全にオープンなままにする場合は「すべてを許可」を使用します。",
@@ -2210,8 +2239,6 @@
     "editTimezoneDescription": "このBotのタイムゾーン オーバーライドを設定します。",
     "avatarUpdateSuccess": "アバターが更新されました",
     "avatarUpdateFailed": "アバターの更新に失敗しました",
-    "timezoneUpdateSuccess": "タイムゾーンが更新されました",
-    "timezoneUpdateFailed": "タイムゾーンの更新に失敗しました",
     "typePlaceholder": "Botの種類を選択してください",
     "types": {
       "personal": "個人的",
@@ -2904,13 +2931,9 @@
     "settings": {
       "blocks": {
         "context": "コンテキストとMemory",
-        "global": "グローバル設定",
         "interaction": "交流",
-        "multimedia": "マルチメディア",
-        "acp": "エージェント"
+        "multimedia": "マルチメディア"
       },
-      "chatLanguage": "言語",
-      "chatLanguagePlaceholder": "例: 英語、zh-CN",
       "chatModel": "チャットModel",
       "chatModelDescription": "Memoh Agentが使用するModelです。",
       "chatModelPlaceholder": "Modelを選択",
@@ -3667,9 +3690,6 @@
       "fieldRequired": "{field}を入力してください",
       "fieldInvalid": "{field}の形式が正しくありません"
     }
-  },
-  "languages": {
-    "auto": "自動"
   },
   "onboarding": {
     "prev": "前の",

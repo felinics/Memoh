@@ -425,8 +425,9 @@ const searchQuery = ref('')
 
 const searchIndex = computed(() => {
   return [
-    { tab: 'general', key: 'bots.settings.blocks.global', keywords: ['name', 'avatar', 'description', 'timezone'] },
-    { tab: 'general', key: 'bots.settings.blocks.interaction', keywords: ['language', 'chat model', 'reasoning', 'model', 'llm', '模型', '换模型', '更换模型', 'モデル'] },
+    { tab: 'general', key: 'bots.name', keywords: ['name', 'url', '名称'] },
+    { tab: 'general', key: 'bots.timezone', keywords: ['timezone', 'schedule', '时区', '定时', 'タイムゾーン'] },
+    { tab: 'general', key: 'bots.settings.blocks.interaction', keywords: ['chat model', 'reasoning', 'model', 'llm', '模型', '换模型', '更换模型', 'モデル'] },
     { tab: 'general', key: 'bots.settings.blocks.context', keywords: ['browser', 'search', 'provider'] },
     { tab: 'general', key: 'bots.settings.blocks.multimedia', keywords: ['image', 'tts', 'transcription'] },
     { tab: 'general', key: 'bots.settings.dangerZone', keywords: ['delete', 'remove'] },

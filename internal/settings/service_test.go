@@ -155,8 +155,8 @@ func TestApplyReasoningPolicy(t *testing.T) {
 		resolver := &stubReasoningOptionsResolver{err: errors.New("must not be called")}
 		service := &Service{reasoningResolver: resolver}
 		current := Settings{ChatModelID: modelID, ReasoningEffort: reasoning.EffortLow}
-		language := "zh"
-		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{Language: &language}); err != nil {
+		timezone := "Asia/Shanghai"
+		if err := service.applyReasoningPolicy(context.Background(), &current, UpsertRequest{Timezone: &timezone}); err != nil {
 			t.Fatal(err)
 		}
 		if resolver.calls != 0 {
@@ -198,7 +198,6 @@ func (q *reasoningPolicyQueries) GetBotAgentByID(context.Context, sqlc.GetBotAge
 func (q *reasoningPolicyQueries) GetBotByID(context.Context, pgtype.UUID) (sqlc.GetBotByIDRow, error) {
 	return sqlc.GetBotByIDRow{
 		ID:              q.botID,
-		Language:        DefaultLanguage,
 		ReasoningEffort: q.storedEffort,
 		ChatModelID:     q.currentModelID,
 	}, nil
@@ -211,7 +210,6 @@ func (*reasoningPolicyQueries) GetBotOverlayConfig(context.Context, pgtype.UUID)
 func (q *reasoningPolicyQueries) GetSettingsByBotID(context.Context, pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
 	return sqlc.GetSettingsByBotIDRow{
 		BotID:                  q.botID,
-		Language:               DefaultLanguage,
 		CommandUiLanguage:      DefaultCommandUILanguage,
 		ReasoningEffort:        q.storedEffort,
 		ChatModelID:            q.currentModelID,
@@ -244,7 +242,6 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 	}
 	return sqlc.UpsertBotSettingsRow{
 		BotID:               q.botID,
-		Language:            arg.Language,
 		CommandUiLanguage:   arg.CommandUiLanguage,
 		ReasoningEffort:     arg.ReasoningEffort,
 		CompactionEnabled:   arg.CompactionEnabled,
@@ -349,10 +346,10 @@ func TestUpsertBotUnrelatedWritePreservesDefaultAgentWithoutRevalidation(t *test
 	// No Bot Agent service is installed on purpose: an unrelated write must not
 	// look up or validate the already persisted default Agent.
 	service := NewService(slog.Default(), queries, nil, nil)
-	language := "zh"
+	timezone := "Asia/Shanghai"
 
 	got, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), UpsertRequest{
-		Language: &language,
+		Timezone: &timezone,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -432,7 +429,6 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMDefault(t *testing.T) {
 	t.Parallel()
 
 	row := sqlc.GetSettingsByBotIDRow{
-		Language:            "en",
 		ReasoningEffort:     "medium",
 		CompactionEnabled:   false,
 		CompactionThreshold: 0,
@@ -448,7 +444,6 @@ func TestNormalizeBotSettingsReadRow_ShowToolCallsInIMPropagates(t *testing.T) {
 	t.Parallel()
 
 	row := sqlc.GetSettingsByBotIDRow{
-		Language:          "en",
 		ReasoningEffort:   "medium",
 		ShowToolCallsInIm: true,
 	}
@@ -463,7 +458,6 @@ func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
 
 	// Explicit value propagates from the read row.
 	got := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:          "en",
 		CommandUiLanguage: "zh",
 		ReasoningEffort:   "medium",
 	})
@@ -473,7 +467,6 @@ func TestNormalizeBotSettingsReadRow_CommandUILanguage(t *testing.T) {
 
 	// Empty value defaults to "auto" (mirrors the DB column default).
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:        "en",
 		ReasoningEffort: "medium",
 	})
 	if def.CommandUILanguage != DefaultCommandUILanguage {
@@ -485,7 +478,6 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 	t.Parallel()
 
 	got := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:           "en",
 		ReasoningEffort:    "medium",
 		ChatRuntime:        ChatRuntimeACPAgent,
 		ChatAcpAgentID:     pgtype.Text{String: "custom-agent", Valid: true},
@@ -505,7 +497,6 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 	// A stored borrowed-shape row (acp_agent + a direct agent id) is
 	// projected as the direct runtime it means.
 	borrowed := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:        "en",
 		ReasoningEffort: "medium",
 		ChatRuntime:     ChatRuntimeACPAgent,
 		ChatAcpAgentID:  pgtype.Text{String: "Codex", Valid: true},
@@ -515,7 +506,6 @@ func TestNormalizeBotSettingsReadRow_ChatRuntimeFields(t *testing.T) {
 	}
 
 	def := normalizeBotSettingsReadRow(sqlc.GetSettingsByBotIDRow{
-		Language:        "en",
 		ReasoningEffort: "medium",
 	})
 	if def.ChatRuntime != ChatRuntimeModel || def.ChatACPProjectPath != DefaultACPProjectPath || def.ChatACPProjectMode != DefaultACPProjectMode {
@@ -603,7 +593,7 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 		"chat_model_id": omitted.ChatModelID, "image_model_id": omitted.ImageModelID,
 		"search_provider_id": omitted.SearchProviderID, "memory_provider_id": omitted.MemoryProviderID,
 		"tts_model_id": omitted.TtsModelID, "transcription_model_id": omitted.TranscriptionModelID,
-		"video_model_id": omitted.VideoModelID, "language": omitted.Language,
+		"video_model_id": omitted.VideoModelID,
 	} {
 		if ptr != nil {
 			t.Fatalf("%s: omitted key must stay nil, got %q", name, *ptr)
@@ -611,12 +601,12 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 	}
 
 	var cleared UpsertRequest
-	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":"","language":""}`), &cleared); err != nil {
+	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":""}`), &cleared); err != nil {
 		t.Fatal(err)
 	}
 	for name, ptr := range map[string]*string{
 		"chat_model_id": cleared.ChatModelID, "search_provider_id": cleared.SearchProviderID,
-		"memory_provider_id": cleared.MemoryProviderID, "language": cleared.Language,
+		"memory_provider_id": cleared.MemoryProviderID,
 	} {
 		if ptr == nil || *ptr != "" {
 			t.Fatalf("%s: explicit empty string must decode to a non-nil empty pointer", name)
@@ -696,7 +686,7 @@ func TestReasoningEffortAllowsFullModelLadder(t *testing.T) {
 		if !hasReasoningEffortValue(effort) {
 			t.Fatalf("hasReasoningEffortValue(%q) = false, want true", effort)
 		}
-		got := normalizeBotSetting("en", "auto", "allow", effort, false, 0, pgtype.Int4{})
+		got := normalizeBotSetting("auto", "allow", effort, false, 0, pgtype.Int4{})
 		if got.ReasoningEffort != effort {
 			t.Fatalf("normalizeBotSetting effort = %q, want %q", got.ReasoningEffort, effort)
 		}

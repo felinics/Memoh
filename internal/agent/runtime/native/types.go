@@ -134,6 +134,7 @@ type RunConfig struct {
 	CurrentModelUUID            string
 	CurrentModelID              string
 	CurrentModelProvider        string
+	CurrentModelProviderID      string
 	ForkContext                 *tools.MessageSnapshot
 	ForkContextSourceMessageIDs []string
 	// ReasoningConfig is the resolved thinking decision, carried whole. It was

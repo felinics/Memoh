@@ -260,7 +260,7 @@ func (s *Service) replaceRecentCompactedMessages(ctx context.Context, scope cont
 		owner, consistent := compactGroupOwner(messages, compactGroups[compactID], scope)
 		if !consistent {
 			if s.logger != nil {
-				s.logger.Warn("replaceCompactedMessages: compact group spans owners", slog.String("compact_id", compactID))
+				s.logger.WarnContext(ctx, "replaceCompactedMessages: compact group spans owners", slog.String("compact_id", compactID))
 			}
 			continue
 		}
@@ -274,14 +274,14 @@ func (s *Service) replaceRecentCompactedMessages(ctx context.Context, scope cont
 				return nil, err
 			}
 			if s.logger != nil {
-				s.logger.Warn("replaceCompactedMessages: failed to load compaction artifact", slog.String("compact_id", compactID), slog.Any("error", err))
+				s.logger.WarnContext(ctx, "replaceCompactedMessages: failed to load compaction artifact", slog.String("compact_id", compactID), slog.Any("error", err))
 			}
 			continue
 		}
 		merged := catalog.Add(owner, compaction.NewArtifactAliasFrontier(compactID, artifact))
 		for _, issue := range merged.Issues {
 			if s.logger != nil && (issue.Kind == compaction.LineageIssueCoverageOverlap || issue.Kind == compaction.LineageIssueAliasConflict) {
-				s.logger.Warn("replaceCompactedMessages: owner frontier conflict", slog.String("issue", issue.Error()))
+				s.logger.WarnContext(ctx, "replaceCompactedMessages: owner frontier conflict", slog.String("issue", issue.Error()))
 			}
 		}
 	}
@@ -345,12 +345,12 @@ func (s *Service) loadActiveCompactionFrontier(ctx context.Context, botID, sessi
 	}
 	for _, issue := range frontier.Issues {
 		if s.logger != nil {
-			s.logger.Warn("loadActiveCompactionFrontier: ignored invalid lineage", slog.String("issue", issue.Error()))
+			s.logger.WarnContext(ctx, "loadActiveCompactionFrontier: ignored invalid lineage", slog.String("issue", issue.Error()))
 		}
 	}
 	for _, artifact := range frontier.Artifacts {
 		if artifact.CoverageMalformed && s.logger != nil {
-			s.logger.Warn("loadActiveCompactionFrontier: malformed coverage requires legacy backfill", slog.String("compact_id", artifact.ID))
+			s.logger.WarnContext(ctx, "loadActiveCompactionFrontier: malformed coverage requires legacy backfill", slog.String("compact_id", artifact.ID))
 		}
 	}
 	return frontier, nil
@@ -438,7 +438,7 @@ func (s *Service) coveredRefsForCompact(ctx context.Context, compactID pgtype.UU
 	rows, err := s.queries.ListMessageRefsByCompactID(ctx, compactID)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("coveredRefsForCompact: failed to load compacted message refs", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "coveredRefsForCompact: failed to load compacted message refs", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
 		}
 		return nil
 	}
@@ -447,7 +447,7 @@ func (s *Service) coveredRefsForCompact(ctx context.Context, compactID pgtype.UU
 		ref, err := historyfrag.DBMessageIdentityRef(pgUUIDString(row.ID))
 		if err != nil {
 			if s.logger != nil {
-				s.logger.Warn("coveredRefsForCompact: skipped compacted message ref", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
+				s.logger.WarnContext(ctx, "coveredRefsForCompact: skipped compacted message ref", slog.String("compact_id", pgUUIDString(compactID)), slog.Any("error", err))
 			}
 			continue
 		}

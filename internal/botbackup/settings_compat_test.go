@@ -1,6 +1,8 @@
 package botbackup
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/felinics/memoh/internal/models"
@@ -136,5 +138,36 @@ func TestSettingsLabelsReasoningState(t *testing.T) {
 				t.Fatalf("labels %v missing %q", labels, tc.want)
 			}
 		})
+	}
+}
+
+func TestDecodeBackupSettingsIgnoresRetiredLanguage(t *testing.T) {
+	t.Parallel()
+	current := []byte(`{"command_ui_language":"ja","timezone":"Asia/Tokyo","reasoning_effort":"high"}`)
+	legacy := []byte(`{"language":"zh","command_ui_language":"ja","timezone":"Asia/Tokyo","reasoning_effort":"high"}`)
+	want, err := decodeBackupSettings(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeBackupSettings(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("legacy archive changed retained settings: got %+v, want %+v", got, want)
+	}
+	if !reflect.DeepEqual(settingsLabels(legacy), settingsLabels(current)) {
+		t.Fatal("legacy language changes the import preview")
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["language"]; exists {
+		t.Fatal("export reintroduced the retired language setting")
 	}
 }

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -18,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/config"
 	ctr "github.com/felinics/memoh/internal/container"
 	displaypkg "github.com/felinics/memoh/internal/display"
@@ -37,6 +37,7 @@ type ContainerdHandler struct {
 	acpRuntimes      acpRuntimeContextResolver
 	mcpStdioMu       sync.Mutex
 	mcpStdioSess     map[string]*mcpStdioSession
+	workspaces       workspaceIntents
 	botService       *bots.Service
 	accountService   *accounts.Service
 	policyService    *policy.Service
@@ -50,7 +51,10 @@ type ContainerGPURequest struct {
 }
 
 type CreateContainerRequest struct {
-	Snapshotter string               `json:"snapshotter,omitempty"`
+	// RestoreData imports the preserved /data archive into the new workspace
+	// once it is running. Backends that expose snapshot mounts restore the
+	// archive while starting regardless of this flag; the flag matters for
+	// backends that restore through the bridge.
 	RestoreData bool                 `json:"restore_data,omitempty"`
 	Image       string               `json:"image,omitempty"`
 	GPU         *ContainerGPURequest `json:"gpu,omitempty"`
@@ -289,6 +293,12 @@ func NewContainerdHandler(log *slog.Logger, manager containerWorkspace, cfg conf
 	return h
 }
 
+// SetWorkspaceIntents wires the botworkspace reconciler used by the workspace
+// create/delete endpoints.
+func (h *ContainerdHandler) SetWorkspaceIntents(intents workspaceIntents) {
+	h.workspaces = intents
+}
+
 func (h *ContainerdHandler) Register(e *echo.Echo) {
 	e.Pre(h.handleBrowserProxyPre)
 
@@ -356,7 +366,9 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 }
 
 // CreateContainer godoc
-// @Summary Create and start workspace for bot
+// @Summary Create workspace for bot
+// @Description Records the intent for a running workspace and streams the
+// reconciler's provisioning progress as SSE events until it settles.
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateContainerRequest true "Create workspace payload"
@@ -369,60 +381,45 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if h.workspaces == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
 
 	var req CreateContainerRequest
 	if err := c.Bind(&req); err != nil {
 		return newI18nHTTPError(http.StatusBadRequest, "workspace_create_request_invalid", "bots.container.createFailed", err.Error())
 	}
+	ctx := c.Request().Context()
 	// Image override lets administrators specify a custom base image.
 	// NOTE(saas): if this becomes a multi-tenant SaaS, image override must be
 	// validated against an allowlist to prevent SSRF and resource abuse.
-	ctx := c.Request().Context()
 	imageOverride := strings.TrimSpace(req.Image)
-	image, err := h.manager.ResolveWorkspaceImage(ctx, botID)
-	if err != nil {
-		h.logger.Error("resolve workspace image failed",
-			slog.String("bot_id", botID), slog.Any("error", err))
-		return nil
-	}
-	gpu, err := h.manager.ResolveWorkspaceGPU(ctx, botID)
-	if err != nil {
-		h.logger.Error("resolve workspace gpu failed",
-			slog.String("bot_id", botID), slog.Any("error", err))
-		return nil
-	}
-	if imageOverride != "" {
-		image = config.NormalizeImageRef(imageOverride)
-	}
 	if req.GPU != nil {
-		gpu = workspace.WorkspaceGPUConfig{Devices: req.GPU.Devices}
-	}
-
-	snapshotter := strings.TrimSpace(req.Snapshotter)
-	if snapshotter == "" {
-		snapshotter = h.cfg.Snapshotter
+		// The GPU preference is read by the reconciler when it provisions, so
+		// it is persisted before the intent.
+		if err := h.manager.RememberWorkspaceGPU(ctx, botID, workspace.WorkspaceGPUConfig{Devices: req.GPU.Devices}); err != nil {
+			return newI18nHTTPError(http.StatusInternalServerError, "workspace_create_failed", "bots.container.createFailed", err.Error())
+		}
 	}
 
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
 		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
 	}
-
 	setSSEHeaders(c)
 	c.Response().WriteHeader(http.StatusOK)
 	writer := c.Response().Writer
 
 	var mu sync.Mutex
-	send := func(payload any) {
+	send := func(payload any) bool {
 		mu.Lock()
 		defer mu.Unlock()
 		data, err := json.Marshal(payload)
 		if err != nil {
-			return
+			return false
 		}
-		_ = writeSSEData(writer, flusher, string(data))
+		return writeSSEData(writer, flusher, string(data)) == nil
 	}
-
 	sendError := func(code, i18nKey, message string) {
 		send(createContainerErrorEvent{
 			Type:      "error",
@@ -434,167 +431,52 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		})
 	}
 
-	workspaceBackend := "container"
-	// Phase 1: Pull image with progress
-	send(createContainerPullingEvent{Type: "pulling", Image: image})
+	events, unsubscribe := h.workspaces.Subscribe(botID)
+	defer unsubscribe()
 
-	var pullDone atomic.Bool
-	prepareResult, pullErr := h.manager.PrepareImageForCreate(ctx, image, &ctr.PullImageOptions{
-		Unpack:        true,
-		StorageDriver: snapshotter,
-		OnProgress: func(p ctr.PullProgress) {
-			if pullDone.Load() {
-				return
-			}
-			send(createContainerPullProgressEvent{Type: "pull_progress", Layers: p.Layers})
-		},
-	})
-	pullDone.Store(true)
-	if pullErr != nil {
-		h.logger.Error("image preparation failed",
-			slog.String("image", image), slog.Any("error", pullErr))
-		h.recordContainerSetupFailure(ctx, botID, "image_prepare", pullErr)
-		sendError("workspace_image_prepare_failed", "bots.container.createFailed", "image preparation failed: "+pullErr.Error())
-		return nil
-	}
-	if strings.TrimSpace(prepareResult.ImageRef) != "" {
-		image = prepareResult.ImageRef
-	}
-	switch prepareResult.Mode {
-	case workspace.ImagePrepareSkipped:
-		send(createContainerPullStatusEvent{Type: "pull_skipped", Image: image, Message: prepareResult.Message})
-	case workspace.ImagePrepareDelegated:
-		send(createContainerPullStatusEvent{Type: "pull_delegated", Image: image, Message: prepareResult.Message})
-	}
-
-	// Phase 2: Create container (image is local, should be fast)
-	send(createContainerCreatingEvent{Type: "creating"})
-
-	// Notify the client before starting if data migration will happen,
-	// since restoring a large /data volume can take a while.
-	willRestoreData := h.manager.HasPreservedData(botID)
-	if willRestoreData {
-		send(createContainerRestoringEvent{Type: "restoring"})
-	}
-
-	if err := h.manager.StartWithResolvedConfig(ctx, botID, image, gpu); err != nil {
-		h.logger.Error("container start failed",
-			slog.String("bot_id", botID), slog.Any("error", err))
-		h.recordContainerSetupFailure(ctx, botID, "start", err)
-		sendError("workspace_start_failed", "bots.container.createFailed", "workspace failed to start")
-		return nil
-	}
-	if err := h.manager.WaitForWorkspaceReady(ctx, botID); err != nil {
-		h.logger.Error("container bridge not ready",
-			slog.String("bot_id", botID), slog.Any("error", err))
-		sendError("workspace_not_ready", "bots.container.createFailed", "workspace runtime is not ready")
-		return nil
-	}
-	if err := h.manager.InitializeNativeWorkspace(ctx, botID); err != nil {
-		h.logger.Error("workspace initialization failed",
-			slog.String("bot_id", botID),
-			slog.String("request_id", httpx.RequestID(c)),
-			slog.Any("error", err),
-		)
-		h.recordContainerSetupFailure(ctx, botID, "initialize", err)
-		if event, ok := newWorkspaceSetupAppError(err, httpx.RequestID(c)); ok {
-			send(event)
-		} else {
-			sendError("workspace_setup_failed", "bots.container.createFailed", "workspace initialization failed")
-		}
-		return nil
-	}
-	if err := h.manager.RememberWorkspaceImage(ctx, botID, image); err != nil {
-		h.logger.Warn("remember workspace image failed",
-			slog.String("bot_id", botID), slog.String("image", image), slog.Any("error", err))
-	}
-	if req.GPU != nil {
-		if err := h.manager.RememberWorkspaceGPU(ctx, botID, gpu); err != nil {
-			h.logger.Warn("remember workspace gpu failed",
-				slog.String("bot_id", botID), slog.Any("error", err))
-		}
-	}
-
-	containerID, err := h.manager.ContainerID(ctx, botID)
+	intentCtx, cancelIntent := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	intent, err := h.workspaces.EnsurePresent(intentCtx, botID, imageOverride)
+	cancelIntent()
 	if err != nil {
-		h.logger.Error("container ID resolution failed after start",
-			slog.String("bot_id", botID), slog.Any("error", err))
-		sendError("workspace_runtime_id_failed", "bots.container.createFailed", "workspace runtime ID could not be resolved")
+		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed", slog.String("bot_id", botID), slog.Any("error", err))
+		sendError("workspace_create_failed", "bots.container.createFailed", "workspace creation could not be scheduled")
 		return nil
 	}
 
-	dataRestored := willRestoreData && !h.manager.HasPreservedData(botID)
+	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceStreamBudget)
+	defer cancel()
+	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
+		return h.workspaces.Await(ctx, botID, intent.DesiredGeneration)
+	}, httpx.RequestID(c), func(code, _ string, message string) {
+		// Workspace-page errors use the container i18n namespace.
+		sendError(code, "bots.container.createFailed", message)
+	})
+	if outcome.Failed || outcome.Disconnected {
+		return nil
+	}
+
+	// The archive is imported after the workspace settled so the single
+	// "complete" event already reports data_restored.
+	dataRestored := false
 	if req.RestoreData && h.manager.HasPreservedData(botID) {
-		if err := h.manager.RestorePreservedData(ctx, botID); err != nil {
-			h.logger.Error("restore preserved data failed",
-				slog.String("bot_id", botID), slog.Any("error", err))
+		send(createContainerRestoringEvent{Type: "restoring"})
+		if err := h.manager.RestorePreservedData(streamCtx, botID); err != nil {
+			h.logger.ErrorContext(c.Request().Context(), "restore preserved data failed", slog.String("bot_id", botID), slog.Any("error", err))
 			sendError("workspace_restore_failed", "bots.container.createFailed", "restore preserved data failed: "+err.Error())
 			return nil
 		}
 		dataRestored = true
 	}
-
-	h.manager.RecordContainerRunning(ctx, botID, containerID, image)
-	h.clearContainerSetupFailure(ctx, botID)
-
-	status, statusErr := h.manager.GetContainerInfo(ctx, botID)
-	if statusErr != nil {
-		h.logger.Warn("load container status after start failed",
-			slog.String("bot_id", botID), slog.Any("error", statusErr))
+	complete, ok := workspaceCompleteEvent(streamCtx, h.logger, h.manager, botID, outcome)
+	if !ok {
+		return nil
 	}
-	cdiDevices := gpu.Devices
-	containerPath := ""
-	responseBackend := workspaceBackend
-	runtimeBackend := ""
-	if status != nil {
-		cdiDevices = status.CDIDevices
-		containerPath = status.ContainerPath
-		responseBackend = status.WorkspaceBackend
-		runtimeBackend = status.RuntimeBackend
+	complete.Container.DataRestored = complete.Container.DataRestored || dataRestored
+	if strings.TrimSpace(complete.Container.Snapshotter) == "" {
+		complete.Container.Snapshotter = h.cfg.Snapshotter
 	}
-
-	// Phase 3: Complete
-	send(createContainerCompleteEvent{
-		Type: "complete",
-		Container: CreateContainerResponse{
-			ContainerID:      containerID,
-			WorkspaceBackend: responseBackend,
-			RuntimeBackend:   runtimeBackend,
-			ContainerPath:    containerPath,
-			Image:            image,
-			Snapshotter:      snapshotter,
-			CDIDevices:       cdiDevices,
-			Started:          true,
-			DataRestored:     dataRestored,
-			HasPreservedData: h.manager.HasPreservedData(botID),
-		},
-	})
-
+	send(complete)
 	return nil
-}
-
-func (h *ContainerdHandler) recordContainerSetupFailure(ctx context.Context, botID, phase string, err error) {
-	if h.botService == nil {
-		return
-	}
-	if recordErr := h.botService.RecordContainerSetupFailure(ctx, botID, phase, err); recordErr != nil {
-		h.logger.Warn("record bot container setup failure failed",
-			slog.String("bot_id", botID),
-			slog.Any("error", recordErr),
-		)
-	}
-}
-
-func (h *ContainerdHandler) clearContainerSetupFailure(ctx context.Context, botID string) {
-	if h.botService == nil {
-		return
-	}
-	if err := h.botService.ClearContainerSetupFailure(ctx, botID); err != nil {
-		h.logger.Warn("clear bot container setup failure failed",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-	}
 }
 
 // GetContainer godoc
@@ -747,12 +629,43 @@ func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if h.workspaces == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
+	}
 	preserveData := c.QueryParam("preserve_data") == "true"
-	if err := h.manager.CleanupBotContainer(c.Request().Context(), botID, preserveData); err != nil {
+	ctx := c.Request().Context()
+	intent, err := h.workspaces.RequestAbsent(ctx, botID, preserveData)
+	if err != nil {
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_delete_failed", "bots.container.deleteFailed", err.Error())
+	}
+	// The reconciler performs the removal (and keeps retrying transient
+	// backend failures after this request ends). Wait for the outcome within
+	// the request so the client sees a definitive answer when it is quick.
+	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceDeleteWait)
+	defer cancel()
+	final, err := h.workspaces.Await(waitCtx, botID, intent.DesiredGeneration)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return c.JSON(http.StatusAccepted, map[string]any{
+			"code":    "workspace_delete_pending",
+			"message": "workspace removal is still in progress",
+		})
+	}
+	if final.Observed != botworkspace.ObservedAbsent {
+		message := strings.TrimSpace(final.LastError)
+		if message == "" {
+			message = "workspace removal failed"
+		}
+		return newI18nHTTPError(http.StatusInternalServerError, "workspace_delete_failed", "bots.container.deleteFailed", message)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
+
+// workspaceDeleteWait bounds how long DELETE waits for the reconciler before
+// answering 202; the removal continues in the background.
+const workspaceDeleteWait = 2 * time.Minute
 
 // StartContainer godoc
 // @Summary Start workspace for bot
@@ -773,6 +686,7 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 		}
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_start_failed", "bots.container.startFailed", err.Error())
 	}
+	h.observeWorkspace(c.Request().Context(), botID)
 	return c.JSON(http.StatusOK, map[string]bool{"started": true})
 }
 
@@ -795,7 +709,21 @@ func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 		}
 		return newI18nHTTPError(http.StatusInternalServerError, "workspace_stop_failed", "bots.container.stopFailed", err.Error())
 	}
+	h.observeWorkspace(c.Request().Context(), botID)
 	return c.JSON(http.StatusOK, map[string]bool{"stopped": true})
+}
+
+// observeWorkspace refreshes the reconciler's observation after a user-driven
+// start or stop so the recorded state (running / stopped) follows the action.
+func (h *ContainerdHandler) observeWorkspace(ctx context.Context, botID string) {
+	if h.workspaces == nil {
+		return
+	}
+	obsCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	if _, err := h.workspaces.Observe(obsCtx, botID); err != nil && !errors.Is(err, botworkspace.ErrNotFound) {
+		h.logger.WarnContext(ctx, "refresh workspace observation failed", slog.String("bot_id", botID), slog.Any("error", err))
+	}
 }
 
 // CreateSnapshot godoc
@@ -877,7 +805,7 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 
 	resp, ok := buildSnapshotListResponse(data)
 	if !ok {
-		h.logger.Warn("container snapshot chain root not found",
+		h.logger.WarnContext(c.Request().Context(), "container snapshot chain root not found",
 			slog.String("container_id", data.ContainerID),
 			slog.String("snapshotter", data.Snapshotter),
 			slog.String("snapshot_key", snapshotKey),

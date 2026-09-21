@@ -235,6 +235,7 @@
       "runtime_conflict": "Agent 运行实例尚未准备好执行此操作，请刷新后重试。",
       "runtime_limit_reached": "当前运行的 Agent 实例过多，请关闭一个后重试。",
       "operation_failed": "Agent 运行实例操作失败，请重试。",
+      "command_not_found": "在工作区里找不到命令「{command}」。请先在工作区终端里安装它，或在 Agent 配置里把命令改成绝对路径。",
       "model_selection_unsupported": "这个外部 Agent 不支持切换模型。",
       "model_id_required": "请选择模型后重试。",
       "model_unavailable": "所选模型已不再可用于这个外部 Agent。",
@@ -1661,6 +1662,30 @@
       "githubConnectHint": "登录 GitHub 账号后即可使用 Copilot 模型。",
       "revokeConfirm": "确定撤销此账号的授权？",
       "connecting": "连接中"
+    },
+    "saveSuccess": "服务商配置已保存",
+    "saveBeforeTest": "请先保存修改，再测试连接。"
+  },
+  "providerConnect": {
+    "title": "添加 Provider",
+    "description": "第三方服务想将以下 Provider 添加到你的 Memoh，确认后才会保存。",
+    "name": "名称",
+    "baseUrl": "Base URL",
+    "clientType": "API 格式",
+    "apiKey": "API Key",
+    "confirm": "添加",
+    "decline": "取消",
+    "createFailed": "添加 Provider 失败",
+    "invalidTitle": "链接无效",
+    "backToProviders": "返回 Provider 列表",
+    "error": {
+      "missing": "链接缺少 payload 参数。",
+      "decode": "链接内容无法解析。",
+      "kind": "这不是 Provider 导入链接。",
+      "version": "不支持的链接版本。",
+      "baseUrl": "链接中没有合法的 Base URL。",
+      "apiKey": "链接中没有 API Key。",
+      "clientType": "链接指定了不支持的 API 格式。"
     }
   },
   "webSearch": {
@@ -2144,6 +2169,10 @@
       "failedTitle": "准备失败",
       "retry": "重试",
       "back": "返回表单",
+      "retryWorkspace": "重试工作区",
+      "continueLater": "稍后处理",
+      "openExisting": "查看已有 Bot",
+      "stillProvisioning": "工作区仍在创建中。可以到 Bot 的工作区页面继续等待，或现在重试。",
       "line": {
         "command": "正在创建 Bot「{name}」",
         "botCreated": "已创建 Bot 记录",
@@ -2177,9 +2206,9 @@
     "avatarUrl": "头像链接",
     "avatarUrlPlaceholder": "输入头像图片地址",
     "timezone": "时区",
+    "timezoneHint": "定时任务按此时区计算执行时间。",
     "timezonePlaceholder": "例如 Asia/Shanghai",
     "timezoneInherited": "继承用户或系统时区",
-    "timezoneInheritedHint": "留空则继承用户时区，若用户未设置则回退到系统时区。",
     "aclPreset": "IM 应用策略",
     "aclPresetDescription": "选择初始的访问控制预设，后续可随时调整。",
     "aclPresetHint": "建议：个人助手用“仅私聊”，群机器人用“仅群聊”或“群聊和话题”，不确定时保留“允许全部”。",
@@ -2212,8 +2241,6 @@
     "editTimezoneDescription": "为这个 Bot 设置独立时区。",
     "avatarUpdateSuccess": "头像已更新",
     "avatarUpdateFailed": "更新头像失败",
-    "timezoneUpdateSuccess": "时区已更新",
-    "timezoneUpdateFailed": "更新时区失败",
     "typePlaceholder": "选择 Bot 类型",
     "types": {
       "personal": "个人",
@@ -2897,13 +2924,9 @@
     "settings": {
       "blocks": {
         "context": "上下文与记忆",
-        "global": "全局设置",
         "interaction": "交互方式",
-        "multimedia": "多媒体",
-        "acp": "Agent"
+        "multimedia": "多媒体"
       },
-      "chatLanguage": "语言",
-      "chatLanguagePlaceholder": "例如：English、zh-CN",
       "chatModel": "对话模型",
       "chatModelDescription": "供 Memoh Agent 使用。",
       "chatModelPlaceholder": "选择模型",
@@ -3673,9 +3696,6 @@
       "fieldRequired": "请输入{field}",
       "fieldInvalid": "{field}格式不正确"
     }
-  },
-  "languages": {
-    "auto": "自动"
   },
   "onboarding": {
     "prev": "上一步",

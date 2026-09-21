@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -30,6 +31,14 @@ const (
 	ToolHeaderIsSubagent         = "X-Memoh-Is-Subagent"
 	ToolHeaderSupportsImageInput = "X-Memoh-Supports-Image-Input"
 	ToolHeaderSupportsFileInput  = "X-Memoh-Supports-File-Input"
+)
+
+const (
+	// From this revision on, a tools/call result without resultType is malformed.
+	protocolVersionResultTypeRequired = "2026-07-28"
+
+	resultTypeKey      = "resultType"
+	resultTypeComplete = "complete"
 )
 
 func ToolSessionContextFromHTTP(req *http.Request, fallbackBotID string) ToolSessionContext {
@@ -204,7 +213,7 @@ func ToolGatewayMiddleware(gateway *ToolGatewayService, contexts *ToolSessionCon
 					})
 					return nil, err
 				}
-				converted, err := ConvertGatewayCallResultToSDK(result)
+				converted, err := ConvertGatewayCallResultToSDK(result, clientRequiresResultType(callReq.Session))
 				if err != nil {
 					recordToolEvent(contexts, session, ToolStreamEvent{
 						Type:       "tool_call_end",
@@ -280,9 +289,32 @@ func ConvertGatewayToolsToSDK(items []ToolDescriptor) []*sdkmcp.Tool {
 	return tools
 }
 
-func ConvertGatewayCallResultToSDK(result map[string]any) (*sdkmcp.CallToolResult, error) {
+// clientRequiresResultType exempts only a client known to speak an older
+// revision: a needless resultType is an ignored extra field, while a missing
+// one makes the client reject every tool result.
+func clientRequiresResultType(session *sdkmcp.ServerSession) bool {
+	if session == nil {
+		return true
+	}
+	params := session.InitializeParams()
+	return params == nil || params.ProtocolVersion >= protocolVersionResultTypeRequired
+}
+
+// ConvertGatewayCallResultToSDK builds the SDK result from its wire form.
+// The SDK sets resultType only inside its built-in tools/call handler, which
+// the gateway middleware bypasses, and keeps the field unexported, so the wire
+// form is the one place it can be supplied.
+func ConvertGatewayCallResultToSDK(result map[string]any, resultTypeRequired bool) (*sdkmcp.CallToolResult, error) {
 	if result == nil {
 		result = BuildToolSuccessResult(map[string]any{"ok": true})
+	}
+	if _, ok := result[resultTypeKey]; !ok && resultTypeRequired {
+		// Copied rather than mutated: the caller goes on to record this map as
+		// the tool event, where a protocol field does not belong.
+		withResultType := make(map[string]any, len(result)+1)
+		maps.Copy(withResultType, result)
+		withResultType[resultTypeKey] = resultTypeComplete
+		result = withResultType
 	}
 	payload, err := json.Marshal(result)
 	if err != nil {

@@ -33,7 +33,7 @@ func (a *FeishuAdapter) resolveBotOpenID(ctx context.Context, cfg channel.Channe
 	discovered, externalID, err := a.DiscoverSelf(ctx, cfg.Credentials)
 	if err != nil {
 		if a != nil && a.logger != nil {
-			a.logger.Warn("discover self fallback failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
+			a.logger.WarnContext(ctx, "discover self fallback failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
 		}
 		return ""
 	}

@@ -629,7 +629,9 @@ export const deleteBotsByBotIdContainer = <ThrowOnError extends boolean = false>
 export const getBotsByBotIdContainer = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdContainerData, ThrowOnError>): RequestResult<GetBotsByBotIdContainerResponses, GetBotsByBotIdContainerErrors, ThrowOnError> => (options.client ?? client).get<GetBotsByBotIdContainerResponses, GetBotsByBotIdContainerErrors, ThrowOnError>({ url: '/bots/{bot_id}/container', ...options });
 
 /**
- * Create and start workspace for bot
+ * Create workspace for bot
+ *
+ * Records the intent for a running workspace and streams the
  */
 export const postBotsByBotIdContainer = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerResponses, PostBotsByBotIdContainerErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerResponses, PostBotsByBotIdContainerErrors, ThrowOnError>({
     url: '/bots/{bot_id}/container',
@@ -1472,8 +1474,8 @@ export const postBotsByBotIdSessions = <ThrowOnError extends boolean = false>(op
  *
  * Lightweight SSE for sidebar live-sort. Carries only session
  * identifiers and minimal metadata (touched timestamps, titles).
- * Never includes message bodies. Filters out internal session
- * types such as schedule and subagent.
+ * Never includes message bodies. Filters out sessions with
+ * internal visibility, such as managed subagent work.
  */
 export const getBotsByBotIdSessionsEvents = <ThrowOnError extends boolean = false>(options: Options<GetBotsByBotIdSessionsEventsData, ThrowOnError, GetBotsByBotIdSessionsEventsResponse>): Promise<ServerSentEventsResult<GetBotsByBotIdSessionsEventsResponses>> => (options.client ?? client).sse.get<GetBotsByBotIdSessionsEventsResponses, GetBotsByBotIdSessionsEventsErrors, ThrowOnError>({ url: '/bots/{bot_id}/sessions/events', ...options });
 

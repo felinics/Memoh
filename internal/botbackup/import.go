@@ -321,9 +321,6 @@ func settingsLabels(raw []byte) []string {
 		return "on"
 	}
 	out := []string{}
-	if v := str("language"); v != "" {
-		out = append(out, "language: "+v)
-	}
 	if v := str("timezone"); v != "" {
 		out = append(out, "timezone: "+v)
 	}
@@ -515,7 +512,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		defer func() {
 			if !committed {
 				if delErr := s.bots.Delete(context.WithoutCancel(ctx), targetBotID); delErr != nil {
-					s.logger.Warn("import compensation: delete bot failed",
+					s.logger.WarnContext(ctx, "import compensation: delete bot failed",
 						slog.String("bot_id", targetBotID), slog.Any("error", delErr))
 				}
 			}
@@ -892,7 +889,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.DiscussProbeModelID = current.DiscussProbeModelID
 			}
 			if !importSettings {
-				eff.Language = current.Language
 				eff.AclDefaultEffect = current.AclDefaultEffect
 				eff.Timezone = current.Timezone
 				eff.ChatRuntime = current.ChatRuntime
@@ -950,7 +946,6 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		MemoryProviderID:        ptrStringAllowEmpty(modelID(eff.MemoryProviderID, deps.memoryProviders)),
 		TtsModelID:              ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
 		TranscriptionModelID:    ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
-		Language:                ptrStringAllowEmpty(eff.Language),
 		AclDefaultEffect:        eff.AclDefaultEffect,
 		Timezone:                &timezone,
 		ReasoningEffort:         &reasoningEffort,

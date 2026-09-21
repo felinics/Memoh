@@ -161,7 +161,7 @@ func (c *Client) Run(ctx context.Context, dispatcher EventDispatcher) error {
 		_ = resp.Body.Close()
 	}
 
-	c.logger.Info("connected",
+	c.logger.InfoContext(ctx, "connected",
 		slog.String("conn_id", connID),
 		slog.String("service_id", serviceID),
 		slog.Duration("ping_interval", pingInterval),
@@ -292,7 +292,7 @@ func (s *session) readLoop(ctx context.Context) error {
 			return fmt.Errorf("ws read: %w", err)
 		}
 		if mt != websocket.BinaryMessage {
-			s.client.logger.Warn("ignoring non-binary frame", slog.Int("type", mt))
+			s.client.logger.WarnContext(ctx, "ignoring non-binary frame", slog.Int("type", mt))
 			continue
 		}
 		s.handleFrame(ctx, msg)
@@ -317,12 +317,12 @@ func (s *session) pingLoop(ctx context.Context, abort context.CancelFunc) {
 				return
 			default:
 				failures++
-				s.client.logger.Warn("ping failed",
+				s.client.logger.WarnContext(ctx, "ping failed",
 					slog.Int("consecutive", failures),
 					slog.Any("error", err),
 				)
 				if failures >= pingFailuresUntilAbort {
-					s.client.logger.Error("aborting session: ping persistently failing",
+					s.client.logger.ErrorContext(ctx, "aborting session: ping persistently failing",
 						slog.Int("consecutive", failures),
 					)
 					abort()
@@ -374,7 +374,7 @@ func (s *session) writeBinary(data []byte) error {
 func (s *session) handleFrame(ctx context.Context, raw []byte) {
 	var frame larkws.Frame
 	if err := frame.Unmarshal(raw); err != nil {
-		s.client.logger.Error("unmarshal frame failed", slog.Any("error", err))
+		s.client.logger.ErrorContext(ctx, "unmarshal frame failed", slog.Any("error", err))
 		return
 	}
 
@@ -384,7 +384,7 @@ func (s *session) handleFrame(ctx context.Context, raw []byte) {
 	case larkws.FrameTypeData:
 		s.spawnDispatch(ctx, frame)
 	default:
-		s.client.logger.Debug("unknown frame method", slog.Int("method", int(frame.Method)))
+		s.client.logger.DebugContext(ctx, "unknown frame method", slog.Int("method", int(frame.Method)))
 	}
 }
 
@@ -408,7 +408,7 @@ func (s *session) spawnDispatch(ctx context.Context, frame larkws.Frame) {
 		defer func() {
 			if r := recover(); r != nil {
 				msgID := larkws.Headers(f.Headers).GetString(larkws.HeaderMessageID)
-				s.client.logger.Error("dispatch panic recovered",
+				s.client.logger.ErrorContext(ctx, "dispatch panic recovered",
 					slog.String("message_id", msgID),
 					slog.Any("panic", r),
 					slog.String("stack", string(debug.Stack())),
@@ -477,7 +477,7 @@ func (s *session) handleData(ctx context.Context, frame larkws.Frame) {
 	resp := larkws.NewResponseByCode(http.StatusOK)
 	switch {
 	case err != nil:
-		s.client.logger.Error("dispatch event failed",
+		s.client.logger.ErrorContext(ctx, "dispatch event failed",
 			slog.String("message_id", msgID),
 			slog.String("trace_id", traceID),
 			slog.Any("error", err),
@@ -486,7 +486,7 @@ func (s *session) handleData(ctx context.Context, frame larkws.Frame) {
 	case rsp != nil:
 		data, encErr := json.Marshal(rsp)
 		if encErr != nil {
-			s.client.logger.Error("encode dispatch response failed",
+			s.client.logger.ErrorContext(ctx, "encode dispatch response failed",
 				slog.String("message_id", msgID),
 				slog.String("trace_id", traceID),
 				slog.Any("error", encErr),
@@ -499,7 +499,7 @@ func (s *session) handleData(ctx context.Context, frame larkws.Frame) {
 
 	encoded, encErr := json.Marshal(resp)
 	if encErr != nil {
-		s.client.logger.Error("marshal ack response failed",
+		s.client.logger.ErrorContext(ctx, "marshal ack response failed",
 			slog.String("message_id", msgID),
 			slog.String("trace_id", traceID),
 			slog.Any("error", encErr),
@@ -510,14 +510,14 @@ func (s *session) handleData(ctx context.Context, frame larkws.Frame) {
 	frame.Headers = headers
 	bs, marshalErr := frame.Marshal()
 	if marshalErr != nil {
-		s.client.logger.Error("marshal response frame failed", slog.Any("error", marshalErr))
+		s.client.logger.ErrorContext(ctx, "marshal response frame failed", slog.Any("error", marshalErr))
 		return
 	}
 	if writeErr := s.writeBinary(bs); writeErr != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		s.client.logger.Error("write response frame failed",
+		s.client.logger.ErrorContext(ctx, "write response frame failed",
 			slog.String("message_id", msgID),
 			slog.String("trace_id", traceID),
 			slog.Any("error", writeErr),

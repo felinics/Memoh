@@ -12,6 +12,7 @@ type Config struct {
 	AppSecret       string
 	MarkdownSupport bool
 	EnableInputHint bool
+	EnableStreaming bool
 }
 
 type UserConfig struct {
@@ -29,6 +30,7 @@ func normalizeConfig(raw map[string]any) (map[string]any, error) {
 		"clientSecret":    cfg.AppSecret,
 		"markdownSupport": cfg.MarkdownSupport,
 		"enableInputHint": cfg.EnableInputHint,
+		"enableStreaming": cfg.EnableStreaming,
 	}, nil
 }
 
@@ -100,6 +102,7 @@ func parseConfig(raw map[string]any) (Config, error) {
 		AppSecret:       clientSecret,
 		MarkdownSupport: readBool(raw, true, "markdownSupport", "markdown_support"),
 		EnableInputHint: readBool(raw, true, "enableInputHint", "enable_input_hint"),
+		EnableStreaming: readBool(raw, true, "enableStreaming", "enable_streaming"),
 	}, nil
 }
 

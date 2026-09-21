@@ -52,7 +52,7 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 	loaded, err := s.loadHistoryRecords(ctx, historyScopeFallbackFromChatRequest(req), req.ThreadID, defaultMaxContextMinutes, 0)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("memory query history load failed",
+			s.logger.WarnContext(ctx, "memory query history load failed",
 				slog.String("bot_id", req.BotID),
 				slog.String("chat_id", req.ChatID),
 				slog.String("session_id", req.ThreadID),
@@ -67,7 +67,7 @@ func (s *Service) buildMemoryQuery(ctx context.Context, req ChatRequest) memoryQ
 	loaded, err = s.replaceCompactedMessages(ctx, req.ThreadID, compactionSummaryScope(req.BotID, req.ChatID, req.ThreadID, req.ConversationType, req.ConversationName, req.ReplyTarget), loaded, artifactBoundary)
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Warn("memory query compaction frontier load failed", slog.String("session_id", req.ThreadID), slog.Any("error", err))
+			s.logger.WarnContext(ctx, "memory query compaction frontier load failed", slog.String("session_id", req.ThreadID), slog.Any("error", err))
 		}
 		return builder.Build(req, nil)
 	}

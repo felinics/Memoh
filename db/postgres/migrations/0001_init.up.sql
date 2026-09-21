@@ -230,6 +230,8 @@ CREATE TABLE IF NOT EXISTS bots (
   timezone TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
+  -- Retired setting: no code reads or writes this column. Kept so dropping it
+  -- never becomes a breaking schema change for an already-deployed server.
   language TEXT NOT NULL DEFAULT 'auto',
   command_ui_language TEXT NOT NULL DEFAULT 'auto',
   reasoning_effort TEXT NOT NULL DEFAULT 'medium',
@@ -265,7 +267,7 @@ CREATE TABLE IF NOT EXISTS bots (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   acl_default_effect TEXT NOT NULL DEFAULT 'allow',
   CONSTRAINT bots_type_check CHECK (type IN ('personal', 'public')),
-  CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting')),
+  CONSTRAINT bots_status_check CHECK (status IN ('creating', 'ready', 'deleting', 'failed')),
   CONSTRAINT bots_acl_default_effect_check CHECK (acl_default_effect IN ('allow', 'deny')),
   CONSTRAINT bots_runtime_reset_pair_check CHECK (
     (runtime_reset_token IS NULL) = (runtime_reset_expires_at IS NULL)
@@ -3104,3 +3106,66 @@ DROP POLICY IF EXISTS agent_authorizations_team ON public.agent_authorizations;
 CREATE POLICY agent_authorizations_team ON public.agent_authorizations
     USING (team_id = public.memoh_current_team_id())
     WITH CHECK (team_id = public.memoh_current_team_id());
+
+-- Declarative workspace state for bots, converged by the internal/botworkspace reconciler.
+-- desired_* is written only by the API layer; observed_* and the lease only by
+-- the reconciler. ever_ready gates whether any automated step may delete the
+-- workspace's data.
+CREATE TABLE IF NOT EXISTS public.bot_workspaces (
+    bot_id              UUID        PRIMARY KEY,
+    team_id             UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                                    REFERENCES public.teams(id) ON DELETE RESTRICT,
+    desired_state       TEXT        NOT NULL,
+    desired_generation  BIGINT      NOT NULL DEFAULT 1,
+    image               TEXT        NOT NULL DEFAULT '',
+    preserve_data       BOOLEAN     NOT NULL DEFAULT false,
+    observed_state      TEXT        NOT NULL DEFAULT 'absent',
+    observed_generation BIGINT      NOT NULL DEFAULT 0,
+    ever_ready          BOOLEAN     NOT NULL DEFAULT false,
+    last_error          TEXT        NOT NULL DEFAULT '',
+    last_error_phase    TEXT        NOT NULL DEFAULT '',
+    attempts            INTEGER     NOT NULL DEFAULT 0,
+    next_attempt_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_owner         TEXT        NOT NULL DEFAULT '',
+    lease_until         TIMESTAMPTZ,
+    version             BIGINT      NOT NULL DEFAULT 1,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT memoh_team_key_7443107a7495 UNIQUE (team_id, bot_id),
+    CONSTRAINT bot_workspaces_desired_state_check
+        CHECK (desired_state IN ('present', 'absent')),
+    CONSTRAINT bot_workspaces_observed_state_check
+        CHECK (observed_state IN ('absent', 'provisioning', 'running', 'stopped', 'failed', 'removing')),
+    CONSTRAINT bot_workspaces_last_error_phase_check
+        CHECK (last_error_phase IN ('', 'image_prepare', 'start', 'bridge', 'bootstrap', 'teardown'))
+);
+
+ALTER TABLE public.bot_workspaces
+    DROP CONSTRAINT IF EXISTS bot_workspaces_bot_id_fkey;
+ALTER TABLE public.bot_workspaces
+    ADD CONSTRAINT bot_workspaces_bot_id_fkey
+    FOREIGN KEY (team_id, bot_id)
+    REFERENCES public.bots(team_id, id) ON DELETE CASCADE
+    NOT VALID;
+
+CREATE INDEX IF NOT EXISTS idx_bot_workspaces_due
+    ON public.bot_workspaces (team_id, next_attempt_at);
+
+ALTER TABLE public.bot_workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_workspaces FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS bot_workspaces_team_select ON public.bot_workspaces;
+DROP POLICY IF EXISTS bot_workspaces_team_insert ON public.bot_workspaces;
+DROP POLICY IF EXISTS bot_workspaces_team_update ON public.bot_workspaces;
+DROP POLICY IF EXISTS bot_workspaces_team_delete ON public.bot_workspaces;
+
+CREATE POLICY bot_workspaces_team_select ON public.bot_workspaces
+    FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_workspaces_team_insert ON public.bot_workspaces
+    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_workspaces_team_update ON public.bot_workspaces
+    FOR UPDATE
+    USING (team_id = public.memoh_current_team_id())
+    WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_workspaces_team_delete ON public.bot_workspaces
+    FOR DELETE USING (team_id = public.memoh_current_team_id());

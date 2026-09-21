@@ -3244,10 +3244,10 @@ func (s *startupCancelBridgeServer) Exec(stream grpc.BidiStreamingServer[pb.Exec
 	s.execs++
 	execNumber := s.execs
 	s.mu.Unlock()
-	// RuntimeLease hardens its UUID directory before the existing command
-	// availability probe, so both setup commands complete before the long-lived
-	// ACP process starts.
-	if execNumber <= 2 {
+	// RuntimeLease hardens its UUID directory and probes the shell PATH before
+	// the command availability probe, so all three setup commands complete
+	// before the long-lived ACP process starts.
+	if execNumber <= 3 {
 		return stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_EXIT, ExitCode: 0})
 	}
 	close(s.processStarted)

@@ -221,7 +221,7 @@ func (s *Service) SubagentRunObserver(ctx context.Context) native.SpawnRunObserv
 				lost.Store(true)
 			}
 			if s.logger != nil {
-				s.logger.Warn("publish subagent runtime event failed",
+				s.logger.WarnContext(ctx, "publish subagent runtime event failed",
 					slog.Any("error", err),
 					slog.String("bot_id", handle.BotID),
 					slog.String("session_id", handle.SessionID),

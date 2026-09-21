@@ -22,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/handlers"
 	"github.com/felinics/memoh/internal/server"
+	"github.com/felinics/memoh/internal/telemetry"
 	"github.com/felinics/memoh/internal/version"
 )
 
@@ -104,6 +105,7 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 func options() fx.Option {
 	return fx.Options(
 		fx.Provide(provideConfig),
+		fx.Supply(telemetry.Service{Name: "memoh-channel"}),
 		coremodule.FoundationModule(),
 		channelmodule.FoundationModule(),
 		channelmodule.RuntimeModule(),

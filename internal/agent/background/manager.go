@@ -164,7 +164,7 @@ func (m *Manager) Spawn(
 
 	m.initializeOutputFile(parentCtx, task, writeFn)
 
-	m.logger.Info("background task spawned",
+	m.logger.InfoContext(parentCtx, "background task spawned",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("command", truncate(command, 120)),
@@ -207,7 +207,7 @@ func (m *Manager) SpawnAdopt(
 
 	m.initializeOutputFile(parentCtx, task, writeFn)
 
-	m.logger.Info("background task adopted",
+	m.logger.InfoContext(parentCtx, "background task adopted",
 		slog.String("task_id", taskID),
 		slog.String("bot_id", botID),
 		slog.String("command", truncate(command, 120)),
@@ -285,7 +285,7 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 		}
 		if combined != "" || result.Err != nil {
 			if err := writeFn(context.WithoutCancel(ctx), task.OutputFile, []byte(combined)); err != nil {
-				m.logger.Warn("background task: write output log failed",
+				m.logger.WarnContext(parentCtx, "background task: write output log failed",
 					slog.String("task_id", task.ID),
 					slog.String("output_file", task.OutputFile),
 					slog.Any("error", err),
@@ -327,7 +327,7 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 
 	result, err := execFn(ctx, wrappedCmd, task.WorkDir, BackgroundExecTimeout)
 	if err != nil {
-		m.logger.Warn("background task: execFn returned error",
+		m.logger.WarnContext(parentCtx, "background task: execFn returned error",
 			slog.String("task_id", task.ID),
 			slog.Any("exec_error", err),
 		)
@@ -341,7 +341,7 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 		ec, recoverErr := readSentinelExitCode(ctx, task.OutputFile+".exit", readFn)
 		if recoverErr == nil {
 			if err != nil {
-				m.logger.Info("background task: recovered exit code from sentinel file after stream error",
+				m.logger.InfoContext(parentCtx, "background task: recovered exit code from sentinel file after stream error",
 					slog.String("task_id", task.ID),
 					slog.Int("recovered_exit_code", int(ec)),
 					slog.Any("stream_error", err),
@@ -350,7 +350,7 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 			result = &bridge.ExecResult{ExitCode: ec}
 			err = nil
 		} else if err != nil {
-			m.logger.Warn("background task: sentinel recovery failed",
+			m.logger.WarnContext(parentCtx, "background task: sentinel recovery failed",
 				slog.String("task_id", task.ID),
 				slog.Any("recover_error", recoverErr),
 			)
@@ -476,7 +476,7 @@ func (m *Manager) initializeOutputFile(parentCtx context.Context, task *Task, wr
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), 5*time.Second)
 	defer cancel()
 	if err := ensureOutputFile(ctx, writeFn, task.OutputFile); err != nil {
-		m.logger.Warn("background task: initialize output log failed",
+		m.logger.WarnContext(parentCtx, "background task: initialize output log failed",
 			slog.String("task_id", task.ID),
 			slog.String("output_file", task.OutputFile),
 			slog.Any("error", err),
@@ -821,7 +821,7 @@ func (m *Manager) stallWatchdog(ctx context.Context, task *Task) {
 			continue
 		}
 
-		m.logger.Warn("background task appears stalled on interactive prompt",
+		m.logger.WarnContext(ctx, "background task appears stalled on interactive prompt",
 			slog.String("task_id", task.ID),
 		)
 

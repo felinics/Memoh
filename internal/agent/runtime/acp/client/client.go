@@ -623,7 +623,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 			// options simply cannot be shown to a decider, so resolve the
 			// request as cancelled instead of aborting the agent's turn.
 			if c.logger != nil {
-				c.logger.Warn("permission options unmappable; cancelling",
+				c.logger.WarnContext(ctx, "permission options unmappable; cancelling",
 					slog.String("tool_call_id", strings.TrimSpace(string(p.ToolCall.ToolCallId))),
 					slog.String("error", err.Error()))
 			}
@@ -684,7 +684,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		// workspace root. Log it (an agent probing the boundary is exactly what
 		// we want visibility into) before refusing.
 		if c.logger != nil {
-			c.logger.Warn("rejecting out-of-scope ACP permission request", slog.Any("error", err))
+			c.logger.WarnContext(ctx, "rejecting out-of-scope ACP permission request", slog.Any("error", err))
 		}
 		return rejectOncePermission(p), nil
 	}
@@ -708,7 +708,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		// an allow option on the user's behalf.
 		forceReview = true
 		if c.logger != nil {
-			c.logger.Info("routing non-Memoh MCP permission request to generic approval",
+			c.logger.InfoContext(ctx, "routing non-Memoh MCP permission request to generic approval",
 				slog.String("tool_call_id", state.id),
 				slog.String("server_name", preflight.serverName),
 				slog.String("tool_name", preflight.toolName),
@@ -741,7 +741,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		if c.logger != nil {
 			// The raw-input summary reports the shape without echoing values
 			// into logs, which is how a new agent encoding gets noticed.
-			c.logger.Info("routing unmapped ACP permission request to generic approval",
+			c.logger.InfoContext(ctx, "routing unmapped ACP permission request to generic approval",
 				slog.String("tool_call_id", toolCallID),
 				slog.String("title", stringFromAny(input["title"])),
 				slog.String("kind", stringFromAny(input["kind"])),
@@ -793,7 +793,7 @@ func (c *clientCallbacks) RequestPermission(ctx context.Context, p acp.RequestPe
 		// grant behind would let a later callback run on a permission the
 		// agent believes was cancelled.
 		if c.logger != nil {
-			c.logger.Warn("approval granted but the agent offered no allow_once option; cancelling",
+			c.logger.WarnContext(ctx, "approval granted but the agent offered no allow_once option; cancelling",
 				slog.String("tool_call_id", toolCallID),
 				slog.String("tool_name", toolName))
 		}
@@ -1309,7 +1309,7 @@ func (c *clientCallbacks) allowsMemohMCPToolPreflight(ctx context.Context, prefl
 	}
 	if !isMemohToolsMCPServerName(preflight.serverName) {
 		if c.logger != nil {
-			c.logger.Warn("rejecting MCP tool preflight for missing or non-Memoh server",
+			c.logger.WarnContext(ctx, "rejecting MCP tool preflight for missing or non-Memoh server",
 				slog.String("shape", preflight.shape),
 				slog.String("server_name", preflight.serverName),
 				slog.String("tool_name", preflight.toolName))
@@ -1330,7 +1330,7 @@ func (c *clientCallbacks) allowsMemohMCPToolPreflight(ctx context.Context, prefl
 	_, ok, err := c.toolGateway.LookupTool(ctx, session, preflight.toolName)
 	if err != nil {
 		if c.logger != nil {
-			c.logger.Warn("failed to classify MCP tool preflight",
+			c.logger.WarnContext(ctx, "failed to classify MCP tool preflight",
 				slog.String("shape", preflight.shape),
 				slog.String("tool_name", preflight.toolName),
 				slog.Any("error", err))

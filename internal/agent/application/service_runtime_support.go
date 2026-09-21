@@ -120,7 +120,7 @@ func (s *Service) resolveRuntimeRoundPersistFailure(
 		}
 		return runtimeRoundCommitted
 	}
-	s.logger.Error("failed to reconcile uncertain External Agent round",
+	s.logger.ErrorContext(ctx, "failed to reconcile uncertain External Agent round",
 		slog.String("session_id", req.ThreadID), slog.String("run_id", req.RunID), slog.Any("error", reconcileErr))
 	s.retryRuntimeRoundOutcome(context.WithoutCancel(ctx), req, func(reconcileCtx context.Context, _ string) {
 		cleanupProjectionsIn(reconcileCtx)
@@ -215,16 +215,16 @@ func (s *Service) retryRuntimeRoundOutcome(ctx context.Context, req ChatRequest,
 				return
 			}
 			if retryCtx.Err() != nil {
-				s.logger.Error("abandoning uncertain External Agent round reconciliation after budget",
+				s.logger.ErrorContext(ctx, "abandoning uncertain External Agent round reconciliation after budget",
 					slog.String("session_id", req.ThreadID), slog.String("run_id", req.RunID), slog.Any("error", err))
 				return
 			}
-			s.logger.Error("retrying uncertain External Agent round reconciliation",
+			s.logger.ErrorContext(ctx, "retrying uncertain External Agent round reconciliation",
 				slog.String("session_id", req.ThreadID), slog.String("run_id", req.RunID), slog.Any("error", err))
 			timer.Reset(backoff)
 			select {
 			case <-retryCtx.Done():
-				s.logger.Error("abandoning uncertain External Agent round reconciliation after budget",
+				s.logger.ErrorContext(ctx, "abandoning uncertain External Agent round reconciliation after budget",
 					slog.String("session_id", req.ThreadID), slog.String("run_id", req.RunID))
 				return
 			case <-timer.C:
@@ -306,7 +306,7 @@ func (s *Service) cleanupUncertainRuntimeLeadingUser(ctx context.Context, req Ch
 			}
 			return
 		}
-		s.logger.Error("retrying uncertain External Agent leading-user cleanup",
+		s.logger.ErrorContext(ctx, "retrying uncertain External Agent leading-user cleanup",
 			slog.String("session_id", req.ThreadID), slog.String("run_id", req.RunID), slog.Any("error", err))
 		timer := time.NewTimer(backoff)
 		select {
@@ -343,7 +343,7 @@ func (s *Service) cleanupRuntimeDecisionProjectionRows(ctx context.Context, req 
 	if _, err := s.queries.DeleteRuntimeDecisionProjectionsByRun(ctx, sqlc.DeleteRuntimeDecisionProjectionsByRunParams{
 		BotID: botID, SessionID: sessionID, RunID: runID,
 	}); err != nil {
-		s.logger.Warn("cleanup External Agent decision projections by run failed",
+		s.logger.WarnContext(ctx, "cleanup External Agent decision projections by run failed",
 			slog.String("session_id", req.ThreadID), slog.String("run_id", req.RunID), slog.Any("error", err))
 	}
 }
@@ -533,7 +533,7 @@ func (s *Service) persistRuntimeLeadingUserMessage(ctx context.Context, req Chat
 		Content: newTextContent(contentText),
 	})
 	if err != nil {
-		s.logger.Warn("persist External Agent leading user message: marshal failed", slog.Any("error", err))
+		s.logger.WarnContext(ctx, "persist External Agent leading user message: marshal failed", slog.Any("error", err))
 		return req, nil, nil
 	}
 	senderChannelIdentityID, senderUserID := s.resolvePersistSenderIDs(ctx, req)
@@ -558,7 +558,7 @@ func (s *Service) persistRuntimeLeadingUserMessage(ctx context.Context, req Chat
 		TurnPosition:            req.TurnPosition,
 	})
 	if err != nil {
-		s.logger.Warn("persist External Agent leading user message failed",
+		s.logger.WarnContext(ctx, "persist External Agent leading user message failed",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.ThreadID),
 			slog.Any("error", err))
@@ -600,7 +600,7 @@ func (s *Service) persistRuntimeDecisionProjection(ctx context.Context, req Chat
 		}
 		content, err := historyfrag.MarshalStoredModelMessage(msg)
 		if err != nil {
-			s.logger.Warn("persist External Agent decision projection: marshal failed",
+			s.logger.WarnContext(ctx, "persist External Agent decision projection: marshal failed",
 				slog.String("tool_call_id", ev.ToolCallID),
 				slog.Any("error", err))
 			return nil
@@ -621,7 +621,7 @@ func (s *Service) persistRuntimeDecisionProjection(ctx context.Context, req Chat
 			RunID:                   req.RunID,
 		})
 		if err != nil {
-			s.logger.Warn("persist External Agent decision projection failed",
+			s.logger.WarnContext(ctx, "persist External Agent decision projection failed",
 				slog.String("bot_id", req.BotID),
 				slog.String("session_id", req.ThreadID),
 				slog.String("tool_call_id", ev.ToolCallID),
@@ -644,14 +644,14 @@ func (s *Service) cancelPendingRuntimeApprovals(ctx context.Context, req ChatReq
 	}
 	cancelled, err := s.toolApproval.CancelPendingForSession(ctx, req.BotID, req.ThreadID, reason)
 	if err != nil {
-		s.logger.Warn("cancel pending External Agent approvals failed",
+		s.logger.WarnContext(ctx, "cancel pending External Agent approvals failed",
 			slog.String("bot_id", req.BotID),
 			slog.String("session_id", req.ThreadID),
 			slog.Any("error", err))
 		return
 	}
 	if len(cancelled) > 0 {
-		s.logger.Info("cancelled pending External Agent approvals with their turn",
+		s.logger.InfoContext(ctx, "cancelled pending External Agent approvals with their turn",
 			slog.String("session_id", req.ThreadID),
 			slog.Int("count", len(cancelled)))
 	}

@@ -154,7 +154,7 @@ func (a *WeComAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, h
 			return a.handleFrame(frameCtx, cfg, frame, handler)
 		})
 		if err != nil && connCtx.Err() == nil {
-			a.logger.Error("wecom websocket stopped",
+			a.logger.ErrorContext(ctx, "wecom websocket stopped",
 				slog.String("config_id", cfg.ID),
 				slog.Any("error", err),
 			)

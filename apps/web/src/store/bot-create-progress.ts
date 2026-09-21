@@ -1,13 +1,15 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { getAgentAuthorizationsById, getBotsByBotIdAgents, getBotsByBotIdAgentsById, patchBotsByBotIdAgentsById, postBotsByBotIdAgents, postBotsByBotIdAgentsByIdCredentialClaim, postBotsByBotIdUserAccess, putBotsByBotIdSettings } from '@memohai/sdk'
+import { getAgentAuthorizationsById, getBotsById, getBotsByIdChecks, getBotsByBotIdAgents, getBotsByBotIdAgentsById, patchBotsByBotIdAgentsById, postBotsByBotIdAgents, postBotsByBotIdAgentsByIdCredentialClaim, postBotsByBotIdUserAccess, putBotsByBotIdSettings } from '@memohai/sdk'
 import type { BotagentsBotAgent, BotsBot, BotsCreateBotRequest } from '@memohai/sdk'
 import {
   botCreateProgressPercent,
   collectBotCreateProgressStream,
   postBotsStream,
   type BotCreateProgress,
+  type BotCreateStreamEvent,
 } from '@/composables/api/useBotCreateStream'
+import { postBotsByBotIdContainerStream } from '@/composables/api/useContainerStream'
 import {
   appendBotCreateTerminalLine,
   finalizeBotCreateTerminalLines,
@@ -17,11 +19,17 @@ import {
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
-import { writeCreatedAgentSession, type CreatedAgentSession } from '@/pages/bots/created-agent-session'
+import { writeCreatedBotSession, type CreatedBotSession, type CreatedBotSessionRuntime } from '@/pages/bots/created-bot-session'
 import { installCreatedAgent } from './install-created-agent'
 
-// A setup failure keeps the created Bot and retries only its remaining setup.
-export type BotCreateStatus = 'idle' | 'creating' | 'ready' | 'setup-error' | 'error'
+// The Bot row exists from the first `bot_created` event on, so every failure
+// after it keeps the Bot and retries only what is missing:
+// - workspace-error: the workspace never became ready (bot status `failed`);
+//   retry re-asserts the workspace intent on the same Bot.
+// - setup-error: the workspace is fine but the Agent / settings step failed;
+//   retry re-runs only that step.
+// - error: no Bot exists (rejected create, or the Bot was deleted meanwhile).
+export type BotCreateStatus = 'idle' | 'creating' | 'ready' | 'setup-error' | 'workspace-error' | 'error'
 
 export type BotCreateDisplay = {
   display_name: string
@@ -65,6 +73,20 @@ export type BotCreateStartResult = {
   agentId?: string
 }
 
+const NOTHING_APPLIED: BotCreateStartResult = { settingsApplied: false, agentApplied: false }
+
+// How a resumed flow follows a Bot that is still `creating`. The budget mirrors
+// the server's SSE stream budget; past it the workspace page is the place to
+// keep watching.
+export const BOT_STATUS_POLL_INTERVAL_MS = 2000
+export const BOT_STATUS_POLL_BUDGET_MS = 15 * 60 * 1000
+
+const WORKSPACE_FAILURE_FALLBACK = { i18n_key: 'bots.create.failedSubtitle' }
+const WORKSPACE_STILL_PROVISIONING = { i18n_key: 'bots.create.stillProvisioning' }
+const BOT_STATUS_FAILED = 'failed'
+const BOT_STATUS_CREATING = 'creating'
+const CONTAINER_INIT_CHECK = 'container.init'
+
 function hasSettings(settings?: BotCreateSettings): boolean {
   return !!(settings && (settings.chat_model_id || settings.memory_provider_id || settings.reasoning_effort))
 }
@@ -75,6 +97,16 @@ function settingsBody(settings: BotCreateSettings) {
     ...(settings.memory_provider_id ? { memory_provider_id: settings.memory_provider_id } : {}),
     ...(settings.reasoning_effort ? { reasoning_effort: settings.reasoning_effort } : {}),
   }
+}
+
+function directRuntimeOf(agent?: BotCreateAgent): CreatedBotSessionRuntime | undefined {
+  if (!agent) return undefined
+  const runtime = botAgentRuntimeForProvider(agent.provider)
+  return runtime === 'codex' || runtime === 'claude-code' ? runtime : undefined
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 // Grants are applied one at a time and never fail the creation: the bot and its
@@ -111,6 +143,31 @@ function toMessage(error: unknown): string {
   return 'Bot create failed'
 }
 
+// Polls the Bot until the server has settled its workspace one way or the
+// other. Returns the last observation even when the budget runs out while the
+// Bot is still creating; the caller decides what that means.
+async function awaitBotSettled(botId: string): Promise<BotsBot> {
+  const deadline = Date.now() + BOT_STATUS_POLL_BUDGET_MS
+  for (;;) {
+    const { data } = await getBotsById({ path: { id: botId }, throwOnError: true })
+    if (data.status !== BOT_STATUS_CREATING || Date.now() >= deadline) return data
+    await sleep(BOT_STATUS_POLL_INTERVAL_MS)
+  }
+}
+
+// The failure reason of a `failed` Bot lives in its runtime checks; the
+// initialization check carries the reconciler's last error.
+async function workspaceFailureDetail(botId: string): Promise<string> {
+  try {
+    const { data } = await getBotsByIdChecks({ path: { id: botId }, throwOnError: true })
+    const detail = data.items?.find(check => check.type === CONTAINER_INIT_CHECK && check.status === 'error')?.detail?.trim()
+    if (detail) return detail
+  } catch {
+    // The check list is a nicety; the failure itself is already known.
+  }
+  return resolveApiErrorMessage(WORKSPACE_FAILURE_FALLBACK, 'Workspace setup failed')
+}
+
 // Owns the bot-create SSE stream and derived state so it survives navigation
 // from the create form to the dedicated progress route. Views read this store
 // and own navigation/onboarding side effects.
@@ -125,12 +182,16 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   const setupError = ref<string | null>(null)
   const errorCode = ref<string | null>(null)
   const modelConfigured = ref(false)
+  const hasPayload = ref(false)
 
   let lastPayload: BotsCreateBotRequest | null = null
   let lastOptions: StartBotCreateOptions = {}
+  let grantsApplied = false
 
   const percent = computed(() => botCreateProgressPercent(progress.value))
   const isActive = computed(() => status.value === 'creating')
+  // A retry needs something to retry on: an existing Bot, or the rejected payload.
+  const canRetry = computed(() => status.value !== 'creating' && (!!bot.value?.id || hasPayload.value))
 
   function reset() {
     status.value = 'idle'
@@ -143,7 +204,9 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     setupError.value = null
     errorCode.value = null
     lastPayload = null
-    writeCreatedAgentSession(null, lastOptions.onboarding)
+    hasPayload.value = false
+    grantsApplied = false
+    writeCreatedBotSession(null, lastOptions.onboarding)
     lastOptions = {}
     modelConfigured.value = false
   }
@@ -154,13 +217,38 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   }
 
   function saveSession() {
-    const runtime = lastOptions.agent && botAgentRuntimeForProvider(lastOptions.agent.provider)
-    if (!bot.value?.id || (runtime !== 'codex' && runtime !== 'claude-code')) return
-    writeCreatedAgentSession({
+    if (!bot.value?.id) return
+    const runtime = directRuntimeOf(lastOptions.agent)
+    writeCreatedBotSession({
       botId: bot.value.id, botName: bot.value.name ?? '', displayName: display.value?.display_name ?? '',
-      agentId: createdAgent.value?.id ?? '', runtime, authorizationId: authorizationId.value,
-      settings: lastOptions.settings, setupError: setupError.value,
+      avatarUrl: display.value?.avatar_url, settings: lastOptions.settings, setupError: setupError.value,
+      ...(runtime && { runtime, agentId: createdAgent.value?.id ?? '', authorizationId: authorizationId.value || undefined }),
     }, lastOptions.onboarding)
+  }
+
+  function beginStep() {
+    status.value = 'creating'
+    setupError.value = null
+    errorCode.value = null
+  }
+
+  function failWorkspace(message: string, code: string | null) {
+    setupError.value = message
+    errorCode.value = code
+    progress.value = { phase: 'error', error: message }
+    lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
+    ensureErrorLine(message)
+    status.value = 'workspace-error'
+    saveSession()
+  }
+
+  function failWithoutBot(error: unknown) {
+    const message = resolveApiErrorMessage(error, toMessage(error))
+    setupError.value = message
+    errorCode.value = parseMemohError(error)?.code ?? (apiErrorStatus(error) === 409 ? 'bot.name_taken' : null)
+    progress.value = { phase: 'error', error: message }
+    ensureErrorLine(message)
+    status.value = 'error'
   }
 
   async function applySetup(recovering = false): Promise<BotCreateStartResult> {
@@ -169,7 +257,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     let settingsApplied = !hasSettings(options.settings)
     let agentApplied = !options.agent
     const directAgent = !!options.agent && botAgentRuntimeForProvider(options.agent.provider) !== 'acp'
-    if (!botId) return { settingsApplied: false, agentApplied: false }
+    if (!botId) return NOTHING_APPLIED
     try {
       if (hasSettings(options.settings) || options.agent) {
         lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'applying-settings', status: 'running' })
@@ -252,86 +340,172 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     return { settingsApplied, agentApplied, agentId: createdAgent.value?.id }
   }
 
+  // Everything that happens once the workspace is ready. Grants are applied
+  // once per Bot; a workspace retry or a resumed flow does not re-share.
+  async function finishSetup(recovering = false): Promise<BotCreateStartResult> {
+    const botId = bot.value?.id
+    if (botId && !grantsApplied) {
+      grantsApplied = true
+      await applyGrants(botId, lastOptions.grants, message => { setupError.value = message })
+    }
+    return await applySetup(recovering)
+  }
+
+  // Relays a workspace provisioning stream (create or container retry) into
+  // the terminal. Returns the settled state; a stream that broke without a
+  // server error event leaves `errorCode` empty.
+  async function followWorkspaceStream(stream: AsyncGenerator<BotCreateStreamEvent, void, unknown>) {
+    return await collectBotCreateProgressStream(stream, {
+      initialState: bot.value ? { bot: bot.value } : undefined,
+      onState: (state) => {
+        progress.value = state.progress ?? progress.value
+        if (state.bot) { bot.value = state.bot; saveSession() }
+      },
+      onEvent: (event) => {
+        // Installation and Agent activation must finish before the ready line.
+        if (event.type !== 'ready') lines.value = appendBotCreateTerminalLine(lines.value, event)
+      },
+    })
+  }
+
+  // Follows an existing Bot through the server's own status instead of posting
+  // a second create: after a refresh, a lost stream, or a workspace retry whose
+  // stream ended early. The reconciler keeps working while nobody is watching.
+  async function resume(): Promise<BotCreateStartResult> {
+    const botId = bot.value?.id
+    if (!botId) return NOTHING_APPLIED
+    beginStep()
+    if (lines.value.at(-1)?.kind !== 'creating') {
+      lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'creating', status: 'running' })
+    }
+    progress.value = { phase: 'creating' }
+    try {
+      const current = await awaitBotSettled(botId)
+      bot.value = { ...bot.value, ...current }
+      if (!display.value?.display_name && current.display_name) {
+        display.value = { display_name: current.display_name, avatar_url: current.avatar_url }
+      }
+      if (current.status === BOT_STATUS_FAILED) {
+        failWorkspace(await workspaceFailureDetail(botId), 'workspace_setup_failed')
+        return NOTHING_APPLIED
+      }
+      if (current.status === BOT_STATUS_CREATING) {
+        failWorkspace(resolveApiErrorMessage(WORKSPACE_STILL_PROVISIONING, 'Workspace setup is still in progress'), 'workspace_setup_timeout')
+        return NOTHING_APPLIED
+      }
+      lines.value = finalizeBotCreateTerminalLines(lines.value)
+      return await finishSetup(true)
+    } catch (error) {
+      if (apiErrorStatus(error) === 404) {
+        // The Bot was deleted meanwhile; there is nothing left to resume on.
+        bot.value = null
+        writeCreatedBotSession(null, lastOptions.onboarding)
+        failWithoutBot(error)
+        return NOTHING_APPLIED
+      }
+      failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+      return NOTHING_APPLIED
+    }
+  }
+
+  // Re-asserts the workspace intent on the same Bot. The server bumps the
+  // desired generation and provisions again; no new Bot, no new name.
+  async function retryWorkspace(): Promise<BotCreateStartResult> {
+    const botId = bot.value?.id
+    if (!botId) return NOTHING_APPLIED
+    beginStep()
+    progress.value = { phase: 'pulling' }
+    try {
+      const { stream } = await postBotsByBotIdContainerStream({ path: { bot_id: botId }, body: {}, throwOnError: true })
+      const result = await followWorkspaceStream(stream)
+      if (result.setupError) {
+        if (!result.errorCode) return await resume()
+        failWorkspace(result.setupError, result.errorCode)
+        return NOTHING_APPLIED
+      }
+      lines.value = finalizeBotCreateTerminalLines(lines.value)
+      return await finishSetup()
+    } catch (error) {
+      failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+      return NOTHING_APPLIED
+    }
+  }
+
   async function start(
     payload: BotsCreateBotRequest,
     options: StartBotCreateOptions = {},
   ): Promise<BotCreateStartResult> {
-    if (status.value === 'creating') return { settingsApplied: false, agentApplied: false }
+    if (status.value === 'creating') return NOTHING_APPLIED
     lastPayload = payload
+    hasPayload.value = true
     lastOptions = options
-    writeCreatedAgentSession(null, options.onboarding)
-    status.value = 'creating'
+    grantsApplied = false
+    writeCreatedBotSession(null, options.onboarding)
+    beginStep()
     bot.value = null
     createdAgent.value = null
     authorizationId.value = options.agent?.authorizationId ?? ''
-    setupError.value = null
-    errorCode.value = null
     modelConfigured.value = false
     progress.value = { phase: 'pulling' }
     display.value = options.display ?? { display_name: payload.display_name ?? payload.name ?? '', avatar_url: payload.avatar_url }
     lines.value = pushBotCreateTerminalLine([], { kind: 'command', status: 'info', message: display.value.display_name })
     try {
       const { stream } = await postBotsStream({ body: payload, throwOnError: true })
-      const result = await collectBotCreateProgressStream(stream, {
-        onState: (state) => {
-          progress.value = state.progress ?? progress.value
-          if (state.bot) { bot.value = state.bot; saveSession() }
-        },
-        onEvent: (event) => {
-          // Installation and Agent activation must finish before the ready line.
-          if (event.type !== 'ready') lines.value = appendBotCreateTerminalLine(lines.value, event)
-        },
-      })
+      const result = await followWorkspaceStream(stream)
       bot.value = result.bot ?? null
-      setupError.value = result.setupError ?? null
-      errorCode.value = result.errorCode ?? null
       if (!bot.value) {
+        setupError.value = result.setupError ?? null
+        errorCode.value = result.errorCode ?? null
         ensureErrorLine(result.setupError ?? toMessage(undefined))
         status.value = 'error'
-        return { settingsApplied: false, agentApplied: false }
+        return NOTHING_APPLIED
       }
-      if (result.setupError && options.agent) {
-        status.value = 'setup-error'
-        saveSession()
-        return { settingsApplied: false, agentApplied: false }
+      if (result.setupError) {
+        // A stream that broke without a server error event says nothing about
+        // the workspace itself; follow the Bot instead of declaring it failed.
+        if (!result.errorCode) return await resume()
+        failWorkspace(result.setupError, result.errorCode)
+        return NOTHING_APPLIED
       }
-      if (bot.value.id) await applyGrants(bot.value.id, options.grants, message => { setupError.value = message })
-      return await applySetup()
+      return await finishSetup()
     } catch (error) {
-      const message = resolveApiErrorMessage(error, toMessage(error))
-      setupError.value = message
-      errorCode.value = parseMemohError(error)?.code ?? (apiErrorStatus(error) === 409 ? 'bot.name_taken' : null)
-      progress.value = { phase: 'error', error: message }
-      ensureErrorLine(message)
-      status.value = bot.value ? options.agent ? 'setup-error' : 'ready' : 'error'
-      saveSession()
-      return { settingsApplied: false, agentApplied: false }
+      if (bot.value) {
+        failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+        return NOTHING_APPLIED
+      }
+      failWithoutBot(error)
+      return NOTHING_APPLIED
     }
   }
 
   async function retry() {
     if (status.value === 'creating') return
+    if (status.value === 'workspace-error' && bot.value?.id) return await retryWorkspace()
     if (bot.value?.id) {
-      status.value = 'creating'
-      setupError.value = null
-      errorCode.value = null
+      beginStep()
       return await applySetup(true)
     }
     if (lastPayload) return await start(lastPayload, lastOptions)
   }
 
-  function restore(saved: CreatedAgentSession, onboarding = false) {
+  function restore(saved: CreatedBotSession, onboarding = false) {
     if (status.value !== 'idle') return
     bot.value = { id: saved.botId, name: saved.botName }
-    display.value = { display_name: saved.displayName }
-    createdAgent.value = saved.agentId ? { id: saved.agentId, runtime: saved.runtime } : null
+    display.value = { display_name: saved.displayName, avatar_url: saved.avatarUrl }
+    createdAgent.value = saved.runtime && saved.agentId ? { id: saved.agentId, runtime: saved.runtime } : null
     authorizationId.value = saved.authorizationId ?? ''
-    lastOptions = { onboarding, settings: saved.settings, agent: {
-      name: externalAgentDisplayName(saved.runtime, saved.runtime), provider: saved.runtime,
-      metadata: directBotAgentMetadata(saved.runtime), authorizationId: saved.authorizationId,
-    } }
+    // Member grants are not part of the saved target; a resumed flow never re-shares.
+    grantsApplied = true
+    lastOptions = {
+      onboarding,
+      settings: saved.settings,
+      ...(saved.runtime && { agent: {
+        name: externalAgentDisplayName(saved.runtime, saved.runtime), provider: saved.runtime,
+        metadata: directBotAgentMetadata(saved.runtime), authorizationId: saved.authorizationId,
+      } }),
+    }
     lines.value = pushBotCreateTerminalLine([], { kind: 'bot-created', status: 'done' })
-    return retry()
+    return resume()
   }
 
   return {
@@ -348,6 +522,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     restore,
     percent,
     isActive,
+    canRetry,
     start,
     retry,
     reset,

@@ -295,7 +295,7 @@ func (p *VideoGenProvider) cancelVideoJob(ctx context.Context, model *sdk.VideoM
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), videoCancelTimeout)
 	defer cancel()
 	if err := sdk.CancelVideo(ctx, model, jobID); err != nil {
-		p.logger.Debug("cancel video job failed",
+		p.logger.DebugContext(ctx, "cancel video job failed",
 			slog.String("job_id", jobID),
 			slog.Any("error", err),
 		)

@@ -30,7 +30,7 @@ func TestEmailRemovalMigrationDeletesMailAndPreservesAccounts(t *testing.T) {
 	pool := freshMigratedDB(t)
 	assertEmailTablesAbsent(t, pool)
 	dsn := teamMigrationDSN(t)
-	steps := countMigrationsFrom(t, "0153_remove_email.up.sql")
+	steps := countMigrationsFrom(t, "0154_remove_email.up.sql")
 	stepDown(t, dsn, steps)
 
 	const userID = "10000000-0000-4000-8000-000000000153"
@@ -65,7 +65,7 @@ func TestEmailRemovalMigrationDeletesMailAndPreservesAccounts(t *testing.T) {
 	}
 
 	// Retrying the destructive migration must be harmless once mail is gone.
-	up, err := fs.ReadFile(postgresMigrationsFS(t), "0153_remove_email.up.sql")
+	up, err := fs.ReadFile(postgresMigrationsFS(t), "0154_remove_email.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

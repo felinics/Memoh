@@ -7,9 +7,8 @@
 // requested locale to English to the key itself, so a missing translation is
 // always visible-but-safe rather than a hard failure.
 //
-// This layer localizes the command UI only. It is intentionally separate from
-// the bot's chat/agent reply language (settings.Language): the command UI
-// locale comes from settings.CommandUILanguage, and "auto" resolves to the
+// This layer localizes the command UI only. Its locale comes from
+// settings.CommandUILanguage, and "auto" resolves to the
 // server default (English) — it never follows per-message content, the IM
 // platform's user language, or the agent's reply language.
 package i18n

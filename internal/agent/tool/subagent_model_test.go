@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -15,12 +17,18 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/settings"
 )
 
 type subagentModelQueries struct {
 	dbstore.Queries
-	models    []sqlc.Model
-	providers map[string]sqlc.Provider
+	models       []sqlc.Model
+	providers    map[string]sqlc.Provider
+	defaultModel pgtype.UUID
+}
+
+func (q *subagentModelQueries) GetSettingsByBotID(context.Context, pgtype.UUID) (sqlc.GetSettingsByBotIDRow, error) {
+	return sqlc.GetSettingsByBotIDRow{ChatModelID: q.defaultModel}, nil
 }
 
 func (q *subagentModelQueries) ListEnabledModelsByType(_ context.Context, modelType string) ([]sqlc.Model, error) {
@@ -83,6 +91,58 @@ func newSubagentModelCatalog(t *testing.T) (*subagentModelQueries, string, strin
 
 func ptr[T any](value T) *T { return &value }
 
+func TestSpawnAgentRejectsOtherProviderBeforeCreatingSession(t *testing.T) {
+	for _, name := range []string{"explicit provider", "implicit provider", "same provider name"} {
+		t.Run(name, func(t *testing.T) {
+			queries, _, currentModelUUID := newSubagentModelCatalog(t)
+			queries.models[0].ModelID = "other-model"
+			args := map[string]any{"task": "inspect", "model_id": "other-model"}
+			if name == "explicit provider" {
+				args["provider"] = "provider-a"
+			}
+			if name == "same provider name" {
+				id := queries.models[0].ProviderID.String()
+				other := queries.providers[id]
+				other.Name = "provider-b"
+				queries.providers[id] = other
+				args["provider"] = "provider-b"
+			}
+			agent := &fakeSpawnAgent{}
+			provider, _, sessions, _ := newAgentControlProvider(t, agent)
+			provider.models = models.NewService(slog.Default(), queries)
+			provider.queries = queries
+			provider.modelResolver = provider.resolveModel
+			session := SessionContext{BotID: "bot-1", SessionID: "parent-1", CurrentModelUUID: currentModelUUID}
+
+			_, err := executeAgentTool(t, provider, session, ToolSpawnAgent().String(), args)
+			if err == nil {
+				t.Fatal("expected cross-provider model selection to be rejected")
+			}
+			if len(sessions.sessions) != 0 || len(agent.queries()) != 0 {
+				t.Fatal("rejected selection must not create a session or run a model")
+			}
+		})
+	}
+}
+
+func TestSpawnAgentRejectsParentProviderChangedDuringTurn(t *testing.T) {
+	queries, _, modelBUUID := newSubagentModelCatalog(t)
+	agent := &fakeSpawnAgent{}
+	provider, _, sessions, _ := newAgentControlProvider(t, agent)
+	provider.models = models.NewService(slog.Default(), queries)
+	provider.queries = queries
+	provider.modelResolver = provider.resolveModel
+	session := SessionContext{
+		BotID: "bot-1", SessionID: "parent-1", CurrentModelUUID: modelBUUID,
+		CurrentModelProviderID: queries.models[1].ProviderID.String(),
+	}
+	queries.models[1].ProviderID = queries.models[0].ProviderID
+	_, err := executeAgentTool(t, provider, session, ToolSpawnAgent().String(), map[string]any{"task": "inspect"})
+	if err == nil || len(sessions.sessions) != 0 || len(agent.queries()) != 0 {
+		t.Fatalf("parent provider drift must fail before creating a session: %v", err)
+	}
+}
+
 func TestListModelsReturnsEnabledCatalogAndMarksCurrent(t *testing.T) {
 	queries, _, currentModelUUID := newSubagentModelCatalog(t)
 	modelService := models.NewService(slog.Default(), queries)
@@ -106,10 +166,13 @@ func TestListModelsReturnsEnabledCatalogAndMarksCurrent(t *testing.T) {
 			spawnDescription = tool.Description
 		}
 	}
-	for _, want := range []string{"worker-model | provider-a", "worker-model | provider-b", "[current]", "list_models"} {
+	for _, want := range []string{"worker-model | provider-b", "[current]", "list_models"} {
 		if !strings.Contains(spawnDescription, want) {
 			t.Fatalf("spawn description missing %q:\n%s", want, spawnDescription)
 		}
+	}
+	if strings.Contains(spawnDescription, "worker-model | provider-a") {
+		t.Fatalf("spawn description includes another provider's model: %s", spawnDescription)
 	}
 
 	result, err := executeAgentTool(t, provider, session, ToolListModels().String(), map[string]any{})
@@ -126,30 +189,18 @@ func TestListModelsReturnsEnabledCatalogAndMarksCurrent(t *testing.T) {
 	}
 }
 
-func TestSpawnAgentRequiresProviderForAmbiguousModelID(t *testing.T) {
-	queries, _, _ := newSubagentModelCatalog(t)
+func TestSpawnAgentResolvesDuplicateModelIDWithinParentProvider(t *testing.T) {
+	queries, _, modelBUUID := newSubagentModelCatalog(t)
 	agent := &fakeSpawnAgent{}
-	provider, _, sessions, _ := newAgentControlProvider(t, agent)
+	provider, _, _, _ := newAgentControlProvider(t, agent)
 	provider.models = models.NewService(slog.Default(), queries)
 	provider.queries = queries
 	provider.modelResolver = provider.resolveModel
-	session := SessionContext{BotID: "bot-1", SessionID: "parent-1", UserID: "user-1"}
-
-	_, err := executeAgentTool(t, provider, session, ToolSpawnAgent().String(), map[string]any{
-		"task":     "inspect",
-		"model_id": "worker-model",
-	})
-	if err == nil || !strings.Contains(err.Error(), "ambiguous") || !strings.Contains(err.Error(), "provider-a") || !strings.Contains(err.Error(), "provider-b") {
-		t.Fatalf("expected provider ambiguity error, got %v", err)
-	}
-	if len(sessions.sessions) != 0 {
-		t.Fatalf("model validation must happen before child session creation, got %d sessions", len(sessions.sessions))
-	}
+	session := SessionContext{BotID: "bot-1", SessionID: "parent-1", UserID: "user-1", CurrentModelUUID: modelBUUID}
 
 	result := asMap(t, mustExecuteAgentTool(t, provider, session, ToolSpawnAgent().String(), map[string]any{
 		"task":     "inspect",
 		"model_id": "worker-model",
-		"provider": "provider-b",
 	}))
 	if result["model_id"] != "worker-model" || result["provider"] != "provider-b" {
 		t.Fatalf("unexpected selected model result: %v", result)
@@ -158,6 +209,8 @@ func TestSpawnAgentRequiresProviderForAmbiguousModelID(t *testing.T) {
 
 func TestSubagentPinsDefaultParentModelAcrossFollowUps(t *testing.T) {
 	queries, modelAUUID, modelBUUID := newSubagentModelCatalog(t)
+	queries.models[0].ProviderID = queries.models[1].ProviderID
+	queries.models[0].ModelID = "other-model"
 	agent := &fakeSpawnAgent{}
 	provider, _, _, _ := newAgentControlProvider(t, agent)
 	provider.models = models.NewService(slog.Default(), queries)
@@ -177,7 +230,7 @@ func TestSubagentPinsDefaultParentModelAcrossFollowUps(t *testing.T) {
 		"task": "first",
 	})
 	session.CurrentModelUUID = modelAUUID
-	session.CurrentModelProvider = "provider-a"
+	session.CurrentModelID = "other-model"
 	mustExecuteAgentTool(t, provider, session, ToolSendMessage().String(), map[string]any{
 		"id":      "worker",
 		"message": "second",
@@ -193,5 +246,127 @@ func TestSubagentPinsDefaultParentModelAcrossFollowUps(t *testing.T) {
 	}
 	if first.ModelUUID != modelBUUID || second.ModelUUID != modelBUUID || second.ModelProvider != "provider-b" {
 		t.Fatalf("expected pinned provider-b model, first=%+v second=%+v", first, second)
+	}
+}
+
+func TestSubagentRejectsProviderChangeAcrossFollowUps(t *testing.T) {
+	for _, change := range []string{"parent model", "pinned model provider"} {
+		t.Run(change, func(t *testing.T) {
+			queries, modelAUUID, modelBUUID := newSubagentModelCatalog(t)
+			worker := queries.models[1]
+			worker.ID = mustSubagentUUID(t, "00000000-0000-0000-0000-000000000303")
+			worker.ModelID = "worker-only"
+			queries.models = append(queries.models, worker)
+			agent := &fakeSpawnAgent{}
+			provider, _, _, _ := newAgentControlProvider(t, agent)
+			provider.models = models.NewService(slog.Default(), queries)
+			provider.queries = queries
+			provider.modelResolver = provider.resolveModel
+			session := SessionContext{BotID: "bot-1", SessionID: "parent-1", CurrentModelUUID: modelBUUID}
+			mustExecuteAgentTool(t, provider, session, ToolSpawnAgent().String(), map[string]any{
+				"id": "worker", "task": "first", "model_id": "worker-only",
+			})
+			if change == "parent model" {
+				session.CurrentModelUUID = modelAUUID
+			} else {
+				queries.models[2].ProviderID = queries.models[0].ProviderID
+				otherID := queries.models[0].ProviderID.String()
+				other := queries.providers[otherID]
+				other.Name = "provider-b"
+				queries.providers[otherID] = other
+			}
+			result, err := executeAgentTool(t, provider, session, ToolSendMessage().String(), map[string]any{
+				"id": "worker", "message": "second",
+			})
+			if err == nil || len(agent.queries()) != 1 {
+				t.Fatalf("provider change must fail before model execution: result=%v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestSpawnAgentProviderScopeUsesCurrentModelOrBotDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		current      string
+		requested    string
+		wantProvider string
+	}{
+		{name: "default model", wantProvider: "provider-b"},
+		{name: "explicit model within default provider", requested: "worker-model", wantProvider: "provider-b"},
+		{name: "current overrides bot default", current: "00000000-0000-0000-0000-000000000301", requested: "worker-model", wantProvider: "provider-a"},
+		{name: "invalid current fails closed", current: "00000000-0000-0000-0000-000000000999", requested: "worker-model"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queries, _, modelBUUID := newSubagentModelCatalog(t)
+			queries.defaultModel = mustSubagentUUID(t, modelBUUID)
+			agent := &fakeSpawnAgent{}
+			provider, _, sessions, _ := newAgentControlProvider(t, agent)
+			provider.models = models.NewService(slog.Default(), queries)
+			provider.queries = queries
+			provider.settings = settings.NewService(slog.Default(), queries, nil, nil)
+			provider.modelResolver = provider.resolveModel
+			session := SessionContext{BotID: "00000000-0000-0000-0000-000000000401", SessionID: "parent-1", CurrentModelUUID: tc.current}
+			result, err := executeAgentTool(t, provider, session, ToolSpawnAgent().String(), map[string]any{
+				"task": "inspect", "model_id": tc.requested,
+			})
+			if tc.wantProvider == "" {
+				if err == nil || len(sessions.sessions) != 0 || len(agent.queries()) != 0 {
+					t.Fatalf("invalid parent must fail before creating a session: result=%v err=%v", result, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := asMap(t, result)["provider"]; got != tc.wantProvider {
+				t.Fatalf("provider = %v, want %s", got, tc.wantProvider)
+			}
+		})
+	}
+}
+
+func TestQueuedSubagentRechecksProviderBeforeExecution(t *testing.T) {
+	queries, _, modelBUUID := newSubagentModelCatalog(t)
+	worker := queries.models[1]
+	worker.ID = mustSubagentUUID(t, "00000000-0000-0000-0000-000000000303")
+	worker.ModelID = "worker-only"
+	queries.models = append(queries.models, worker)
+	block := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(block) })
+	t.Cleanup(unblock)
+	agent := &fakeSpawnAgent{block: block}
+	provider, manager, _, _ := newAgentControlProvider(t, agent)
+	provider.models = models.NewService(slog.Default(), queries)
+	provider.queries = queries
+	provider.modelResolver = provider.resolveModel
+	session := SessionContext{
+		BotID: "bot-1", SessionID: "parent-1", CurrentModelUUID: modelBUUID,
+		CurrentModelProviderID: queries.models[1].ProviderID.String(),
+	}
+	mustExecuteAgentTool(t, provider, session, ToolSpawnAgent().String(), map[string]any{
+		"id": "worker", "task": "first", "model_id": "worker-only", "run_in_background": true,
+	})
+	waitUntil(t, time.Second, func() bool { return len(agent.queries()) == 1 })
+	queued := asMap(t, mustExecuteAgentTool(t, provider, session, ToolSendMessage().String(), map[string]any{
+		"id": "worker", "message": "second",
+	}))
+	if queued["status"] != string(background.TaskQueued) {
+		t.Fatalf("expected queued follow-up: %v", queued)
+	}
+	queries.models[2].ProviderID = queries.models[0].ProviderID
+	otherID := queries.models[0].ProviderID.String()
+	other := queries.providers[otherID]
+	other.Name = "provider-b"
+	queries.providers[otherID] = other
+	unblock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	snapshot, _, err := manager.WaitForSessionTask(ctx, session.BotID, session.SessionID, queued["task_id"].(string), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Status != background.TaskFailed || len(agent.queries()) != 1 {
+		t.Fatalf("queued provider change must fail without executing: %+v", snapshot)
 	}
 }
