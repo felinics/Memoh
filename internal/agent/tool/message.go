@@ -204,6 +204,7 @@ func sendAttachmentObjectSchema() map[string]any {
 					string(messaging.AttachmentVoice),
 					string(messaging.AttachmentFile),
 					string(messaging.AttachmentGIF),
+					string(messaging.AttachmentSticker),
 				},
 			},
 			"base64":          map[string]any{"type": "string"},

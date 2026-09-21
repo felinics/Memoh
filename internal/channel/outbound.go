@@ -411,6 +411,9 @@ func validateMessageAgainstCapabilities(caps ChannelCapabilities, ok bool, msg M
 	if len(msg.Attachments) > 0 && requiresMedia(msg.Attachments) && !caps.Media {
 		return errors.New("channel does not support media")
 	}
+	if containsSticker(msg.Attachments) && !caps.Stickers {
+		return errors.New("channel does not support stickers")
+	}
 	if len(msg.Actions) > 0 && !caps.Buttons {
 		if !caps.URLButtons {
 			return errors.New("channel does not support actions")
@@ -594,6 +597,19 @@ func normalizeAttachmentRefs(attachments []Attachment, defaultPlatform ChannelTy
 		normalized = append(normalized, item)
 	}
 	return normalized, nil
+}
+
+// containsSticker reports whether any attachment asks to be sent as a native
+// sticker. A sticker reference belongs to the platform that issued it, so the
+// capability check is the boundary that stops one platform's handle from being
+// handed to another as if it were local.
+func containsSticker(attachments []Attachment) bool {
+	for _, att := range attachments {
+		if att.Type == AttachmentSticker {
+			return true
+		}
+	}
+	return false
 }
 
 func requiresMedia(attachments []Attachment) bool {

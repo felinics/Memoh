@@ -358,6 +358,71 @@ func (q *Queries) ListMessageAssetsBatch(ctx context.Context, messageIds []pgtyp
 	return items, nil
 }
 
+const listRecentStickerAssetsBySession = `-- name: ListRecentStickerAssetsBySession :many
+SELECT a.content_hash, a.mime, a.name, a.metadata, m.created_at
+FROM bot_history_message_assets a
+JOIN bot_history_messages m
+  ON m.id = a.message_id
+ AND m.team_id = public.memoh_current_team_id()
+WHERE a.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND a.metadata ->> 'sticker_unique_id' IS NOT NULL
+  AND m.created_at <= $2
+ORDER BY m.created_at DESC, a.ordinal ASC
+LIMIT $3
+`
+
+type ListRecentStickerAssetsBySessionParams struct {
+	SessionID    pgtype.UUID        `json:"session_id"`
+	VisibleUntil pgtype.Timestamptz `json:"visible_until"`
+	MaxCount     int32              `json:"max_count"`
+}
+
+type ListRecentStickerAssetsBySessionRow struct {
+	ContentHash string             `json:"content_hash"`
+	Mime        string             `json:"mime"`
+	Name        string             `json:"name"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+// Recent sticker sightings in one session, newest first.
+// A sticker arrives as an ordinary image asset, so the sticker metadata the
+// adapter attached is what separates it from the photo next to it. The filter
+// is the unique id rather than sticker_file_id: the latter is only written
+// when a preview replaced the sticker, so it would miss every static and
+// animated sticker. The lookup goes through message assets rather than a
+// sticker table because the library that owns descriptions lives in the bot's
+// workspace, not in Postgres: this only answers "which sticker was just seen".
+// visible_until is the caller's turn boundary. Group messages are persisted
+// whether or not they wake the bot, so without it "the most recent sticker"
+// would drift to one that arrived after the turn started.
+func (q *Queries) ListRecentStickerAssetsBySession(ctx context.Context, arg ListRecentStickerAssetsBySessionParams) ([]ListRecentStickerAssetsBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listRecentStickerAssetsBySession, arg.SessionID, arg.VisibleUntil, arg.MaxCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecentStickerAssetsBySessionRow
+	for rows.Next() {
+		var i ListRecentStickerAssetsBySessionRow
+		if err := rows.Scan(
+			&i.ContentHash,
+			&i.Mime,
+			&i.Name,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStorageProviders = `-- name: ListStorageProviders :many
 SELECT id, name, provider, config, created_at, updated_at, team_id FROM storage_providers WHERE team_id = public.memoh_current_team_id() ORDER BY created_at DESC
 `

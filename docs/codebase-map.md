@@ -122,6 +122,7 @@ Memoh/
 │   ├── apps/          #   Installed Supermarket App state
 │   ├── skills/                 #   Skill registry and activation
 │   ├── slash/                  #   Slash-command classification and metadata (channel + web surfaces)
+│   ├── sticker/                #   Per-bot sticker library (markdown entries in the bot workspace)
 │   ├── storage/                #   Storage provider interface (filesystem, container FS)
 │   ├── supermarket/            #   Supermarket protocol client and App installer
 │   ├── team/                   #   Singleton team identity (DefaultTeamID)

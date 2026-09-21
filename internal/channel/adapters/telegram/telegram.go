@@ -20,6 +20,7 @@ import (
 	tele "gopkg.in/telebot.v4"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	attachmentpkg "github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/command"
@@ -242,6 +243,7 @@ func (*TelegramAdapter) Descriptor() channel.Descriptor {
 			Buttons:         true,
 			Attachments:     true,
 			Media:           true,
+			Stickers:        true,
 			Streaming:       true,
 			BlockStreaming:  true,
 			Edit:            true,
@@ -1942,6 +1944,17 @@ func sendTelegramAttachmentImpl(ctx context.Context, bot *tele.Bot, target strin
 	case channel.AttachmentGIF:
 		_, sendErr := bot.Send(recipient, &tele.Animation{File: file, Caption: caption, FileName: name}, opts)
 		return sendErr
+	case channel.AttachmentSticker:
+		// sendSticker takes no caption. Dropping it silently would lose text
+		// the agent meant to say, so the caption follows as its own message.
+		if _, sendErr := bot.Send(recipient, &tele.Sticker{File: file}, opts); sendErr != nil {
+			return sendErr
+		}
+		if strings.TrimSpace(caption) == "" {
+			return nil
+		}
+		_, sendErr := bot.Send(recipient, caption, telegramAttachmentSendOptions(parseMode, replyTo, actions))
+		return sendErr
 	default:
 		return fmt.Errorf("unsupported attachment type: %s", att.Logical.Type)
 	}
@@ -2254,9 +2267,34 @@ func (a *TelegramAdapter) buildTelegramStickerAttachment(bot *tele.Bot, sticker 
 	if usedThumbnail {
 		// The stored media is a preview of the sticker rather than the sticker,
 		// so keep a handle on the original.
-		att.Metadata["sticker_file_id"] = sticker.FileID
+		att.Metadata[attachmentpkg.MetadataKeyStickerFileID] = sticker.FileID
+	}
+	// Sticker identity for the library. The unique id is what an entry is keyed
+	// on — stable across bots and re-sends, unlike a file id — and the pack,
+	// emoji and kind are what a saved sticker is searched and displayed by.
+	// None of these are speculative: internal/sticker reads every one of them.
+	if uniqueID := strings.TrimSpace(sticker.UniqueID); uniqueID != "" {
+		att.Metadata[attachmentpkg.MetadataKeyStickerUniqueID] = uniqueID
+	}
+	att.Metadata[attachmentpkg.MetadataKeyStickerKind] = telegramStickerKind(sticker)
+	if set := strings.TrimSpace(sticker.SetName); set != "" {
+		att.Metadata[attachmentpkg.MetadataKeyStickerSet] = set
+	}
+	if emoji := strings.TrimSpace(sticker.Emoji); emoji != "" {
+		att.Metadata[attachmentpkg.MetadataKeyStickerEmoji] = emoji
 	}
 	return att
+}
+
+func telegramStickerKind(sticker *tele.Sticker) string {
+	switch {
+	case sticker.Animated:
+		return channel.StickerKindAnimated
+	case sticker.Video:
+		return channel.StickerKindVideo
+	default:
+		return channel.StickerKindStatic
+	}
 }
 
 func telegramStickerName(sticker *tele.Sticker) string {
