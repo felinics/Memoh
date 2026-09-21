@@ -2250,6 +2250,10 @@
       "failedTitle": "准备失败",
       "retry": "重试",
       "back": "返回表单",
+      "retryWorkspace": "重试工作区",
+      "continueLater": "稍后处理",
+      "openExisting": "查看已有 Bot",
+      "stillProvisioning": "工作区仍在创建中。可以到 Bot 的工作区页面继续等待，或现在重试。",
       "line": {
         "command": "正在创建 Bot「{name}」",
         "botCreated": "已创建 Bot 记录",

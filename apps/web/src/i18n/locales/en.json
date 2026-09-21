@@ -2250,6 +2250,10 @@
       "failedTitle": "Setup failed",
       "retry": "Retry",
       "back": "Back to form",
+      "retryWorkspace": "Retry workspace",
+      "continueLater": "Continue later",
+      "openExisting": "Open existing bot",
+      "stillProvisioning": "The workspace is still being set up. Keep waiting on the bot's workspace page, or retry now.",
       "line": {
         "command": "Creating bot \"{name}\"",
         "botCreated": "Bot record created",
