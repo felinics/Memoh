@@ -15,6 +15,9 @@ import (
 	"github.com/felinics/memoh/internal/httpx"
 )
 
+// livenessRoute is the path both processes answer probes on.
+const livenessRoute = "/health"
+
 // EchoServer traces inbound HTTP requests.
 //
 // This is written here rather than taken from a library because the
@@ -43,6 +46,19 @@ func EchoServer(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		req := c.Request()
 		if websocket.IsWebSocketUpgrade(req) {
+			return next(c)
+		}
+		// The liveness probe is skipped too, for a duller reason: it runs
+		// every few seconds forever, and its span says the same thing every
+		// time. Left in, it is most of what a trace backend stores and most
+		// of what it bills for — on a dev stack idling overnight it was the
+		// only thing in there.
+		//
+		// /ping is not skipped even though it looks like a sibling. It
+		// reports the server's capabilities and the desktop app calls it to
+		// test a connection, so a slow or failing one is a real answer to a
+		// real question.
+		if c.Path() == livenessRoute {
 			return next(c)
 		}
 		// Continue the caller's trace when there is one. A public entrance

@@ -40,6 +40,12 @@ func serve(t *testing.T, req *http.Request, handler echo.HandlerFunc) *httptest.
 	e.Use(httpx.RequestIDContext)
 	e.Use(telemetry.EchoServer)
 	e.GET("/bots/:id", handler)
+	// The routes the skip rules are about. Registered here rather than in
+	// each test because the middleware reads the matched route, so an
+	// unregistered path would exercise the 404 path instead of the rule.
+	e.HEAD("/health", handler)
+	e.GET("/health", handler)
+	e.GET("/ping", handler)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	return rec
@@ -157,4 +163,49 @@ func TestEchoServerMarksServerFailuresButNotRejections(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A liveness probe runs every few seconds for the life of the process and
+// its span says the same thing every time. Tracing it means the backend
+// mostly stores probes.
+func TestEchoServerDoesNotSpanTheLivenessProbe(t *testing.T) {
+	recorder := recordSpans(t)
+
+	for _, method := range []string{http.MethodHead, http.MethodGet} {
+		t.Run(method, func(t *testing.T) {
+			rec := serve(t, httptest.NewRequestWithContext(t.Context(), method, "/health", nil),
+				func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+			}
+		})
+	}
+
+	for _, span := range recorder.Ended() {
+		if strings.Contains(span.Name(), "/health") {
+			t.Errorf("probe produced a span named %q", span.Name())
+		}
+	}
+}
+
+// /ping looks like a sibling of /health and is not one. It reports the
+// server's capabilities and the desktop app calls it to decide whether a
+// server is usable, so a slow one is worth seeing.
+func TestEchoServerStillSpansPing(t *testing.T) {
+	recorder := recordSpans(t)
+
+	rec := serve(t, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ping", nil),
+		func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	var names []string
+	for _, span := range recorder.Ended() {
+		if span.Name() == "GET /ping" {
+			return
+		}
+		names = append(names, span.Name())
+	}
+	t.Fatalf("no span for /ping; got %v", names)
 }
