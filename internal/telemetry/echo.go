@@ -3,6 +3,7 @@ package telemetry
 import (
 	"errors"
 
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -27,12 +28,23 @@ import (
 //
 // Install it after middleware.RequestID and httpx.RequestIDContext, so the
 // span can carry the id the client is given.
+//
+// A WebSocket is skipped, and has to be. Echo calls the handler and the
+// handler does not return until the socket closes, which for a chat
+// connection is hours. A span around that measures how long someone left a
+// tab open, stays open for its whole duration, and — because it is the
+// current span while it is open — adopts every turn sent over the connection
+// into one trace. Handlers that upgrade trace the handshake themselves, which
+// is the part with a duration worth having.
 func EchoServer(next echo.HandlerFunc) echo.HandlerFunc {
 	tracer := otel.Tracer(ScopeName)
 	propagator := otel.GetTextMapPropagator()
 
 	return func(c echo.Context) error {
 		req := c.Request()
+		if websocket.IsWebSocketUpgrade(req) {
+			return next(c)
+		}
 		// Continue the caller's trace when there is one. A public entrance
 		// will usually not have one; an internal caller will.
 		ctx := propagator.Extract(req.Context(), propagation.HeaderCarrier(req.Header))

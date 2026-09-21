@@ -20,6 +20,9 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
@@ -43,6 +46,7 @@ import (
 	"github.com/felinics/memoh/internal/runtimefence"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
+	"github.com/felinics/memoh/internal/telemetry"
 )
 
 // localSpeechSynthesizer synthesizes text to speech audio.
@@ -1783,10 +1787,25 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "resolver not configured")
 	}
 
+	// The handshake gets a span; the connection does not. telemetry.EchoServer
+	// skips upgrades because a span covering this handler would run for the
+	// life of the socket — see its comment. This one ends where the protocol
+	// switch does, which is the part that can be slow or fail.
+	handshakeCtx, handshake := telemetry.Tracer().Start(c.Request().Context(), "ws.handshake "+c.Path(),
+		trace.WithSpanKind(trace.SpanKindServer),
+		trace.WithAttributes(attribute.String("agent.bot_id", botID)),
+	)
 	conn, err := wsUpgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
+		handshake.RecordError(err)
+		handshake.SetStatus(codes.Error, "")
+		handshake.End()
 		return err
 	}
+	handshake.End()
+	// The identity of the handshake, kept so each message can name what
+	// opened the connection it arrived on without joining that span.
+	connTrigger := telemetry.TriggerFrom(handshakeCtx)
 	defer func() { _ = conn.Close() }()
 
 	rawToken := extractRawBearerToken(c)
@@ -1797,7 +1816,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 	connCtx, connCancel := context.WithCancel(context.Background())
 	defer connCancel()
-	streamBaseCtx := context.WithoutCancel(c.Request().Context())
+	// WithoutCancel keeps the request's values, which is what this needs: the
+	// authenticated identity and the request id. It also keeps the request's
+	// span, and that has to go — every turn on this connection would otherwise
+	// be a child of one span and share its trace id, so a conversation would
+	// read as a single four-hour operation. The handshake identity is carried
+	// as a trigger instead, so each turn links back to it and still measures
+	// only itself.
+	streamBaseCtx := telemetry.ContextWithTrigger(context.WithoutCancel(c.Request().Context()), connTrigger)
 
 	// Subscriptions observe sessions; they never own the runs behind them, so
 	// closing them on disconnect leaves a run executing for its other

@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/felinics/memoh/internal/telemetry"
 )
 
 // ErrInboundQueueFull indicates the synchronous inbound queue admission failed
@@ -19,10 +24,18 @@ func IsInboundQueueFull(err error) bool {
 type inboundTask struct {
 	cfg ChannelConfig
 	msg InboundMessage
+	// trigger names the request that enqueued this message, so the work the
+	// worker does can be traced back to what asked for it. It is carried on
+	// the task rather than in a context because the enqueuing request is
+	// answered and gone before a worker looks at this.
+	trigger telemetry.Trigger
 }
 
 // HandleInbound enqueues an inbound message for asynchronous processing by the worker pool.
-func (m *Manager) HandleInbound(_ context.Context, cfg ChannelConfig, msg InboundMessage) error {
+//
+// ctx is read for the identity of the request doing the enqueuing and is
+// deliberately not kept: the work outlives it.
+func (m *Manager) HandleInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error {
 	if m.processor == nil {
 		return errors.New("inbound processor not configured")
 	}
@@ -31,8 +44,9 @@ func (m *Manager) HandleInbound(_ context.Context, cfg ChannelConfig, msg Inboun
 		return errors.New("inbound dispatcher stopped")
 	}
 	task := inboundTask{
-		cfg: cfg,
-		msg: msg,
+		cfg:     cfg,
+		msg:     msg,
+		trigger: telemetry.TriggerFrom(ctx),
 	}
 	select {
 	case m.inboundQueue <- task:
@@ -74,11 +88,31 @@ func (m *Manager) runInboundWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case task := <-m.inboundQueue:
-			if err := m.handleInbound(ctx, task.cfg, task.msg); err != nil {
-				if m.logger != nil {
-					m.logger.ErrorContext(ctx, "inbound processing failed", slog.String("channel", task.msg.Channel.String()), slog.Any("error", err))
-				}
-			}
+			m.runInboundTask(ctx, task)
+		}
+	}
+}
+
+// runInboundTask handles one queued message under its own trace.
+//
+// Its own, rather than the enqueuing request's: that request was answered
+// before this ran, so a parent-child edge would give the trace a parent that
+// ends before its child. The link keeps the two reachable from each other
+// while letting each report an honest duration.
+func (m *Manager) runInboundTask(ctx context.Context, task inboundTask) {
+	ctx, span := telemetry.StartLinked(ctx, task.trigger, "channel.inbound",
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("channel", task.msg.Channel.String()),
+			attribute.String("agent.bot_id", task.msg.BotID),
+		),
+	)
+	defer span.End()
+
+	if err := m.handleInbound(ctx, task.cfg, task.msg); err != nil {
+		span.RecordError(err)
+		if m.logger != nil {
+			m.logger.ErrorContext(ctx, "inbound processing failed", slog.String("channel", task.msg.Channel.String()), slog.Any("error", err))
 		}
 	}
 }

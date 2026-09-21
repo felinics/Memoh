@@ -58,38 +58,61 @@ than either keeping or dropping them whole.
 
 | Where | What | How |
 | --- | --- | --- |
-| HTTP server | One server span per request, named after the matched route (`GET /bots/:id`) | `telemetry.EchoServer`, on both HTTP shells |
+| HTTP server | One server span per request, named after the matched route (`GET /bots/:id`). WebSocket upgrades get a `ws.handshake` span from the handler instead | `telemetry.EchoServer`, on both HTTP shells |
 | gRPC, internal RPC | Client and server spans, channel process ↔ server process | `otelgrpc` stats handlers in `internal/rpc` |
 | gRPC, workspace bridge | Client spans, host → workspace container | `otelgrpc` client handler in `internal/workspace/bridge` |
 | gRPC, remote runtime | Client spans, server → runtime over the WebSocket tunnel | `otelgrpc` client handler in `internal/userruntime` |
 | PostgreSQL | One span per query, on all three pools | `telemetry.PgxTracer` |
+| Channel inbound | One span per queued message, linked to the request that enqueued it | `Manager.runInboundTask` |
 | Agent turn | One span per turn, with its outcome | `startTurnSpan`, on both entry points |
-| Model call | One span per provider call, with the attempt count | `internal/agent/runtime/native` |
+| Model call | One span per provider call | `providerCallObserver`, in `internal/agent/runtime/native` |
 | Tool call | One span per tool execution | `wrapToolTracing`, in `assembleTools` |
 
 A turn therefore reads as a tree:
 
 ```
-GET /bots/:bot_id/web/ws
-└ agent.turn                     outcome=completed
-  └ agent.model.first_part       model=…, provider=…
-  └ agent.tool ask_user
-    └ bridgepb.ContainerService/ListDir
-    └ postgresql.query
+agent.turn                       outcome=completed
+├ agent.model.stream             call_index=0, first_part_ms=…
+├ agent.tool ask_user
+│ ├ bridgepb.ContainerService/ListDir
+│ └ postgresql.query
+└ agent.model.stream             call_index=1, first_part_ms=…
 ```
+
+### Where a turn's trace begins
+
+A turn is usually its own trace, with a link to whatever caused it rather
+than a parent. The cause is a WebSocket that stays open for hours, or an HTTP
+request that was answered before the turn started, and making either the
+parent produces a trace that is wrong in a specific way: a parent that ends
+before its children, or one that never ends, with every turn of the
+conversation sharing its trace id. Asking how long an answer took then
+returns the length of the session.
+
+A turn that arrives over the internal RPC is the exception, and keeps the
+ordinary parent-child edge: the calling process is waiting on it, so that one
+trace really does span both.
+
+The ingress decides which, by recording a `telemetry.Trigger` in the context
+it hands on. `startTurnSpan` links when it finds one and nests when it does
+not.
 
 ### What the span names promise
 
-`agent.model.first_part` and `agent.model.generate` are separate names
-because they do not measure the same interval. The first ends when the first
-part of the reply arrives — the pause a user sits through before anything
-appears, retries included — and deliberately does not cover the rest of the
-reply, which would hide that number inside one dominated by how long the
-answer happened to be. The second covers a whole non-streaming call.
+One model span per call to the provider, not one per turn. The SDK runs the
+whole loop — model, tools, model again — inside a single call, so a span
+around that call covers every round at once and can only be ended on one of
+them; `call_index` is what tells the rounds apart.
+
+`first_part_ms` is how long the provider took to say anything, which is not
+the duration of the call: an answer that streams tool arguments for twenty
+seconds spends almost none of it waiting. It is an attribute rather than a
+span of its own, because both numbers describe the same call and nesting them
+would double every model row in a waterfall.
 
 The model spans are leaves beside the tool spans, not their parents. The SDK
 keeps the context it is handed for the whole stream, so passing it a span's
-context would file every tool call under a span that has already ended.
+context would file every tool call under a model span.
 
 The `agent.*` names are **not a stable interface yet**. The agent application
 package is still being restructured, and these names are placed at its

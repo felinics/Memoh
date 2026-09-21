@@ -13,6 +13,7 @@ import (
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/telemetry"
 )
 
 // followUpPayload is the document stored for one follow-up item. Text is the
@@ -144,7 +145,11 @@ type followUpStart struct {
 }
 
 func (s *Service) startFollowUp(parent context.Context, terminal sessionruntime.TerminalRun) {
-	ctx := context.WithoutCancel(parent)
+	// The turn that finished is what let this one start, and it is already
+	// over: a follow-up is its own trace, linked to the run it was queued
+	// behind rather than nested inside it. Without this the second, third and
+	// tenth queued message all land in the first one's trace.
+	ctx := telemetry.ContextWithTrigger(context.WithoutCancel(parent), telemetry.TriggerFrom(parent))
 	key := sessionruntime.Key{BotID: terminal.BotID, SessionID: terminal.SessionID}
 	state := &followUpStart{}
 	for {
