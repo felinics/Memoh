@@ -1,71 +1,30 @@
 package native
 
-import (
-	"context"
-
-	sdk "github.com/felinics/twilight/sdk"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
-
-	"github.com/felinics/memoh/internal/telemetry"
-)
-
-// Span names for model calls. They are deliberately literal about what each
-// one measures, because the two are not the same duration and reading them as
-// if they were would be worse than having neither.
-const (
-	// spanModelFirstPart covers the wait before the provider says anything:
-	// it starts when the request is built, includes retries, and ends when
-	// the first part of the reply arrives. That is the pause a user sits
-	// through, and the one a provider problem shows up in.
-	//
-	// It deliberately does not cover the rest of the reply. Naming the whole
-	// generation would hide the number that matters inside one that is
-	// dominated by how long the answer happened to be.
-	spanModelFirstPart = "agent.model.first_part"
-	// spanModelGenerate covers a whole non-streaming call, so this one is the
-	// full generation.
-	spanModelGenerate = "agent.model.generate"
-	// spanModelRetry covers restarting a stream that broke partway through.
-	// It ends when the new stream is handed back rather than at its first
-	// part: the reply is already in progress, so there is no user-visible
-	// pause to measure, only whether the restart worked.
-	spanModelRetry = "agent.model.stream_retry"
-)
-
-// traceModelCall starts a span around a call to the model provider.
+// Span names for model calls. The spans themselves are opened by
+// providerCallObserver, which wraps the provider for both entry points.
 //
-// Nothing about the conversation is recorded: not the prompt, not the reply,
-// not the tool definitions sent with it. A span carrying those would publish
-// the user's messages to whoever can read traces, which is the same rule
-// docs/logging.md applies to log records. The model name and the outcome are
-// what makes the span useful.
-func traceModelCall(ctx context.Context, name string, model *sdk.Model) (context.Context, trace.Span) {
-	attrs := []attribute.KeyValue{}
-	if model != nil {
-		attrs = append(attrs, attribute.String("agent.model.id", model.ID))
-		if model.Provider != nil {
-			attrs = append(attrs, attribute.String("agent.model.provider", model.Provider.Name()))
-		}
-	}
-	return telemetry.Tracer().Start(ctx, name,
-		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(attrs...),
-	)
-}
-
-// endModelCall closes a model span, recording the error and how many attempts
-// it took. Retries are invisible in the logs today: a provider that fails
-// twice and succeeds on the third try looks the same as one that answered
-// immediately, except slower.
-func endModelCall(span trace.Span, attempts int, err error) {
-	if attempts > 1 {
-		span.SetAttributes(attribute.Int("agent.model.attempts", attempts))
-	}
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "")
-	}
-	span.End()
-}
+// Nothing about the conversation is recorded on them: not the prompt, not the
+// reply, not the tool definitions sent with it. A span carrying those would
+// publish the user's messages to whoever can read traces, which is the same
+// rule docs/logging.md applies to log records.
+//
+// One span per call to the provider, not one per turn. A turn is a loop —
+// model, tools, model again — and the SDK runs the whole loop inside a single
+// call to StreamText, so a span opened around that call covers every round at
+// once and can only be ended on one of them. Measured that way a ten-round
+// turn shows one model span and nine unexplained gaps, which is the question
+// the trace was supposed to answer.
+//
+// The names say which entry point the call came through, because the two
+// behave differently under the same load: a stream can be abandoned partway
+// and retried, a generate cannot.
+const (
+	// spanModelStream covers one streaming call, from the request to the end
+	// of that call's parts. How long the provider took to say anything at all
+	// is on it as agent.model.first_part_ms rather than as a span, because the
+	// two numbers describe the same call and nesting them would double every
+	// model row in a waterfall.
+	spanModelStream = "agent.model.stream"
+	// spanModelGenerate covers one whole non-streaming call.
+	spanModelGenerate = "agent.model.generate"
+)

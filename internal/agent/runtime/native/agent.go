@@ -304,7 +304,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		steerGate = &modelSteerGate{cancel: cancel, ready: make(chan struct{}, 1)}
 		go a.watchSteer(streamCtx, cfg, steerGate)
 	}
-	cfg.Model = modelWithProviderStreamEventObserver(cfg.Model, cfg.OnProviderStreamEventObserved, steerGate)
+	cfg.Model = modelWithProviderCallObserver(cfg.Model, cfg.OnProviderStreamEventObserved, steerGate)
 	eventGate := newStreamEmitterGate(streamCtx, ch)
 	defer func() {
 		cancel(nil)
@@ -523,26 +523,14 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}
 
 	var streamResult *sdk.StreamResult
-	// Timing only: the span's context is deliberately discarded and streamCtx
-	// is what the SDK gets. The SDK keeps the context it is called with for
-	// the whole stream, tool execution included, so handing it the span's
-	// context would make every tool call a child of this span rather than of
-	// the turn.
-	_, streamSpan := traceModelCall(streamCtx, spanModelFirstPart, cfg.Model)
-	attemptsUsed := 0
-	var establishErr error
-	// Closed when the first part arrives — see the drain loop below — because
-	// StreamText returns as soon as it has launched its goroutine, so closing
-	// it here would time that launch and nothing else. The deferred call is
-	// the safety net for the paths that never reach a first part: a span that
-	// never ends never leaves the process.
-	endFirstPart := sync.OnceFunc(func() { endModelCall(streamSpan, attemptsUsed, establishErr) })
-	defer endFirstPart()
+	// No span around this loop. The SDK runs every round of the turn inside
+	// the one StreamText call below, so a span here would cover all of them
+	// and could only be ended on one. The rounds are timed one at a time in
+	// providerCallObserver, which is the only place that sees each request
+	// start after the previous round's tools have finished.
 	for attempt := 0; attempt < retryCfg.MaxAttempts; attempt++ {
 		var err error
-		attemptsUsed = attempt + 1
 		streamResult, err = a.client.StreamText(streamCtx, opts...)
-		establishErr = err
 		if err == nil {
 			break
 		}
@@ -605,17 +593,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 			part = next
 		}
 		interruptedStep.observe(part)
-
-		// The provider has said something only once a part carries content.
-		// StartPart and the step bookkeeping around it are emitted by the SDK
-		// as soon as it has a goroutine, so ending on those would time our own
-		// plumbing — which is what the first two attempts at this span did.
-		switch part.(type) {
-		case *sdk.TextStartPart, *sdk.TextDeltaPart,
-			*sdk.ReasoningStartPart, *sdk.ReasoningDeltaPart,
-			*sdk.ToolInputStartPart, *sdk.StreamToolCallPart:
-			endFirstPart()
-		}
 
 		switch p := part.(type) {
 		case *sdk.StartPart:
@@ -1102,6 +1079,10 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	}
 	genCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
+	// The non-streaming path runs the same loop as the streaming one and needs
+	// the same per-call timing. It has no stream to observe and nothing to
+	// steer, so the observer here exists for the spans alone.
+	cfg.Model = modelWithProviderCallObserver(cfg.Model, nil, nil)
 	defer func() {
 		event := hooks.EventTurnEnd
 		errMsg := ""
@@ -1236,7 +1217,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		return nil
 	}))
 
-	genCtx, genSpan := traceModelCall(genCtx, spanModelGenerate, cfg.Model)
 	genResult, err := a.client.GenerateTextResult(genCtx, opts...)
 	capabilitiesChanged := errors.Is(err, errCapabilitiesChanged)
 	if capabilitiesChanged {
@@ -1246,7 +1226,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 		}
 		err = nil
 	}
-	endModelCall(genSpan, 1, err)
 	if stepErr := contextStepBudgetError(genCtx); stepErr != nil {
 		return nil, stepErr
 	}
@@ -2246,13 +2225,10 @@ func (a *Agent) runMidStreamRetry(
 			return failResult(), true
 		}
 
-		// streamCtx, not the span's context, for the same reason as the first
-		// attempt: the SDK keeps what it is given for the whole stream, so
-		// passing the span's would reparent this retry's tool calls under a
-		// span that is about to end.
-		_, retrySpan := traceModelCall(streamCtx, spanModelRetry, retryCfgCopy.Model)
+		// No span of its own: retryCfgCopy.Model is the wrapped model, so the
+		// call this starts is timed by providerCallObserver like every other,
+		// and a second span here would show one restart as two rows.
 		retryResult, retryErr := a.client.StreamText(streamCtx, retryOpts...)
-		endModelCall(retrySpan, attempt+1, retryErr)
 		if retryErr != nil {
 			a.logger.WarnContext(sendCtx, "mid-stream retry failed to start",
 				slog.Int("attempt", attempt+1),
