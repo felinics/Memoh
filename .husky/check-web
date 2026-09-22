@@ -1,6 +1,4 @@
 #!/usr/bin/env sh
-
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-# echo "Check Web build..."
-pnpm exec lint-staged
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "$SCRIPT_DIR/checks.mjs" web

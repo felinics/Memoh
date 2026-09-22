@@ -1,11 +1,4 @@
 #!/usr/bin/env sh
-
 export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-if ! command -v golangci-lint >/dev/null 2>&1; then
-  echo "golangci-lint not found, skipping Go lint..."
-  exit 0
-fi
-
-echo "Check Go lint..."
-golangci-lint run ./...
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "$SCRIPT_DIR/checks.mjs" go

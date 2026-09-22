@@ -42,8 +42,8 @@
     "drizzle-kit": "^0.31.8"
   },
   "lint-staged": {
-    "*.{vue,js,ts,md,json,scss}": [
-      "eslint --fix --concurrency=auto"
+    "*.{vue,js,jsx,mjs,cjs,ts,tsx}": [
+      "eslint --fix"
     ]
   },
   "pnpm": {

@@ -4,6 +4,8 @@ on:
   push:
     branches: ["main"]
     paths:
+      - ".husky/**"
+      - "scripts/hook-checks.test.mjs"
       - "apps/**/*.js"
       - "apps/**/*.cjs"
       - "apps/**/*.mjs"
@@ -28,6 +30,8 @@ on:
   pull_request:
     branches: ["main"]
     paths:
+      - ".husky/**"
+      - "scripts/hook-checks.test.mjs"
       - "apps/**/*.js"
       - "apps/**/*.cjs"
       - "apps/**/*.mjs"
@@ -98,6 +102,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Test commit hook selection and execution
+        run: node --test scripts/hook-checks.test.mjs
       - name: Test release scripts
         run: node --test scripts/publish-auth.test.mjs
       - name: Test server entrypoint
