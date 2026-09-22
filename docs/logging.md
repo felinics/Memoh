@@ -106,6 +106,27 @@ spelling would be written one way and queried another.
 Entity identifiers are `<entity>_id` (`bot_id`, `config_id`, `workspace_id`).
 Durations use `slog.Duration`. Errors use `slog.Any("error", err)`.
 
+### Code locations and Agent failures
+
+The shared logger enables slog `source`: `file`, `line`, and `function` identify
+the logging call, not necessarily where an error was created. Derived loggers
+retain the same behavior. File paths refer to the build's source tree (or its
+`-trimpath` paths); use the service build version to choose the matching source.
+
+Agent turn, provider-call, and tool failures attach `code.file.path`,
+`code.line.number`, and `code.function.name` to an exception event with
+`error.location.kind=observation`. Ordinary Go errors do not carry an original
+stack. These fields identify the boundary observing the failure; they must not
+be presented as the original throw site. Exception messages are deliberately
+generic here because provider/tool error strings can contain user input or
+credentials; the error type and operation span remain available.
+
+A tool panic emits a bounded, code-only `exception.stacktrace` and
+`error.location.kind=panic_stack` before re-panicking the original value.
+Existing recovery and task-failure behavior is unchanged. Panic values and
+function arguments are not exported. This does not add spans to every function
+or capture stacks for ordinary returned errors.
+
 Attributes are `slog.Attr` values, not loose key-value pairs
 (`sloglint.attr-only`): an odd number of arguments silently renders as
 `!BADKEY` rather than failing.

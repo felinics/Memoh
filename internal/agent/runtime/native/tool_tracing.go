@@ -3,7 +3,6 @@ package native
 import (
 	"github.com/felinics/twilight/sdk"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/felinics/memoh/internal/telemetry"
@@ -45,7 +44,22 @@ func wrapToolTracing(sdkTools []sdk.Tool) []sdk.Tool {
 				trace.WithSpanKind(trace.SpanKindInternal),
 				trace.WithAttributes(attribute.String("agent.tool.name", name)),
 			)
-			defer span.End()
+			ended := false
+			defer func() {
+				if !ended {
+					span.End()
+				}
+			}()
+			defer func() {
+				if value := recover(); value != nil {
+					telemetry.RecordPanic(span, value)
+					// End before re-panicking so the SDK cannot add the raw
+					// panic value as a second exception event.
+					span.End()
+					ended = true
+					panic(value)
+				}
+			}()
 
 			// The tool reads its context from here, so the span has to be put
 			// back for anything the tool does — a workspace RPC, a database
@@ -55,8 +69,7 @@ func wrapToolTracing(sdkTools []sdk.Tool) []sdk.Tool {
 
 			output, err := execute(&scoped, input)
 			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, "")
+				telemetry.RecordFailure(span, err)
 			}
 			return output, err
 		}

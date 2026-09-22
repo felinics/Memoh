@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/felinics/memoh/internal/telemetry"
@@ -48,8 +47,7 @@ func startTurnSpan(ctx context.Context, req ChatRequest) (context.Context, func(
 			span.SetAttributes(attribute.String("agent.turn.outcome", "aborted"))
 		case err != nil:
 			span.SetAttributes(attribute.String("agent.turn.outcome", "errored"))
-			span.RecordError(err)
-			span.SetStatus(codes.Error, "")
+			telemetry.RecordFailure(span, err)
 		default:
 			span.SetAttributes(attribute.String("agent.turn.outcome", "completed"))
 		}

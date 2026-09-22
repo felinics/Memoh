@@ -32,7 +32,12 @@ import (
 // logged with a context that has a request or trace identity picks those
 // fields up without the call site repeating them.
 func New(w io.Writer, level, format string) *slog.Logger {
-	opts := &slog.HandlerOptions{Level: parseLevel(level)}
+	// AddSource gives every application log the exact call site. Keep this at
+	// the handler boundary so callers do not need to repeat file/line fields.
+	opts := &slog.HandlerOptions{
+		Level:     parseLevel(level),
+		AddSource: true,
+	}
 
 	var encoder slog.Handler
 	if strings.ToLower(format) == "json" {

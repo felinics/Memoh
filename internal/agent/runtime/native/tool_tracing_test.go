@@ -100,18 +100,58 @@ func TestWrapToolTracingGivesTheToolItsOwnSpanContext(t *testing.T) {
 
 func TestWrapToolTracingMarksAFailedCall(t *testing.T) {
 	recorder := recordToolSpans(t)
+	wantErr := errors.New("disk full: synthetic-secret")
 	tools := wrapToolTracing([]sdk.Tool{{
 		Name: "write_file",
 		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return nil, errors.New("disk full")
+			return nil, wantErr
 		},
 	}})
 
-	if _, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, nil); err == nil {
+	if _, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, nil); err != wantErr {
 		t.Fatal("want the tool's error to pass through")
 	}
 	if span := findSpan(t, recorder, "agent.tool write_file"); span.Status().Code != codes.Error {
 		t.Error("a failed tool call was not marked as an error")
+	}
+	for _, event := range findSpan(t, recorder, "agent.tool write_file").Events() {
+		for _, attr := range event.Attributes {
+			if strings.Contains(attr.Value.Emit(), "synthetic-secret") {
+				t.Fatal("tool error payload leaked into telemetry")
+			}
+		}
+	}
+}
+
+func TestWrapToolTracingRecordsPanicWithoutChangingRecovery(t *testing.T) {
+	recorder := recordToolSpans(t)
+	value := &struct{ Secret string }{"synthetic-secret"}
+	tools := wrapToolTracing([]sdk.Tool{{Name: "panic_tool", Execute: func(*sdk.ToolExecContext, any) (any, error) {
+		panic(value)
+	}}})
+	func() {
+		defer func() {
+			if got := recover(); got != value {
+				t.Errorf("panic identity changed: %T", got)
+			}
+		}()
+		_, _ = tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, nil)
+	}()
+	span := findSpan(t, recorder, "agent.tool panic_tool")
+	if span.Status().Code != codes.Error || len(span.Events()) != 1 {
+		t.Fatalf("panic must end one failed span with one event: %v", span.Events())
+	}
+	var hasStack bool
+	for _, attr := range span.Events()[0].Attributes {
+		if strings.Contains(attr.Value.Emit(), "synthetic-secret") {
+			t.Fatal("panic payload leaked")
+		}
+		if attr.Key == "exception.stacktrace" {
+			hasStack = strings.Contains(attr.Value.AsString(), "tool_tracing_test.go:")
+		}
+	}
+	if !hasStack {
+		t.Fatal("missing original panic code frames")
 	}
 }
 

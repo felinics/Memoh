@@ -8,7 +8,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/felinics/memoh/internal/telemetry"
@@ -96,8 +95,7 @@ func endCallSpan(ctx context.Context, span trace.Span, err error) {
 		span.SetAttributes(attribute.String("agent.model.outcome", "aborted"))
 	case err != nil:
 		span.SetAttributes(attribute.String("agent.model.outcome", "errored"))
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "")
+		telemetry.RecordFailure(span, err)
 	default:
 		span.SetAttributes(attribute.String("agent.model.outcome", "completed"))
 	}
