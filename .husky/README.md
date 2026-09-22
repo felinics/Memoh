@@ -10,9 +10,17 @@ keep unstaged Go edits in mind when interpreting results.
 - Frontend dependency, UI submodule, ESLint or TypeScript configuration changes: full ESLint.
 - Go sources and resources below `cmd`, `internal`, `db` or `templates`:
   lint and test the nearest indexed Go package. This includes embedded assets
-  and test fixtures. Deleting the last Go source in a package falls back to
-  full Go checks; renames consider both paths.
-- Go dependencies, lint/toolchain configuration, `conf/` and SQL inputs: full Go checks.
+  and test fixtures. Deleting the last Go source in a package requires
+  full CI; renames consider both paths. Go itself resolves build tags
+  and platform constraints before selecting explicit packages; tag-only packages
+  excluded by the current build context are skipped as with `./...`. Other
+  package-loading errors are retained and fail the checks.
+- Cross-directory inputs read by handler tests (the workspace Dockerfile,
+  Swagger JSON and four desktop/display scripts): check `internal/handlers`.
+- Go dependencies, lint/toolchain configuration, `conf/`, SQL inputs and deleted
+  packages: retain any identifiable package checks and report that full CI is
+  required. An ordinary commit never automatically starts `./...`.
+- Go CI covers all `docker/`, `spec/`, `scripts/` changes to catch wider effects.
 - Other files: no language checks unless full mode is requested.
 
 Package-scoped checks do not test all reverse dependencies. Go CI retains
@@ -28,6 +36,8 @@ Each stage reports its command and duration. Local stages have a 180-second
 wall-clock budget (900 seconds in explicit full mode). Override it with
 `MEMOH_CHECK_TIMEOUT_SECONDS=300`; timeout or missing tools fail the check,
 never silently pass. Go tests have the same per-test-binary timeout as well.
+Local Go commands use `GOMAXPROCS=2`; lint concurrency and Go test package
+parallelism are also capped at 2, including explicit full mode.
 Cancellation terminates the running process group on Unix. Do not run multiple
 Go lint jobs against the same shared linter cache concurrently.
 

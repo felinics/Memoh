@@ -15,6 +15,9 @@ on:
       - "db/**"
       - "templates/**"
       - "conf/**"
+      - "docker/**"
+      - "spec/**"
+      - "scripts/**"
       - "mise.toml"
       - ".github/workflows/go-ci.yml"
   pull_request:
@@ -31,6 +34,9 @@ on:
       - "db/**"
       - "templates/**"
       - "conf/**"
+      - "docker/**"
+      - "spec/**"
+      - "scripts/**"
       - "mise.toml"
       - ".github/workflows/go-ci.yml"
   workflow_dispatch:
