@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -62,6 +62,7 @@ if ('${name}' === 'go' && process.argv[2] === 'list') {
   console.log(process.env.GO_LIST_PACKAGES ?? process.argv.slice(6).join('\\n'))
   process.exit(0)
 }
+console.log('CWD', process.cwd())
 console.log('CALLED ${name}', JSON.stringify(process.argv.slice(2)))
 if (process.env.FAIL_COMMAND === '${name}') process.exit(7)
 if (process.env.BUSY_COMMAND === '${name}') setInterval(() => {}, 1000)
@@ -72,8 +73,8 @@ if (process.env.BUSY_COMMAND === '${name}') setInterval(() => {}, 1000)
     writeFileSync(join(cwd, path), content)
     git('add', '--', path)
   }
-  const run = (env = {}, args = []) => spawnSync(process.execPath, [runner, ...args], {
-    cwd, encoding: 'utf8', timeout: 10000,
+  const run = (env = {}, args = [], runCwd = cwd) => spawnSync(process.execPath, [runner, ...args], {
+    cwd: runCwd, encoding: 'utf8', timeout: 10000,
     env: { ...fixtureEnv, MEMOH_FULL_CHECKS: '0', PATH: `${bin}:${process.env.PATH}`, ...env },
   })
   return { cwd, git, stage, run }
@@ -120,6 +121,8 @@ test('timeout fails rather than silently skipping checks', t => {
   const result = run({ BUSY_COMMAND: 'golangci-lint', MEMOH_CHECK_TIMEOUT_SECONDS: '0.1' })
   assert.equal(result.status, 1)
   assert.match(result.stderr, /exceeded/)
+  assert.match(result.stderr, /includes tool startup and compilation/)
+  assert.match(result.stderr, /MEMOH_CHECK_TIMEOUT_SECONDS/)
   assert.doesNotMatch(result.stdout, /CALLED go \[/)
 })
 
@@ -199,4 +202,22 @@ test('real Go build constraints skip tag-only packages and honor GOFLAGS', t => 
   const missing = run({ ...env, FAIL_COMMAND: 'go' })
   assert.equal(missing.status, 1)
   assert.match(missing.stdout, /CALLED go .*internal\/tagged/)
+})
+
+test('manual checks from a subdirectory select and run packages at the root', t => {
+  const { cwd, stage, run } = fixture(t)
+  stage('internal/a/a.go', 'package a')
+  const result = run({}, ['go'], join(cwd, 'internal/a'))
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /CALLED golangci-lint .*internal\/a/)
+  assert.ok(result.stdout.includes(`CWD ${realpathSync(cwd)}\n`))
+})
+test('dependency-only commits explicitly require CI without invoking Go', t => {
+  const { stage, run } = fixture(t)
+  stage('go.mod', 'module example.test/hooks\n')
+  const result = run()
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /no local package checks; full CI must pass before merging/)
+  assert.doesNotMatch(result.stdout, /CALLED/)
+  assert.doesNotMatch(result.stdout, /Go: no relevant staged changes/)
 })

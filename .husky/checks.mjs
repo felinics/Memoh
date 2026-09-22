@@ -101,6 +101,8 @@ async function run(label, command, args, timeoutSeconds, capture = false) {
   }
   const timer = setTimeout(() => {
     console.error(`[hooks] ${label} exceeded ${timeoutSeconds}s; check failed (not skipped)`)
+    console.error('[hooks] The wall-clock budget includes tool startup and compilation; a timeout does not establish a test failure.')
+    console.error('[hooks] For an expected cold build, retry with a larger MEMOH_CHECK_TIMEOUT_SECONDS value (see .husky/README.md).')
     stop()
   }, timeoutSeconds * 1000)
   process.once('SIGINT', stop)
@@ -122,6 +124,8 @@ async function run(label, command, args, timeoutSeconds, capture = false) {
 }
 
 async function main() {
+  // Git paths and tool arguments must share the worktree root, even for manual calls.
+  process.chdir(git(['rev-parse', '--show-toplevel']).trim())
   const only = process.argv[2]
   if (only && !['--plan', 'sizes', 'web', 'go', 'go-test'].includes(only)) throw new Error(`Unknown check: ${only}`)
   const full = process.env.MEMOH_FULL_CHECKS === '1'
@@ -152,7 +156,9 @@ async function main() {
       plan.go = selected.split('\n').map(path => path.trim()).filter(Boolean)
       if (!plan.go.length) console.log('[hooks] Go: selected packages are excluded by current build constraints')
     }
-    if (!plan.go.length) console.log('[hooks] Go: no relevant staged changes')
+    if (!plan.go.length) console.log(plan.fullGoInCI
+      ? '[hooks] Go: no local package checks; full CI must pass before merging'
+      : '[hooks] Go: no packages selected for this build context')
     else {
       // Sequential Go checks avoid competing compilation/type-loading workloads.
       if (!only || only === 'go') await run('Go lint', 'golangci-lint', ['run', '--concurrency=2', ...plan.go], timeout)

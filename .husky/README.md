@@ -30,12 +30,20 @@ triggers. Cloud must also enable these workflows for `submodule/memoh`.
 Run `MEMOH_FULL_CHECKS=1 sh .husky/pre-commit` for full Go and ESLint checks.
 Run `node .husky/checks.mjs --plan` to inspect selection without running checks.
 The `check-go`, `check-go-test`, `check-web` and `check-large-files` wrappers
-remain available and use the same staged selection.
+remain available and use the same staged selection. The runner switches to the
+current worktree root before selecting paths or starting tools, so calling
+`sh ../../.husky/check-go` from `internal/acl` also works.
 
 Each stage reports its command and duration. Local stages have a 180-second
 wall-clock budget (900 seconds in explicit full mode). Override it with
 `MEMOH_CHECK_TIMEOUT_SECONDS=300`; timeout or missing tools fail the check,
-never silently pass. Go tests have the same per-test-binary timeout as well.
+never silently pass. The wall-clock budget includes startup, dependency downloads
+and compilation; a cold cache after checkout or a toolchain change may exceed it
+without any failing tests. The timeout message identifies this budget and points
+to the override. For an expected cold build, explicitly retry with e.g.
+`MEMOH_CHECK_TIMEOUT_SECONDS=600 git commit`; this does not enable full checks.
+The hook never retries with a larger budget automatically. Go tests have the
+same per-test-binary timeout, which starts after compilation.
 Local Go commands use `GOMAXPROCS=2`; lint concurrency and Go test package
 parallelism are also capped at 2, including explicit full mode.
 Cancellation terminates the running process group on Unix. Do not run multiple
