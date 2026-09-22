@@ -216,6 +216,15 @@ export const useChatStore = defineStore('chat', () => {
     seq: number
   } | null>(null)
   let userSendSeq = 0
+  function recordUserSent(botId: string, targetSessionId: string, viewId: string, wasDraft: boolean) {
+    userSentInSession.value = {
+      id: targetSessionId,
+      botId,
+      viewId,
+      wasDraft,
+      seq: ++userSendSeq,
+    }
+  }
   const { realtime, decisions, integration: runtimeIntegration } =
     createChatRuntimeLayer({
     currentBotId,
@@ -227,15 +236,7 @@ export const useChatStore = defineStore('chat', () => {
     bumpProjectionVersion: () => { runtimeProjectionVersion.value += 1 },
     normalizeTarget: normalizedChatViewTarget,
     promoteDraftView: promoteDraftChatView,
-    recordUserSent: (botId, targetSessionId, viewId, wasDraft) => {
-      userSentInSession.value = {
-        id: targetSessionId,
-        botId,
-        viewId,
-        wasDraft,
-        seq: ++userSendSeq,
-      }
-    },
+    recordUserSent,
     rescopeSessionCommandEventToComposer,
     rememberCommandEvent,
     removeTurnFromSession,
@@ -558,13 +559,7 @@ export const useChatStore = defineStore('chat', () => {
     ensureChatViewSession,
     startSessionRuntime,
     recordUserSent: (target, targetSessionId, wasDraft) => {
-      userSentInSession.value = {
-        id: targetSessionId,
-        botId: target.botId,
-        viewId: target.viewId,
-        wasDraft,
-        seq: ++userSendSeq,
-      }
+      recordUserSent(target.botId, targetSessionId, target.viewId, wasDraft)
     },
     ensureWebSocket,
     trackAssistantStream,
