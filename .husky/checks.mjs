@@ -151,7 +151,8 @@ async function main() {
       // Let Go apply GOOS/GOARCH/GOFLAGS and build tags. Explicitly naming a
       // tag-only package fails where ./... would skip it. Preserve every other
       // load error so lint/test can report it instead of silently passing.
-      const format = '{{if .Error}}{{if eq (printf "%v" .Error.Err) (printf "build constraints exclude all Go files in %s" .Dir)}}{{else}}{{.ImportPath}}{{end}}{{else}}{{.ImportPath}}{{end}}'
+      // golangci-lint expects filesystem paths, whereas go test also accepts imports.
+      const format = '{{if .Error}}{{if eq (printf "%v" .Error.Err) (printf "build constraints exclude all Go files in %s" .Dir)}}{{else}}{{if .Dir}}{{.Dir}}{{else}}{{.ImportPath}}{{end}}{{end}}{{else}}{{if .Dir}}{{.Dir}}{{else}}{{.ImportPath}}{{end}}{{end}}'
       const selected = await run('Go package selection', 'go', ['list', '-e', '-f', format, ...plan.go], timeout, true)
       plan.go = selected.split('\n').map(path => path.trim()).filter(Boolean)
       if (!plan.go.length) console.log('[hooks] Go: selected packages are excluded by current build constraints')

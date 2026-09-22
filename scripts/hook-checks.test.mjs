@@ -62,6 +62,14 @@ if ('${name}' === 'go' && process.argv[2] === 'list') {
   console.log(process.env.GO_LIST_PACKAGES ?? process.argv.slice(6).join('\\n'))
   process.exit(0)
 }
+if ('${name}' === 'golangci-lint') {
+  for (const path of process.argv.slice(3).filter(arg => !arg.startsWith('-'))) {
+    if (path !== './...' && !require('node:fs').existsSync(path)) {
+      console.error('lint package directory not found:', path)
+      process.exit(7)
+    }
+  }
+}
 console.log('CWD', process.cwd())
 console.log('CALLED ${name}', JSON.stringify(process.argv.slice(2)))
 if (process.env.FAIL_COMMAND === '${name}') process.exit(7)
@@ -186,12 +194,12 @@ test('real Go build constraints skip tag-only packages and honor GOFLAGS', t => 
   assert.doesNotMatch(excluded.stdout, /CALLED/)
   const included = run({ ...env, GOFLAGS: '-tags=integration' })
   assert.equal(included.status, 0, included.stderr)
-  assert.match(included.stdout, /CALLED golangci-lint .*example.test\/hooks\/internal\/tagged/)
-  assert.match(included.stdout, /CALLED go .*example.test\/hooks\/internal\/tagged/)
+  assert.match(included.stdout, /CALLED golangci-lint .*internal\/tagged/)
+  assert.match(included.stdout, /CALLED go .*internal\/tagged/)
   stage('internal/normal/a.go', 'package normal\n')
   const mixed = run(env)
   assert.equal(mixed.status, 0, mixed.stderr)
-  assert.match(mixed.stdout, /CALLED go .*example.test\/hooks\/internal\/normal/)
+  assert.match(mixed.stdout, /CALLED go .*internal\/normal/)
   assert.doesNotMatch(mixed.stdout, /CALLED .*internal\/tagged/)
   stage('internal/tagged/a_test.go', 'this is invalid Go\n')
   const invalid = run({ ...env, FAIL_COMMAND: 'go' })
@@ -220,4 +228,13 @@ test('dependency-only commits explicitly require CI without invoking Go', t => {
   assert.match(result.stdout, /no local package checks; full CI must pass before merging/)
   assert.doesNotMatch(result.stdout, /CALLED/)
   assert.doesNotMatch(result.stdout, /Go: no relevant staged changes/)
+})
+
+test('lint rejects import paths even when Go accepts them', t => {
+  const { stage, run } = fixture(t)
+  stage('internal/a/a.go', 'package a')
+  const result = run({ GO_LIST_PACKAGES: 'example.test/hooks/internal/a' })
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /lint package directory not found/)
+  assert.doesNotMatch(result.stdout, /CALLED go \[/)
 })
