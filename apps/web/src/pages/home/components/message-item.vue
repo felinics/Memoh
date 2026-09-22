@@ -296,7 +296,7 @@
                 class="flex items-start gap-2 rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
               >
                 <TriangleAlert class="mt-0.5 size-3.5 shrink-0" />
-                <span class="min-w-0 whitespace-pre-wrap break-words">{{ errorBlockContent(node.block) }}</span>
+                <span class="min-w-0 whitespace-pre-wrap break-words">{{ noticeBlockContent(node.block) }}</span>
               </div>
 
               <!-- Attachment block. An assistant turn posts images as reply
@@ -850,10 +850,14 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
   return true
 }
 
-function errorBlockContent(block: Pick<ErrorBlock, 'code' | 'content'>): string {
+function errorBlockContent(block: Pick<ErrorBlock, 'code' | 'content'> & { args?: Record<string, string> }): string {
   const code = block.code?.trim()
   const key = code ? `errors.${code}` : ''
-  return key && te(key) ? t(key) : block.content
+  return key && te(key) ? t(key, block.args ?? {}) : block.content
+}
+
+function noticeBlockContent(block: { name?: string; content: string; args?: Record<string, string> }): string {
+  return errorBlockContent({ code: block.name, content: block.content, args: block.args })
 }
 
 // Consecutive tools and reasoning form one process, regardless of tool kind.

@@ -22,6 +22,19 @@
 - Loop detection (text and tool loops) is built into the agent with configurable thresholds.
 - Tag extraction system processes inline tags in streaming output (attachments, reactions, speech/TTS).
 
+## External runtime notices
+
+`runtime_notice` carries a public conversation fact, not temporary activity
+(`runtime_status`) or model prose. The application collects notices across
+driver startup and execution, including scheduled runs. Successful, failed,
+and stopped rounds store each distinct notice once under `runtime_notices` on
+their first assistant row. Terminal snapshots and history reads both project
+those records into notice blocks, so refresh, reconnect, and forks retain them.
+The metadata stays outside the provider transcript and memory-extraction text.
+Use a stable code, public fallback text, and public string arguments; never put
+private diagnostics in a notice. A round that cannot commit still follows the
+normal persistence failure/rollback contract.
+
 ## Codex session checkpoints
 
 The direct Codex runtime persists its primary native rollout through the existing

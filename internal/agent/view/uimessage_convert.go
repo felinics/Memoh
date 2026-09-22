@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/textutil"
@@ -21,6 +22,7 @@ var (
 	uiMessageCollapsedNewlinesRe = regexp.MustCompile(`\n{3,}`)
 	uiTaskNotificationRe         = regexp.MustCompile(`(?s)<task-notification>\s*(.*?)\s*</task-notification>`)
 	uiMetadataParseKeys          = [][]byte{
+		[]byte(`"runtime_notices"`),
 		[]byte(`"agent_turn_id"`),
 		[]byte(`"message_source"`),
 		[]byte(`"forward"`),
@@ -337,10 +339,11 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			reasonings := extractPersistedReasoning(&modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 			commands := extractCommandOutputs(&modelMessage)
+			notices := event.NoticesFromMetadata(raw.Metadata)
 
 			// A persisted turn_id is the only grouping key. Plain-text assistant
 			// messages and tool calls with that same id remain one reply.
-			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 {
+			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 && len(notices) == 0 {
 				if code := persistedHistoryErrorCode(raw.Metadata); code != "" {
 					if pending == nil {
 						pending = newPendingAssistantTurn(raw)
@@ -359,6 +362,9 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			}
 
 			reasoningTimings := uiReasoningTimingsByOrdinal(raw.Metadata)
+			for _, notice := range notices {
+				appendPendingAssistantMessage(pending, noticeUIMessage(notice))
+			}
 			for _, command := range commands {
 				appendPendingAssistantMessage(pending, command)
 			}

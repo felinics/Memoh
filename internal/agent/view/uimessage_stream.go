@@ -3,6 +3,8 @@ package view
 import (
 	"encoding/json"
 	"strings"
+
+	agentevent "github.com/felinics/memoh/internal/agent/event"
 )
 
 type uiTextStreamState struct {
@@ -375,9 +377,13 @@ func (c *UIMessageStreamConverter) finalizeTextBlock() {
 // Instead each snapshot block reuses the ID of its live counterpart — tools are
 // matched by tool call ID, text/reasoning positionally within their kind — and
 // only blocks without one get fresh IDs.
-func (c *UIMessageStreamConverter) ConvertTerminalMessages(raw json.RawMessage) []UIMessage {
+func (c *UIMessageStreamConverter) ConvertTerminalMessages(raw json.RawMessage, notices ...agentevent.Notice) []UIMessage {
 	c.finalizeTextBlock()
-	blocks := ConvertRawModelMessagesToUIAssistantMessages(raw)
+	blocks := make([]UIMessage, 0, len(notices))
+	for _, notice := range notices {
+		blocks = append(blocks, noticeUIMessage(notice))
+	}
+	blocks = append(blocks, ConvertRawModelMessagesToUIAssistantMessages(raw)...)
 	consumed := make([]bool, len(c.emitted))
 	for i := range blocks {
 		if id, ok := c.reuseEmittedBlockID(blocks[i].Type, blocks[i].ToolCallID, consumed); ok {
@@ -391,6 +397,10 @@ func (c *UIMessageStreamConverter) ConvertTerminalMessages(raw json.RawMessage) 
 		blocks = append(blocks, *c.status)
 	}
 	return blocks
+}
+
+func noticeUIMessage(notice agentevent.Notice) UIMessage {
+	return UIMessage{Type: UIMessageNotice, Name: notice.Code, Content: notice.Content, Args: notice.Args}
 }
 
 func (c *UIMessageStreamConverter) reuseEmittedBlockID(kind UIMessageType, toolCallID string, consumed []bool) (int, bool) {

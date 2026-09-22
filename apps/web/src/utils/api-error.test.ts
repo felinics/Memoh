@@ -79,6 +79,17 @@ describe('resolveApiErrorMessage', () => {
     expect(resolveApiErrorMessage({ detail: 'plain detail' }, 'fallback')).toBe('plain detail')
   })
 
+  it.each(['en', 'zh', 'ja'])('localizes durable runtime notices in %s', (language) => {
+    locale = language
+    const message = resolveApiErrorMessage({
+      code: 'native_history_lost',
+      detail: 'backend fallback',
+    }, 'fallback')
+    expect(message).not.toBe('backend fallback')
+    expect(message).not.toBe('fallback')
+    expect(message).not.toContain('errors.native_history_lost')
+  })
+
   it.each([
     '<html><head><title>413 Request Entity Too Large</title></head></html>',
     '\n<!DOCTYPE html><html><body>Bad gateway</body></html>',

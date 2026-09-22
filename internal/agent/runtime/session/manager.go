@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	agentevent "github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -1837,7 +1838,7 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	switch event.Type {
 	case native.EventAgentStart:
 	case native.EventAgentEnd, native.EventAgentAbort:
-		messages = ctrl.converter.ConvertTerminalMessages(event.Messages)
+		messages = ctrl.converter.ConvertTerminalMessages(event.Messages, agentevent.NoticesFromMetadata(event.Metadata)...)
 	case native.EventError:
 	default:
 		messages = ctrl.converter.HandleEvent(chatview.UIStreamEventFromAgentEvent(event))

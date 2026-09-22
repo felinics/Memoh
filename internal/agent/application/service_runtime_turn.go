@@ -13,6 +13,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -315,7 +316,11 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	}
 	cleanupProjections := func() { cleanupProjectionsIn(context.WithoutCancel(ctx)) }
 
+	var notices runtimeNotices
 	emitWithContext := func(deliveryCtx context.Context, ev native.StreamEvent) {
+		if !notices.observe(ev) {
+			return
+		}
 		reasoningTiming.observe(ev)
 		if isRuntimeDecisionProjectionEvent(ev) && recordProjection(ev) {
 			completeProjection(ev.ToolCallID, s.persistRuntimeDecisionProjection(context.WithoutCancel(ctx), req, ev))
@@ -389,6 +394,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		CanRequestUserInput: s.canDeliverUserInputWS(eventCh),
 		Sink:                external.EventSinkFunc(emit),
 	})
+	notices.apply(&result)
 	lifecycleCause = err
 	if idleCancel.DidFire() {
 		// Drivers normalize cancellation into a partial nil-error result so the
@@ -455,7 +461,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 			emitWithContext(ctx, runtimeTerminalStreamEvent(native.EventAbort, result))
 			return nil
 		}
-		if isRuntimeConfigurationError(err) && !runtimeTurnRan(result) {
+		if isRuntimeConfigurationError(err) && !runtimeTurnRan(result) && len(result.Notices) == 0 {
 			// Configuration-class failure: nothing ran, so persist nothing.
 			// Repeated attempts must not pile failure rounds into history.
 			cleanupProjections()
@@ -633,6 +639,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	}
 
 	reasoningTiming := newReasoningTimingTracker(nil)
+	var notices runtimeNotices
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, strings.TrimSpace(payload.ReasoningEffort))
 	defer idleCancel.Stop()
 	result, promptErr := driver.Prompt(idleCtx, external.PromptInput{
@@ -657,6 +664,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		// Nobody is on the other end of a scheduled run.
 		CanRequestUserInput: false,
 		Sink: external.EventSinkFunc(func(ev native.StreamEvent) {
+			notices.observe(ev)
 			idleCancel.Reset()
 			if ev.Type == native.EventToolCallStart {
 				idleCancel.RecordToolCall()
@@ -664,6 +672,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 			reasoningTiming.observe(ev)
 		}),
 	})
+	notices.apply(&result)
 	if idleCancel.DidFire() {
 		promptErr = context.Cause(idleCtx)
 	}
@@ -707,7 +716,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	}
 	if promptErr != nil {
 		s.cancelPendingRuntimeApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
-		if isRuntimeConfigurationError(promptErr) && !runtimeTurnRan(result) {
+		if isRuntimeConfigurationError(promptErr) && !runtimeTurnRan(result) && len(result.Notices) == 0 {
 			// Configuration-class failure: nothing ran; the schedule log keeps
 			// the failure record without polluting the session history.
 			if leadingUser != nil {
@@ -907,9 +916,12 @@ func (s *Service) persistRuntimeRound(
 	if req.UserMessagePersisted || req.ReusePersistedUserMessage {
 		metadataOffset = 0
 	}
-	lastAssistantIndex := -1
+	firstAssistantIndex, lastAssistantIndex := -1, -1
 	for idx, msg := range output {
 		if msg.Role == "assistant" {
+			if firstAssistantIndex < 0 {
+				firstAssistantIndex = idx
+			}
 			lastAssistantIndex = idx
 			entryMeta := make(map[string]any, len(meta))
 			for key, value := range meta {
@@ -939,6 +951,11 @@ func (s *Service) persistRuntimeRound(
 		// has a runtime anchor matching the complete visible history.
 		metadataByIndex[lastAssistantIndex+metadataOffset]["agent_turn_id"] = agentTurnID
 		agentTurnID = "" // Do not bulk-assign this anchor to earlier assistant rows.
+	}
+	// Keep each notice on one row only, including notice-only aborted rounds.
+	// Row metadata survives history refresh/fork without entering model input.
+	if firstAssistantIndex >= 0 && len(result.Notices) > 0 {
+		metadataByIndex[firstAssistantIndex+metadataOffset][event.RuntimeNoticesMetadataKey] = result.Notices
 	}
 	// A staged snapshot is the native side of exactly this round, so the head
 	// follows it however the turn ended; otherwise the next turn would restore
@@ -1051,6 +1068,9 @@ func runtimeFailureEvent(cause error) native.StreamEvent {
 
 func runtimeTerminalStreamEvent(eventType native.StreamEventType, result external.PromptResult) native.StreamEvent {
 	ev := native.StreamEvent{Type: eventType}
+	if len(result.Notices) > 0 {
+		ev.Metadata = map[string]any{event.RuntimeNoticesMetadataKey: result.Notices}
+	}
 	if data, err := json.Marshal(result.Output); err == nil {
 		ev.Messages = data
 	}

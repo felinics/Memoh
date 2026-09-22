@@ -282,6 +282,9 @@ func (f EventSinkFunc) EmitStreamEvent(ev event.StreamEvent) { f(ev) }
 
 // PromptResult is the durable outcome of one turn.
 type PromptResult struct {
+	// Notices are UI-only runtime facts collected across startup and execution.
+	// They are persisted with the round, independently of the model transcript.
+	Notices []event.Notice
 	// SteerInputIDs correspond to the user messages in Output, in arrival order.
 	SteerInputIDs []string
 	// Output is the transcript to persist, in provider-message form.
