@@ -712,6 +712,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "workspaceLinkUnavailable": "This workspace link is unavailable here. Open the conversation in Memoh with workspace access.",
     "runtimeStatus": {
       "compacting": "Compacting context…",
       "api_retry": "Retry {attempt}/{max_retries} in {seconds}s…"

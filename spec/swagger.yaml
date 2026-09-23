@@ -4154,6 +4154,11 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.SiteIconResponse:
+    properties:
+      url:
+        type: string
+    type: object
   handlers.SkillItem:
     properties:
       app_id:
@@ -17086,6 +17091,26 @@ paths:
       summary: List search provider metadata
       tags:
       - search-providers
+  /site-icon:
+    get:
+      parameters:
+      - description: Public page URL
+        in: query
+        name: url
+        required: true
+        type: string
+      - description: light or dark
+        in: query
+        name: theme
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SiteIconResponse'
+      summary: Resolve a public page favicon for a color scheme
+      tags:
+      - site-icon
   /speech-models:
     get:
       description: List all models of type 'speech' (filtered view of unified models

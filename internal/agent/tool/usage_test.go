@@ -1107,3 +1107,29 @@ func TestContainerProviderUsageNamesWorkdirPath(t *testing.T) {
 		t.Fatalf("Usage without a workdir binding must not name one, got:\n%s", unbound)
 	}
 }
+
+func TestContainerDeliveryLinksRespectSurfaceAndLocation(t *testing.T) {
+	t.Parallel()
+	provider := NewContainerProvider(nil, nil, nil, "")
+	available := availableToolsForTest(ToolRead(), ToolExec())
+	for _, platform := range []string{"local", "web"} {
+		got := provider.Usage(context.Background(), SessionContext{CurrentPlatform: platform}, available)
+		for _, want := range []string{"[View source](/data/project/index.html)", "[Try it](http://localhost:5173/)", "does not need to configure port forwarding"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%s missing %q", platform, want)
+			}
+		}
+	}
+	for _, session := range []SessionContext{
+		{CurrentPlatform: "telegram"},
+		{CurrentPlatform: "local", WorkspaceTargetID: "computer-1", WorkspaceTargetKind: "remote"},
+	} {
+		got := provider.Usage(context.Background(), session, available)
+		if strings.Contains(got, "[View source]") || strings.Contains(got, "[Try it]") {
+			t.Fatalf("unsupported surface/location got workspace link guidance: %s", got)
+		}
+	}
+	if got := provider.Usage(context.Background(), SessionContext{CurrentPlatform: "local"}, AvailableTools{}); got != "" {
+		t.Fatalf("no tools got guidance: %s", got)
+	}
+}

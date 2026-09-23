@@ -14565,6 +14565,37 @@ const docTemplate = `{
                 }
             }
         },
+        "/site-icon": {
+            "get": {
+                "tags": [
+                    "site-icon"
+                ],
+                "summary": "Resolve a public page favicon for a color scheme",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Public page URL",
+                        "name": "url",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "light or dark",
+                        "name": "theme",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SiteIconResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/speech-models": {
             "get": {
                 "description": "List all models of type 'speech' (filtered view of unified models table)",
@@ -22990,6 +23021,14 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "handlers.SiteIconResponse": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string"
                 }
             }
         },

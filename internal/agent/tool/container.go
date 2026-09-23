@@ -150,6 +150,16 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 			parts = append(parts, text)
 		}
 	}
+	// Workspace links are a Web/Desktop affordance, not a portable channel URL.
+	// Other execution locations must not be advertised as the native workspace.
+	if (session.CurrentPlatform == "local" || session.CurrentPlatform == "web") && !sessionUsesRemoteWorkspaceTarget(session) {
+		if len(available.Refs(ToolRead(), ToolWrite(), ToolEdit(), ToolApplyPatch())) > 0 {
+			parts = append(parts, "In Memoh Web/Desktop, link to files on the native Server Workspace using Markdown with the real absolute path, for example [View source](/data/project/index.html). Encode spaces in link destinations. Memoh renders link icons; do not add emoji or icon characters to link labels. These links open the workspace file viewer, not a running web page. Do not prefix paths with the Memoh site URL or file://, and do not use this format for files on another computer.")
+		}
+		if _, ok := available.Ref(ToolExec()); ok {
+			parts = append(parts, "When delivering a web app running on the native Server Workspace, provide a Markdown link with its verified HTTP localhost URL and explicit port, for example [Try it](http://localhost:5173/). Memoh opens it through its workspace preview proxy; the user does not need to configure port forwarding for this in-app preview. Public HTTP(S) links open in the user's browser. Workspace links are not public share URLs; never invent a proxy address or claim a service is running without checking it.")
+		}
+	}
 	return usageSection("Basic Tools", parts)
 }
 

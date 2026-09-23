@@ -961,36 +961,19 @@
   background-color: var(--color-border);
 }
 
-/* Links — a dotted underline (a run of small dots), foreground at rest. On
- * hover BOTH the text and the dots turn the selection blue, with NO transition
- * (an animated link color reads twitchy in running prose). `skip-ink: none`
- * keeps the dotted run continuous under descenders; the offset + visible
- * overflow stop a glyph tail (the "p" in https) from being clipped. The floating
- * URL tooltip is disabled at the renderer (showTooltips=false) — it was an
- * off-language popover, not the design-system Tooltip. */
+/* Inline Markdown links share the theme accent with their leading icon.
+ * Keep decoration off at rest; hover/focus retain an explicit link affordance. */
 .markstream-vue .link-node {
-  color: var(--color-foreground);
-  text-decoration-line: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in oklch, var(--color-foreground) 45%, transparent);
-  text-underline-offset: 0.22em;
-  text-decoration-skip-ink: none;
+  color: var(--brand);
+  text-decoration: none;
   overflow: visible;
   transition: none;
 }
 
-.markstream-vue .link-node:hover {
-  /* Hover tints to the scarce brand purple (the app's "special" accent) — the
-   * same hue the footnote markers use, so every inline jump speaks one color. */
+.markstream-vue .link-node:is(:hover, :focus-visible) {
   color: var(--brand);
-  /* Re-assert dotted on hover: markstream's own :hover swaps in a SOLID
-   * underline (it defaults to no underline until hover), which would turn our
-   * dots into a line. Pin the style so hover only changes color, not shape. */
-  text-decoration-line: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-decoration-color: var(--brand);
+  text-decoration: underline solid;
+  text-underline-offset: 0.22em;
 }
 
 /* Footnotes — drop the per-item top divider (markstream stamps a `border-t` on

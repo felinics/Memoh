@@ -709,6 +709,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "workspaceLinkUnavailable": "ここではワークスペースのリンクを開けません。ワークスペースへのアクセス権がある Memoh の会話で開いてください。",
     "runtimeStatus": {
       "compacting": "コンテキストを圧縮中…",
       "api_retry": "{seconds} 秒後に再試行（{attempt}/{max_retries}）…"
