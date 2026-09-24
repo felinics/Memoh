@@ -1,159 +1,164 @@
 <template>
   <SettingsSection :title="$t('settings.connectedAccounts.title')">
-    <!-- No linkable IM bot: linking needs a bot that can receive /link, so the
-         only useful action here is going to set one up. -->
-    <SettingsRow
-      v-if="!checkingImBot && !hasLinkableImBot"
-      :label="$t('settings.connectedAccounts.noImBotTitle')"
-      :description="$t('settings.connectedAccounts.noImBotHint')"
-    >
-      <Button
-        variant="outline"
-        size="sm"
-        class="shrink-0"
-        @click="goToBots"
-      >
-        {{ $t('settings.connectedAccounts.goToBots') }}
-        <ArrowRight class="ml-1.5 size-3.5" />
-      </Button>
-    </SettingsRow>
-
-    <!-- First load of bound identities only. ui-allow-shape: borrows the SettingsRow
-         height only to hold the row's vertical space steady while bindings load, so
-         the list doesn't jump (CLS) when they arrive — it's a skeleton, not a data row.
-         Background refetches (the /link poll, KeepAlive re-activation) must keep the
-         list and the live code on screen, so this keys off isPending, not isLoading. -->
-    <div
-      v-else-if="loadingBindings"
-      class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
-    >
-      <Spinner class="size-5 text-muted-foreground/50" />
-    </div>
-
-    <template v-else>
-      <!-- Bound identities -->
+    <!-- AutoHeight: issuing/retiring the link code (and the first load landing)
+         grows or shrinks the card smoothly instead of hard-cutting, matching the
+         provider device-code panel. -->
+    <AutoHeight>
+      <!-- No linkable IM bot: linking needs a bot that can receive /link, so the
+           only useful action here is going to set one up. -->
       <SettingsRow
-        v-for="binding in bindings"
-        :key="binding.id"
-      >
-        <template #leading>
-          <Avatar class="size-8">
-            <AvatarImage
-              :src="binding.channel_identity_avatar_url || ''"
-              :alt="bindingLabel(binding)"
-            />
-            <AvatarFallback class="text-xs">
-              {{ bindingLabel(binding).slice(0, 2).toUpperCase() }}
-            </AvatarFallback>
-          </Avatar>
-        </template>
-        <template #content>
-          <div class="truncate text-sm font-medium text-foreground">
-            {{ bindingLabel(binding) }}
-          </div>
-          <div
-            v-if="binding.channel_type"
-            class="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground"
-          >
-            <ChannelIcon
-              :channel="binding.channel_type"
-              size="1em"
-            />
-            <span>{{ channelTypeDisplayName(t, binding.channel_type) }}</span>
-          </div>
-        </template>
-        <ConfirmPopover
-          :message="$t('settings.connectedAccounts.disconnectConfirm')"
-          :cancel-text="$t('common.cancel')"
-          :confirm-text="$t('settings.connectedAccounts.disconnect')"
-          @confirm="() => onDisconnect(binding)"
-        >
-          <template #trigger>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              class="shrink-0 text-muted-foreground hover:text-destructive"
-              :disabled="isRowBusy(binding)"
-            >
-              <Trash2 class="size-4" />
-            </Button>
-          </template>
-        </ConfirmPopover>
-      </SettingsRow>
-
-      <!-- Link action: empty-state title when none yet, otherwise "link another" -->
-      <SettingsRow
-        :label="bindings.length === 0 ? $t('settings.connectedAccounts.empty') : $t('settings.connectedAccounts.linkAnother')"
-        :description="$t('settings.connectedAccounts.subtitle')"
+        v-if="!checkingImBot && !hasLinkableImBot"
+        :label="$t('settings.connectedAccounts.noImBotTitle')"
+        :description="$t('settings.connectedAccounts.noImBotHint')"
       >
         <Button
           variant="outline"
           size="sm"
           class="shrink-0"
-          :loading="issuing"
-          @click="onIssue"
+          @click="goToBots"
         >
-          <Plus class="mr-1.5 size-3.5" />
-          {{ $t('settings.connectedAccounts.connect') }}
+          {{ $t('settings.connectedAccounts.goToBots') }}
+          <ArrowRight class="ml-1.5 size-3.5" />
         </Button>
       </SettingsRow>
 
-      <!-- Active link code with live countdown -->
+      <!-- First load of bound identities only. ui-allow-shape: borrows the SettingsRow
+           height only to hold the row's vertical space steady while bindings load, so
+           the list doesn't jump (CLS) when they arrive — it's a skeleton, not a data row.
+           Background refetches (the /link poll, KeepAlive re-activation) must keep the
+           list and the live code on screen, so this keys off isPending, not isLoading. -->
       <div
-        v-if="activeCode"
-        class="mx-4 space-y-2.5 border-b border-border py-4 last:border-b-0"
+        v-else-if="loadingBindings"
+        class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
       >
-        <div class="flex items-center justify-between gap-2">
-          <p class="text-xs text-muted-foreground">
-            {{ $t('settings.connectedAccounts.codeInstruction') }}
-          </p>
-          <span
-            class="shrink-0 text-xs tabular-nums"
-            :class="expired ? 'text-destructive' : 'text-muted-foreground'"
+        <Spinner class="size-5 text-muted-foreground/50" />
+      </div>
+
+      <template v-else>
+        <!-- Bound identities -->
+        <SettingsRow
+          v-for="binding in bindings"
+          :key="binding.id"
+        >
+          <template #leading>
+            <Avatar class="size-8">
+              <AvatarImage
+                :src="binding.channel_identity_avatar_url || ''"
+                :alt="bindingLabel(binding)"
+              />
+              <AvatarFallback class="text-xs">
+                {{ bindingLabel(binding).slice(0, 2).toUpperCase() }}
+              </AvatarFallback>
+            </Avatar>
+          </template>
+          <template #content>
+            <div class="truncate text-sm font-medium text-foreground">
+              {{ bindingLabel(binding) }}
+            </div>
+            <div
+              v-if="binding.channel_type"
+              class="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground"
+            >
+              <ChannelIcon
+                :channel="binding.channel_type"
+                size="1em"
+              />
+              <span>{{ channelTypeDisplayName(t, binding.channel_type) }}</span>
+            </div>
+          </template>
+          <ConfirmPopover
+            :message="$t('settings.connectedAccounts.disconnectConfirm')"
+            :cancel-text="$t('common.cancel')"
+            :confirm-text="$t('settings.connectedAccounts.disconnect')"
+            @confirm="() => onDisconnect(binding)"
           >
-            {{ expired ? $t('settings.connectedAccounts.expired') : $t('settings.connectedAccounts.expiresIn', { time: remainingLabel }) }}
-          </span>
-        </div>
-        <div class="flex items-center gap-2">
-          <Input
-            :model-value="`/link ${activeCode}`"
-            readonly
-            tabindex="-1"
-            size="sm"
-            class="flex-1 cursor-default select-none pointer-events-none font-mono [&:read-only:not(:disabled)]:bg-transparent [&:read-only:not(:disabled)]:text-foreground [&:read-only:not(:disabled)]:cursor-default"
-            :class="expired ? 'line-through opacity-60' : ''"
-          />
+            <template #trigger>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                class="shrink-0 text-muted-foreground hover:text-destructive"
+                :disabled="isRowBusy(binding)"
+              >
+                <Trash2 class="size-4" />
+              </Button>
+            </template>
+          </ConfirmPopover>
+        </SettingsRow>
+
+        <!-- Link action: empty-state title when none yet, otherwise "link another" -->
+        <SettingsRow
+          :label="bindings.length === 0 ? $t('settings.connectedAccounts.empty') : $t('settings.connectedAccounts.linkAnother')"
+          :description="$t('settings.connectedAccounts.subtitle')"
+        >
           <Button
-            v-if="!expired"
-            variant="outline"
-            size="sm"
-            class="shrink-0"
-            @click="copyCode"
-          >
-            <Check
-              v-if="copied"
-              class="mr-1.5 size-3.5"
-            />
-            <Copy
-              v-else
-              class="mr-1.5 size-3.5"
-            />
-            {{ copied ? $t('settings.connectedAccounts.copied') : $t('settings.connectedAccounts.copy') }}
-          </Button>
-          <Button
-            v-else
             variant="outline"
             size="sm"
             class="shrink-0"
             :loading="issuing"
             @click="onIssue"
           >
-            <RefreshCw class="mr-1.5 size-3.5" />
+            <Plus class="mr-1.5 size-3.5" />
             {{ $t('settings.connectedAccounts.connect') }}
           </Button>
+        </SettingsRow>
+
+        <!-- Active link code with live countdown -->
+        <div
+          v-if="activeCode"
+          class="mx-4 space-y-2.5 border-b border-border py-4 last:border-b-0"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs text-muted-foreground">
+              {{ $t('settings.connectedAccounts.codeInstruction') }}
+            </p>
+            <span
+              class="shrink-0 text-xs tabular-nums"
+              :class="expired ? 'text-destructive' : 'text-muted-foreground'"
+            >
+              {{ expired ? $t('settings.connectedAccounts.expired') : $t('settings.connectedAccounts.expiresIn', { time: remainingLabel }) }}
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <Input
+              :model-value="`/link ${activeCode}`"
+              readonly
+              tabindex="-1"
+              size="sm"
+              class="flex-1 cursor-default select-none pointer-events-none font-mono [&:read-only:not(:disabled)]:bg-transparent [&:read-only:not(:disabled)]:text-foreground [&:read-only:not(:disabled)]:cursor-default"
+              :class="expired ? 'line-through opacity-60' : ''"
+            />
+            <Button
+              v-if="!expired"
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              @click="copyCode"
+            >
+              <Check
+                v-if="copied"
+                class="mr-1.5 size-3.5"
+              />
+              <Copy
+                v-else
+                class="mr-1.5 size-3.5"
+              />
+              {{ copied ? $t('settings.connectedAccounts.copied') : $t('settings.connectedAccounts.copy') }}
+            </Button>
+            <Button
+              v-else
+              variant="outline"
+              size="sm"
+              class="shrink-0"
+              :loading="issuing"
+              @click="onIssue"
+            >
+              <RefreshCw class="mr-1.5 size-3.5" />
+              {{ $t('settings.connectedAccounts.connect') }}
+            </Button>
+          </div>
         </div>
-      </div>
-    </template>
+      </template>
+    </AutoHeight>
   </SettingsSection>
 </template>
 
@@ -163,7 +168,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { Plus, Trash2, Copy, Check, RefreshCw, ArrowRight } from 'lucide-vue-next'
-import { ConfirmPopover, SettingsRow, SettingsSection, toast, useClipboard } from '@felinic/ui'
+import { AutoHeight, ConfirmPopover, SettingsRow, SettingsSection, toast, useClipboard } from '@felinic/ui'
 import {
   Button,
   Spinner,
