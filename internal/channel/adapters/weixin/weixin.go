@@ -290,7 +290,7 @@ func (a *WeixinAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 		return a.sendWithAttachments(ctx, parsed, target, contextToken, msg.Message)
 	}
 
-	text := strings.TrimSpace(msg.Message.Message.PlainText())
+	text := strings.TrimSpace(filterMarkdown(msg.Message.Message.PlainText()))
 	if text == "" {
 		return errors.New("weixin: message is empty")
 	}
@@ -298,7 +298,7 @@ func (a *WeixinAdapter) Send(ctx context.Context, cfg channel.ChannelConfig, msg
 }
 
 func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConfig, target, contextToken string, msg channel.PreparedMessage) error {
-	text := strings.TrimSpace(msg.Message.PlainText())
+	text := strings.TrimSpace(filterMarkdown(msg.Message.PlainText()))
 
 	for i, att := range msg.Attachments {
 		caption := ""
