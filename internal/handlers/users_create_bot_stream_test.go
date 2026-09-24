@@ -727,6 +727,27 @@ func TestCreateBotAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
 	}
 }
 
+func TestCreateBotFinishesAResendWhoseFirstAttemptStoppedAtTheRow(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+
+	// The first attempt inserted the bot and failed before the rest of the
+	// create ran; the bot is still creating. The resend must finish the create
+	// (here: no workspace subsystem, so the bot is made usable), not hand back
+	// a bot that nothing will ever move.
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", keyHeld: true, status: bots.BotStatusCreating}
+	rec := httptest.NewRecorder()
+	if err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated || dbFake.inserts != 0 {
+		t.Fatalf("status = %d inserts = %d; want 201 and no second bot", rec.Code, dbFake.inserts)
+	}
+	if dbFake.status != bots.BotStatusReady {
+		t.Fatalf("bot status = %q; the resend left the create unfinished", dbFake.status)
+	}
+}
+
 func TestCreateBotAnswersTheLoserOfARaceWithTheWinnersBot(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000101"
 	botID := "00000000-0000-0000-0000-000000000201"

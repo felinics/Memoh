@@ -187,6 +187,23 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
+	return s.provisionCreated(ctx, bot, req, false)
+}
+
+// ResumeCreated finishes, for a bot an earlier create with the same
+// Idempotency-Key made, what Create does after inserting the row. That attempt
+// may have died in between (its client gone, the store briefly unavailable,
+// the server restarted), leaving a bot whose workspace nothing was asked to
+// provision, in creating forever. The intent is recorded only when missing, so
+// a provisioning run already under way is never restarted.
+func (s *Service) ResumeCreated(ctx context.Context, bot Bot, req CreateBotRequest) (Bot, error) {
+	return s.provisionCreated(ctx, bot, req, true)
+}
+
+// provisionCreated is the workspace half of a create: record the intent and,
+// with WaitForReady, wait for it to settle. resumed marks a bot an earlier
+// attempt inserted, whose intent may or may not have been recorded.
+func (s *Service) provisionCreated(ctx context.Context, bot Bot, req CreateBotRequest, resumed bool) (Bot, error) {
 	if req.SkipLifecycle {
 		return bot, nil
 	}
@@ -199,12 +216,24 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 		}
 		return s.Get(ctx, bot.ID)
 	}
-	// The workspace is provisioned by the reconciler; the request only
-	// records the intent. A failed provisioning leaves the bot in status
-	// failed with its diagnostics, never stranded in creating.
-	generation, err := s.workspaceIntents.EnsurePresent(ctx, bot.ID, workspaceImageFromMetadata(metadata))
-	if err != nil {
-		return Bot{}, fmt.Errorf("record workspace intent: %w", err)
+	recorded := false
+	if resumed {
+		var err error
+		if _, recorded, err = s.workspaceIntents.Current(ctx, bot.ID); err != nil {
+			return Bot{}, err
+		}
+	}
+	// Zero waits for whichever intent is current: the one a resumed create's
+	// first attempt recorded.
+	var generation int64
+	if !recorded {
+		// The workspace is provisioned by the reconciler; the request only
+		// records the intent. A failed provisioning leaves the bot in status
+		// failed with its diagnostics, never stranded in creating.
+		var err error
+		if generation, err = s.workspaceIntents.EnsurePresent(ctx, bot.ID, workspaceImageFromMetadata(bot.Metadata)); err != nil {
+			return Bot{}, fmt.Errorf("record workspace intent: %w", err)
+		}
 	}
 	if !req.WaitForReady {
 		return bot, nil

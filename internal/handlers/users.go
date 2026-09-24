@@ -474,7 +474,12 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 		return h.createBotStream(c, ownerID, ownerFromToken, req, resent)
 	}
 	// A resend gets the answer its first attempt would have: 201 and that bot.
-	resp, _, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
+	resp, replayed, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
+	if err == nil && replayed {
+		// That attempt may have died between inserting the bot and asking for
+		// its workspace; finish what it left undone.
+		resp, err = h.botService.ResumeCreated(c.Request().Context(), resp, req)
+	}
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}

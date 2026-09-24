@@ -397,6 +397,9 @@ type fakeWorkspaceIntents struct {
 	preserve []bool
 	outcome  WorkspaceOutcome
 	awaitErr error
+	// noRow makes Current report that the bot has no workspace intent yet.
+	noRow   bool
+	awaited []int64
 }
 
 func (f *fakeWorkspaceIntents) EnsurePresent(_ context.Context, botID, image string) (int64, error) {
@@ -411,12 +414,13 @@ func (f *fakeWorkspaceIntents) RequestAbsent(_ context.Context, botID string, pr
 	return int64(len(f.absent)), nil
 }
 
-func (f *fakeWorkspaceIntents) AwaitSettled(context.Context, string, int64) (WorkspaceOutcome, error) {
+func (f *fakeWorkspaceIntents) AwaitSettled(_ context.Context, _ string, generation int64) (WorkspaceOutcome, error) {
+	f.awaited = append(f.awaited, generation)
 	return f.outcome, f.awaitErr
 }
 
 func (f *fakeWorkspaceIntents) Current(context.Context, string) (WorkspaceOutcome, bool, error) {
-	return f.outcome, true, nil
+	return f.outcome, !f.noRow, nil
 }
 
 func TestWorkspaceOutcomeErrorKeepsBootstrapSentinel(t *testing.T) {
@@ -642,5 +646,55 @@ func TestCreateStoresTheRequestKey(t *testing.T) {
 		if !errors.Is(err, insertReached) || stored != tc.want {
 			t.Fatalf("key %q: stored %#v, err %v; want %#v", tc.key, stored, err, tc.want)
 		}
+	}
+}
+
+func TestResumeCreatedRecordsTheIntentTheFirstAttemptNeverDid(t *testing.T) {
+	// The first attempt inserted the bot and died before asking for its
+	// workspace: nothing would ever move it out of creating.
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{})))
+	intents := &fakeWorkspaceIntents{noRow: true}
+	svc.SetWorkspaceIntents(intents)
+	bot := Bot{ID: "00000000-0000-0000-0000-000000000002", Status: BotStatusCreating, Metadata: map[string]any{"workspace": map[string]any{"image": "img:1"}}}
+
+	if _, err := svc.ResumeCreated(context.Background(), bot, CreateBotRequest{}); err != nil {
+		t.Fatalf("ResumeCreated: %v", err)
+	}
+	if len(intents.ensured) != 1 || intents.ensured[0] != bot.ID || intents.images[0] != "img:1" {
+		t.Fatalf("ensured = %v images = %v; want one intent for %s with the first attempt's image", intents.ensured, intents.images, bot.ID)
+	}
+}
+
+func TestResumeCreatedLeavesARecordedIntentAlone(t *testing.T) {
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row { return makeBotRow(botUUID, ownerUUID) },
+	})))
+	intents := &fakeWorkspaceIntents{outcome: WorkspaceOutcome{Desired: "present", Observed: WorkspaceObservedRunning}}
+	svc.SetWorkspaceIntents(intents)
+	bot := Bot{ID: botUUID.String(), Status: BotStatusCreating}
+
+	// Asking again would raise the generation and restart a provisioning run
+	// that is still converging; WaitForReady waits for the one under way.
+	if _, err := svc.ResumeCreated(context.Background(), bot, CreateBotRequest{WaitForReady: true}); err != nil {
+		t.Fatalf("ResumeCreated: %v", err)
+	}
+	if len(intents.ensured) != 0 {
+		t.Fatalf("ensured = %v; a recorded intent must not be asked for again", intents.ensured)
+	}
+	if len(intents.awaited) != 1 || intents.awaited[0] != 0 {
+		t.Fatalf("awaited = %v; want one wait for the current intent", intents.awaited)
+	}
+}
+
+func TestResumeCreatedAnswersWithTheFirstAttemptsWorkspaceFailure(t *testing.T) {
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{})))
+	svc.SetWorkspaceIntents(&fakeWorkspaceIntents{outcome: WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: WorkspacePhaseBootstrap, LastError: "write AGENTS.md: permission denied"}})
+	bot := Bot{ID: "00000000-0000-0000-0000-000000000002", Status: BotStatusFailed}
+
+	_, err := svc.ResumeCreated(context.Background(), bot, CreateBotRequest{WaitForReady: true})
+	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("err = %v; a resend must get the failure its first attempt would have", err)
 	}
 }
