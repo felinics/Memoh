@@ -6,7 +6,7 @@ import MarkdownRender from 'markstream-vue'
 import { registerSharedMarkdownComponents } from './index'
 import { clearSiteIconLookups } from '@/utils/site-icon'
 
-const mocks = vi.hoisted(() => ({ siteIcon: vi.fn(async () => ({ data: { light: 'https://github.com/favicon.svg', dark: 'https://github.com/favicon-dark.svg' } })), openFile: vi.fn(() => true), openBrowserAt: vi.fn(() => true), error: vi.fn() }))
+const mocks = vi.hoisted(() => ({ siteIcon: vi.fn(async () => ({ data: { light: 'https://site.example/favicon.svg', dark: 'https://site.example/favicon-dark.svg' } })), openFile: vi.fn(() => true), openBrowserAt: vi.fn(() => true), error: vi.fn() }))
 vi.mock('@memohai/sdk', () => ({ getSiteIcon: mocks.siteIcon }))
 const settings = reactive({ resolvedColorMode: 'dark' })
 vi.mock('@/store/settings', () => ({ useSettingsStore: () => settings }))
@@ -19,12 +19,12 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 let unmount: (() => void) | undefined
 afterEach(() => { unmount?.(); settings.resolvedColorMode = 'dark'; document.body.innerHTML = ''; clearSiteIconLookups(); vi.clearAllMocks() })
 
-async function render(content: string) {
+async function render(content: string, { showTooltips = false, customId = 'link-test' } = {}) {
   registerSharedMarkdownComponents('link-test')
   const host = document.createElement('div')
   document.body.append(host)
   const app = createApp({ render: () => h(TooltipProvider, {}, () => h(MarkdownRender, {
-    content, customId: 'link-test', final: true, typewriter: false, smoothStreaming: false, showTooltips: false,
+    content, customId, final: true, typewriter: false, smoothStreaming: false, showTooltips,
   })) })
   app.mount(host)
   unmount = () => app.unmount()
@@ -49,13 +49,35 @@ describe('chat Markdown delivery links', () => {
     expect(links[2]!.target).toBe('_blank')
     expect(links[2]!.rel).toContain('noopener')
   })
+  it('keeps the renderer tooltip off even when the page enables markstream tooltips', async () => {
+    // markstream lets an injected setting override LinkNode's prop; if that
+    // stops holding, its popover opens next to the shared tooltip. An open
+    // popover marks the anchor with aria-describedby. The stock renderer opens
+    // it first, proving the check can see it and loading the lazily mounted
+    // popover, so the second check only has to pass its 80ms open delay.
+    const hover = new MouseEvent('mouseenter', { clientX: 1, clientY: 1 })
+    let anchor = (await render('[官网](https://site.example/docs)', { showTooltips: true, customId: 'stock' })).querySelector('a')!
+    anchor.dispatchEvent(hover)
+    await vi.waitFor(() => expect(anchor.getAttribute('aria-describedby')).not.toBeNull())
+    unmount?.()
+    anchor = (await render('[官网](https://site.example/docs)', { showTooltips: true })).querySelector('a')!
+    vi.useFakeTimers()
+    try {
+      anchor.dispatchEvent(hover)
+      await vi.advanceTimersByTimeAsync(200)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(anchor.getAttribute('aria-describedby')).toBeNull()
+    expect(anchor.getAttribute('title')).toBeNull()
+  })
   it('uses a loaded site icon and falls back when the icon is unavailable', async () => {
-    const host = await render('[站点](https://github.com/path?q=private) [预览](http://localhost:8080/)')
+    const host = await render('[站点](https://site.example/path?q=private) [预览](http://localhost:8080/)')
     await vi.waitFor(() => expect(host.querySelector('img')).not.toBeNull())
     // Only the origin leaves the browser; the shared path and query stay private.
-    expect(mocks.siteIcon).toHaveBeenCalledWith({ query: { url: 'https://github.com' } })
+    expect(mocks.siteIcon).toHaveBeenCalledWith({ query: { url: 'https://site.example' } })
     const image = host.querySelector('img')!
-    expect(image.src).toBe('https://github.com/favicon-dark.svg')
+    expect(image.src).toBe('https://site.example/favicon-dark.svg')
     expect(image.getAttribute('referrerpolicy')).toBe('no-referrer')
     expect(host.querySelectorAll('img')).toHaveLength(1)
     image.dispatchEvent(new Event('load'))
@@ -67,21 +89,21 @@ describe('chat Markdown delivery links', () => {
     expect(host.querySelector('img')).toBeNull()
   })
   it('looks up each site once and switches icons with the theme without refetching', async () => {
-    const host = await render('[a](https://github.com/a) [b](https://github.com/b?x=1) [c](https://github.com)')
+    const host = await render('[a](https://site.example/a) [b](https://site.example/b?x=1) [c](https://site.example)')
     await vi.waitFor(() => expect(host.querySelectorAll('img')).toHaveLength(3))
     expect(mocks.siteIcon).toHaveBeenCalledTimes(1)
     settings.resolvedColorMode = 'light'
-    await vi.waitFor(() => expect(host.querySelector('img')?.src).toBe('https://github.com/favicon.svg'))
+    await vi.waitFor(() => expect(host.querySelector('img')?.src).toBe('https://site.example/favicon.svg'))
     expect(host.querySelector('img')?.style.colorScheme).toBe('light')
     expect(mocks.siteIcon).toHaveBeenCalledTimes(1)
   })
   it('asks again for a site whose lookup came back empty', async () => {
     mocks.siteIcon.mockResolvedValueOnce({ data: { light: '', dark: '' } })
-    let host = await render('[a](https://github.com/a)')
+    let host = await render('[a](https://site.example/a)')
     await vi.waitFor(() => expect(mocks.siteIcon).toHaveBeenCalledTimes(1))
     expect(host.querySelector('img')).toBeNull()
     unmount?.()
-    host = await render('[a](https://github.com/a)')
+    host = await render('[a](https://site.example/a)')
     await vi.waitFor(() => expect(host.querySelector('img')).not.toBeNull())
     expect(mocks.siteIcon).toHaveBeenCalledTimes(2)
   })

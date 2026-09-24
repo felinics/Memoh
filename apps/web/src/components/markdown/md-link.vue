@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, provide, ref, useAttrs, watch } from 'vue'
+import { computed, provide, reactive, useAttrs } from 'vue'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@felinic/ui'
-import type { HandlersSiteIconResponse } from '@memohai/sdk'
-import { useSettingsStore } from '@/store/settings'
 import { FileText, Globe } from 'lucide-vue-next'
 import { LinkNode, type LinkNodeProps } from 'markstream-vue'
+import { useSiteIcon } from '@/composables/useSiteIcon'
 import { useWorkspaceLink } from '@/composables/useWorkspaceLink'
 import { classifyWorkspaceLink } from '@/utils/workspace-link'
-import { lookupSiteIcon, siteIconOrigin } from '@/utils/site-icon'
+import { siteIconOrigin } from '@/utils/site-icon'
 
 // Keep markstream's rich inline text, URL sanitization and streaming
 // behavior. The leading icon sits over the anchor's padding so it shares the
@@ -19,8 +18,11 @@ const props = defineProps<{
   indexKey: LinkNodeProps['indexKey']
 }>()
 
-// The shared Memoh tooltip owns link hints. Disable the renderer tooltip and
-// remove its native title fallback, which would produce a second delayed hint.
+// The shared Memoh tooltip owns link hints. markstream's injected
+// `markstreamShowTooltips` overrides LinkNode's own prop, so disabling its
+// popover has to go through the same key. With the popover off, LinkNode puts
+// the URL in a native title instead (attrs cannot override it); remove it, or
+// it shows a second, delayed hint.
 provide('markstreamShowTooltips', computed(() => false))
 function removeNativeTitle(element: HTMLElement) {
   element.removeAttribute('title')
@@ -31,30 +33,7 @@ const attrs = useAttrs()
 const openWorkspaceLink = useWorkspaceLink()
 const link = computed(() => props.node.loading ? null : classifyWorkspaceLink(props.node.href))
 const icon = computed(() => link.value?.kind === 'file' ? FileText : Globe)
-
-const settings = useSettingsStore()
-const siteIcons = ref<HandlersSiteIconResponse | null>(null)
-watch([() => props.node.href, link], async ([href, target], _, onCleanup) => {
-  siteIcons.value = null
-  const origin = target?.kind === 'external' ? siteIconOrigin(href) : null
-  if (!origin) return
-  let stale = false
-  onCleanup(() => { stale = true })
-  const icons = await lookupSiteIcon(origin)
-  if (!stale) siteIcons.value = icons
-}, { immediate: true })
-const favicon = computed(() => siteIcons.value?.[settings.resolvedColorMode] || '')
-const loadedFavicon = ref('')
-const failedFavicon = ref('')
-watch(favicon, () => { loadedFavicon.value = ''; failedFavicon.value = '' })
-function faviconLoaded(event: Event) {
-  loadedFavicon.value = (event.target as HTMLImageElement).src
-}
-function faviconFailed(event: Event) {
-  loadedFavicon.value = ''
-  failedFavicon.value = (event.target as HTMLImageElement).src
-}
-
+const favicon = reactive(useSiteIcon(() => link.value?.kind === 'external' ? siteIconOrigin(props.node.href) : null))
 </script>
 
 <template>
@@ -72,23 +51,23 @@ function faviconFailed(event: Event) {
         >
           <component
             :is="icon"
-            v-if="link && (!favicon || loadedFavicon !== favicon)"
+            v-if="link && !favicon.ready"
             class="pointer-events-none absolute left-0 top-1/2 size-4 -translate-y-1/2"
             aria-hidden="true"
           />
           <img
-            v-if="favicon && failedFavicon !== favicon"
-            :key="favicon"
-            :src="favicon"
-            :style="{ colorScheme: settings.resolvedColorMode }"
+            v-if="favicon.usable"
+            :key="favicon.src"
+            :src="favicon.src"
+            :style="{ colorScheme: favicon.colorScheme }"
             alt=""
             aria-hidden="true"
             referrerpolicy="no-referrer"
             loading="lazy"
             class="pointer-events-none absolute left-0 top-1/2 size-4 -translate-y-1/2 object-contain"
-            :class="{ invisible: loadedFavicon !== favicon }"
-            @load="faviconLoaded"
-            @error="faviconFailed"
+            :class="{ invisible: !favicon.ready }"
+            @load="favicon.onLoad"
+            @error="favicon.onError"
           >
           <LinkNode
             v-without-native-title
@@ -96,7 +75,6 @@ function faviconFailed(event: Event) {
             :index-key="indexKey"
             v-bind="attrs"
             :class="{ 'pl-4.5': link }"
-            :show-tooltip="false"
             :target="link?.kind === 'external' ? '_blank' : undefined"
           />
         </span>

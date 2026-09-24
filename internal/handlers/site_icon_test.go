@@ -47,15 +47,6 @@ func TestIconIPRestrictions(t *testing.T) {
 	}
 }
 
-func TestDiscoverGitHubScriptTheme(t *testing.T) {
-	page, _ := url.Parse("https://github.com/")
-	source := `<link rel="icon" type="image/svg+xml" href="https://github.githubassets.com/favicons/favicon.svg" data-base-href="https://github.githubassets.com/favicons/favicon">`
-	got := discoverIcons(strings.NewReader(source), page)
-	if got.Light != "https://github.githubassets.com/favicons/favicon.svg" || got.Dark != "https://github.githubassets.com/favicons/favicon-dark.svg" {
-		t.Fatalf("%+v", got)
-	}
-}
-
 func TestIconURLRestrictions(t *testing.T) {
 	for _, raw := range []string{"http://localhost/a", "http://127.0.0.1/a", "http://[::1]/a", "https://user:pass@example.com/a", "javascript:alert(1)", "https://example.com:8443/", "http://example.com:6379/"} {
 		u, _ := url.Parse(raw)
@@ -75,6 +66,17 @@ func TestSiteIconOrigin(t *testing.T) {
 	got, ok := siteIconOrigin("https://Example.com/private/path?q=1#frag")
 	if !ok || got != "https://example.com/" {
 		t.Fatalf("%q %v", got, ok)
+	}
+	for _, raw := range []string{"https://example.com:443/a", "HTTPS://EXAMPLE.COM"} {
+		if got, _ := siteIconOrigin(raw); got != "https://example.com/" {
+			t.Fatalf("%s -> %q", raw, got)
+		}
+	}
+	if got, _ := siteIconOrigin("http://example.com:443/"); got != "http://example.com:443/" {
+		t.Fatalf("non-default port dropped: %q", got)
+	}
+	if got, _ := siteIconOrigin("https://[2606:4700::1]:443/"); got != "https://[2606:4700::1]/" {
+		t.Fatalf("ipv6 origin: %q", got)
 	}
 	if _, ok := siteIconOrigin("http://10.0.0.1/"); ok {
 		t.Fatal("private origin accepted")

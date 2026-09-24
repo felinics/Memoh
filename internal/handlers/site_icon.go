@@ -110,13 +110,23 @@ func (h *SiteIconHandler) Get(c echo.Context) error {
 	return h.siteIconJSON(c, result.(siteIconEntry))
 }
 
+var defaultIconPorts = map[string]string{"http": "80", "https": "443"}
+
 // siteIconOrigin reduces a link to the site root that is actually fetched.
 func siteIconOrigin(raw string) (string, bool) {
 	u, err := url.Parse(raw)
 	if err != nil || !validIconURL(u) {
 		return "", false
 	}
-	return (&url.URL{Scheme: u.Scheme, Host: strings.ToLower(u.Host), Path: "/"}).String(), true
+	// Drop an explicit default port so https://host:443/ and https://host/ share one entry.
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port := u.Port(); port != "" && port != defaultIconPorts[u.Scheme] {
+		host += ":" + port
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: host, Path: "/"}).String(), true
 }
 
 // The browser may keep the response only as long as the server entry lives,
@@ -300,6 +310,14 @@ func discoverIcons(body io.Reader, page *url.URL) SiteIconResponse {
 		if token.Data != "link" || attrs["href"] == "" || !hasIconRel(attrs["rel"]) {
 			continue
 		}
+		href, err := url.Parse(attrs["href"])
+		if err != nil {
+			continue
+		}
+		candidate := base.ResolveReference(href)
+		if !validIconURL(candidate) {
+			continue
+		}
 		media := strings.ToLower(strings.ReplaceAll(attrs["media"], " ", ""))
 		for _, theme := range siteIconThemes {
 			score := 0
@@ -313,12 +331,7 @@ func discoverIcons(body io.Reader, page *url.URL) SiteIconResponse {
 			if strings.Contains(attrs["type"], "svg") {
 				score++
 			}
-			candidate, err := url.Parse(themedIconHref(page, attrs, theme))
-			if err != nil {
-				continue
-			}
-			candidate = base.ResolveReference(candidate)
-			if validIconURL(candidate) && score >= best[theme].score {
+			if score >= best[theme].score {
 				best[theme] = &choice{url: candidate.String(), score: score}
 			}
 		}
@@ -333,18 +346,4 @@ func hasIconRel(rel string) bool {
 		}
 	}
 	return false
-}
-
-// GitHub switches its favicon in JavaScript using data-base-href and
-// matchMedia, so its static HTML has no themed media declaration. It is special
-// cased because it is among the most linked sites in agent replies; other
-// script-switched sites keep their static icon.
-func themedIconHref(page *url.URL, attrs map[string]string, theme string) string {
-	if page.Hostname() != "github.com" || attrs["type"] != "image/svg+xml" || attrs["data-base-href"] == "" {
-		return attrs["href"]
-	}
-	if theme == "dark" {
-		return attrs["data-base-href"] + "-dark.svg"
-	}
-	return attrs["data-base-href"] + ".svg"
 }
