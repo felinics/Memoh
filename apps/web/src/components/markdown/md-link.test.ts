@@ -4,8 +4,9 @@ import { TooltipProvider } from '@felinic/ui'
 import { createApp, h, nextTick, reactive } from 'vue'
 import MarkdownRender from 'markstream-vue'
 import { registerSharedMarkdownComponents } from './index'
+import { clearSiteIconLookups } from '@/utils/site-icon'
 
-const mocks = vi.hoisted(() => ({ siteIcon: vi.fn(async () => ({ data: { url: 'https://github.com/favicon.ico' } })), openFile: vi.fn(() => true), openBrowserAt: vi.fn(() => true), error: vi.fn() }))
+const mocks = vi.hoisted(() => ({ siteIcon: vi.fn(async () => ({ data: { light: 'https://github.com/favicon.svg', dark: 'https://github.com/favicon-dark.svg' } })), openFile: vi.fn(() => true), openBrowserAt: vi.fn(() => true), error: vi.fn() }))
 vi.mock('@memohai/sdk', () => ({ getSiteIcon: mocks.siteIcon }))
 const settings = reactive({ resolvedColorMode: 'dark' })
 vi.mock('@/store/settings', () => ({ useSettingsStore: () => settings }))
@@ -16,7 +17,7 @@ vi.mock('@felinic/ui', async (importOriginal) => ({
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 let unmount: (() => void) | undefined
-afterEach(() => { unmount?.(); settings.resolvedColorMode = 'dark'; document.body.innerHTML = ''; vi.clearAllMocks() })
+afterEach(() => { unmount?.(); settings.resolvedColorMode = 'dark'; document.body.innerHTML = ''; clearSiteIconLookups(); vi.clearAllMocks() })
 
 async function render(content: string) {
   registerSharedMarkdownComponents('link-test')
@@ -51,9 +52,10 @@ describe('chat Markdown delivery links', () => {
   it('uses a loaded site icon and falls back when the icon is unavailable', async () => {
     const host = await render('[站点](https://github.com/path?q=private) [预览](http://localhost:8080/)')
     await vi.waitFor(() => expect(host.querySelector('img')).not.toBeNull())
-    expect(mocks.siteIcon).toHaveBeenCalledWith(expect.objectContaining({ query: { url: 'https://github.com/path?q=private', theme: 'dark' } }))
+    // Only the origin leaves the browser; the shared path and query stay private.
+    expect(mocks.siteIcon).toHaveBeenCalledWith({ query: { url: 'https://github.com' } })
     const image = host.querySelector('img')!
-    expect(image.src).toBe('https://github.com/favicon.ico')
+    expect(image.src).toBe('https://github.com/favicon-dark.svg')
     expect(image.getAttribute('referrerpolicy')).toBe('no-referrer')
     expect(host.querySelectorAll('img')).toHaveLength(1)
     image.dispatchEvent(new Event('load'))
@@ -64,12 +66,14 @@ describe('chat Markdown delivery links', () => {
     await nextTick()
     expect(host.querySelector('img')).toBeNull()
   })
-  it('rediscovers the site icon when the app theme changes', async () => {
-    const host = await render('[GitHub](https://github.com)')
-    await vi.waitFor(() => expect(host.querySelector('img')).not.toBeNull())
+  it('looks up each site once and switches icons with the theme without refetching', async () => {
+    const host = await render('[a](https://github.com/a) [b](https://github.com/b?x=1) [c](https://github.com)')
+    await vi.waitFor(() => expect(host.querySelectorAll('img')).toHaveLength(3))
+    expect(mocks.siteIcon).toHaveBeenCalledTimes(1)
     settings.resolvedColorMode = 'light'
-    await vi.waitFor(() => expect(mocks.siteIcon).toHaveBeenLastCalledWith(expect.objectContaining({ query: { url: 'https://github.com/', theme: 'light' } })))
-    await vi.waitFor(() => expect(host.querySelector('img')?.style.colorScheme).toBe('light'))
+    await vi.waitFor(() => expect(host.querySelector('img')?.src).toBe('https://github.com/favicon.svg'))
+    expect(host.querySelector('img')?.style.colorScheme).toBe('light')
+    expect(mocks.siteIcon).toHaveBeenCalledTimes(1)
   })
   it('keeps modifier and middle clicks in the workspace instead of navigating to the host', async () => {
     const host = await render('[文件](/data/a%20b.md)')

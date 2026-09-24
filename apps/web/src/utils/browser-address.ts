@@ -43,7 +43,7 @@ export function parseBrowserAddress(raw: string): BrowserAddress {
 
   const hostname = parsed.hostname.toLowerCase()
   if (!['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
-    throw new Error('Browser address must use localhost or 127.0.0.1')
+    throw new Error('Browser address must use localhost, 127.0.0.1 or [::1]')
   }
 
   const port = Number.parseInt(portMatch?.[1] || parsed.port || '', 10)

@@ -962,7 +962,11 @@
 }
 
 /* Inline Markdown links share the theme accent with their leading icon.
- * Keep decoration off at rest; hover/focus retain an explicit link affordance. */
+ * Keep decoration off at rest; hover/focus add a fine dotted underline — a
+ * solid rule reads too heavy against accent-colored text. The dot size and gap
+ * both follow the 1px thickness, and markstream's own :hover (a solid
+ * underline) is overridden by restating every decoration property.
+ * `skip-ink: none` keeps the dotted run continuous under descenders. */
 .markstream-vue .link-node {
   color: var(--brand);
   text-decoration: none;
@@ -972,8 +976,12 @@
 
 .markstream-vue .link-node:is(:hover, :focus-visible) {
   color: var(--brand);
-  text-decoration: underline solid;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in oklch, var(--brand) 70%, transparent);
   text-underline-offset: 0.22em;
+  text-decoration-skip-ink: none;
 }
 
 /* Footnotes — drop the per-item top divider (markstream stamps a `border-t` on

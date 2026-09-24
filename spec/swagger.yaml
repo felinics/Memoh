@@ -4156,7 +4156,9 @@ definitions:
     type: object
   handlers.SiteIconResponse:
     properties:
-      url:
+      dark:
+        type: string
+      light:
         type: string
     type: object
   handlers.SkillItem:
@@ -17094,21 +17096,17 @@ paths:
   /site-icon:
     get:
       parameters:
-      - description: Public page URL
+      - description: Public page or site URL; only its origin is fetched
         in: query
         name: url
         required: true
-        type: string
-      - description: light or dark
-        in: query
-        name: theme
         type: string
       responses:
         "200":
           description: OK
           schema:
             $ref: '#/definitions/handlers.SiteIconResponse'
-      summary: Resolve a public page favicon for a color scheme
+      summary: Resolve a public site's favicons for light and dark color schemes
       tags:
       - site-icon
   /speech-models:

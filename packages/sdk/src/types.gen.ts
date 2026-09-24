@@ -2376,7 +2376,8 @@ export type HandlersSessionInfoResponse = {
 };
 
 export type HandlersSiteIconResponse = {
-    url?: string;
+    dark?: string;
+    light?: string;
 };
 
 export type HandlersSkillItem = {
@@ -15835,13 +15836,9 @@ export type GetSiteIconData = {
     path?: never;
     query: {
         /**
-         * Public page URL
+         * Public page or site URL; only its origin is fetched
          */
         url: string;
-        /**
-         * light or dark
-         */
-        theme?: string;
     };
     url: '/site-icon';
 };

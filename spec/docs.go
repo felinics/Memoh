@@ -14570,20 +14570,14 @@ const docTemplate = `{
                 "tags": [
                     "site-icon"
                 ],
-                "summary": "Resolve a public page favicon for a color scheme",
+                "summary": "Resolve a public site's favicons for light and dark color schemes",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Public page URL",
+                        "description": "Public page or site URL; only its origin is fetched",
                         "name": "url",
                         "in": "query",
                         "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "light or dark",
-                        "name": "theme",
-                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -23027,7 +23021,10 @@ const docTemplate = `{
         "handlers.SiteIconResponse": {
             "type": "object",
             "properties": {
-                "url": {
+                "dark": {
+                    "type": "string"
+                },
+                "light": {
                     "type": "string"
                 }
             }

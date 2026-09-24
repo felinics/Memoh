@@ -2602,7 +2602,7 @@ export const putSearchProvidersById = <ThrowOnError extends boolean = false>(opt
 });
 
 /**
- * Resolve a public page favicon for a color scheme
+ * Resolve a public site's favicons for light and dark color schemes
  */
 export const getSiteIcon = <ThrowOnError extends boolean = false>(options: Options<GetSiteIconData, ThrowOnError>): RequestResult<GetSiteIconResponses, unknown, ThrowOnError> => (options.client ?? client).get<GetSiteIconResponses, unknown, ThrowOnError>({ url: '/site-icon', ...options });
 

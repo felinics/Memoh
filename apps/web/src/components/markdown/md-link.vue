@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, provide, ref, useAttrs, watch } from 'vue'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@felinic/ui'
-import { getSiteIcon } from '@memohai/sdk'
+import type { HandlersSiteIconResponse } from '@memohai/sdk'
 import { useSettingsStore } from '@/store/settings'
 import { FileText, Globe } from 'lucide-vue-next'
 import { LinkNode, type LinkNodeProps } from 'markstream-vue'
 import { useWorkspaceLink } from '@/composables/useWorkspaceLink'
 import { classifyWorkspaceLink } from '@/utils/workspace-link'
+import { lookupSiteIcon, siteIconOrigin } from '@/utils/site-icon'
 
 // Keep markstream's rich inline text, URL sanitization and streaming
 // behavior. The leading icon sits over the anchor's padding so it shares the
@@ -32,18 +33,17 @@ const link = computed(() => props.node.loading ? null : classifyWorkspaceLink(pr
 const icon = computed(() => link.value?.kind === 'file' ? FileText : Globe)
 
 const settings = useSettingsStore()
-const favicon = ref('')
-watch([() => props.node.href, link, () => settings.resolvedColorMode], async ([href, target, theme], _, onCleanup) => {
-  favicon.value = ''
-  if (target?.kind !== 'external') return
-  const controller = new AbortController()
-  onCleanup(() => controller.abort())
-  try {
-    const url = new URL(href, window.location.href)
-    const { data } = await getSiteIcon({ query: { url: url.href, theme }, signal: controller.signal })
-    if (!controller.signal.aborted) favicon.value = data?.url || ''
-  } catch { /* Optional site metadata must not interrupt a chat message. */ }
+const siteIcons = ref<HandlersSiteIconResponse | null>(null)
+watch([() => props.node.href, link], async ([href, target], _, onCleanup) => {
+  siteIcons.value = null
+  const origin = target?.kind === 'external' ? siteIconOrigin(href) : null
+  if (!origin) return
+  let stale = false
+  onCleanup(() => { stale = true })
+  const icons = await lookupSiteIcon(origin)
+  if (!stale) siteIcons.value = icons
 }, { immediate: true })
+const favicon = computed(() => siteIcons.value?.[settings.resolvedColorMode] || '')
 const loadedFavicon = ref('')
 const failedFavicon = ref('')
 watch(favicon, () => { loadedFavicon.value = ''; failedFavicon.value = '' })

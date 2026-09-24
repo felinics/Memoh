@@ -4482,7 +4482,7 @@ export const putSearchProvidersByIdMutation = (options?: Partial<Options<PutSear
 export const getSiteIconQueryKey = (options: Options<GetSiteIconData>) => createQueryKey('getSiteIcon', options);
 
 /**
- * Resolve a public page favicon for a color scheme
+ * Resolve a public site's favicons for light and dark color schemes
  */
 export const getSiteIconQuery = defineQueryOptions<Options<GetSiteIconData>, GetSiteIconResponse, Error>((options: Options<GetSiteIconData>) => ({
     key: getSiteIconQueryKey(options),
