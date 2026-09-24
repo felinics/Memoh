@@ -595,6 +595,30 @@ func TestSendACPFeedbackErrorUsesI18nKey(t *testing.T) {
 	}
 }
 
+func TestRequireWorkspaceExecUnboundIdentityPointsToLink(t *testing.T) {
+	// An owner whose IM identity isn't linked yet fails this gate on every
+	// message; the reply must tell them how to link rather than just deny.
+	p := &ChannelInboundProcessor{permissionChecker: &fakeBotPermissionChecker{}}
+	sender := &fakeReplySender{}
+	msg := channel.InboundMessage{
+		Channel:     channel.ChannelTypeTelegram,
+		Message:     channel.Message{ID: "msg-1"},
+		ReplyTarget: "target-1",
+	}
+
+	err := p.requireWorkspaceExecForExternalAgent(context.Background(), InboundIdentity{BotID: "bot-1"})
+	if err := p.sendExternalAgentFeedbackError(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, err); err != nil {
+		t.Fatalf("sendExternalAgentFeedbackError() error = %v", err)
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent replies = %d, want 1", len(sender.sent))
+	}
+	got := sender.sent[0].Message.PlainText()
+	if !strings.Contains(got, "/link") || !strings.Contains(got, "Connected Accounts") {
+		t.Fatalf("feedback text = %q, want link guidance", got)
+	}
+}
+
 func TestHandleNewSessionCommandACPRequiresWorkspaceExec(t *testing.T) {
 	chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "11111111-1111-1111-1111-111111111111"}}
 	ensurer := &fakeSessionEnsurer{activeSession: SessionResult{ID: "22222222-2222-2222-2222-222222222222", Type: sessionpkg.TypeACPAgent}}

@@ -340,6 +340,11 @@ func TestExecute_WritePermissionDenied(t *testing.T) {
 	if !strings.Contains(result, "Only the bot owner") {
 		t.Errorf("expected permission denied, got: %s", result)
 	}
+	// An owner whose IM account isn't linked lands here too, so the denial must
+	// say how to link rather than leave them guessing.
+	if !strings.Contains(result, "/link") {
+		t.Errorf("expected owner-only denial to point at /link, got: %s", result)
+	}
 }
 
 func TestExecute_WritePermissionAllowedForOwner(t *testing.T) {

@@ -18,11 +18,13 @@
       </Button>
     </SettingsRow>
 
-    <!-- Loading bound identities. ui-allow-shape: borrows the SettingsRow height
-         only to hold the row's vertical space steady while bindings load, so the
-         list doesn't jump (CLS) when they arrive — it's a skeleton, not a data row. -->
+    <!-- First load of bound identities only. ui-allow-shape: borrows the SettingsRow
+         height only to hold the row's vertical space steady while bindings load, so
+         the list doesn't jump (CLS) when they arrive — it's a skeleton, not a data row.
+         Background refetches (the /link poll, KeepAlive re-activation) must keep the
+         list and the live code on screen, so this keys off isPending, not isLoading. -->
     <div
-      v-else-if="isLoading"
+      v-else-if="loadingBindings"
       class="mx-4 flex min-h-[3.75rem] items-center justify-center py-3"
     >
       <Spinner class="size-5 text-muted-foreground/50" />
@@ -226,7 +228,9 @@ const remainingLabel = computed(() => {
   return `${m}:${String(s).padStart(2, '0')}`
 })
 
-const { data: bindingsData, isLoading, refetch: refetchBindings } = useQuery({
+// isPending is true only until the first result lands; isLoading would also be true
+// during every background refetch and blank the section each poll tick.
+const { data: bindingsData, isPending: loadingBindings, refetch: refetchBindings } = useQuery({
   key: () => ['my-channel-identities'],
   query: async () => {
     const { data } = await getUsersMeChannelIdentities({ throwOnError: true })
@@ -238,15 +242,17 @@ const bindings = computed<ChannelaccessBinding[]>(() => bindingsData.value?.item
 const { copyText } = useClipboard()
 
 // A live code is being polled in the background; when a new account shows up the
-// code has just been used, so retire it instead of leaving a stale countdown.
+// code has just been used, so retire it instead of leaving a stale countdown and
+// confirm the link — the user is usually looking at the IM app, not this page.
 watch(() => bindings.value.length, (count) => {
   if (activeCode.value && count > bindingsCountAtIssue.value) {
     clearActiveCode()
+    toast.success(t('settings.connectedAccounts.linked'))
   }
 })
 
 // Whether the user has any bot connected to an IM channel that could receive /link.
-const { data: hasImBotData, isLoading: checkingImBot, refetch: refetchHasImBot } = useQuery({
+const { data: hasImBotData, isPending: checkingImBot, refetch: refetchHasImBot } = useQuery({
   key: () => ['user-has-im-bot'],
   query: async (): Promise<boolean> => {
     const [botsRes, channelsRes] = await Promise.all([

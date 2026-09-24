@@ -4810,13 +4810,21 @@ func groupChatExternalAgentUnsupportedFeedback() *agentfeedback.Error {
 }
 
 func (*ChannelInboundProcessor) missingWorkspaceExecFeedback(reason, message string) *agentfeedback.Error {
+	key := "chat.externalAgent.noWorkspaceExec"
+	var args map[string]string
+	if reason == "account_user_unbound" {
+		// The bot owner's IM identity is usually just not linked yet; a bare
+		// "no permission" leaves them nothing to act on, so point at /link.
+		key = "chat.externalAgent.accountUnbound"
+		args = map[string]string{"link": command.CmdRef("link")}
+	}
 	return agentfeedback.New(
 		agentfeedback.CodeNoWorkspaceExec,
 		reason,
 		http.StatusForbidden,
-		"chat.externalAgent.noWorkspaceExec",
+		key,
 		message,
-		nil,
+		args,
 	)
 }
 

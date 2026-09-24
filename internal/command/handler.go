@@ -509,7 +509,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 	}
 
 	if sub.IsWrite && !writeAccess {
-		return &Result{Text: cc.T("cmd.error.ownerOnly", map[string]any{"command": CmdRef(parsed.Resource)})}, nil
+		return &Result{Text: cc.T("cmd.error.ownerOnly", map[string]any{"command": CmdRef(parsed.Resource), "link": CmdRef("link")})}, nil
 	}
 
 	if sub.ResultHandler != nil {
