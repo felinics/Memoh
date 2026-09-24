@@ -2377,7 +2377,9 @@ export type HandlersSessionInfoResponse = {
 
 export type HandlersSiteIconResponse = {
     dark?: string;
+    dark_mask?: string;
     light?: string;
+    light_mask?: string;
 };
 
 export type HandlersSkillItem = {

@@ -20,14 +20,18 @@ export function useSiteIcon(origin: MaybeRefOrGetter<string | null>) {
 
   const colorScheme = computed(() => settings.resolvedColorMode)
   const src = computed(() => icons.value?.[colorScheme.value] || '')
+  // A one-color icon that would vanish on this scheme comes back as a mask,
+  // painted in the link color; it is inline, so there is nothing to wait for.
+  const mask = computed(() => (colorScheme.value === 'dark' ? icons.value?.dark_mask : icons.value?.light_mask) || '')
   // Keyed by src, so a theme switch to the other icon starts from "not loaded".
   const loaded = ref('')
   const failed = ref('')
   return {
     src,
+    mask,
     colorScheme,
-    usable: computed(() => !!src.value && failed.value !== src.value),
-    ready: computed(() => !!src.value && loaded.value === src.value && failed.value !== src.value),
+    usable: computed(() => !mask.value && !!src.value && failed.value !== src.value),
+    ready: computed(() => !!mask.value || (!!src.value && loaded.value === src.value && failed.value !== src.value)),
     onLoad: (event: Event) => { loaded.value = (event.target as HTMLImageElement).src },
     onError: (event: Event) => { failed.value = (event.target as HTMLImageElement).src },
   }

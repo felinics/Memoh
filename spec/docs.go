@@ -23024,7 +23024,13 @@ const docTemplate = `{
                 "dark": {
                     "type": "string"
                 },
+                "dark_mask": {
+                    "type": "string"
+                },
                 "light": {
+                    "type": "string"
+                },
+                "light_mask": {
                     "type": "string"
                 }
             }

@@ -55,8 +55,14 @@ const favicon = reactive(useSiteIcon(() => link.value?.kind === 'external' ? sit
             class="pointer-events-none absolute left-0 top-1/2 size-4 -translate-y-1/2"
             aria-hidden="true"
           />
+          <span
+            v-if="favicon.mask"
+            class="pointer-events-none absolute left-0 top-1/2 size-4 -translate-y-1/2 bg-current mask-contain mask-center mask-no-repeat"
+            :style="{ maskImage: `url(${favicon.mask})` }"
+            aria-hidden="true"
+          />
           <img
-            v-if="favicon.usable"
+            v-else-if="favicon.usable"
             :key="favicon.src"
             :src="favicon.src"
             :style="{ colorScheme: favicon.colorScheme }"

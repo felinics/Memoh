@@ -43,10 +43,14 @@ type (
 		cache   map[string]siteIconEntry
 	}
 	// SiteIconResponse holds the icon for each color scheme. An empty value
-	// means no icon was found and callers keep their fallback icon.
+	// means no icon was found and callers keep their fallback icon. A mask is
+	// set only when that scheme's icon is a one-color SVG without enough
+	// contrast; it is a data URL to paint in the link color instead.
 	SiteIconResponse struct {
-		Light string `json:"light"`
-		Dark  string `json:"dark"`
+		Light     string `json:"light"`
+		Dark      string `json:"dark"`
+		LightMask string `json:"light_mask,omitempty"`
+		DarkMask  string `json:"dark_mask,omitempty"`
 	}
 	siteIconEntry struct {
 		icons   SiteIconResponse
@@ -153,7 +157,11 @@ func (h *SiteIconHandler) discover(ctx context.Context, origin string) (SiteIcon
 	defer func() { _ = response.Body.Close() }()
 	switch {
 	case response.StatusCode == http.StatusOK:
-		return discoverIcons(io.LimitReader(response.Body, 1<<20), response.Request.URL), siteIconCacheTTL
+		icons := discoverIcons(io.LimitReader(response.Body, 1<<20), response.Request.URL)
+		if h.addMasks(ctx, &icons) {
+			return icons, siteIconTransientCacheTTL
+		}
+		return icons, siteIconCacheTTL
 	case response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError:
 		return SiteIconResponse{}, siteIconTransientCacheTTL
 	default:
