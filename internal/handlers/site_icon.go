@@ -20,18 +20,22 @@ import (
 // Icons are a per-site property, so discovery is keyed by origin: a chat full of
 // links to one site costs one outbound fetch, and the page path the user shared
 // is never sent to that site. Results, including "no icon", are cached so
-// rendering history or switching themes does not fan out new requests.
+// rendering history or switching themes does not fan out new requests. A site
+// that answered without a usable page is retried after an hour; timeouts, 5xx
+// and rate limits are likely transient, so they are retried sooner rather than
+// hiding the icon for the full hour.
 const (
-	siteIconCacheTTL        = 24 * time.Hour
-	siteIconFailureCacheTTL = time.Hour
-	siteIconCacheMaxEntries = 1024
+	siteIconCacheTTL          = 24 * time.Hour
+	siteIconFailureCacheTTL   = time.Hour
+	siteIconTransientCacheTTL = 5 * time.Minute
+	siteIconCacheMaxEntries   = 1024
 )
 
 // SiteIconHandler resolves public site icon metadata; it never forwards account credentials.
 type (
 	SiteIconHandler struct {
 		client  *http.Client
-		fetch   func(ctx context.Context, origin string) (SiteIconResponse, bool)
+		fetch   func(ctx context.Context, origin string) (SiteIconResponse, time.Duration)
 		now     func() time.Time
 		flights singleflight.Group
 		mu      sync.Mutex
@@ -92,11 +96,7 @@ func (h *SiteIconHandler) Get(c echo.Context) error {
 		if icons, ok := h.cached(origin); ok {
 			return icons, nil
 		}
-		icons, found := h.fetch(context.WithoutCancel(c.Request().Context()), origin)
-		ttl := siteIconCacheTTL
-		if !found {
-			ttl = siteIconFailureCacheTTL
-		}
+		icons, ttl := h.fetch(context.WithoutCancel(c.Request().Context()), origin)
 		h.store(origin, icons, ttl)
 		return icons, nil
 	})
@@ -117,22 +117,27 @@ func siteIconJSON(c echo.Context, icons SiteIconResponse) error {
 	return c.JSON(http.StatusOK, icons)
 }
 
-func (h *SiteIconHandler) discover(ctx context.Context, origin string) (SiteIconResponse, bool) {
+// discover returns the icons and how long the result may be cached.
+func (h *SiteIconHandler) discover(ctx context.Context, origin string) (SiteIconResponse, time.Duration) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, origin, nil)
 	if err != nil {
-		return SiteIconResponse{}, false
+		return SiteIconResponse{}, siteIconFailureCacheTTL
 	}
 	req.Header.Set("Accept", "text/html")
 	// The transport validates and pins public IPs on every connection, including redirects.
 	response, err := h.client.Do(req) //nolint:gosec // dialIconHost prevents SSRF to private networks.
 	if err != nil {
-		return SiteIconResponse{}, false
+		return SiteIconResponse{}, siteIconTransientCacheTTL
 	}
 	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode != http.StatusOK {
-		return SiteIconResponse{}, false
+	switch {
+	case response.StatusCode == http.StatusOK:
+		return discoverIcons(io.LimitReader(response.Body, 1<<20), response.Request.URL), siteIconCacheTTL
+	case response.StatusCode == http.StatusTooManyRequests || response.StatusCode >= http.StatusInternalServerError:
+		return SiteIconResponse{}, siteIconTransientCacheTTL
+	default:
+		return SiteIconResponse{}, siteIconFailureCacheTTL
 	}
-	return discoverIcons(io.LimitReader(response.Body, 1<<20), response.Request.URL), true
 }
 
 func (h *SiteIconHandler) cached(origin string) (SiteIconResponse, bool) {

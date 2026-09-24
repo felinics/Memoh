@@ -83,20 +83,23 @@ func TestSiteIconOrigin(t *testing.T) {
 
 // The public-IP dialer cannot reach an httptest server, so the fetch is faked
 // to check the handler contract: one fetch per origin across pages and
-// concurrent callers, and cached misses that expire sooner than hits.
+// concurrent callers, and misses cached for the TTL the fetch reports.
 func TestSiteIconFetchesEachOriginOnce(t *testing.T) {
 	var fetches atomic.Int32
 	release := make(chan struct{})
 	h := NewSiteIconHandler()
 	now := time.Unix(0, 0)
 	h.now = func() time.Time { return now }
-	h.fetch = func(_ context.Context, origin string) (SiteIconResponse, bool) {
+	h.fetch = func(_ context.Context, origin string) (SiteIconResponse, time.Duration) {
 		fetches.Add(1)
 		<-release
-		if origin == "https://missing.example/" {
-			return SiteIconResponse{}, false
+		switch origin {
+		case "https://missing.example/":
+			return SiteIconResponse{}, siteIconFailureCacheTTL
+		case "https://slow.example/":
+			return SiteIconResponse{}, siteIconTransientCacheTTL
 		}
-		return SiteIconResponse{Light: origin + "light.svg", Dark: origin + "dark.svg"}, true
+		return SiteIconResponse{Light: origin + "light.svg", Dark: origin + "dark.svg"}, siteIconCacheTTL
 	}
 	get := func(target string) SiteIconResponse {
 		rec := httptest.NewRecorder()
@@ -135,10 +138,17 @@ func TestSiteIconFetchesEachOriginOnce(t *testing.T) {
 	if fetches.Load() != 2 {
 		t.Fatalf("miss not cached: fetches = %d", fetches.Load())
 	}
+	get("https://slow.example/")
+	now = now.Add(siteIconTransientCacheTTL)
+	get("https://slow.example/")
+	get("https://missing.example/")
+	if fetches.Load() != 4 {
+		t.Fatalf("transient miss should expire before a definitive one: fetches = %d", fetches.Load())
+	}
 	now = now.Add(siteIconFailureCacheTTL)
 	get("https://missing.example/")
 	get("https://example.com/")
-	if fetches.Load() != 3 {
+	if fetches.Load() != 5 {
 		t.Fatalf("miss should expire before hit: fetches = %d", fetches.Load())
 	}
 }
@@ -150,5 +160,32 @@ func TestSiteIconCacheIsBounded(t *testing.T) {
 	}
 	if len(h.cache) > siteIconCacheMaxEntries {
 		t.Fatalf("cache grew to %d", len(h.cache))
+	}
+}
+
+func TestSiteIconDiscoverCacheTTL(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   time.Duration
+	}{
+		{http.StatusOK, siteIconCacheTTL},
+		{http.StatusNotFound, siteIconFailureCacheTTL},
+		{http.StatusTooManyRequests, siteIconTransientCacheTTL},
+		{http.StatusBadGateway, siteIconTransientCacheTTL},
+	} {
+		h := NewSiteIconHandler()
+		h.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: tc.status, Body: http.NoBody, Request: r}, nil
+		})}
+		if _, got := h.discover(t.Context(), "https://example.com/"); got != tc.want {
+			t.Fatalf("status %d: ttl %v, want %v", tc.status, got, tc.want)
+		}
+	}
+	h := NewSiteIconHandler()
+	h.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, context.DeadlineExceeded
+	})}
+	if _, got := h.discover(t.Context(), "https://example.com/"); got != siteIconTransientCacheTTL {
+		t.Fatalf("network error: ttl %v", got)
 	}
 }
