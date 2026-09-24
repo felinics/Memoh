@@ -214,6 +214,82 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	return s.Get(waitCtx, bot.ID)
 }
 
+// resendWindow bounds how long after a bot was created an identical create
+// still counts as that request arriving again rather than as a new one.
+const resendWindow = 10 * time.Minute
+
+// CreateOrReplay is Create for a request its client may have to send twice. A
+// create that reached the server but whose response was lost (proxy read
+// timeout, dropped stream, closed lid) can only be resent; when the owner
+// already has the bot that request made, the resend is answered with it
+// instead of a second bot. replayed reports which of the two happened.
+//
+// Only the create endpoint wants this. Other callers of Create (backup import)
+// always mean a new bot and must never be handed an existing one.
+func (s *Service) CreateOrReplay(ctx context.Context, ownerUserID string, req CreateBotRequest) (Bot, bool, error) {
+	if existing, ok, err := s.resentCreate(ctx, ownerUserID, req); err != nil || ok {
+		return existing, ok, err
+	}
+	bot, err := s.Create(ctx, ownerUserID, req)
+	if errors.Is(err, ErrBotNameTaken) {
+		// Two identical creates raced past the lookup and asked for the same
+		// name; the loser answers with the bot the winner inserted.
+		if raced, ok, lookupErr := s.resentCreate(ctx, ownerUserID, req); lookupErr == nil && ok {
+			return raced, true, nil
+		}
+	}
+	return bot, false, err
+}
+
+// resentCreate finds the bot an earlier, identical create already made: the
+// owner's newest bot created inside resendWindow with the same display name
+// (and the same name, when the request picks one) that is not being deleted.
+//
+// Nothing on the row identifies the request that wrote it, so this matches on
+// what the request asked for. Its name is no help on its own: a derived name
+// may have been suffixed (neko-2) or drawn at random (bot-<uuid>) the first
+// time. Within minutes of making a bot with this exact display name, the same
+// create again is overwhelmingly that request arriving twice. A false positive
+// hands back the bot the same user made minutes ago and leaves this request's
+// other fields unapplied; past the window a create is always a new bot.
+func (s *Service) resentCreate(ctx context.Context, ownerUserID string, req CreateBotRequest) (Bot, bool, error) {
+	displayName := strings.TrimSpace(req.DisplayName)
+	if s.queries == nil || displayName == "" {
+		// Without a display name Create invents a random one; nothing to match.
+		return Bot{}, false, nil
+	}
+	ownerUUID, err := db.ParseUUID(strings.TrimSpace(ownerUserID))
+	if err != nil {
+		return Bot{}, false, nil // Create reports it.
+	}
+	rows, err := s.queries.ListBotsByOwner(ctx, ownerUUID)
+	if err != nil {
+		return Bot{}, false, err
+	}
+	name := normalizeName(req.Name)
+	cutoff := time.Now().Add(-resendWindow)
+	for _, row := range rows { // newest first
+		if !row.CreatedAt.Valid || row.CreatedAt.Time.Before(cutoff) {
+			break
+		}
+		if row.Status == BotStatusDeleting || strings.TrimSpace(row.DisplayName.String) != displayName {
+			continue
+		}
+		if name != "" && row.Name != name {
+			continue
+		}
+		bot, err := toBot(asSQLCBot(row))
+		if err != nil {
+			return Bot{}, false, err
+		}
+		if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
+			return Bot{}, false, err
+		}
+		return bot, true, nil
+	}
+	return Bot{}, false, nil
+}
+
 // workspaceOutcomeError turns a failed observation into the stable errors the
 // API layer maps to user-facing codes.
 func workspaceOutcomeError(outcome WorkspaceOutcome) error {

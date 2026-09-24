@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -414,6 +415,20 @@ type createBotStreamWorkspace struct {
 	intents []string
 }
 
+// Get answers with the intent EnsurePresent already recorded, so a resent
+// create re-attaches instead of asking for a new generation.
+func (w *createBotStreamWorkspace) Get(_ context.Context, botID string) (botworkspace.Workspace, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ws, ok := w.final[botID]; ok {
+		return ws, nil
+	}
+	if _, ok := w.settled[botID]; ok {
+		return botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1}, nil
+	}
+	return botworkspace.Workspace{}, botworkspace.ErrNotFound
+}
+
 func (w *createBotStreamWorkspace) EnsurePresent(_ context.Context, botID, image string) (botworkspace.Workspace, error) {
 	w.mu.Lock()
 	if w.final == nil {
@@ -527,6 +542,11 @@ type createBotStreamDB struct {
 	status            string
 	metadata          []byte
 	persistedMetadata []byte
+
+	// firstAttemptAt, when set, is when an identical earlier create made this
+	// fake's bot: the owner already has it.
+	firstAttemptAt time.Time
+	inserts        int
 }
 
 func (d *createBotStreamDB) Exec(_ context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
@@ -536,8 +556,11 @@ func (d *createBotStreamDB) Exec(_ context.Context, query string, args ...interf
 	return pgconn.CommandTag{}, nil
 }
 
-func (*createBotStreamDB) Query(context.Context, string, ...interface{}) (pgx.Rows, error) {
-	return nil, nil
+func (d *createBotStreamDB) Query(_ context.Context, query string, _ ...interface{}) (pgx.Rows, error) {
+	if !d.firstAttemptAt.IsZero() && strings.Contains(query, "FROM bots") && strings.Contains(query, "owner_user_id = $1") {
+		return &createBotStreamRows{rows: []pgx.Row{d.botRow(bots.BotStatusCreating)}}, nil
+	}
+	return &createBotStreamRows{}, nil
 }
 
 func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
@@ -545,6 +568,7 @@ func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...an
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "id = $1"):
 		return &createBotStreamRow{scanFunc: func(_ ...any) error { return nil }}
 	case strings.Contains(query, "INSERT INTO bots"):
+		d.inserts++
 		if len(args) > 6 {
 			if payload, ok := args[6].([]byte); ok {
 				d.metadata = append([]byte(nil), payload...)
@@ -594,7 +618,7 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[11].(*pgtype.UUID) = pgtype.UUID{}
 		if len(dest) == 15 {
 			*dest[12].(*[]byte) = append([]byte(nil), metadata...)
-			*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+			*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: d.firstAttemptAt, Valid: !d.firstAttemptAt.IsZero()}
 			*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 			return nil
 		}
@@ -603,7 +627,7 @@ func (d *createBotStreamDB) botRow(status string) pgx.Row {
 		*dest[14].(*pgtype.Int4) = pgtype.Int4{Int32: 50, Valid: true}
 		*dest[15].(*pgtype.UUID) = pgtype.UUID{}
 		*dest[16].(*[]byte) = append([]byte(nil), metadata...)
-		*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
+		*dest[17].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: d.firstAttemptAt, Valid: !d.firstAttemptAt.IsZero()}
 		*dest[18].(*pgtype.Timestamptz) = pgtype.Timestamptz{Valid: false}
 		return nil
 	}}
@@ -615,4 +639,96 @@ type createBotStreamRow struct {
 
 func (r *createBotStreamRow) Scan(dest ...any) error {
 	return r.scanFunc(dest...)
+}
+
+// createBotStreamRows implements pgx.Rows over fixed rows.
+type createBotStreamRows struct {
+	rows []pgx.Row
+	idx  int
+}
+
+func (*createBotStreamRows) Close()                                       {}
+func (*createBotStreamRows) Err() error                                   { return nil }
+func (*createBotStreamRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*createBotStreamRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (r *createBotStreamRows) Next() bool {
+	if r.idx >= len(r.rows) {
+		return false
+	}
+	r.idx++
+	return true
+}
+func (r *createBotStreamRows) Scan(dest ...any) error { return r.rows[r.idx-1].Scan(dest...) }
+func (*createBotStreamRows) Values() ([]any, error)   { return nil, nil }
+func (*createBotStreamRows) RawValues() [][]byte      { return nil }
+func (*createBotStreamRows) Conn() *pgx.Conn          { return nil }
+
+func TestCreateBotStreamAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+
+	// The first attempt created the bot and recorded its workspace intent; its
+	// response never reached the client, which sent the same body again.
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, firstAttemptAt: time.Now().Add(-30 * time.Second)}
+	ws := &createBotStreamWorkspace{}
+	if _, err := ws.EnsurePresent(context.Background(), botID, ""); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+	handler := &UsersHandler{
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(dbFake))),
+		workspaceSetup: ws,
+	}
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{"display_name":"Stream Bot","acl_preset":"allow_all"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(echo.HeaderAccept, "text/event-stream")
+	rec := httptest.NewRecorder()
+	if err := handler.CreateBot(testAuthContext(echo.New(), req, rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+
+	events := decodeSSEEvents(t, rec.Body.String())
+	if len(events) == 0 || events[0]["type"] != "bot_created" || eventBotID(events[0]) != botID {
+		t.Fatalf("want bot_created for the first attempt's bot %s; events=%#v", botID, events)
+	}
+	if last := events[len(events)-1]; last["type"] != "ready" {
+		t.Fatalf("last event = %#v, want ready; events=%#v", last["type"], events)
+	}
+	if dbFake.inserts != 0 {
+		t.Fatalf("resend inserted %d bot rows, want 0", dbFake.inserts)
+	}
+	if got := len(ws.intents); got != 1 {
+		t.Fatalf("workspace intents recorded = %d, want 1; a resend must re-attach, not ask for a new generation", got)
+	}
+}
+
+func TestCreateBotAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, firstAttemptAt: time.Now().Add(-30 * time.Second)}
+	handler := &UsersHandler{
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(dbFake))),
+		workspaceSetup: &createBotStreamWorkspace{},
+	}
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{"display_name":"Stream Bot","acl_preset":"allow_all"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := handler.CreateBot(testAuthContext(echo.New(), req, rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+	// The resend gets the answer its first attempt would have: 201 and that bot.
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["id"] != botID || dbFake.inserts != 0 {
+		t.Fatalf("want the first attempt's bot %s and no insert; got id=%#v inserts=%d", botID, body["id"], dbFake.inserts)
+	}
 }

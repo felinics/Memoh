@@ -457,7 +457,9 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	if acceptsEventStream(c) {
 		return h.createBotStream(c, ownerID, ownerFromToken, req)
 	}
-	resp, err := h.botService.Create(c.Request().Context(), ownerID, req)
+	// A resent create is answered with the bot its first attempt made: the
+	// answer that attempt would have received, not a second bot.
+	resp, _, err := h.botService.CreateOrReplay(c.Request().Context(), ownerID, req)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}
@@ -515,7 +517,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	// the subscription is in place before the reconciler starts emitting.
 	req.WaitForReady = false
 	req.SkipLifecycle = true
-	bot, err := h.botService.Create(c.Request().Context(), ownerID, req)
+	bot, replayed, err := h.botService.CreateOrReplay(c.Request().Context(), ownerID, req)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}
@@ -556,7 +558,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 
 	// Recording the intent must not depend on the client staying connected.
 	intentCtx, cancelIntent := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 15*time.Second)
-	intent, err := h.workspaceSetup.EnsurePresent(intentCtx, bot.ID, workspaceImageFromCreateRequest(req))
+	intent, err := h.workspaceIntentForCreate(intentCtx, bot.ID, workspaceImageFromCreateRequest(req), replayed)
 	cancelIntent()
 	if err != nil {
 		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed",
@@ -592,6 +594,22 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil
+}
+
+// workspaceIntentForCreate yields the workspace intent whose progress the
+// create stream relays. A resend re-attaches to the intent its first attempt
+// recorded: asking again would raise the desired generation and restart a
+// provisioning run that is still converging. Only a first attempt that died
+// before recording anything leaves nothing to attach to.
+func (h *UsersHandler) workspaceIntentForCreate(ctx context.Context, botID, image string, replayed bool) (botworkspace.Workspace, error) {
+	if !replayed {
+		return h.workspaceSetup.EnsurePresent(ctx, botID, image)
+	}
+	w, err := h.workspaceSetup.Get(ctx, botID)
+	if errors.Is(err, botworkspace.ErrNotFound) {
+		return h.workspaceSetup.EnsurePresent(ctx, botID, image)
+	}
+	return w, err
 }
 
 // workspaceImageFromCreateRequest reads the optional workspace.image preference

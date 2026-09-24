@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -30,6 +31,7 @@ func (r *fakeRow) Scan(dest ...any) error {
 // fakeDBTX implements sqlc.DBTX for unit testing.
 type fakeDBTX struct {
 	queryRowFunc func(ctx context.Context, sql string, args ...any) pgx.Row
+	queryFunc    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	execFunc     func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
@@ -40,9 +42,34 @@ func (d *fakeDBTX) Exec(ctx context.Context, sql string, args ...interface{}) (p
 	return pgconn.CommandTag{}, nil
 }
 
-func (*fakeDBTX) Query(context.Context, string, ...interface{}) (pgx.Rows, error) {
-	return nil, nil
+func (d *fakeDBTX) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	if d.queryFunc != nil {
+		return d.queryFunc(ctx, sql, args...)
+	}
+	return &fakeRows{}, nil
 }
+
+// fakeRows implements pgx.Rows over a fixed list of scan functions.
+type fakeRows struct {
+	rows []func(dest ...any) error
+	idx  int
+}
+
+func (*fakeRows) Close()                                       {}
+func (*fakeRows) Err() error                                   { return nil }
+func (*fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (r *fakeRows) Next() bool {
+	if r.idx >= len(r.rows) {
+		return false
+	}
+	r.idx++
+	return true
+}
+func (r *fakeRows) Scan(dest ...any) error { return r.rows[r.idx-1](dest...) }
+func (*fakeRows) Values() ([]any, error)   { return nil, nil }
+func (*fakeRows) RawValues() [][]byte      { return nil }
+func (*fakeRows) Conn() *pgx.Conn          { return nil }
 
 func (d *fakeDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	if d.queryRowFunc != nil {
@@ -549,5 +576,161 @@ func TestRunDeleteLifecycleRevertsToPreviousStatusWhenWorkspaceLingers(t *testin
 	svc.runDeleteLifecycle(context.Background(), botID, BotStatusFailed)
 	if len(exec) != 1 || exec[0] != "status:"+BotStatusFailed {
 		t.Fatalf("a failed bot whose deletion lingers must revert to failed, not ready, and not be deleted; exec=%v", exec)
+	}
+}
+
+// ownedBot is one row of ListBotsByOwner in its column order.
+func ownedBot(botID, ownerUserID pgtype.UUID, name, displayName, status string, createdAt time.Time) func(dest ...any) error {
+	return func(dest ...any) error {
+		*dest[0].(*pgtype.UUID) = botID
+		*dest[1].(*pgtype.UUID) = ownerUserID
+		*dest[2].(*string) = name
+		*dest[3].(*pgtype.Text) = pgtype.Text{String: displayName, Valid: true}
+		*dest[4].(*pgtype.Text) = pgtype.Text{}
+		*dest[5].(*pgtype.Text) = pgtype.Text{}
+		*dest[6].(*bool) = true
+		*dest[7].(*string) = status
+		*dest[8].(*string) = "medium"
+		*dest[9].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[10].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[11].(*pgtype.UUID) = pgtype.UUID{}
+		*dest[12].(*[]byte) = []byte(`{}`)
+		*dest[13].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: createdAt, Valid: true}
+		*dest[14].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: createdAt, Valid: true}
+		return nil
+	}
+}
+
+var errInsertReached = errors.New("insert reached")
+
+// newResendService serves owned (newest first) as the owner's bots and fails
+// any INSERT with errInsertReached, recording that one was attempted.
+func newResendService(owned ...func(dest ...any) error) (*Service, *bool) {
+	inserted := false
+	dbtx := &fakeDBTX{
+		queryFunc: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if strings.Contains(sql, "FROM bots") && strings.Contains(sql, "owner_user_id = $1") {
+				return &fakeRows{rows: owned}, nil
+			}
+			return &fakeRows{}, nil
+		},
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "id = $1"):
+				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
+			case strings.Contains(sql, "INSERT INTO bots"):
+				inserted = true
+				return &fakeRow{scanFunc: func(_ ...any) error { return errInsertReached }}
+			default:
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+	}
+	return NewService(nil, postgresstore.NewQueries(sqlc.New(dbtx))), &inserted
+}
+
+func TestCreateOrReplayAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
+	owner := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	earlier := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	now := time.Now()
+
+	cases := []struct {
+		name  string
+		req   CreateBotRequest
+		owned []func(dest ...any) error
+	}{
+		{
+			// A display name the slug rules cannot represent got a random
+			// bot-<uuid> name the first time; the resend must not need it.
+			name:  "random derived name",
+			req:   CreateBotRequest{DisplayName: "小猫"},
+			owned: []func(dest ...any) error{ownedBot(earlier, owner, "bot-5f0c2d1e-0000-4000-8000-000000000000", "小猫", BotStatusCreating, now.Add(-30*time.Second))},
+		},
+		{
+			// neko was already held, so the first attempt became neko-2.
+			name: "suffixed derived name",
+			req:  CreateBotRequest{DisplayName: "Neko"},
+			owned: []func(dest ...any) error{
+				ownedBot(earlier, owner, "neko-2", "Neko", BotStatusReady, now.Add(-time.Minute)),
+				ownedBot(mustParseUUID("00000000-0000-0000-0000-000000000003"), owner, "neko", "Neko Original", BotStatusReady, now.Add(-time.Hour)),
+			},
+		},
+		{
+			name:  "explicit name",
+			req:   CreateBotRequest{Name: "neko", DisplayName: "Neko"},
+			owned: []func(dest ...any) error{ownedBot(earlier, owner, "neko", "Neko", BotStatusFailed, now.Add(-time.Minute))},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, inserted := newResendService(tc.owned...)
+			bot, replayed, err := svc.CreateOrReplay(context.Background(), owner.String(), tc.req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !replayed || bot.ID != earlier.String() {
+				t.Fatalf("want a replay of %s, got replayed=%v bot=%s", earlier.String(), replayed, bot.ID)
+			}
+			if *inserted {
+				t.Fatal("a resend must not insert a second bot row")
+			}
+		})
+	}
+}
+
+func TestCreateOrReplayCreatesWhenNoBotIsThisRequests(t *testing.T) {
+	owner := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	earlier := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	now := time.Now()
+
+	cases := []struct {
+		name  string
+		req   CreateBotRequest
+		owned func(dest ...any) error
+	}{
+		{
+			// Recreating a bot that is being deleted must not be answered
+			// with the bot that is about to disappear.
+			name:  "being deleted",
+			req:   CreateBotRequest{DisplayName: "Neko"},
+			owned: ownedBot(earlier, owner, "neko", "Neko", BotStatusDeleting, now.Add(-time.Minute)),
+		},
+		{
+			name:  "outside the window",
+			req:   CreateBotRequest{DisplayName: "Neko"},
+			owned: ownedBot(earlier, owner, "neko", "Neko", BotStatusReady, now.Add(-resendWindow-time.Minute)),
+		},
+		{
+			name:  "different display name",
+			req:   CreateBotRequest{DisplayName: "Tama"},
+			owned: ownedBot(earlier, owner, "neko", "Neko", BotStatusReady, now.Add(-time.Minute)),
+		},
+		{
+			name:  "different explicit name",
+			req:   CreateBotRequest{Name: "neko-work", DisplayName: "Neko"},
+			owned: ownedBot(earlier, owner, "neko", "Neko", BotStatusReady, now.Add(-time.Minute)),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, inserted := newResendService(tc.owned)
+			_, replayed, err := svc.CreateOrReplay(context.Background(), owner.String(), tc.req)
+			if replayed || !*inserted || !errors.Is(err, errInsertReached) {
+				t.Fatalf("want a new bot, got replayed=%v inserted=%v err=%v", replayed, *inserted, err)
+			}
+		})
+	}
+}
+
+func TestCreateNeverAnswersWithAnExistingBot(t *testing.T) {
+	owner := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	earlier := mustParseUUID("00000000-0000-0000-0000-000000000002")
+
+	// Backup import creates through Create and treats the result as a bot it
+	// may fill and, on failure, delete. It must never get the user's bot back.
+	svc, inserted := newResendService(ownedBot(earlier, owner, "neko", "Neko", BotStatusReady, time.Now().Add(-time.Minute)))
+	_, err := svc.Create(context.Background(), owner.String(), CreateBotRequest{DisplayName: "Neko"})
+	if !*inserted || !errors.Is(err, errInsertReached) {
+		t.Fatalf("Create must always insert a new bot; inserted=%v err=%v", *inserted, err)
 	}
 }
