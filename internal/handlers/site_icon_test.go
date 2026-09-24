@@ -34,13 +34,16 @@ func TestDiscoverIconsTheme(t *testing.T) {
 }
 
 func TestIconIPRestrictions(t *testing.T) {
-	for _, raw := range []string{"127.0.0.1", "10.1.2.3", "169.254.169.254", "100.64.0.1", "::1", "fc00::1", "0.0.0.0", "198.18.0.1", "192.0.0.8", "64:ff9b::a00:1", "::ffff:10.0.0.1"} {
+	for _, raw := range []string{"127.0.0.1", "10.1.2.3", "169.254.169.254", "100.64.0.1", "::1", "fc00::1", "0.0.0.0", "192.0.0.8", "64:ff9b::a00:1", "::ffff:10.0.0.1"} {
 		if publicIconIP(net.ParseIP(raw)) {
 			t.Fatal(raw)
 		}
 	}
-	if !publicIconIP(net.ParseIP("8.8.8.8")) {
-		t.Fatal("public address rejected")
+	// 198.18.0.0/15 is where fake-IP proxies map public hosts.
+	for _, raw := range []string{"8.8.8.8", "198.18.0.21"} {
+		if !publicIconIP(net.ParseIP(raw)) {
+			t.Fatal(raw)
+		}
 	}
 }
 

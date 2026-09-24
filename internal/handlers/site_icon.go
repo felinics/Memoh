@@ -187,11 +187,14 @@ func validIconURL(u *url.URL) bool {
 }
 
 // Special-purpose ranges that pass IsGlobalUnicast but can still reach
-// internal networks (CGNAT, NAT64 translation, benchmarking, IETF assignments).
+// internal networks (CGNAT, NAT64 translation, IETF assignments).
+// 198.18.0.0/15 is deliberately allowed: fake-IP proxies (Clash, Surge in TUN
+// mode) resolve every host into it, so blocking it disables icons for those
+// users. Behind such a proxy the real destination is chosen by the proxy, which
+// an IP check here cannot see either way.
 var nonPublicIconPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("192.0.0.0/24"),
-	netip.MustParsePrefix("198.18.0.0/15"),
 	netip.MustParsePrefix("64:ff9b::/96"),
 	netip.MustParsePrefix("64:ff9b:1::/48"),
 }
