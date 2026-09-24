@@ -101,7 +101,7 @@ func TestSiteIconFetchesEachOriginOnce(t *testing.T) {
 		}
 		return SiteIconResponse{Light: origin + "light.svg", Dark: origin + "dark.svg"}, siteIconCacheTTL
 	}
-	get := func(target string) SiteIconResponse {
+	request := func(target string) (SiteIconResponse, string) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/site-icon?url="+url.QueryEscape(target), nil)
 		if err := h.Get(echo.New().NewContext(req, rec)); err != nil {
@@ -109,8 +109,9 @@ func TestSiteIconFetchesEachOriginOnce(t *testing.T) {
 		}
 		var got SiteIconResponse
 		_ = json.Unmarshal(rec.Body.Bytes(), &got)
-		return got
+		return got, rec.Header().Get("Cache-Control")
 	}
+	get := func(target string) SiteIconResponse { got, _ := request(target); return got }
 
 	var wg sync.WaitGroup
 	results := make([]SiteIconResponse, 8)
@@ -127,8 +128,12 @@ func TestSiteIconFetchesEachOriginOnce(t *testing.T) {
 			t.Fatalf("%+v", got)
 		}
 	}
-	if got := get("https://example.com/another"); got != want || fetches.Load() != 1 {
+	got, cacheControl := request("https://example.com/another")
+	if got != want || fetches.Load() != 1 {
 		t.Fatalf("fetches = %d, got %+v", fetches.Load(), got)
+	}
+	if cacheControl != "private, max-age=3600" {
+		t.Fatalf("hit cache-control %q", cacheControl)
 	}
 
 	if got := get("https://missing.example/"); got != (SiteIconResponse{}) {
@@ -138,7 +143,9 @@ func TestSiteIconFetchesEachOriginOnce(t *testing.T) {
 	if fetches.Load() != 2 {
 		t.Fatalf("miss not cached: fetches = %d", fetches.Load())
 	}
-	get("https://slow.example/")
+	if _, cacheControl = request("https://slow.example/"); cacheControl != "private, max-age=300" {
+		t.Fatalf("transient miss must not outlive the server entry in the browser: %q", cacheControl)
+	}
 	now = now.Add(siteIconTransientCacheTTL)
 	get("https://slow.example/")
 	get("https://missing.example/")

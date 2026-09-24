@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -86,21 +87,20 @@ func (h *SiteIconHandler) Get(c echo.Context) error {
 	if !ok {
 		return c.JSON(http.StatusOK, SiteIconResponse{})
 	}
-	if icons, ok := h.cached(origin); ok {
-		return siteIconJSON(c, icons)
+	if entry, ok := h.cached(origin); ok {
+		return h.siteIconJSON(c, entry)
 	}
 	// Concurrent requests for one origin share a fetch. It is detached from the
 	// first caller's request so that caller leaving does not fail the others;
 	// the client timeout still bounds it.
 	result, _, _ := h.flights.Do(origin, func() (any, error) {
-		if icons, ok := h.cached(origin); ok {
-			return icons, nil
+		if entry, ok := h.cached(origin); ok {
+			return entry, nil
 		}
 		icons, ttl := h.fetch(context.WithoutCancel(c.Request().Context()), origin)
-		h.store(origin, icons, ttl)
-		return icons, nil
+		return h.store(origin, icons, ttl), nil
 	})
-	return siteIconJSON(c, result.(SiteIconResponse))
+	return h.siteIconJSON(c, result.(siteIconEntry))
 }
 
 // siteIconOrigin reduces a link to the site root that is actually fetched.
@@ -112,9 +112,13 @@ func siteIconOrigin(raw string) (string, bool) {
 	return (&url.URL{Scheme: u.Scheme, Host: strings.ToLower(u.Host), Path: "/"}).String(), true
 }
 
-func siteIconJSON(c echo.Context, icons SiteIconResponse) error {
-	c.Response().Header().Set("Cache-Control", "private, max-age=3600")
-	return c.JSON(http.StatusOK, icons)
+// The browser may keep the response only as long as the server entry lives,
+// capped at an hour, so a short-lived transient miss is not pinned in the
+// browser cache after the server would already retry.
+func (h *SiteIconHandler) siteIconJSON(c echo.Context, entry siteIconEntry) error {
+	maxAge := min(entry.expires.Sub(h.now()), time.Hour)
+	c.Response().Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", max(int(maxAge.Seconds()), 0)))
+	return c.JSON(http.StatusOK, entry.icons)
 }
 
 // discover returns the icons and how long the result may be cached.
@@ -140,17 +144,17 @@ func (h *SiteIconHandler) discover(ctx context.Context, origin string) (SiteIcon
 	}
 }
 
-func (h *SiteIconHandler) cached(origin string) (SiteIconResponse, bool) {
+func (h *SiteIconHandler) cached(origin string) (siteIconEntry, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	entry, ok := h.cache[origin]
 	if !ok || !h.now().Before(entry.expires) {
-		return SiteIconResponse{}, false
+		return siteIconEntry{}, false
 	}
-	return entry.icons, true
+	return entry, true
 }
 
-func (h *SiteIconHandler) store(origin string, icons SiteIconResponse, ttl time.Duration) {
+func (h *SiteIconHandler) store(origin string, icons SiteIconResponse, ttl time.Duration) siteIconEntry {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
@@ -169,7 +173,9 @@ func (h *SiteIconHandler) store(origin string, icons SiteIconResponse, ttl time.
 		}
 		delete(h.cache, key)
 	}
-	h.cache[origin] = siteIconEntry{icons: icons, expires: now.Add(ttl)}
+	entry := siteIconEntry{icons: icons, expires: now.Add(ttl)}
+	h.cache[origin] = entry
+	return entry
 }
 
 // Only default web ports are fetched, so the endpoint cannot be used to probe
