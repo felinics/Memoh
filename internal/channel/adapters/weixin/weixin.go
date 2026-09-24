@@ -126,12 +126,24 @@ func (a *WeixinAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig, 
 
 	go func() {
 		defer close(done)
+		// notifystart/notifystop mirror upstream's channel start/stop hooks. They
+		// are advisory: a failure is logged and never blocks message delivery.
+		if err := a.client.NotifyStart(connCtx, parsed); err != nil && connCtx.Err() == nil {
+			a.logger.WarnContext(connCtx, "weixin notifystart failed",
+				slog.String("config_id", cfg.ID), slog.Any("error", err))
+		}
 		a.pollLoop(connCtx, cfg, parsed, handler)
 	}()
 
-	stop := func(context.Context) error {
+	stop := func(stopCtx context.Context) error {
 		cancel()
 		<-done
+		// The poll context is already cancelled, so notifystop runs on the
+		// caller's context instead.
+		if err := a.client.NotifyStop(stopCtx, parsed); err != nil {
+			a.logger.WarnContext(stopCtx, "weixin notifystop failed",
+				slog.String("config_id", cfg.ID), slog.Any("error", err))
+		}
 		return nil
 	}
 	return channel.NewConnection(cfg, stop), nil
@@ -349,27 +361,31 @@ func (*WeixinAdapter) ResolveAttachment(_ context.Context, cfg channel.ChannelCo
 	}
 
 	encryptedQP := ""
+	fullURL := ""
 	aesKey := ""
 	if attachment.Metadata != nil {
 		if v, ok := attachment.Metadata["encrypt_query_param"].(string); ok {
 			encryptedQP = strings.TrimSpace(v)
 		}
+		if v, ok := attachment.Metadata["full_url"].(string); ok {
+			fullURL = strings.TrimSpace(v)
+		}
 		if v, ok := attachment.Metadata["aes_key"].(string); ok {
 			aesKey = strings.TrimSpace(v)
 		}
 	}
-	if encryptedQP == "" {
+	if encryptedQP == "" && fullURL == "" {
 		encryptedQP = strings.TrimSpace(attachment.PlatformKey)
 	}
-	if encryptedQP == "" {
-		return channel.AttachmentPayload{}, errors.New("weixin: no encrypt_query_param for attachment")
+	if encryptedQP == "" && fullURL == "" {
+		return channel.AttachmentPayload{}, errors.New("weixin: no encrypt_query_param or full_url for attachment")
 	}
 
 	var data []byte
 	if aesKey != "" {
-		data, err = downloadAndDecrypt(parsed.CDNBaseURL, encryptedQP, aesKey)
+		data, err = downloadAndDecrypt(parsed.CDNBaseURL, encryptedQP, fullURL, aesKey)
 	} else {
-		data, err = downloadPlain(parsed.CDNBaseURL, encryptedQP)
+		data, err = downloadPlain(parsed.CDNBaseURL, encryptedQP, fullURL)
 	}
 	if err != nil {
 		return channel.AttachmentPayload{}, fmt.Errorf("weixin: download attachment: %w", err)

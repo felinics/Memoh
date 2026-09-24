@@ -24,7 +24,7 @@ func TestPollQRStatusNormalizesLegacyScannedStatus(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(slog.Default())
-	status, err := client.PollQRStatus(context.Background(), server.URL, "legacy-code")
+	status, err := client.PollQRStatus(context.Background(), server.URL, "legacy-code", "")
 	if err != nil {
 		t.Fatalf("PollQRStatus() error = %v", err)
 	}

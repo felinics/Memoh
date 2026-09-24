@@ -3341,7 +3341,13 @@
         "expired": "二维码已过期",
         "refresh": "刷新二维码",
         "success": "微信连接成功！",
-        "retry": "重试"
+        "retry": "重试",
+        "verifyCodePrompt": "输入手机微信上显示的数字以继续连接",
+        "verifyCodeWrong": "数字不匹配，请重新输入",
+        "verifyCodePlaceholder": "手机上显示的数字",
+        "verifyCodeSubmit": "确认",
+        "verifyCodeBlocked": "多次输入错误，请刷新二维码稍后再试",
+        "alreadyBound": "该微信已连接到此 Bot"
       },
       "types": {
         "feishu": "飞书",

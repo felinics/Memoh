@@ -3341,7 +3341,13 @@
         "expired": "QR code expired",
         "refresh": "Refresh QR Code",
         "success": "WeChat connected successfully!",
-        "retry": "Try Again"
+        "retry": "Try Again",
+        "verifyCodePrompt": "Enter the number shown in WeChat on your phone to continue",
+        "verifyCodeWrong": "The number didn't match. Try again.",
+        "verifyCodePlaceholder": "Number shown on your phone",
+        "verifyCodeSubmit": "Confirm",
+        "verifyCodeBlocked": "Too many wrong attempts. Refresh the QR code and try again later.",
+        "alreadyBound": "This WeChat account is already connected to this bot"
       },
       "types": {
         "feishu": "Feishu",

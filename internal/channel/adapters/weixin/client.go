@@ -18,13 +18,25 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/felinics/memoh/internal/version"
 )
 
 const (
-	channelVersion         = "1.0.0"
+	// channelVersion is the openclaw-weixin release whose wire protocol this
+	// adapter implements. iLink reads it from base_info.channel_version, and its
+	// packed form (see iLinkClientVersion) from the iLink-App-ClientVersion header.
+	channelVersion = "2.4.9"
+	// iLinkClientVersion packs channelVersion as uint32 0x00MMNNPP
+	// (major<<16 | minor<<8 | patch), matching upstream buildClientVersion.
+	iLinkClientVersion = "132105" // 0x00020409
+	// iLinkAppID is upstream package.json's ilink_appid; sent as iLink-App-Id.
+	iLinkAppID = "bot"
+
 	defaultLongPollTimeout = 35 * time.Second
 	defaultAPITimeout      = 15 * time.Second
 	defaultConfigTimeout   = 10 * time.Second
+	notifyStopTimeout      = 3 * time.Second
 
 	sessionExpiredErrCode = -14
 )
@@ -47,7 +59,39 @@ func NewClient(log *slog.Logger) *Client {
 }
 
 func buildBaseInfo() BaseInfo {
-	return BaseInfo{ChannelVersion: channelVersion}
+	return BaseInfo{ChannelVersion: channelVersion, BotAgent: botAgent}
+}
+
+// botAgent identifies the host application to iLink, in upstream's UA-style
+// grammar (`name "/" version`, each 1-32 chars of [A-Za-z0-9_.+-]). Upstream
+// drops tokens that don't parse, so the build version is squeezed into that
+// charset rather than sent verbatim.
+var botAgent = "Memoh/" + sanitizeBotAgentVersion(version.Version)
+
+func sanitizeBotAgentVersion(v string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(v) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '_', r == '.', r == '+', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+		if b.Len() >= 32 {
+			break
+		}
+	}
+	if b.Len() == 0 {
+		return "dev"
+	}
+	return b.String()
+}
+
+// setCommonHeaders adds the headers iLink expects on every request, GET or POST.
+func setCommonHeaders(h http.Header) {
+	h.Set("iLink-App-Id", iLinkAppID)
+	h.Set("iLink-App-ClientVersion", iLinkClientVersion)
 }
 
 // randomWechatUIN generates the X-WECHAT-UIN header value: random uint32 -> decimal -> base64.
@@ -58,11 +102,13 @@ func randomWechatUIN() string {
 	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(uint64(n), 10)))
 }
 
-func (*Client) buildHeaders(token string, bodyLen int) http.Header {
+// buildHeaders returns the POST headers. Content-Length is left to net/http,
+// which derives it from the request body.
+func (*Client) buildHeaders(token string) http.Header {
 	h := http.Header{}
+	setCommonHeaders(h)
 	h.Set("Content-Type", "application/json")
 	h.Set("AuthorizationType", "ilink_bot_token")
-	h.Set("Content-Length", strconv.Itoa(bodyLen))
 	h.Set("X-WECHAT-UIN", randomWechatUIN())
 	if strings.TrimSpace(token) != "" {
 		h.Set("Authorization", "Bearer "+strings.TrimSpace(token))
@@ -90,7 +136,7 @@ func (c *Client) apiPost(ctx context.Context, baseURL, endpoint string, body []b
 	if err != nil {
 		return nil, fmt.Errorf("weixin api request: %w", err)
 	}
-	for k, vs := range c.buildHeaders(token, len(body)) {
+	for k, vs := range c.buildHeaders(token) {
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
@@ -145,8 +191,22 @@ func (c *Client) SendMessage(ctx context.Context, cfg adapterConfig, msg SendMes
 	if err != nil {
 		return err
 	}
-	_, err = c.apiPost(ctx, cfg.BaseURL, "ilink/bot/sendmessage", body, cfg.Token, defaultAPITimeout)
-	return err
+	raw, err := c.apiPost(ctx, cfg.BaseURL, "ilink/bot/sendmessage", body, cfg.Token, defaultAPITimeout)
+	if err != nil {
+		return err
+	}
+	// An HTTP 200 can still carry a rejection in ret/errmsg; an empty body is
+	// treated as accepted, as older gateways replied without one.
+	var resp SendMessageResponse
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return fmt.Errorf("weixin sendmessage decode: %w", err)
+		}
+	}
+	if resp.Ret != 0 {
+		return fmt.Errorf("weixin sendmessage ret=%d: %s", resp.Ret, resp.ErrMsg)
+	}
+	return nil
 }
 
 // GetConfig fetches bot config (typing_ticket etc.).
@@ -203,26 +263,53 @@ func (c *Client) GetUploadURL(ctx context.Context, cfg adapterConfig, req GetUpl
 	return &resp, nil
 }
 
-// FetchQRCode requests a new QR code for login.
-func (c *Client) FetchQRCode(ctx context.Context, apiBaseURL string) (*QRCodeResponse, error) {
-	base := ensureTrailingSlash(apiBaseURL)
-	u := base + "ilink/bot/get_bot_qrcode?bot_type=" + url.QueryEscape(defaultBotType)
+// NotifyStart tells iLink this bot's channel client has come online.
+func (c *Client) NotifyStart(ctx context.Context, cfg adapterConfig) error {
+	return c.notifyLifecycle(ctx, cfg, "ilink/bot/msg/notifystart", defaultConfigTimeout)
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+// NotifyStop tells iLink this bot's channel client is going offline.
+// Its timeout is short because channel.Manager stops connections one by one
+// under its lock (stopAll on shutdown), so a slow iLink would stall every stop.
+func (c *Client) NotifyStop(ctx context.Context, cfg adapterConfig) error {
+	return c.notifyLifecycle(ctx, cfg, "ilink/bot/msg/notifystop", notifyStopTimeout)
+}
+
+func (c *Client) notifyLifecycle(ctx context.Context, cfg adapterConfig, endpoint string, timeout time.Duration) error {
+	body, err := json.Marshal(NotifyLifecycleRequest{BaseInfo: buildBaseInfo()})
+	if err != nil {
+		return err
+	}
+	raw, err := c.apiPost(ctx, cfg.BaseURL, endpoint, body, cfg.Token, timeout)
+	if err != nil {
+		return err
+	}
+	var resp NotifyLifecycleResponse
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return fmt.Errorf("weixin %s decode: %w", endpoint, err)
+		}
+	}
+	if resp.Ret != 0 {
+		return fmt.Errorf("weixin %s ret=%d: %s", endpoint, resp.Ret, resp.ErrMsg)
+	}
+	return nil
+}
+
+// FetchQRCode requests a new QR code for login. localTokens are bot tokens this
+// installation already holds for the account being connected; iLink uses them
+// to recognise a re-scan of an already-bound bot (status binded_redirect).
+func (c *Client) FetchQRCode(ctx context.Context, apiBaseURL string, localTokens []string) (*QRCodeResponse, error) {
+	if localTokens == nil {
+		localTokens = []string{}
+	}
+	body, err := json.Marshal(QRCodeRequest{LocalTokenList: localTokens})
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.httpClient.Do(req) //nolint:gosec // URL from admin-configured baseURL
+	raw, err := c.apiPost(ctx, apiBaseURL, "ilink/bot/get_bot_qrcode?bot_type="+url.QueryEscape(defaultBotType), body, "", defaultAPITimeout)
 	if err != nil {
-		return nil, fmt.Errorf("weixin qrcode fetch: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("weixin qrcode %d: %s", resp.StatusCode, string(raw))
+		return nil, fmt.Errorf("weixin qrcode: %w", err)
 	}
 	var qr QRCodeResponse
 	if err := json.Unmarshal(raw, &qr); err != nil {
@@ -231,30 +318,42 @@ func (c *Client) FetchQRCode(ctx context.Context, apiBaseURL string) (*QRCodeRes
 	return &qr, nil
 }
 
-// PollQRStatus long-polls the QR code login status.
-func (c *Client) PollQRStatus(ctx context.Context, apiBaseURL, qrcode string) (*QRStatusResponse, error) {
-	base := ensureTrailingSlash(apiBaseURL)
-	u := base + "ilink/bot/get_qrcode_status?qrcode=" + url.QueryEscape(qrcode)
+// PollQRStatus long-polls the QR code login status. verifyCode is the number the
+// user read off their phone after a need_verifycode status; empty otherwise.
+//
+// A client-side timeout or a transport/gateway failure is reported as "wait",
+// as upstream does: the long-poll is expected to be cut by proxies, and the
+// caller simply polls again.
+func (c *Client) PollQRStatus(ctx context.Context, apiBaseURL, qrcode, verifyCode string) (*QRStatusResponse, error) {
+	u := ensureTrailingSlash(apiBaseURL) + "ilink/bot/get_qrcode_status?qrcode=" + url.QueryEscape(qrcode)
+	if verifyCode != "" {
+		u += "&verify_code=" + url.QueryEscape(verifyCode)
+	}
 
-	ctx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, defaultLongPollTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(pollCtx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("iLink-App-ClientVersion", "1")
-	resp, err := c.httpClient.Do(req) //nolint:gosec // URL from admin-configured baseURL
+	setCommonHeaders(req.Header)
+	resp, err := c.httpClient.Do(req) //nolint:gosec // host is defaultBaseURL or an allowlisted iLink redirect host
 	if err != nil {
 		if ctx.Err() != nil {
-			return &QRStatusResponse{Status: "wait"}, nil
+			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("weixin qrstatus fetch: %w", err)
+		c.logger.WarnContext(ctx, "weixin qrstatus fetch failed, treating as wait", slog.Any("error", err))
+		return &QRStatusResponse{Status: "wait"}, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode >= http.StatusInternalServerError {
+		c.logger.WarnContext(ctx, "weixin qrstatus gateway error, treating as wait", slog.Int("status", resp.StatusCode))
+		return &QRStatusResponse{Status: "wait"}, nil
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("weixin qrstatus %d: %s", resp.StatusCode, string(raw))
