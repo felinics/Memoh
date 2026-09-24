@@ -132,4 +132,20 @@ CREATE VIEW bot_visible_history_messages AS SELECT * FROM bot_history_messages;
 	if err := tx.QueryRow(ctx, "SELECT sum((usage->>'inputTokens')::bigint) FROM bot_history_messages").Scan(&rawInput); err != nil || rawInput != 1770 {
 		t.Fatalf("raw input changed: %d, err = %v", rawInput, err)
 	}
+	if _, err := tx.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0155_usage_input_semantics.down.sql")); err != nil {
+		t.Fatal(err)
+	}
+	var removed bool
+	if err := tx.QueryRow(ctx, "SELECT to_regprocedure('public.memoh_usage_input_tokens(jsonb,jsonb,text)') IS NULL").Scan(&removed); err != nil || !removed {
+		t.Fatalf("down migration removed function = %t, err = %v", removed, err)
+	}
+	for range 2 {
+		if _, err := tx.Exec(ctx, readEmbeddedMigration(t, "postgres/migrations/0155_usage_input_semantics.up.sql")); err != nil {
+			t.Fatal(err)
+		}
+		models, err := queries.GetTokenUsageByModel(ctx, sqlc.GetTokenUsageByModelParams{BotID: botUUID, FromTime: from, ToTime: to})
+		if err != nil || len(models) != 1 || models[0].InputTokens != wantTotal {
+			t.Fatalf("reapplied migration totals = %+v, err = %v", models, err)
+		}
+	}
 }
