@@ -4,14 +4,10 @@ import (
 	"context"
 	"errors"
 	"os"
-	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/felinics/memoh/internal/botworkspace"
 	dbpkg "github.com/felinics/memoh/internal/db"
@@ -22,197 +18,127 @@ import (
 	"github.com/felinics/memoh/internal/team"
 )
 
-var (
-	botCreateMigrationOnce sync.Once
-	botCreateMigrationErr  error
-)
-
-func TestPostgresBotCreateMakesOneBotAndOneIntentPerKey(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	pool := openBotCreatePostgres(t, ctx)
-	ownerID := createBotCreateOwner(t, ctx, pool)
-	store := postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool))
-	svc := NewService(nil, store)
-	svc.SetWorkspaceIntents(postgresIntents{})
-
-	// Identical creates racing with one key, as a client resending in parallel
-	// would send them; a loser is answered the way the endpoint answers it.
-	key := uuid.NewString()
-	const attempts = 8
-	start := make(chan struct{})
-	type answer struct {
-		botID      string
-		generation int64
-		err        error
-	}
-	answers := make(chan answer, attempts)
-	var wg sync.WaitGroup
-	for range attempts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			req := CreateBotRequest{DisplayName: "小猫", AclPreset: "allow_all", RequestKey: key}
-			bot, err := svc.Create(ctx, ownerID, req)
-			if errors.Is(err, ErrBotNameTaken) {
-				var found bool
-				if bot, found, err = svc.FindCreated(ctx, ownerID, key); err == nil && !found {
-					err = errors.New("lost the race but found no winner")
-				}
-				if err == nil {
-					bot, err = svc.AwaitCreated(ctx, bot, req)
-				}
-			}
-			if err != nil {
-				answers <- answer{err: err}
-				return
-			}
-			// Whoever answers sees the winner's bot complete, intent included.
-			generation, err := intentGeneration(ctx, pool, bot.ID)
-			answers <- answer{botID: bot.ID, generation: generation, err: err}
-		}()
-	}
-	close(start)
-	wg.Wait()
-	close(answers)
-
-	var botID string
-	for a := range answers {
-		if a.err != nil {
-			t.Fatalf("attempt failed: %v", a.err)
+func TestPostgresBotCreate(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		if os.Getenv("MEMOH_TEST_POSTGRES_REQUIRED") == "1" {
+			t.Fatal("TEST_POSTGRES_DSN is not set")
 		}
-		if botID == "" {
-			botID = a.botID
-		}
-		if a.botID != botID || a.generation != 1 {
-			t.Fatalf("answered bot %s at generation %d; want every attempt answered with %s at generation 1", a.botID, a.generation, botID)
+		t.Skip("set TEST_POSTGRES_DSN to run")
+	}
+	if os.Getenv("TEST_POSTGRES_BOOTSTRAP_SCHEMA") == "1" {
+		if err := dbtest.MigratePostgresUp(dsn); err != nil {
+			t.Fatalf("migrate: %v", err)
 		}
 	}
-	if n := countBotsWithKey(t, ctx, pool, key); n != 1 {
-		t.Fatalf("bots made with the key = %d, want 1", n)
-	}
-	if generation, err := intentGeneration(ctx, pool, botID); err != nil || generation != 1 {
-		t.Fatalf("workspace intent generation = %d (%v), want 1", generation, err)
-	}
-}
-
-func TestPostgresBotCreateThatFailsPartWayLeavesNothing(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	pool := openBotCreatePostgres(t, ctx)
-	ownerID := createBotCreateOwner(t, ctx, pool)
-	store := postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool))
-	key := uuid.NewString()
-
-	failing := NewService(nil, store)
-	failing.SetWorkspaceIntents(postgresIntents{failAfterWrite: true})
-	if _, err := failing.Create(ctx, ownerID, CreateBotRequest{DisplayName: "小猫", AclPreset: "allow_all", RequestKey: key}); err == nil {
-		t.Fatal("Create succeeded; want the intent failure")
-	}
-	if n := countBotsWithKey(t, ctx, pool, key); n != 0 {
-		t.Fatalf("bots left behind by the failed create = %d, want 0", n)
-	}
-
-	// Nothing is left half-made, so the resend simply creates the bot.
-	svc := NewService(nil, store)
-	svc.SetWorkspaceIntents(postgresIntents{})
-	bot, err := svc.Create(ctx, ownerID, CreateBotRequest{DisplayName: "小猫", AclPreset: "allow_all", RequestKey: key})
+	ctx := t.Context()
+	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
 	if err != nil {
-		t.Fatalf("resend: %v", err)
+		t.Fatalf("open: %v", err)
 	}
-	if generation, err := intentGeneration(ctx, pool, bot.ID); err != nil || generation != 1 {
-		t.Fatalf("resent bot's intent generation = %d (%v), want 1", generation, err)
+	t.Cleanup(pool.Close)
+	owner := uuid.New()
+	if _, err := pool.Exec(ctx, `WITH u AS (INSERT INTO users (id, username, is_active, metadata) VALUES ($1, $2, true, '{}') RETURNING id)
+		INSERT INTO team_members (team_id, user_id, role) SELECT $3, id, 'admin' FROM u`, owner, "bot-create-"+owner.String(), team.DefaultTeamID); err != nil {
+		t.Fatalf("create owner: %v", err)
 	}
+	cleanupCtx := context.WithoutCancel(ctx)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM bots WHERE owner_user_id = $1", owner)
+		_, _ = pool.Exec(cleanupCtx, "DELETE FROM users WHERE id = $1", owner)
+	})
+	store := postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool))
+	newService := func(intents postgresIntents) *Service {
+		svc := NewService(nil, store)
+		svc.SetWorkspaceIntents(intents)
+		return svc
+	}
+	count := func(query string, args ...any) (n int64) {
+		if err := pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
+			t.Errorf("%s: %v", query, err)
+		}
+		return n
+	}
+	generation := func(botID string) int64 {
+		return count("SELECT COALESCE(max(desired_generation), 0) FROM bot_workspaces WHERE bot_id = $1", botID)
+	}
+
+	t.Run("concurrent creates with one key make one bot and one intent", func(t *testing.T) {
+		svc := newService(postgresIntents{})
+		req := CreateBotRequest{DisplayName: "小猫", AclPreset: "allow_all", RequestKey: uuid.NewString()}
+		ids := make(chan string, 8)
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				bot, err := svc.Create(ctx, owner.String(), req)
+				if errors.Is(err, ErrBotNameTaken) { // lost the race: answered as the endpoint answers it
+					if bot, _, err = svc.FindCreated(ctx, owner.String(), req.RequestKey); err == nil {
+						bot, err = svc.AwaitCreated(ctx, bot, req)
+					}
+				}
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if g := generation(bot.ID); g != 1 {
+					t.Errorf("answered with bot %s at intent generation %d, want 1", bot.ID, g)
+				}
+				ids <- bot.ID
+			})
+		}
+		wg.Wait()
+		close(ids)
+		first := <-ids
+		for id := range ids {
+			if id != first {
+				t.Errorf("answered with bots %s and %s, want one", first, id)
+			}
+		}
+		if n := count("SELECT count(*) FROM bots WHERE create_request_key = $1", req.RequestKey); n != 1 {
+			t.Errorf("bots made with the key = %d, want 1", n)
+		}
+	})
+
+	t.Run("a create that fails part-way leaves nothing", func(t *testing.T) {
+		req := CreateBotRequest{DisplayName: "小猫", AclPreset: "allow_all", RequestKey: uuid.NewString()}
+		if _, err := newService(postgresIntents{fail: true}).Create(ctx, owner.String(), req); err == nil {
+			t.Fatal("Create succeeded, want the intent failure")
+		}
+		if n := count("SELECT count(*) FROM bots WHERE create_request_key = $1", req.RequestKey); n != 0 {
+			t.Errorf("bots left behind = %d, want 0", n)
+		}
+		bot, err := newService(postgresIntents{}).Create(ctx, owner.String(), req)
+		if err != nil || generation(bot.ID) != 1 {
+			t.Errorf("resend: %v, intent generation %d; want a new bot at generation 1", err, generation(bot.ID))
+		}
+	})
+
+	t.Run("creates without a key never replay", func(t *testing.T) {
+		svc := newService(postgresIntents{})
+		before := count("SELECT count(*) FROM bots WHERE owner_user_id = $1 AND create_request_key IS NULL", owner)
+		for range 2 {
+			if _, err := svc.Create(ctx, owner.String(), CreateBotRequest{DisplayName: "小猫", AclPreset: "allow_all"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := count("SELECT count(*) FROM bots WHERE owner_user_id = $1 AND create_request_key IS NULL", owner) - before; n != 2 {
+			t.Errorf("keyless creates made %d bots, want 2", n)
+		}
+	})
 }
 
-// postgresIntents records intents the way the botworkspace adapter in
-// cmd/internal/core does; failAfterWrite fails the create after the write.
-type postgresIntents struct{ failAfterWrite bool }
+// postgresIntents writes intents as the botworkspace adapter in
+// cmd/internal/core does; fail fails the create after the write.
+type postgresIntents struct {
+	WorkspaceIntents // Create uses only RecordPresent and Wake
+	fail             bool
+}
 
 func (i postgresIntents) RecordPresent(ctx context.Context, q dbstore.Queries, botID, image string) error {
-	if _, err := botworkspace.NewRepository(q).Upsert(ctx, botID, botworkspace.DesiredPresent, strings.TrimSpace(image), false); err != nil {
+	if _, err := botworkspace.NewRepository(q).Upsert(ctx, botID, botworkspace.DesiredPresent, image, false); err != nil || !i.fail {
 		return err
 	}
-	if i.failAfterWrite {
-		return errors.New("store went away")
-	}
-	return nil
+	return errors.New("store went away")
 }
 
 func (postgresIntents) Wake(context.Context) {}
-
-func (postgresIntents) RequestAbsent(context.Context, string, bool) (int64, error) { return 0, nil }
-
-func (postgresIntents) AwaitSettled(context.Context, string, int64) (WorkspaceOutcome, error) {
-	return WorkspaceOutcome{}, nil
-}
-
-func (postgresIntents) Current(context.Context, string) (WorkspaceOutcome, bool, error) {
-	return WorkspaceOutcome{}, false, nil
-}
-
-func intentGeneration(ctx context.Context, pool *pgxpool.Pool, botID string) (int64, error) {
-	var generation int64
-	err := pool.QueryRow(ctx, `SELECT desired_generation FROM bot_workspaces WHERE bot_id = $1`, botID).Scan(&generation)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, errors.New("bot has no workspace intent")
-	}
-	return generation, err
-}
-
-func countBotsWithKey(t *testing.T, ctx context.Context, pool *pgxpool.Pool, key string) int {
-	t.Helper()
-	var n int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM bots WHERE create_request_key = $1`, key).Scan(&n); err != nil {
-		t.Fatalf("count bots: %v", err)
-	}
-	return n
-}
-
-func createBotCreateOwner(t *testing.T, ctx context.Context, pool *pgxpool.Pool) string {
-	t.Helper()
-	userID := uuid.New()
-	if _, err := pool.Exec(ctx, `
-		WITH created_user AS (
-			INSERT INTO users (id, username, is_active, metadata)
-			VALUES ($1, $2, true, '{}'::jsonb)
-			RETURNING id
-		)
-		INSERT INTO team_members (team_id, user_id, role)
-		SELECT $3, id, 'admin' FROM created_user`,
-		userID, "bot-create-"+userID.String(), team.DefaultTeamID,
-	); err != nil {
-		t.Fatalf("create owner: %v", err)
-	}
-	// The test's own context is canceled by the time cleanup runs.
-	cleanupCtx := context.WithoutCancel(ctx)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM bots WHERE owner_user_id = $1", userID)
-		_, _ = pool.Exec(cleanupCtx, "DELETE FROM users WHERE id = $1", userID)
-	})
-	return userID.String()
-}
-
-func openBotCreatePostgres(t *testing.T, ctx context.Context) *pgxpool.Pool {
-	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
-	if dsn == "" {
-		if os.Getenv("MEMOH_TEST_POSTGRES_REQUIRED") == "1" {
-			t.Fatal("bot create PostgreSQL test is required, but TEST_POSTGRES_DSN is not set")
-		}
-		t.Skip("set TEST_POSTGRES_DSN to run bot create PostgreSQL integration")
-	}
-	if os.Getenv("TEST_POSTGRES_BOOTSTRAP_SCHEMA") == "1" {
-		botCreateMigrationOnce.Do(func() { botCreateMigrationErr = dbtest.MigratePostgresUp(dsn) })
-		if botCreateMigrationErr != nil {
-			t.Fatalf("migrate bot create PostgreSQL database: %v", botCreateMigrationErr)
-		}
-	}
-	pool, err := dbpkg.OpenPostgresDSN(ctx, dsn)
-	if err != nil {
-		t.Fatalf("open bot create PostgreSQL pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}

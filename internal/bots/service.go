@@ -48,9 +48,7 @@ var (
 	ErrBotNameTaken      = errors.New("bot name already taken")
 	ErrBotNameInvalid    = errors.New("bot name is invalid")
 	ErrBotNameReserved   = errors.New("bot name is reserved")
-	// ErrCreateRequestDeleted reports that the bot an Idempotency-Key created
-	// is being deleted: that create's answer is gone, and a new bot would not
-	// be the one the request asked for.
+	// ErrCreateRequestDeleted: the bot an Idempotency-Key created is being deleted.
 	ErrCreateRequestDeleted = errors.New("the bot this create request made is being deleted")
 )
 
@@ -160,12 +158,8 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 		status = BotStatusReady
 	}
 	var row sqlc.CreateBotRow
-	// The bot, its ACL preset and its workspace intent commit together: a
-	// create that fails part-way leaves nothing behind, and one that committed
-	// leaves nothing for a resend to finish. Two creates with the same
-	// Idempotency-Key serialize on its unique index, so the loser sees the
-	// winner only once all of it has committed; the endpoint answers the loser
-	// via FindCreated.
+	// The bot, its ACL preset and its workspace intent commit together, so a
+	// resend never finds a half-made bot to finish.
 	err = s.inTx(ctx, func(q dbstore.Queries) error {
 		created, err := q.CreateBot(ctx, sqlc.CreateBotParams{
 			OwnerUserID:      ownerUUID,
@@ -215,18 +209,14 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	return s.AwaitCreated(ctx, bot, req)
 }
 
-// AwaitCreated answers for a bot a create made, by this request or by an
-// earlier attempt with the same Idempotency-Key: with WaitForReady, once its
-// workspace has settled. It writes nothing; the create committed everything
-// the bot needs together with the bot.
+// AwaitCreated answers a create, first attempt or resend, with its bot: with
+// WaitForReady, once the workspace has settled.
 func (s *Service) AwaitCreated(ctx context.Context, bot Bot, req CreateBotRequest) (Bot, error) {
 	if !req.WaitForReady || s.workspaceIntents == nil {
 		return bot, nil
 	}
 	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), botLifecycleOperationTimeout)
 	defer cancel()
-	// Zero waits for the current intent: the one the bot was created with, or
-	// whatever superseded it since.
 	outcome, err := s.workspaceIntents.AwaitSettled(waitCtx, bot.ID, 0)
 	if err != nil {
 		return Bot{}, fmt.Errorf("wait for workspace: %w", err)
@@ -237,8 +227,7 @@ func (s *Service) AwaitCreated(ctx context.Context, bot Bot, req CreateBotReques
 	return s.Get(waitCtx, bot.ID)
 }
 
-// inTx runs fn in one transaction when the store supports them; stores without
-// one (tests) run it directly.
+// inTx runs fn in one transaction; test stores without InTx run it directly.
 func (s *Service) inTx(ctx context.Context, fn func(dbstore.Queries) error) error {
 	if txer, ok := s.queries.(interface {
 		InTx(context.Context, func(dbstore.Queries) error) error
@@ -249,9 +238,7 @@ func (s *Service) inTx(ctx context.Context, fn func(dbstore.Queries) error) erro
 }
 
 // FindCreated returns the bot an earlier create with this Idempotency-Key made
-// for the owner, so a create resent after its response was lost is answered
-// with that bot instead of a second one. ok is false when the key is empty or
-// has made nothing yet.
+// for the owner; ok is false when there is none.
 func (s *Service) FindCreated(ctx context.Context, ownerUserID, requestKey string) (Bot, bool, error) {
 	if requestKey == "" {
 		return Bot{}, false, nil

@@ -230,8 +230,7 @@ CREATE TABLE IF NOT EXISTS bots (
   timezone TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
-  -- Idempotency-Key of the POST /bots that created this row; NULL when the
-  -- client sent none. Unique per owner (idx_bots_create_request_key).
+  -- Idempotency-Key of the POST /bots that created this row.
   create_request_key TEXT,
   -- Retired setting: no code reads or writes this column. Kept so dropping it
   -- never becomes a breaking schema change for an already-deployed server.

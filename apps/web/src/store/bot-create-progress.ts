@@ -187,10 +187,8 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
 
   let lastPayload: BotsCreateBotRequest | null = null
   let lastOptions: StartBotCreateOptions = {}
-  // Idempotency-Key of the last create. retry() resends it with the same
-  // payload, so a create whose response was lost is answered with the Bot it
-  // already made instead of a second one; every start() from the form mints a
-  // new key.
+  // retry() resends the same Idempotency-Key, so a lost response is answered
+  // with the Bot already made; each start() from the form mints a new key.
   let lastRequestKey = ''
   let grantsApplied = false
 

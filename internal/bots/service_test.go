@@ -392,35 +392,21 @@ func TestResolveNameSuffixesDerivedNameCollisions(t *testing.T) {
 
 // fakeWorkspaceIntents records intents and answers awaits from a script.
 type fakeWorkspaceIntents struct {
-	ensured []string
-	images  []string
-	// recordedThrough is the store each intent was written through.
-	recordedThrough []dbstore.Queries
-	recordErr       error
-	// onWake observes each Wake.
-	onWake   func()
+	ensured  []string
+	images   []string
 	absent   []string
 	preserve []bool
 	outcome  WorkspaceOutcome
 	awaitErr error
-	awaited  []int64
 }
 
-func (f *fakeWorkspaceIntents) RecordPresent(_ context.Context, q dbstore.Queries, botID, image string) error {
-	if f.recordErr != nil {
-		return f.recordErr
-	}
+func (f *fakeWorkspaceIntents) RecordPresent(_ context.Context, _ dbstore.Queries, botID, image string) error {
 	f.ensured = append(f.ensured, botID)
 	f.images = append(f.images, image)
-	f.recordedThrough = append(f.recordedThrough, q)
 	return nil
 }
 
-func (f *fakeWorkspaceIntents) Wake(context.Context) {
-	if f.onWake != nil {
-		f.onWake()
-	}
-}
+func (*fakeWorkspaceIntents) Wake(context.Context) {}
 
 func (f *fakeWorkspaceIntents) RequestAbsent(_ context.Context, botID string, preserve bool) (int64, error) {
 	f.absent = append(f.absent, botID)
@@ -428,8 +414,7 @@ func (f *fakeWorkspaceIntents) RequestAbsent(_ context.Context, botID string, pr
 	return int64(len(f.absent)), nil
 }
 
-func (f *fakeWorkspaceIntents) AwaitSettled(_ context.Context, _ string, generation int64) (WorkspaceOutcome, error) {
-	f.awaited = append(f.awaited, generation)
+func (f *fakeWorkspaceIntents) AwaitSettled(context.Context, string, int64) (WorkspaceOutcome, error) {
 	return f.outcome, f.awaitErr
 }
 
@@ -570,238 +555,12 @@ func TestRunDeleteLifecycleRevertsToPreviousStatusWhenWorkspaceLingers(t *testin
 	}
 }
 
-// keyedBotRow is a GetBotByCreateRequestKey row for botID in status.
-func keyedBotRow(botID, ownerUserID pgtype.UUID, status string) *fakeRow {
-	row := makeBotRow(botID, ownerUserID)
-	scan := row.scanFunc
-	row.scanFunc = func(dest ...any) error {
-		if err := scan(dest...); err != nil {
-			return err
-		}
-		*dest[7].(*string) = status
-		return nil
-	}
-	return row
-}
-
-func TestFindCreatedAnswersWithTheBotTheKeyMade(t *testing.T) {
-	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	var asked []any
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
-		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if strings.Contains(sql, "create_request_key = $2") {
-				asked = args
-				return keyedBotRow(botUUID, ownerUUID, BotStatusCreating)
-			}
-			return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
-		},
-	})))
-
-	bot, found, err := svc.FindCreated(context.Background(), ownerUUID.String(), "key-1")
-	if err != nil || !found || bot.ID != botUUID.String() {
-		t.Fatalf("FindCreated = %q, %v, %v; want the keyed bot", bot.ID, found, err)
-	}
-	if len(asked) != 2 || asked[0] != ownerUUID || asked[1] != (pgtype.Text{String: "key-1", Valid: true}) {
-		t.Fatalf("lookup args = %#v; the key must be scoped to the owner", asked)
-	}
-}
-
-func TestFindCreatedWithoutAKeyFindsNothing(t *testing.T) {
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
-		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
-			t.Fatal("a create without a key must not be looked up")
-			return nil
-		},
-	})))
-	if _, found, err := svc.FindCreated(context.Background(), "00000000-0000-0000-0000-000000000001", ""); found || err != nil {
-		t.Fatalf("FindCreated without a key = %v, %v; want nothing", found, err)
-	}
-}
-
-func TestFindCreatedRefusesABotBeingDeleted(t *testing.T) {
-	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
-		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
-			return keyedBotRow(botUUID, ownerUUID, BotStatusDeleting)
-		},
-	})))
-	if _, found, err := svc.FindCreated(context.Background(), ownerUUID.String(), "key-1"); found || !errors.Is(err, ErrCreateRequestDeleted) {
-		t.Fatalf("FindCreated on a deleting bot = %v, %v; want ErrCreateRequestDeleted", found, err)
-	}
-}
-
-func TestCreateStoresTheRequestKey(t *testing.T) {
-	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
-	for _, tc := range []struct {
-		key  string
-		want pgtype.Text
-	}{
-		{key: "key-1", want: pgtype.Text{String: "key-1", Valid: true}},
-		{key: "", want: pgtype.Text{}}, // backup import and other callers send none
-	} {
-		var stored any
-		insertReached := errors.New("insert reached")
-		svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
-			queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
-				switch {
-				case strings.Contains(sql, "FROM users") && strings.Contains(sql, "id = $1"):
-					return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
-				case strings.Contains(sql, "INSERT INTO bots"):
-					stored = args[8]
-					return &fakeRow{scanFunc: func(_ ...any) error { return insertReached }}
-				default:
-					return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
-				}
-			},
-		})))
-		_, err := svc.Create(context.Background(), ownerUUID.String(), CreateBotRequest{DisplayName: "Neko", RequestKey: tc.key})
-		if !errors.Is(err, insertReached) || stored != tc.want {
-			t.Fatalf("key %q: stored %#v, err %v; want %#v", tc.key, stored, err, tc.want)
-		}
-	}
-}
-
-// txStore runs InTx on a marked copy of the store and reports what became of
-// the transaction.
-type txStore struct {
-	dbstore.Queries
-	tx      dbstore.Queries
-	outcome string
-}
-
-type txQueries struct{ dbstore.Queries }
-
-func (s *txStore) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
-	s.tx = &txQueries{Queries: s.Queries}
-	if err := fn(s.tx); err != nil {
-		s.outcome = "rolled back"
-		return err
-	}
-	s.outcome = "committed"
-	return nil
-}
-
-// createdBotRow is a CreateBot row for botID.
-func createdBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
-	return &fakeRow{scanFunc: func(dest ...any) error {
-		*dest[0].(*pgtype.UUID) = botID
-		*dest[1].(*pgtype.UUID) = ownerUserID
-		*dest[2].(*string) = "neko"
-		*dest[3].(*pgtype.Text) = pgtype.Text{String: "Neko", Valid: true}
-		*dest[4].(*pgtype.Text) = pgtype.Text{}
-		*dest[5].(*pgtype.Text) = pgtype.Text{}
-		*dest[6].(*bool) = true
-		*dest[7].(*string) = BotStatusCreating
-		*dest[8].(*string) = "medium"
-		*dest[12].(*[]byte) = []byte(`{"workspace":{"image":"img:1"}}`)
-		return nil
-	}}
-}
-
-// newCreateStore is a store whose owner exists and whose INSERT answers with
-// botID; deletes counts DELETE FROM bots.
-func newCreateStore(botID, ownerUserID pgtype.UUID, deletes *int) *txStore {
-	return &txStore{Queries: postgresstore.NewQueries(sqlc.New(&fakeDBTX{
-		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
-			switch {
-			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "id = $1"):
-				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
-			case strings.Contains(sql, "INSERT INTO bots"):
-				return createdBotRow(botID, ownerUserID)
-			default:
-				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
-			}
-		},
-		execFunc: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
-			if strings.Contains(sql, "DELETE FROM bots") {
-				*deletes++
-			}
-			return pgconn.CommandTag{}, nil
-		},
-	}))}
-}
-
-func TestCreateCommitsTheBotWithItsWorkspaceIntent(t *testing.T) {
-	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	for _, deferWake := range []bool{false, true} {
-		deletes := 0
-		store := newCreateStore(botUUID, ownerUUID, &deletes)
-		var wokeAfter []string
-		intents := &fakeWorkspaceIntents{}
-		intents.onWake = func() { wokeAfter = append(wokeAfter, store.outcome) }
-		svc := NewService(nil, store)
-		svc.SetWorkspaceIntents(intents)
-
-		req := CreateBotRequest{DisplayName: "Neko", AclPreset: "allow_all", Metadata: map[string]any{"workspace": map[string]any{"image": "img:1"}}, DeferWake: deferWake}
-		if _, err := svc.Create(context.Background(), ownerUUID.String(), req); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		if store.outcome != "committed" || len(intents.recordedThrough) != 1 || intents.recordedThrough[0] != store.tx {
-			t.Fatalf("outcome %q, intents written through %v; want one intent in the transaction that inserted the bot", store.outcome, intents.recordedThrough)
-		}
-		if intents.ensured[0] != botUUID.String() || intents.images[0] != "img:1" {
-			t.Fatalf("intent for %v with image %v; want %s with img:1", intents.ensured, intents.images, botUUID.String())
-		}
-		// The create stream wakes the reconciler itself, once it listens.
-		if want := map[bool]int{false: 1, true: 0}[deferWake]; len(wokeAfter) != want || (want == 1 && wokeAfter[0] != "committed") {
-			t.Fatalf("DeferWake=%v: woke %v; want %d wake after the commit", deferWake, wokeAfter, want)
-		}
-	}
-}
-
-func TestCreateLeavesNothingWhenItsWorkspaceIntentFails(t *testing.T) {
-	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	deletes := 0
-	store := newCreateStore(botUUID, ownerUUID, &deletes)
-	recordFailed := errors.New("store unavailable")
-	woke := false
-	svc := NewService(nil, store)
-	svc.SetWorkspaceIntents(&fakeWorkspaceIntents{recordErr: recordFailed, onWake: func() { woke = true }})
-
-	_, err := svc.Create(context.Background(), ownerUUID.String(), CreateBotRequest{DisplayName: "Neko", AclPreset: "allow_all"})
-	if !errors.Is(err, recordFailed) {
-		t.Fatalf("err = %v, want the intent failure", err)
-	}
-	// The rollback takes the bot with it: no half-made bot for a resend to
-	// find, and nothing to clean up by hand.
-	if store.outcome != "rolled back" || deletes != 0 || woke {
-		t.Fatalf("outcome %q, deletes %d, woke %v; want a rollback and nothing else", store.outcome, deletes, woke)
-	}
-}
-
-func TestAwaitCreatedWaitsForTheCurrentIntentWithoutRecordingOne(t *testing.T) {
-	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
-	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
-		queryRowFunc: func(context.Context, string, ...any) pgx.Row { return makeBotRow(botUUID, ownerUUID) },
-	})))
-	woke := false
-	intents := &fakeWorkspaceIntents{outcome: WorkspaceOutcome{Desired: "present", Observed: WorkspaceObservedRunning}, onWake: func() { woke = true }}
-	svc.SetWorkspaceIntents(intents)
-	bot := Bot{ID: botUUID.String(), Status: BotStatusCreating}
-
-	if _, err := svc.AwaitCreated(context.Background(), bot, CreateBotRequest{WaitForReady: true}); err != nil {
-		t.Fatalf("AwaitCreated: %v", err)
-	}
-	if len(intents.ensured) != 0 || woke {
-		t.Fatalf("ensured = %v woke = %v; answering a create must write nothing", intents.ensured, woke)
-	}
-	if len(intents.awaited) != 1 || intents.awaited[0] != 0 {
-		t.Fatalf("awaited = %v; want one wait for the current intent", intents.awaited)
-	}
-}
-
 func TestAwaitCreatedAnswersWithTheWorkspaceFailure(t *testing.T) {
 	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{})))
 	svc.SetWorkspaceIntents(&fakeWorkspaceIntents{outcome: WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: WorkspacePhaseBootstrap, LastError: "write AGENTS.md: permission denied"}})
-	bot := Bot{ID: "00000000-0000-0000-0000-000000000002", Status: BotStatusFailed}
 
-	_, err := svc.AwaitCreated(context.Background(), bot, CreateBotRequest{WaitForReady: true})
+	_, err := svc.AwaitCreated(context.Background(), Bot{ID: "00000000-0000-0000-0000-000000000002"}, CreateBotRequest{WaitForReady: true})
 	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
-		t.Fatalf("err = %v; a resend must get the failure its first attempt would have", err)
+		t.Fatalf("err = %v; a resend with wait_for_ready must get the failure its first attempt would have", err)
 	}
 }

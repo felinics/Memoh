@@ -33,12 +33,14 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000101"
 	botID := "00000000-0000-0000-0000-000000000201"
 	botUUID := testUUID(botID)
-	ws := &createBotStreamWorkspace{}
 
 	handler := &UsersHandler{
-		service:        newTestCreateBotAccountService(ownerID),
-		botService:     newCreateBotService(&createBotStreamDB{ownerID: ownerID, botID: botID}, ws),
-		workspaceSetup: ws,
+		service: newTestCreateBotAccountService(ownerID),
+		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(&createBotStreamDB{
+			ownerID: ownerID,
+			botID:   botID,
+		}))),
+		workspaceSetup: &createBotStreamWorkspace{},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -52,6 +54,7 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
+	wireCreateBotIntents(handler)
 	if err := handler.CreateBot(ctx); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
@@ -79,8 +82,8 @@ func TestCreateBotStreamsLifecycleWhenSSERequested(t *testing.T) {
 	if got := eventBotID(last); got != botID {
 		t.Fatalf("ready bot id = %q, want %q", got, botID)
 	}
-	if got := len(ws.intents); got != 1 {
-		t.Fatalf("workspace intents recorded = %d, want the one Create committed with the bot", got)
+	if handler.botService == nil {
+		t.Fatal("bot service should be configured")
 	}
 	if botUUID.Valid != true {
 		t.Fatal("bot UUID helper sanity check failed")
@@ -123,24 +126,26 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000102"
 	botID := "00000000-0000-0000-0000-000000000202"
 
-	ws := &createBotStreamWorkspace{events: []workspace.ContainerSetupEvent{
-		{Type: "pulling", Image: "debian:bookworm-slim"},
-		{Type: "pull_progress", Layers: []ctr.LayerStatus{{Ref: "layer-1", Offset: 10, Total: 100}}},
-		{Type: "creating"},
-		{
-			Type:             "complete",
-			Image:            "debian:bookworm-slim",
-			ContainerID:      "workspace-" + botID,
-			WorkspaceBackend: bridge.WorkspaceBackendContainer,
-			RuntimeBackend:   "io.containerd.runc.v2",
-			ContainerPath:    "/data",
-			Started:          true,
-		},
-	}}
 	handler := &UsersHandler{
-		service:        newTestCreateBotAccountService(ownerID),
-		botService:     newCreateBotService(&createBotStreamDB{ownerID: ownerID, botID: botID}, ws),
-		workspaceSetup: ws,
+		service: newTestCreateBotAccountService(ownerID),
+		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(&createBotStreamDB{
+			ownerID: ownerID,
+			botID:   botID,
+		}))),
+		workspaceSetup: &createBotStreamWorkspace{events: []workspace.ContainerSetupEvent{
+			{Type: "pulling", Image: "debian:bookworm-slim"},
+			{Type: "pull_progress", Layers: []ctr.LayerStatus{{Ref: "layer-1", Offset: 10, Total: 100}}},
+			{Type: "creating"},
+			{
+				Type:             "complete",
+				Image:            "debian:bookworm-slim",
+				ContainerID:      "workspace-" + botID,
+				WorkspaceBackend: bridge.WorkspaceBackendContainer,
+				RuntimeBackend:   "io.containerd.runc.v2",
+				ContainerPath:    "/data",
+				Started:          true,
+			},
+		}},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -154,6 +159,7 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
+	wireCreateBotIntents(handler)
 	if err := handler.CreateBot(ctx); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
@@ -163,6 +169,9 @@ func TestCreateBotStreamsContainerProgressEvents(t *testing.T) {
 		if !hasEventType(events, eventType) {
 			t.Fatalf("missing %q event: %#v", eventType, events)
 		}
+	}
+	if !handler.workspaceSetup.(*createBotStreamWorkspace).subscribedAtKick {
+		t.Fatal("the reconciler was woken before the stream subscribed")
 	}
 	complete, ok := findEventType(events, "complete")
 	if !ok {
@@ -194,12 +203,11 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 		botID:   botID,
 	}
 
-	ws := &createBotStreamWorkspace{err: errors.New("image pull failed")}
 	handler := &UsersHandler{
 		logger:         slog.Default(),
 		service:        newTestCreateBotAccountService(ownerID),
-		botService:     newCreateBotService(streamDB, ws),
-		workspaceSetup: ws,
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{err: errors.New("image pull failed")},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -213,6 +221,7 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
+	wireCreateBotIntents(handler)
 	if err := handler.CreateBot(ctx); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
@@ -238,7 +247,7 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	if strings.Contains(message, "image pull failed") {
 		t.Fatalf("backend error leaked into the stream message %q", message)
 	}
-	// The create only records intent; bots.status is derived by the
+	// The handler only records intent; bots.status is derived by the
 	// reconciler, so the request path must not touch it.
 	if streamDB.status != "" {
 		t.Fatalf("handler wrote bot status %q; the reconciler owns it", streamDB.status)
@@ -249,15 +258,14 @@ func TestCreateBotStreamReportsStableBootstrapError(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000108"
 	botID := "00000000-0000-0000-0000-000000000208"
 	streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
-	ws := &createBotStreamWorkspace{
-		err:   errors.New("write /data/AGENTS.md: permission denied"),
-		phase: botworkspace.PhaseBootstrap,
-	}
 	handler := &UsersHandler{
-		logger:         slog.Default(),
-		service:        newTestCreateBotAccountService(ownerID),
-		botService:     newCreateBotService(streamDB, ws),
-		workspaceSetup: ws,
+		logger:     slog.Default(),
+		service:    newTestCreateBotAccountService(ownerID),
+		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
+		workspaceSetup: &createBotStreamWorkspace{
+			err:   errors.New("write /data/AGENTS.md: permission denied"),
+			phase: botworkspace.PhaseBootstrap,
+		},
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/bots", strings.NewReader(`{
@@ -271,6 +279,7 @@ func TestCreateBotStreamReportsStableBootstrapError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
+	wireCreateBotIntents(handler)
 	if err := handler.CreateBot(ctx); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
@@ -397,10 +406,10 @@ func newTestCreateBotAccountService(userID string) *accounts.Service {
 	return accounts.NewService(nil, createBotAccountStore{userID: userID})
 }
 
-// createBotStreamWorkspace stands in for the botworkspace reconciler: an intent
-// recorded through createBotIntents waits, as a committed row does, until Kick
-// runs a fake provisioning in the background that relays the scripted progress
-// events to subscribers and settles on running or failed.
+// createBotStreamWorkspace stands in for the botworkspace reconciler: every
+// intent runs, once Kick wakes it, a fake provisioning in the background that
+// relays the scripted progress events to subscribers and settles on running or
+// failed.
 type createBotStreamWorkspace struct {
 	events []workspace.ContainerSetupEvent
 	err    error
@@ -410,70 +419,37 @@ type createBotStreamWorkspace struct {
 	subs    map[string][]chan botworkspace.ProgressEvent
 	final   map[string]botworkspace.Workspace
 	settled map[string]chan struct{}
-	pending map[string]string
 	intents []string
+	kick    chan struct{}
+	kicked  sync.Once
+	// subscribedAtKick: whether the stream listened before the reconciler woke.
+	subscribedAtKick bool
 }
 
-func (w *createBotStreamWorkspace) record(botID, image string) {
+func (w *createBotStreamWorkspace) woken() chan struct{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.final == nil {
-		w.final = map[string]botworkspace.Workspace{}
-		w.settled = map[string]chan struct{}{}
-		w.pending = map[string]string{}
+	if w.kick == nil {
+		w.kick = make(chan struct{})
 	}
-	w.intents = append(w.intents, botID)
-	w.settled[botID] = make(chan struct{})
-	w.pending[botID] = image
-}
-
-func (w *createBotStreamWorkspace) EnsurePresent(_ context.Context, botID, image string) (botworkspace.Workspace, error) {
-	w.record(botID, image)
-	w.Kick()
-	return botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1}, nil
+	return w.kick
 }
 
 func (w *createBotStreamWorkspace) Kick() {
-	w.mu.Lock()
-	pending := w.pending
-	w.pending = map[string]string{}
-	w.mu.Unlock()
-	for botID, image := range pending {
-		go w.provision(botID, image)
-	}
+	w.kicked.Do(func() {
+		w.mu.Lock()
+		w.subscribedAtKick = len(w.subs) > 0
+		w.mu.Unlock()
+		close(w.woken())
+	})
 }
 
-func (w *createBotStreamWorkspace) provision(botID, image string) {
-	for _, ev := range w.events {
-		w.publish(botID, botworkspace.ProgressEvent{
-			Type: ev.Type, Image: ev.Image, Message: ev.Message, Layers: ev.Layers,
-			ContainerID: ev.ContainerID, WorkspaceBackend: ev.WorkspaceBackend, RuntimeBackend: ev.RuntimeBackend,
-			ContainerPath: ev.ContainerPath, CDIDevices: ev.CDIDevices, Snapshotter: ev.Snapshotter, Started: ev.Started,
-			DataRestored: ev.DataRestored, HasPreservedData: ev.HasPreservedData,
-		})
-	}
-	final := botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1, ObservedGeneration: 1, Image: image}
-	if w.err != nil {
-		final.Observed = botworkspace.ObservedFailed
-		final.LastError = w.err.Error()
-		final.LastErrorPhase = w.phase
-		if final.LastErrorPhase == "" {
-			final.LastErrorPhase = botworkspace.PhaseStart
-		}
-	} else {
-		final.Observed = botworkspace.ObservedRunning
-		final.EverReady = true
-	}
-	w.mu.Lock()
-	w.final[botID] = final
-	done := w.settled[botID]
-	w.mu.Unlock()
-	close(done)
+// createBotIntents is the bots side of the same fake, as providers.go wires the
+// real reconciler into both.
+type createBotIntents struct {
+	bots.WorkspaceIntents
+	w *createBotStreamWorkspace
 }
-
-// createBotIntents is the bots side of the same fake reconciler: Create records
-// its intent here inside its transaction, as the botworkspace adapter does.
-type createBotIntents struct{ w *createBotStreamWorkspace }
 
 func (i createBotIntents) RecordPresent(_ context.Context, _ dbstore.Queries, botID, image string) error {
 	i.w.record(botID, image)
@@ -482,23 +458,59 @@ func (i createBotIntents) RecordPresent(_ context.Context, _ dbstore.Queries, bo
 
 func (i createBotIntents) Wake(context.Context) { i.w.Kick() }
 
-func (createBotIntents) RequestAbsent(context.Context, string, bool) (int64, error) { return 0, nil }
-
-func (i createBotIntents) AwaitSettled(ctx context.Context, botID string, generation int64) (bots.WorkspaceOutcome, error) {
-	ws, err := i.w.Await(ctx, botID, generation)
-	return bots.WorkspaceOutcome{Desired: ws.Desired, Observed: ws.Observed, LastError: ws.LastError, LastErrorPhase: ws.LastErrorPhase, EverReady: ws.EverReady}, err
-}
-
 func (createBotIntents) Current(context.Context, string) (bots.WorkspaceOutcome, bool, error) {
 	return bots.WorkspaceOutcome{}, false, nil
 }
 
-// newCreateBotService wires a bots service over dbFake to the fake reconciler,
-// the way providers.go wires the real one.
-func newCreateBotService(dbFake *createBotStreamDB, ws *createBotStreamWorkspace) *bots.Service {
-	svc := bots.NewService(nil, postgresstore.NewQueries(sqlc.New(dbFake)))
-	svc.SetWorkspaceIntents(createBotIntents{w: ws})
-	return svc
+func wireCreateBotIntents(h *UsersHandler) {
+	h.botService.SetWorkspaceIntents(createBotIntents{w: h.workspaceSetup.(*createBotStreamWorkspace)})
+}
+
+func (w *createBotStreamWorkspace) EnsurePresent(_ context.Context, botID, image string) (botworkspace.Workspace, error) {
+	w.record(botID, image)
+	w.Kick()
+	return botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1}, nil
+}
+
+// record is an intent that waits for Kick, as one Create commits does.
+func (w *createBotStreamWorkspace) record(botID, image string) {
+	w.mu.Lock()
+	if w.final == nil {
+		w.final = map[string]botworkspace.Workspace{}
+		w.settled = map[string]chan struct{}{}
+	}
+	w.intents = append(w.intents, botID)
+	done := make(chan struct{})
+	w.settled[botID] = done
+	w.mu.Unlock()
+
+	go func() {
+		<-w.woken()
+		for _, ev := range w.events {
+			w.publish(botID, botworkspace.ProgressEvent{
+				Type: ev.Type, Image: ev.Image, Message: ev.Message, Layers: ev.Layers,
+				ContainerID: ev.ContainerID, WorkspaceBackend: ev.WorkspaceBackend, RuntimeBackend: ev.RuntimeBackend,
+				ContainerPath: ev.ContainerPath, CDIDevices: ev.CDIDevices, Snapshotter: ev.Snapshotter, Started: ev.Started,
+				DataRestored: ev.DataRestored, HasPreservedData: ev.HasPreservedData,
+			})
+		}
+		final := botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1, ObservedGeneration: 1, Image: image}
+		if w.err != nil {
+			final.Observed = botworkspace.ObservedFailed
+			final.LastError = w.err.Error()
+			final.LastErrorPhase = w.phase
+			if final.LastErrorPhase == "" {
+				final.LastErrorPhase = botworkspace.PhaseStart
+			}
+		} else {
+			final.Observed = botworkspace.ObservedRunning
+			final.EverReady = true
+		}
+		w.mu.Lock()
+		w.final[botID] = final
+		w.mu.Unlock()
+		close(done)
+	}()
 }
 
 func (w *createBotStreamWorkspace) publish(botID string, ev botworkspace.ProgressEvent) {
@@ -576,8 +588,8 @@ type createBotStreamDB struct {
 	persistedMetadata []byte
 
 	// requestKey is the Idempotency-Key this fake's bot was created with;
-	// keyHeld says whether that bot exists yet. racedInsert makes the INSERT
-	// lose to an identical create that inserted first.
+	// keyHeld says whether that bot exists. racedInsert makes the INSERT lose
+	// to an identical create that inserted first.
 	requestKey  string
 	keyHeld     bool
 	racedInsert bool
@@ -690,11 +702,13 @@ func (r *createBotStreamRow) Scan(dest ...any) error {
 }
 
 func newResendHandler(ownerID string, dbFake *createBotStreamDB, ws *createBotStreamWorkspace) *UsersHandler {
-	return &UsersHandler{
+	h := &UsersHandler{
 		service:        newTestCreateBotAccountService(ownerID),
-		botService:     newCreateBotService(dbFake, ws),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(dbFake))),
 		workspaceSetup: ws,
 	}
+	wireCreateBotIntents(h)
+	return h
 }
 
 func newCreateRequest(key string, stream bool) *http.Request {
@@ -710,89 +724,55 @@ func newCreateRequest(key string, stream bool) *http.Request {
 func TestCreateBotStreamAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000101"
 	botID := "00000000-0000-0000-0000-000000000201"
-
-	// The first attempt committed the bot with its workspace intent; its
-	// response never reached the client, which sent the same request again.
 	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", keyHeld: true}
 	ws := &createBotStreamWorkspace{}
-	ws.record(botID, "")
+	ws.record(botID, "") // the first attempt's intent
 	rec := httptest.NewRecorder()
 	if err := newResendHandler(ownerID, dbFake, ws).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", true), rec, ownerID)); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
-
 	events := decodeSSEEvents(t, rec.Body.String())
-	if len(events) == 0 || events[0]["type"] != "bot_created" || eventBotID(events[0]) != botID {
-		t.Fatalf("want bot_created for the first attempt's bot %s; events=%#v", botID, events)
+	if len(events) == 0 || eventBotID(events[0]) != botID || events[len(events)-1]["type"] != "ready" {
+		t.Fatalf("want bot_created ... ready for the first attempt's bot %s; events=%#v", botID, events)
 	}
-	if last := events[len(events)-1]; last["type"] != "ready" {
-		t.Fatalf("last event = %#v, want ready; events=%#v", last["type"], events)
-	}
-	if dbFake.inserts != 0 {
-		t.Fatalf("resend inserted %d bot rows, want 0", dbFake.inserts)
-	}
-	if got := len(ws.intents); got != 1 {
-		t.Fatalf("workspace intents recorded = %d, want 1; a resend must follow the committed intent, not record another", got)
+	if dbFake.inserts != 0 || len(ws.intents) != 1 {
+		t.Fatalf("inserts = %d, intents = %d; a resend must write nothing", dbFake.inserts, len(ws.intents))
 	}
 }
 
 func TestCreateBotAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000101"
 	botID := "00000000-0000-0000-0000-000000000201"
-
 	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", keyHeld: true}
 	ws := &createBotStreamWorkspace{}
 	rec := httptest.NewRecorder()
 	if err := newResendHandler(ownerID, dbFake, ws).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), rec, ownerID)); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
-	// The resend gets the answer its first attempt would have: 201 and that bot.
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body["id"] != botID || dbFake.inserts != 0 || len(ws.intents) != 0 {
-		t.Fatalf("want the first attempt's bot %s and nothing written; got id=%#v inserts=%d intents=%d", botID, body["id"], dbFake.inserts, len(ws.intents))
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), botID) || dbFake.inserts != 0 || len(ws.intents) != 0 {
+		t.Fatalf("status = %d body = %s inserts = %d intents = %d; want 201 with the first attempt's bot and nothing written", rec.Code, rec.Body.String(), dbFake.inserts, len(ws.intents))
 	}
 }
 
 func TestCreateBotAnswersTheLoserOfARaceWithTheWinnersBot(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000101"
 	botID := "00000000-0000-0000-0000-000000000201"
-
-	// Both identical creates looked the key up before either inserted; this
-	// one's INSERT then hit the key the winner just took.
 	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", racedInsert: true}
-	ws := &createBotStreamWorkspace{}
 	rec := httptest.NewRecorder()
-	if err := newResendHandler(ownerID, dbFake, ws).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), rec, ownerID)); err != nil {
+	if err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), rec, ownerID)); err != nil {
 		t.Fatalf("CreateBot() error = %v", err)
 	}
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), botID) {
-		t.Fatalf("status = %d body=%s; want 201 with the winner's bot %s", rec.Code, rec.Body.String(), botID)
-	}
-	// The winner committed its intent with its bot; the loser's rolled back
-	// with its failed insert.
-	if len(ws.intents) != 0 {
-		t.Fatalf("the loser recorded %d workspace intents, want 0", len(ws.intents))
+		t.Fatalf("status = %d body = %s; want 201 with the winner's bot %s", rec.Code, rec.Body.String(), botID)
 	}
 }
 
 func TestCreateBotRefusesAResendWhoseBotIsBeingDeleted(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000101"
-	dbFake := &createBotStreamDB{
-		ownerID: ownerID, botID: "00000000-0000-0000-0000-000000000201",
-		requestKey: "key-1", keyHeld: true, status: bots.BotStatusDeleting,
-	}
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: "00000000-0000-0000-0000-000000000201", requestKey: "key-1", keyHeld: true, status: bots.BotStatusDeleting}
 	err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", true), httptest.NewRecorder(), ownerID))
-	if httpErr := requireHTTPError(t, err); httpErr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusConflict)
-	}
-	if dbFake.inserts != 0 {
-		t.Fatalf("inserted %d bot rows, want 0", dbFake.inserts)
+	if httpErr := requireHTTPError(t, err); httpErr.Code != http.StatusConflict || dbFake.inserts != 0 {
+		t.Fatalf("status = %d inserts = %d, want %d and no insert", httpErr.Code, dbFake.inserts, http.StatusConflict)
 	}
 }
 

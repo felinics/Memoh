@@ -602,8 +602,6 @@ type botWorkspaceIntents struct {
 	svc *botworkspace.Service
 }
 
-// RecordPresent writes the intent through the create's transaction; a new bot
-// has no row yet, so it starts at generation 1.
 func (botWorkspaceIntents) RecordPresent(ctx context.Context, q dbstore.Queries, botID, image string) error {
 	_, err := botworkspace.NewRepository(q).Upsert(ctx, botID, botworkspace.DesiredPresent, strings.TrimSpace(image), false)
 	return err

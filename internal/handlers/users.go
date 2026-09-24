@@ -458,9 +458,8 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	if len(req.RequestKey) > maxCreateRequestKeyLen {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("%s must be at most %d characters", createRequestKeyHeader, maxCreateRequestKeyLen))
 	}
-	// A create resent after its response was lost is answered with the bot its
-	// first attempt made. Look it up before anything that could refuse the
-	// resend, such as a quota that first bot already counts against.
+	// Look a resend up before anything that could refuse it, such as a quota
+	// the first attempt's bot already counts against.
 	var resent *bots.Bot
 	existing, found, err := h.botService.FindCreated(c.Request().Context(), ownerID, req.RequestKey)
 	if err != nil {
@@ -472,7 +471,6 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	if acceptsEventStream(c) {
 		return h.createBotStream(c, ownerID, ownerFromToken, req, resent)
 	}
-	// A resend gets the answer its first attempt would have: 201 and that bot.
 	resp, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
@@ -488,17 +486,12 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	return c.JSON(http.StatusCreated, scrubBotForResponse(resp))
 }
 
-// createRequestKeyHeader carries the client's key for one logical create; every
-// resend of that create carries the same key. See bots.Service.FindCreated.
 const createRequestKeyHeader = "Idempotency-Key"
 
 const maxCreateRequestKeyLen = 255
 
-// createOrReplay answers a create whose Idempotency-Key already made a bot with
-// that bot, and creates one otherwise. The bot is either resent (found before
-// this call) or the winner of a race between identical creates, whose row now
-// holds the key or the name this one asked for. Either way that create
-// committed the bot with its workspace intent, so answering it writes nothing.
+// createOrReplay creates the bot, or answers with the one this Idempotency-Key
+// already made: found before the call, or by the winner of a race.
 func (h *UsersHandler) createOrReplay(ctx context.Context, ownerID string, req bots.CreateBotRequest, resent *bots.Bot) (bots.Bot, error) {
 	if resent == nil {
 		bot, err := h.botService.Create(ctx, ownerID, req)
@@ -556,9 +549,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
 	}
 
-	// The bot commits with its workspace intent, so a first attempt and a
-	// resend follow the same intent. The reconciler is woken below, once the
-	// subscription is in place, so the stream relays every progress event.
+	// Wake the reconciler only once subscribed below, so every event is relayed.
 	req.WaitForReady = false
 	req.DeferWake = true
 	bot, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
@@ -604,7 +595,6 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), workspaceStreamBudget)
 	defer cancel()
 	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
-		// Zero follows the current intent: the one the bot was created with.
 		return h.workspaceSetup.Await(ctx, bot.ID, 0)
 	}, httpx.RequestID(c), sendError)
 	if outcome.Failed || outcome.Disconnected {
