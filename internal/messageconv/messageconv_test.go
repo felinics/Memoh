@@ -63,6 +63,15 @@ func TestSDKMessagesToModelMessagesPreservesUsage(t *testing.T) {
 	if usage.InputTokens != 3 || usage.OutputTokens != 4 || usage.TotalTokens != 7 {
 		t.Fatalf("usage = %#v, want input/output/total 3/4/7", usage)
 	}
+	var envelope struct {
+		InputTokenSemantics string `json:"inputTokenSemantics"`
+	}
+	if err := json.Unmarshal(got[0].Usage, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.InputTokenSemantics != "total" {
+		t.Fatalf("input token semantics = %q, want total", envelope.InputTokenSemantics)
+	}
 }
 
 func TestModelMessageToSDKMessageDoesNotInterpretLegacyEnvelopeFields(t *testing.T) {
