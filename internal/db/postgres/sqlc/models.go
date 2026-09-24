@@ -116,6 +116,7 @@ type Bot struct {
 	Timezone                pgtype.Text        `json:"timezone"`
 	IsActive                bool               `json:"is_active"`
 	Status                  string             `json:"status"`
+	CreateRequestKey        pgtype.Text        `json:"create_request_key"`
 	Language                string             `json:"language"`
 	CommandUiLanguage       string             `json:"command_ui_language"`
 	ReasoningEffort         string             `json:"reasoning_effort"`

@@ -233,6 +233,36 @@ describe('useBotCreateProgressStore', () => {
     expect(store.lines.at(-1)).toMatchObject({ kind: 'error', status: 'error' })
   })
 
+  it('resends a create whose response was lost under the same Idempotency-Key', async () => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream
+      .mockResolvedValueOnce(brokenStreamOf([], new Error('Failed to fetch')))
+      .mockResolvedValueOnce(streamOf([{ type: 'bot_created', bot }, { type: 'ready', bot }]))
+
+    const store = useBotCreateProgressStore()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+    expect(store.status).toBe('error')
+    await store.retry()
+
+    const [first, resent] = postBotsStream.mock.calls.map(([options]) => options.headers['Idempotency-Key'])
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(resent).toBe(first)
+    expect(store.status).toBe('ready')
+    expect(store.bot).toEqual(bot)
+  })
+
+  it('gives every create from the form its own Idempotency-Key', async () => {
+    postBotsStream.mockImplementation(async () => brokenStreamOf([], new Error('Failed to fetch')))
+
+    const store = useBotCreateProgressStore()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+    store.reset()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+
+    const [first, second] = postBotsStream.mock.calls.map(([options]) => options.headers['Idempotency-Key'])
+    expect(second).not.toBe(first)
+  })
+
   it('keeps the stable code when bot creation returns an HTTP problem', async () => {
     postBotsStream.mockResolvedValue({
       stream: (async function* (): AsyncGenerator<BotCreateStreamEvent, void, unknown> {

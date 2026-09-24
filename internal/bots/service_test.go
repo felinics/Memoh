@@ -551,3 +551,96 @@ func TestRunDeleteLifecycleRevertsToPreviousStatusWhenWorkspaceLingers(t *testin
 		t.Fatalf("a failed bot whose deletion lingers must revert to failed, not ready, and not be deleted; exec=%v", exec)
 	}
 }
+
+// keyedBotRow is a GetBotByCreateRequestKey row for botID in status.
+func keyedBotRow(botID, ownerUserID pgtype.UUID, status string) *fakeRow {
+	row := makeBotRow(botID, ownerUserID)
+	scan := row.scanFunc
+	row.scanFunc = func(dest ...any) error {
+		if err := scan(dest...); err != nil {
+			return err
+		}
+		*dest[7].(*string) = status
+		return nil
+	}
+	return row
+}
+
+func TestFindCreatedAnswersWithTheBotTheKeyMade(t *testing.T) {
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	var asked []any
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
+		queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "create_request_key = $2") {
+				asked = args
+				return keyedBotRow(botUUID, ownerUUID, BotStatusCreating)
+			}
+			return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+		},
+	})))
+
+	bot, found, err := svc.FindCreated(context.Background(), ownerUUID.String(), "key-1")
+	if err != nil || !found || bot.ID != botUUID.String() {
+		t.Fatalf("FindCreated = %q, %v, %v; want the keyed bot", bot.ID, found, err)
+	}
+	if len(asked) != 2 || asked[0] != ownerUUID || asked[1] != (pgtype.Text{String: "key-1", Valid: true}) {
+		t.Fatalf("lookup args = %#v; the key must be scoped to the owner", asked)
+	}
+}
+
+func TestFindCreatedWithoutAKeyFindsNothing(t *testing.T) {
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			t.Fatal("a create without a key must not be looked up")
+			return nil
+		},
+	})))
+	if _, found, err := svc.FindCreated(context.Background(), "00000000-0000-0000-0000-000000000001", ""); found || err != nil {
+		t.Fatalf("FindCreated without a key = %v, %v; want nothing", found, err)
+	}
+}
+
+func TestFindCreatedRefusesABotBeingDeleted(t *testing.T) {
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
+		queryRowFunc: func(context.Context, string, ...any) pgx.Row {
+			return keyedBotRow(botUUID, ownerUUID, BotStatusDeleting)
+		},
+	})))
+	if _, found, err := svc.FindCreated(context.Background(), ownerUUID.String(), "key-1"); found || !errors.Is(err, ErrCreateRequestDeleted) {
+		t.Fatalf("FindCreated on a deleting bot = %v, %v; want ErrCreateRequestDeleted", found, err)
+	}
+}
+
+func TestCreateStoresTheRequestKey(t *testing.T) {
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	for _, tc := range []struct {
+		key  string
+		want pgtype.Text
+	}{
+		{key: "key-1", want: pgtype.Text{String: "key-1", Valid: true}},
+		{key: "", want: pgtype.Text{}}, // backup import and other callers send none
+	} {
+		var stored any
+		insertReached := errors.New("insert reached")
+		svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
+			queryRowFunc: func(_ context.Context, sql string, args ...any) pgx.Row {
+				switch {
+				case strings.Contains(sql, "FROM users") && strings.Contains(sql, "id = $1"):
+					return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
+				case strings.Contains(sql, "INSERT INTO bots"):
+					stored = args[8]
+					return &fakeRow{scanFunc: func(_ ...any) error { return insertReached }}
+				default:
+					return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+				}
+			},
+		})))
+		_, err := svc.Create(context.Background(), ownerUUID.String(), CreateBotRequest{DisplayName: "Neko", RequestKey: tc.key})
+		if !errors.Is(err, insertReached) || stored != tc.want {
+			t.Fatalf("key %q: stored %#v, err %v; want %#v", tc.key, stored, err, tc.want)
+		}
+	}
+}

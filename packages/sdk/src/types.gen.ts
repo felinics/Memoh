@@ -4614,6 +4614,12 @@ export type PostBotsData = {
      * Bot payload
      */
     body: BotsCreateBotRequest;
+    headers?: {
+        /**
+         * Client-generated key for one logical create. A resend with the same key is answered with the bot the first attempt created instead of a second one.
+         */
+        'Idempotency-Key'?: string;
+    };
     path?: never;
     query?: never;
     url: '/bots';

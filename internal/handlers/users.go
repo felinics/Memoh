@@ -408,6 +408,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 // @Summary Create bot user
 // @Description Create a bot user owned by current user (or admin-specified owner)
 // @Tags bots
+// @Param Idempotency-Key header string false "Client-generated key for one logical create. A resend with the same key is answered with the bot the first attempt created instead of a second one."
 // @Param payload body bots.CreateBotRequest true "Bot payload"
 // @Success 201 {object} bots.Bot
 // @Failure 400 {object} ErrorResponse
@@ -454,10 +455,26 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid ACP metadata: "+err.Error())
 		}
 	}
-	if acceptsEventStream(c) {
-		return h.createBotStream(c, ownerID, ownerFromToken, req)
+	req.RequestKey = strings.TrimSpace(c.Request().Header.Get(createRequestKeyHeader))
+	if len(req.RequestKey) > maxCreateRequestKeyLen {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("%s must be at most %d characters", createRequestKeyHeader, maxCreateRequestKeyLen))
 	}
-	resp, err := h.botService.Create(c.Request().Context(), ownerID, req)
+	// A create resent after its response was lost is answered with the bot its
+	// first attempt made. Look it up before anything that could refuse the
+	// resend, such as a quota that first bot already counts against.
+	var resent *bots.Bot
+	existing, found, err := h.botService.FindCreated(c.Request().Context(), ownerID, req.RequestKey)
+	if err != nil {
+		return createBotHTTPError(err, ownerFromToken)
+	}
+	if found {
+		resent = &existing
+	}
+	if acceptsEventStream(c) {
+		return h.createBotStream(c, ownerID, ownerFromToken, req, resent)
+	}
+	// A resend gets the answer its first attempt would have: 201 and that bot.
+	resp, _, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}
@@ -470,6 +487,30 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	// config be written on a later settings update.
 	//
 	return c.JSON(http.StatusCreated, scrubBotForResponse(resp))
+}
+
+// createRequestKeyHeader carries the client's key for one logical create; every
+// resend of that create carries the same key. See bots.Service.FindCreated.
+const createRequestKeyHeader = "Idempotency-Key"
+
+const maxCreateRequestKeyLen = 255
+
+// createOrReplay answers a create whose Idempotency-Key already made a bot with
+// that bot, and creates one otherwise; replayed reports which happened. The
+// bot is either resent (found before this call) or the winner of a race
+// between identical creates, whose row now holds the key or the name this one
+// asked for.
+func (h *UsersHandler) createOrReplay(ctx context.Context, ownerID string, req bots.CreateBotRequest, resent *bots.Bot) (bots.Bot, bool, error) {
+	if resent != nil {
+		return *resent, true, nil
+	}
+	bot, err := h.botService.Create(ctx, ownerID, req)
+	if errors.Is(err, bots.ErrBotNameTaken) && req.RequestKey != "" {
+		if winner, found, lookupErr := h.botService.FindCreated(ctx, ownerID, req.RequestKey); lookupErr == nil && found {
+			return winner, true, nil
+		}
+	}
+	return bot, false, err
 }
 
 func acceptsEventStream(c echo.Context) bool {
@@ -499,10 +540,13 @@ func createBotHTTPError(err error, ownerFromToken bool) error {
 	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if errors.Is(err, bots.ErrCreateRequestDeleted) {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
 	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 }
 
-func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFromToken bool, req bots.CreateBotRequest) error {
+func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFromToken bool, req bots.CreateBotRequest, resent *bots.Bot) error {
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
 		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
@@ -515,7 +559,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	// the subscription is in place before the reconciler starts emitting.
 	req.WaitForReady = false
 	req.SkipLifecycle = true
-	bot, err := h.botService.Create(c.Request().Context(), ownerID, req)
+	bot, replayed, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}
@@ -556,7 +600,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 
 	// Recording the intent must not depend on the client staying connected.
 	intentCtx, cancelIntent := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 15*time.Second)
-	intent, err := h.workspaceSetup.EnsurePresent(intentCtx, bot.ID, workspaceImageFromCreateRequest(req))
+	intent, err := h.workspaceIntentForCreate(intentCtx, bot.ID, workspaceImageFromCreateRequest(req), replayed)
 	cancelIntent()
 	if err != nil {
 		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed",
@@ -592,6 +636,22 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil
+}
+
+// workspaceIntentForCreate yields the workspace intent whose progress the
+// create stream relays. A replayed create re-attaches to the intent its first
+// attempt recorded: asking again would raise the desired generation and
+// restart a provisioning run that is still converging. Only a first attempt
+// that died before recording anything leaves nothing to attach to.
+func (h *UsersHandler) workspaceIntentForCreate(ctx context.Context, botID, image string, replayed bool) (botworkspace.Workspace, error) {
+	if !replayed {
+		return h.workspaceSetup.EnsurePresent(ctx, botID, image)
+	}
+	w, err := h.workspaceSetup.Get(ctx, botID)
+	if errors.Is(err, botworkspace.ErrNotFound) {
+		return h.workspaceSetup.EnsurePresent(ctx, botID, image)
+	}
+	return w, err
 }
 
 // workspaceImageFromCreateRequest reads the optional workspace.image preference

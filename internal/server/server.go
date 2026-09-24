@@ -64,7 +64,7 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins:  []string{"*"},
 		AllowMethods:  []string{echo.GET, echo.HEAD, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
-		AllowHeaders:  []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID},
+		AllowHeaders:  []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID, "Idempotency-Key"},
 		ExposeHeaders: []string{echo.HeaderXRequestID},
 	}))
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{

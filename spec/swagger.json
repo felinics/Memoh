@@ -405,6 +405,12 @@
                 "summary": "Create bot user",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Client-generated key for one logical create. A resend with the same key is answered with the bot the first attempt created instead of a second one.",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
                         "description": "Bot payload",
                         "name": "payload",
                         "in": "body",

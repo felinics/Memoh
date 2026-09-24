@@ -49,6 +49,10 @@ type CreateBotRequest struct {
 	Metadata      map[string]any `json:"metadata,omitempty"`
 	WaitForReady  bool           `json:"wait_for_ready,omitempty"`
 	SkipLifecycle bool           `json:"-"`
+	// RequestKey is the Idempotency-Key the create endpoint received. Create
+	// stores it on the bot so the key names at most one bot per owner; see
+	// Service.FindCreated. Only that endpoint sets it.
+	RequestKey string `json:"-"`
 }
 
 // UpdateBotRequest is the input for updating a bot.

@@ -230,6 +230,9 @@ CREATE TABLE IF NOT EXISTS bots (
   timezone TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
+  -- Idempotency-Key of the POST /bots that created this row; NULL when the
+  -- client sent none. Unique per owner (idx_bots_create_request_key).
+  create_request_key TEXT,
   -- Retired setting: no code reads or writes this column. Kept so dropping it
   -- never becomes a breaking schema change for an already-deployed server.
   language TEXT NOT NULL DEFAULT 'auto',
@@ -1635,6 +1638,10 @@ CREATE UNIQUE INDEX idx_bot_user_grants_unique_user
 DROP INDEX IF EXISTS idx_bots_name;
 CREATE UNIQUE INDEX idx_bots_name
     ON public.bots (team_id, name);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_create_request_key
+    ON public.bots (team_id, owner_user_id, create_request_key)
+    WHERE create_request_key IS NOT NULL;
 
 DROP INDEX IF EXISTS idx_session_events_dedup;
 CREATE UNIQUE INDEX idx_session_events_dedup

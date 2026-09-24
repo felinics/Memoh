@@ -414,6 +414,20 @@ type createBotStreamWorkspace struct {
 	intents []string
 }
 
+// Get answers with the intent EnsurePresent already recorded, so a replayed
+// create re-attaches instead of asking for a new generation.
+func (w *createBotStreamWorkspace) Get(_ context.Context, botID string) (botworkspace.Workspace, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ws, ok := w.final[botID]; ok {
+		return ws, nil
+	}
+	if _, ok := w.settled[botID]; ok {
+		return botworkspace.Workspace{BotID: botID, Desired: botworkspace.DesiredPresent, DesiredGeneration: 1}, nil
+	}
+	return botworkspace.Workspace{}, botworkspace.ErrNotFound
+}
+
 func (w *createBotStreamWorkspace) EnsurePresent(_ context.Context, botID, image string) (botworkspace.Workspace, error) {
 	w.mu.Lock()
 	if w.final == nil {
@@ -527,6 +541,14 @@ type createBotStreamDB struct {
 	status            string
 	metadata          []byte
 	persistedMetadata []byte
+
+	// requestKey is the Idempotency-Key this fake's bot was created with;
+	// keyHeld says whether that bot exists yet. racedInsert makes the INSERT
+	// lose to an identical create that inserted first.
+	requestKey  string
+	keyHeld     bool
+	racedInsert bool
+	inserts     int
 }
 
 func (d *createBotStreamDB) Exec(_ context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
@@ -544,7 +566,17 @@ func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...an
 	switch {
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "id = $1"):
 		return &createBotStreamRow{scanFunc: func(_ ...any) error { return nil }}
+	case strings.Contains(query, "create_request_key = $2"):
+		if !d.keyHeld || args[1] != (pgtype.Text{String: d.requestKey, Valid: true}) {
+			return &createBotStreamRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+		}
+		return d.botRow(d.statusOr(bots.BotStatusCreating))
 	case strings.Contains(query, "INSERT INTO bots"):
+		d.inserts++
+		if d.racedInsert {
+			d.keyHeld = true
+			return &createBotStreamRow{scanFunc: func(_ ...any) error { return &pgconn.PgError{Code: "23505"} }}
+		}
 		if len(args) > 6 {
 			if payload, ok := args[6].([]byte); ok {
 				d.metadata = append([]byte(nil), payload...)
@@ -567,6 +599,13 @@ func (d *createBotStreamDB) QueryRow(_ context.Context, query string, args ...an
 		_ = args
 		return &createBotStreamRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
 	}
+}
+
+func (d *createBotStreamDB) statusOr(fallback string) string {
+	if d.status != "" {
+		return d.status
+	}
+	return fallback
 }
 
 func (d *createBotStreamDB) botRow(status string) pgx.Row {
@@ -615,4 +654,115 @@ type createBotStreamRow struct {
 
 func (r *createBotStreamRow) Scan(dest ...any) error {
 	return r.scanFunc(dest...)
+}
+
+func newResendHandler(ownerID string, dbFake *createBotStreamDB, ws *createBotStreamWorkspace) *UsersHandler {
+	return &UsersHandler{
+		service:        newTestCreateBotAccountService(ownerID),
+		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(dbFake))),
+		workspaceSetup: ws,
+	}
+}
+
+func newCreateRequest(key string, stream bool) *http.Request {
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/bots", strings.NewReader(`{"display_name":"Stream Bot","acl_preset":"allow_all"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(createRequestKeyHeader, key)
+	if stream {
+		req.Header.Set(echo.HeaderAccept, "text/event-stream")
+	}
+	return req
+}
+
+func TestCreateBotStreamAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+
+	// The first attempt created the bot and recorded its workspace intent; its
+	// response never reached the client, which sent the same request again.
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", keyHeld: true}
+	ws := &createBotStreamWorkspace{}
+	if _, err := ws.EnsurePresent(context.Background(), botID, ""); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	if err := newResendHandler(ownerID, dbFake, ws).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", true), rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+
+	events := decodeSSEEvents(t, rec.Body.String())
+	if len(events) == 0 || events[0]["type"] != "bot_created" || eventBotID(events[0]) != botID {
+		t.Fatalf("want bot_created for the first attempt's bot %s; events=%#v", botID, events)
+	}
+	if last := events[len(events)-1]; last["type"] != "ready" {
+		t.Fatalf("last event = %#v, want ready; events=%#v", last["type"], events)
+	}
+	if dbFake.inserts != 0 {
+		t.Fatalf("resend inserted %d bot rows, want 0", dbFake.inserts)
+	}
+	if got := len(ws.intents); got != 1 {
+		t.Fatalf("workspace intents recorded = %d, want 1; a resend must re-attach, not ask for a new generation", got)
+	}
+}
+
+func TestCreateBotAnswersAResendWithTheBotItAlreadyMade(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", keyHeld: true}
+	rec := httptest.NewRecorder()
+	if err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+	// The resend gets the answer its first attempt would have: 201 and that bot.
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["id"] != botID || dbFake.inserts != 0 {
+		t.Fatalf("want the first attempt's bot %s and no insert; got id=%#v inserts=%d", botID, body["id"], dbFake.inserts)
+	}
+}
+
+func TestCreateBotAnswersTheLoserOfARaceWithTheWinnersBot(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	botID := "00000000-0000-0000-0000-000000000201"
+
+	// Both identical creates looked the key up before either inserted; this
+	// one's INSERT then hit the key the winner just took.
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: botID, requestKey: "key-1", racedInsert: true}
+	rec := httptest.NewRecorder()
+	if err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", false), rec, ownerID)); err != nil {
+		t.Fatalf("CreateBot() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), botID) {
+		t.Fatalf("status = %d body=%s; want 201 with the winner's bot %s", rec.Code, rec.Body.String(), botID)
+	}
+}
+
+func TestCreateBotRefusesAResendWhoseBotIsBeingDeleted(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	dbFake := &createBotStreamDB{
+		ownerID: ownerID, botID: "00000000-0000-0000-0000-000000000201",
+		requestKey: "key-1", keyHeld: true, status: bots.BotStatusDeleting,
+	}
+	err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest("key-1", true), httptest.NewRecorder(), ownerID))
+	if httpErr := requireHTTPError(t, err); httpErr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusConflict)
+	}
+	if dbFake.inserts != 0 {
+		t.Fatalf("inserted %d bot rows, want 0", dbFake.inserts)
+	}
+}
+
+func TestCreateBotRejectsAnOverlongIdempotencyKey(t *testing.T) {
+	ownerID := "00000000-0000-0000-0000-000000000101"
+	dbFake := &createBotStreamDB{ownerID: ownerID, botID: "00000000-0000-0000-0000-000000000201"}
+	err := newResendHandler(ownerID, dbFake, &createBotStreamWorkspace{}).CreateBot(testAuthContext(echo.New(), newCreateRequest(strings.Repeat("k", maxCreateRequestKeyLen+1), false), httptest.NewRecorder(), ownerID))
+	if httpErr := requireHTTPError(t, err); httpErr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", httpErr.Code, http.StatusBadRequest)
+	}
 }
