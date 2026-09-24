@@ -24,6 +24,9 @@ export function useSiteIcon(origin: MaybeRefOrGetter<string | null>) {
   // painted in the link color; it is inline, so there is nothing to wait for.
   const mask = computed(() => (colorScheme.value === 'dark' ? icons.value?.dark_mask : icons.value?.light_mask) || '')
   // Keyed by src, so a theme switch to the other icon starts from "not loaded".
+  // The <img> is keyed by src too, so an event always belongs to the current
+  // src; recording the element's own src would compare the browser-normalized
+  // URL (lowercased host, dropped :443, encoded spaces) against the raw one.
   const loaded = ref('')
   const failed = ref('')
   return {
@@ -32,7 +35,7 @@ export function useSiteIcon(origin: MaybeRefOrGetter<string | null>) {
     colorScheme,
     usable: computed(() => !mask.value && !!src.value && failed.value !== src.value),
     ready: computed(() => !!mask.value || (!!src.value && loaded.value === src.value && failed.value !== src.value)),
-    onLoad: (event: Event) => { loaded.value = (event.target as HTMLImageElement).src },
-    onError: (event: Event) => { failed.value = (event.target as HTMLImageElement).src },
+    onLoad: () => { loaded.value = src.value },
+    onError: () => { failed.value = src.value },
   }
 }

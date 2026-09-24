@@ -30,6 +30,15 @@ const (
 	siteIconFailureCacheTTL   = time.Hour
 	siteIconTransientCacheTTL = 5 * time.Minute
 	siteIconCacheMaxEntries   = 1024
+	// One discovery is a page fetch plus up to two SVG fetches, each also bounded
+	// by the client timeout; this caps the whole chain that waiting callers share.
+	siteIconDiscoverTimeout = 10 * time.Second
+	// Links render all at once, so a message with many sites must not open that
+	// many outbound connections from the server.
+	siteIconMaxConcurrentFetches = 8
+	// Icon URLs are cached and sent back as <img src>; a page cannot make one
+	// entry cost more than a normal URL.
+	siteIconMaxURLLength = 2048
 )
 
 // SiteIconHandler resolves public site icon metadata; it never forwards account credentials.
@@ -39,6 +48,7 @@ type (
 		fetch   func(ctx context.Context, origin string) (SiteIconResponse, time.Duration)
 		now     func() time.Time
 		flights singleflight.Group
+		slots   chan struct{}
 		mu      sync.Mutex
 		cache   map[string]siteIconEntry
 	}
@@ -72,10 +82,11 @@ func NewSiteIconHandler() *SiteIconHandler {
 	h := &SiteIconHandler{
 		client: &http.Client{Transport: transport, Timeout: 8 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
 			if len(via) >= 5 || !validIconURL(r.URL) {
-				return errors.New("unsupported redirect")
+				return errSiteIconRejected
 			}
 			return nil
 		}},
+		slots: make(chan struct{}, siteIconMaxConcurrentFetches),
 		now:   time.Now,
 		cache: map[string]siteIconEntry{},
 	}
@@ -103,12 +114,22 @@ func (h *SiteIconHandler) Get(c echo.Context) error {
 	}
 	// Concurrent requests for one origin share a fetch. It is detached from the
 	// first caller's request so that caller leaving does not fail the others;
-	// the client timeout still bounds it.
+	// siteIconDiscoverTimeout bounds it instead.
 	result, _, _ := h.flights.Do(origin, func() (any, error) {
 		if entry, ok := h.cached(origin); ok {
 			return entry, nil
 		}
-		icons, ttl := h.fetch(context.WithoutCancel(c.Request().Context()), origin)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), siteIconDiscoverTimeout)
+		defer cancel()
+		select {
+		case h.slots <- struct{}{}:
+			defer func() { <-h.slots }()
+		case <-ctx.Done():
+			// Busy with other sites, not a property of this one: answer empty
+			// without caching so the next render asks again.
+			return siteIconEntry{expires: h.now()}, nil
+		}
+		icons, ttl := h.fetch(ctx, origin)
 		return h.store(origin, icons, ttl), nil
 	})
 	return h.siteIconJSON(c, result.(siteIconEntry))
@@ -151,6 +172,9 @@ func (h *SiteIconHandler) discover(ctx context.Context, origin string) (SiteIcon
 	req.Header.Set("Accept", "text/html")
 	// The transport validates and pins public IPs on every connection, including redirects.
 	response, err := h.client.Do(req) //nolint:gosec // dialIconHost prevents SSRF to private networks.
+	if errors.Is(err, errSiteIconRejected) {
+		return SiteIconResponse{}, siteIconFailureCacheTTL
+	}
 	if err != nil {
 		return SiteIconResponse{}, siteIconTransientCacheTTL
 	}
@@ -202,6 +226,10 @@ func (h *SiteIconHandler) store(origin string, icons SiteIconResponse, ttl time.
 	h.cache[origin] = entry
 	return entry
 }
+
+// errSiteIconRejected marks a site that resolves or redirects somewhere icons
+// are never fetched from; retrying it soon would give the same answer.
+var errSiteIconRejected = errors.New("icon host rejected")
 
 // Only default web ports are fetched, so the endpoint cannot be used to probe
 // arbitrary services on public hosts.
@@ -264,7 +292,7 @@ func dialIconHost(ctx context.Context, network, address string) (net.Conn, error
 	}
 	for _, a := range addresses {
 		if !publicIconIP(a.IP) {
-			return nil, errors.New("non-public icon host")
+			return nil, errSiteIconRejected
 		}
 	}
 	for _, a := range addresses {
@@ -315,7 +343,7 @@ func discoverIcons(body io.Reader, page *url.URL) SiteIconResponse {
 			}
 			continue
 		}
-		if token.Data != "link" || attrs["href"] == "" || !hasIconRel(attrs["rel"]) {
+		if token.Data != "link" || attrs["href"] == "" || len(attrs["href"]) > siteIconMaxURLLength || !hasIconRel(attrs["rel"]) {
 			continue
 		}
 		href, err := url.Parse(attrs["href"])
@@ -323,7 +351,9 @@ func discoverIcons(body io.Reader, page *url.URL) SiteIconResponse {
 			continue
 		}
 		candidate := base.ResolveReference(href)
-		if !validIconURL(candidate) {
+		// Resolving against a long <base> can still grow the URL past the limit.
+		iconURL := candidate.String()
+		if !validIconURL(candidate) || len(iconURL) > siteIconMaxURLLength {
 			continue
 		}
 		media := strings.ToLower(strings.ReplaceAll(attrs["media"], " ", ""))
@@ -340,7 +370,7 @@ func discoverIcons(body io.Reader, page *url.URL) SiteIconResponse {
 				score++
 			}
 			if score >= best[theme].score {
-				best[theme] = &choice{url: candidate.String(), score: score}
+				best[theme] = &choice{url: iconURL, score: score}
 			}
 		}
 	}

@@ -9,7 +9,7 @@ import (
 
 const (
 	staticPromptTokenHeadroom           = 4
-	staticPromptChatBaselineTokens      = 1351
+	staticPromptChatBaselineTokens      = 1212
 	staticPromptDiscussBaselineTokens   = 1278
 	staticPromptScheduleBaselineTokens  = 1220
 	staticPromptSubagentBaselineTokens  = 599
@@ -53,11 +53,6 @@ func TestStaticPromptSizeBaselines(t *testing.T) {
 			preRound6, ok := staticPromptPreRound6Tokens[mode]
 			if !ok {
 				t.Fatalf("missing pre-Round-6 static prompt size for mode %q", mode)
-			}
-			// Inline delivery guidance adds 139 tokens to chat after the historical reduction.
-			// Compare both budgets with that same addition; keep the four-token headroom.
-			if mode == sessionmode.Chat {
-				preRound6 += 139
 			}
 			t.Logf("static prompt tokens = %d, bytes = %d", got, len(prompt))
 			if baseline >= preRound6 || baseline+staticPromptTokenHeadroom >= preRound6 {

@@ -7,11 +7,12 @@ export type WorkspaceLink =
 
 // A single leading slash is a workspace path. Protocol-relative URLs and
 // fragments retain their normal web meaning; never turn them into file reads.
+// A query or fragment on a path (e.g. `#L10`) is not part of the file name.
 export function classifyWorkspaceLink(href: string): WorkspaceLink | null {
   const value = href.trim()
   if (value.startsWith('/') && !value.startsWith('//') && !value.includes('\\')) {
     try {
-      const path = decodeURIComponent(value)
+      const path = decodeURIComponent(value.split(/[?#]/, 1)[0]!)
       if (/[\u0000-\u001f\u007f]/.test(path)) return null
       return { kind: 'file', path }
     } catch {

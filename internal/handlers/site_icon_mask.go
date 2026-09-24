@@ -79,6 +79,9 @@ func (h *SiteIconHandler) fetchSVG(ctx context.Context, src string) ([]byte, err
 	}
 	req.Header.Set("Accept", "image/svg+xml")
 	response, err := h.client.Do(req) //nolint:gosec // dialIconHost prevents SSRF to private networks.
+	if errors.Is(err, errSiteIconRejected) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, errSiteIconTransient
 	}
@@ -117,13 +120,16 @@ func svgSingleColorLuminance(body []byte) (float64, bool) {
 	}
 	decoder := xml.NewDecoder(bytes.NewReader(body))
 	var color string
-	record := func(value string) bool {
+	// Paints are recorded as resolved against the inherited `color`, which an
+	// SVG loaded as an image leaves black unless the file sets it.
+	record := func(value, current string) bool {
 		switch value {
 		case "none", "transparent":
 			return true
-		case "", "currentcolor":
-			// An SVG loaded as an image paints unset fill and currentColor black.
-			value = "#000"
+		case "":
+			value = "#000" // unset fill paints black
+		case "currentcolor":
+			value = current
 		}
 		if strings.HasPrefix(value, "url(") {
 			return true // gradient stops are recorded where they are declared
@@ -133,7 +139,8 @@ func svgSingleColorLuminance(body []byte) (float64, bool) {
 		}
 		return value == color
 	}
-	fills := []string{""}
+	type inherited struct{ fill, color string }
+	stack := []inherited{{color: "#000"}}
 	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
@@ -148,21 +155,24 @@ func svgSingleColorLuminance(body []byte) (float64, bool) {
 				return 0, false
 			}
 			properties := svgPresentation(t.Attr)
-			fill, set := properties["fill"]
-			if !set {
-				fill = fills[len(fills)-1]
+			state := stack[len(stack)-1]
+			if value, set := properties["fill"]; set {
+				state.fill = value
 			}
-			fills = append(fills, fill)
-			if svgFilledElements[t.Name.Local] && !record(fill) {
+			if value, set := properties["color"]; set && value != "currentcolor" && value != "inherit" {
+				state.color = value
+			}
+			stack = append(stack, state)
+			if svgFilledElements[t.Name.Local] && !record(state.fill, state.color) {
 				return 0, false
 			}
 			for _, name := range []string{"stroke", "stop-color"} {
-				if value, set := properties[name]; set && !record(value) {
+				if value, set := properties[name]; set && !record(value, state.color) {
 					return 0, false
 				}
 			}
 		case xml.EndElement:
-			fills = fills[:len(fills)-1]
+			stack = stack[:len(stack)-1]
 		}
 	}
 	if color == "" {
@@ -175,13 +185,13 @@ func svgSingleColorLuminance(body []byte) (float64, bool) {
 	return relativeLuminance(r, g, b), true
 }
 
-// svgPresentation merges color presentation attributes with the inline style
-// attribute, which takes precedence in SVG.
+// svgPresentation merges paint and color presentation attributes with the
+// inline style attribute, which takes precedence in SVG.
 func svgPresentation(attrs []xml.Attr) map[string]string {
 	properties := map[string]string{}
 	for _, a := range attrs {
 		switch a.Name.Local {
-		case "fill", "stroke", "stop-color":
+		case "fill", "stroke", "stop-color", "color":
 			properties[a.Name.Local] = strings.ToLower(strings.TrimSpace(a.Value))
 		}
 	}
@@ -192,7 +202,7 @@ func svgPresentation(attrs []xml.Attr) map[string]string {
 		for _, declaration := range strings.Split(a.Value, ";") {
 			name, value, found := strings.Cut(declaration, ":")
 			name = strings.ToLower(strings.TrimSpace(name))
-			if found && (name == "fill" || name == "stroke" || name == "stop-color") {
+			if found && (name == "fill" || name == "stroke" || name == "stop-color" || name == "color") {
 				properties[name] = strings.ToLower(strings.TrimSpace(value))
 			}
 		}

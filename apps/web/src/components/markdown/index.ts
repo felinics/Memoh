@@ -18,8 +18,8 @@ const sharedComponents: Record<string, Component> = {
   footnote_reference: MdFootnoteReference,
   footnote_anchor: MdFootnoteAnchor,
   text: MdText,
-  // Intercept clicks on container-local (localhost) links to open the workspace
-  // browser panel; delegates rendering/external links to markstream's LinkNode.
+  // Opens workspace file paths and localhost links inside the workspace and
+  // adds site icons; rendering stays with markstream's LinkNode.
   link: MdLink,
 }
 

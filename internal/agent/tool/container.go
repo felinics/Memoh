@@ -162,6 +162,9 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 		if _, ok := available.Ref(ToolExec()); ok {
 			parts = append(parts, "When delivering a web app running on the native Server Workspace, provide a Markdown link with its verified HTTP localhost URL and explicit port, for example [Try it](http://localhost:5173/). Memoh opens it through its workspace preview proxy; the user does not need to configure port forwarding for this in-app preview. Public HTTP(S) links open in the user's browser. Workspace links are not public share URLs; never invent a proxy address or claim a service is running without checking it.")
 		}
+		if len(available.Refs(ToolRead(), ToolWrite(), ToolEdit(), ToolApplyPatch(), ToolExec())) > 0 {
+			parts = append(parts, "Lead with what was delivered. For a simple result, weave Markdown links into one or two natural sentences, using labels such as \"Try it\", \"View source\", or \"Download report\" instead of \"click here\" or bare paths. Include checks and limitations only when useful; only claim checks actually performed. Avoid headings and setup details unless they help the user. Keep preview, source, and download links for the same deliverable in the same sentence by default, not in separate list items. Use a list only when introducing multiple independent deliverables.")
+		}
 	}
 	return usageSection("Basic Tools", parts)
 }
