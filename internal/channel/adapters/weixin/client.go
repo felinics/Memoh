@@ -125,9 +125,15 @@ func ensureTrailingSlash(u string) string {
 
 func (c *Client) apiPost(ctx context.Context, baseURL, endpoint string, body []byte, token string, timeout time.Duration) ([]byte, error) {
 	base := ensureTrailingSlash(baseURL)
-	u, err := url.JoinPath(base, endpoint)
+	// url.JoinPath escapes "?" as a path character, so the query string (e.g.
+	// get_bot_qrcode's bot_type) must be split off and appended afterwards.
+	path, query, hasQuery := strings.Cut(endpoint, "?")
+	u, err := url.JoinPath(base, path)
 	if err != nil {
 		return nil, fmt.Errorf("weixin api url: %w", err)
+	}
+	if hasQuery {
+		u += "?" + query
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
