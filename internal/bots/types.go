@@ -3,6 +3,8 @@ package bots
 import (
 	"context"
 	"time"
+
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 // Bot represents a bot entity.
@@ -40,15 +42,18 @@ type BotCheck struct {
 
 // CreateBotRequest is the input for creating a bot.
 type CreateBotRequest struct {
-	Name          string         `json:"name,omitempty"`
-	DisplayName   string         `json:"display_name,omitempty"`
-	AvatarURL     string         `json:"avatar_url,omitempty"`
-	Timezone      *string        `json:"timezone,omitempty"`
-	IsActive      *bool          `json:"is_active,omitempty"`
-	AclPreset     string         `json:"acl_preset,omitempty"`
-	Metadata      map[string]any `json:"metadata,omitempty"`
-	WaitForReady  bool           `json:"wait_for_ready,omitempty"`
-	SkipLifecycle bool           `json:"-"`
+	Name         string         `json:"name,omitempty"`
+	DisplayName  string         `json:"display_name,omitempty"`
+	AvatarURL    string         `json:"avatar_url,omitempty"`
+	Timezone     *string        `json:"timezone,omitempty"`
+	IsActive     *bool          `json:"is_active,omitempty"`
+	AclPreset    string         `json:"acl_preset,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	WaitForReady bool           `json:"wait_for_ready,omitempty"`
+	// DeferWake leaves waking the workspace reconciler to the caller: the
+	// create stream subscribes to provisioning progress first, so it relays
+	// every event.
+	DeferWake bool `json:"-"`
 	// RequestKey is the Idempotency-Key the create endpoint received. Create
 	// stores it on the bot so the key names at most one bot per owner; see
 	// Service.FindCreated. Only that endpoint sets it.
@@ -90,9 +95,13 @@ type ListChecksResponse struct {
 // botworkspace reconciler converges the actual workspace toward it and derives
 // bots.status. The bots service never drives provisioning itself.
 type WorkspaceIntents interface {
-	// EnsurePresent asks for a running workspace built from image (empty keeps
-	// the previous or default image) and returns the intent generation.
-	EnsurePresent(ctx context.Context, botID, image string) (int64, error)
+	// RecordPresent records, through q, that a new bot should have a running
+	// workspace built from image (empty takes the default). Create calls it in
+	// the transaction that inserts the bot, so the intent exists exactly when
+	// the bot does. Nothing acts on it until Wake.
+	RecordPresent(ctx context.Context, q dbstore.Queries, botID, image string) error
+	// Wake starts the reconciler on intents that have committed.
+	Wake(ctx context.Context)
 	// RequestAbsent asks for the workspace to be removed, optionally exporting
 	// its data first, and returns the intent generation.
 	RequestAbsent(ctx context.Context, botID string, preserve bool) (int64, error)

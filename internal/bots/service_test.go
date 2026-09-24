@@ -15,6 +15,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -391,21 +392,34 @@ func TestResolveNameSuffixesDerivedNameCollisions(t *testing.T) {
 
 // fakeWorkspaceIntents records intents and answers awaits from a script.
 type fakeWorkspaceIntents struct {
-	ensured  []string
-	images   []string
+	ensured []string
+	images  []string
+	// recordedThrough is the store each intent was written through.
+	recordedThrough []dbstore.Queries
+	recordErr       error
+	// onWake observes each Wake.
+	onWake   func()
 	absent   []string
 	preserve []bool
 	outcome  WorkspaceOutcome
 	awaitErr error
-	// noRow makes Current report that the bot has no workspace intent yet.
-	noRow   bool
-	awaited []int64
+	awaited  []int64
 }
 
-func (f *fakeWorkspaceIntents) EnsurePresent(_ context.Context, botID, image string) (int64, error) {
+func (f *fakeWorkspaceIntents) RecordPresent(_ context.Context, q dbstore.Queries, botID, image string) error {
+	if f.recordErr != nil {
+		return f.recordErr
+	}
 	f.ensured = append(f.ensured, botID)
 	f.images = append(f.images, image)
-	return int64(len(f.ensured)), nil
+	f.recordedThrough = append(f.recordedThrough, q)
+	return nil
+}
+
+func (f *fakeWorkspaceIntents) Wake(context.Context) {
+	if f.onWake != nil {
+		f.onWake()
+	}
 }
 
 func (f *fakeWorkspaceIntents) RequestAbsent(_ context.Context, botID string, preserve bool) (int64, error) {
@@ -420,7 +434,7 @@ func (f *fakeWorkspaceIntents) AwaitSettled(_ context.Context, _ string, generat
 }
 
 func (f *fakeWorkspaceIntents) Current(context.Context, string) (WorkspaceOutcome, bool, error) {
-	return f.outcome, !f.noRow, nil
+	return f.outcome, true, nil
 }
 
 func TestWorkspaceOutcomeErrorKeepsBootstrapSentinel(t *testing.T) {
@@ -649,51 +663,144 @@ func TestCreateStoresTheRequestKey(t *testing.T) {
 	}
 }
 
-func TestResumeCreatedRecordsTheIntentTheFirstAttemptNeverDid(t *testing.T) {
-	// The first attempt inserted the bot and died before asking for its
-	// workspace: nothing would ever move it out of creating.
-	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{})))
-	intents := &fakeWorkspaceIntents{noRow: true}
-	svc.SetWorkspaceIntents(intents)
-	bot := Bot{ID: "00000000-0000-0000-0000-000000000002", Status: BotStatusCreating, Metadata: map[string]any{"workspace": map[string]any{"image": "img:1"}}}
+// txStore runs InTx on a marked copy of the store and reports what became of
+// the transaction.
+type txStore struct {
+	dbstore.Queries
+	tx      dbstore.Queries
+	outcome string
+}
 
-	if _, err := svc.ResumeCreated(context.Background(), bot, CreateBotRequest{}); err != nil {
-		t.Fatalf("ResumeCreated: %v", err)
+type txQueries struct{ dbstore.Queries }
+
+func (s *txStore) InTx(_ context.Context, fn func(dbstore.Queries) error) error {
+	s.tx = &txQueries{Queries: s.Queries}
+	if err := fn(s.tx); err != nil {
+		s.outcome = "rolled back"
+		return err
 	}
-	if len(intents.ensured) != 1 || intents.ensured[0] != bot.ID || intents.images[0] != "img:1" {
-		t.Fatalf("ensured = %v images = %v; want one intent for %s with the first attempt's image", intents.ensured, intents.images, bot.ID)
+	s.outcome = "committed"
+	return nil
+}
+
+// createdBotRow is a CreateBot row for botID.
+func createdBotRow(botID, ownerUserID pgtype.UUID) *fakeRow {
+	return &fakeRow{scanFunc: func(dest ...any) error {
+		*dest[0].(*pgtype.UUID) = botID
+		*dest[1].(*pgtype.UUID) = ownerUserID
+		*dest[2].(*string) = "neko"
+		*dest[3].(*pgtype.Text) = pgtype.Text{String: "Neko", Valid: true}
+		*dest[4].(*pgtype.Text) = pgtype.Text{}
+		*dest[5].(*pgtype.Text) = pgtype.Text{}
+		*dest[6].(*bool) = true
+		*dest[7].(*string) = BotStatusCreating
+		*dest[8].(*string) = "medium"
+		*dest[12].(*[]byte) = []byte(`{"workspace":{"image":"img:1"}}`)
+		return nil
+	}}
+}
+
+// newCreateStore is a store whose owner exists and whose INSERT answers with
+// botID; deletes counts DELETE FROM bots.
+func newCreateStore(botID, ownerUserID pgtype.UUID, deletes *int) *txStore {
+	return &txStore{Queries: postgresstore.NewQueries(sqlc.New(&fakeDBTX{
+		queryRowFunc: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "FROM users") && strings.Contains(sql, "id = $1"):
+				return &fakeRow{scanFunc: func(_ ...any) error { return nil }}
+			case strings.Contains(sql, "INSERT INTO bots"):
+				return createdBotRow(botID, ownerUserID)
+			default:
+				return &fakeRow{scanFunc: func(_ ...any) error { return pgx.ErrNoRows }}
+			}
+		},
+		execFunc: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+			if strings.Contains(sql, "DELETE FROM bots") {
+				*deletes++
+			}
+			return pgconn.CommandTag{}, nil
+		},
+	}))}
+}
+
+func TestCreateCommitsTheBotWithItsWorkspaceIntent(t *testing.T) {
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	for _, deferWake := range []bool{false, true} {
+		deletes := 0
+		store := newCreateStore(botUUID, ownerUUID, &deletes)
+		var wokeAfter []string
+		intents := &fakeWorkspaceIntents{}
+		intents.onWake = func() { wokeAfter = append(wokeAfter, store.outcome) }
+		svc := NewService(nil, store)
+		svc.SetWorkspaceIntents(intents)
+
+		req := CreateBotRequest{DisplayName: "Neko", AclPreset: "allow_all", Metadata: map[string]any{"workspace": map[string]any{"image": "img:1"}}, DeferWake: deferWake}
+		if _, err := svc.Create(context.Background(), ownerUUID.String(), req); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if store.outcome != "committed" || len(intents.recordedThrough) != 1 || intents.recordedThrough[0] != store.tx {
+			t.Fatalf("outcome %q, intents written through %v; want one intent in the transaction that inserted the bot", store.outcome, intents.recordedThrough)
+		}
+		if intents.ensured[0] != botUUID.String() || intents.images[0] != "img:1" {
+			t.Fatalf("intent for %v with image %v; want %s with img:1", intents.ensured, intents.images, botUUID.String())
+		}
+		// The create stream wakes the reconciler itself, once it listens.
+		if want := map[bool]int{false: 1, true: 0}[deferWake]; len(wokeAfter) != want || (want == 1 && wokeAfter[0] != "committed") {
+			t.Fatalf("DeferWake=%v: woke %v; want %d wake after the commit", deferWake, wokeAfter, want)
+		}
 	}
 }
 
-func TestResumeCreatedLeavesARecordedIntentAlone(t *testing.T) {
+func TestCreateLeavesNothingWhenItsWorkspaceIntentFails(t *testing.T) {
+	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
+	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
+	deletes := 0
+	store := newCreateStore(botUUID, ownerUUID, &deletes)
+	recordFailed := errors.New("store unavailable")
+	woke := false
+	svc := NewService(nil, store)
+	svc.SetWorkspaceIntents(&fakeWorkspaceIntents{recordErr: recordFailed, onWake: func() { woke = true }})
+
+	_, err := svc.Create(context.Background(), ownerUUID.String(), CreateBotRequest{DisplayName: "Neko", AclPreset: "allow_all"})
+	if !errors.Is(err, recordFailed) {
+		t.Fatalf("err = %v, want the intent failure", err)
+	}
+	// The rollback takes the bot with it: no half-made bot for a resend to
+	// find, and nothing to clean up by hand.
+	if store.outcome != "rolled back" || deletes != 0 || woke {
+		t.Fatalf("outcome %q, deletes %d, woke %v; want a rollback and nothing else", store.outcome, deletes, woke)
+	}
+}
+
+func TestAwaitCreatedWaitsForTheCurrentIntentWithoutRecordingOne(t *testing.T) {
 	ownerUUID := mustParseUUID("00000000-0000-0000-0000-000000000001")
 	botUUID := mustParseUUID("00000000-0000-0000-0000-000000000002")
 	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{
 		queryRowFunc: func(context.Context, string, ...any) pgx.Row { return makeBotRow(botUUID, ownerUUID) },
 	})))
-	intents := &fakeWorkspaceIntents{outcome: WorkspaceOutcome{Desired: "present", Observed: WorkspaceObservedRunning}}
+	woke := false
+	intents := &fakeWorkspaceIntents{outcome: WorkspaceOutcome{Desired: "present", Observed: WorkspaceObservedRunning}, onWake: func() { woke = true }}
 	svc.SetWorkspaceIntents(intents)
 	bot := Bot{ID: botUUID.String(), Status: BotStatusCreating}
 
-	// Asking again would raise the generation and restart a provisioning run
-	// that is still converging; WaitForReady waits for the one under way.
-	if _, err := svc.ResumeCreated(context.Background(), bot, CreateBotRequest{WaitForReady: true}); err != nil {
-		t.Fatalf("ResumeCreated: %v", err)
+	if _, err := svc.AwaitCreated(context.Background(), bot, CreateBotRequest{WaitForReady: true}); err != nil {
+		t.Fatalf("AwaitCreated: %v", err)
 	}
-	if len(intents.ensured) != 0 {
-		t.Fatalf("ensured = %v; a recorded intent must not be asked for again", intents.ensured)
+	if len(intents.ensured) != 0 || woke {
+		t.Fatalf("ensured = %v woke = %v; answering a create must write nothing", intents.ensured, woke)
 	}
 	if len(intents.awaited) != 1 || intents.awaited[0] != 0 {
 		t.Fatalf("awaited = %v; want one wait for the current intent", intents.awaited)
 	}
 }
 
-func TestResumeCreatedAnswersWithTheFirstAttemptsWorkspaceFailure(t *testing.T) {
+func TestAwaitCreatedAnswersWithTheWorkspaceFailure(t *testing.T) {
 	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{})))
 	svc.SetWorkspaceIntents(&fakeWorkspaceIntents{outcome: WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: WorkspacePhaseBootstrap, LastError: "write AGENTS.md: permission denied"}})
 	bot := Bot{ID: "00000000-0000-0000-0000-000000000002", Status: BotStatusFailed}
 
-	_, err := svc.ResumeCreated(context.Background(), bot, CreateBotRequest{WaitForReady: true})
+	_, err := svc.AwaitCreated(context.Background(), bot, CreateBotRequest{WaitForReady: true})
 	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
 		t.Fatalf("err = %v; a resend must get the failure its first attempt would have", err)
 	}

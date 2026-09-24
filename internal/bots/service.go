@@ -152,95 +152,82 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err != nil {
 		return Bot{}, err
 	}
-	row, err := s.queries.CreateBot(ctx, sqlc.CreateBotParams{
-		OwnerUserID: ownerUUID,
-		Name:        botName,
-		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
-		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
-		Timezone:    timezoneValue,
-		IsActive:    isActive,
-		Metadata:    payload,
-		Status:      BotStatusCreating,
-		// The unique index on it also makes two racing creates with the same
-		// key collide here; the endpoint answers the loser via FindCreated.
-		CreateRequestKey: pgtype.Text{String: req.RequestKey, Valid: req.RequestKey != ""},
+	status := BotStatusCreating
+	if s.workspaceIntents == nil {
+		// No workspace subsystem is wired (tests, partial deployments). Keep
+		// the bot usable instead of leaving it in creating with nothing that
+		// would ever change that status.
+		status = BotStatusReady
+	}
+	var row sqlc.CreateBotRow
+	// The bot, its ACL preset and its workspace intent commit together: a
+	// create that fails part-way leaves nothing behind, and one that committed
+	// leaves nothing for a resend to finish. Two creates with the same
+	// Idempotency-Key serialize on its unique index, so the loser sees the
+	// winner only once all of it has committed; the endpoint answers the loser
+	// via FindCreated.
+	err = s.inTx(ctx, func(q dbstore.Queries) error {
+		created, err := q.CreateBot(ctx, sqlc.CreateBotParams{
+			OwnerUserID:      ownerUUID,
+			Name:             botName,
+			DisplayName:      pgtype.Text{String: displayName, Valid: displayName != ""},
+			AvatarUrl:        pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
+			Timezone:         timezoneValue,
+			IsActive:         isActive,
+			Metadata:         payload,
+			Status:           status,
+			CreateRequestKey: pgtype.Text{String: req.RequestKey, Valid: req.RequestKey != ""},
+		})
+		if err != nil {
+			if db.IsUniqueViolation(err) {
+				return ErrBotNameTaken
+			}
+			return err
+		}
+		botID := created.ID.String()
+		if err := acl.ApplyPreset(ctx, q, botID, ownerID, aclPresetKey); err != nil {
+			return fmt.Errorf("apply acl preset: %w", err)
+		}
+		if s.workspaceIntents != nil {
+			// The workspace is provisioned by the reconciler; the request only
+			// records the intent. A failed provisioning leaves the bot in
+			// status failed with its diagnostics, never stranded in creating.
+			if err := s.workspaceIntents.RecordPresent(ctx, q, botID, workspaceImageFromMetadata(metadata)); err != nil {
+				return fmt.Errorf("record workspace intent: %w", err)
+			}
+		}
+		row = created
+		return nil
 	})
 	if err != nil {
-		if db.IsUniqueViolation(err) {
-			return Bot{}, ErrBotNameTaken
-		}
 		return Bot{}, err
 	}
 	bot, err := toBot(asSQLCBot(row))
 	if err != nil {
 		return Bot{}, err
 	}
-	if err := acl.ApplyPreset(ctx, s.queries, bot.ID, ownerID, aclPresetKey); err != nil {
-		if cleanupErr := s.queries.DeleteBotByID(ctx, row.ID); cleanupErr != nil {
-			return Bot{}, errors.Join(
-				fmt.Errorf("apply acl preset: %w", err),
-				fmt.Errorf("cleanup bot after acl preset failure: %w", cleanupErr),
-			)
-		}
-		return Bot{}, fmt.Errorf("apply acl preset: %w", err)
-	}
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
-	return s.provisionCreated(ctx, bot, req, false)
+	if s.workspaceIntents != nil && !req.DeferWake {
+		s.workspaceIntents.Wake(ctx)
+	}
+	return s.AwaitCreated(ctx, bot, req)
 }
 
-// ResumeCreated finishes, for a bot an earlier create with the same
-// Idempotency-Key made, what Create does after inserting the row. That attempt
-// may have died in between (its client gone, the store briefly unavailable,
-// the server restarted), leaving a bot whose workspace nothing was asked to
-// provision, in creating forever. The intent is recorded only when missing, so
-// a provisioning run already under way is never restarted.
-func (s *Service) ResumeCreated(ctx context.Context, bot Bot, req CreateBotRequest) (Bot, error) {
-	return s.provisionCreated(ctx, bot, req, true)
-}
-
-// provisionCreated is the workspace half of a create: record the intent and,
-// with WaitForReady, wait for it to settle. resumed marks a bot an earlier
-// attempt inserted, whose intent may or may not have been recorded.
-func (s *Service) provisionCreated(ctx context.Context, bot Bot, req CreateBotRequest, resumed bool) (Bot, error) {
-	if req.SkipLifecycle {
-		return bot, nil
-	}
-	if s.workspaceIntents == nil {
-		// No workspace subsystem is wired (tests, partial deployments). Keep
-		// the bot usable instead of leaving it in creating with nothing that
-		// would ever change that status.
-		if err := s.updateStatus(ctx, bot.ID, BotStatusReady); err != nil {
-			return Bot{}, err
-		}
-		return s.Get(ctx, bot.ID)
-	}
-	recorded := false
-	if resumed {
-		var err error
-		if _, recorded, err = s.workspaceIntents.Current(ctx, bot.ID); err != nil {
-			return Bot{}, err
-		}
-	}
-	// Zero waits for whichever intent is current: the one a resumed create's
-	// first attempt recorded.
-	var generation int64
-	if !recorded {
-		// The workspace is provisioned by the reconciler; the request only
-		// records the intent. A failed provisioning leaves the bot in status
-		// failed with its diagnostics, never stranded in creating.
-		var err error
-		if generation, err = s.workspaceIntents.EnsurePresent(ctx, bot.ID, workspaceImageFromMetadata(bot.Metadata)); err != nil {
-			return Bot{}, fmt.Errorf("record workspace intent: %w", err)
-		}
-	}
-	if !req.WaitForReady {
+// AwaitCreated answers for a bot a create made, by this request or by an
+// earlier attempt with the same Idempotency-Key: with WaitForReady, once its
+// workspace has settled. It writes nothing; the create committed everything
+// the bot needs together with the bot.
+func (s *Service) AwaitCreated(ctx context.Context, bot Bot, req CreateBotRequest) (Bot, error) {
+	if !req.WaitForReady || s.workspaceIntents == nil {
 		return bot, nil
 	}
 	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), botLifecycleOperationTimeout)
 	defer cancel()
-	outcome, err := s.workspaceIntents.AwaitSettled(waitCtx, bot.ID, generation)
+	// Zero waits for the current intent: the one the bot was created with, or
+	// whatever superseded it since.
+	outcome, err := s.workspaceIntents.AwaitSettled(waitCtx, bot.ID, 0)
 	if err != nil {
 		return Bot{}, fmt.Errorf("wait for workspace: %w", err)
 	}
@@ -248,6 +235,17 @@ func (s *Service) provisionCreated(ctx context.Context, bot Bot, req CreateBotRe
 		return Bot{}, workspaceOutcomeError(outcome)
 	}
 	return s.Get(waitCtx, bot.ID)
+}
+
+// inTx runs fn in one transaction when the store supports them; stores without
+// one (tests) run it directly.
+func (s *Service) inTx(ctx context.Context, fn func(dbstore.Queries) error) error {
+	if txer, ok := s.queries.(interface {
+		InTx(context.Context, func(dbstore.Queries) error) error
+	}); ok {
+		return txer.InTx(ctx, fn)
+	}
+	return fn(s.queries)
 }
 
 // FindCreated returns the bot an earlier create with this Idempotency-Key made

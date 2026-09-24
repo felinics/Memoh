@@ -602,12 +602,15 @@ type botWorkspaceIntents struct {
 	svc *botworkspace.Service
 }
 
-func (a botWorkspaceIntents) EnsurePresent(ctx context.Context, botID, image string) (int64, error) {
-	w, err := a.svc.EnsurePresent(ctx, botID, image)
-	if err != nil {
-		return 0, err
-	}
-	return w.DesiredGeneration, nil
+// RecordPresent writes the intent through the create's transaction; a new bot
+// has no row yet, so it starts at generation 1.
+func (botWorkspaceIntents) RecordPresent(ctx context.Context, q dbstore.Queries, botID, image string) error {
+	_, err := botworkspace.NewRepository(q).Upsert(ctx, botID, botworkspace.DesiredPresent, strings.TrimSpace(image), false)
+	return err
+}
+
+func (a botWorkspaceIntents) Wake(context.Context) {
+	a.svc.Kick()
 }
 
 func (a botWorkspaceIntents) RequestAbsent(ctx context.Context, botID string, preserve bool) (int64, error) {

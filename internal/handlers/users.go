@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
@@ -474,12 +473,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 		return h.createBotStream(c, ownerID, ownerFromToken, req, resent)
 	}
 	// A resend gets the answer its first attempt would have: 201 and that bot.
-	resp, replayed, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
-	if err == nil && replayed {
-		// That attempt may have died between inserting the bot and asking for
-		// its workspace; finish what it left undone.
-		resp, err = h.botService.ResumeCreated(c.Request().Context(), resp, req)
-	}
+	resp, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}
@@ -501,21 +495,23 @@ const createRequestKeyHeader = "Idempotency-Key"
 const maxCreateRequestKeyLen = 255
 
 // createOrReplay answers a create whose Idempotency-Key already made a bot with
-// that bot, and creates one otherwise; replayed reports which happened. The
-// bot is either resent (found before this call) or the winner of a race
-// between identical creates, whose row now holds the key or the name this one
-// asked for.
-func (h *UsersHandler) createOrReplay(ctx context.Context, ownerID string, req bots.CreateBotRequest, resent *bots.Bot) (bots.Bot, bool, error) {
-	if resent != nil {
-		return *resent, true, nil
-	}
-	bot, err := h.botService.Create(ctx, ownerID, req)
-	if errors.Is(err, bots.ErrBotNameTaken) && req.RequestKey != "" {
-		if winner, found, lookupErr := h.botService.FindCreated(ctx, ownerID, req.RequestKey); lookupErr == nil && found {
-			return winner, true, nil
+// that bot, and creates one otherwise. The bot is either resent (found before
+// this call) or the winner of a race between identical creates, whose row now
+// holds the key or the name this one asked for. Either way that create
+// committed the bot with its workspace intent, so answering it writes nothing.
+func (h *UsersHandler) createOrReplay(ctx context.Context, ownerID string, req bots.CreateBotRequest, resent *bots.Bot) (bots.Bot, error) {
+	if resent == nil {
+		bot, err := h.botService.Create(ctx, ownerID, req)
+		if !errors.Is(err, bots.ErrBotNameTaken) || req.RequestKey == "" {
+			return bot, err
 		}
+		winner, found, lookupErr := h.botService.FindCreated(ctx, ownerID, req.RequestKey)
+		if lookupErr != nil || !found {
+			return bot, err
+		}
+		resent = &winner
 	}
-	return bot, false, err
+	return h.botService.AwaitCreated(ctx, *resent, req)
 }
 
 func acceptsEventStream(c echo.Context) bool {
@@ -560,11 +556,12 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
 	}
 
-	// The bot row is created first; the workspace intent is recorded below so
-	// the subscription is in place before the reconciler starts emitting.
+	// The bot commits with its workspace intent, so a first attempt and a
+	// resend follow the same intent. The reconciler is woken below, once the
+	// subscription is in place, so the stream relays every progress event.
 	req.WaitForReady = false
-	req.SkipLifecycle = true
-	bot, replayed, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
+	req.DeferWake = true
+	bot, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}
@@ -602,24 +599,13 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 
 	events, unsubscribe := h.workspaceSetup.Subscribe(bot.ID)
 	defer unsubscribe()
-
-	// Recording the intent must not depend on the client staying connected.
-	intentCtx, cancelIntent := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 15*time.Second)
-	intent, err := h.workspaceIntentForCreate(intentCtx, bot.ID, workspaceImageFromCreateRequest(req), replayed)
-	cancelIntent()
-	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed",
-			slog.String("bot_id", bot.ID),
-			slog.Any("error", err),
-		)
-		sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup could not be scheduled")
-		return nil
-	}
+	h.workspaceSetup.Kick()
 
 	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), workspaceStreamBudget)
 	defer cancel()
 	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
-		return h.workspaceSetup.Await(ctx, bot.ID, intent.DesiredGeneration)
+		// Zero follows the current intent: the one the bot was created with.
+		return h.workspaceSetup.Await(ctx, bot.ID, 0)
 	}, httpx.RequestID(c), sendError)
 	if outcome.Failed || outcome.Disconnected {
 		return nil
@@ -641,33 +627,6 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil
-}
-
-// workspaceIntentForCreate yields the workspace intent whose progress the
-// create stream relays. A replayed create re-attaches to the intent its first
-// attempt recorded: asking again would raise the desired generation and
-// restart a provisioning run that is still converging. Only a first attempt
-// that died before recording anything leaves nothing to attach to.
-func (h *UsersHandler) workspaceIntentForCreate(ctx context.Context, botID, image string, replayed bool) (botworkspace.Workspace, error) {
-	if !replayed {
-		return h.workspaceSetup.EnsurePresent(ctx, botID, image)
-	}
-	w, err := h.workspaceSetup.Get(ctx, botID)
-	if errors.Is(err, botworkspace.ErrNotFound) {
-		return h.workspaceSetup.EnsurePresent(ctx, botID, image)
-	}
-	return w, err
-}
-
-// workspaceImageFromCreateRequest reads the optional workspace.image preference
-// from the create request metadata.
-func workspaceImageFromCreateRequest(req bots.CreateBotRequest) string {
-	section, ok := req.Metadata["workspace"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	image, _ := section["image"].(string)
-	return strings.TrimSpace(image)
 }
 
 // CheckBotName godoc
