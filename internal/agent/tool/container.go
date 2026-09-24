@@ -152,6 +152,9 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 	}
 	// Workspace links are a Web/Desktop affordance, not a portable channel URL.
 	// Other execution locations must not be advertised as the native workspace.
+	// Any workspace that reports a native target gets these instructions, a
+	// hosted sandbox included, so its file viewer and localhost preview must
+	// open these links.
 	if (session.CurrentPlatform == "local" || session.CurrentPlatform == "web") && !sessionUsesRemoteWorkspaceTarget(session) {
 		if len(available.Refs(ToolRead(), ToolWrite(), ToolEdit(), ToolApplyPatch())) > 0 {
 			parts = append(parts, "In Memoh Web/Desktop, link to files on the native Server Workspace using Markdown with the real absolute path, for example [View source](/data/project/index.html). Encode spaces in link destinations. Memoh renders link icons; do not add emoji or icon characters to link labels. These links open the workspace file viewer, not a running web page. Do not prefix paths with the Memoh site URL or file://, and do not use this format for files on another computer.")

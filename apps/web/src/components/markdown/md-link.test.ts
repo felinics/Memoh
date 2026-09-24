@@ -75,6 +75,16 @@ describe('chat Markdown delivery links', () => {
     expect(host.querySelector('img')?.style.colorScheme).toBe('light')
     expect(mocks.siteIcon).toHaveBeenCalledTimes(1)
   })
+  it('asks again for a site whose lookup came back empty', async () => {
+    mocks.siteIcon.mockResolvedValueOnce({ data: { light: '', dark: '' } })
+    let host = await render('[a](https://github.com/a)')
+    await vi.waitFor(() => expect(mocks.siteIcon).toHaveBeenCalledTimes(1))
+    expect(host.querySelector('img')).toBeNull()
+    unmount?.()
+    host = await render('[a](https://github.com/a)')
+    await vi.waitFor(() => expect(host.querySelector('img')).not.toBeNull())
+    expect(mocks.siteIcon).toHaveBeenCalledTimes(2)
+  })
   it('keeps modifier and middle clicks in the workspace instead of navigating to the host', async () => {
     const host = await render('[文件](/data/a%20b.md)')
     const anchor = host.querySelector('a')!

@@ -56,6 +56,13 @@ type (
 
 var siteIconThemes = []string{"light", "dark"}
 
+// Fetches leave this server process directly: the transport resolves and dials
+// validated IPs itself and ignores HTTP(S)_PROXY. A hosted deployment whose
+// egress requires an explicit proxy, or cannot reach the linked sites, gets
+// empty results and the fallback icon rather than an error, so check the
+// server's egress when deploying there. Any signed-in user can make the server
+// fetch a public site root from that egress IP; per-origin caching bounds
+// repeats but there is no per-user rate limit.
 func NewSiteIconHandler() *SiteIconHandler {
 	transport := &http.Transport{DialContext: dialIconHost, TLSHandshakeTimeout: 5 * time.Second, MaxIdleConns: 16, IdleConnTimeout: 30 * time.Second}
 	h := &SiteIconHandler{
