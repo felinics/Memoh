@@ -890,6 +890,7 @@
     "pdfUnsupportedByModel": "The current model can't read PDFs natively. The file will be saved to the workspace as a path, but the model won't be able to view its content.",
     "send": "Send",
     "sendFailed": "Message failed to send",
+    "sendWorkdirUnsupported": "The server couldn't start this chat in the selected folder. Update the server, or send without a folder.",
     "forkFailed": "Failed to fork session",
     "forkedFrom": "Forked from {session}",
     "forkSourceUnavailable": "The original session no longer exists or was deleted.",

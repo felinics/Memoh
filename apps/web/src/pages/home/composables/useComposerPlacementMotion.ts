@@ -2,14 +2,18 @@ import { nextTick, onScopeDispose, watch, type Ref } from 'vue'
 import { animate } from 'motion/mini'
 import { CHAT_SEND_MOTION } from './turn-entrance'
 
+export type ComposerPlacementDirection = 'toChat' | 'toWelcome'
+
 export function useComposerPlacementMotion(
   element: Ref<HTMLElement | null>,
   isWelcome: Ref<boolean>,
-  // The FLIP is only honest on the send path, where the pane's layout is
-  // otherwise stable. Navigation (welcome → sidebar session) swaps the whole
+  // The FLIP is only honest when the pane's layout is otherwise stable: a
+  // first send leaving welcome (toChat) or that send being rolled back
+  // (toWelcome). Navigation (welcome <-> a sidebar session) swaps the whole
   // pane in the same flush; gliding the composer over the already-arrived
-  // content reads as a stray ghost, so callers gate those flips out.
-  allow: () => boolean = () => true,
+  // content reads as a stray ghost, so callers gate those flips out. Only
+  // the send direction animates unless the caller opts in.
+  allow: (direction: ComposerPlacementDirection) => boolean = direction => direction === 'toChat',
 ) {
   let cancel: (() => void) | undefined
   let revision = 0
@@ -18,10 +22,10 @@ export function useComposerPlacementMotion(
     cancel?.()
     cancel = undefined
   }
-  watch(isWelcome, async (welcome, wasWelcome) => {
+  watch(isWelcome, async (welcome) => {
     reset()
     const el = element.value
-    if (welcome || !wasWelcome || !el || !allow()
+    if (!el || !allow(welcome ? 'toWelcome' : 'toChat')
       || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
     const attempt = revision
     // Measure before Vue changes the welcome layout, then invert the movement.

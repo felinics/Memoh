@@ -159,6 +159,18 @@
                   </template>
                 </div>
               </div>
+
+              <FirstSendExitTurn
+                v-if="exitRollback"
+                :key="exitRollback.invocationId"
+                :target="exitRollback.target"
+                :invocation-id="exitRollback.invocationId"
+                :turns="exitRollback.turns"
+                :bot-id="currentBotId"
+                :bot-name="currentBot?.name"
+                :bot-avatar-url="currentBot?.avatar_url"
+                @done="chatStore.acknowledgeFirstSendRollback"
+              />
             </div>
           </ScrollArea>
 
@@ -619,6 +631,7 @@
                   rows="1"
                   :placeholder="composerPlaceholder"
                   :disabled="!currentBotId || activeChatReadOnly || loadingMessages"
+                  :readonly="firstSendRollingBack"
                   class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="isWelcome ? 'min-h-12' : 'min-h-10'"
                   @keydown="handleComposerKeydown"
@@ -892,9 +905,10 @@
                         type="button"
                         variant="brand"
                         shape="circle"
-                        :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel || goalSubmissionBlocked || !!runtimeModeUnavailableReason)"
+                        :disabled="firstSendRollingBack || (streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel || goalSubmissionBlocked || !!runtimeModeUnavailableReason))"
                         :title="goalSubmissionBlocked ? goalExecutionBlockedReason : undefined"
                         :class="runtimeModeChanging && !streaming && showSend && !!currentBotId && !activeChatReadOnly && !loadingMessages && !composerAgentConfigPending && !composerHasNoModel ? 'disabled:opacity-100' : undefined"
+                        :aria-busy="firstSendStopPending || undefined"
                         :aria-label="streaming && showSend ? $t(composerQueueCommand?.mode === 'steer' ? 'chat.queue.enqueueSteer' : 'chat.queue.enqueueFollowUp') : (streaming ? 'Stop generating response' : 'Send message')"
                         class="size-full"
                         @click="handleSendButton"
@@ -920,7 +934,7 @@
                             viewBox="0 0 24 24"
                             fill="currentColor"
                             class="col-start-1 row-start-1 size-4 max-md:size-4.5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                            :class="streaming ? 'opacity-100' : 'opacity-0'"
+                            :class="streaming && !firstSendStopPending ? 'opacity-100' : 'opacity-0'"
                           >
                             <rect
                               x="4"
@@ -930,6 +944,12 @@
                               rx="3"
                             />
                           </svg>
+                          <!-- Stop pressed before the server named the run:
+                               the run is still being stopped. -->
+                          <Spinner
+                            v-if="firstSendStopPending"
+                            class="col-start-1 row-start-1 size-4 max-md:size-4.5"
+                          />
                         </span>
                       </Button>
                     </div>
@@ -974,7 +994,7 @@
                     :bot-id="currentBotId || ''"
                     :project="runtimeProject"
                     :projects="selectableFolders"
-                    :editable="!hasRenderedSession"
+                    :editable="draftSetupEditable"
                     :locked="computerSwitchLocked || composerConfigPending || !canWorkspaceRead"
                     :visible="isVisible && canWorkspaceRead"
                     :streaming="streaming"
@@ -1270,6 +1290,7 @@ import RuntimeModeIcon from './runtime-mode-icon.vue'
 import ComposerFolderMenu from './composer-folder-menu.vue'
 import CodexGoalBar from './codex-goal-bar.vue'
 import ChatAttachmentCard from './chat-attachment-card.vue'
+import FirstSendExitTurn from './first-send-exit-turn.vue'
 import { useChatScroll } from '../composables/useChatScroll'
 import { useComposerPlacementMotion } from '../composables/useComposerPlacementMotion'
 import { useQueueTurnAnchors } from '../composables/useQueueTurnAnchors'
@@ -1454,17 +1475,30 @@ const startupSendFailure = computed(() => chatStore.startupSendFailureFor(
 const hasRenderedSession = computed(() =>
   !!(paneTarget.value.sessionId || activeChatTarget.value.sessionId || '').trim(),
 )
+// The first message sent from this pane's draft, from Enter until it is an
+// ordinary session (or rolled back). The store owns the phase; the pane only
+// reads it. It is keyed by the pane's view id, so it outlives the draft ->
+// session repoint and the rollback back to a fresh draft.
+const firstSendEntry = computed(() => chatStore.firstSendFor(paneTarget.value))
+const firstSendPhase = computed(() => firstSendEntry.value?.phase ?? 'idle')
+const firstSendRollingBack = computed(() => firstSendPhase.value === 'rolledBack')
+const firstSendStopPending = computed(() => firstSendEntry.value?.stopRequested === true)
+// A draft whose first message is in flight is committed to its setup (the
+// folder travels with that message), even before a session id exists.
+const draftSetupEditable = computed(() => !hasRenderedSession.value && firstSendPhase.value === 'idle')
 
 // A fresh, writable chat opens with the composer centred and a greeting above
 // it. Read-only sessions (system / synced channel threads) hide the composer
-// entirely, so they never reach this state.
-const isWelcome = computed(() =>
-  !!currentBotId.value
-  && !hasRenderedSession.value
-  && !activeChatReadOnly.value
-  && !loadingChats.value
-  && messages.value.length === 0,
-)
+// entirely, so they never reach this state. While a first send is in flight
+// the pane is a chat whatever the session id says: the turn is on screen from
+// Enter, before the server names the session. A rolled-back first send is
+// welcome again from the moment it fails, while its turn animates out.
+const isWelcome = computed(() => {
+  if (!currentBotId.value || activeChatReadOnly.value || loadingChats.value) return false
+  if (firstSendPhase.value === 'rolledBack') return true
+  if (firstSendPhase.value !== 'idle') return false
+  return !hasRenderedSession.value && messages.value.length === 0
+})
 
 // During boot, "a draft that stays a draft" and "a draft about to be
 // repointed to the most recent session" are indistinguishable until
@@ -1477,14 +1511,25 @@ const isWelcome = computed(() =>
 // from the first frame, so this gate never engages on session routes.
 const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 const composerPlacementEl = useTemplateRef<HTMLElement>('composerPlacementEl')
-// Armed by handleSend when the send leaves from welcome; consumed on the
-// welcome→chat flip. Without an armed send the flip is navigation, and the
-// composer just lands docked with the rest of the pane.
-const welcomeSendMotionArmed = ref(false)
-useComposerPlacementMotion(composerPlacementEl, isWelcome, () => {
-  const armed = welcomeSendMotionArmed.value
-  welcomeSendMotionArmed.value = false
-  return armed
+// Only a first send moves the composer: out of welcome when it starts, back
+// when it rolls back. Any other flip is navigation, and the composer just
+// lands with the rest of the pane.
+useComposerPlacementMotion(composerPlacementEl, isWelcome, direction => direction === 'toWelcome'
+  ? firstSendRollingBack.value
+  : firstSendPhase.value !== 'idle' && firstSendPhase.value !== 'rolledBack')
+
+// The turns a rolled-back first send removed, rendered once more so they can
+// leave the way they came in. The rollback ends when the exit finishes (or
+// immediately under reduced motion); until then the composer holds the
+// restored input read-only, so an edit cannot race the animation.
+const exitRollback = computed(() => {
+  const entry = firstSendEntry.value
+  if (entry?.phase !== 'rolledBack' || entry.exitTurns.length === 0) return null
+  return { invocationId: entry.invocationId, turns: entry.exitTurns, target: { ...paneTarget.value } }
+})
+watch(() => firstSendRollingBack.value && !exitRollback.value ? firstSendEntry.value?.invocationId ?? '' : '', (invocationId) => {
+  // Nothing to animate (the send failed before any turn existed).
+  if (invocationId) chatStore.acknowledgeFirstSendRollback({ ...paneTarget.value }, invocationId)
 })
 
 // Rotate the greeting per fresh chat so the entry point feels alive rather than
@@ -1514,7 +1559,8 @@ const welcomeGreeting = computed(() => {
   return t(WELCOME_GREETING_KEYS[welcomeGreetingIndex.value] ?? WELCOME_GREETING_KEYS[0])
 })
 watch([isWelcome, currentBotId, () => activeSession.value?.id], ([welcome]) => {
-  if (welcome) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
+  // A rollback returns to the same welcome the user left, greeting included.
+  if (welcome && !firstSendRollingBack.value) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
 })
 
 const pendingDecision = computed(() => findLatestPendingChatDecision(messages.value))
@@ -3912,7 +3958,7 @@ async function handleEditMessage(turnId: string, text: string, done?: (started: 
 }
 
 async function handleSend() {
-  if (!isActive.value) return
+  if (!isActive.value || firstSendRollingBack.value) return
   if (!skillSlashEnabled.value && requestedSkills.value.length) {
     requestedSkills.value = []
   }
@@ -4098,10 +4144,6 @@ async function handleSend() {
     return
   }
 
-  // Arm the placement FLIP only after attachment conversion has succeeded and
-  // the send is really going out: arming earlier lets a navigation during the
-  // async read (or a failed conversion) consume/inherit the flag.
-  welcomeSendMotionArmed.value = isWelcome.value
   // Arm the pin only once the store has passed command handling and session
   // setup and is about to start a real turn. Command-only sends therefore do
   // not leave a latent pin behind; startup failures roll the arm back.
@@ -4138,11 +4180,6 @@ async function handleSend() {
     pairSend.releaseReads()
   })
   rollbackPin = null
-  // A send that never promoted the draft (command-only, or failed before the
-  // turn) leaves the motion armed; disarm so a later navigation can't inherit it.
-  void nextTick(() => {
-    if (isWelcome.value) welcomeSendMotionArmed.value = false
-  })
   pairSend.finish(result.messageSent === true || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.stage === 'startup') {
@@ -4171,6 +4208,8 @@ async function handleSend() {
 }
 
 function handleSendButton() {
+  // A stop already sent waits for the server to end the run.
+  if (firstSendStopPending.value) return
   if (streaming.value && !showSend.value) {
     chatStore.abort(paneTarget.value)
     return
