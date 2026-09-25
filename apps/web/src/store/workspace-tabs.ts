@@ -402,6 +402,25 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     return null
   }
 
+  function terminalSessionId(panelId: string): string | null {
+    const params = api.value?.getPanel(panelId)?.params as { terminalSessionId?: unknown } | undefined
+    const id = params?.terminalSessionId
+    return typeof id === 'string' && id.trim() ? id.trim() : null
+  }
+
+  function setTerminalSessionId(panelId: string, sessionId: string | null) {
+    const dock = api.value
+    if (!dock || panelComponentOf(panelId) !== 'terminal') return
+    const panel = dock.getPanel(panelId)
+    if (!panel) return
+    const params = panel.params as { terminalSessionId?: unknown } | undefined
+    const current = typeof params?.terminalSessionId === 'string' ? params.terminalSessionId : null
+    const next = sessionId?.trim() || null
+    if (current === next) return
+    panel.api.updateParameters({ terminalSessionId: next })
+    persistLayout()
+  }
+
   function updateTerminalTitle(panelId: string, title: unknown) {
     const dock = api.value
     if (!dock || panelComponentOf(panelId) !== 'terminal' || typeof title !== 'string') return
@@ -2384,6 +2403,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     unregisterFileSaveHandler,
     updateBrowserAddress,
     updateTerminalTitle,
+    terminalSessionId,
+    setTerminalSessionId,
     resetBot,
     resetAll,
   }

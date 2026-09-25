@@ -12,6 +12,9 @@ service ContainerService {
   rpc Mkdir(MkdirRequest) returns (MkdirResponse);
   rpc Rename(RenameRequest) returns (RenameResponse);
   rpc Exec(stream ExecInput) returns (stream ExecOutput);
+  // Terminal attaches a browser shell. The PTY outlives this stream: cancelling
+  // the stream detaches, and only an explicit release frame ends the session.
+  rpc Terminal(stream TerminalClient) returns (stream TerminalServer);
   rpc Tunnel(stream TunnelFrame) returns (stream TunnelFrame);
   rpc ReverseHTTP(stream ReverseHTTPFrame) returns (stream ReverseHTTPFrame);
   rpc ReadRaw(ReadRawRequest) returns (stream DataChunk);
@@ -98,6 +101,56 @@ message ExecOutput {
   Stream stream = 1;
   bytes data = 2;
   int32 exit_code = 3;
+}
+
+message TerminalClient {
+  oneof frame {
+    TerminalOpen open = 1;
+    TerminalAttach attach = 2;
+    bytes input = 3;
+    TerminalResize resize = 4;
+    bool release = 5;
+  }
+}
+
+message TerminalOpen {
+  string command = 1;
+  string work_dir = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message TerminalAttach {
+  string session_id = 1;
+  uint64 since_offset = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message TerminalServer {
+  oneof frame {
+    TerminalReady ready = 1;
+    TerminalBytes bytes = 2;
+    TerminalExit exit = 3;
+  }
+}
+
+message TerminalReady {
+  string session_id = 1;
+  // Absolute offset of the next TerminalBytes payload.
+  uint64 offset = 2;
+  // since_offset is older than the bytes still kept in the ring.
+  bool truncated = 3;
+}
+
+message TerminalBytes {
+  bytes data = 1;
+  // Absolute offset after data is applied.
+  uint64 offset = 2;
+}
+
+message TerminalExit {
+  int32 code = 1;
 }
 
 message TunnelOpen {

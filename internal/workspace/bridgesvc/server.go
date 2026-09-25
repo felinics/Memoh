@@ -57,6 +57,7 @@ type Server struct {
 	dataMount         string
 	allowHostAbsolute bool
 	reverseHTTP       *ReverseHTTPBroker
+	terminals         *terminalHub
 }
 
 func New(opts Options) *Server {
@@ -80,6 +81,7 @@ func New(opts Options) *Server {
 		dataMount:         filepath.Clean(dataMount),
 		allowHostAbsolute: opts.AllowHostAbsolute,
 		reverseHTTP:       opts.ReverseHTTP,
+		terminals:         newTerminalHub(),
 	}
 }
 

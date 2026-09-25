@@ -43,6 +43,16 @@ import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
 import { useSettingsStore } from '@/store/settings'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { LOCALHOST_URL_REGEX, tryParseLocalhostHref } from '@/utils/localhost-link'
+import {
+  createTerminalLink,
+  manualReconnect,
+  markRelease,
+  onBytes,
+  onReady,
+  onSocketClose,
+  openFrame,
+  type TerminalLink,
+} from './terminal-session'
 import '@xterm/xterm/css/xterm.css'
 
 const props = withDefaults(defineProps<{
@@ -73,6 +83,7 @@ function resolveTerminalTheme() {
 
 const TERMINAL_OPTIONS = {
   cursorBlink: true,
+  scrollback: 5000,
 } as const
 
 // All code surfaces follow the shared code font size (default 13). Only the
@@ -98,11 +109,66 @@ let serializeAddon: SerializeAddon | null = null
 let ws: WebSocket | null = null
 let resizeObserver: ResizeObserver | null = null
 let fitTimer: ReturnType<typeof setTimeout> | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let offsetTimer: ReturnType<typeof setTimeout> | null = null
 let disposables: Array<{ dispose(): void }> = []
 let connectionDisposables: Array<{ dispose(): void }> = []
+let link: TerminalLink = createTerminalLink(null, 0)
+let displayedOutput = false
+let pendingSnapshot: string | null = null
 
 function currentCacheKey(): string {
   return terminalCacheKey(props.botId, props.tabId)
+}
+
+function offsetStorageKey(): string {
+  return `memoh.terminal.offset.${props.botId}.${props.tabId}`
+}
+
+function readStoredOffset(): number {
+  try {
+    const raw = sessionStorage.getItem(offsetStorageKey())
+    const value = raw ? Number(raw) : 0
+    return Number.isFinite(value) && value > 0 ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+function persistOffsetNow() {
+  try {
+    if (!link.sessionId || link.offset <= 0) {
+      sessionStorage.removeItem(offsetStorageKey())
+      return
+    }
+    sessionStorage.setItem(offsetStorageKey(), String(link.offset))
+  } catch {
+    // sessionStorage can be unavailable in private browsing modes.
+  }
+}
+
+function scheduleOffsetPersist() {
+  if (offsetTimer) return
+  offsetTimer = setTimeout(() => {
+    offsetTimer = null
+    persistOffsetNow()
+  }, 1000)
+}
+
+function loadLink() {
+  link = createTerminalLink(tabsStore.terminalSessionId(props.tabId), readStoredOffset())
+}
+
+function writeNotice(message: string) {
+  terminal?.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`)
+}
+
+function noticeFor(kind: 'gone' | 'unsupported' | 'full' | 'taken' | 'truncated') {
+  if (kind === 'gone') return t('bots.terminal.sessionGone')
+  if (kind === 'unsupported') return t('bots.terminal.unsupported')
+  if (kind === 'full') return t('bots.terminal.full')
+  if (kind === 'taken') return t('bots.terminal.taken')
+  return t('bots.terminal.replayTruncated')
 }
 
 function persistSnapshot() {
@@ -137,8 +203,60 @@ function closeWs() {
   }
 }
 
+function clearReconnectTimer() {
+  if (!reconnectTimer) return
+  clearTimeout(reconnectTimer)
+  reconnectTimer = null
+}
+
+function applyServerText(data: string) {
+  let message: { type?: string, sessionId?: string, offset?: number, truncated?: boolean, code?: number }
+  try {
+    message = JSON.parse(data) as typeof message
+  } catch {
+    return
+  }
+  if (message.type === 'ready') {
+    const applied = onReady(link, message)
+    link = applied.link
+    if (link.sessionId) tabsStore.setTerminalSessionId(props.tabId, link.sessionId)
+    if (applied.reset && terminal) {
+      terminal.reset()
+      displayedOutput = false
+      writeNotice(noticeFor('truncated'))
+    }
+    status.value = 'connected'
+  }
+}
+
+function handleSocketClose(code: number) {
+  const step = onSocketClose(link, code)
+  link = step.link
+  if (step.action === 'close-tab') {
+    tabsStore.closeTab(props.tabId)
+    return
+  }
+  if (!link.sessionId) {
+    tabsStore.setTerminalSessionId(props.tabId, null)
+    persistOffsetNow()
+  }
+  if (step.notice === 'gone' && !displayedOutput && pendingSnapshot) {
+    terminal?.write(pendingSnapshot)
+    pendingSnapshot = null
+  }
+  if (step.notice) writeNotice(noticeFor(step.notice))
+  status.value = 'disconnected'
+  if (step.action !== 'connect') return
+  clearReconnectTimer()
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    connectWs()
+  }, step.delayMs)
+}
+
 function connectWs() {
-  if (!terminal) return
+  if (!terminal || link.releasing) return
+  clearReconnectTimer()
   closeWs()
 
   for (const d of connectionDisposables) d.dispose()
@@ -146,34 +264,37 @@ function connectWs() {
 
   fitTerminal()
 
-  const cols = terminal.cols
-  const rows = terminal.rows
-
   status.value = 'connecting'
-  const url = resolveTerminalWsUrl(cols, rows)
-  const socket = new WebSocket(url)
+  const socket = new WebSocket(resolveTerminalWsUrl(terminal.cols, terminal.rows))
   socket.binaryType = 'arraybuffer'
   ws = socket
+  const frame = openFrame(link, terminal.cols, terminal.rows)
+  let handshakeSent = false
+  const queuedInput: Uint8Array[] = []
 
   socket.onopen = () => {
-    status.value = 'connected'
+    socket.send(JSON.stringify(frame))
+    handshakeSent = true
+    for (const chunk of queuedInput) socket.send(chunk)
+    queuedInput.length = 0
   }
 
   socket.onmessage = (event) => {
     if (event.data instanceof ArrayBuffer) {
-      terminal?.write(new Uint8Array(event.data))
-    } else if (typeof event.data === 'string') {
-      terminal?.write(event.data)
+      const bytes = new Uint8Array(event.data)
+      terminal?.write(bytes)
+      displayedOutput = true
+      link = onBytes(link, bytes.byteLength)
+      scheduleOffsetPersist()
+      return
     }
+    if (typeof event.data === 'string') applyServerText(event.data)
   }
 
   socket.onclose = (event) => {
-    if (event.code === 1000) {
-      tabsStore.closeTab(props.tabId)
-      return
-    }
-    status.value = 'disconnected'
-    terminal?.write('\r\n\x1b[31m[Connection closed]\x1b[0m\r\n')
+    if (ws !== socket) return
+    ws = null
+    handleSocketClose(event.code)
   }
 
   socket.onerror = () => {
@@ -182,20 +303,29 @@ function connectWs() {
 
   connectionDisposables.push(
     terminal.onData((data) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(new TextEncoder().encode(data))
+      if (ws !== socket || socket.readyState !== WebSocket.OPEN) return
+      const bytes = new TextEncoder().encode(data)
+      if (!handshakeSent) {
+        queuedInput.push(bytes)
+        return
       }
+      socket.send(bytes)
     }),
     terminal.onResize(({ cols: c, rows: r }) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols: c, rows: r }))
+      if (ws === socket && handshakeSent && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'resize', cols: c, rows: r }))
       }
     }),
   )
 }
 
 function reconnect() {
+  link = manualReconnect(link)
   connectWs()
+}
+
+function onPageHide() {
+  persistOffsetNow()
 }
 
 function setupResizeObserver() {
@@ -267,10 +397,14 @@ onMounted(() => {
     }),
   )
 
-  const snapshot = readTerminalSnapshot(currentCacheKey())
-  if (snapshot) {
-    term.write(snapshot)
+  pendingSnapshot = readTerminalSnapshot(currentCacheKey())
+  loadLink()
+  if (!link.sessionId && pendingSnapshot) {
+    term.write(pendingSnapshot)
+    pendingSnapshot = null
+    displayedOutput = true
   }
+  window.addEventListener('pagehide', onPageHide)
 
   nextTick(() => {
     setupResizeObserver()
@@ -319,12 +453,23 @@ watch(
 
 onBeforeUnmount(() => {
   persistSnapshot()
+  link = markRelease(link)
+  persistOffsetNow()
+  if (offsetTimer) {
+    clearTimeout(offsetTimer)
+    offsetTimer = null
+  }
+  clearReconnectTimer()
+  window.removeEventListener('pagehide', onPageHide)
   if (fitTimer) {
     clearTimeout(fitTimer)
     fitTimer = null
   }
   resizeObserver?.disconnect()
   resizeObserver = null
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'release' }))
+  }
   closeWs()
   for (const d of disposables) d.dispose()
   disposables = []

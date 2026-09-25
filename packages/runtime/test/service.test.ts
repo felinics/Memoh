@@ -51,6 +51,7 @@ interface TestClient extends Client {
   ReadRaw(request: { path: string }, metadata: Metadata): ClientReadableStream<{ data: Buffer }>
   WriteRaw(metadata: Metadata, callback: UnaryCallback<{ bytes_written: string }>): ClientWritableStream<WriteRawChunk>
   Exec(metadata: Metadata): ClientDuplexStream<ExecInput, ExecOutput>
+  Terminal(metadata: Metadata): ClientDuplexStream<Record<string, unknown>, Record<string, unknown>>
 }
 
 type UnaryCallback<Response> = (error: ServiceError | null, response: Response) => void
@@ -146,6 +147,11 @@ process.exitCode = 7
       .rejects.toMatchObject({ code: status.PERMISSION_DENIED })
     await expect(exec({ command: 'echo ok', work_dir: '/data', pty: true }))
       .rejects.toMatchObject({ code: status.UNIMPLEMENTED })
+    const terminal = client.Terminal(new Metadata())
+    terminal.write({ open: { command: 'true', work_dir: '/data', cols: 80, rows: 24 } })
+    await expect(new Promise((_resolve, reject) => {
+      terminal.once('error', reject)
+    })).rejects.toMatchObject({ code: status.UNIMPLEMENTED })
 
     const timeoutScript = await writeNodeFixture('timeout.cjs', 'setInterval(() => {}, 1_000)\n')
     const timedOut = await exec({ command: nodeScriptCommand(timeoutScript), work_dir: '/data', timeout_seconds: 1 })

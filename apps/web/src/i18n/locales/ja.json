@@ -2726,7 +2726,12 @@
         "connecting": "接続中...",
         "connected": "接続済み",
         "disconnected": "切断されました"
-      }
+      },
+      "replayTruncated": "これより前の出力はバッファに残っていません",
+      "sessionGone": "前の shell はもうありません。新しいセッションを開きました。",
+      "unsupported": "Terminal を使うには Workspace の再起動が必要です。",
+      "full": "Terminal セッションの上限に達しました。",
+      "taken": "この shell は別の Terminal に接続されています。"
     },
     "files": {
       "name": "名前",

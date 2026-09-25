@@ -2693,7 +2693,12 @@
         "connecting": "Connecting...",
         "connected": "Connected",
         "disconnected": "Disconnected"
-      }
+      },
+      "replayTruncated": "Earlier output is no longer in the buffer",
+      "sessionGone": "The previous shell is gone. Opened a new session.",
+      "unsupported": "Restart the workspace to use the terminal.",
+      "full": "The terminal session limit has been reached.",
+      "taken": "This shell is attached to another terminal."
     },
     "files": {
       "name": "Name",

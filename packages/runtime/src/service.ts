@@ -158,6 +158,9 @@ export function createContainerService(
   const Exec: handleBidiStreamingCall<ExecInput, ExecOutput> = call => {
     commands.exec(call)
   }
+  const Terminal: handleBidiStreamingCall<unknown, unknown> = call => {
+    call.emit('error', rpcError(status.UNIMPLEMENTED, 'terminal sessions are not implemented by Remote Runtime'))
+  }
   const Tunnel: handleBidiStreamingCall<unknown, unknown> = call => {
     const error = rpcError(status.PERMISSION_DENIED, 'tunnels are not allowed by Remote Runtime M1')
     call.emit('error', error)
@@ -291,6 +294,7 @@ export function createContainerService(
     Mkdir,
     Rename,
     Exec,
+    Terminal,
     Tunnel,
     ReverseHTTP,
     ReadRaw,

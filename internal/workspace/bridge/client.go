@@ -455,6 +455,47 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 	return &ExecStream{stream: stream, cancel: cancel}, nil
 }
 
+// TerminalStream is one attach to a bridge terminal session.
+// Closing it detaches; it does not release the session.
+type TerminalStream struct {
+	stream pb.ContainerService_TerminalClient
+	cancel context.CancelFunc
+	sendMu sync.Mutex
+}
+
+// Terminal opens a terminal RPC. The caller sends open or attach as the first frame.
+func (c *Client) Terminal(ctx context.Context) (*TerminalStream, error) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := c.svc.Terminal(streamCtx)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return &TerminalStream{stream: stream, cancel: cancel}, nil
+}
+
+// Send sends one terminal client frame.
+func (s *TerminalStream) Send(msg *pb.TerminalClient) error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.stream.Send(msg)
+}
+
+// Recv receives one terminal server frame. The error is the raw gRPC status.
+func (s *TerminalStream) Recv() (*pb.TerminalServer, error) {
+	return s.stream.Recv()
+}
+
+// Close detaches this stream.
+func (s *TerminalStream) Close() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.stream.CloseSend()
+}
+
 // ReadRaw streams raw file bytes. Caller must consume the returned reader.
 func (c *Client) ReadRaw(ctx context.Context, path string) (io.ReadCloser, error) {
 	streamCtx, cancel := context.WithCancel(ctx)

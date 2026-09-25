@@ -2693,7 +2693,12 @@
         "connecting": "连接中...",
         "connected": "已连接",
         "disconnected": "已断开"
-      }
+      },
+      "replayTruncated": "更早的输出已不在缓冲里",
+      "sessionGone": "上一个 shell 已经不在，已打开新的会话",
+      "unsupported": "工作区需要重启后才能使用终端",
+      "full": "终端会话数量已满",
+      "taken": "这个 shell 已经连接到另一个终端"
     },
     "files": {
       "name": "名称",
