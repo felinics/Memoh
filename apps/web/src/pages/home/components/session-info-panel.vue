@@ -1,163 +1,91 @@
 <template>
-  <ScrollArea class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
-    <div class="px-4 py-3">
-      <!-- No session -->
-      <div
-        v-if="!sessionId"
-        class="flex h-40 items-center justify-center"
-      >
-        <p class="text-body text-muted-foreground">
-          {{ $t('chat.infoNoData') }}
-        </p>
-      </div>
+  <p
+    v-if="!sessionId"
+    class="px-4 py-6 text-center text-body text-muted-foreground"
+  >
+    {{ t('chat.infoNoSession') }}
+  </p>
 
-      <template v-else>
-        <!-- Key-value rows -->
-        <div class="divide-y divide-border text-body">
-          <!-- Messages -->
-          <div class="flex items-center justify-between py-2">
-            <span class="text-muted-foreground">{{ $t('chat.infoMessages') }}</span>
-            <span class="font-medium text-foreground tabular-nums">{{ info?.message_count ?? '--' }}</span>
-          </div>
-
-          <!-- Context Usage -->
-          <div class="py-2 space-y-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-muted-foreground">{{ $t('chat.infoContextUsage') }}</span>
-              <span class="font-medium text-foreground tabular-nums">
-                <template v-if="composition">
-                  <template v-if="contextWindow != null">
-                    {{ $t('chat.infoContextTokensEstimate', { used: formatTokenCount(composition.totalTokens), window: formatTokenCount(contextWindow) }) }}
-                  </template>
-                  <template v-else>
-                    {{ $t('chat.infoContextTokensEstimateNoWindow', { used: formatTokenCount(composition.totalTokens) }) }}
-                  </template>
-                  <span
-                    v-if="contextWindow != null"
-                    class="font-normal ml-1"
-                    :class="contextPercentColor"
-                  >({{ contextPercent.toFixed(1) }}%)</span>
-                </template>
-                <template v-else-if="contextWindow != null">
-                  {{ $t('chat.infoContextTokens', { used: formatTokenCount(usedTokens), window: formatTokenCount(contextWindow) }) }}
-                  <span class="text-muted-foreground font-normal ml-1">({{ contextPercent.toFixed(1) }}%)</span>
-                </template>
-                <template v-else>
-                  {{ $t('chat.infoContextTokensNoWindow', { used: formatTokenCount(usedTokens) }) }}
-                </template>
-              </span>
-            </div>
-            <ContextUsageBreakdown
-              v-if="composition"
-              :composition="composition"
-              :context-window="contextWindow"
-              :output-reserve="outputReserve"
-              :auto-compact-tokens="autoCompactTokens"
-            />
-            <div
-              v-else-if="contextWindow != null && contextWindow > 0"
-              class="h-1.5 w-full overflow-hidden rounded-full bg-accent"
-            >
-              <div
-                class="h-full rounded-full transition-all"
-                :class="contextBarColor"
-                :style="{ width: `${Math.min(contextPercent, 100)}%` }"
-              />
-            </div>
-          </div>
-
-          <!-- Provider-reported input of the latest turn: the only actual↔estimate bridge -->
-          <div
-            v-if="composition && usedTokens > 0"
-            class="flex items-center justify-between py-2"
+  <div
+    v-else
+    class="relative flex flex-col gap-3 p-4"
+  >
+    <!-- The Inspector button follows the dialog close-button precedent: its
+         hover background is inset equally from the top and right edges
+         (half the panel padding), which also lands the glyph on the content
+         edge and leaves the same gap down to the grid. -->
+    <TooltipProvider :delay-duration="200">
+      <Tooltip ignore-non-keyboard-focus>
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            tone="muted"
+            size="icon-sm"
+            class="absolute top-2 right-2"
+            :aria-label="t('chat.lifecycle.title')"
+            @click="emit('openLifecycle')"
           >
-            <span class="text-muted-foreground">{{ $t('chat.infoProviderInput') }}</span>
-            <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(usedTokens) }}</span>
-          </div>
-
-          <!-- Cache Hit Rate -->
-          <div class="flex items-center justify-between py-2">
-            <span class="text-muted-foreground">{{ $t('chat.infoCacheHitRate') }}</span>
-            <span class="font-medium text-foreground tabular-nums">{{ cacheHitRate }}%</span>
-          </div>
-
-          <!-- Cache Read -->
-          <div class="flex items-center justify-between py-2">
-            <span class="text-muted-foreground">{{ $t('chat.infoCacheRead') }}</span>
-            <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(info?.cache_stats?.cache_read_tokens ?? 0) }}</span>
-          </div>
-        </div>
-
-        <!-- Compact Now: only where Memoh owns compaction (native runtime) -->
-        <Button
-          v-if="compactionAvailable"
-          variant="secondary"
-          size="sm"
-          class="mt-3 w-full"
-          :disabled="!sessionId || contextTokens <= 0"
-          :loading="isCompacting"
-          loading-mode="icon"
-          @click="triggerCompact"
-        >
-          <Minimize2 class="size-3.5" />
-          {{ $t('chat.compactNow') }}
-        </Button>
-
-        <!-- Context Inspector -->
-        <Button
-          variant="ghost"
-          size="sm"
-          class="mt-1 w-full"
-          :disabled="!sessionId"
-          @click="emit('openLifecycle')"
-        >
-          <ScanSearch class="size-3.5" />
-          {{ $t('chat.lifecycle.title') }}
-        </Button>
-
-        <!-- Subagents -->
-        <div class="mt-4">
-          <SubagentList />
-        </div>
-
-        <!-- Skills -->
-        <div class="mt-4">
-          <p class="mb-1.5 text-caption font-medium uppercase tracking-wider text-muted-foreground">
-            {{ $t('chat.infoSkills') }}
-          </p>
-          <p
-            v-if="!skills.length"
-            class="text-body text-muted-foreground"
-          >
-            {{ $t('chat.infoNoSkills') }}
-          </p>
-          <div
-            v-else
-            class="space-y-0.5"
-          >
-            <div
-              v-for="skill in skills"
-              :key="skill"
-              class="flex min-h-8 items-center gap-1.5 rounded-md px-2 text-body text-foreground"
-            >
-              <Sparkles class="size-3.5 shrink-0 text-muted-foreground" />
-              <span class="min-w-0 flex-1 truncate text-left">{{ skill }}</span>
-            </div>
-          </div>
-        </div>
-      </template>
+            <ScanSearch />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="top">
+          {{ t('chat.lifecycle.title') }}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+    <div class="flex items-center gap-2 pr-6">
+      <span
+        v-if="contextWindow != null"
+        class="text-control font-medium tabular-nums"
+        :class="toneClass"
+      >{{ percent }}%</span>
+      <span class="min-w-0 flex-1 truncate text-body text-muted-foreground tabular-nums">{{ tokensLabel }}</span>
     </div>
-  </ScrollArea>
+
+    <ContextWaffle
+      v-if="contextWindow != null"
+      :percent="contextPercent"
+      :groups="groups"
+      :columns="20"
+    />
+
+    <div
+      v-if="groups.length"
+      class="flex flex-wrap gap-x-4 gap-y-1 text-body"
+    >
+      <span
+        v-for="group in groups"
+        :key="group.id"
+        class="inline-flex items-center gap-1.5"
+      >
+        <span
+          class="size-2 shrink-0 rounded-2xs"
+          :class="group.colorClass"
+        />
+        <span class="text-muted-foreground">{{ t(`chat.contextGroup.${group.id}`) }}</span>
+        <span class="text-foreground tabular-nums">{{ formatTokenCount(group.tokens) }}</span>
+      </span>
+    </div>
+
+    <p
+      v-if="nearlyFull"
+      class="text-body"
+      :class="toneClass"
+    >
+      {{ t('chat.infoNearlyFull') }}
+    </p>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
-import { ScrollArea, Button } from '@felinic/ui'
-import { Sparkles, Minimize2, ScanSearch } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
+import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@felinic/ui'
+import { ScanSearch } from 'lucide-vue-next'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import { contextPressureToneClass, formatTokenCount } from '../composables/context-categories'
-import SubagentList from './subagent-list.vue'
-import ContextUsageBreakdown from './context-usage-breakdown.vue'
+import { groupContextCategories } from '../composables/context-groups'
+import ContextWaffle from './context-waffle.vue'
 
 const emit = defineEmits<{ openLifecycle: [] }>()
 
@@ -167,26 +95,30 @@ const props = defineProps<{
   fallbackContextWindow?: number | null
 }>()
 
-const visibleRef = toRef(props, 'visible')
-const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
-const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
+const { t } = useI18n()
 
-const { info, usedTokens, composition, contextWindow, outputReserve, autoCompactTokens, compactionAvailable, contextTokens, contextPercent, sessionId, isCompacting, triggerCompact } = useSessionInfo({
-  visible: visibleRef,
-  overrideModelId: overrideModelIdRef,
-  fallbackContextWindow: fallbackContextWindowRef,
+const { composition, contextWindow, contextTokens, contextPercent, autoCompactTokens, sessionId } = useSessionInfo({
+  visible: toRef(props, 'visible'),
+  overrideModelId: computed(() => props.overrideModelId ?? ''),
+  fallbackContextWindow: computed(() => props.fallbackContextWindow ?? null),
 })
 
-const contextPercentColor = computed(() =>
-  contextPercent.value >= 70 ? contextPressureToneClass(contextPercent.value, 'text') : 'text-muted-foreground',
-)
+const percent = computed(() => Math.round(contextPercent.value))
+const toneClass = computed(() => contextPercent.value >= 70 ? contextPressureToneClass(contextPercent.value, 'text') : '')
+const nearlyFull = computed(() => contextWindow.value != null && contextPercent.value >= 70 && autoCompactTokens.value != null)
 
-const contextBarColor = computed(() => contextPressureToneClass(contextPercent.value, 'bg'))
-
-const cacheHitRate = computed(() => {
-  const rate = info.value?.cache_stats?.cache_hit_rate ?? 0
-  return rate.toFixed(1)
+const tokensLabel = computed(() => {
+  const used = formatTokenCount(contextTokens.value)
+  if (composition.value) {
+    return contextWindow.value != null
+      ? t('chat.infoContextTokensEstimate', { used, window: formatTokenCount(contextWindow.value) })
+      : t('chat.infoContextTokensEstimateNoWindow', { used })
+  }
+  return contextWindow.value != null
+    ? t('chat.infoContextTokens', { used, window: formatTokenCount(contextWindow.value) })
+    : t('chat.infoContextTokensNoWindow', { used })
 })
 
-const skills = computed(() => info.value?.skills ?? [])
+const groups = computed(() => groupContextCategories(composition.value?.categories))
+
 </script>

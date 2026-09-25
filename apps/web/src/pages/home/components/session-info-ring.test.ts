@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, defineComponent, h, nextTick, ref } from 'vue'
+import { createApp, nextTick, ref } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { afterEach, expect, it, vi } from 'vitest'
 import SessionInfoRing from './session-info-ring.vue'
@@ -21,9 +21,9 @@ vi.mock('../composables/useSessionInfo', () => ({
     sessionId: ref('session-1'),
   }),
 }))
-vi.mock('./subagent-list.vue', () => ({
-  default: defineComponent({ setup: () => () => h('div') }),
-}))
+
+// The panel's usage grid only renders while the popover is open.
+const panelOpen = () => document.querySelector('.grid-cols-20') != null
 
 let app: ReturnType<typeof createApp> | undefined
 let root: HTMLDivElement | undefined
@@ -52,23 +52,23 @@ it('shows usage on hover, opens details on click, and keeps them open after the 
   await nextTick()
   const trigger = root.querySelector('button')!
   expect(trigger.disabled).toBe(false)
-  expect(document.body.textContent).not.toContain(en.chat.infoMessages)
+  expect(panelOpen()).toBe(false)
   trigger.dispatchEvent(new MouseEvent('pointermove'))
   await new Promise(resolve => setTimeout(resolve, 250))
   await nextTick()
   expect(document.body.textContent).toContain('9% context used')
   expect(document.body.textContent).toContain('22.4K / 256.0K tokens')
-  expect(document.body.textContent).not.toContain(en.chat.infoMessages)
+  expect(panelOpen()).toBe(false)
   trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
   trigger.focus()
   trigger.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }))
   trigger.click()
   await nextTick()
   await nextTick()
-  expect(document.body.textContent).toContain(en.chat.infoMessages)
+  expect(panelOpen()).toBe(true)
   trigger.dispatchEvent(new MouseEvent('mouseleave'))
   await new Promise(resolve => setTimeout(resolve, 250))
-  expect(document.body.textContent).toContain(en.chat.infoMessages)
+  expect(panelOpen()).toBe(true)
   trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
   trigger.focus()
   trigger.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }))
