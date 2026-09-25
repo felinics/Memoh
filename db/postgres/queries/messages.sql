@@ -1915,7 +1915,7 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
 WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = sqlc.arg(session_id)
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
@@ -2022,7 +2022,7 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
 WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = sqlc.arg(session_id)
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
@@ -2066,6 +2066,7 @@ SELECT
   m.id,
   m.bot_id,
   m.session_id,
+  m.turn_id,
   m.sender_channel_identity_id,
   m.sender_account_user_id AS sender_user_id,
   m.source_message_id AS external_message_id,
@@ -2084,7 +2085,7 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
 WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = sqlc.arg(session_id)
   AND m.turn_visible = true
   AND m.id = sqlc.arg(message_id)
@@ -2376,7 +2377,7 @@ SELECT
   s.channel_type AS platform
 FROM bot_history_messages m
 LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
 WHERE m.team_id = public.memoh_current_team_id() AND m.session_id = sqlc.arg(session_id)
   AND m.turn_visible = true
   AND m.turn_id IS NOT NULL
@@ -2780,39 +2781,64 @@ GROUP BY
 ORDER BY rr.last_observed_at DESC;
 
 -- name: SearchMessages :many
-SELECT
-  m.id,
-  m.bot_id,
-  m.session_id,
-  m.sender_channel_identity_id,
-  m.role,
-  m.content,
-  m.created_at,
-  ci.display_name AS sender_display_name,
-  s.channel_type AS platform
-FROM bot_visible_history_messages m
-LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.bot_id = sqlc.arg(bot_id)
-  AND m.session_id = ANY(sqlc.arg(session_ids)::uuid[])
-  AND (sqlc.narg(session_id)::uuid IS NULL OR m.session_id = sqlc.narg(session_id)::uuid)
-  AND (sqlc.narg(contact_id)::uuid IS NULL OR m.sender_channel_identity_id = sqlc.narg(contact_id)::uuid)
-  AND (sqlc.narg(start_time)::timestamptz IS NULL OR m.created_at >= sqlc.narg(start_time)::timestamptz)
-  AND (sqlc.narg(end_time)::timestamptz IS NULL OR m.created_at <= sqlc.narg(end_time)::timestamptz)
-  AND (sqlc.narg(role)::text IS NULL OR m.role = sqlc.narg(role)::text)
-  AND (sqlc.narg(keyword)::text IS NULL OR (
-    CASE
-      WHEN jsonb_typeof(m.content->'content') = 'string'
-        THEN m.content->>'content'
-      WHEN jsonb_typeof(m.content->'content') = 'array'
-        THEN (SELECT COALESCE(string_agg(elem->>'text', ' '), '')
-              FROM jsonb_array_elements(m.content->'content') AS elem
-              WHERE elem->>'type' = 'text')
-      ELSE ''
-    END
-  ) ILIKE '%' || sqlc.narg(keyword)::text || '%')
-ORDER BY m.created_at DESC, m.id DESC
+WITH projected AS NOT MATERIALIZED (
+  SELECT m.id, m.bot_id, m.session_id, m.turn_id, m.sender_channel_identity_id, m.role, m.created_at,
+    ci.display_name AS sender_display_name, s.channel_type AS platform,
+    concat_ws(' ',
+      m.display_text,
+      CASE
+        WHEN jsonb_typeof(m.content) = 'string' THEN m.content #>> '{}'
+        WHEN jsonb_typeof(m.content->'content') = 'string' THEN m.content->>'content'
+        WHEN m.role = 'tool' AND COALESCE(jsonb_typeof(m.content->'tool_call_id') = 'string', false)
+          AND btrim(m.content->>'tool_call_id', E' \t\n\r\f\x0B') <> ''
+          AND NOT COALESCE(jsonb_path_exists(m.content->'content', '$[*] ? (@.type == "tool-result")'), false)
+          THEN m.content->>'content'
+        ELSE ''
+      END,
+      (
+        SELECT string_agg(
+          CASE elem->>'type'
+            WHEN 'text' THEN elem->>'text'
+            WHEN 'tool-call' THEN concat_ws(' ', elem->>'toolName', elem->>'toolCallId', elem->>'input', elem->>'args')
+            WHEN 'tool-result' THEN concat_ws(' ', elem->>'toolName', elem->>'toolCallId', elem->>'result', elem->>'output')
+            ELSE ''
+          END, ' ' ORDER BY ordinal
+        )
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(m.content->'content') = 'array' THEN m.content->'content'
+            WHEN m.content->'content'->>'type' = 'tool-result' THEN jsonb_build_array(m.content->'content')
+            WHEN jsonb_typeof(m.content) = 'array' THEN m.content
+            WHEN m.content ? 'type' THEN jsonb_build_array(m.content)
+            ELSE '[]'::jsonb
+          END
+        ) WITH ORDINALITY AS parts(elem, ordinal)
+      ),
+      CASE WHEN jsonb_typeof(m.content->'tool_calls') = 'array' THEN (
+        SELECT string_agg(concat_ws(' ', call->>'id', call->'function'->>'name', call->'function'->>'arguments'), ' ' ORDER BY ordinal)
+        FROM jsonb_array_elements(m.content->'tool_calls')
+          WITH ORDINALITY AS calls(call, ordinal)
+      ) END,
+      m.content->>'tool_call_id', m.content->>'name'
+    )::text AS search_text
+  FROM bot_visible_history_messages m
+  JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id() AND s.deleted_at IS NULL
+  LEFT JOIN channel_identities ci ON ci.id = m.sender_channel_identity_id AND ci.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.bot_id = sqlc.arg(bot_id)
+    AND m.session_id = ANY(sqlc.arg(session_ids)::uuid[])
+    AND (sqlc.narg(session_id)::uuid IS NULL OR m.session_id = sqlc.narg(session_id)::uuid)
+    AND (sqlc.narg(contact_id)::uuid IS NULL OR m.sender_channel_identity_id = sqlc.narg(contact_id)::uuid)
+    AND (sqlc.narg(start_time)::timestamptz IS NULL OR m.created_at >= sqlc.narg(start_time)::timestamptz)
+    AND (sqlc.narg(end_time)::timestamptz IS NULL OR m.created_at <= sqlc.narg(end_time)::timestamptz)
+    AND (sqlc.narg(role)::text IS NULL OR m.role = sqlc.narg(role)::text)
+    AND (sqlc.narg(cursor_created_at)::timestamptz IS NULL OR (m.created_at, m.id) < (sqlc.narg(cursor_created_at)::timestamptz, sqlc.narg(cursor_id)::uuid))
+)
+SELECT id, bot_id, session_id, turn_id, sender_channel_identity_id, role, created_at, sender_display_name, platform,
+  substring(search_text FROM greatest(1, strpos(lower(search_text), lower(COALESCE(sqlc.narg(keyword)::text, ''))) - 32) FOR 1024)::text AS search_text
+FROM projected
+WHERE sqlc.narg(keyword)::text IS NULL OR strpos(lower(search_text), lower(sqlc.narg(keyword)::text)) > 0
+ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(max_count);
 
 -- name: MarkMessagesCompacted :execrows
