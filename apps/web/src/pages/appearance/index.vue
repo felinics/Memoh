@@ -14,14 +14,12 @@
               align="end"
               :align-offset="0"
             >
-              <SelectItem value="en">
-                {{ t('settings.langEn') }}
-              </SelectItem>
-              <SelectItem value="zh">
-                {{ t('settings.langZh') }}
-              </SelectItem>
-              <SelectItem value="ja">
-                {{ t('settings.langJa') }}
+              <SelectItem
+                v-for="option in LOCALE_OPTIONS"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -371,7 +369,7 @@ import { useI18n } from 'vue-i18n'
 import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-vue'
 import { PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
-import type { Locale } from '@/i18n'
+import { LOCALE_OPTIONS, type Locale } from '@/i18n'
 import type { BundledTheme } from 'shiki'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'

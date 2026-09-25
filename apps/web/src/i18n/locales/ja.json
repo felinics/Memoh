@@ -628,12 +628,9 @@
         }
       }
     },
-    "langZh": "中文",
-    "langEn": "英語",
     "version": "バージョン",
     "versionTag": "v{version}",
-    "commitHash": "コミット",
-    "langJa": "日本語"
+    "commitHash": "コミット"
   },
   "people": {
     "title": "メンバー",

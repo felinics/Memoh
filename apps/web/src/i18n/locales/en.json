@@ -631,12 +631,9 @@
         }
       }
     },
-    "langZh": "中文",
-    "langEn": "English",
     "version": "Version",
     "versionTag": "v{version}",
-    "commitHash": "Commit",
-    "langJa": "日本語"
+    "commitHash": "Commit"
   },
   "people": {
     "title": "Members",

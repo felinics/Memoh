@@ -627,12 +627,9 @@
         }
       }
     },
-    "langZh": "简体中文",
-    "langEn": "English",
     "version": "当前版本",
     "versionTag": "v{version}",
     "commitHash": "提交记录",
-    "langJa": "日本語",
     "changeEmail": "修改邮箱",
     "emailRequired": "请填写邮箱",
     "emailUpdated": "邮箱已更新",
