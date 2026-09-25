@@ -7,7 +7,7 @@
             :model-value="language"
             @update:model-value="(value) => value && setLanguage(value as Locale)"
           >
-            <SelectTrigger size="sm">
+            <SelectTrigger>
               <SelectValue :placeholder="t('settings.languagePlaceholder')" />
             </SelectTrigger>
             <SelectContent
@@ -49,7 +49,6 @@
             @update:model-value="(value) => value && setColorScheme(value as ColorSchemeId)"
           >
             <SelectTrigger
-              size="sm"
               class="min-w-36"
             >
               <span class="flex min-w-0 items-center gap-1.5">
@@ -105,7 +104,6 @@
             :max="20"
             :step="1"
             :placeholder="String(DEFAULT_UI_FONT_SIZE_PX)"
-            size="sm"
             disable-wheel-change
             class="w-32"
             @update:model-value="(value) => setUiFontSizePx(value ?? '')"
@@ -123,7 +121,6 @@
             :max="20"
             :step="1"
             :placeholder="String(DEFAULT_CODE_FONT_SIZE_PX)"
-            size="sm"
             disable-wheel-change
             class="w-32"
             @update:model-value="(value) => setCodeFontSizePx(value ?? '')"
@@ -138,7 +135,7 @@
             id="ui-font-family"
             :model-value="uiFontFamilyDraft"
             :placeholder="defaultUiFontFamily"
-            class="h-8 w-48 font-mono text-xs"
+            class="w-48 font-mono"
             @update:model-value="(value) => updateUiFontFamilyDraft(value)"
             @change="commitUiFontFamilyDraft"
             @blur="commitUiFontFamilyDraft"
@@ -154,7 +151,7 @@
             id="code-font-family"
             :model-value="codeFontFamilyDraft"
             :placeholder="defaultCodeFontFamily"
-            class="h-8 w-48 font-mono text-xs"
+            class="w-48 font-mono"
             @update:model-value="(value) => updateCodeFontFamilyDraft(value)"
             @change="commitCodeFontFamilyDraft"
             @blur="commitCodeFontFamilyDraft"
@@ -274,7 +271,6 @@
                 @update:model-value="(value) => isMermaidTheme(value) && setMermaidTheme(value)"
               >
                 <SelectTrigger
-                  size="sm"
                   class="min-w-36"
                 >
                   <SelectValue>

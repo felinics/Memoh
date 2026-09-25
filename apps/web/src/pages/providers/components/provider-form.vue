@@ -140,7 +140,6 @@
                   @update:model-value="handleChange"
                 >
                   <SelectTrigger
-                    size="sm"
                     class="w-full sm:w-auto sm:min-w-36"
                   >
                     <SelectValue :placeholder="$t('provider.promptCache.label')" />

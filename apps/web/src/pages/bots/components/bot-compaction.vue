@@ -307,7 +307,6 @@ onBeforeUnmount(() => {
               :min="0"
               :step="1"
               placeholder="0"
-              size="sm"
               disable-wheel-change
               class="w-32"
               @update:model-value="(value) => form.compaction_threshold = value ?? 0"
@@ -341,7 +340,6 @@ onBeforeUnmount(() => {
               :max="99"
               :step="1"
               placeholder="40"
-              size="sm"
               disable-wheel-change
               class="w-32"
               @update:model-value="(value) => form.compaction_target_percent = value ?? null"
