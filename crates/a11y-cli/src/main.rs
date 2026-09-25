@@ -14,6 +14,12 @@ mod probe;
 mod refs;
 mod snapshot;
 
+/// Version of the JSON contract shared with the Go caller
+/// (`internal/agent/tool/computer_a11y.go`). Bump it whenever a field the Go
+/// side relies on changes shape; the Go side refuses output from a different
+/// version instead of silently misreading it.
+pub const PROTOCOL_VERSION: u32 = 2;
+
 /// Top-level CLI definition.
 #[derive(Parser)]
 #[command(name = "a11y-cli", about = "Memoh workspace AT-SPI2 helper", version)]
@@ -31,6 +37,12 @@ enum Command {
         /// Hard cap on the number of interactive nodes returned.
         #[arg(long, default_value_t = 300)]
         limit: usize,
+    },
+    /// Resolve a ref from the persisted snapshot index to its geometry
+    /// without touching the accessibility bus or re-numbering anything.
+    Locate {
+        #[arg(long)]
+        r#ref: String,
     },
     /// Invoke the default action (typically "click") on a ref.
     Click {
@@ -59,6 +71,7 @@ fn main() -> Result<()> {
         match cli.command {
             Command::Probe => probe::run().await,
             Command::Snapshot { limit } => snapshot::run(limit).await,
+            Command::Locate { r#ref } => action::locate(&r#ref),
             Command::Click { r#ref } => action::click(&r#ref).await,
             Command::Type { r#ref, text } => action::type_text(&r#ref, &text).await,
             Command::Fill { r#ref, text } => action::fill_text(&r#ref, &text).await,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -13,7 +14,18 @@ import (
 const (
 	a11yCLIPath        = "/opt/memoh/toolkit/display/bin/a11y-cli"
 	a11yExecTimeoutSec = 15
+	// a11yProtocolVersion must match PROTOCOL_VERSION in
+	// crates/a11y-cli/src/main.rs. Output from any other version is refused
+	// instead of being decoded into a plausible-looking but wrong result.
+	a11yProtocolVersion      = 2
+	a11ySnapshotDefaultLimit = 300
+	a11ySnapshotMaxLimit     = 2000
 )
+
+// errA11yHelperOutdated is returned when the workspace ships an a11y-cli that
+// speaks a different protocol than this server. The fix is a workspace image
+// rebuild, so the message says so instead of surfacing a decode error.
+var errA11yHelperOutdated = errors.New("workspace a11y helper does not match this server; rebuild the workspace image")
 
 type a11yPoint struct {
 	X int `json:"x"`
@@ -21,26 +33,106 @@ type a11yPoint struct {
 }
 
 type a11ySnapshotItem struct {
-	Ref     string     `json:"ref"`
-	Role    string     `json:"role"`
-	Name    string     `json:"name"`
-	Center  *a11yPoint `json:"center,omitempty"`
-	CenterX int        `json:"center_x,omitempty"`
-	CenterY int        `json:"center_y,omitempty"`
+	Ref    string   `json:"ref"`
+	Role   string   `json:"role"`
+	Name   string   `json:"name"`
+	X      int      `json:"x"`
+	Y      int      `json:"y"`
+	Width  int      `json:"width"`
+	Height int      `json:"height"`
+	States []string `json:"states,omitempty"`
+}
+
+// a11yMaxPointerCoord mirrors MAX_POINTER_COORD in the helper: RFB pointer
+// positions are 16-bit, and AT-SPI reports extents near math.MinInt32 for
+// nodes that were never laid out.
+const a11yMaxPointerCoord = 32767
+
+// center returns the on-screen centre of the element, or false when the
+// helper reported no usable box (such nodes can still be driven through
+// AT-SPI actions but never through pointer coordinates).
+func (it a11ySnapshotItem) center() (a11yPoint, bool) {
+	if it.Width <= 0 || it.Height <= 0 {
+		return a11yPoint{}, false
+	}
+	point := a11yPoint{X: it.X + it.Width/2, Y: it.Y + it.Height/2}
+	if !a11yPointerCoordValid(point) {
+		return a11yPoint{}, false
+	}
+	return point, true
+}
+
+func a11yPointerCoordValid(p a11yPoint) bool {
+	return p.X >= 0 && p.X <= a11yMaxPointerCoord && p.Y >= 0 && p.Y <= a11yMaxPointerCoord
+}
+
+type a11yDiagnostics struct {
+	Apps            int    `json:"apps"`
+	Visited         int    `json:"visited"`
+	Accepted        int    `json:"accepted"`
+	SkippedState    int    `json:"skipped_state"`
+	SkippedRole     int    `json:"skipped_role"`
+	SkippedGeometry int    `json:"skipped_geometry"`
+	Errors          int    `json:"errors"`
+	BusAddress      string `json:"bus_address,omitempty"`
+	Display         string `json:"display,omitempty"`
+}
+
+// public returns the counters that explain an empty or short list to the
+// model. Bus and display addresses stay in server logs.
+func (d a11yDiagnostics) public() map[string]any {
+	return map[string]any{
+		"apps":             d.Apps,
+		"visited":          d.Visited,
+		"accepted":         d.Accepted,
+		"skipped_state":    d.SkippedState,
+		"skipped_role":     d.SkippedRole,
+		"skipped_geometry": d.SkippedGeometry,
+		"errors":           d.Errors,
+	}
 }
 
 type a11ySnapshotOutput struct {
-	Items   []a11ySnapshotItem `json:"items"`
-	Lines   string             `json:"lines"`
-	RefPath string             `json:"refs_path"`
+	OK              bool               `json:"ok"`
+	ProtocolVersion int                `json:"protocol_version"`
+	HelperVersion   string             `json:"helper_version"`
+	Limit           int                `json:"limit"`
+	Truncated       bool               `json:"truncated"`
+	Items           []a11ySnapshotItem `json:"items"`
+	Lines           []string           `json:"lines"`
+	RefsPath        string             `json:"refs_path"`
+	Diagnostics     a11yDiagnostics    `json:"diagnostics"`
+}
+
+func (o *a11ySnapshotOutput) text() string {
+	if o == nil || len(o.Lines) == 0 {
+		return "(no on-screen elements)"
+	}
+	return strings.Join(o.Lines, "\n")
 }
 
 type a11yActionOutput struct {
-	OK       bool       `json:"ok"`
-	Ref      string     `json:"ref"`
-	Action   string     `json:"action"`
-	Fallback *a11yPoint `json:"fallback,omitempty"`
-	Error    string     `json:"error,omitempty"`
+	OK              bool       `json:"ok"`
+	ProtocolVersion int        `json:"protocol_version"`
+	Ref             string     `json:"ref"`
+	Action          string     `json:"action"`
+	Detail          string     `json:"detail,omitempty"`
+	Fallback        *a11yPoint `json:"fallback,omitempty"`
+	Error           string     `json:"error,omitempty"`
+}
+
+type a11yLocateOutput struct {
+	OK              bool       `json:"ok"`
+	ProtocolVersion int        `json:"protocol_version"`
+	Ref             string     `json:"ref"`
+	Role            string     `json:"role"`
+	Name            string     `json:"name"`
+	X               int        `json:"x"`
+	Y               int        `json:"y"`
+	Width           int        `json:"width"`
+	Height          int        `json:"height"`
+	Center          *a11yPoint `json:"center,omitempty"`
+	States          []string   `json:"states,omitempty"`
 }
 
 func execA11y(ctx context.Context, client *bridge.Client, args ...string) ([]byte, error) {
@@ -55,6 +147,9 @@ func execA11y(ctx context.Context, client *bridge.Client, args ...string) ([]byt
 	stdout := strings.TrimSpace(result.Stdout)
 	if result.ExitCode != 0 {
 		stderr := strings.TrimSpace(result.Stderr)
+		if a11yUsageError(stderr) {
+			return nil, errA11yHelperOutdated
+		}
 		if stderr == "" {
 			stderr = stdout
 		}
@@ -69,26 +164,74 @@ func execA11y(ctx context.Context, client *bridge.Client, args ...string) ([]byt
 	return []byte(stdout), nil
 }
 
-func computerA11ySnapshot(ctx context.Context, client *bridge.Client) (*a11ySnapshotOutput, error) {
-	raw, err := execA11y(ctx, client, "snapshot")
+// a11yUsageError recognises clap's rejection of a subcommand or flag this
+// server sent, which means the helper predates it.
+func a11yUsageError(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "unrecognized subcommand") || strings.Contains(lower, "unexpected argument")
+}
+
+// decodeA11y parses helper JSON after confirming the protocol version, so a
+// stale helper produces a clear "rebuild" error rather than an empty tree.
+func decodeA11y(raw []byte, what string, out any) error {
+	var header struct {
+		ProtocolVersion *int `json:"protocol_version"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return fmt.Errorf("parse a11y-cli %s output: %w", what, err)
+	}
+	switch {
+	case header.ProtocolVersion == nil:
+		return fmt.Errorf("%w (helper output has no protocol_version)", errA11yHelperOutdated)
+	case *header.ProtocolVersion != a11yProtocolVersion:
+		return fmt.Errorf("%w (helper protocol %d, server expects %d)", errA11yHelperOutdated, *header.ProtocolVersion, a11yProtocolVersion)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("parse a11y-cli %s output: %w", what, err)
+	}
+	return nil
+}
+
+func computerA11ySnapshot(ctx context.Context, client *bridge.Client, limit int) (*a11ySnapshotOutput, error) {
+	if limit <= 0 {
+		limit = a11ySnapshotDefaultLimit
+	}
+	raw, err := execA11y(ctx, client, "snapshot", "--limit", strconv.Itoa(limit))
 	if err != nil {
 		return nil, err
 	}
 	var out a11ySnapshotOutput
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("parse snapshot output: %w", err)
+	if err := decodeA11y(raw, "snapshot", &out); err != nil {
+		return nil, err
 	}
-	for i := range out.Items {
-		if out.Items[i].Center != nil {
-			out.Items[i].CenterX = out.Items[i].Center.X
-			out.Items[i].CenterY = out.Items[i].Center.Y
-		}
+	if !out.OK {
+		return nil, errors.New("a11y-cli snapshot reported failure")
+	}
+	return &out, nil
+}
+
+func computerA11yLocate(ctx context.Context, client *bridge.Client, ref string) (*a11yLocateOutput, error) {
+	raw, err := execA11y(ctx, client, "locate", "--ref", ref)
+	if err != nil {
+		return nil, err
+	}
+	var out a11yLocateOutput
+	if err := decodeA11y(raw, "locate", &out); err != nil {
+		return nil, err
+	}
+	if !out.OK {
+		return nil, fmt.Errorf("a11y-cli could not resolve ref %s", ref)
+	}
+	// Defence in depth against a helper that still reports unrealised
+	// extents: never hand a coordinate the pointer cannot address to RFB.
+	if out.Center != nil && !a11yPointerCoordValid(*out.Center) {
+		out.Center = nil
 	}
 	return &out, nil
 }
 
 func computerA11yClick(ctx context.Context, client *bridge.Client, ref string) (*a11yActionOutput, error) {
-	return runA11yAction(ctx, client, "click", ref, "")
+	return runA11yAction(ctx, client, "click", ref, nil)
 }
 
 func computerA11yEdit(ctx context.Context, client *bridge.Client, ref, text string, replace bool) (*a11yActionOutput, error) {
@@ -96,44 +239,25 @@ func computerA11yEdit(ctx context.Context, client *bridge.Client, ref, text stri
 	if replace {
 		action = "fill"
 	}
-	return runA11yAction(ctx, client, action, ref, text)
+	return runA11yAction(ctx, client, action, ref, &text)
 }
 
-func runA11yAction(ctx context.Context, client *bridge.Client, action, ref, text string) (*a11yActionOutput, error) {
+// runA11yAction invokes a ref-based helper action. text is passed through
+// verbatim when non-nil, including the empty string, so fill can clear.
+func runA11yAction(ctx context.Context, client *bridge.Client, action, ref string, text *string) (*a11yActionOutput, error) {
 	args := []string{action, "--ref", ref}
-	if text != "" {
-		args = append(args, "--text", text)
+	if text != nil {
+		args = append(args, "--text", *text)
 	}
 	raw, err := execA11y(ctx, client, args...)
 	if err != nil {
 		return nil, err
 	}
 	var out a11yActionOutput
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("parse a11y-cli %s output: %w", action, err)
+	if err := decodeA11y(raw, action, &out); err != nil {
+		return nil, err
 	}
 	return &out, nil
-}
-
-func lookupComputerRef(ctx context.Context, containers bridge.Provider, botID, ref string) (*a11ySnapshotItem, error) {
-	if containers == nil {
-		return nil, errors.New("workspace runtime provider is not configured")
-	}
-	client, err := containers.MCPClient(ctx, botID)
-	if err != nil {
-		return nil, err
-	}
-	snapshot, err := computerA11ySnapshot(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-	normalized := normalizeBrowserRef(ref)
-	for i := range snapshot.Items {
-		if normalizeBrowserRef(snapshot.Items[i].Ref) == normalized {
-			return &snapshot.Items[i], nil
-		}
-	}
-	return nil, nil
 }
 
 func shellQuote(arg string) string {
