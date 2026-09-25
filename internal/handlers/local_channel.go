@@ -71,6 +71,7 @@ type LocalChannelHandler struct {
 	botService          *bots.Service
 	accountService      *accounts.Service
 	sessionService      *sessionpkg.Service
+	workdirs            sessionWorkdirService
 	agentService        *application.Service
 	sessionRuntime      wsTurnAdmitter
 	commandHandler      *command.Handler
@@ -127,6 +128,12 @@ func NewLocalChannelHandler(channelType channel.ChannelType, channelManager *cha
 func (h *LocalChannelHandler) SetAgentService(service *application.Service) {
 	h.agentService = service
 	h.runtimeControls = service
+}
+
+// SetWorkdirService installs the workdir domain used to validate the workdir a
+// first message binds when it creates its session in-band.
+func (h *LocalChannelHandler) SetWorkdirService(workdirs sessionWorkdirService) {
+	h.workdirs = workdirs
 }
 
 // SetSessionRuntime installs the durable admission gate for turn-starting
@@ -881,6 +888,11 @@ type wsClientMessage struct {
 	Reason            string                     `json:"reason,omitempty"`
 	Answers           []userinput.QuestionAnswer `json:"answers,omitempty"`
 	Canceled          bool                       `json:"canceled,omitempty"`
+	// WorkdirID is the workdir a first message binds to the session it
+	// creates. It is read only when the message carries no session_id: a
+	// session's workdir binding is immutable, so on an existing session it is
+	// ignored rather than treated as a request to rebind.
+	WorkdirID string `json:"workdir_id,omitempty"`
 	// Cursor is the subscriber's last observed position. It is carried here
 	// rather than in a separate message type because runtime_subscribe shares
 	// this envelope with every other inbound message.
@@ -938,6 +950,11 @@ type wsOutboundEvent struct {
 	Control   string `json:"control,omitempty"`
 	ControlID string `json:"control_id,omitempty"`
 	Applied   bool   `json:"applied,omitempty"`
+	// WorkdirID is the workdir the session was actually born bound to. It is
+	// set only on session_created, and empty when the session has no workdir,
+	// so a client that asked for one can tell a binding that did not happen
+	// from one that did.
+	WorkdirID string `json:"workdir_id,omitempty"`
 }
 
 // wsTurnRef names the turn an outbound event belongs to. It exists because that
@@ -2282,7 +2299,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 					releaseActiveWSTurnNow()
 					continue
 				}
-				created, createErr := h.createWSChatSession(streamBaseCtx, botID, channelIdentityID, msg.ModelID, msg.ReasoningEffort)
+				created, createErr := h.createWSChatSession(streamBaseCtx, botID, channelIdentityID, msg.ModelID, msg.ReasoningEffort, msg.WorkdirID)
 				if createErr != nil {
 					failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", createErr)
 					releaseActiveWSTurnNow()
@@ -2303,7 +2320,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				}
 				// The session exists before the run does, so this is announced
 				// under the client's own name for the turn.
-				writer.SendJSON(ref.event("session_created"))
+				createdEvent := ref.event("session_created")
+				createdEvent.WorkdirID = created.WorkdirID
+				writer.SendJSON(createdEvent)
 			}
 			if !sessionAuthorized {
 				if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
@@ -2659,7 +2678,11 @@ func userInputResponseAppError(err error) error {
 // broadcast that follows can never be observed with empty preference.
 // Channel-side creation (inbound) calls thread.Create without these fields,
 // so channel sessions are born with NULL preference.
-func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, channelIdentityID, modelID, reasoningEffort string) (sessionpkg.Thread, error) {
+//
+// A requested workdir is validated by the same rule as the REST create
+// (resolveSessionWorkdirBinding) before anything is written, so an invalid
+// binding fails the send without leaving a session behind.
+func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, channelIdentityID, modelID, reasoningEffort, workdirID string) (sessionpkg.Thread, error) {
 	if h == nil || h.sessionService == nil {
 		return sessionpkg.Thread{}, errors.New("session service not configured")
 	}
@@ -2668,6 +2691,14 @@ func (h *LocalChannelHandler) createWSChatSession(ctx context.Context, botID, ch
 		ChannelType:     h.channelType.String(),
 		Type:            sessionpkg.TypeChat,
 		CreatedByUserID: strings.TrimSpace(channelIdentityID),
+	}
+	boundWorkdir, err := resolveSessionWorkdirBinding(ctx, h.workdirs, input.BotID, workdirID, sessionpkg.RuntimeModel)
+	if err != nil {
+		return sessionpkg.Thread{}, err
+	}
+	if boundWorkdir != nil {
+		input.WorkdirID = boundWorkdir.ID
+		input.WorkdirPath = boundWorkdir.Path
 	}
 	// Reconcile a carried pair exactly like the REST first-send (spec §3.3:
 	// every write point reconciles). Without it a stale composer draft naming
