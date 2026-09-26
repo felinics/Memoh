@@ -651,10 +651,12 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 			}
 		}
 	}
+	forkMessageCount := 0
 	if forkContext := s.subagentForkContextModelMessages(ctx, req); len(forkContext) > 0 {
 		// The inherited parent snapshot precedes the thread's own transcript,
 		// exactly as parent-driven subagent tasks assemble it.
 		messages, currentMessageIndex = prependContextMessages(forkContext, messages, currentMessageIndex)
+		forkMessageCount = normalizedContextPrefixLength(messages, len(forkContext))
 	}
 	historyMessageCount := len(messages)
 	if notice := s.currentWorkspaceContextMessage(ctx, req); notice != nil {
@@ -733,6 +735,11 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	runCfg.InlineAttachments = extractNativeAttachmentParts(mergedAttachments)
 	runCfg.ContextScope = buildContextFragScope(req, displayName, runCfg.Identity)
 	runCfg = runCfg.RefreshContextFrag()
+	historyLayout := chatHistoryLayout{forkCount: min(forkMessageCount, runCfg.ContextTrimmableMessages), historyCount: runCfg.ContextTrimmableMessages, pressureTokens: historyPressureTokens, usePipeline: usePipeline}
+	if index := runCfg.ContextCurrentUserMessageIndex; index != nil && *index >= historyLayout.forkCount && *index < historyLayout.historyCount {
+		historyLayout.pressureTokens = max(0, historyLayout.pressureTokens-estimateMessageTokens(messages[*index]))
+	}
+	runCfg.RecoverContextBudget = s.chatBudgetRecovery(req, historyLayout)
 
 	var injectedRecords *[]InjectedMessageRecord
 	if req.InjectCh != nil {

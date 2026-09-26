@@ -250,6 +250,10 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
+	runConfig.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
+		return s.recoverDiscussContextBudget(ctx, cmd, resolved.ModelID, cfg)
+	}
+	runConfig = pauseIdleDuringBudgetRecovery(runConfig, idleCancel)
 	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
 
 	var finalMessages json.RawMessage
@@ -258,6 +262,15 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	var terminalPayload []byte
 	var hasTerminalEvent bool
 	for event := range eventCh {
+		if event.Type == native.EventContextRecompose {
+			if h.emit(turn.DiscussEventRecompose, nil) {
+				h.contentLightTerminal = true
+				lifecycleDeferred = true
+			} else {
+				lifecycleCause = context.Cause(ctx)
+			}
+			return
+		}
 		idleCancel.Reset()
 		if event.Type == native.EventToolCallStart {
 			idleCancel.RecordToolCall()

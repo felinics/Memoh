@@ -99,11 +99,13 @@ func NewMessageSnapshot(messages []sdk.Message) *MessageSnapshot {
 // Store calls preserve IDs only for unchanged messages that remain in order.
 func NewMessageSnapshotWithSources(messages []sdk.Message, sourceMessageIDs []string) *MessageSnapshot {
 	s := &MessageSnapshot{}
-	_ = s.storeInitial(messages, sourceMessageIDs)
+	_ = s.StoreWithSources(messages, sourceMessageIDs)
 	return s
 }
 
-func (s *MessageSnapshot) storeInitial(messages []sdk.Message, sourceMessageIDs []string) error {
+// StoreWithSources replaces the history basis before provider dispatch.
+// Later provider steps use Store to retain only unchanged sources.
+func (s *MessageSnapshot) StoreWithSources(messages []sdk.Message, sourceMessageIDs []string) error {
 	if messages == nil {
 		messages = []sdk.Message{}
 	}
