@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -44,24 +45,26 @@ func (c *discussBudgetCompactor) RunCompactionSync(ctx context.Context, cfg comp
 }
 
 func TestDiscussProviderBudgetRecoveryDoesNotConsumeModelIdleTimeout(t *testing.T) {
-	service, _, provider, compactor, cmd := discussBudgetRecoveryFixture(t)
-	configureDiscussLifecycle(service)
-	service.streamIdleTimeout = 10 * time.Millisecond
-	compactor.delay = 50 * time.Millisecond
-	handle, err := service.StartTurn(context.Background(), cmd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recomposed := false
-	for event := range handle.Events() {
-		recomposed = recomposed || event.Kind == turn.DiscussEventRecompose
-	}
-	for err := range handle.Errs() {
-		t.Errorf("active compaction timed out as model silence: %v", err)
-	}
-	if !recomposed || len(compactor.configs) != 1 || provider.callCount() != 0 {
-		t.Fatalf("recompose=%t compactor/provider=%d/%d, want recompose after one compaction and no provider call", recomposed, len(compactor.configs), provider.callCount())
-	}
+	synctest.Test(t, func(t *testing.T) {
+		service, _, provider, compactor, cmd := discussBudgetRecoveryFixture(t)
+		configureDiscussLifecycle(service)
+		service.streamIdleTimeout = 10 * time.Millisecond
+		compactor.delay = 50 * time.Millisecond
+		handle, err := service.StartTurn(context.Background(), cmd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recomposed := false
+		for event := range handle.Events() {
+			recomposed = recomposed || event.Kind == turn.DiscussEventRecompose
+		}
+		for err := range handle.Errs() {
+			t.Errorf("active compaction timed out as model silence: %v", err)
+		}
+		if !recomposed || len(compactor.configs) != 1 || provider.callCount() != 0 {
+			t.Fatalf("recompose=%t compactor/provider=%d/%d, want recompose after one compaction and no provider call", recomposed, len(compactor.configs), provider.callCount())
+		}
+	})
 }
 
 func TestDiscussProviderBudgetRecoveryStillHonorsCancellation(t *testing.T) {
