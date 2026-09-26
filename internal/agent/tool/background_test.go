@@ -9,6 +9,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -34,7 +35,7 @@ func TestBackgroundProviderWaitAndInspectAgentResult(t *testing.T) {
 		})
 	}()
 
-	waitRes, err := p.execWaitUntil(context.Background(), session, map[string]any{"task_id": taskID}, nil)
+	waitRes, err := p.execWaitUntil(context.Background(), session, waitUntilArgs{TaskID: taskID}, nil)
 	if err != nil {
 		t.Fatalf("wait_until failed: %v", err)
 	}
@@ -43,7 +44,7 @@ func TestBackgroundProviderWaitAndInspectAgentResult(t *testing.T) {
 	}
 	<-done
 
-	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, map[string]any{"task_id": taskID})
+	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, taskArgs{TaskID: taskID})
 	if err != nil {
 		t.Fatalf("get_background_status failed: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestBackgroundProviderSpawnResultShape(t *testing.T) {
 		{Task: "beta", Status: background.TaskFailed, Error: "boom"},
 	})
 
-	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, map[string]any{"task_id": taskID})
+	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, taskArgs{TaskID: taskID})
 	if err != nil {
 		t.Fatalf("get_background_status failed: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestBackgroundProviderSpawnResultShape(t *testing.T) {
 		t.Errorf("unexpected spawn status payload: %v", sm)
 	}
 	result := sm["result"].(map[string]any)
-	branches := result["branches"].([]map[string]any)
+	branches := asMapSlice(t, result["branches"])
 	if len(branches) != 2 {
 		t.Fatalf("expected 2 branches, got %d", len(branches))
 	}
@@ -117,7 +118,7 @@ func TestBackgroundProviderVideoResultShape(t *testing.T) {
 		"duration_seconds": 8.0,
 	}, "")
 
-	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, map[string]any{"task_id": taskID})
+	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, taskArgs{TaskID: taskID})
 	if err != nil {
 		t.Fatalf("get_background_status failed: %v", err)
 	}
@@ -143,19 +144,19 @@ func TestBackgroundProviderListKillAndWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSpawnTask failed: %v", err)
 	}
-	listRes, err := p.execListBackground(context.Background(), session, nil)
+	listRes, err := p.execListBackground(context.Background(), session)
 	if err != nil {
 		t.Fatalf("list_background failed: %v", err)
 	}
-	entries := listRes.(map[string]any)["tasks"].([]map[string]any)
+	entries := asMapSlice(t, listRes.(map[string]any)["tasks"])
 	if len(entries) != 1 || entries[0]["task_id"] != taskID {
 		t.Fatalf("unexpected list payload: %v", listRes)
 	}
 
-	if _, err := p.execKillBackground(context.Background(), session, map[string]any{"task_id": taskID}); err != nil {
+	if _, err := p.execKillBackground(context.Background(), session, taskArgs{TaskID: taskID}); err != nil {
 		t.Fatalf("kill_background failed: %v", err)
 	}
-	waitRes, err := p.execWaitUntil(context.Background(), session, map[string]any{"task_id": taskID}, nil)
+	waitRes, err := p.execWaitUntil(context.Background(), session, waitUntilArgs{TaskID: taskID}, nil)
 	if err != nil {
 		t.Fatalf("wait_until failed: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestBackgroundProviderListKillAndWait(t *testing.T) {
 		t.Fatalf("wait_until payload = %v, want killed", waitRes)
 	}
 	progressCount := 0
-	if _, err := p.execWait(context.Background(), session, map[string]any{"duration": 0.001}, func(any) {
+	if _, err := p.execWait(context.Background(), session, waitArgs{Duration: secondsPtr(0.001)}, func(sdk.ToolOutput) {
 		progressCount++
 	}); err != nil {
 		t.Fatalf("wait failed: %v", err)
@@ -183,7 +184,7 @@ func TestBackgroundProviderWaitUntilEmitsProgressWhileWaiting(t *testing.T) {
 		t.Fatalf("StartSpawnTask failed: %v", err)
 	}
 
-	var waitUntil sdk.Tool
+	var waitUntil toolexec.Tool
 	for _, tool := range mustTools(t, p, session) {
 		if tool.Name == ToolWaitUntil().String() {
 			waitUntil = tool
@@ -196,19 +197,19 @@ func TestBackgroundProviderWaitUntilEmitsProgressWhileWaiting(t *testing.T) {
 
 	progressCh := make(chan any, 1)
 	done := make(chan struct{})
-	var waitRes any
+	var waitRes sdk.ToolOutput
 	var waitErr error
 	go func() {
 		defer close(done)
-		waitRes, waitErr = waitUntil.Execute(&sdk.ToolExecContext{
+		waitRes, waitErr = waitUntil.Execute(&toolexec.ToolExecContext{
 			Context: context.Background(),
-			SendProgress: func(content any) {
+			SendProgress: func(content sdk.ToolOutput) {
 				select {
-				case progressCh <- content:
+				case progressCh <- toolexec.OutputValue(content):
 				default:
 				}
 			},
-		}, map[string]any{"task_id": taskID})
+		}, toolexec.ArgumentsFromValue(map[string]any{"task_id": taskID}))
 	}()
 
 	select {
@@ -233,7 +234,7 @@ func TestBackgroundProviderWaitUntilEmitsProgressWhileWaiting(t *testing.T) {
 	if waitErr != nil {
 		t.Fatalf("wait_until failed: %v", waitErr)
 	}
-	if waitRes.(map[string]any)["status"] != "completed" {
+	if toolexec.OutputValue(waitRes).(map[string]any)["status"] != "completed" {
 		t.Fatalf("wait_until payload = %v, want completed", waitRes)
 	}
 }
@@ -266,7 +267,7 @@ func TestGetBackgroundStatusIncludesTailWhileRunning(t *testing.T) {
 	taskID := startRunningExecTask(t, mgr)
 	mgr.RecordOutput(taskID, "stdout", "  ➜  Local: http://localhost:5173/\n")
 
-	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, map[string]any{"task_id": taskID})
+	statusRes, err := p.execGetBackgroundStatus(context.Background(), session, taskArgs{TaskID: taskID})
 	if err != nil {
 		t.Fatalf("get_background_status failed: %v", err)
 	}
@@ -293,7 +294,7 @@ func TestWaitUntilReturnsIdleWithTailForQuietService(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	res, err := p.execWaitUntil(ctx, session, map[string]any{"task_id": taskID, "idle_timeout": 1, "timeout": 30}, nil)
+	res, err := p.execWaitUntil(ctx, session, waitUntilArgs{TaskID: taskID, IdleTimeout: secondsPtr(1), Timeout: secondsPtr(30)}, nil)
 	if err != nil {
 		t.Fatalf("wait_until failed: %v", err)
 	}
@@ -320,7 +321,7 @@ func TestWaitUntilTimeoutReturnsSnapshotInsteadOfError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	res, err := p.execWaitUntil(ctx, session, map[string]any{"task_id": taskID, "timeout": 1}, nil)
+	res, err := p.execWaitUntil(ctx, session, waitUntilArgs{TaskID: taskID, Timeout: secondsPtr(1)}, nil)
 	if err != nil {
 		t.Fatalf("wait_until should return a snapshot on timeout, got error: %v", err)
 	}
@@ -330,7 +331,7 @@ func TestWaitUntilTimeoutReturnsSnapshotInsteadOfError(t *testing.T) {
 	}
 }
 
-func mustTools(t *testing.T, p *BackgroundProvider, session SessionContext) []sdk.Tool {
+func mustTools(t *testing.T, p *BackgroundProvider, session SessionContext) []toolexec.Tool {
 	t.Helper()
 	tools, err := p.Tools(context.Background(), session)
 	if err != nil {
@@ -338,3 +339,5 @@ func mustTools(t *testing.T, p *BackgroundProvider, session SessionContext) []sd
 	}
 	return tools
 }
+
+func secondsPtr(v float64) *float64 { return &v }

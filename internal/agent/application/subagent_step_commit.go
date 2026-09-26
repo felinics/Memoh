@@ -16,6 +16,7 @@ import (
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -40,8 +41,8 @@ func (s *Service) SubagentStepCommit(
 	contextLifecycle *contextfrag.LifecycleHolder,
 	onPersisted func(),
 ) (
-	func(context.Context, int, *sdk.StepResult) error,
-	func(context.Context, int, *sdk.StepResult) error,
+	func(context.Context, int, *step.Record) error,
+	func(context.Context, int, *step.Record) error,
 ) {
 	if s == nil || s.messageService == nil {
 		return nil, nil
@@ -104,16 +105,16 @@ type subagentStepCommitter struct {
 	nextStep int // In-process ordering guard, not a durable replay cursor.
 }
 
-func (c *subagentStepCommitter) commit(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-	return c.persist(ctx, stepIndex, step, false)
+func (c *subagentStepCommitter) commit(ctx context.Context, stepIndex int, record *step.Record) error {
+	return c.persist(ctx, stepIndex, record, false)
 }
 
-func (c *subagentStepCommitter) interrupt(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-	return c.persist(ctx, stepIndex, step, true)
+func (c *subagentStepCommitter) interrupt(ctx context.Context, stepIndex int, record *step.Record) error {
+	return c.persist(ctx, stepIndex, record, true)
 }
 
-func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step *sdk.StepResult, interrupted bool) error {
-	if c == nil || step == nil {
+func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, record *step.Record, interrupted bool) error {
+	if c == nil || record == nil {
 		return errors.New("agent step is missing")
 	}
 	persistCtx, ownershipErr := stepPersistenceContext(ctx, c.ownerContext)
@@ -126,8 +127,8 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 	if stepIndex != c.nextStep {
 		return fmt.Errorf("unexpected agent step %d, want %d", stepIndex, c.nextStep)
 	}
-	inputs := make([]messagepkg.PersistInput, 0, len(step.Messages))
-	for _, msg := range step.Messages {
+	inputs := make([]messagepkg.PersistInput, 0, len(record.Messages))
+	for _, msg := range record.Messages {
 		if msg.Role == sdk.MessageRoleUser {
 			continue
 		}

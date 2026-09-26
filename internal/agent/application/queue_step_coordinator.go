@@ -9,6 +9,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/step"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -37,7 +38,6 @@ type queueStepOutcome struct {
 	appliedSteerItemID   string
 	claimedSteer         *sessionruntime.SteerItem
 	claimedSteerTurn     *messagepkg.TurnSlot
-	continueAfterFinal   bool
 	replacementFinalized bool
 }
 
@@ -143,11 +143,11 @@ func (q *queueStepCoordinator) commit(
 		q.pendingSteerTurn = nil
 	}
 	if kind == queueStepDeferredDecision {
-		// The loop parks after this step and its inject channel is never read
-		// again. A claim taken here would sit unapplied across the decision, and
-		// across any owner change while the run waits. The resumed execution
-		// claims at its next complete step or model-interruption checkpoint,
-		// keeping the approved tool result ahead of the new input.
+		// The loop parks after this step. A claim taken here would sit
+		// unapplied across the decision, and across any owner change while
+		// the run waits. The resumed execution claims at its next complete
+		// step or model-interruption checkpoint, keeping the approved tool
+		// result ahead of the new input.
 		return outcome, nil
 	}
 
@@ -165,9 +165,6 @@ func (q *queueStepCoordinator) commit(
 		q.pendingSteerTurn = q.allocateSteerTurn(ctx)
 		outcome.claimedSteer = &item
 		outcome.claimedSteerTurn = q.pendingSteerTurn
-		if kind == queueStepFinal || kind == queueStepSteered {
-			outcome.continueAfterFinal = true
-		}
 	} else if q.req.TurnReplacement != nil && kind == queueStepFinal {
 		allPersisted := append([]messagepkg.Message(nil), previouslyPersisted...)
 		allPersisted = append(allPersisted, persisted...)
@@ -197,11 +194,11 @@ const (
 	queueStepSteered          queueStepKind = "steered"
 )
 
-func classifyQueueStep(step *sdk.StepResult) queueStepKind {
-	if step == nil || step.DeferredToolApproval != nil {
+func classifyQueueStep(record *step.Record) queueStepKind {
+	if record == nil || record.Deferred != nil {
 		return queueStepDeferredDecision
 	}
-	if step.FinishReason == sdk.FinishReasonToolCalls && len(step.ToolCalls) > 0 {
+	if record.Result.FinishReason == sdk.FinishReasonToolCalls && len(record.Result.ToolCalls) > 0 {
 		return queueStepToolLoop
 	}
 	return queueStepFinal

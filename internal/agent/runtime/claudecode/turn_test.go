@@ -16,8 +16,10 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 type testCLIProcess struct {
@@ -229,7 +231,7 @@ func TestClaudeCommandOutputKeepsModelReply(t *testing.T) {
 					t.Fatalf("receipt and reply must stay separate: %#v", result.Output)
 				}
 				command := result.Output[0].Content[0].(sdk.TextPart)
-				if command.Text != "Goal set: review" || command.ProviderMetadata["runtime_command"] != "goal" {
+				if command.Text != "Goal set: review" || partmeta.Unfold(command.ProviderMetadata)["runtime_command"] != "goal" {
 					t.Fatalf("receipt lost its identity: %#v", command)
 				}
 				if tc.result != "" {
@@ -350,7 +352,7 @@ func TestClaudePermissionCardKeepsToolArguments(t *testing.T) {
 				continue
 			}
 			seen = true
-			fields, _ := call.Input.(map[string]any)
+			fields, _ := toolexec.ArgumentsValue(call.Input).(map[string]any)
 			if call.ToolName != "Glob" || fields["pattern"] != "*.go" {
 				t.Fatalf("tool call lost its arguments: %#v", call)
 			}

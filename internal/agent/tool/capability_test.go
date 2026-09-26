@@ -10,6 +10,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	approval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/mcp"
 )
@@ -125,11 +126,11 @@ func callCapability(t *testing.T, p *CapabilityProvider, session SessionContext,
 	if err != nil || len(tools) == 0 {
 		t.Fatalf("tools: %v", err)
 	}
-	result, err := tools[0].Execute(&sdk.ToolExecContext{Context: t.Context(), ToolCallID: "call"}, args)
+	result, err := tools[0].Execute(&toolexec.ToolExecContext{Context: t.Context(), ToolCallID: "call"}, toolexec.ArgumentsFromValue(args))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return result
+	return toolexec.OutputValue(result)
 }
 
 func assertCapabilityCode(t *testing.T, result any, code apperror.Code) {
@@ -142,6 +143,9 @@ func assertCapabilityCode(t *testing.T, result any, code apperror.Code) {
 
 func assertCapabilityMessage(t *testing.T, result any) {
 	t.Helper()
+	if output, ok := result.(sdk.ToolOutput); ok {
+		result = toolexec.OutputValue(output)
+	}
 	data, ok := result.(map[string]any)
 	if !ok || strings.TrimSpace(StringArg(data, "message")) == "" {
 		t.Fatalf("result has no actionable message: %#v", result)
@@ -267,7 +271,7 @@ func TestCapabilityUsageFollowsAvailableTools(t *testing.T) {
 	if usage := p.Usage(t.Context(), session, NewAvailableTools(nil)); usage != "" {
 		t.Fatal(usage)
 	}
-	usage := p.Usage(t.Context(), session, NewAvailableTools([]sdk.Tool{{Name: ToolMCPManage().String()}}))
+	usage := p.Usage(t.Context(), session, NewAvailableTools([]toolexec.Tool{{Name: ToolMCPManage().String()}}))
 	if !strings.Contains(usage, "mcp_manage") || strings.Contains(usage, "app_manage") {
 		t.Fatal(usage)
 	}

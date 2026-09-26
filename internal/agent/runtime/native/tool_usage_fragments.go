@@ -6,6 +6,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 const toolUsageGroupID = "system.tool_usage"
@@ -15,7 +16,7 @@ type toolUsageSection struct {
 	text       string
 }
 
-func firstToolName(providerTools []sdk.Tool) string {
+func firstToolName(providerTools []toolexec.Tool) string {
 	first := ""
 	for _, tool := range providerTools {
 		name := strings.TrimSpace(tool.Name)

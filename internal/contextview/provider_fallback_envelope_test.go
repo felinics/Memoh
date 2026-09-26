@@ -61,8 +61,8 @@ func TestApplyProviderRunConfigFallbackCarriesBudgetPlanAndStepReselector(t *tes
 func TestFallbackDispatchFailsClosedWhenLegacyPayloadExceedsAllowance(t *testing.T) {
 	t.Parallel()
 
-	provider := &envelopeProbeProvider{handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-		return nil, fmt.Errorf("provider must not be called for an oversized fallback payload (call %d)", call)
+	provider := &envelopeProbeProvider{handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
+		return sdk.ModelResult{}, fmt.Errorf("provider must not be called for an oversized fallback payload (call %d)", call)
 	}}
 	agent := agentpkg.New(agentpkg.Deps{ContextViewApplier: ProviderRunConfigApplier(nil)})
 	const window = 2_000

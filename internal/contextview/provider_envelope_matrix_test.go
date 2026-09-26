@@ -77,10 +77,10 @@ func TestProviderEnvelopeAuthorityMatrix(t *testing.T) {
 				if cost := contextfrag.ProviderEnvelopeTokens("", oversized, nil); cost <= window-limits.MaxOutputTokens || cost >= window {
 					t.Fatalf("oversized fixture costs %d tokens, want strictly between allowance %d and window %d", cost, window-limits.MaxOutputTokens, window)
 				}
-				var seen sdk.GenerateParams
-				probe := &envelopeProbeProvider{handler: func(_ int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+				var seen sdk.Request
+				probe := &envelopeProbeProvider{handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
 					seen = params
-					return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+					return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 				}}
 				provider := namedEnvelopeProbeProvider{envelopeProbeProvider: probe, name: client.provider}
 				run := func(messages []sdk.Message) (*contextfrag.LifecycleSnapshot, []contextfrag.MutationRecord, error) {

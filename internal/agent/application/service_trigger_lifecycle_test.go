@@ -27,7 +27,7 @@ import (
 type triggerLifecycleProvider struct {
 	mu     sync.Mutex
 	calls  int
-	params sdk.GenerateParams
+	params sdk.Request
 }
 
 func (*triggerLifecycleProvider) Name() string { return "trigger-lifecycle" }
@@ -44,25 +44,22 @@ func (*triggerLifecycleProvider) TestModel(context.Context, string) (*sdk.ModelT
 
 func (p *triggerLifecycleProvider) DoGenerate(
 	_ context.Context,
-	params sdk.GenerateParams,
-) (*sdk.GenerateResult, error) {
+	params sdk.Request,
+) (sdk.ModelResult, error) {
 	p.mu.Lock()
 	p.calls++
 	p.params = params
 	p.mu.Unlock()
-	return &sdk.GenerateResult{
+	return sdk.ModelResult{
 		Text:         directLifecycleResponse,
 		FinishReason: sdk.FinishReasonStop,
-		Messages: []sdk.Message{
-			sdk.AssistantMessage(directLifecycleResponse),
-		},
 	}, nil
 }
 
 func (p *triggerLifecycleProvider) DoStream(
 	ctx context.Context,
-	params sdk.GenerateParams,
-) (*sdk.StreamResult, error) {
+	params sdk.Request,
+) (<-chan sdk.StreamPart, error) {
 	result, err := p.DoGenerate(ctx, params)
 	if err != nil {
 		return nil, err
@@ -75,7 +72,7 @@ func (p *triggerLifecycleProvider) DoStream(
 	ch <- &sdk.FinishStepPart{FinishReason: result.FinishReason}
 	ch <- &sdk.FinishPart{FinishReason: result.FinishReason}
 	close(ch)
-	return &sdk.StreamResult{Stream: ch}, nil
+	return ch, nil
 }
 
 func (p *triggerLifecycleProvider) callCount() int {

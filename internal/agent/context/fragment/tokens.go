@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // EstimateBytesPerToken is the byte-per-token heuristic shared by every
@@ -129,15 +131,16 @@ func ResolveProviderBudgetFragTokens(frag ContextFrag) int {
 // ProviderEnvelopeTokens prices one provider payload for envelope decisions
 // with the estimator that selection applies per fragment, so a single-message
 // fragment costs the same whether it is being selected or has already been
-// frozen into a prefix.
-func ProviderEnvelopeTokens(system string, messages []sdk.Message, tools []sdk.Tool) int {
+// frozen into a prefix. Tools are the provider-neutral definitions the request
+// actually carries, not the local executable tool set.
+func ProviderEnvelopeTokens(system string, messages []sdk.Message, tools []sdk.ToolDefinition) int {
 	total := ProviderBudgetTokensFromBytes(len(system))
 	for _, message := range messages {
 		bytes, images := sdkMessageEstimate(message)
 		total += ProviderBudgetTokensFromBytes(bytes) + images*EstimateImageTokens
 	}
 	for _, tool := range tools {
-		total += ProviderToolDefTokens(ToolDefAccountingFor("", tool))
+		total += ProviderToolDefTokens(ToolDefinitionAccountingFor("", tool))
 	}
 	return total
 }
@@ -147,10 +150,26 @@ func ProviderToolDefTokens(def ToolDefAccounting) int {
 	return max(def.TokenEstimate, ProviderBudgetTokensFromBytes(def.Bytes))
 }
 
-// ToolDefAccountingFor measures one tool definition as the provider will
-// receive it (name, description, parameter schema). A definition that fails
-// to serialize falls back to its visible prose size.
-func ToolDefAccountingFor(provider string, tool sdk.Tool) ToolDefAccounting {
+// ToolDefAccountingFor measures one local executable tool as the provider will
+// receive it (name, description, parameter schema). A definition that fails to
+// serialize falls back to its visible prose size.
+func ToolDefAccountingFor(provider string, tool toolexec.Tool) ToolDefAccounting {
+	size := len(tool.Name) + len(tool.Description)
+	if data, err := json.Marshal(tool); err == nil {
+		size = len(data)
+	}
+	return ToolDefAccounting{
+		Provider:      provider,
+		Name:          tool.Name,
+		Bytes:         size,
+		TokenEstimate: TokensFromBytes(size),
+	}
+}
+
+// ToolDefinitionAccountingFor measures one provider-bound tool definition as it
+// travels on the wire. It is the ToolDefAccountingFor counterpart for the
+// sdk.Request tools shape.
+func ToolDefinitionAccountingFor(provider string, tool sdk.ToolDefinition) ToolDefAccounting {
 	size := len(tool.Name) + len(tool.Description)
 	if data, err := json.Marshal(tool); err == nil {
 		size = len(data)

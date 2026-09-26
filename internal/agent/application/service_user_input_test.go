@@ -14,6 +14,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
@@ -125,7 +126,7 @@ func TestUserInputContinuationHistoryClosesOlderPendingCall(t *testing.T) {
 	currentResult := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
 		ToolCallID: "current-call",
 		ToolName:   userinput.ToolNameAskUser,
-		Result:     map[string]any{"status": userinput.StatusSubmitted},
+		Result:     toolexec.OutputFromValue(map[string]any{"status": userinput.StatusSubmitted}),
 	})})[0]
 
 	input := nonNilModelMessages(sanitizeMessages([]ModelMessage{
@@ -518,7 +519,7 @@ func TestRespondUserInputLimitsChatToolResult(t *testing.T) {
 	if continued == nil {
 		t.Fatal("chat request must continue the session")
 	}
-	result, ok := continued.Result.(map[string]any)
+	result, ok := toolexec.OutputValue(continued.Result).(map[string]any)
 	if !ok {
 		t.Fatalf("continued result = %#v, want map", continued.Result)
 	}

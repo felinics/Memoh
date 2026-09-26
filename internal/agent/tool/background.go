@@ -12,6 +12,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 const (
@@ -59,85 +60,54 @@ func (*BackgroundProvider) Usage(_ context.Context, _ SessionContext, available 
 	return usageSection("Background Tasks", parts)
 }
 
-func (p *BackgroundProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+// Argument shapes of the background tools. The json tag names the property
+// and marks it optional; the jsonschema tag is the description the model reads.
+// Seconds arrive as pointers so an omitted value is told apart from zero.
+type (
+	listBackgroundArgs struct{}
+	waitArgs           struct {
+		Duration *float64 `json:"duration" jsonschema:"Seconds to wait. Must be > 0 and at most 300."`
+	}
+	waitUntilArgs struct {
+		TaskID      string   `json:"task_id" jsonschema:"Background task ID"`
+		Timeout     *float64 `json:"timeout,omitempty" jsonschema:"Max seconds to wait before returning with reason 'timeout'. Default 120, max 600. The task keeps running; call wait_until again to keep observing."`
+		IdleTimeout *float64 `json:"idle_timeout,omitempty" jsonschema:"Seconds of output silence after which a running command returns with reason 'idle'. Default 20, max 300. Only applies to exec tasks."`
+	}
+	taskArgs struct {
+		TaskID string `json:"task_id" jsonschema:"Background task ID"`
+	}
+)
+
+func (p *BackgroundProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.bgManager == nil {
 		return nil, nil
 	}
 	sess := session
-	return []sdk.Tool{
-		{
-			Name:        ToolListBackground().String(),
-			Description: "List background tasks for the current session.",
-			Parameters: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execListBackground(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolWait().String(),
-			Description: "Wait for a fixed duration in seconds. Use wait_until when you have a background task_id.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"duration": map[string]any{"type": "number", "description": "Seconds to wait. Must be > 0 and at most 300.", "minimum": 0, "maximum": 300},
-				},
-				"required": []string{"duration"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWait(ctx.Context, sess, inputAsMap(input), ctx.SendProgress)
-			},
-		},
-		{
-			Name:        ToolWaitUntil().String(),
-			Description: "Observe a background task for a bounded time. Returns with a reason: completed/failed/killed, unknown (execution connection lost; refresh dependency state before retrying), stalled (interactive prompt), idle (still running but output quiet for idle_timeout), or timeout — always with the latest output_tail. For servers/watchers that never exit (dev server, watch mode), reason 'idle' plus a ready message in output_tail (e.g. a local URL) means the service is up; do not keep waiting for completion.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"task_id":      map[string]any{"type": "string", "description": "Background task ID"},
-					"timeout":      map[string]any{"type": "number", "description": "Max seconds to wait before returning with reason 'timeout'. Default 120, max 600. The task keeps running; call wait_until again to keep observing.", "minimum": 1, "maximum": 600},
-					"idle_timeout": map[string]any{"type": "number", "description": "Seconds of output silence after which a running command returns with reason 'idle'. Default 20, max 300. Only applies to exec tasks.", "minimum": 1, "maximum": 300},
-				},
-				"required": []string{"task_id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWaitUntil(ctx.Context, sess, inputAsMap(input), ctx.SendProgress)
-			},
-		},
-		{
-			Name:        ToolGetBackgroundStatus().String(),
-			Description: "Get the status and details of a background task. For completed agent/spawn tasks, read the result field.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"task_id": map[string]any{"type": "string", "description": "Background task ID"},
-				},
-				"required": []string{"task_id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execGetBackgroundStatus(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolKillBackground().String(),
-			Description: "Kill a running or queued background task.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"task_id": map[string]any{"type": "string", "description": "Background task ID"},
-				},
-				"required": []string{"task_id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execKillBackground(ctx.Context, sess, inputAsMap(input))
-			},
-		},
+	return []toolexec.Tool{
+		toolexec.Define(ToolListBackground().String(), "List background tasks for the current session.",
+			func(ctx *toolexec.ToolExecContext, _ listBackgroundArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execListBackground(ctx.Context, sess))
+			}),
+		toolexec.Define(ToolWait().String(), "Wait for a fixed duration in seconds. Use wait_until when you have a background task_id.",
+			func(ctx *toolexec.ToolExecContext, args waitArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execWait(ctx.Context, sess, args, ctx.SendProgress))
+			}, toolexec.Range("duration", 0, 300)),
+		toolexec.Define(ToolWaitUntil().String(), "Observe a background task for a bounded time. Returns with a reason: completed/failed/killed, unknown (execution connection lost; refresh dependency state before retrying), stalled (interactive prompt), idle (still running but output quiet for idle_timeout), or timeout — always with the latest output_tail. For servers/watchers that never exit (dev server, watch mode), reason 'idle' plus a ready message in output_tail (e.g. a local URL) means the service is up; do not keep waiting for completion.",
+			func(ctx *toolexec.ToolExecContext, args waitUntilArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execWaitUntil(ctx.Context, sess, args, ctx.SendProgress))
+			}, toolexec.Range("timeout", 1, 600), toolexec.Range("idle_timeout", 1, 300)),
+		toolexec.Define(ToolGetBackgroundStatus().String(), "Get the status and details of a background task. For completed agent/spawn tasks, read the result field.",
+			func(ctx *toolexec.ToolExecContext, args taskArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execGetBackgroundStatus(ctx.Context, sess, args))
+			}),
+		toolexec.Define(ToolKillBackground().String(), "Kill a running or queued background task.",
+			func(ctx *toolexec.ToolExecContext, args taskArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execKillBackground(ctx.Context, sess, args))
+			}),
 	}, nil
 }
 
-func (p *BackgroundProvider) execListBackground(_ context.Context, session SessionContext, _ map[string]any) (any, error) {
+func (p *BackgroundProvider) execListBackground(_ context.Context, session SessionContext) (any, error) {
 	snapshots := p.bgManager.ListSnapshotsForSession(session.BotID, session.SessionID)
 	entries := make([]map[string]any, 0, len(snapshots))
 	for _, s := range snapshots {
@@ -161,8 +131,8 @@ func (p *BackgroundProvider) execListBackground(_ context.Context, session Sessi
 	return map[string]any{"tasks": entries, "count": len(entries)}, nil
 }
 
-func (*BackgroundProvider) execWait(ctx context.Context, _ SessionContext, args map[string]any, sendProgress func(any)) (any, error) {
-	duration, err := durationArg(args, "duration")
+func (*BackgroundProvider) execWait(ctx context.Context, _ SessionContext, args waitArgs, sendProgress func(sdk.ToolOutput)) (any, error) {
+	duration, err := requiredSeconds(args.Duration, "duration", maxWaitDuration)
 	if err != nil {
 		return nil, err
 	}
@@ -189,16 +159,16 @@ func (*BackgroundProvider) execWait(ctx context.Context, _ SessionContext, args 
 	}
 }
 
-func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionContext, args map[string]any, sendProgress func(any)) (any, error) {
-	taskID := strings.TrimSpace(StringArg(args, "task_id"))
+func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionContext, args waitUntilArgs, sendProgress func(sdk.ToolOutput)) (any, error) {
+	taskID := strings.TrimSpace(args.TaskID)
 	if taskID == "" {
 		return nil, errors.New("task_id is required")
 	}
-	timeout, err := optionalDurationArg(args, "timeout", background.DefaultWaitTimeout, minWaitUntilTimeout, maxWaitUntilTimeout)
+	timeout, err := optionalSeconds(args.Timeout, "timeout", background.DefaultWaitTimeout, minWaitUntilTimeout, maxWaitUntilTimeout)
 	if err != nil {
 		return nil, err
 	}
-	idleThreshold, err := optionalDurationArg(args, "idle_timeout", background.DefaultIdleThreshold, minIdleTimeout, maxIdleTimeout)
+	idleThreshold, err := optionalSeconds(args.IdleTimeout, "idle_timeout", background.DefaultIdleThreshold, minIdleTimeout, maxIdleTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +201,7 @@ func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionC
 	return result, nil
 }
 
-func (p *BackgroundProvider) waitForSessionTaskWithProgress(ctx context.Context, botID, sessionID, taskID string, idleThreshold time.Duration, sendProgress func(any)) (background.TaskSnapshot, background.WaitOutcome, error) {
+func (p *BackgroundProvider) waitForSessionTaskWithProgress(ctx context.Context, botID, sessionID, taskID string, idleThreshold time.Duration, sendProgress func(sdk.ToolOutput)) (background.TaskSnapshot, background.WaitOutcome, error) {
 	if sendProgress == nil {
 		return p.bgManager.WaitForSessionTask(ctx, botID, sessionID, taskID, idleThreshold)
 	}
@@ -275,14 +245,14 @@ func (p *BackgroundProvider) waitForSessionTaskWithProgress(ctx context.Context,
 	}
 }
 
-func emitWaitProgress(sendProgress func(any), payload map[string]any) {
+func emitWaitProgress(sendProgress func(sdk.ToolOutput), payload map[string]any) {
 	if sendProgress != nil {
-		sendProgress(payload)
+		sendProgress(toolexec.OutputFromValue(payload))
 	}
 }
 
-func (p *BackgroundProvider) execGetBackgroundStatus(_ context.Context, session SessionContext, args map[string]any) (any, error) {
-	taskID := strings.TrimSpace(StringArg(args, "task_id"))
+func (p *BackgroundProvider) execGetBackgroundStatus(_ context.Context, session SessionContext, args taskArgs) (any, error) {
+	taskID := strings.TrimSpace(args.TaskID)
 	if taskID == "" {
 		return nil, errors.New("task_id is required")
 	}
@@ -293,8 +263,8 @@ func (p *BackgroundProvider) execGetBackgroundStatus(_ context.Context, session 
 	return backgroundStatusMap(session, task.Snapshot()), nil
 }
 
-func (p *BackgroundProvider) execKillBackground(_ context.Context, session SessionContext, args map[string]any) (any, error) {
-	taskID := strings.TrimSpace(StringArg(args, "task_id"))
+func (p *BackgroundProvider) execKillBackground(_ context.Context, session SessionContext, args taskArgs) (any, error) {
+	taskID := strings.TrimSpace(args.TaskID)
 	if taskID == "" {
 		return nil, errors.New("task_id is required")
 	}
@@ -392,29 +362,28 @@ func statusString(s background.TaskSnapshot) string {
 	return string(s.Status)
 }
 
-func durationArg(args map[string]any, key string) (time.Duration, error) {
-	raw, ok := args[key]
-	if !ok {
+// requiredSeconds reads a required seconds argument, clamping it to maxD.
+func requiredSeconds(value *float64, key string, maxD time.Duration) (time.Duration, error) {
+	if value == nil {
 		return 0, fmt.Errorf("%s is required", key)
 	}
-	duration, err := secondsValue(raw, key)
+	duration, err := secondsDuration(*value, key)
 	if err != nil {
 		return 0, err
 	}
-	if duration > maxWaitDuration {
-		duration = maxWaitDuration
+	if duration > maxD {
+		duration = maxD
 	}
 	return duration, nil
 }
 
-// optionalDurationArg reads a seconds argument, falling back to def when the
-// key is absent and clamping present values into [minD, maxD].
-func optionalDurationArg(args map[string]any, key string, def, minD, maxD time.Duration) (time.Duration, error) {
-	raw, ok := args[key]
-	if !ok || raw == nil {
+// optionalSeconds reads a seconds argument, falling back to def when the
+// value is absent and clamping present values into [minD, maxD].
+func optionalSeconds(value *float64, key string, def, minD, maxD time.Duration) (time.Duration, error) {
+	if value == nil {
 		return def, nil
 	}
-	duration, err := secondsValue(raw, key)
+	duration, err := secondsDuration(*value, key)
 	if err != nil {
 		return 0, err
 	}
@@ -427,32 +396,9 @@ func optionalDurationArg(args map[string]any, key string, def, minD, maxD time.D
 	return duration, nil
 }
 
-func secondsValue(raw any, key string) (time.Duration, error) {
-	var seconds float64
-	switch v := raw.(type) {
-	case float64:
-		seconds = v
-	case float32:
-		seconds = float64(v)
-	case int:
-		seconds = float64(v)
-	case int64:
-		seconds = float64(v)
-	case jsonNumber:
-		parsed, err := v.Float64()
-		if err != nil {
-			return 0, fmt.Errorf("invalid %s: %w", key, err)
-		}
-		seconds = parsed
-	default:
-		return 0, fmt.Errorf("%s must be a number", key)
-	}
+func secondsDuration(seconds float64, key string) (time.Duration, error) {
 	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 {
 		return 0, fmt.Errorf("%s must be > 0", key)
 	}
 	return time.Duration(seconds * float64(time.Second)), nil
-}
-
-type jsonNumber interface {
-	Float64() (float64, error)
 }

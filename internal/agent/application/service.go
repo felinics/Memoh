@@ -34,6 +34,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	turnpkg "github.com/felinics/memoh/internal/agent/turn"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -834,7 +835,6 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	cfg := rc.runConfig
-	cfg.StepIndexOffset = req.StepIndexOffset
 	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
 	if stepCommitter != nil {
 		cfg.OnStepCommitted = stepCommitter.commit
@@ -1118,23 +1118,23 @@ func resolveReasoningConfig(chatModel models.GetResponse, botSettings settings.S
 	)
 }
 
-func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {
-	return func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.Context, sdk.ToolCall) (toolexec.ToolApprovalResult, error) {
+	return func(ctx context.Context, call sdk.ToolCall) (toolexec.ToolApprovalResult, error) {
 		if strings.TrimSpace(call.ToolName) == userinput.ToolNameAskUser {
-			if err := userinput.ValidateAskUserInput(call.Input); err != nil {
+			if err := userinput.ValidateAskUserInput(toolexec.ArgumentsValue(call.Input)); err != nil {
 				// Let the tool's Execute handler return an instructional tool result
 				// to the model instead of creating a fake pending request.
-				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+				return toolexec.ToolApprovalResult{Decision: toolexec.ToolApprovalDecisionApproved}, nil
 			}
 			if s.userInput == nil {
-				return s.limitToolApprovalResult(sdk.ToolApprovalResult{
-					Decision: sdk.ToolApprovalDecisionRejected,
+				return s.limitToolApprovalResult(toolexec.ToolApprovalResult{
+					Decision: toolexec.ToolApprovalDecisionRejected,
 					Reason:   "user input service is not configured",
 				}, call.ToolName), nil
 			}
 			if !isInteractiveApprovalSession(p.SessionType) {
-				return s.limitToolApprovalResult(sdk.ToolApprovalResult{
-					Decision: sdk.ToolApprovalDecisionRejected,
+				return s.limitToolApprovalResult(toolexec.ToolApprovalResult{
+					Decision: toolexec.ToolApprovalDecisionRejected,
 					Reason:   "user input requested in a non-interactive session",
 				}, call.ToolName), nil
 			}
@@ -1149,25 +1149,25 @@ func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.C
 				RequestedByChannelIdentityID: p.ChannelIdentityID,
 				ToolCallID:                   call.ToolCallID,
 				ToolName:                     call.ToolName,
-				Input:                        call.Input,
+				Input:                        toolexec.ArgumentsValue(call.Input),
 				SourcePlatform:               p.CurrentPlatform,
 				ReplyTarget:                  p.ReplyTarget,
 				ConversationType:             p.ConversationType,
 				WorkspaceTargetID:            workspace.WorkspaceTargetFromContext(ctx),
 			})
 			if err != nil {
-				return sdk.ToolApprovalResult{}, err
+				return toolexec.ToolApprovalResult{}, err
 			}
 			if req.Status != userinput.StatusPending {
-				return s.limitToolApprovalResult(sdk.ToolApprovalResult{
-					Decision:   sdk.ToolApprovalDecisionRejected,
+				return s.limitToolApprovalResult(toolexec.ToolApprovalResult{
+					Decision:   toolexec.ToolApprovalDecisionRejected,
 					ApprovalID: req.ID,
 					Reason:     "ask_user request is already " + req.Status,
 					Metadata:   userinput.DeferredMetadata(req),
 				}, call.ToolName), nil
 			}
-			return sdk.ToolApprovalResult{
-				Decision:   sdk.ToolApprovalDecisionDeferred,
+			return toolexec.ToolApprovalResult{
+				Decision:   toolexec.ToolApprovalDecisionDeferred,
 				ApprovalID: req.ID,
 				Metadata:   userinput.DeferredMetadata(req),
 			}, nil
@@ -1180,7 +1180,7 @@ func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.C
 			RequestedByChannelIdentityID: p.ChannelIdentityID,
 			ToolCallID:                   call.ToolCallID,
 			ToolName:                     call.ToolName,
-			ToolInput:                    call.Input,
+			ToolInput:                    toolexec.ArgumentsValue(call.Input),
 			SourcePlatform:               p.CurrentPlatform,
 			ReplyTarget:                  p.ReplyTarget,
 			ConversationType:             p.ConversationType,
@@ -1190,18 +1190,18 @@ func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.C
 		forcedApprovalReason, forcedApproval := native.HookForcedApprovalReason(ctx)
 		if s.toolApproval == nil {
 			if forcedApproval {
-				return s.limitToolApprovalResult(sdk.ToolApprovalResult{
-					Decision: sdk.ToolApprovalDecisionRejected,
+				return s.limitToolApprovalResult(toolexec.ToolApprovalResult{
+					Decision: toolexec.ToolApprovalDecisionRejected,
 					Reason:   firstNonEmpty(forcedApprovalReason, "hook requested approval but tool approval is not configured"),
 				}, call.ToolName), nil
 			}
-			return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+			return toolexec.ToolApprovalResult{Decision: toolexec.ToolApprovalDecisionApproved}, nil
 		}
 		eval, err := s.toolApproval.EvaluatePolicy(ctx, input)
 		if err != nil {
 			if input.WorkspaceTargeted && errors.Is(err, workspace.ErrWorkspaceTargetNotFound) {
 				requestedTargetID := ""
-				if args, ok := call.Input.(map[string]any); ok {
+				if args, ok := toolexec.ArgumentsValue(call.Input).(map[string]any); ok {
 					requestedTargetID = strings.TrimSpace(readAnyString(args["target_id"]))
 				}
 				if s.logger != nil {
@@ -1216,37 +1216,48 @@ func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.C
 				// A missing target is invalid model input, so let the tool execute
 				// and return its normal, instructional error instead. This is safe
 				// only for not-found targets: they cannot execute or bypass policy.
-				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved}, nil
+				return toolexec.ToolApprovalResult{Decision: toolexec.ToolApprovalDecisionApproved}, nil
 			}
-			return sdk.ToolApprovalResult{}, err
+			return toolexec.ToolApprovalResult{}, err
 		}
 		input.ExecutionLocation = eval.ExecutionLocation
 		locationMetadata := executionLocationResultMetadata(eval.ExecutionLocation)
+		// The policy resolved the workspace target and pinned it on the
+		// argument map it evaluated. The executor takes these arguments for
+		// the call, so the tool runs where the policy looked and the persisted
+		// call names that target (call.Input is a copy the handler cannot
+		// mutate).
+		var approvedInput *sdk.ToolArguments
+		if input.WorkspaceTargeted {
+			rewritten := toolexec.ArgumentsFromValue(input.ToolInput)
+			approvedInput = &rewritten
+		}
 		if eval.Decision == toolapproval.DecisionDeny {
-			return s.limitToolApprovalResult(sdk.ToolApprovalResult{
-				Decision: sdk.ToolApprovalDecisionRejected,
+			return s.limitToolApprovalResult(toolexec.ToolApprovalResult{
+				Decision: toolexec.ToolApprovalDecisionRejected,
 				Reason:   toolapproval.PolicyDeniedReason,
 				Metadata: locationMetadata,
 			}, call.ToolName), nil
 		}
 		if eval.Decision == toolapproval.DecisionBypass && !forcedApproval {
-			return sdk.ToolApprovalResult{
-				Decision: sdk.ToolApprovalDecisionApproved,
+			return toolexec.ToolApprovalResult{
+				Decision: toolexec.ToolApprovalDecisionApproved,
 				Metadata: locationMetadata,
+				Input:    approvedInput,
 			}, nil
 		}
 		if !isInteractiveApprovalSession(p.SessionType) {
 			req, err := s.toolApproval.CreatePending(ctx, input)
 			if err != nil {
-				return sdk.ToolApprovalResult{}, err
+				return toolexec.ToolApprovalResult{}, err
 			}
 			reason := "tool execution requires approval, but this session type cannot request approval"
 			rejected, err := s.toolApproval.Reject(ctx, req.ID, p.ChannelIdentityID, reason)
 			if err != nil {
-				return sdk.ToolApprovalResult{}, err
+				return toolexec.ToolApprovalResult{}, err
 			}
-			return s.limitToolApprovalResult(sdk.ToolApprovalResult{
-				Decision:   sdk.ToolApprovalDecisionRejected,
+			return s.limitToolApprovalResult(toolexec.ToolApprovalResult{
+				Decision:   toolexec.ToolApprovalDecisionRejected,
 				ApprovalID: rejected.ID,
 				Reason:     reason,
 				Metadata:   approvalResultMetadata(rejected),
@@ -1254,12 +1265,13 @@ func (s *Service) buildToolApprovalHandler(p baseRunConfigParams) func(context.C
 		}
 		req, err := s.toolApproval.CreatePending(ctx, input)
 		if err != nil {
-			return sdk.ToolApprovalResult{}, err
+			return toolexec.ToolApprovalResult{}, err
 		}
-		return sdk.ToolApprovalResult{
-			Decision:   sdk.ToolApprovalDecisionDeferred,
+		return toolexec.ToolApprovalResult{
+			Decision:   toolexec.ToolApprovalDecisionDeferred,
 			ApprovalID: req.ID,
 			Metadata:   approvalResultMetadata(req),
+			Input:      approvedInput,
 		}, nil
 	}
 }

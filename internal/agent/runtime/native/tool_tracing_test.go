@@ -6,12 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/felinics/twilight/sdk"
+	sdk "github.com/felinics/twilight/sdk"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func recordToolSpans(t *testing.T) *tracetest.SpanRecorder {
@@ -47,16 +49,16 @@ func TestWrapToolTracingRecordsACallWithoutItsArguments(t *testing.T) {
 	// asked for. Recording the input would put all of it in the trace
 	// backend, which is exactly what docs/logging.md keeps out of records.
 	recorder := recordToolSpans(t)
-	tools := wrapToolTracing([]sdk.Tool{{
+	tools := wrapToolTracing([]toolexec.Tool{{
 		Name: "bash",
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return "ok", nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue("ok"), nil
 		},
 	}})
 
-	out, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()},
-		map[string]any{"command": "cat /etc/synthetic-secret"})
-	if err != nil || out != "ok" {
+	out, err := tools[0].Execute(&toolexec.ToolExecContext{Context: context.Background()},
+		toolexec.ArgumentsFromValue(map[string]any{"command": "cat /etc/synthetic-secret"}))
+	if err != nil || toolexec.OutputValue(out) != "ok" {
 		t.Fatalf("Execute() = %v, %v", out, err)
 	}
 
@@ -77,16 +79,16 @@ func TestWrapToolTracingRecordsACallWithoutItsArguments(t *testing.T) {
 // no longer says which tool caused them.
 func TestWrapToolTracingGivesTheToolItsOwnSpanContext(t *testing.T) {
 	recorder := recordToolSpans(t)
-	tools := wrapToolTracing([]sdk.Tool{{
+	tools := wrapToolTracing([]toolexec.Tool{{
 		Name: "browser_action",
-		Execute: func(execCtx *sdk.ToolExecContext, _ any) (any, error) {
+		Execute: func(execCtx *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
 			_, inner := otel.Tracer("test").Start(execCtx.Context, "inner.work")
 			inner.End()
-			return "ok", nil
+			return toolexec.OutputFromValue("ok"), nil
 		},
 	}})
 
-	if _, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, nil); err != nil {
+	if _, err := tools[0].Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(nil)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,14 +102,14 @@ func TestWrapToolTracingGivesTheToolItsOwnSpanContext(t *testing.T) {
 
 func TestWrapToolTracingMarksAFailedCall(t *testing.T) {
 	recorder := recordToolSpans(t)
-	tools := wrapToolTracing([]sdk.Tool{{
+	tools := wrapToolTracing([]toolexec.Tool{{
 		Name: "write_file",
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return nil, errors.New("disk full")
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return sdk.ToolOutput{}, errors.New("disk full")
 		},
 	}})
 
-	if _, err := tools[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, nil); err == nil {
+	if _, err := tools[0].Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(nil)); err == nil {
 		t.Fatal("want the tool's error to pass through")
 	}
 	if span := findSpan(t, recorder, "agent.tool write_file"); span.Status().Code != codes.Error {
@@ -118,13 +120,15 @@ func TestWrapToolTracingMarksAFailedCall(t *testing.T) {
 func TestWrapToolTracingLeavesTheCallersSliceAlone(t *testing.T) {
 	// The decorators in this chain copy before they wrap. Mutating the input
 	// would double-wrap whichever caller reuses the assembled slice.
-	original := []sdk.Tool{{Name: "read_file", Execute: func(*sdk.ToolExecContext, any) (any, error) { return nil, nil }}}
+	original := []toolexec.Tool{{Name: "read_file", Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+		return sdk.ToolOutput{}, nil
+	}}}
 	wrapped := wrapToolTracing(original)
 	if &original[0] == &wrapped[0] {
 		t.Fatal("wrapToolTracing returned the caller's slice")
 	}
 	recorder := recordToolSpans(t)
-	if _, err := original[0].Execute(&sdk.ToolExecContext{Context: context.Background()}, nil); err != nil {
+	if _, err := original[0].Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(nil)); err != nil {
 		t.Fatal(err)
 	}
 	if names := spanNames(recorder); len(names) != 0 {

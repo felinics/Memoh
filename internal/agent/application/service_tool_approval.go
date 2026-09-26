@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/workspace"
@@ -240,7 +241,7 @@ func (s *Service) continueCommittedToolApprovalResponse(
 		toolResult = sdk.ToolResultPart{
 			ToolCallID: target.ToolCallID,
 			ToolName:   target.ToolName,
-			Result:     s.limitToolResultText(rejectedToolResultText(committed.input.Reason), target.ToolName),
+			Result:     toolexec.OutputFromValue(s.limitToolResultText(rejectedToolResultText(committed.input.Reason), target.ToolName)),
 			IsError:    true,
 		}
 	default:
@@ -266,8 +267,8 @@ func (s *Service) limitToolResultValue(value any, toolName string) any {
 	return contextlimit.LimitToolOutput(value, "tool result ("+toolName+")", s.toolOutputLimit())
 }
 
-func (s *Service) limitToolApprovalResult(result sdk.ToolApprovalResult, toolName string) sdk.ToolApprovalResult {
-	if result.Decision == sdk.ToolApprovalDecisionRejected {
+func (s *Service) limitToolApprovalResult(result toolexec.ToolApprovalResult, toolName string) toolexec.ToolApprovalResult {
+	if result.Decision == toolexec.ToolApprovalDecisionRejected {
 		result.Reason = s.limitToolResultText(result.Reason, toolName)
 	}
 	return result
@@ -398,7 +399,7 @@ func (s *Service) executeApprovedTool(ctx context.Context, req toolapproval.Requ
 	part, uiMetadata, err := s.agent.ExecuteToolWithUIMetadata(ctx, resolved.RunConfig, sdk.ToolCall{
 		ToolCallID: req.ToolCallID,
 		ToolName:   req.ToolName,
-		Input:      req.ToolInput,
+		Input:      toolexec.ArgumentsFromValue(req.ToolInput),
 	})
 	return part, uiMetadata, err
 }

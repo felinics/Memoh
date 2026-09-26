@@ -10,6 +10,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func loopSpanWithToolCycles(prefix []sdk.Message, cycles int, resultSize int) []sdk.Message {
@@ -58,12 +59,12 @@ func TestStepReselectionTruncatesOldToolResultsKeepsRecent(t *testing.T) {
 		t.Fatalf("tool results = %d, want all three preserved as parts", len(toolResults))
 	}
 	for i, result := range toolResults[:2] {
-		text, _ := result.Result.(string)
+		text, _ := toolexec.OutputValue(result.Result).(string)
 		if !strings.Contains(text, "pruned") {
 			t.Fatalf("older result %d must be truncated, got %q", i, text)
 		}
 	}
-	newest, _ := toolResults[2].Result.(string)
+	newest, _ := toolexec.OutputValue(toolResults[2].Result).(string)
 	if strings.Contains(newest, "pruned") {
 		t.Fatalf("newest cycle must stay intact, got %q", newest)
 	}
@@ -106,7 +107,7 @@ func TestStepReselectionTruncationPreservesExactLaterCarrierOrigin(t *testing.T)
 			if !ok {
 				continue
 			}
-			text, _ := result.Result.(string)
+			text, _ := toolexec.OutputValue(result.Result).(string)
 			if strings.Contains(text, "pruned") {
 				truncated++
 				if selection.MessageSourceIndexes[i] != -1 {

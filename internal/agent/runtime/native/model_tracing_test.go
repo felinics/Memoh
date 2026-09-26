@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // spanAttr reports one attribute of a recorded span.
@@ -42,10 +43,10 @@ func spansNamed(recorder *tracetest.SpanRecorder, name string) []sdktrace.ReadOn
 // execute ends the run instead of starting another round.
 func noopToolAgent() *Agent {
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name: "noop",
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return "ok", nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue("ok"), nil
 		},
 	}}}})
 	return a
@@ -59,12 +60,12 @@ func TestEveryModelRoundGetsItsOwnSpan(t *testing.T) {
 	recorder := recordToolSpans(t)
 
 	round := 0
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		round++
 		if round <= 2 {
 			return closedAgentTestStream(
 				&sdk.StartStepPart{},
-				&sdk.StreamToolCallPart{ToolCallID: "call-1", ToolName: "noop", Input: map[string]any{}},
+				&sdk.StreamToolCallPart{ToolCallID: "call-1", ToolName: "noop", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 				&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls},
 			), nil
 		}
@@ -114,12 +115,12 @@ func TestModelSpansDoNotAdoptTheToolSpans(t *testing.T) {
 	recorder := recordToolSpans(t)
 
 	round := 0
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		round++
 		if round == 1 {
 			return closedAgentTestStream(
 				&sdk.StartStepPart{},
-				&sdk.StreamToolCallPart{ToolCallID: "call-1", ToolName: "noop", Input: map[string]any{}},
+				&sdk.StreamToolCallPart{ToolCallID: "call-1", ToolName: "noop", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 				&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls},
 			), nil
 		}
@@ -166,7 +167,7 @@ func TestModelSpanReportsTheWaitBeforeTheFirstPart(t *testing.T) {
 	recorder := recordToolSpans(t)
 
 	const wait = 40 * time.Millisecond
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		ch := make(chan sdk.StreamPart)
 		go func() {
 			defer close(ch)
@@ -175,7 +176,7 @@ func TestModelSpanReportsTheWaitBeforeTheFirstPart(t *testing.T) {
 			ch <- &sdk.TextDeltaPart{ID: "text-1", Text: "done"}
 			ch <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
 		}()
-		return &sdk.StreamResult{Stream: ch}, nil
+		return ch, nil
 	})
 
 	events := New(Deps{}).Stream(context.Background(), RunConfig{
@@ -208,7 +209,7 @@ func TestModelSpanReportsTheWaitBeforeTheFirstPart(t *testing.T) {
 func TestModelSpanEndsWhenTheStreamProducesNothing(t *testing.T) {
 	recorder := recordToolSpans(t)
 
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		return closedAgentTestStream(), nil
 	})
 
@@ -232,7 +233,7 @@ func TestModelSpanRecordsAProviderThatRefusesTheCall(t *testing.T) {
 	recorder := recordToolSpans(t)
 
 	refused := errors.New("provider refused the call")
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		return nil, refused
 	})
 
@@ -297,7 +298,7 @@ func TestModelSpansRecordNothingFromTheConversation(t *testing.T) {
 	recorder := recordToolSpans(t)
 
 	const secret = "synthetic-conversation-secret"
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		return closedAgentTestStream(
 			&sdk.StartStepPart{},
 			&sdk.TextDeltaPart{ID: "text-1", Text: secret},

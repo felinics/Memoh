@@ -229,14 +229,14 @@ type recoverySilentProvider struct {
 	calls atomic.Int32
 }
 
-func (p *recoverySilentProvider) DoStream(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (p *recoverySilentProvider) DoStream(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 	p.calls.Add(1)
 	parts := make(chan sdk.StreamPart)
 	go func() {
 		<-ctx.Done()
 		close(parts)
 	}()
-	return &sdk.StreamResult{Stream: parts}, nil
+	return parts, nil
 }
 
 func TestChatBudgetRecoveryPausesIdleUntilProviderDispatch(t *testing.T) {

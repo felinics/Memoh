@@ -49,8 +49,8 @@ func TestAgentGenerateLogsContextLifecycleOnceOnHardError(t *testing.T) {
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return nil, errors.New("boom: hard failure")
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{}, errors.New("boom: hard failure")
 		},
 	}
 	handler := &lifecycleRecordingHandler{}
@@ -74,8 +74,8 @@ func TestAgentGenerateLogsContextLifecycleOnceOnHappyPath(t *testing.T) {
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	handler := &lifecycleRecordingHandler{}
@@ -99,7 +99,7 @@ func TestAgentStreamLogsContextLifecycleOnceOnNonRetryableStreamStartError(t *te
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
-		stream: func(_ context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		stream: func(_ context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 			return nil, errors.New("boom: non-retryable")
 		},
 	}
@@ -154,8 +154,8 @@ func TestAgentStreamLogsContextLifecycleOnceOnHappyPath(t *testing.T) {
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	handler := &lifecycleRecordingHandler{}

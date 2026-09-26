@@ -1,0 +1,81 @@
+{
+  "get_messages": {
+    "properties": {
+      "before": {
+        "description": "ISO 8601 timestamp cursor. When provided, returns messages created before this time.",
+        "type": "string"
+      },
+      "limit": {
+        "description": "Maximum number of messages to return. Default 30, max 100.",
+        "type": "integer"
+      },
+      "message_id": {
+        "description": "Exact persisted message ID to resolve, such as a message_id returned in search_memory source_refs.",
+        "type": "string"
+      },
+      "session_id": {
+        "description": "Session ID to read. Defaults to the current session when omitted.",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "list_sessions": {
+    "properties": {
+      "limit": {
+        "description": "Maximum number of sessions to return. Default 50.",
+        "type": "integer"
+      },
+      "platform": {
+        "description": "Filter by channel platform (e.g. telegram, feishu). Returns all platforms when omitted.",
+        "type": "string"
+      },
+      "type": {
+        "description": "Filter by session type: chat or schedule. Returns all types when omitted.",
+        "enum": [
+          "chat",
+          "schedule"
+        ],
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "search_messages": {
+    "properties": {
+      "contact_id": {
+        "description": "Filter by sender channel identity ID.",
+        "type": "string"
+      },
+      "end_time": {
+        "description": "ISO 8601 timestamp. Only return messages created at or before this time.",
+        "type": "string"
+      },
+      "keyword": {
+        "description": "Search keyword — matches against the text content of messages (case-insensitive).",
+        "type": "string"
+      },
+      "limit": {
+        "description": "Maximum number of messages to return. Default 50, max 200.",
+        "type": "integer"
+      },
+      "role": {
+        "description": "Filter by message role.",
+        "enum": [
+          "user",
+          "assistant"
+        ],
+        "type": "string"
+      },
+      "session_id": {
+        "description": "Filter by session ID.",
+        "type": "string"
+      },
+      "start_time": {
+        "description": "ISO 8601 timestamp. Only return messages created at or after this time.",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

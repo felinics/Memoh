@@ -15,6 +15,7 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agent/tool/internal/toolset"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // SkillDetail holds the description and content of a loadable skill.
@@ -230,10 +231,10 @@ func providerNeutralMessages(messages []sdk.Message) []sdk.Message {
 					clean.Content = append(clean.Content, sdk.FilePart{Data: value.Data, MediaType: value.MediaType, Filename: value.Filename})
 				}
 			case sdk.ToolCallPart:
-				clean.Content = append(clean.Content, sdk.ToolCallPart{ToolCallID: value.ToolCallID, ToolName: value.ToolName, Input: value.Input})
+				clean.Content = append(clean.Content, sdk.ToolCallPart{ToolCallID: value.ToolCallID, ToolName: value.ToolName, Input: toolexec.ArgumentsFromValue(value.Input)})
 			case *sdk.ToolCallPart:
 				if value != nil {
-					clean.Content = append(clean.Content, sdk.ToolCallPart{ToolCallID: value.ToolCallID, ToolName: value.ToolName, Input: value.Input})
+					clean.Content = append(clean.Content, sdk.ToolCallPart{ToolCallID: value.ToolCallID, ToolName: value.ToolName, Input: toolexec.ArgumentsFromValue(value.Input)})
 				}
 			case sdk.ToolResultPart:
 				clean.Content = append(clean.Content, value)
@@ -418,13 +419,13 @@ type ProviderLabeler interface {
 // Tools() is called per-request; implementations may return different
 // tool sets based on session context (e.g. subagent restrictions, bot settings).
 type ToolProvider interface {
-	Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error)
+	Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error)
 }
 
 // AvailableTools is the set of tool names registered for the current session.
 type AvailableTools = toolset.Available
 
-func NewAvailableTools(tools []sdk.Tool) AvailableTools {
+func NewAvailableTools(tools []toolexec.Tool) AvailableTools {
 	names := make([]ToolName, 0, len(tools))
 	for _, tool := range tools {
 		name := strings.TrimSpace(tool.Name)
@@ -493,15 +494,6 @@ func StringArg(arguments map[string]any, key string) string {
 	}
 }
 
-func FirstStringArg(arguments map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value := StringArg(arguments, key); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func IntArg(arguments map[string]any, key string) (int, bool, error) {
 	if arguments == nil {
 		return 0, false, nil
@@ -540,33 +532,13 @@ func IntArg(arguments map[string]any, key string) (int, bool, error) {
 	}
 }
 
-func BoolArg(arguments map[string]any, key string) (bool, bool, error) {
-	if arguments == nil {
-		return false, false, nil
-	}
-	raw, ok := arguments[key]
-	if !ok || raw == nil {
-		return false, false, nil
-	}
-	value, ok := raw.(bool)
-	if !ok {
-		return false, true, fmt.Errorf("%s must be a boolean", key)
-	}
-	return value, true, nil
-}
-
-func inputAsMap(input any) map[string]any {
-	args, ok := input.(map[string]any)
-	if ok {
-		return args
-	}
-	if input == nil {
+// inputAsMap decodes the model's arguments as an object. Invalid arguments
+// never reach a handler through the executor, so the fallback only covers a
+// direct caller; a non-object document yields the empty object.
+func inputAsMap(input sdk.ToolArguments) map[string]any {
+	args := map[string]any{}
+	if err := input.Unmarshal(&args); err != nil || args == nil {
 		return map[string]any{}
-	}
-	raw, _ := json.Marshal(input)
-	_ = json.Unmarshal(raw, &args)
-	if args == nil {
-		args = map[string]any{}
 	}
 	return args
 }

@@ -1,0 +1,23 @@
+{
+  "list_skills": {
+    "properties": {},
+    "type": "object"
+  },
+  "use_skill": {
+    "properties": {
+      "reason": {
+        "description": "Why this skill is relevant to the current task",
+        "type": "string"
+      },
+      "skillName": {
+        "description": "The name of the skill to activate",
+        "type": "string"
+      }
+    },
+    "required": [
+      "skillName",
+      "reason"
+    ],
+    "type": "object"
+  }
+}

@@ -7,12 +7,10 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
-
-	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/step"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -22,15 +20,13 @@ import (
 // persistence. It is intentionally enabled only for admitted, fenced turns;
 // legacy calls without a runtime owner keep their terminal-snapshot behavior.
 type agentStepCommitter struct {
-	ownerContext       context.Context
-	service            *Service
-	req                ChatRequest
-	rc                 resolvedContext
-	persister          messagepkg.AgentStepPersister
-	reasoningTiming    *reasoningTimingTracker
-	queueStep          *queueStepCoordinator
-	continueAfterFinal atomic.Bool
-	nextModelInputs    []sdk.Message
+	ownerContext    context.Context
+	service         *Service
+	req             ChatRequest
+	rc              resolvedContext
+	persister       messagepkg.AgentStepPersister
+	reasoningTiming *reasoningTimingTracker
+	queueStep       *queueStepCoordinator
 
 	mu                   sync.Mutex
 	turnRequestMessageID string
@@ -84,7 +80,9 @@ func (s *Service) newAgentStepCommitter(ctx context.Context, req ChatRequest, rc
 		service: s, req: req, rc: rc, persister: persister, ownerContext: ctx,
 		queueStep:            queueStep,
 		turnRequestMessageID: requestMessageID,
-		nextStep:             req.StepIndexOffset,
+		// A continuation resumes a run whose earlier steps are already
+		// persisted; the loop numbers its commits from the same offset.
+		nextStep: req.StepIndexOffset,
 	}
 }
 
@@ -92,8 +90,6 @@ func (c *agentStepCommitter) bindContinuation(cfg *native.RunConfig) {
 	if c == nil || cfg == nil {
 		return
 	}
-	cfg.ContinueAfterFinal = &c.continueAfterFinal
-	cfg.NextModelInputs = &c.nextModelInputs
 	if c.queueStep != nil && c.queueStep.steerEnabled {
 		cfg.SteerWake = c.service.sessionManager.SteerWake(c.req.RunHandle)
 		cfg.PendingSteer = func(ctx context.Context) (bool, error) {
@@ -107,8 +103,11 @@ func (c *agentStepCommitter) bindContinuation(cfg *native.RunConfig) {
 			}
 			return false, err
 		}
-		cfg.OnSteer = func(ctx context.Context, index int, step *sdk.StepResult) error {
-			return c.persist(ctx, index, step, stepSteered)
+		// The steered checkpoint is also a claim boundary: its directive
+		// carries whatever input the claim admitted, so the loop continues
+		// with the new input instead of restarting the run.
+		cfg.OnSteer = func(ctx context.Context, index int, record *step.Record) (native.StepDirective, error) {
+			return c.persist(ctx, index, record, stepSteered)
 		}
 	}
 }
@@ -121,25 +120,26 @@ const (
 	stepSteered
 )
 
-func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-	return c.persist(ctx, stepIndex, step, stepCompleted)
+func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, record *step.Record) (native.StepDirective, error) {
+	return c.persist(ctx, stepIndex, record, stepCompleted)
 }
 
-func (c *agentStepCommitter) interrupt(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-	return c.persist(ctx, stepIndex, step, stepInterrupted)
+func (c *agentStepCommitter) interrupt(ctx context.Context, stepIndex int, record *step.Record) error {
+	_, err := c.persist(ctx, stepIndex, record, stepInterrupted)
+	return err
 }
 
-func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *sdk.StepResult, mode stepCommitMode) error {
+func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record *step.Record, mode stepCommitMode) (native.StepDirective, error) {
 	interrupted := mode != stepCompleted
-	if c == nil || step == nil {
-		return errors.New("agent step is missing")
+	if c == nil || record == nil {
+		return native.StepDirective{}, errors.New("agent step is missing")
 	}
 	persistCtx, ownershipErr := stepPersistenceContext(ctx, c.ownerContext)
 	if ownershipErr != nil {
-		return ownershipErr
+		return native.StepDirective{}, ownershipErr
 	}
 	ctx = persistCtx
-	messages := sdkMessagesWithOrigins(step.Messages, native.InternalFeedbackIndexes(ctx))
+	messages := sdkMessagesWithOrigins(record.Messages, native.InternalFeedbackIndexes(ctx))
 	timingState := "completed"
 	if interrupted {
 		timingState = "interrupted"
@@ -148,14 +148,15 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	var dir native.StepDirective
 	// A failed interrupted checkpoint is reported to its caller but never
 	// recorded as a commit failure: the turn is already ending, and losing an
 	// unfinished snapshot must not turn an abort into a turn error.
-	fail := func(err error) error {
+	fail := func(err error) (native.StepDirective, error) {
 		if mode != stepInterrupted {
 			c.commitErr = err
 		}
-		return err
+		return native.StepDirective{}, err
 	}
 	if stepIndex != c.nextStep {
 		return fail(fmt.Errorf("unexpected agent step %d, want %d", stepIndex, c.nextStep))
@@ -167,7 +168,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	// paths retain the old cheap no-op behavior.
 	if !hasAssistantOutput && mode != stepSteered && (c.queueStep == nil || interrupted) {
 		c.nextStep++
-		return nil
+		return native.StepDirective{}, nil
 	}
 	if (hasAssistantOutput || mode == stepSteered) && stepIndex == 0 && !c.req.UserMessagePersisted && !c.req.ReusePersistedUserMessage {
 		messages = prependTurnUserMessage(c.req, messages)
@@ -177,7 +178,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	// collector in every step would attach the same accumulated assets again.
 	storeReq.OutboundAssetCollector = nil
 	opts := storeRoundOptions{
-		AllowPendingToolCalls: step.DeferredToolApproval != nil,
+		AllowPendingToolCalls: record.Deferred != nil,
 		ContextLifecycle:      c.rc.runConfig.ContextLifecycle,
 		ReasoningTiming:       reasoningTiming,
 	}
@@ -209,7 +210,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	var queueErr error
 	if c.queueStep != nil && mode != stepInterrupted {
 		stepCtx := context.WithoutCancel(ctx)
-		kind := classifyQueueStep(step)
+		kind := classifyQueueStep(record)
 		if mode == stepSteered {
 			kind = queueStepSteered
 		}
@@ -226,13 +227,15 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 		persisted = outcome.persisted
 		c.replacementFinalized = outcome.replacementFinalized
 		if queueErr == nil {
-			if outcome.claimedSteer != nil {
-				c.nextModelInputs = append(c.nextModelInputs, sdk.UserMessage(QueuePayloadText(outcome.claimedSteer.Payload)))
-			}
-			c.continueAfterFinal.Store(outcome.continueAfterFinal)
-		}
-		if queueErr == nil {
 			c.publishQueueUserTurns(context.WithoutCancel(ctx), stepIndex, outcome)
+			if outcome.claimedSteer != nil {
+				if text := QueuePayloadText(outcome.claimedSteer.Payload); text != "" {
+					dir.NextInputs = []native.DirectiveInput{{
+						ID:   string(outcome.claimedSteer.ID),
+						Text: text,
+					}}
+				}
+			}
 		}
 	} else {
 		persisted, err = c.persister.PersistAgentStep(context.WithoutCancel(ctx), agentStep)
@@ -262,18 +265,18 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, step *s
 	if queueErr != nil {
 		return fail(queueErr)
 	}
-	return nil
+	return dir, nil
 }
 
 // stampSteerTurn files this step's injected steer input under the turn drawn
 // when the input was claimed, instead of letting persistence mint a second name
 // for it. The row is identified by position rather than by text, and the
 // position to take is the last one: the steer is the final user row a step can
-// carry. PrepareStep's other user-row injectors — the image-only row read_media
-// appends after reading media, and mid-turn platform injects — are wrapped
-// inside prepareQueuedSteer, so their rows are appended ahead of the steer, and
-// sdk.StepResult.Messages holds only the assistant and tool rows the provider
-// produced. So scan from the end and take the last user row nobody named.
+// carry. The loop appends its other user rows first at a step boundary — the
+// read-media carrier, then injected platform messages — and the steer
+// directive last (see streamEngine.run), and step.Record.Messages holds only
+// the assistant and tool rows the provider produced. So scan from the end and
+// take the last user row nobody named.
 // native.TestQueuedSteerIsAppendedAfterEveryOtherPreparedMessage pins the
 // ordering this depends on.
 func (c *agentStepCommitter) stampSteerTurn(inputs []messagepkg.PersistInput) {

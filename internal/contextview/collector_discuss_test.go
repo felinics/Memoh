@@ -9,6 +9,8 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
@@ -138,5 +140,31 @@ func TestDiscussCollectorPreservesExplicitSourcesAndImage(t *testing.T) {
 	}
 	if len(contextfrag.FragMessage(frags[0]).Content) != 2 || len(contextfrag.FragMessage(frags[1]).Content) != 1 {
 		t.Fatal("image attached to echo")
+	}
+}
+
+// A composed discuss message with RawContent carries the stored content shape;
+// the collector types it through the codec instead of decoding SDK JSON.
+func TestDiscussContextMessageToSDKTypesStoredShape(t *testing.T) {
+	t.Parallel()
+
+	msg := discussContextMessageToSDK(timeline.ContextMessage{
+		Role:       "assistant",
+		Content:    "fallback",
+		RawContent: json.RawMessage(`[{"type":"tool-call","toolCallId":"call-1","toolName":"exec","input":{"command":"ls && pwd"},"providerMetadata":{"approval":{"approval_id":"a1","status":"approved"}}}]`),
+	})
+	call, ok := msg.Content[0].(sdk.ToolCallPart)
+	if !ok || msg.Role != sdk.MessageRoleAssistant {
+		t.Fatalf("message = %#v, want an assistant tool call", msg)
+	}
+	if args, _ := toolexec.ArgumentsValue(call.Input).(map[string]any); args["command"] != "ls && pwd" {
+		t.Fatalf("tool call input = %#v", toolexec.ArgumentsValue(call.Input))
+	}
+	if approval, ok := partmeta.Object(call.ProviderMetadata, partmeta.KeyApproval); !ok || approval["status"] != "approved" {
+		t.Fatalf("approval annotation = %#v, want the stored annotation typed", call.ProviderMetadata)
+	}
+	plain := discussContextMessageToSDK(timeline.ContextMessage{Role: "user", Content: "hello"})
+	if text, ok := plain.Content[0].(sdk.TextPart); !ok || text.Text != "hello" || plain.Role != sdk.MessageRoleUser {
+		t.Fatalf("plain message = %#v", plain)
 	}
 }

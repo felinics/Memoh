@@ -4,6 +4,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // Prompt cache TTL options accepted in Provider config.
@@ -63,8 +64,8 @@ func ApplyPromptCache(
 	ttl string,
 	system string,
 	messages []sdk.Message,
-	tools []sdk.Tool,
-) (string, []sdk.Message, []sdk.Tool) {
+	tools []toolexec.Tool,
+) (string, []sdk.Message, []toolexec.Tool) {
 	newSystem, newMessages, newTools, _, _ := ApplyPromptCacheWithPlan(model, ttl, contextfrag.CachePlan{}, system, messages, tools)
 	return newSystem, newMessages, newTools
 }
@@ -88,8 +89,8 @@ func ApplyPromptCacheWithPlan(
 	plan contextfrag.CachePlan,
 	system string,
 	messages []sdk.Message,
-	tools []sdk.Tool,
-) (string, []sdk.Message, []sdk.Tool, bool, int) {
+	tools []toolexec.Tool,
+) (string, []sdk.Message, []toolexec.Tool, bool, int) {
 	if model == nil {
 		return system, messages, tools, false, plan.StableMessageCount
 	}
@@ -141,8 +142,8 @@ func applyAnthropicPromptCache(
 	plan contextfrag.CachePlan,
 	system string,
 	messages []sdk.Message,
-	tools []sdk.Tool,
-) (string, []sdk.Message, []sdk.Tool, bool, int) {
+	tools []toolexec.Tool,
+) (string, []sdk.Message, []toolexec.Tool, bool, int) {
 	cc := anthropicCacheControl(ttl)
 	if cc == nil {
 		return system, messages, tools, false, plan.StableMessageCount
@@ -185,7 +186,7 @@ func applyAnthropicPromptCache(
 
 	newTools := tools
 	if len(tools) > 0 {
-		newTools = make([]sdk.Tool, len(tools))
+		newTools = make([]toolexec.Tool, len(tools))
 		copy(newTools, tools)
 		newTools[len(newTools)-1].CacheControl = cc
 	}

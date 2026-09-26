@@ -12,6 +12,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentevent "github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
@@ -43,8 +44,8 @@ func TestSpawnAdapterGenerateWithWatchdogKeepsRetryableAttemptNonTerminal(t *tes
 			ctx, cancel := tc.ctx()
 			defer cancel()
 			provider := &atomicMockProvider{
-				handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-					return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+				handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+					return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
 				},
 			}
 			adapter := NewSpawnAdapter(newTestAgent())
@@ -81,8 +82,8 @@ func TestSpawnAdapterGenerateWithWatchdogMakesFinalWatchdogAttemptTerminal(t *te
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(tools.ErrWatchdogTimedOut)
 	provider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	adapter := NewSpawnAdapter(newTestAgent())
@@ -126,7 +127,7 @@ func TestSpawnAdapterGenerateWithWatchdogMakesFinalWatchdogAttemptTerminal(t *te
 func TestSpawnAdapterGenerateWithWatchdogDoesNotRetryPersistedInterruptedCheckpoint(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	provider := &atomicMockProvider{
-		stream: func(streamCtx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		stream: func(streamCtx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 			parts := make(chan sdk.StreamPart)
 			go func() {
 				defer close(parts)
@@ -144,7 +145,7 @@ func TestSpawnAdapterGenerateWithWatchdogDoesNotRetryPersistedInterruptedCheckpo
 				}
 				<-streamCtx.Done()
 			}()
-			return &sdk.StreamResult{Stream: parts}, nil
+			return parts, nil
 		},
 	}
 	adapter := NewSpawnAdapter(newTestAgent())
@@ -158,9 +159,9 @@ func TestSpawnAdapterGenerateWithWatchdogDoesNotRetryPersistedInterruptedCheckpo
 		_ string,
 		_ *contextfrag.LifecycleHolder,
 		onPersisted func(),
-	) (func(context.Context, int, *sdk.StepResult) error, func(context.Context, int, *sdk.StepResult) error) {
-		return func(context.Context, int, *sdk.StepResult) error { return nil },
-			func(context.Context, int, *sdk.StepResult) error {
+	) (func(context.Context, int, *step.Record) error, func(context.Context, int, *step.Record) error) {
+		return func(context.Context, int, *step.Record) error { return nil },
+			func(context.Context, int, *step.Record) error {
 				interruptedCalls.Add(1)
 				onPersisted()
 				return nil
@@ -347,8 +348,8 @@ func TestSpawnAdapterArbitratesCleanEndBeforePublishingTerminal(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			provider := &atomicMockProvider{
-				handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-					return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+				handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+					return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 				},
 			}
 			adapter := NewSpawnAdapter(newTestAgent())
@@ -391,8 +392,8 @@ func TestSpawnAdapterArbitratesCleanEndBeforePublishingTerminal(t *testing.T) {
 
 func TestSpawnAdapterPersistsFallbackBeforePublishingTerminal(t *testing.T) {
 	provider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	adapter := NewSpawnAdapter(newTestAgent())
@@ -433,8 +434,8 @@ func TestSpawnAdapterPersistsFallbackBeforePublishingTerminal(t *testing.T) {
 
 func TestSpawnAdapterWithholdsTerminalWhenFallbackPersistenceFails(t *testing.T) {
 	provider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	adapter := NewSpawnAdapter(newTestAgent())

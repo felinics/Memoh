@@ -18,6 +18,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/messageconv"
 )
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
@@ -712,19 +713,12 @@ func discussMessagesToSDK(messages []turn.DiscussMessage) []sdk.Message {
 	result := make([]sdk.Message, 0, len(messages))
 	for _, m := range messages {
 		if len(m.RawContent) > 0 {
-			raw, err := json.Marshal(struct {
-				Role    string          `json:"role"`
-				Content json.RawMessage `json:"content"`
-			}{
-				Role:    m.Role,
-				Content: m.RawContent,
-			})
-			if err == nil {
-				var msg sdk.Message
-				if json.Unmarshal(raw, &msg) == nil {
-					result = append(result, msg)
-					continue
-				}
+			// RawContent is the stored content shape (arguments object, output
+			// value, nested annotations); the codec types it for the SDK.
+			msg := messageconv.ModelMessageToSDKMessage(turn.ModelMessage{Role: m.Role, Content: m.RawContent})
+			if msg.Role != "" && len(msg.Content) > 0 {
+				result = append(result, msg)
+				continue
 			}
 		}
 		switch m.Role {

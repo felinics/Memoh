@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/messageconv"
 )
@@ -94,7 +95,7 @@ func restoreLegacyFields(message turn.ModelMessage, sdkMessage sdk.Message) sdk.
 			sdkMessage.Content = append(sdkMessage.Content, sdk.ToolCallPart{
 				ToolCallID: call.ID,
 				ToolName:   call.Function.Name,
-				Input:      decodeLegacyJSON(call.Function.Arguments),
+				Input:      toolexec.ArgumentsFromValue(decodeLegacyJSON(call.Function.Arguments)),
 			})
 		}
 	}
@@ -105,7 +106,7 @@ func restoreLegacyFields(message turn.ModelMessage, sdkMessage sdk.Message) sdk.
 		sdkMessage.Content = []sdk.MessagePart{sdk.ToolResultPart{
 			ToolCallID: message.ToolCallID,
 			ToolName:   message.Name,
-			Result:     decodeLegacyRaw(message.Content),
+			Result:     toolexec.OutputFromValue(decodeLegacyRaw(message.Content)),
 		}}
 	}
 

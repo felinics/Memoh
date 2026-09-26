@@ -12,7 +12,9 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestAgentStreamRecordsLaterDuplicateInjectionRetainedByReselection(t *testing.T) {
@@ -22,10 +24,10 @@ func TestAgentStreamRecordsLaterDuplicateInjectionRetainedByReselection(t *testi
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
 
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		switch call {
 		case 1:
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "duplicate-step-one", ToolName: "lookup"}},
 			}, nil
@@ -34,7 +36,7 @@ func TestAgentStreamRecordsLaterDuplicateInjectionRetainedByReselection(t *testi
 				t.Fatalf("second provider duplicate count = %d, want 1", got)
 			}
 			injectCh <- InjectMessage{Text: marker}
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "duplicate-step-two", ToolName: "lookup"}},
 			}, nil
@@ -42,15 +44,15 @@ func TestAgentStreamRecordsLaterDuplicateInjectionRetainedByReselection(t *testi
 			if got := countRound8MessageText(params.Messages, marker); got != 1 {
 				t.Fatalf("third provider duplicate count = %d, want latest copy only", got)
 			}
-			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		}
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
@@ -121,10 +123,10 @@ func TestAgentStreamProviderStartFailureDoesNotPersistInjectedMessage(t *testing
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
 
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		switch call {
 		case 1:
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "start-failure", ToolName: "lookup"}},
 			}, nil
@@ -132,18 +134,18 @@ func TestAgentStreamProviderStartFailureDoesNotPersistInjectedMessage(t *testing
 			if !providerAttemptContainsText(params.Messages, marker) {
 				t.Fatal("failed provider start did not receive the injected message")
 			}
-			return nil, errors.New("invalid provider request")
+			return sdk.ModelResult{}, errors.New("invalid provider request")
 		default:
 			t.Fatalf("provider call %d crossed the nonretryable start failure", call)
-			return nil, nil
+			return sdk.ModelResult{}, nil
 		}
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
@@ -187,10 +189,10 @@ func TestAgentStreamRetryPreflightFailureDoesNotPersistUncommittedInjection(t *t
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
 
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		switch call {
 		case 1:
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "retry-fence", ToolName: "lookup"}},
 			}, nil
@@ -198,18 +200,18 @@ func TestAgentStreamRetryPreflightFailureDoesNotPersistUncommittedInjection(t *t
 			if !providerAttemptContainsText(params.Messages, marker) {
 				t.Fatal("failed dispatched attempt did not receive the injected message")
 			}
-			return nil, errors.New("api error 500")
+			return sdk.ModelResult{}, errors.New("api error 500")
 		default:
 			t.Fatalf("provider call %d crossed the failed retry preflight", call)
-			return nil, nil
+			return sdk.ModelResult{}, nil
 		}
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
@@ -252,7 +254,7 @@ func TestAgentStreamInterruptedInjectedMessageIsDurableExactlyOnce(t *testing.T)
 	injectCh <- InjectMessage{Text: marker}
 
 	var calls int
-	provider := &atomicMockProvider{stream: func(streamCtx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := &atomicMockProvider{stream: func(streamCtx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 		calls++
 		switch calls {
 		case 1:
@@ -276,19 +278,19 @@ func TestAgentStreamInterruptedInjectedMessageIsDurableExactlyOnce(t *testing.T)
 				<-streamCtx.Done()
 				close(parts)
 			}()
-			return &sdk.StreamResult{Stream: parts}, nil
+			return parts, nil
 		}
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
-	var interrupted *sdk.StepResult
+	var interrupted *step.Record
 	var recorded []string
 	events := a.Stream(ctx, RunConfig{
 		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
@@ -297,7 +299,7 @@ func TestAgentStreamInterruptedInjectedMessageIsDurableExactlyOnce(t *testing.T)
 		InjectCh:         injectCh,
 		Identity:         SessionContext{BotID: "bot-1"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		OnStepInterrupted: func(_ context.Context, stepIndex int, step *sdk.StepResult) error {
+		OnStepInterrupted: func(_ context.Context, stepIndex int, step *step.Record) error {
 			if stepIndex != 1 {
 				t.Errorf("interrupted step index = %d, want 1", stepIndex)
 			}
@@ -348,7 +350,7 @@ streamClosed:
 	}
 }
 
-func TestSelectionMessageSourceIndexesRequiresVerifiableOrigins(t *testing.T) {
+func TestRemapDynamicRefsRequiresVerifiableOrigins(t *testing.T) {
 	t.Parallel()
 
 	before := []sdk.Message{
@@ -361,31 +363,32 @@ func TestSelectionMessageSourceIndexesRequiresVerifiableOrigins(t *testing.T) {
 	part.CacheControl = &sdk.CacheControl{Type: "ephemeral"}
 	cachedAll[1].Content[0] = part
 	cachedPrefix := cachedAll[:2]
+	refs := []dynamicSourceRef{{recordID: 7, index: 1}}
 
 	tests := []struct {
 		name      string
 		after     []sdk.Message
 		selection ContextStepSelectionResult
-		want      []int
-		valid     bool
+		want      []dynamicSourceRef
 	}{
 		{
+			// A change the selection cannot attribute fails closed: no ref
+			// survives, even when its content is still present.
 			name:  "unknown changed normalized prefix",
 			after: cachedPrefix,
-			want:  []int{0, -1},
-			valid: true,
+			want:  nil,
 		},
 		{
 			name:  "unknown changed subsequence",
 			after: []sdk.Message{before[0], before[2]},
-			want:  []int{0, -1},
-			valid: true,
+			want:  nil,
 		},
 		{
+			// A cache-control-only rewrite is normalized away: unchanged
+			// payload keeps the refs at their positions.
 			name:  "unknown normalized unchanged",
 			after: cachedAll,
-			want:  []int{0, 1, 2},
-			valid: true,
+			want:  refs,
 		},
 		{
 			name:  "known normalized cache rewrite",
@@ -394,26 +397,26 @@ func TestSelectionMessageSourceIndexesRequiresVerifiableOrigins(t *testing.T) {
 				MessageSourceIndexes:      []int{0, 1},
 				MessageSourceIndexesKnown: true,
 			},
-			want:  []int{0, 1},
-			valid: true,
+			want: []dynamicSourceRef{{recordID: 7, index: 1}},
 		},
 		{
+			// A vector claiming an origin whose content does not match the
+			// output invalidates the whole mapping and fails closed.
 			name:  "known source content mismatch",
 			after: []sdk.Message{before[0], before[2]},
 			selection: ContextStepSelectionResult{
 				MessageSourceIndexes:      []int{0, 1},
 				MessageSourceIndexesKnown: true,
 			},
-			want:  []int{0, -1},
-			valid: true,
+			want: nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, valid := selectionMessageSourceIndexes(before, tt.after, 1, tt.selection)
-			if valid != tt.valid || !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("source indexes = %#v, %t; want %#v, %t", got, valid, tt.want, tt.valid)
+			got := remapDynamicRefs(refs, before, tt.after, 1, tt.selection)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("remapped refs = %#v, want %#v", got, tt.want)
 			}
 		})
 	}

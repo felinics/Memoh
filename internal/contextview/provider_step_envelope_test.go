@@ -2,6 +2,7 @@ package contextview
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestProviderStepReselectionRescuesEnvelopeS3HugeResult(t *testing.T) {
@@ -30,9 +32,9 @@ func TestProviderStepReselectionRescuesEnvelopeS3HugeResult(t *testing.T) {
 		toolResultMessage("contextbench-s3-003", "exec", resultText),
 	)
 	system := strings.Repeat("s", 10_000)
-	tools := []sdk.Tool{{
+	tools := []sdk.ToolDefinition{{
 		Name: "exec", Description: "Execute a bounded command.",
-		Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}},
+		Parameters: toolexec.SchemaFromValue(json.RawMessage(`{"properties":{"command":{"type":"string"}},"type":"object"}`)),
 	}}
 	if candidateTokens := contextfrag.ProviderEnvelopeTokens(system, messages, tools); candidateTokens <= inputAllowance {
 		t.Fatalf("literal S3 candidate = %d tokens, want over allowance %d", candidateTokens, inputAllowance)
@@ -78,9 +80,9 @@ func TestProviderStepReselectionTightensEnvelopeS3HugeResultWhenDroppable(t *tes
 		toolResultMessage("contextbench-s3-004", "exec", "small protected result"),
 	)
 	system := strings.Repeat("s", 10_000)
-	tools := []sdk.Tool{{
+	tools := []sdk.ToolDefinition{{
 		Name: "exec", Description: "Execute a bounded command.",
-		Parameters: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}},
+		Parameters: toolexec.SchemaFromValue(json.RawMessage(`{"properties":{"command":{"type":"string"}},"type":"object"}`)),
 	}}
 	if candidateTokens := contextfrag.ProviderEnvelopeTokens(system, messages, tools); candidateTokens <= inputAllowance {
 		t.Fatalf("literal S3 candidate = %d tokens, want over allowance %d", candidateTokens, inputAllowance)
@@ -119,7 +121,7 @@ func TestProviderStepReselectionAllowsExactlyFittingProtectedEnvelopeSuffix(t *t
 	}
 	messages := append(append([]sdk.Message(nil), prefix...), loop...)
 	system := strings.Repeat("system", 83)
-	tools := []sdk.Tool{{Name: "exec", Description: "Execute a bounded command."}}
+	tools := []sdk.ToolDefinition{{Name: "exec", Description: "Execute a bounded command."}}
 	allowance := contextfrag.ProviderEnvelopeTokens(system, messages, tools)
 	suffixBudget := allowance - contextfrag.ProviderEnvelopeTokens(system, prefix, tools)
 	if selectionCost := contextfrag.ProviderEnvelopeTokens("", loop, nil); selectionCost != suffixBudget {

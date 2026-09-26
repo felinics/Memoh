@@ -5,6 +5,8 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestPromptUsageFromACPMapsTokenDetails(t *testing.T) {
@@ -40,7 +42,7 @@ func TestAttachUsageToLastAssistant(t *testing.T) {
 	output := []sdk.Message{
 		sdk.UserMessage("question"),
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "first"}}},
-		{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "exec", Result: "ok"}}},
+		{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "exec", Result: toolexec.OutputFromValue("ok")}}},
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "final"}}},
 	}
 

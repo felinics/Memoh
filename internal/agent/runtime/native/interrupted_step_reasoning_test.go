@@ -5,6 +5,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/step"
 	"github.com/felinics/memoh/internal/messageconv"
 )
 
@@ -14,7 +15,7 @@ import (
 // blocks here would leave the checkpoint unreplayable even though the provider
 // side is correct — and nothing would fail to compile.
 
-func reasoningPartsOf(t *testing.T, step *sdk.StepResult) []sdk.ReasoningPart {
+func reasoningPartsOf(t *testing.T, step *step.Record) []sdk.ReasoningPart {
 	t.Helper()
 	if step == nil {
 		t.Fatal("no snapshot produced")
@@ -28,12 +29,12 @@ func reasoningPartsOf(t *testing.T, step *sdk.StepResult) []sdk.ReasoningPart {
 	return parts
 }
 
-func anthropicMeta(key, value string) map[string]any {
-	return map[string]any{"anthropic": map[string]any{key: value}}
+func anthropicMeta(key, value string) sdk.ProviderMetadata {
+	return sdk.ProviderMetadata{"anthropic": {key: value}}
 }
 
-func googleMeta(key, value string) map[string]any {
-	return map[string]any{"google": map[string]any{key: value}}
+func googleMeta(key, value string) sdk.ProviderMetadata {
+	return sdk.ProviderMetadata{"google": {key: value}}
 }
 
 func TestInterruptedStepKeepsTextProviderMetadata(t *testing.T) {
@@ -62,8 +63,8 @@ func TestInterruptedStepKeepsTextProviderMetadata(t *testing.T) {
 	if !ok {
 		t.Fatalf("content[0] = %T, want TextPart", replayed.Content[0])
 	}
-	gm, _ := text.ProviderMetadata["google"].(map[string]any)
-	if sig, _ := gm["thoughtSignature"].(string); sig != "SIG_TEXT" {
+	gm := text.ProviderMetadata["google"]
+	if sig := gm["thoughtSignature"]; sig != "SIG_TEXT" {
 		t.Errorf("thought signature: got %q, want SIG_TEXT", sig)
 	}
 }
@@ -99,8 +100,8 @@ func TestInterruptedStepKeepsEveryReasoningBlockToken(t *testing.T) {
 		if parts[i].Format != sdk.ReasoningFormatAnthropic {
 			t.Errorf("part %d format: got %q, want %q", i, parts[i].Format, sdk.ReasoningFormatAnthropic)
 		}
-		am, _ := parts[i].ProviderMetadata["anthropic"].(map[string]any)
-		if sig, _ := am["signature"].(string); sig != want.sig {
+		am := parts[i].ProviderMetadata["anthropic"]
+		if sig := am["signature"]; sig != want.sig {
 			t.Errorf("part %d signature: got %q, want %q", i, sig, want.sig)
 		}
 	}
@@ -135,7 +136,7 @@ func TestInterruptedStepKeepsReasoningBlockModel(t *testing.T) {
 	if step == nil {
 		t.Fatal("no snapshot produced")
 	}
-	if got := step.ReasoningParts[0].Model; got != "claude-sonnet-4-20250514" {
+	if got := step.Result.ReasoningParts[0].Model; got != "claude-sonnet-4-20250514" {
 		t.Errorf("ReasoningParts[0].Model: got %q, want response model", got)
 	}
 	parts := reasoningPartsOf(t, step)
@@ -179,8 +180,8 @@ func TestInterruptedStepKeepsEmptyTextReasoningBlock(t *testing.T) {
 	if len(parts) != 1 {
 		t.Fatalf("reasoning parts: got %d, want 1 — empty-text block was dropped", len(parts))
 	}
-	am, _ := parts[0].ProviderMetadata["anthropic"].(map[string]any)
-	if data, _ := am["redactedData"].(string); data != "BLOB" {
+	am := parts[0].ProviderMetadata["anthropic"]
+	if data := am["redactedData"]; data != "BLOB" {
 		t.Errorf("redactedData: got %q, want BLOB", data)
 	}
 }
@@ -199,8 +200,8 @@ func TestInterruptedStepSnapshotsReasoningWithoutText(t *testing.T) {
 	if step == nil {
 		t.Fatal("reasoning-only interruption produced no snapshot")
 	}
-	if len(step.ReasoningParts) != 1 {
-		t.Fatalf("ReasoningParts: got %d, want 1", len(step.ReasoningParts))
+	if len(step.Result.ReasoningParts) != 1 {
+		t.Fatalf("ReasoningParts: got %d, want 1", len(step.Result.ReasoningParts))
 	}
 }
 
@@ -230,8 +231,8 @@ func TestInterruptedStepFlatReasoningJoinsBlocks(t *testing.T) {
 	if step == nil {
 		t.Fatal("no snapshot produced")
 	}
-	if step.Reasoning != "AAABBB" {
-		t.Errorf("Reasoning: got %q, want %q", step.Reasoning, "AAABBB")
+	if step.Result.Reasoning != "AAABBB" {
+		t.Errorf("Reasoning: got %q, want %q", step.Result.Reasoning, "AAABBB")
 	}
 }
 

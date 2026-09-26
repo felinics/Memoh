@@ -53,6 +53,18 @@ func (c *Client) model() *sdk.Model {
 	})
 }
 
+func (c *Client) generate(ctx context.Context, systemPrompt, userText string) (sdk.ModelResult, error) {
+	model := c.model()
+	system, messages, _ := models.ApplyPromptCache(
+		model, c.cfg.PromptCacheTTL,
+		systemPrompt, []sdk.Message{sdk.UserMessage(userText)}, nil,
+	)
+	return model.Generate(ctx, sdk.Request{
+		System:   system,
+		Messages: messages,
+	})
+}
+
 func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adapters.ExtractResponse, error) {
 	if len(req.Messages) == 0 {
 		return adapters.ExtractResponse{}, nil
@@ -88,16 +100,7 @@ func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adap
 	}
 	systemPrompt := strings.ReplaceAll(memoryExtractPrompt, "{{today}}", now.Format("2006-01-02"))
 
-	model := c.model()
-	system, messages, _ := models.ApplyPromptCache(
-		model, c.cfg.PromptCacheTTL,
-		systemPrompt, []sdk.Message{sdk.UserMessage(transcript)}, nil,
-	)
-	result, err := sdk.GenerateTextResult(ctx,
-		sdk.WithModel(model),
-		sdk.WithSystem(system),
-		sdk.WithMessages(messages),
-	)
+	result, err := c.generate(ctx, systemPrompt, transcript)
 	if err != nil {
 		return adapters.ExtractResponse{}, fmt.Errorf("extract: %w", err)
 	}
@@ -132,16 +135,7 @@ func (c *Client) Decide(ctx context.Context, req adapters.DecideRequest) (adapte
 
 	userMessage := buildUpdateUserMessage(req.Candidates, req.Facts)
 
-	model := c.model()
-	system, messages, _ := models.ApplyPromptCache(
-		model, c.cfg.PromptCacheTTL,
-		memoryUpdatePrompt, []sdk.Message{sdk.UserMessage(userMessage)}, nil,
-	)
-	result, err := sdk.GenerateTextResult(ctx,
-		sdk.WithModel(model),
-		sdk.WithSystem(system),
-		sdk.WithMessages(messages),
-	)
+	result, err := c.generate(ctx, memoryUpdatePrompt, userMessage)
 	if err != nil {
 		return adapters.DecideResponse{}, fmt.Errorf("decide: %w", err)
 	}
@@ -168,16 +162,7 @@ func (c *Client) Compact(ctx context.Context, req adapters.CompactRequest) (adap
 	if err != nil {
 		return adapters.CompactResponse{}, fmt.Errorf("compact: marshal input: %w", err)
 	}
-	model := c.model()
-	system, messages, _ := models.ApplyPromptCache(
-		model, c.cfg.PromptCacheTTL,
-		compactSystemPrompt, []sdk.Message{sdk.UserMessage(string(payload))}, nil,
-	)
-	result, err := sdk.GenerateTextResult(ctx,
-		sdk.WithModel(model),
-		sdk.WithSystem(system),
-		sdk.WithMessages(messages),
-	)
+	result, err := c.generate(ctx, compactSystemPrompt, string(payload))
 	if err != nil {
 		return adapters.CompactResponse{}, fmt.Errorf("compact: %w", err)
 	}

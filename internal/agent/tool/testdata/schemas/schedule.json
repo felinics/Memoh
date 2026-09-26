@@ -1,0 +1,155 @@
+{
+  "create_schedule": {
+    "properties": {
+      "acp_agent_id": {
+        "description": "Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions.",
+        "type": "string"
+      },
+      "acp_model_id": {
+        "description": "ACP agent model id (from list_acp_agents with agent_id). Requires acp_agent_id or an ACP session_id.",
+        "type": "string"
+      },
+      "command": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "max_calls": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Optional max calls, null means unlimited"
+      },
+      "model_id": {
+        "description": "Native model override: a model_uuid from list_models. Not valid together with acp_agent_id/acp_model_id.",
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "pattern": {
+        "type": "string"
+      },
+      "reasoning_effort": {
+        "description": "Reasoning effort override (native: none|minimal|low|medium|high|xhigh|max as supported by the model; ACP: the agent's effort ids).",
+        "type": "string"
+      },
+      "session_id": {
+        "description": "Run every fire in this existing session instead of a fresh one. The session's runtime and workdir are inherited.",
+        "type": "string"
+      },
+      "workdir_id": {
+        "description": "Bind fresh sessions to this workdir (id from list_workdirs).",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "description",
+      "pattern",
+      "command"
+    ],
+    "type": "object"
+  },
+  "delete_schedule": {
+    "properties": {
+      "id": {
+        "description": "Schedule ID",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "type": "object"
+  },
+  "get_schedule": {
+    "properties": {
+      "id": {
+        "description": "Schedule ID",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "type": "object"
+  },
+  "list_schedule": {
+    "properties": {},
+    "type": "object"
+  },
+  "update_schedule": {
+    "properties": {
+      "acp_agent_id": {
+        "description": "Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions.",
+        "type": "string"
+      },
+      "acp_model_id": {
+        "description": "ACP agent model id (from list_acp_agents with agent_id).",
+        "type": "string"
+      },
+      "command": {
+        "type": "string"
+      },
+      "description": {
+        "type": "string"
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "id": {
+        "type": "string"
+      },
+      "max_calls": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "model_id": {
+        "description": "Native model override: a model_uuid from list_models.",
+        "type": "string"
+      },
+      "name": {
+        "type": "string"
+      },
+      "pattern": {
+        "type": "string"
+      },
+      "reasoning_effort": {
+        "description": "Reasoning effort override.",
+        "type": "string"
+      },
+      "session_id": {
+        "description": "Run every fire in this existing session. The session's runtime and workdir are inherited.",
+        "type": "string"
+      },
+      "update_execution": {
+        "description": "Set true to replace the execution parameter block with the values below.",
+        "type": "boolean"
+      },
+      "workdir_id": {
+        "description": "Bind fresh sessions to this workdir (id from list_workdirs).",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "type": "object"
+  }
+}

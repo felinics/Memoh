@@ -11,7 +11,9 @@ import (
 	"github.com/felinics/memoh/internal/agent/background"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -78,7 +80,7 @@ type ContextStepSelectionInput struct {
 	// the complete provider envelope into step reselection. A zero allowance
 	// keeps the unlimited-window contract and disables serialized enforcement.
 	ProviderSystem               string
-	ProviderTools                []sdk.Tool
+	ProviderTools                []sdk.ToolDefinition
 	ProviderInputAllowanceTokens int
 	// RecentProtectTokens carries the run's recent-protection window override
 	// so step reselection resolves the same window as the provider view. Nil
@@ -114,8 +116,22 @@ type ContextStepSelectionResult struct {
 
 type ContextStepReselector func(context.Context, ContextStepSelectionInput) ContextStepSelectionResult
 
+// StepDirective is returned by OnStepCommitted after a durable step lands.
+// NextInputs become the next model request; a would-be-final step continues
+// instead of ending the loop when this slice is non-empty.
+type StepDirective struct {
+	NextInputs []DirectiveInput
+}
+
+// DirectiveInput is one user input admitted at a step commit boundary.
+// ID is caller-assigned identity (a queue item ID) and Text is the model input.
+type DirectiveInput struct {
+	ID   string
+	Text string
+}
+
 // InjectMessage carries a user message to be injected into a running agent
-// stream between tool rounds via the PrepareStep hook.
+// stream between tool rounds at a step boundary.
 type InjectMessage struct {
 	Text            string
 	HeaderifiedText string
@@ -180,9 +196,8 @@ type RunConfig struct {
 	initialProviderMessageCount    int
 	initialProviderPrefixSet       bool
 	providerAttemptState           *providerAttemptState
-	providerMessageProvenance      preparedMessageProvenance
-	preparedStepMessages           *stepMessageCapture
-	initialStepInputs              []sdk.Message
+	retryDynamicRefs               []dynamicSourceRef
+	dynamicInputs                  *loopDynamicInputs
 	contextStepFailure             func(error)
 	SessionType                    string
 	LiveToolStream                 bool
@@ -203,21 +218,15 @@ type RunConfig struct {
 	LoopDetection     LoopDetectionConfig
 	Retry             RetryConfig
 	// StepIndexOffset lets an application-owned continuation of the same run
-	// keep durable step indexes monotonic when the SDK invocation is restarted
-	// after a final step accepted a steer item.
+	// keep durable step indexes monotonic when the step loop is restarted
+	// after a parked decision.
 	StepIndexOffset int
-	// ContinueAfterFinal is set by the durable coordinator when a final model
-	// step found steer input. Native runtime uses it to reopen the same run.
-	ContinueAfterFinal *atomic.Bool
-	NextModelInputs    *[]sdk.Message
-
 	// SteerWake announces queue changes; PendingSteer rechecks the authoritative
 	// queue. OnSteer checkpoints a stopped model attempt and claims its next input.
 	// These callbacks retain the run context, unlike the cancelled invocation.
-	SteerWake          <-chan struct{}
-	PendingSteer       func(context.Context) (bool, error)
-	OnSteer            func(context.Context, int, *sdk.StepResult) error
-	SuppressAgentStart bool
+	SteerWake    <-chan struct{}
+	PendingSteer func(context.Context) (bool, error)
+	OnSteer      func(context.Context, int, *step.Record) (StepDirective, error)
 
 	// PromptCacheTTL controls prompt caching for this run. Empty or
 	// unrecognized values default to 5m. Use "1h" for the long-cache tier
@@ -227,14 +236,15 @@ type RunConfig struct {
 	PromptCacheTTL string
 
 	// InjectCh receives user messages to inject between tool rounds.
-	// When non-nil, a PrepareStep hook drains this channel and appends
-	// user messages to the conversation before the next LLM call.
+	// When non-nil, the step loop drains this channel at each step boundary
+	// and appends user messages to the conversation before the next LLM call.
 	InjectCh <-chan InjectMessage
 
-	// InjectedRecorder is called during terminal delivery for each injected
-	// message admitted by a provider attempt, recording the headerified text
-	// and the number of SDK output messages that preceded the injection. Used
-	// by the resolver to interleave injected messages in storeRound.
+	// InjectedRecorder is called during terminal delivery for each user
+	// message the loop appended at a step boundary and a provider attempt
+	// admitted: live injections and steer directive inputs alike. It records
+	// the headerified text and the number of output messages that preceded
+	// the message, so the resolver can interleave them in storeRound.
 	InjectedRecorder func(headerifiedText string, insertAfter int)
 
 	// OnProviderStreamEventObserved receives normalized provider parts before
@@ -246,20 +256,22 @@ type RunConfig struct {
 	// OnStepCommitted is a synchronous durability barrier. The callback sees
 	// the complete step plus any user/read-media messages prepared immediately
 	// before it, with persistence-only tool metadata already attached.
-	OnStepCommitted func(ctx context.Context, stepIndex int, step *sdk.StepResult) error
+	// NextInputs on the returned directive are appended as the next model
+	// input; a would-be-final step with NextInputs continues the same loop.
+	OnStepCommitted func(ctx context.Context, stepIndex int, step *step.Record) (StepDirective, error)
 
 	// OnStepInterrupted persists text/reasoning emitted by the current model
 	// call when cancellation arrives before finish-step. Tool-call steps never
 	// use this path. It retains the original run cancellation cause so the
 	// persistence adapter can reject ownership loss before detaching for IO.
-	OnStepInterrupted func(ctx context.Context, stepIndex int, step *sdk.StepResult) error
+	OnStepInterrupted func(ctx context.Context, stepIndex int, record *step.Record) error
 
 	// BackgroundManager provides access to the background task system.
 	// When non-nil, the agent loop refreshes running task summaries at step
 	// boundaries while tools handle waiting and result inspection.
 	BackgroundManager *background.Manager
 
-	ToolApprovalHandler func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error)
+	ToolApprovalHandler func(ctx context.Context, call sdk.ToolCall) (toolexec.ToolApprovalResult, error)
 }
 
 // GenerateResult holds the result of a non-streaming agent invocation.

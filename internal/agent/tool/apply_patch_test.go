@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 type applyPatchFakeFS struct {
@@ -267,5 +269,25 @@ func TestNormalizeApplyPatchPathUsesRemoteWindowsSemantics(t *testing.T) {
 	}
 	if _, err := normalizeApplyPatchPath(`..\outside.txt`, workspace); err == nil {
 		t.Fatal("expected Windows traversal path to be rejected")
+	}
+}
+
+// The object form of apply_patch decodes like every other tool: a key that
+// differs from "patch" only in case is rejected instead of binding to it
+// behind the approval policy, and a wrong-typed field is reported by name.
+func TestExecApplyPatchInputDecodesLikeOtherTools(t *testing.T) {
+	t.Parallel()
+
+	_, err := execApplyPatchInput(sdk.ParseToolArguments(`{"Patch":"*** Begin Patch\n*** End Patch"}`))
+	if err == nil || !strings.Contains(err.Error(), `unknown property "Patch" (did you mean "patch")`) {
+		t.Fatalf("case-variant key error = %v", err)
+	}
+	_, err = execApplyPatchInput(sdk.ParseToolArguments(`{"patch":"*** Begin Patch\n*** End Patch","target_id":{"id":"x"}}`))
+	if err == nil || !strings.Contains(err.Error(), "target_id must be a string") {
+		t.Fatalf("wrong-typed target_id error = %v", err)
+	}
+	args, err := execApplyPatchInput(sdk.ParseToolArguments(`{"patch":"*** Begin Patch\n*** End Patch","target_id":"native"}`))
+	if err != nil || args.TargetID != "native" || !strings.HasPrefix(args.Patch, "*** Begin Patch") {
+		t.Fatalf("object form = %+v err = %v", args, err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // usageTestProvider is a ToolProvider that also implements tools.ToolUsage. It
@@ -25,7 +26,7 @@ type usageTestProvider struct {
 	sessionSeen   *tools.SessionContext
 }
 
-func (p *usageTestProvider) Tools(_ context.Context, session tools.SessionContext) ([]sdk.Tool, error) {
+func (p *usageTestProvider) Tools(_ context.Context, session tools.SessionContext) ([]toolexec.Tool, error) {
 	if p.sessionSeen != nil {
 		*p.sessionSeen = session
 	}
@@ -36,7 +37,7 @@ func (p *usageTestProvider) Tools(_ context.Context, session tools.SessionContex
 	if name == "" {
 		name = "fake_tool"
 	}
-	return []sdk.Tool{{Name: name, Description: "fake"}}, nil
+	return []toolexec.Tool{{Name: name, Description: "fake"}}, nil
 }
 
 func (p *usageTestProvider) Usage(_ context.Context, _ tools.SessionContext, available tools.AvailableTools) string {
@@ -52,16 +53,16 @@ func (p *usageTestProvider) Usage(_ context.Context, _ tools.SessionContext, ava
 // plainTestProvider returns a tool but does NOT implement tools.ToolUsage.
 type plainTestProvider struct{}
 
-func (plainTestProvider) Tools(_ context.Context, _ tools.SessionContext) ([]sdk.Tool, error) {
-	return []sdk.Tool{{Name: tools.ToolRead().String(), Description: "plain"}}, nil
+func (plainTestProvider) Tools(_ context.Context, _ tools.SessionContext) ([]toolexec.Tool, error) {
+	return []toolexec.Tool{{Name: tools.ToolRead().String(), Description: "plain"}}, nil
 }
 
 type labeledTestProvider struct{ label string }
 
 func (p labeledTestProvider) ProviderLabel() string { return p.label }
 
-func (labeledTestProvider) Tools(_ context.Context, _ tools.SessionContext) ([]sdk.Tool, error) {
-	return []sdk.Tool{{Name: "remote_tool", Description: "remote"}}, nil
+func (labeledTestProvider) Tools(_ context.Context, _ tools.SessionContext) ([]toolexec.Tool, error) {
+	return []toolexec.Tool{{Name: "remote_tool", Description: "remote"}}, nil
 }
 
 func newTestAgent(providers ...tools.ToolProvider) *Agent {
@@ -74,7 +75,7 @@ const usageMarker = "USAGE_MARKER_xyz"
 
 type usageRecordingProvider struct {
 	mu     sync.Mutex
-	params []sdk.GenerateParams
+	params []sdk.Request
 }
 
 func (*usageRecordingProvider) Name() string { return "usage-recording" }
@@ -89,22 +90,22 @@ func (*usageRecordingProvider) TestModel(context.Context, string) (*sdk.ModelTes
 	return &sdk.ModelTestResult{Supported: true}, nil
 }
 
-func (p *usageRecordingProvider) DoGenerate(_ context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (p *usageRecordingProvider) DoGenerate(_ context.Context, params sdk.Request) (sdk.ModelResult, error) {
 	p.mu.Lock()
 	p.params = append(p.params, params)
 	p.mu.Unlock()
-	return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+	return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 }
 
-func (*usageRecordingProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (*usageRecordingProvider) DoStream(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 	return nil, nil
 }
 
-func (p *usageRecordingProvider) lastParams() sdk.GenerateParams {
+func (p *usageRecordingProvider) lastParams() sdk.Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.params) == 0 {
-		return sdk.GenerateParams{}
+		return sdk.Request{}
 	}
 	return p.params[len(p.params)-1]
 }
@@ -163,7 +164,7 @@ type usageStreamRecordingProvider struct {
 	usageRecordingProvider
 }
 
-func (p *usageStreamRecordingProvider) DoStream(_ context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (p *usageStreamRecordingProvider) DoStream(_ context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 	p.mu.Lock()
 	p.params = append(p.params, params)
 	p.mu.Unlock()
@@ -176,7 +177,7 @@ func (p *usageStreamRecordingProvider) DoStream(_ context.Context, params sdk.Ge
 		ch <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
 		ch <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
 	}()
-	return &sdk.StreamResult{Stream: ch}, nil
+	return ch, nil
 }
 
 func TestStreamInjectsToolUsageIntoModelSystem(t *testing.T) {

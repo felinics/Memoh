@@ -13,6 +13,7 @@ import (
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/toolcontext"
 )
@@ -66,7 +67,7 @@ type NativeToolSource struct {
 }
 
 type nativeLoadedTool struct {
-	tool          sdk.Tool
+	tool          toolexec.Tool
 	usageProvider ToolUsage
 	usageID       int
 }
@@ -185,10 +186,10 @@ func (s *NativeToolSource) CallTool(ctx context.Context, session mcp.ToolSession
 		if err := toolcontext.ValidateRuntimeGuard(ctx, session); err != nil {
 			return nil, err
 		}
-		result, err := tool.Execute(&sdk.ToolExecContext{
+		result, err := tool.Execute(&toolexec.ToolExecContext{
 			Context:  ctx,
 			ToolName: toolName,
-		}, arguments)
+		}, toolexec.ArgumentsFromValue(arguments))
 		if err != nil {
 			return nil, err
 		}
@@ -206,25 +207,19 @@ func (s *NativeToolSource) limitMCPResult(toolName string, result map[string]any
 	return mcp.LimitToolResult(result, "tool result ("+toolName+")", limit)
 }
 
-func publicNativeToolResult(result any) any {
-	switch value := result.(type) {
-	case ReadMediaToolOutput:
+func publicNativeToolResult(result sdk.ToolOutput) any {
+	if value, ok := DecodeReadMediaToolOutput(result); ok {
 		return value.Public
-	case *ReadMediaToolOutput:
-		if value == nil {
-			return nil
-		}
-		return value.Public
-	default:
-		// The reserved UI-only payload (e.g. the edit/write diff) is stripped
-		// by the native runtime wrapper, but this gateway path has no wrapper
-		// and no UI consumer — without the delete it would reach external
-		// runtimes' model context verbatim.
-		if m, ok := result.(map[string]any); ok {
-			delete(m, UIOutputMetadataKey)
-		}
-		return result
 	}
+	out := toolexec.OutputValue(result)
+	// The reserved UI-only payload (e.g. the edit/write diff) is stripped by
+	// the native runtime wrapper, but this gateway path has no wrapper and no
+	// UI consumer — without the delete it would reach external runtimes'
+	// model context verbatim.
+	if m, ok := out.(map[string]any); ok {
+		delete(m, UIOutputMetadataKey)
+	}
+	return out
 }
 
 func (s *NativeToolSource) callAskUser(ctx context.Context, session mcp.ToolSessionContext, arguments map[string]any) (map[string]any, error) {
@@ -463,7 +458,7 @@ func sessionFromMCP(session mcp.ToolSessionContext) SessionContext {
 }
 
 func availableFromLoadedTools(items []nativeLoadedTool) AvailableTools {
-	sdkTools := make([]sdk.Tool, 0, len(items))
+	sdkTools := make([]toolexec.Tool, 0, len(items))
 	for _, item := range items {
 		sdkTools = append(sdkTools, item.tool)
 	}

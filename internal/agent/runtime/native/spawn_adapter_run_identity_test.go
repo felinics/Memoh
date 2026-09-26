@@ -14,6 +14,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
@@ -50,11 +51,11 @@ func TestSpawnAdapterStepCommitSharesLifecycleAndInstallsInterrupt(t *testing.T)
 		lifecycle *contextfrag.LifecycleHolder,
 		_ func(),
 	) (
-		func(context.Context, int, *sdk.StepResult) error,
-		func(context.Context, int, *sdk.StepResult) error,
+		func(context.Context, int, *step.Record) error,
+		func(context.Context, int, *step.Record) error,
 	) {
 		captured = lifecycle
-		callback := func(context.Context, int, *sdk.StepResult) error { return nil }
+		callback := func(context.Context, int, *step.Record) error { return nil }
 		return callback, callback
 	})
 	rc := runConfigFromSpawnRunConfig(tools.SpawnRunConfig{})
@@ -81,8 +82,8 @@ func TestSpawnAdapterStepCommitSharesLifecycleAndInstallsInterrupt(t *testing.T)
 
 func TestSpawnAdapterGenerateWithWatchdogCarriesLifecycleSnapshot(t *testing.T) {
 	provider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	result, err := NewSpawnAdapter(newTestAgent()).GenerateWithWatchdog(
@@ -118,7 +119,7 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 	var streamCalls atomic.Int32
 	var dispositionCalls atomic.Int32
 	provider := &atomicMockProvider{
-		stream: func(_ context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		stream: func(_ context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 			call := streamCalls.Add(1)
 			parts := make(chan sdk.StreamPart, 8)
 			parts <- &sdk.StartPart{}
@@ -126,7 +127,7 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 			if call == 1 {
 				parts <- &sdk.ErrorPart{Error: errors.New("api error 500")}
 				close(parts)
-				return &sdk.StreamResult{Stream: parts}, nil
+				return parts, nil
 			}
 			parts <- &sdk.TextStartPart{ID: "recovered"}
 			parts <- &sdk.TextDeltaPart{ID: "recovered", Text: "recovered result"}
@@ -134,7 +135,7 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 			parts <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
 			parts <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
 			close(parts)
-			return &sdk.StreamResult{Stream: parts}, nil
+			return parts, nil
 		},
 	}
 
@@ -174,43 +175,6 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 	}
 }
 
-func TestSpawnAdapterGenerateWithWatchdogRejectsProviderAbort(t *testing.T) {
-	provider := &atomicMockProvider{
-		stream: func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
-			return closedAgentTestStream(
-				&sdk.StartPart{},
-				&sdk.StartStepPart{},
-				&sdk.AbortPart{},
-			), nil
-		},
-	}
-	adapter := NewSpawnAdapter(newTestAgent())
-	var observed []StreamEvent
-	adapter.SetRunObserverFactory(func(context.Context) SpawnRunObserver {
-		return func(event StreamEvent) SpawnRunObservation {
-			observed = append(observed, event)
-			return SpawnRunObservation{}
-		}
-	})
-	result, err := adapter.GenerateWithWatchdog(
-		context.Background(),
-		tools.SpawnRunConfig{
-			Model:       &sdk.Model{ID: "spawn-abort-model", Provider: provider, Type: sdk.ModelTypeChat},
-			Query:       "abort the task",
-			SessionType: sessionmode.Subagent,
-			Identity:    tools.SpawnIdentity{BotID: "bot-1", SessionID: "session-1", IsSubagent: true},
-		},
-		func() {},
-	)
-	if err == nil || err.Error() != "agent run aborted" {
-		t.Fatalf("GenerateWithWatchdog error = %v, want generic abort cause", err)
-	}
-	if result == nil || result.ContextLifecycle == nil {
-		t.Fatalf("GenerateWithWatchdog result = %#v, want failure lifecycle snapshot", result)
-	}
-	assertSpawnAbortObservedAsFailure(t, observed)
-}
-
 func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 	repeatedChunk := strings.Repeat("abcd", 64)
 	var observedCancel atomic.Bool
@@ -220,7 +184,7 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 	// a channel because a retrying run calls the provider more than once.
 	var providers sync.WaitGroup
 	provider := &atomicMockProvider{
-		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		stream: func(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 			parts := make(chan sdk.StreamPart, 16)
 			providers.Add(1)
 			go func() {
@@ -251,7 +215,7 @@ func TestSpawnAdapterGenerateWithWatchdogRejectsTextLoopAbort(t *testing.T) {
 				}
 				_ = send(&sdk.FinishPart{FinishReason: sdk.FinishReasonStop})
 			}()
-			return &sdk.StreamResult{Stream: parts}, nil
+			return parts, nil
 		},
 	}
 	outerCtx := context.Background()
@@ -312,8 +276,8 @@ func TestSpawnAdapterGenerateWithWatchdogPreservesOwningCancellationCause(t *tes
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(context.Canceled)
 	provider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 
@@ -355,8 +319,8 @@ func TestSpawnAdapterGenerateWithWatchdogTreatsOtherContextCausesAsFailures(t *t
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cancel(wantCause)
 	provider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 
@@ -387,8 +351,8 @@ func TestSpawnAdapterGenerateWithWatchdogTreatsOtherContextCausesAsFailures(t *t
 func TestSpawnAdapterGenerateFailureCarriesLifecycleSnapshot(t *testing.T) {
 	providerErr := errors.New("provider unavailable")
 	provider := &atomicMockProvider{
-		handler: func(_ int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return nil, providerErr
+		handler: func(_ int, _ sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{}, providerErr
 		},
 	}
 	result, err := NewSpawnAdapter(newTestAgent()).Generate(

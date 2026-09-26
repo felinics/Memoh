@@ -180,7 +180,7 @@ func TestListModelsReturnsEnabledCatalogAndMarksCurrent(t *testing.T) {
 		t.Fatalf("list_models: %v", err)
 	}
 	output := asMap(t, result)
-	items := output["models"].([]map[string]any)
+	items := asMapSlice(t, output["models"])
 	if len(items) != 2 || items[0]["provider"] != "provider-b" || items[0]["current"] != true {
 		t.Fatalf("expected current model first, got %v", output)
 	}

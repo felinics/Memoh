@@ -13,6 +13,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 const contextbenchFixtureSeed int64 = 0x434f4e54455854
@@ -279,23 +280,23 @@ func testBudgetMessageFrag(
 	})
 }
 
-func contextbenchTools() []sdk.Tool {
+func contextbenchTools() []toolexec.Tool {
 	names := []string{
 		"use_skill", "read", "write", "apply_patch", "exec", "search_memory", "web_search",
 		"browser_action", "computer_action", "ask_user", "spawn_agent", "read_media",
 	}
-	tools := make([]sdk.Tool, 0, len(names))
+	tools := make([]toolexec.Tool, 0, len(names))
 	for i, name := range names {
-		tools = append(tools, sdk.Tool{
+		tools = append(tools, toolexec.Tool{
 			Name: name, Description: "Contextbench tool " + name + " with bounded, production-shaped usage guidance.",
-			Parameters: map[string]any{
+			Parameters: toolexec.SchemaFromValue(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query": map[string]any{"type": "string", "description": "request text"},
 					"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 100 + i},
 				},
 				"required": []string{"query"},
-			},
+			}),
 		})
 	}
 	return tools

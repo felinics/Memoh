@@ -17,6 +17,8 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/background"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
@@ -227,7 +229,9 @@ func (s *fakeAgentMessageService) persistInputs() []messagepkg.PersistInput {
 	return append([]messagepkg.PersistInput(nil), s.inputs...)
 }
 
-func TestPersistSubagentMessagesSkipsMarshalDefectAndKeepsLaterOutput(t *testing.T) {
+// A tool call whose arguments cannot be encoded is typed as invalid argument
+// text, so the message persists with that text instead of being dropped.
+func TestPersistSubagentMessagesKeepsUnencodableInputAsText(t *testing.T) {
 	messages := newFakeAgentMessageService()
 	provider := &SpawnProvider{
 		messageService: messages,
@@ -243,18 +247,21 @@ func TestPersistSubagentMessagesSkipsMarshalDefectAndKeepsLaterOutput(t *testing
 		{
 			Role: sdk.MessageRoleAssistant,
 			Content: []sdk.MessagePart{sdk.ToolCallPart{
-				ToolCallID: "bad-call", ToolName: "bad", Input: func() {},
+				ToolCallID: "bad-call", ToolName: "bad", Input: toolexec.ArgumentsFromValue(func() {}),
 			}},
 		},
 		sdk.AssistantMessage("durable report"),
 	}}
 
 	if err := provider.persistMessages(context.Background(), req, result, false); err != nil {
-		t.Fatalf("persistMessages() error = %v, want malformed message skipped", err)
+		t.Fatalf("persistMessages() error = %v", err)
 	}
 	inputs := messages.persistInputs()
-	if len(inputs) != 1 || inputs[0].Role != string(sdk.MessageRoleAssistant) {
-		t.Fatalf("persisted inputs = %#v, want only the later valid assistant message", inputs)
+	if len(inputs) != 2 || inputs[0].Role != string(sdk.MessageRoleAssistant) || inputs[1].Role != string(sdk.MessageRoleAssistant) {
+		t.Fatalf("persisted inputs = %#v, want both assistant messages", inputs)
+	}
+	if !strings.Contains(string(inputs[0].Content), `"input":"0x`) {
+		t.Fatalf("unencodable input = %s, want the printed value as invalid argument text", inputs[0].Content)
 	}
 }
 
@@ -406,14 +413,15 @@ func executeAgentTool(t *testing.T, p *SpawnProvider, session SessionContext, na
 	}
 	for _, tool := range tools {
 		if tool.Name == name {
-			return tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, args)
+			out, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(args))
+			return toolexec.OutputValue(out), err
 		}
 	}
 	t.Fatalf("tool %q not found in %v", name, toolNames(tools))
 	return nil, nil
 }
 
-func toolNames(tools []sdk.Tool) []string {
+func toolNames(tools []toolexec.Tool) []string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {
 		names = append(names, tool.Name)
@@ -833,10 +841,10 @@ func TestBusyAgentQueuesAndRunsFIFO(t *testing.T) {
 	}
 	second := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "second"}))
 	third := asMap(t, mustExecuteAgentTool(t, p, session, "send_message", map[string]any{"id": "worker", "message": "third"}))
-	if second["status"] != "queued" || second["queue_position"] != 1 {
+	if second["status"] != "queued" || second["queue_position"] != float64(1) {
 		t.Fatalf("expected second queued at position 1, got %v", second)
 	}
-	if third["status"] != "queued" || third["queue_position"] != 2 {
+	if third["status"] != "queued" || third["queue_position"] != float64(2) {
 		t.Fatalf("expected third queued at position 2, got %v", third)
 	}
 
@@ -1075,8 +1083,104 @@ func TestListAgentsScopedByCurrentSession(t *testing.T) {
 	mustExecuteAgentTool(t, p, sessionB, "spawn_agent", map[string]any{"id": "beta", "task": "b"})
 
 	listA := asMap(t, mustExecuteAgentTool(t, p, sessionA, "list_agents", map[string]any{}))
-	agents := listA["agents"].([]map[string]any)
-	if len(agents) != 1 || agents[0]["agent_id"] != "alpha" {
+	agents, _ := listA["agents"].([]any)
+	if len(agents) != 1 || asMap(t, agents[0])["agent_id"] != "alpha" {
 		t.Fatalf("expected only session A agent, got %v", listA)
 	}
+}
+
+// History rows hold the stored content shape; the subagent context reader
+// types them through the history codec, so argument objects and nested
+// annotations survive instead of failing an SDK decode.
+func TestSDKMessageFromPersistedTypesStoredRow(t *testing.T) {
+	msg, ok := sdkMessageFromPersisted(messagepkg.Message{
+		ID:      "m1",
+		Role:    "assistant",
+		Content: json.RawMessage(`{"role":"assistant","content":[{"type":"tool-call","toolCallId":"call-1","toolName":"exec","input":{"command":"ls && pwd"},"providerMetadata":{"approval":{"approval_id":"a1","status":"approved"}}}]}`),
+	})
+	if !ok || msg.Role != sdk.MessageRoleAssistant || len(msg.Content) != 1 {
+		t.Fatalf("message = %#v, ok=%v", msg, ok)
+	}
+	call, isCall := msg.Content[0].(sdk.ToolCallPart)
+	if !isCall {
+		t.Fatalf("part = %#v, want a tool call", msg.Content[0])
+	}
+	if args, _ := toolexec.ArgumentsValue(call.Input).(map[string]any); args["command"] != "ls && pwd" {
+		t.Fatalf("tool call input = %#v", toolexec.ArgumentsValue(call.Input))
+	}
+	if approval, ok := partmeta.Object(call.ProviderMetadata, partmeta.KeyApproval); !ok || approval["status"] != "approved" {
+		t.Fatalf("approval annotation = %#v", call.ProviderMetadata)
+	}
+	if _, ok := sdkMessageFromPersisted(messagepkg.Message{Role: "assistant", Content: json.RawMessage(`{"role":"assistant","content":[]}`)}); ok {
+		t.Fatal("empty row must be skipped")
+	}
+}
+
+// A parent thread may hold an assistant message without content (a step that
+// produced neither text nor calls). The fork skips such a row, as the
+// direct-turn reader does, instead of refusing the whole fork.
+func TestForkedSubagentToleratesEmptyParentMessage(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	parentMessages := []sdk.Message{
+		sdk.UserMessage("parent question"),
+		{Role: sdk.MessageRoleAssistant},
+		sdk.AssistantMessage("parent working context"),
+	}
+	session := SessionContext{BotID: "bot1", SessionID: "parent1", ForkContext: NewMessageSnapshot(parentMessages)}
+
+	result := asMap(t, mustExecuteAgentTool(t, p, session, ToolSpawnAgent().String(), map[string]any{"id": "worker", "task": "child task", "fork": true}))
+	if result["fork"] != true {
+		t.Fatalf("fork result = %v", result)
+	}
+	// The follow-up reloads the fork rows from storage.
+	mustExecuteAgentTool(t, p, session, ToolSendMessage().String(), map[string]any{"id": "worker", "message": "again"})
+	second, ok := agent.callAt(1)
+	if !ok {
+		t.Fatal("follow-up call missing")
+	}
+	var texts []string
+	for _, msg := range second.Messages[:2] {
+		texts = append(texts, messageContentTextForTest(msg))
+	}
+	if texts[0] != "parent question" || texts[1] != "parent working context" {
+		t.Fatalf("fork prefix after reload = %q, want the two non-empty parent messages", texts)
+	}
+}
+
+// Fork rows follow the history-row rule: a document's bytes are never stored.
+// The forked agent inherits the file's name and type as text and reads the
+// content from the workspace itself; images are inherited as they are.
+func TestForkedSubagentInheritsFileNameNotFileBytes(t *testing.T) {
+	agent := &fakeSpawnAgent{}
+	p, _, _, _ := newAgentControlProvider(t, agent)
+	parentMessages := []sdk.Message{
+		sdk.UserMessage("read this", sdk.FilePart{Data: "JVBERi0xLjQ=", MediaType: "application/pdf", Filename: "brief.pdf"}),
+	}
+	session := SessionContext{BotID: "bot1", SessionID: "parent1", ForkContext: NewMessageSnapshot(parentMessages)}
+	mustExecuteAgentTool(t, p, session, ToolSpawnAgent().String(), map[string]any{"id": "worker", "task": "child task", "fork": true})
+	mustExecuteAgentTool(t, p, session, ToolSendMessage().String(), map[string]any{"id": "worker", "message": "again"})
+	second, ok := agent.callAt(1)
+	if !ok {
+		t.Fatal("follow-up call missing")
+	}
+	text := messageContentTextForTest(second.Messages[0])
+	if !strings.Contains(text, "brief.pdf") || !strings.Contains(text, "application/pdf") {
+		t.Fatalf("forked prefix = %q, want the attachment name and type", text)
+	}
+	for _, part := range second.Messages[0].Content {
+		if _, isFile := part.(sdk.FilePart); isFile {
+			t.Fatalf("forked prefix carries document bytes: %#v", part)
+		}
+	}
+}
+
+func messageContentTextForTest(message sdk.Message) string {
+	var b strings.Builder
+	for _, part := range message.Content {
+		if text, ok := part.(sdk.TextPart); ok {
+			b.WriteString(text.Text)
+		}
+	}
+	return b.String()
 }

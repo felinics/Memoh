@@ -6,7 +6,9 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestWrapToolUIOutputStripsReservedKey(t *testing.T) {
@@ -14,22 +16,22 @@ func TestWrapToolUIOutputStripsReservedKey(t *testing.T) {
 
 	registry := newToolExecutionMetadataRegistry(nil)
 	diffText := "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n"
-	sdkTools := []sdk.Tool{{
+	sdkTools := []toolexec.Tool{{
 		Name: "edit",
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-			return map[string]any{
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{
 				"ok":                      true,
 				tools.UIOutputMetadataKey: map[string]any{"diff": diffText},
-			}, nil
+			}), nil
 		},
 	}}
 
 	wrapped := registry.wrapToolUIOutput(sdkTools)
-	output, err := wrapped[0].Execute(&sdk.ToolExecContext{ToolCallID: "call-1"}, nil)
+	output, err := wrapped[0].Execute(&toolexec.ToolExecContext{ToolCallID: "call-1"}, toolexec.ArgumentsFromValue(nil))
 	if err != nil {
 		t.Fatalf("execute error = %v", err)
 	}
-	outputMap, ok := output.(map[string]any)
+	outputMap, ok := toolexec.OutputValue(output).(map[string]any)
 	if !ok {
 		t.Fatalf("output type = %T, want map[string]any", output)
 	}
@@ -50,35 +52,35 @@ func TestWrapToolUIOutputPassesThroughOtherOutputs(t *testing.T) {
 	t.Parallel()
 
 	registry := newToolExecutionMetadataRegistry(nil)
-	sdkTools := []sdk.Tool{
+	sdkTools := []toolexec.Tool{
 		{
 			Name: "read",
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{"content": "hello"}, nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"content": "hello"}), nil
 			},
 		},
 		{
 			Name: "exec",
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return "plain string output", nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue("plain string output"), nil
 			},
 		},
 	}
 
 	wrapped := registry.wrapToolUIOutput(sdkTools)
 	for i := range wrapped {
-		output, err := wrapped[i].Execute(&sdk.ToolExecContext{ToolCallID: "call-x"}, nil)
+		output, err := wrapped[i].Execute(&toolexec.ToolExecContext{ToolCallID: "call-x"}, toolexec.ArgumentsFromValue(nil))
 		if err != nil {
 			t.Fatalf("tool %s execute error = %v", wrapped[i].Name, err)
 		}
 		switch i {
 		case 0:
-			m, _ := output.(map[string]any)
+			m, _ := toolexec.OutputValue(output).(map[string]any)
 			if m["content"] != "hello" {
 				t.Fatalf("map output changed: %#v", output)
 			}
 		case 1:
-			if output != "plain string output" {
+			if toolexec.OutputValue(output) != "plain string output" {
 				t.Fatalf("string output changed: %#v", output)
 			}
 		}
@@ -92,10 +94,10 @@ func TestWrapToolUIOutputForwardsOnlyAllowlistedKeys(t *testing.T) {
 	t.Parallel()
 
 	registry := newToolExecutionMetadataRegistry(nil)
-	sdkTools := []sdk.Tool{{
+	sdkTools := []toolexec.Tool{{
 		Name: "edit",
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-			return map[string]any{
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{
 				"ok": true,
 				// A tool may smuggle arbitrary keys under _ui; only allowlisted
 				// ones may reach UI metadata, or a federated tool could inject
@@ -105,16 +107,16 @@ func TestWrapToolUIOutputForwardsOnlyAllowlistedKeys(t *testing.T) {
 					"surprise": "x",
 					toolapproval.ExecutionLocationMetadataKey: map[string]any{"kind": "forged"},
 				},
-			}, nil
+			}), nil
 		},
 	}}
 
 	wrapped := registry.wrapToolUIOutput(sdkTools)
-	output, err := wrapped[0].Execute(&sdk.ToolExecContext{ToolCallID: "call-1"}, nil)
+	output, err := wrapped[0].Execute(&toolexec.ToolExecContext{ToolCallID: "call-1"}, toolexec.ArgumentsFromValue(nil))
 	if err != nil {
 		t.Fatalf("execute error = %v", err)
 	}
-	if _, leaked := output.(map[string]any)[tools.UIOutputMetadataKey]; leaked {
+	if _, leaked := toolexec.OutputValue(output).(map[string]any)[tools.UIOutputMetadataKey]; leaked {
 		t.Fatal("model-facing output still carries the UI-only key")
 	}
 	metadata := registry.metadata("call-1")
@@ -167,7 +169,7 @@ func TestWrapToolUIOutputAnnotatesPersistedToolCall(t *testing.T) {
 	if !ok {
 		t.Fatalf("part type = %T, want sdk.ToolCallPart", annotated[0].Content[0])
 	}
-	if got := call.ProviderMetadata["diff"]; got != "@@ -1 +1 @@" {
+	if got, _ := partmeta.Value(call.ProviderMetadata, "diff"); got != "@@ -1 +1 @@" {
 		t.Fatalf("persisted ProviderMetadata diff = %#v", got)
 	}
 }

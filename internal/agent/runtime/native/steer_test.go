@@ -14,7 +14,9 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
@@ -25,8 +27,7 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 			wake := make(chan struct{}, 1)
 			started := make(chan int, 3)
 			var calls, disconnected atomic.Int32
-			var pending, continueAfter atomic.Bool
-			var nextInputs []sdk.Message
+			var pending atomic.Bool
 			var checkpoints, starts, terminals int
 			var steps []int
 			var finalInput []sdk.Message
@@ -38,7 +39,7 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 			if mode == "consecutive" {
 				interruptions = 2
 			}
-			provider := agentStreamTestProvider(func(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+			provider := agentStreamTestProvider(func(ctx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 				call := int(calls.Add(1))
 				if mode == "retry" && call == 1 {
 					return closedAgentTestStream(&sdk.ErrorPart{Error: errors.New("unexpected EOF")}), nil
@@ -68,24 +69,26 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 					<-ctx.Done()
 					disconnected.Add(1)
 				}()
-				return &sdk.StreamResult{Stream: parts}, nil
+				return parts, nil
 			})
 			events := New(Deps{}).Stream(ctx, RunConfig{
 				Model: &sdk.Model{ID: "mock", Provider: provider}, Messages: []sdk.Message{sdk.UserMessage("original")},
 				SteerWake: wake, PendingSteer: func(context.Context) (bool, error) { return pending.Load(), nil },
-				ContinueAfterFinal: &continueAfter, NextModelInputs: &nextInputs,
-				OnSteer: func(_ context.Context, index int, _ *sdk.StepResult) error {
+				// The checkpoint claims the queued input and hands it back as the
+				// directive the loop applies at its next step boundary.
+				OnSteer: func(_ context.Context, index int, _ *step.Record) (StepDirective, error) {
 					if index != checkpoints {
-						return fmt.Errorf("step %d, want %d", index, checkpoints)
+						return StepDirective{}, fmt.Errorf("step %d, want %d", index, checkpoints)
 					}
 					checkpoints++
 					if mode == "checkpoint_failure" {
-						return errors.New("SECRET database diagnostic")
+						return StepDirective{}, errors.New("SECRET database diagnostic")
 					}
 					pending.Store(false)
-					nextInputs = []sdk.Message{sdk.UserMessage(fmt.Sprintf("steer-%d", checkpoints))}
-					continueAfter.Store(true)
-					return nil
+					return StepDirective{NextInputs: []DirectiveInput{{
+						ID:   fmt.Sprintf("item-%d", checkpoints),
+						Text: fmt.Sprintf("steer-%d", checkpoints),
+					}}}, nil
 				},
 			})
 			for events != nil {
@@ -130,8 +133,13 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 			if calls.Load() != int32(interruptions+retryAttempts+1) || disconnected.Load() != int32(interruptions) || starts != 1 || terminals != 1 {
 				t.Fatalf("calls=%d disconnected=%d starts=%d terminals=%d", calls.Load(), disconnected.Load(), starts, terminals)
 			}
-			for i, step := range steps {
-				if step != i {
+			// Every steered checkpoint advances the durable cursor, so the
+			// final answer lands on the step after the last interruption.
+			if len(steps) != interruptions+1 {
+				t.Fatalf("step cursor: %v, want %d checkpointed steps", steps, interruptions+1)
+			}
+			for i, index := range steps {
+				if index != i {
 					t.Fatalf("step cursor: %v", steps)
 				}
 			}
@@ -155,17 +163,40 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 func TestSteerGatePreservesToolAndCommitBoundaries(t *testing.T) {
 	for _, part := range []sdk.StreamPart{&sdk.ToolInputStartPart{}, &sdk.StreamToolCallPart{}, &sdk.FinishStepPart{}} {
 		t.Run(fmt.Sprintf("%T", part), func(t *testing.T) {
-			ctx, cancel := context.WithCancelCause(context.Background())
-			defer cancel(nil)
-			g := &modelSteerGate{cancel: cancel, ready: make(chan struct{}, 1)}
+			g := &modelSteerGate{ready: make(chan struct{}, 1)}
+
+			boundaryCtx, cancelBoundary := context.WithCancelCause(context.Background())
+			defer cancelBoundary(nil)
+			g.arm(cancelBoundary)
 			g.begin()
 			g.observe(part)
-			if g.interrupt() || ctx.Err() != nil {
+			if g.interrupt(g.generation()) || boundaryCtx.Err() != nil {
 				t.Fatal("interrupted tool/commit boundary")
 			}
+
+			// The call that follows owns its own cancellation: a steer stops it
+			// and fences the output it may still emit.
+			steeredCtx, cancelSteered := context.WithCancelCause(context.Background())
+			defer cancelSteered(nil)
+			g.arm(cancelSteered)
 			g.begin()
-			if !g.interrupt() || !errors.Is(context.Cause(ctx), errModelSteered) || g.observe(&sdk.FinishStepPart{}) {
+			if !g.interrupt(g.generation()) || !errors.Is(context.Cause(steeredCtx), errModelSteered) ||
+				g.observe(&sdk.FinishStepPart{}) {
 				t.Fatal("next model invocation failed to fence late output")
+			}
+			if boundaryCtx.Err() != nil {
+				t.Fatal("steer cancelled an earlier model invocation")
+			}
+
+			// A pending-steer probe that started before the next call armed
+			// carries the earlier generation and must not cancel that call.
+			stale := g.generation()
+			nextCtx, cancelNext := context.WithCancelCause(context.Background())
+			defer cancelNext(nil)
+			g.arm(cancelNext)
+			g.begin()
+			if g.interrupt(stale) || nextCtx.Err() != nil {
+				t.Fatal("stale steer decision cancelled the following model invocation")
 			}
 		})
 	}
@@ -180,9 +211,8 @@ func TestSteerPreservesToolsAndEarlierInput(t *testing.T) {
 	var calls, executions atomic.Int32
 	var pending atomic.Bool
 	var immediateInput atomic.Bool
-	var nextInputs []sdk.Message
 	var finalInput []sdk.Message
-	provider := agentStreamTestProvider(func(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(ctx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 		call := calls.Add(1)
 		if call <= 2 {
 			if call == 2 {
@@ -193,7 +223,7 @@ func TestSteerPreservesToolsAndEarlierInput(t *testing.T) {
 				}
 			}
 			return closedAgentTestStream(
-				&sdk.StreamToolCallPart{ToolCallID: fmt.Sprintf("call-%d", call), ToolName: "held_tool", Input: map[string]any{}},
+				&sdk.StreamToolCallPart{ToolCallID: fmt.Sprintf("call-%d", call), ToolName: "held_tool", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 				&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls},
 			), nil
 		}
@@ -201,45 +231,44 @@ func TestSteerPreservesToolsAndEarlierInput(t *testing.T) {
 			parts := make(chan sdk.StreamPart, 1)
 			parts <- &sdk.TextDeltaPart{Text: "after-tools"}
 			go func() { <-ctx.Done(); close(parts) }()
-			return &sdk.StreamResult{Stream: parts}, nil
+			return parts, nil
 		}
 		finalInput = cloneProviderMessages(params.Messages)
 		return closedAgentTestStream(&sdk.TextDeltaPart{Text: "done"}, &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}), nil
 	})
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name: "held_tool", Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
+		Execute: func(ctx *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
 			if executions.Add(1) > 1 {
-				return "completed second tool result", nil
+				return toolexec.OutputFromValue("completed second tool result"), nil
 			}
 			started <- ctx
 			select {
 			case <-release:
-				return "completed tool result", nil
+				return toolexec.OutputFromValue("completed tool result"), nil
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return sdk.ToolOutput{}, ctx.Err()
 			}
 		},
 	}}}})
 	events := a.Stream(ctx, RunConfig{
 		Model: &sdk.Model{ID: "mock", Provider: provider}, Messages: []sdk.Message{sdk.UserMessage("original")},
-		SupportsToolCall: true, SteerWake: wake, NextModelInputs: &nextInputs,
+		SupportsToolCall: true, SteerWake: wake,
 		PendingSteer: func(context.Context) (bool, error) { return pending.Load(), nil },
-		OnSteer: func(_ context.Context, index int, _ *sdk.StepResult) error {
+		OnSteer: func(_ context.Context, index int, _ *step.Record) (StepDirective, error) {
 			if index != 2 {
-				return errors.New("must not preempt a tool")
+				return StepDirective{}, errors.New("must not preempt a tool")
 			}
-			nextInputs = []sdk.Message{sdk.UserMessage("second change")}
 			pending.Store(false)
-			return nil
+			return StepDirective{NextInputs: []DirectiveInput{{ID: "steer", Text: "second change"}}}, nil
 		},
-		OnStepCommitted: func(_ context.Context, index int, _ *sdk.StepResult) error {
+		OnStepCommitted: func(_ context.Context, index int, _ *step.Record) (StepDirective, error) {
 			if index == 0 {
-				nextInputs = []sdk.Message{sdk.UserMessage("change direction")}
 				pending.Store(false)
+				return StepDirective{NextInputs: []DirectiveInput{{ID: "commit", Text: "change direction"}}}, nil
 			}
-			return nil
+			return StepDirective{}, nil
 		},
 	})
 	var releaseTimer <-chan time.Time
@@ -289,59 +318,55 @@ func TestSteerPreservesToolsAndEarlierInput(t *testing.T) {
 
 // A claimed steer is named before its row exists (SR-TURN-001), and the step
 // that consumes it files its user row under that name by taking the last
-// unnamed user row it carries. That only works while prepareQueuedSteer stays
-// the outermost captured PrepareStep wrapper: every other injector of user rows
-// — read_media's image-only row here, mid-turn platform injects via InjectCh —
-// runs inside it and must append ahead of the steer. Reordering the wrappers at
-// agent.go would silently file the steer's turn onto somebody else's row, so
+// unnamed user row it carries. That only holds while the loop drains its
+// boundary inputs in this order: read_media's image-only row and mid-turn
+// platform injects first, the steer directive last. Reordering the drains in
+// the engine would silently file the steer's turn onto somebody else's row, so
 // pin the ordering here rather than in the persistence layer that relies on it.
 func TestQueuedSteerIsAppendedAfterEveryOtherPreparedMessage(t *testing.T) {
 	t.Parallel()
 
 	imageBase64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\n\x00payload"))
-	wrapped, readMedia := decorateReadMediaTools(&sdk.Model{ID: "mock-model"}, []sdk.Tool{{
+	wrapped, readMedia := decorateReadMediaTools(&sdk.Model{ID: "mock-model"}, []toolexec.Tool{{
 		Name: agenttools.ReadMediaToolName().String(),
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-			return agenttools.ReadMediaToolOutput{
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(agenttools.ReadMediaToolOutput{
 				Public:         agenttools.ReadMediaToolResult{OK: true, Path: "/data/image.png", Mime: "image/png"},
 				ImageBase64:    imageBase64,
 				ImageMediaType: "image/png",
-			}, nil
+			}), nil
 		},
 	}})
 	if readMedia == nil || len(wrapped) != 1 {
 		t.Fatalf("decorateReadMediaTools did not wrap read tool: state=%v tools=%d", readMedia, len(wrapped))
 	}
-	if _, err := wrapped[0].Execute(&sdk.ToolExecContext{
+	if _, err := wrapped[0].Execute(&toolexec.ToolExecContext{
 		Context:    context.Background(),
 		ToolCallID: "call-1",
 		ToolName:   agenttools.ReadMediaToolName().String(),
-	}, map[string]any{"path": "/data/image.png"}); err != nil {
+	}, toolexec.ArgumentsFromValue(map[string]any{"path": "/data/image.png"})); err != nil {
 		t.Fatalf("wrapped read execute returned error: %v", err)
 	}
 
-	steer := []sdk.Message{sdk.UserMessage("steer text")}
-	cfg := RunConfig{NextModelInputs: &steer, ContextMutations: contextfrag.NewMutationLedger()}
-	prepare := prepareQueuedSteer(readMedia.prepareStep, cfg)
+	ledger := contextfrag.NewMutationLedger()
+	dynamic := newLoopDynamicInputs(0)
+	dynamic.beginBoundary(1)
+	convo := []sdk.Message{sdk.UserMessage("original query")}
+	before := len(convo)
+	convo = drainReadMediaMessage(readMedia, dynamic, ledger, 1, convo)
+	convo = appendDirectiveInputs(RunConfig{ContextMutations: ledger}, dynamic, convo, []DirectiveInput{{ID: "steer-1", Text: "steer text"}})
 
-	params := &sdk.GenerateParams{Messages: []sdk.Message{sdk.UserMessage("original query")}}
-	before := len(params.Messages)
-	prepared := params
-	if override := prepare(params); override != nil {
-		prepared = override
-	}
-
-	appended := prepared.Messages[before:]
+	appended := convo[before:]
 	if len(appended) != 2 {
-		t.Fatalf("prepared block = %d messages, want the read_media row and the steer", len(appended))
+		t.Fatalf("boundary block = %d messages, want the read_media row and the steer", len(appended))
 	}
 	if appended[0].Role != sdk.MessageRoleUser || textOfMessage(appended[0]) != "" {
-		t.Fatalf("prepared[0] = %s %q, want read_media's image-only user row",
+		t.Fatalf("appended[0] = %s %q, want read_media's image-only user row",
 			appended[0].Role, textOfMessage(appended[0]))
 	}
 	last := appended[len(appended)-1]
 	if last.Role != sdk.MessageRoleUser || textOfMessage(last) != "steer text" {
-		t.Fatalf("last prepared message = %s %q, want the steer injection",
+		t.Fatalf("last boundary message = %s %q, want the steer input",
 			last.Role, textOfMessage(last))
 	}
 }

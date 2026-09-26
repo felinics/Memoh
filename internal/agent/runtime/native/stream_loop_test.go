@@ -14,6 +14,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestAgentGenerateRejectsNonPrefixPreservingStepSelectionWithoutMutationRecord(t *testing.T) {
@@ -22,29 +23,29 @@ func TestAgentGenerateRejectsNonPrefixPreservingStepSelectionWithoutMutationReco
 	ledger := contextfrag.NewMutationLedger()
 	var secondCallMessages []sdk.Message
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 			if call == 1 {
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-guard",
 						ToolName:   "lookup",
-						Input:      map[string]any{"q": "one"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 					}},
 				}, nil
 			}
 			secondCallMessages = append([]sdk.Message(nil), params.Messages...)
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []sdk.Tool{{
+		staticToolProvider{tools: []toolexec.Tool{{
 			Name:       "lookup",
 			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{"answer": "ok"}, nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 			},
 		}}},
 	})
@@ -79,19 +80,19 @@ func TestAgentStreamStopsOnToolLoopAbort(t *testing.T) {
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call >= 20 {
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					Text:         "unexpected-final-step",
 					FinishReason: sdk.FinishReasonStop,
 				}, nil
 			}
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls: []sdk.ToolCall{{
 					ToolCallID: "call-stream",
 					ToolName:   "loop_tool",
-					Input:      map[string]any{"query": "same"},
+					Input:      toolexec.ArgumentsFromValue(map[string]any{"query": "same"}),
 				}},
 			}, nil
 		},
@@ -100,11 +101,11 @@ func TestAgentStreamStopsOnToolLoopAbort(t *testing.T) {
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
 		staticToolProvider{
-			tools: []sdk.Tool{{
+			tools: []toolexec.Tool{{
 				Name:       "loop_tool",
 				Parameters: &jsonschema.Schema{Type: "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return map[string]any{"ok": true}, nil
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 				},
 			}},
 		},
@@ -139,7 +140,7 @@ func TestAgentStreamMarksTerminalTextLoopAsAbort(t *testing.T) {
 	// a channel because a retrying run calls the provider more than once.
 	var providers sync.WaitGroup
 	modelProvider := &atomicMockProvider{
-		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		stream: func(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 			ch := make(chan sdk.StreamPart, 16)
 			providers.Add(1)
 			go func() {
@@ -182,7 +183,7 @@ func TestAgentStreamMarksTerminalTextLoopAsAbort(t *testing.T) {
 				}
 				_ = send(&sdk.FinishPart{FinishReason: sdk.FinishReasonStop})
 			}()
-			return &sdk.StreamResult{Stream: ch}, nil
+			return ch, nil
 		},
 	}
 
@@ -222,7 +223,7 @@ func TestAgentStreamMarksRetryTextLoopAsAbort(t *testing.T) {
 	// a channel because a retrying run calls the provider more than once.
 	var providers sync.WaitGroup
 	modelProvider := &atomicMockProvider{
-		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		stream: func(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 			call := streamCalls.Add(1)
 			ch := make(chan sdk.StreamPart, 16)
 			providers.Add(1)
@@ -273,7 +274,7 @@ func TestAgentStreamMarksRetryTextLoopAsAbort(t *testing.T) {
 				}
 				_ = send(&sdk.FinishPart{FinishReason: sdk.FinishReasonStop})
 			}()
-			return &sdk.StreamResult{Stream: ch}, nil
+			return ch, nil
 		},
 	}
 
@@ -304,17 +305,16 @@ func TestAgentStreamMarksRetryTextLoopAsAbort(t *testing.T) {
 	}
 }
 
-// TestAgentStreamMidStreamRetryRecordsCacheUsageForRetryAttempt is Defect B:
-// runMidStreamRetry builds its retry stream from buildGenerateOptions alone,
-// without the sdk.WithOnStep option that records cache usage and runs the
-// after-model-call hook. So a retry step's cache usage was silently dropped
-// from the ledger — the retry attempt's step never got recorded at all.
+// TestAgentStreamMidStreamRetryRecordsCacheUsageForRetryAttempt pins that a
+// step produced by a mid-stream retry attempt still records its cache usage
+// and its MutationMidStreamRetry ledger entry under the advanced attempt
+// counter (the legacy retry loop once dropped both).
 func TestAgentStreamMidStreamRetryRecordsCacheUsageForRetryAttempt(t *testing.T) {
 	t.Parallel()
 
 	var streamCalls atomic.Int32
 	modelProvider := &atomicMockProvider{
-		stream: func(_ context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+		stream: func(_ context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 			call := streamCalls.Add(1)
 			ch := make(chan sdk.StreamPart, 16)
 			go func() {
@@ -336,7 +336,7 @@ func TestAgentStreamMidStreamRetryRecordsCacheUsageForRetryAttempt(t *testing.T)
 				}
 				ch <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
 			}()
-			return &sdk.StreamResult{Stream: ch}, nil
+			return ch, nil
 		},
 	}
 
@@ -381,113 +381,6 @@ func TestAgentStreamMidStreamRetryRecordsCacheUsageForRetryAttempt(t *testing.T)
 	}
 	if !retryFound {
 		t.Fatalf("mutation records = %#v, want a MutationMidStreamRetry record with attempt=1", ledger.Records())
-	}
-}
-
-func TestRunMidStreamRetryMarksTextLoopCancellationAsAborted(t *testing.T) {
-	t.Parallel()
-
-	repeatedChunk := strings.Repeat("abcd", 64)
-	var observedCancel atomic.Bool
-	// Waits for the provider goroutines to finish deciding. The assertions
-	// below read what they stored, and the run can return before a goroutine
-	// has been scheduled again after the cancellation. A WaitGroup rather than
-	// a channel because a retrying run calls the provider more than once.
-	var providers sync.WaitGroup
-	modelProvider := &atomicMockProvider{
-		stream: func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
-			ch := make(chan sdk.StreamPart)
-			providers.Add(1)
-			go func() {
-				defer providers.Done()
-				defer close(ch)
-				send := func(part sdk.StreamPart) bool {
-					select {
-					case <-ctx.Done():
-						observedCancel.Store(true)
-						return false
-					case ch <- part:
-						return true
-					}
-				}
-
-				if !send(&sdk.StartPart{}) {
-					return
-				}
-				if !send(&sdk.StartStepPart{}) {
-					return
-				}
-				if !send(&sdk.TextStartPart{ID: "mock-retry-only"}) {
-					return
-				}
-				for i := 0; i < 4; i++ {
-					if !send(&sdk.TextDeltaPart{ID: "mock-retry-only", Text: repeatedChunk}) {
-						return
-					}
-				}
-				select {
-				case <-ctx.Done():
-					observedCancel.Store(true)
-					return
-				case <-time.After(200 * time.Millisecond):
-					t.Error("expected text-loop detection to cancel retry stream before any extra part was sent")
-					return
-				}
-			}()
-			return &sdk.StreamResult{Stream: ch}, nil
-		},
-	}
-
-	a := New(Deps{})
-	streamCtx, cancel := context.WithCancelCause(context.Background())
-	defer cancel(nil)
-
-	textLoopGuard := NewTextLoopGuard(LoopDetectedStreakThreshold, LoopDetectedMinNewGramsPerChunk, SentialOptions{})
-	textLoopProbeBuffer := NewTextLoopProbeBuffer(LoopDetectedProbeChars, func(text string) {
-		result := textLoopGuard.Inspect(text)
-		if result.Abort {
-			cancel(ErrTextLoopDetected)
-		}
-	})
-
-	retryResult, aborted := a.runMidStreamRetry(
-		context.Background(),
-		streamCtx,
-		cancel,
-		newToolAbortRegistry(),
-		make(chan StreamEvent, 32),
-		RunConfig{
-			Model:         &sdk.Model{ID: "mock-model", Provider: modelProvider},
-			Messages:      []sdk.Message{sdk.UserMessage("retry text loop")},
-			Identity:      SessionContext{BotID: "bot-1"},
-			LoopDetection: LoopDetectionConfig{Enabled: true},
-		},
-		nil,
-		nil,
-		newToolExecutionMetadataRegistry(nil),
-		nil,
-		&sdk.StreamResult{Messages: []sdk.Message{sdk.UserMessage("previous step")}},
-		&stepMessageCapture{},
-		nil,
-		&interruptedStepCapture{},
-		0,
-		"api error 500",
-		&strings.Builder{},
-		textLoopProbeBuffer,
-	)
-
-	if retryResult == nil {
-		t.Fatal("expected retry result")
-	}
-	providers.Wait()
-	if !observedCancel.Load() {
-		t.Fatal("expected retry stream provider to observe context cancellation from text-loop abort")
-	}
-	if !errors.Is(context.Cause(streamCtx), ErrTextLoopDetected) {
-		t.Fatalf("expected stream context cause ErrTextLoopDetected, got %v", context.Cause(streamCtx))
-	}
-	if !aborted {
-		t.Fatal("expected runMidStreamRetry to report aborted when retry stream hit text-loop cancellation")
 	}
 }
 

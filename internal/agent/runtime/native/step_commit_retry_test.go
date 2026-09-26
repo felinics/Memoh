@@ -11,25 +11,27 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestStepCommitFailureMustNotReplayExecutedTool(t *testing.T) {
 	var effects, commits, providerCalls atomic.Int32
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		providerCalls.Add(1)
 		return closedAgentTestStream(
 			&sdk.StartStepPart{},
-			&sdk.StreamToolCallPart{ToolCallID: "side-effect-1", ToolName: "record_effect", Input: map[string]any{}},
+			&sdk.StreamToolCallPart{ToolCallID: "side-effect-1", ToolName: "record_effect", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls},
 		), nil
 	})
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name: "record_effect",
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
 			effects.Add(1)
-			return "effect recorded", nil
+			return toolexec.OutputFromValue("effect recorded"), nil
 		},
 	}}}})
 	var events []StreamEvent
@@ -39,9 +41,9 @@ func TestStepCommitFailureMustNotReplayExecutedTool(t *testing.T) {
 		SupportsToolCall: true,
 		Identity:         SessionContext{BotID: "qc-bot"},
 		Retry:            RetryConfig{MaxAttempts: 1, FastAttempts: 1},
-		OnStepCommitted: func(context.Context, int, *sdk.StepResult) error {
+		OnStepCommitted: func(context.Context, int, *step.Record) (StepDirective, error) {
 			commits.Add(1)
-			return io.EOF
+			return StepDirective{}, io.EOF
 		},
 	}) {
 		events = append(events, event)

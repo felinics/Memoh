@@ -12,6 +12,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agentpkg "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -54,7 +55,7 @@ func lastTextCacheControl(msg sdk.Message) *sdk.CacheControl {
 // decorated payload and counts real cache_control occurrences, so a
 // breakpoint applied somewhere other than the specific locations this test
 // checks by hand cannot go unnoticed.
-func countCacheControlBreakpoints(messages []sdk.Message, tools []sdk.Tool) int {
+func countCacheControlBreakpoints(messages []sdk.Message, tools []toolexec.Tool) int {
 	count := 0
 	for _, msg := range messages {
 		for _, part := range msg.Content {
@@ -112,7 +113,7 @@ func TestApplyProviderRunConfigAnthropicMessageLevelBreakpoint(t *testing.T) {
 		t.Fatalf("stable message count = %d, want 2", got.ContextCachePlan.StableMessageCount)
 	}
 
-	tools := []sdk.Tool{{Name: "search"}}
+	tools := []toolexec.Tool{{Name: "search"}}
 	model := anthropicCacheTestModel()
 	newSystem, newMessages, newTools, systemPrepended, _ := models.ApplyPromptCacheWithPlan(model, models.DefaultPromptCacheTTL, got.ContextCachePlan, got.System, got.Messages, tools)
 
@@ -181,7 +182,7 @@ func TestApplyProviderRunConfigNonAnthropicUnaffected(t *testing.T) {
 		t.Fatal("test fixture must produce a non-zero stable message count")
 	}
 
-	tools := []sdk.Tool{{Name: "search"}}
+	tools := []toolexec.Tool{{Name: "search"}}
 	model := openAICacheTestModel()
 	newSystem, newMessages, newTools, systemPrepended, _ := models.ApplyPromptCacheWithPlan(model, models.DefaultPromptCacheTTL, got.ContextCachePlan, got.System, got.Messages, tools)
 

@@ -15,7 +15,7 @@ import (
 // A subagent used to run with no thinking configuration at all: SpawnRunConfig
 // carried a lone ReasoningEffort string that production code never assigned, and
 // the four flags that actually drive the wire had no field to travel in. Since
-// BuildReasoningOptions switches on Active and Disabled, a config with both false
+// the per-request effort switches on Active and Disabled, a config with both false
 // emits nothing — so the parent's choice, on or off, silently became "whatever
 // the provider does by default".
 //
@@ -26,7 +26,7 @@ import (
 // test can assert on the wire-level reasoning shape.
 type spawnReasoningProvider struct {
 	name   string
-	params sdk.GenerateParams
+	params sdk.Request
 	calls  int
 }
 
@@ -49,21 +49,21 @@ func (*spawnReasoningProvider) TestModel(context.Context, string) (*sdk.ModelTes
 	return &sdk.ModelTestResult{Supported: true}, nil
 }
 
-func (p *spawnReasoningProvider) DoGenerate(_ context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (p *spawnReasoningProvider) DoGenerate(_ context.Context, params sdk.Request) (sdk.ModelResult, error) {
 	p.calls++
 	p.params = params
-	return &sdk.GenerateResult{
+	return sdk.ModelResult{
 		Text:         "ok",
 		FinishReason: sdk.FinishReasonStop,
 	}, nil
 }
 
-func (*spawnReasoningProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (*spawnReasoningProvider) DoStream(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 	return nil, nil
 }
 
-// runSpawnReasoning drives the real spawn conversion plus buildGenerateOptions
-// and returns the reasoning effort the provider actually received.
+// runSpawnReasoning drives the real spawn conversion plus the agent generate
+// loop and returns the reasoning effort the provider actually received.
 func runSpawnReasoning(t *testing.T, providerName string, cfg tools.SpawnRunConfig) *string {
 	t.Helper()
 
@@ -75,9 +75,8 @@ func runSpawnReasoning(t *testing.T, providerName string, cfg tools.SpawnRunConf
 	}
 
 	rc := runConfigFromSpawnRunConfig(cfg)
-	opts := (*Agent)(nil).buildGenerateOptions(context.Background(), rc, nil, nil, nil)
-	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
-		t.Fatalf("generate text result: %v", err)
+	if _, err := New(Deps{}).Generate(context.Background(), rc); err != nil {
+		t.Fatalf("Generate() error = %v", err)
 	}
 	if provider.calls == 0 {
 		t.Fatal("expected the provider to be called")
@@ -185,9 +184,8 @@ func TestParentTurnSendsReasoningForSameDecision(t *testing.T) {
 		ReasoningConfig: &models.ReasoningConfig{Active: true, Effort: models.ReasoningEffortHigh},
 	}
 
-	opts := (*Agent)(nil).buildGenerateOptions(context.Background(), cfg, nil, nil, nil)
-	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
-		t.Fatalf("generate text result: %v", err)
+	if _, err := New(Deps{}).Generate(context.Background(), cfg); err != nil {
+		t.Fatalf("Generate() error = %v", err)
 	}
 	if provider.params.ReasoningEffort == nil {
 		t.Fatal("parent turn: expected reasoning effort to reach the provider")

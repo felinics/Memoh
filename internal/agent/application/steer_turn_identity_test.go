@@ -20,8 +20,8 @@ func TestStampSteerTurnFilesTheInjectedInputUnderTheClaimedSlot(t *testing.T) {
 	}}
 
 	// The order a steered step really carries, per
-	// TestQueuedSteerIsAppendedAfterEveryOtherPreparedMessage: PrepareStep's
-	// other injectors run inside prepareQueuedSteer and append first, then the
+	// TestQueuedSteerIsAppendedAfterEveryOtherPreparedMessage: the loop appends
+	// its other user rows at the step boundary first, then the
 	// steer, then the assistant and tool rows the provider produced.
 	inputs := []messagepkg.PersistInput{
 		// A row admission already named must never be re-stamped.

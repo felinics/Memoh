@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestLimitToolOutputPrunesLargeStringLeaves(t *testing.T) {
@@ -104,14 +106,14 @@ func TestLimitToolOutputPreservesErrorSignalOnFallback(t *testing.T) {
 func TestWrapToolOutputLimitsPrunesErrors(t *testing.T) {
 	t.Parallel()
 
-	wrapped := WrapToolOutputLimits([]sdk.Tool{{
+	wrapped := WrapToolOutputLimits([]toolexec.Tool{{
 		Name: "broken_tool",
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return nil, errors.New("HEAD\n" + strings.Repeat("error detail ", 300) + "\nTAIL")
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return sdk.ToolOutput{}, errors.New("HEAD\n" + strings.Repeat("error detail ", 300) + "\nTAIL")
 		},
 	}}, ToolOutputLimit{MaxBytes: 512, MaxLines: 80})
 
-	_, err := wrapped[0].Execute(&sdk.ToolExecContext{Context: context.Background(), ToolName: "broken_tool"}, nil)
+	_, err := wrapped[0].Execute(&toolexec.ToolExecContext{Context: context.Background(), ToolName: "broken_tool"}, toolexec.ArgumentsFromValue(nil))
 	if err == nil {
 		t.Fatal("Execute() error = nil, want limited error")
 	}

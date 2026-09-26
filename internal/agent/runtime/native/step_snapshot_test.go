@@ -13,10 +13,11 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
 )
 
-func TestBuildGenerateOptionsSetsModelInfoAndLegacyPruneLoopSelectionModeWithoutReselector(t *testing.T) {
+func TestBuildGenerateDispatchSetsModelInfoAndLegacyPruneLoopSelectionModeWithoutReselector(t *testing.T) {
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
@@ -28,7 +29,9 @@ func TestBuildGenerateOptionsSetsModelInfoAndLegacyPruneLoopSelectionModeWithout
 		ContextMutations: ledger,
 	}
 
-	(*Agent)(nil).buildGenerateOptions(context.Background(), cfg, nil, nil, nil)
+	if _, err := (*Agent)(nil).buildGenerateDispatch(context.Background(), cfg, nil, nil, nil); err != nil {
+		t.Fatalf("buildGenerateDispatch: %v", err)
+	}
 
 	gotModel, gotClientType := ledger.ModelInfo()
 	if gotModel != "mock-model" {
@@ -42,7 +45,7 @@ func TestBuildGenerateOptionsSetsModelInfoAndLegacyPruneLoopSelectionModeWithout
 	}
 }
 
-func TestBuildGenerateOptionsSetsSuffixOnlyLoopSelectionModeWithReselector(t *testing.T) {
+func TestBuildGenerateDispatchSetsSuffixOnlyLoopSelectionModeWithReselector(t *testing.T) {
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
@@ -57,7 +60,9 @@ func TestBuildGenerateOptionsSetsSuffixOnlyLoopSelectionModeWithReselector(t *te
 		},
 	}
 
-	(*Agent)(nil).buildGenerateOptions(context.Background(), cfg, nil, nil, nil)
+	if _, err := (*Agent)(nil).buildGenerateDispatch(context.Background(), cfg, nil, nil, nil); err != nil {
+		t.Fatalf("buildGenerateDispatch: %v", err)
+	}
 
 	if got := ledger.LoopSelectionMode(); got != contextfrag.LoopSelectionSuffixOnly {
 		t.Fatalf("loop selection mode = %q, want %q", got, contextfrag.LoopSelectionSuffixOnly)
@@ -87,23 +92,23 @@ func TestAgentGenerateStepReselectionAppliedPreservesDecoratedPrefix(t *testing.
 
 	var firstCallMessages, secondCallMessages []sdk.Message
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 			switch call {
 			case 1:
 				firstCallMessages = append([]sdk.Message(nil), params.Messages...)
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-1",
 						ToolName:   "lookup",
-						Input:      map[string]any{"q": "one"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 					}},
 				}, nil
 			case 2:
 				secondCallMessages = append([]sdk.Message(nil), params.Messages...)
-				return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+				return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 			default:
-				return nil, errors.New("unexpected provider call")
+				return sdk.ModelResult{}, errors.New("unexpected provider call")
 			}
 		},
 	}
@@ -111,11 +116,11 @@ func TestAgentGenerateStepReselectionAppliedPreservesDecoratedPrefix(t *testing.
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []sdk.Tool{{
+		staticToolProvider{tools: []toolexec.Tool{{
 			Name:       "lookup",
 			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{"answer": "ok"}, nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 			},
 		}}},
 	})
@@ -192,23 +197,23 @@ func TestAgentGenerateStepReselectionRejectedKeepsDecoratedPrefixUnchanged(t *te
 
 	var firstCallMessages, secondCallMessages []sdk.Message
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 			switch call {
 			case 1:
 				firstCallMessages = append([]sdk.Message(nil), params.Messages...)
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-1",
 						ToolName:   "lookup",
-						Input:      map[string]any{"q": "one"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 					}},
 				}, nil
 			case 2:
 				secondCallMessages = append([]sdk.Message(nil), params.Messages...)
-				return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+				return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 			default:
-				return nil, errors.New("unexpected provider call")
+				return sdk.ModelResult{}, errors.New("unexpected provider call")
 			}
 		},
 	}
@@ -216,11 +221,11 @@ func TestAgentGenerateStepReselectionRejectedKeepsDecoratedPrefixUnchanged(t *te
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []sdk.Tool{{
+		staticToolProvider{tools: []toolexec.Tool{{
 			Name:       "lookup",
 			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{"answer": "ok"}, nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 			},
 		}}},
 	})
@@ -263,44 +268,43 @@ func TestAgentGenerateStepReselectionRejectedKeepsDecoratedPrefixUnchanged(t *te
 }
 
 // TestAgentGenerateRecordsOneStepSnapshotPerModelStepWithDistinctHashes
-// covers Defect A: the twilight SDK only invokes PrepareStep for model steps
-// > 0 (step 0's input is the initial decorated payload, never re-prepared),
-// while every model step 0..R-1 gets a StepResult via WithOnStep. So R
-// provider calls must produce exactly R step snapshots (0..R-1), each
-// hashing that call's ACTUAL input params — not R-1 snapshots misattributed
-// one call ahead of the usage they're supposed to pair with.
+// covers Defect A: R provider calls must produce exactly R step snapshots
+// (0..R-1), each hashing that call's ACTUAL input request — not R-1 snapshots
+// misattributed one call ahead of the usage they are supposed to pair with.
+// The owned generate loop builds the request for every step, including step 0,
+// so each snapshot pairs with the call it was taken from.
 func TestAgentGenerateRecordsOneStepSnapshotPerModelStepWithDistinctHashes(t *testing.T) {
 	t.Parallel()
 
-	var callParams []sdk.GenerateParams
+	var callParams []sdk.Request
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			callParams = append(callParams, sdk.GenerateParams{
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
+			callParams = append(callParams, sdk.Request{
 				System:   params.System,
 				Messages: append([]sdk.Message(nil), params.Messages...),
-				Tools:    append([]sdk.Tool(nil), params.Tools...),
+				Tools:    append([]sdk.ToolDefinition(nil), params.Tools...),
 			})
 			if call <= 3 {
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: fmt.Sprintf("call-%d", call),
 						ToolName:   "lookup",
-						Input:      map[string]any{"step": call},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"step": call}),
 					}},
 				}, nil
 			}
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []sdk.Tool{{
+		staticToolProvider{tools: []toolexec.Tool{{
 			Name:       "lookup",
 			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{"answer": "ok"}, nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 			},
 		}}},
 	})
@@ -343,7 +347,7 @@ func TestAgentGenerateRecordsOneStepSnapshotPerModelStepWithDistinctHashes(t *te
 	}
 }
 
-func TestPrepareMidStreamRetryConfigAdvancesAttemptForSubsequentRecords(t *testing.T) {
+func TestPrepareMidStreamRetryConfigWithMessagesAdvancesAttemptForSubsequentRecords(t *testing.T) {
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
@@ -353,7 +357,7 @@ func TestPrepareMidStreamRetryConfigAdvancesAttemptForSubsequentRecords(t *testi
 		Messages:         []sdk.Message{sdk.UserMessage("hello")},
 		ContextMutations: ledger,
 	}
-	_ = prepareMidStreamRetryConfig(cfg, nil, "timeout")
+	_ = prepareMidStreamRetryConfigWithMessages(cfg, cfg.Messages, nil, 0, "timeout")
 	ledger.RecordCacheUsage(contextfrag.CacheUsageRecord{StepIndex: 0})
 	ledger.AppendStepSnapshot(contextfrag.StepSnapshot{StepIndex: 0})
 

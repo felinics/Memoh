@@ -26,6 +26,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
@@ -1825,7 +1826,7 @@ func TestPromptToolEventSinkPreservesACPAndHTTPToolEventOrder(t *testing.T) {
 	if !ok {
 		t.Fatalf("output[0] = %#v, want tool call", result.Output[0])
 	}
-	approval, ok := toolCall.ProviderMetadata["approval"].(map[string]any)
+	approval, ok := partmeta.Object(toolCall.ProviderMetadata, partmeta.KeyApproval)
 	if !ok || approval["approval_id"] != "approval-1" || approval["status"] != toolapproval.StatusPending {
 		t.Fatalf("tool call approval metadata = %#v", toolCall.ProviderMetadata)
 	}

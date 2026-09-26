@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/turn"
 )
 
@@ -93,7 +94,8 @@ func ExtractToolCallDiffsFromSDK(message sdk.Message) (sdk.Message, map[string]s
 		if !ok || len(call.ProviderMetadata) == 0 {
 			continue
 		}
-		diff, ok := call.ProviderMetadata[toolCallDiffProviderKey].(string)
+		raw, ok := partmeta.Value(call.ProviderMetadata, toolCallDiffProviderKey)
+		diff, _ := raw.(string)
 		if !ok || diff == "" {
 			continue
 		}
@@ -105,16 +107,7 @@ func ExtractToolCallDiffsFromSDK(message sdk.Message) (sdk.Message, map[string]s
 			parts = append([]sdk.MessagePart(nil), parts...)
 			copied = true
 		}
-		remaining := make(map[string]any, len(call.ProviderMetadata))
-		for key, value := range call.ProviderMetadata {
-			if key != toolCallDiffProviderKey {
-				remaining[key] = value
-			}
-		}
-		if len(remaining) == 0 {
-			remaining = nil
-		}
-		call.ProviderMetadata = remaining
+		call.ProviderMetadata = partmeta.Delete(call.ProviderMetadata, toolCallDiffProviderKey)
 		parts[i] = call
 		if diffs == nil {
 			diffs = make(map[string]string)

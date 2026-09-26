@@ -1,0 +1,34 @@
+{
+  "generate_video": {
+    "properties": {
+      "aspect_ratio": {
+        "description": "Optional aspect ratio, e.g. 16:9, 9:16, or 1:1",
+        "type": "string"
+      },
+      "duration_seconds": {
+        "description": "Optional duration in seconds",
+        "type": "integer"
+      },
+      "generate_audio": {
+        "description": "Whether the provider should generate audio when supported",
+        "type": "boolean"
+      },
+      "prompt": {
+        "description": "Detailed description of the video to generate",
+        "type": "string"
+      },
+      "resolution": {
+        "description": "Optional resolution, e.g. 720p or 1080p",
+        "type": "string"
+      },
+      "size": {
+        "description": "Optional provider-specific size, e.g. 1280x720",
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "type": "object"
+  }
+}

@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -163,7 +164,7 @@ func TestBrowserRefHelpers(t *testing.T) {
 	if _, err := browserRefIndex("e0"); err == nil {
 		t.Fatal("expected invalid zero ref")
 	}
-	target := browserTargetArg(map[string]any{"ref": "12", "selector": "#fallback"}, "selector", "ref")
+	target := browserCommand{Ref: "12", Selector: "#fallback"}.target()
 	if target.Ref != "e12" || target.Selector != "#fallback" {
 		t.Fatalf("unexpected target: %#v", target)
 	}
@@ -190,12 +191,14 @@ func TestWrapRuntimeExpressionScopesHelper(t *testing.T) {
 }
 
 func TestBrowserSchemasAreStrict(t *testing.T) {
-	schema := browserObjectSchema(map[string]any{"action": map[string]any{"type": "string"}}, []string{"action"})
-	if schema["additionalProperties"] != false {
-		t.Fatalf("expected strict browser schema, got %#v", schema["additionalProperties"])
-	}
-	if required, ok := schema["required"].([]string); !ok || len(required) != 1 || required[0] != "action" {
-		t.Fatalf("unexpected required fields: %#v", schema["required"])
+	for _, tool := range (&BrowserProvider{}).browserTools(goldenSession) {
+		schema := toolexec.SchemaValue(tool.Parameters)
+		if schema["additionalProperties"] != false {
+			t.Fatalf("%s: expected strict browser schema, got %#v", tool.Name, schema["additionalProperties"])
+		}
+		if required, ok := schema["required"].([]any); !ok || len(required) != 1 {
+			t.Fatalf("%s: unexpected required fields: %#v", tool.Name, schema["required"])
+		}
 	}
 }
 
@@ -209,7 +212,7 @@ func TestBuildScreenshotResultDropsShareMetadata(t *testing.T) {
 	if _, exists := asMap["shared"]; exists {
 		t.Fatalf("expected shared field to be removed, got %#v", asMap)
 	}
-	content, ok := asMap["content"].([]map[string]any)
+	content, ok := mapSlice(asMap["content"])
 	if !ok || len(content) == 0 {
 		t.Fatalf("expected text content, got %#v", asMap["content"])
 	}

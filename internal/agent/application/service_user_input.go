@@ -10,6 +10,7 @@ import (
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/bots"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/i18n"
@@ -196,7 +197,7 @@ func (s *Service) continueCommittedUserInputResponse(
 	toolResult := sdk.ToolResultPart{
 		ToolCallID: resolved.ToolCallID,
 		ToolName:   resolved.ToolName,
-		Result:     s.limitToolResultValue(resolved.Result, resolved.ToolName),
+		Result:     toolexec.OutputFromValue(s.limitToolResultValue(resolved.Result, resolved.ToolName)),
 		IsError:    false,
 	}
 	if s.continueUserInputFn != nil {

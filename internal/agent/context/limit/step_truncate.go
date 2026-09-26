@@ -30,12 +30,12 @@ func TruncateStepToolResult(msg sdk.Message, thresholdBytes int) (out sdk.Messag
 			parts = append(parts, part)
 			continue
 		}
-		size := len(fmt.Sprintf("%v", tr.Result))
+		size := len(tr.Result.String())
 		if size <= thresholdBytes {
 			parts = append(parts, tr)
 			continue
 		}
-		tr.Result = fmt.Sprintf("[tool result pruned: %d bytes]", size)
+		tr.Result = sdk.TextOutput(fmt.Sprintf("[tool result pruned: %d bytes]", size))
 		parts = append(parts, tr)
 		changed = true
 	}

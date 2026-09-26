@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
@@ -1455,13 +1458,13 @@ func TestConvertRawModelMessagesToUIAssistantMessagesBuildsTerminalSnapshots(t *
 			Role: "assistant",
 			Content: mustUIRawJSON(t, []map[string]any{
 				{"type": "reasoning", "text": "thinking"},
-				{"type": "tool-call", "toolCallId": "call-1", "toolName": "read", "input": map[string]any{"path": "/tmp/a.txt"}},
+				{"type": "tool-call", "toolCallId": "call-1", "toolName": "read", "input": map[string]any{"json": map[string]any{"path": "/tmp/a.txt"}}},
 			}),
 		},
 		{
 			Role: "tool",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-result", "toolCallId": "call-1", "toolName": "read", "result": map[string]any{"structuredContent": map[string]any{"stdout": "ok"}}},
+				{"type": "tool-result", "toolCallId": "call-1", "toolName": "read", "result": map[string]any{"json": map[string]any{"structuredContent": map[string]any{"stdout": "ok"}}}},
 			}),
 		},
 		{
@@ -1495,13 +1498,13 @@ func TestConvertRawModelMessagesToUIAssistantMessagesKeepsBackgroundExecRunning(
 		{
 			Role: "assistant",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-call", "toolCallId": "call-1", "toolName": "exec", "input": map[string]any{"command": "npm test"}},
+				{"type": "tool-call", "toolCallId": "call-1", "toolName": "exec", "input": map[string]any{"json": map[string]any{"command": "npm test"}}},
 			}),
 		},
 		{
 			Role: "tool",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-result", "toolCallId": "call-1", "toolName": "exec", "result": map[string]any{"structuredContent": map[string]any{"status": "background_started", "task_id": "bg_1", "output_file": "/tmp/memoh-bg/bg_1.log"}}},
+				{"type": "tool-result", "toolCallId": "call-1", "toolName": "exec", "result": map[string]any{"json": map[string]any{"structuredContent": map[string]any{"status": "background_started", "task_id": "bg_1", "output_file": "/tmp/memoh-bg/bg_1.log"}}}},
 			}),
 		},
 	})
@@ -1739,13 +1742,13 @@ func TestConvertTerminalMessagesReusesLiveBlockIDsAroundAttachments(t *testing.T
 		{
 			Role: "assistant",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"prompt": "a cat"}},
+				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"json": map[string]any{"prompt": "a cat"}}},
 			}),
 		},
 		{
 			Role: "tool",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"path": "/data/generated-images/1.png"}},
+				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"json": map[string]any{"path": "/data/generated-images/1.png"}}},
 			}),
 		},
 		{
@@ -1809,13 +1812,13 @@ func TestConvertTerminalMessagesAfterRetryIgnoresDiscardedAttemptBlocks(t *testi
 		{
 			Role: "assistant",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"prompt": "a cat"}},
+				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"json": map[string]any{"prompt": "a cat"}}},
 			}),
 		},
 		{
 			Role: "tool",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"path": "/data/generated-images/1.png"}},
+				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"json": map[string]any{"path": "/data/generated-images/1.png"}}},
 			}),
 		},
 		{
@@ -1870,13 +1873,13 @@ func TestConvertTerminalMessagesSkipsTagOnlyLiveTextBlocks(t *testing.T) {
 		{
 			Role: "assistant",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"prompt": "a cat"}},
+				{"type": "tool-call", "toolCallId": "call-1", "toolName": "generate_image", "input": map[string]any{"json": map[string]any{"prompt": "a cat"}}},
 			}),
 		},
 		{
 			Role: "tool",
 			Content: mustUIRawJSON(t, []map[string]any{
-				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"path": "/tmp/a.png"}},
+				{"type": "tool-result", "toolCallId": "call-1", "toolName": "generate_image", "result": map[string]any{"json": map[string]any{"path": "/tmp/a.png"}}},
 			}),
 		},
 		{
@@ -2102,5 +2105,73 @@ func TestRuntimeFeedbackLiveAndHistoryProjection(t *testing.T) {
 	history := ConvertMessagesToUITurns(rows)
 	if len(history) != 1 || len(history[0].Messages) != 3 || history[0].Messages[0].Type != UIMessageCommand {
 		t.Fatalf("history lost command identity: %#v", history)
+	}
+}
+
+// The terminal snapshot is a serialized []sdk.Message. Its tool input and
+// Memoh annotations arrive in the SDK shape and must read back the way the
+// persisted rows do; a pending ask_user card otherwise loses its form when
+// the run ends and the snapshot replaces the live block.
+func TestConvertRawModelMessagesReadsSDKShapedToolCalls(t *testing.T) {
+	call := sdk.ToolCallPart{
+		ToolCallID: "call-1",
+		ToolName:   "ask_user",
+		Input:      sdk.ToolArguments{JSON: json.RawMessage(`{"questions":[{"kind":"text","text":"name?"}]}`)},
+	}
+	call.ProviderMetadata = partmeta.Set(call.ProviderMetadata, partmeta.KeyUserInput, map[string]any{
+		"user_input_id": "req-1",
+		"short_id":      3,
+		"status":        "pending",
+		"ui_payload":    map[string]any{"version": 2, "questions": []any{map[string]any{"id": "q1", "kind": "text", "text": "name?"}}},
+	})
+	approved := sdk.ToolCallPart{
+		ToolCallID: "call-2",
+		ToolName:   "exec",
+		Input:      sdk.ToolArguments{JSON: json.RawMessage(`{"command":"ls"}`)},
+	}
+	approved.ProviderMetadata = partmeta.Set(approved.ProviderMetadata, partmeta.KeyApproval, map[string]any{
+		"approval_id": "appr-1", "short_id": 4, "status": "pending", "can_approve": true,
+	})
+	raw, err := json.Marshal([]sdk.Message{
+		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{call, approved}},
+		{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{sdk.ToolResultPart{
+			ToolCallID: "call-2", ToolName: "exec", Result: sdk.ToolOutput{JSON: json.RawMessage(`{"stdout":"ok"}`)},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	messages := ConvertRawModelMessagesToUIAssistantMessages(raw)
+	byCall := map[string]UIMessage{}
+	for _, message := range messages {
+		if message.Type == UIMessageTool {
+			byCall[message.ToolCallID] = message
+		}
+	}
+	ask, ok := byCall["call-1"]
+	if !ok {
+		t.Fatalf("ask_user block missing: %#v", messages)
+	}
+	input, _ := ask.Input.(map[string]any)
+	if _, wrapped := input["json"]; wrapped || input["questions"] == nil {
+		t.Fatalf("ask_user input must be the plain object, got %#v", ask.Input)
+	}
+	if ask.UserInput == nil || ask.UserInput.UserInputID != "req-1" || ask.UserInput.ShortID != 3 || ask.UserInput.Status != "pending" {
+		t.Fatalf("ask_user user_input not read from SDK metadata: %#v", ask.UserInput)
+	}
+	if len(ask.UserInput.Questions) != 1 || ask.UserInput.Questions[0].Text != "name?" {
+		t.Fatalf("ask_user ui_payload questions lost: %#v", ask.UserInput)
+	}
+	exec, ok := byCall["call-2"]
+	if !ok {
+		t.Fatalf("exec block missing: %#v", messages)
+	}
+	if exec.Approval == nil || exec.Approval.ApprovalID != "appr-1" || exec.Approval.ShortID != 4 {
+		t.Fatalf("exec approval not read from SDK metadata: %#v", exec.Approval)
+	}
+	output, _ := exec.Output.(map[string]any)
+	if output["stdout"] != "ok" {
+		t.Fatalf("exec output must be the plain value, got %#v", exec.Output)
 	}
 }

@@ -1,0 +1,71 @@
+{
+  "ask_user": {
+    "additionalProperties": false,
+    "properties": {
+      "questions": {
+        "description": "Questions to ask in this single pause. Use one element unless the user must answer several related questions at once.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "allow_custom": {
+              "description": "Select kinds only: retained for compatibility; Memoh always offers and accepts custom answers.",
+              "type": "boolean"
+            },
+            "kind": {
+              "description": "single_select: the user picks exactly one option. multi_select: the user picks one or more options (select-all-that-apply, multi-answer quizzes). text: free-form text answer without options.",
+              "enum": [
+                "single_select",
+                "multi_select",
+                "text"
+              ],
+              "type": "string"
+            },
+            "options": {
+              "description": "Answer choices. Required for single_select and multi_select; forbidden for text.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "description": "Optional one-sentence tradeoff or detail.",
+                    "type": "string"
+                  },
+                  "label": {
+                    "description": "Short user-facing answer text.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label"
+                ],
+                "type": "object"
+              },
+              "maxItems": 20,
+              "minItems": 2,
+              "type": "array"
+            },
+            "placeholder": {
+              "description": "Optional placeholder for the text input (kind text) or the custom entry (allow_custom).",
+              "type": "string"
+            },
+            "text": {
+              "description": "The question text. Do not embed answer choices here. For multi_select, include a localized cue such as （多选） or (select all that apply).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "questions"
+    ],
+    "type": "object"
+  }
+}

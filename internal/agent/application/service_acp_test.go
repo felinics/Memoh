@@ -21,9 +21,11 @@ import (
 	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -828,7 +830,7 @@ func TestStreamChatWSPersistsACPUserInputProjectionOnceBeforePromptReturns(t *te
 	if len(results) != 1 || results[0].ToolCallID != "ask-1" || results[0].IsError {
 		t.Fatalf("terminal user input result = %#v, want canceled ask-1 closure", results)
 	}
-	result, ok := results[0].Result.(map[string]any)
+	result, ok := toolexec.OutputValue(results[0].Result).(map[string]any)
 	if !ok || result["status"] != userinput.StatusCanceled {
 		t.Fatalf("terminal user input payload = %#v, want canceled", results[0].Result)
 	}
@@ -2455,7 +2457,7 @@ func persistedModelMessage(t *testing.T, content json.RawMessage) ModelMessage {
 }
 
 func toolCallMetadataStatus(call sdk.ToolCallPart, key string) string {
-	raw, ok := call.ProviderMetadata[key].(map[string]any)
+	raw, ok := partmeta.Object(call.ProviderMetadata, key)
 	if !ok {
 		return ""
 	}

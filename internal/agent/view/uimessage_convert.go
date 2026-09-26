@@ -11,6 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/textutil"
 )
 
@@ -90,13 +91,18 @@ type uiDecodedModelMessage struct {
 
 // ConvertRawModelMessagesToUIAssistantMessages converts terminal stream payload
 // messages into frontend-friendly assistant UI messages.
+// ConvertRawModelMessagesToUIAssistantMessages converts the Messages payload
+// of a step or terminal stream event. That payload is a serialized
+// []sdk.Message, whose tool input and provider metadata are shaped for the
+// SDK, so it goes through the stored-shape codec before the extraction below
+// reads it the way it reads persisted rows.
 func ConvertRawModelMessagesToUIAssistantMessages(raw json.RawMessage) []UIMessage {
 	if len(raw) == 0 {
 		return nil
 	}
 
-	var messages []turn.ModelMessage
-	if err := json.Unmarshal(raw, &messages); err != nil {
+	messages, err := messageconv.SDKMessagesJSONToModelMessages(raw)
+	if err != nil {
 		return nil
 	}
 	return ConvertModelMessagesToUIAssistantMessages(messages)

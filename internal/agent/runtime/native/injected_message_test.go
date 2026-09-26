@@ -12,7 +12,9 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestAgentStreamRecordsInjectedMessageMutation(t *testing.T) {
@@ -22,23 +24,23 @@ func TestAgentStreamRecordsInjectedMessageMutation(t *testing.T) {
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
 
-	var secondCall sdk.GenerateParams
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	var secondCall sdk.Request
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		if call == 1 {
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "inject-call", ToolName: "lookup"}},
 			}, nil
 		}
 		secondCall = cloneGenerateParams(params)
-		return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 	ledger := contextfrag.NewMutationLedger()
@@ -88,23 +90,23 @@ func TestAgentStreamDroppedInjectedMessageIsNotRecorded(t *testing.T) {
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
 
-	var secondCall sdk.GenerateParams
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	var secondCall sdk.Request
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		if call == 1 {
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "drop-inject", ToolName: "lookup"}},
 			}, nil
 		}
 		secondCall = cloneGenerateParams(params)
-		return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
@@ -113,7 +115,7 @@ func TestAgentStreamDroppedInjectedMessageIsNotRecorded(t *testing.T) {
 		insertAfter int
 	}
 	var recorded []recordedInjection
-	var committed []sdk.StepResult
+	var committed []step.Record
 	for range a.Stream(context.Background(), RunConfig{
 		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
 		Messages:         []sdk.Message{sdk.UserMessage("start")},
@@ -136,9 +138,9 @@ func TestAgentStreamDroppedInjectedMessageIsNotRecorded(t *testing.T) {
 		InjectedRecorder: func(text string, insertAfter int) {
 			recorded = append(recorded, recordedInjection{text: text, insertAfter: insertAfter})
 		},
-		OnStepCommitted: func(_ context.Context, _ int, step *sdk.StepResult) error {
+		OnStepCommitted: func(_ context.Context, _ int, step *step.Record) (StepDirective, error) {
 			committed = append(committed, *step)
-			return nil
+			return StepDirective{}, nil
 		},
 	}) {
 	}
@@ -161,10 +163,10 @@ func TestAgentStreamRetryRevokesInjectedMessageRecord(t *testing.T) {
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
 
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		switch call {
 		case 1:
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "retry-inject", ToolName: "lookup"}},
 			}, nil
@@ -172,20 +174,20 @@ func TestAgentStreamRetryRevokesInjectedMessageRecord(t *testing.T) {
 			if !providerAttemptContainsText(params.Messages, marker) {
 				t.Fatal("failed provider attempt did not receive admitted injection")
 			}
-			return nil, errors.New("api error 500")
+			return sdk.ModelResult{}, errors.New("api error 500")
 		default:
 			if providerAttemptContainsText(params.Messages, marker) {
 				t.Fatal("retry provider attempt retained revoked injection")
 			}
-			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		}
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
@@ -245,21 +247,21 @@ func TestAgentStreamFailedPreflightDoesNotRecordInjectedMessage(t *testing.T) {
 	injectCh := make(chan InjectMessage, 1)
 	injectCh <- InjectMessage{Text: marker}
 
-	provider := &atomicMockProvider{handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &atomicMockProvider{handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 		if call != 1 {
-			return nil, errors.New("provider called after failed injection preflight")
+			return sdk.ModelResult{}, errors.New("provider called after failed injection preflight")
 		}
-		return &sdk.GenerateResult{
+		return sdk.ModelResult{
 			FinishReason: sdk.FinishReasonToolCalls,
 			ToolCalls:    []sdk.ToolCall{{ToolCallID: "reject-inject", ToolName: "lookup"}},
 		}, nil
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
@@ -306,9 +308,9 @@ func TestAgentStreamRecordsDuplicateAdmittedInjections(t *testing.T) {
 	injectCh <- InjectMessage{Text: marker}
 	injectCh <- InjectMessage{Text: marker}
 
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		if call == 1 {
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "duplicate-inject", ToolName: "lookup"}},
 			}, nil
@@ -320,14 +322,14 @@ func TestAgentStreamRecordsDuplicateAdmittedInjections(t *testing.T) {
 		if got := strings.Count(string(raw), marker); got != 2 {
 			t.Fatalf("provider injection count = %d, want 2: %s", got, raw)
 		}
-		return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
@@ -365,10 +367,10 @@ func TestAgentStreamRecordsLaterInjectionAtOutputBoundary(t *testing.T) {
 	injectCh := make(chan InjectMessage, 2)
 	injectCh <- InjectMessage{Text: firstMarker}
 
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		switch call {
 		case 1:
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "boundary-one", ToolName: "lookup"}},
 			}, nil
@@ -377,7 +379,7 @@ func TestAgentStreamRecordsLaterInjectionAtOutputBoundary(t *testing.T) {
 				t.Fatal("second provider call lost first boundary injection")
 			}
 			injectCh <- InjectMessage{Text: secondMarker}
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "boundary-two", ToolName: "lookup"}},
 			}, nil
@@ -385,15 +387,15 @@ func TestAgentStreamRecordsLaterInjectionAtOutputBoundary(t *testing.T) {
 			if !providerAttemptContainsText(params.Messages, secondMarker) {
 				t.Fatal("third provider call lost second boundary injection")
 			}
-			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		}
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 
@@ -434,9 +436,9 @@ func TestAgentStreamRecordsOnlyAdmittedDuplicateInjection(t *testing.T) {
 	injectCh <- InjectMessage{Text: marker}
 	injectCh <- InjectMessage{Text: marker}
 
-	provider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		if call == 1 {
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "partial-duplicate", ToolName: "lookup"}},
 			}, nil
@@ -444,14 +446,14 @@ func TestAgentStreamRecordsOnlyAdmittedDuplicateInjection(t *testing.T) {
 		if got := countRound8MessageText(params.Messages, marker); got != 1 {
 			t.Fatalf("provider duplicate count = %d, want 1", got)
 		}
-		return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 	}}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return map[string]any{"ok": true}, nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 		},
 	}}}})
 

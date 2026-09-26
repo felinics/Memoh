@@ -107,7 +107,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		}
 		// Anthropic extended thinking has two wire shapes by model generation:
 		//   - 4.6+ (Adaptive): thinking{type:"adaptive"}; effort is carried
-		//     per-request via output_config.effort (see BuildReasoningOptions).
+		//     per-request via output_config.effort (see ApplyReasoningToRequest).
 		//     budget_tokens is deprecated on 4.6 and rejected (400) on 4.7+, so it
 		//     is never sent here.
 		//   - <=4.5 (legacy): thinking is only enabled via
@@ -185,14 +185,27 @@ func appendChatCompletionsCompat(
 	}
 }
 
-// BuildReasoningOptions returns per-request SDK generation options for
-// reasoning/thinking. It only ever sets an effort string (output_config.effort
-// for Anthropic, reasoning.effort for OpenAI); the adaptive thinking flag is set
-// at provider construction time in NewSDKChatModel. No token budgets are sent.
-func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
+// ApplyReasoningToRequest sets Request.ReasoningEffort from cfg when
+// ReasoningEffortParam reports a value. It only ever sets an effort string
+// (output_config.effort for Anthropic, reasoning.effort for OpenAI); the
+// adaptive thinking flag is set at provider construction time in
+// NewSDKChatModel, and no token budgets are sent.
+func ApplyReasoningToRequest(req *sdk.Request, cfg SDKModelConfig) {
+	if req == nil {
+		return
+	}
+	if effort, ok := ReasoningEffortParam(cfg); ok {
+		req.ReasoningEffort = &effort
+	}
+}
+
+// ReasoningEffortParam resolves the per-request reasoning effort value for the
+// resolved thinking decision. ok reports whether an effort should be sent at
+// all; ApplyReasoningToRequest sets Request.ReasoningEffort from it.
+func ReasoningEffortParam(cfg SDKModelConfig) (string, bool) {
 	rc := cfg.ReasoningConfig
 	if rc == nil {
-		return nil
+		return "", false
 	}
 	ct := ClientType(cfg.ClientType)
 
@@ -206,11 +219,11 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		(isDeepSeekChatCompletionsCompat(cfg.ChatCompletionsCompat) || isMiniMaxChatCompletionsCompat(cfg.ChatCompletionsCompat)) {
 		switch {
 		case rc.Disabled:
-			return []sdk.GenerateOption{sdk.WithReasoningEffort(ReasoningEffortNone)}
+			return ReasoningEffortNone, true
 		case rc.Active && rc.Effort != "":
-			return []sdk.GenerateOption{sdk.WithReasoningEffort(openAIWireEffort(ct, rc.Effort))}
+			return openAIWireEffort(ct, rc.Effort), true
 		default:
-			return nil
+			return "", false
 		}
 	}
 
@@ -222,35 +235,35 @@ func BuildReasoningOptions(cfg SDKModelConfig) []sdk.GenerateOption {
 		// so send nothing for them. When disabled, send nothing too (absence of
 		// thinking == off for Anthropic).
 		if rc.Active && rc.Adaptive && rc.Effort != "" {
-			return []sdk.GenerateOption{sdk.WithReasoningEffort(rc.Effort)}
+			return rc.Effort, true
 		}
-		return nil
+		return "", false
 
 	case ClientTypeGoogleGenerativeAI:
 		// Google's thinking control rides on the provider (see googleThinkingFor),
 		// because budget and level are mutually exclusive and which one applies is
 		// a property of the model, not of the request.
-		return nil
+		return "", false
 
 	case ClientTypeOpenAIResponses, ClientTypeOpenAICodex, ClientTypeOpenAICompletions:
-		return openAIEffortOptions(ct, rc)
+		return openAIEffortParam(ct, rc)
 
 	default:
-		return openAIEffortOptions(ct, rc)
+		return openAIEffortParam(ct, rc)
 	}
 }
 
-// openAIEffortOptions maps a reasoning decision to OpenAI-style reasoning.effort.
+// openAIEffortParam maps a reasoning decision to OpenAI-style reasoning.effort.
 // OpenAI expresses "off" as a member of the same enum ("none" from gpt-5.1 on),
 // so the off state travels in the very field that carries the tiers.
-func openAIEffortOptions(clientType ClientType, rc *ReasoningConfig) []sdk.GenerateOption {
+func openAIEffortParam(clientType ClientType, rc *ReasoningConfig) (string, bool) {
 	switch {
 	case rc.Active:
 		effort := openAIWireEffort(clientType, rc.Effort)
 		if effort == "" {
 			effort = ReasoningEffortMedium
 		}
-		return []sdk.GenerateOption{sdk.WithReasoningEffort(effort)}
+		return effort, true
 	case rc.Disabled:
 		// OffEffort is "none" when the model advertised that it can be turned off,
 		// and "" when it cannot. Omitting the field in the latter case lets the
@@ -259,11 +272,11 @@ func openAIEffortOptions(clientType ClientType, rc *ReasoningConfig) []sdk.Gener
 		// extended thinking), which is the opposite of what the user asked for.
 		off := openAIWireEffort(clientType, rc.OffEffort)
 		if off == "" {
-			return nil
+			return "", false
 		}
-		return []sdk.GenerateOption{sdk.WithReasoningEffort(off)}
+		return off, true
 	default:
-		return nil
+		return "", false
 	}
 }
 

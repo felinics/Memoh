@@ -11,12 +11,14 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type recordingReasoningProvider struct {
-	params sdk.GenerateParams
+	params sdk.Request
 }
 
 func (*recordingReasoningProvider) Name() string {
@@ -35,19 +37,19 @@ func (*recordingReasoningProvider) TestModel(context.Context, string) (*sdk.Mode
 	return &sdk.ModelTestResult{Supported: true}, nil
 }
 
-func (p *recordingReasoningProvider) DoGenerate(_ context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (p *recordingReasoningProvider) DoGenerate(_ context.Context, params sdk.Request) (sdk.ModelResult, error) {
 	p.params = params
-	return &sdk.GenerateResult{
+	return sdk.ModelResult{
 		Text:         "ok",
 		FinishReason: sdk.FinishReasonStop,
 	}, nil
 }
 
-func (*recordingReasoningProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (*recordingReasoningProvider) DoStream(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 	return nil, nil
 }
 
-func TestBuildGenerateOptionsPreservesDeepSeekReasoningDisabled(t *testing.T) {
+func TestAgentGeneratePreservesDeepSeekReasoningDisabled(t *testing.T) {
 	t.Parallel()
 
 	provider := &recordingReasoningProvider{}
@@ -61,9 +63,8 @@ func TestBuildGenerateOptionsPreservesDeepSeekReasoningDisabled(t *testing.T) {
 		ChatCompletionsCompat: models.ChatCompletionsCompatDeepSeek,
 	}
 
-	opts := (*Agent)(nil).buildGenerateOptions(context.Background(), cfg, nil, nil, nil)
-	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
-		t.Fatalf("generate text result: %v", err)
+	if _, err := New(Deps{}).Generate(context.Background(), cfg); err != nil {
+		t.Fatalf("Generate() error = %v", err)
 	}
 	if provider.params.ReasoningEffort == nil {
 		t.Fatal("expected reasoning effort to be set")
@@ -76,7 +77,7 @@ func TestBuildGenerateOptionsPreservesDeepSeekReasoningDisabled(t *testing.T) {
 type recordingPromptCacheProvider struct {
 	mu     sync.Mutex
 	calls  int
-	params []sdk.GenerateParams
+	params []sdk.Request
 }
 
 func (*recordingPromptCacheProvider) Name() string {
@@ -95,7 +96,7 @@ func (*recordingPromptCacheProvider) TestModel(context.Context, string) (*sdk.Mo
 	return &sdk.ModelTestResult{Supported: true}, nil
 }
 
-func (p *recordingPromptCacheProvider) DoGenerate(_ context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (p *recordingPromptCacheProvider) DoGenerate(_ context.Context, params sdk.Request) (sdk.ModelResult, error) {
 	p.mu.Lock()
 	p.calls++
 	call := p.calls
@@ -103,40 +104,40 @@ func (p *recordingPromptCacheProvider) DoGenerate(_ context.Context, params sdk.
 	p.mu.Unlock()
 
 	if call == 1 {
-		return &sdk.GenerateResult{
+		return sdk.ModelResult{
 			FinishReason: sdk.FinishReasonToolCalls,
 			ToolCalls: []sdk.ToolCall{{
 				ToolCallID: "call-1",
 				ToolName:   "noop",
-				Input:      map[string]any{},
+				Input:      toolexec.ArgumentsFromValue(map[string]any{}),
 			}},
 		}, nil
 	}
-	return &sdk.GenerateResult{
+	return sdk.ModelResult{
 		Text:         "ok",
 		FinishReason: sdk.FinishReasonStop,
 	}, nil
 }
 
-func (*recordingPromptCacheProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (*recordingPromptCacheProvider) DoStream(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 	return nil, nil
 }
 
-func (p *recordingPromptCacheProvider) snapshotParams() []sdk.GenerateParams {
+func (p *recordingPromptCacheProvider) snapshotParams() []sdk.Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make([]sdk.GenerateParams, len(p.params))
+	out := make([]sdk.Request, len(p.params))
 	for i := range p.params {
 		out[i] = cloneGenerateParams(p.params[i])
 	}
 	return out
 }
 
-func cloneGenerateParams(params sdk.GenerateParams) sdk.GenerateParams {
+func cloneGenerateParams(params sdk.Request) sdk.Request {
 	cloned := params
 	cloned.Messages = cloneMessages(params.Messages)
 	if params.Tools != nil {
-		cloned.Tools = append([]sdk.Tool(nil), params.Tools...)
+		cloned.Tools = append([]sdk.ToolDefinition(nil), params.Tools...)
 	}
 	return cloned
 }
@@ -167,12 +168,12 @@ func cloneMessagePart(part sdk.MessagePart) sdk.MessagePart {
 			p.CacheControl = &cc
 		}
 		if p.ProviderMetadata != nil {
-			p.ProviderMetadata = cloneMap(p.ProviderMetadata)
+			p.ProviderMetadata = p.ProviderMetadata.Clone()
 		}
 		return p
 	case sdk.ReasoningPart:
 		if p.ProviderMetadata != nil {
-			p.ProviderMetadata = cloneMap(p.ProviderMetadata)
+			p.ProviderMetadata = p.ProviderMetadata.Clone()
 		}
 		return p
 	case sdk.ImagePart:
@@ -192,15 +193,7 @@ func cloneMessagePart(part sdk.MessagePart) sdk.MessagePart {
 	}
 }
 
-func cloneMap(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func TestBuildGenerateOptionsBackgroundPrepareKeepsCachedAnthropicSystemPromoted(t *testing.T) {
+func TestAgentGenerateBackgroundPrepareKeepsCachedAnthropicSystemPromoted(t *testing.T) {
 	t.Parallel()
 
 	provider := &recordingPromptCacheProvider{}
@@ -221,16 +214,17 @@ func TestBuildGenerateOptionsBackgroundPrepareKeepsCachedAnthropicSystemPromoted
 		},
 	}
 
-	testTools := []sdk.Tool{{
+	testTools := []toolexec.Tool{{
 		Name: "noop",
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return "ok", nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue("ok"), nil
 		},
 	}}
-	opts := (*Agent)(nil).buildGenerateOptions(context.Background(), cfg, testTools, testTools, nil)
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: testTools}})
 
-	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
-		t.Fatalf("generate text result: %v", err)
+	if _, err := a.Generate(context.Background(), cfg); err != nil {
+		t.Fatalf("Generate() error = %v", err)
 	}
 
 	params := provider.snapshotParams()
@@ -250,7 +244,7 @@ func TestBuildGenerateOptionsBackgroundPrepareKeepsCachedAnthropicSystemPromoted
 	}
 }
 
-func TestBuildGenerateOptionsRunningTaskSummaryInjectsUserMessageNotSystem(t *testing.T) {
+func TestAgentGenerateRunningTaskSummaryInjectsUserMessageNotSystem(t *testing.T) {
 	t.Parallel()
 
 	provider := &recordingPromptCacheProvider{}
@@ -286,16 +280,17 @@ func TestBuildGenerateOptionsRunningTaskSummaryInjectsUserMessageNotSystem(t *te
 		},
 	}
 
-	testTools := []sdk.Tool{{
+	testTools := []toolexec.Tool{{
 		Name: "noop",
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return "ok", nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue("ok"), nil
 		},
 	}}
-	opts := (*Agent)(nil).buildGenerateOptions(context.Background(), cfg, testTools, testTools, nil)
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: testTools}})
 
-	if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
-		t.Fatalf("generate text result: %v", err)
+	if _, err := a.Generate(context.Background(), cfg); err != nil {
+		t.Fatalf("Generate() error = %v", err)
 	}
 
 	params := provider.snapshotParams()
@@ -371,15 +366,4 @@ func systemTextPartAt(t *testing.T, messages []sdk.Message, index int) (string, 
 		t.Fatalf("expected system text part at index %d, got %#v", index, messages[index].Content[0])
 	}
 	return part.Text, part.CacheControl
-}
-
-func TestIsAskUserArgumentParseError(t *testing.T) {
-	t.Parallel()
-
-	if !isAskUserArgumentParseError(`openai: unmarshal tool call arguments for "ask_user": invalid character 'ç' after object key:value pair`) {
-		t.Fatal("expected ask_user argument parse error to match")
-	}
-	if isAskUserArgumentParseError(`openai: unmarshal tool call arguments for "web_search": invalid character`) {
-		t.Fatal("expected other tool argument errors not to match")
-	}
 }

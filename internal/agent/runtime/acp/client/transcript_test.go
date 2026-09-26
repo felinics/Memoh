@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,8 @@ import (
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // TestTranscriptSurvivesEventBufferCap ensures transcript persistence is not
@@ -133,8 +136,11 @@ func TestTranscriptKeepsSubmittedUserInputAnswers(t *testing.T) {
 
 	messages := recorder.Messages("")
 	toolCall := messages[0].Content[0].(sdk.ToolCallPart)
-	metadata := toolCall.ProviderMetadata["user_input"].(map[string]any)
-	answers := metadata["answers"].([]userinput.UIAnswer)
+	metadata, _ := partmeta.Object(toolCall.ProviderMetadata, partmeta.KeyUserInput)
+	var answers []userinput.UIAnswer
+	if raw, err := json.Marshal(metadata["answers"]); err != nil || json.Unmarshal(raw, &answers) != nil {
+		t.Fatalf("submitted answers did not decode: %#v", metadata["answers"])
+	}
 	if len(answers) != 1 || answers[0].Selected[0].Label != "Yes" {
 		t.Fatalf("submitted answers = %#v", answers)
 	}
@@ -163,7 +169,7 @@ func TestTranscriptLimitsToolResultOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("message[1] = %#v, want tool result", messages[1])
 	}
-	output, ok := result.Result.(map[string]any)
+	output, ok := toolexec.OutputValue(result.Result).(map[string]any)
 	if !ok {
 		t.Fatalf("tool result = %#v, want map", result.Result)
 	}

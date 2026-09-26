@@ -8,6 +8,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -20,7 +21,7 @@ func TestHistoryRecordPathPreservesLegacyServiceMessagePipeline(t *testing.T) {
 			sdk.ToolCallPart{
 				ToolCallID: "call-1",
 				ToolName:   "lookup",
-				Input:      map[string]any{"q": "memoh"},
+				Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "memoh"}),
 			},
 		},
 	}
@@ -28,7 +29,7 @@ func TestHistoryRecordPathPreservesLegacyServiceMessagePipeline(t *testing.T) {
 	toolResultSDK := sdk.ToolMessage(sdk.ToolResultPart{
 		ToolCallID: "call-1",
 		ToolName:   "lookup",
-		Result:     "tool result",
+		Result:     toolexec.OutputFromValue("tool result"),
 	})
 	toolResult := sdkMessagesToModelMessages([]sdk.Message{toolResultSDK})[0]
 	rows := []messagepkg.Message{

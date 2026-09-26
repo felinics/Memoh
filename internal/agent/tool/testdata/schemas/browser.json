@@ -1,0 +1,281 @@
+{
+  "browser_action": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "description": "Browser action to perform. Compatibility aliases dblclick, scrollintoview, keyboard_type, and keyboard_inserttext are also accepted; keydown and keyup dispatch a single raw key event.",
+        "enum": [
+          "navigate",
+          "click",
+          "double_click",
+          "focus",
+          "type",
+          "fill",
+          "press",
+          "hover",
+          "select",
+          "check",
+          "uncheck",
+          "scroll",
+          "scroll_into_view",
+          "drag",
+          "upload",
+          "wait",
+          "go_back",
+          "go_forward",
+          "reload",
+          "tab_new",
+          "tab_select",
+          "tab_close"
+        ],
+        "type": "string"
+      },
+      "amount": {
+        "default": 500,
+        "description": "Scroll amount in pixels.",
+        "maximum": 5000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "direction": {
+        "description": "Scroll direction. Defaults to down.",
+        "enum": [
+          "up",
+          "down",
+          "left",
+          "right"
+        ],
+        "type": "string"
+      },
+      "files": {
+        "description": "Workspace file paths to upload.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "key": {
+        "description": "Key or key chord for press, e.g. Enter, Tab, Escape, Control+a.",
+        "type": "string"
+      },
+      "ref": {
+        "description": "Element ref such as e12 from a browser observation snapshot or screenshot annotation. Preferred over selector.",
+        "type": "string"
+      },
+      "selector": {
+        "description": "CSS selector for the target element when no ref is available.",
+        "type": "string"
+      },
+      "tab_index": {
+        "description": "Tab index for tab_select or tab_close.",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "target_ref": {
+        "description": "Drop target ref for drag, preferred over target_selector.",
+        "type": "string"
+      },
+      "target_selector": {
+        "description": "Drop target CSS selector for drag when no target_ref is available.",
+        "type": "string"
+      },
+      "text": {
+        "description": "Text for type or fill.",
+        "type": "string"
+      },
+      "timeout": {
+        "default": 1000,
+        "description": "Timeout in milliseconds for wait or navigation readiness.",
+        "maximum": 45000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "url": {
+        "description": "URL to open for navigate or tab_new.",
+        "type": "string"
+      },
+      "value": {
+        "description": "Option value for select.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "type": "object"
+  },
+  "browser_observe": {
+    "additionalProperties": false,
+    "properties": {
+      "full_page": {
+        "default": false,
+        "description": "Capture a full-page screenshot for screenshot.",
+        "type": "boolean"
+      },
+      "observe": {
+        "description": "What to observe from the page.",
+        "enum": [
+          "snapshot",
+          "get_content",
+          "screenshot_annotate",
+          "screenshot",
+          "get_html",
+          "evaluate",
+          "get_url",
+          "get_title",
+          "pdf",
+          "tab_list"
+        ],
+        "type": "string"
+      },
+      "ref": {
+        "description": "Element ref from snapshot or screenshot_annotate. Scopes get_content/get_html and evaluate helper use.",
+        "type": "string"
+      },
+      "script": {
+        "description": "JavaScript expression to evaluate. Keep it short and read-only unless the task requires otherwise.",
+        "type": "string"
+      },
+      "selector": {
+        "description": "CSS selector to scope get_content or get_html when no ref is available.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "observe"
+    ],
+    "type": "object"
+  },
+  "browser_remote_session": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "description": "Session action to perform.",
+        "enum": [
+          "create",
+          "close",
+          "status"
+        ],
+        "type": "string"
+      },
+      "session_id": {
+        "description": "Target/session ID returned by create or status.",
+        "type": "string"
+      },
+      "url": {
+        "description": "Optional URL to open when creating a target.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "type": "object"
+  },
+  "computer_action": {
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "description": "Desktop action to perform.",
+        "enum": [
+          "click",
+          "double_click",
+          "type",
+          "fill",
+          "key",
+          "scroll",
+          "drag",
+          "wait",
+          "mouse_move",
+          "pointer"
+        ],
+        "type": "string"
+      },
+      "amount": {
+        "default": 500,
+        "description": "Scroll amount or wait duration in milliseconds.",
+        "maximum": 10000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "button": {
+        "description": "Mouse button. Defaults to left.",
+        "enum": [
+          "left",
+          "middle",
+          "right"
+        ],
+        "type": "string"
+      },
+      "button_mask": {
+        "description": "Raw RFB button mask for pointer actions.",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "direction": {
+        "description": "Scroll direction. Defaults to down.",
+        "enum": [
+          "up",
+          "down",
+          "left",
+          "right"
+        ],
+        "type": "string"
+      },
+      "key": {
+        "description": "Key or key chord, e.g. Enter, Escape, Control+a.",
+        "type": "string"
+      },
+      "ref": {
+        "description": "Element ref such as e3 from a desktop observation snapshot. Preferred over coordinates for click/double_click/type/fill/scroll.",
+        "type": "string"
+      },
+      "text": {
+        "description": "Text to type or fill into the target.",
+        "type": "string"
+      },
+      "to_x": {
+        "description": "Destination X coordinate for drag.",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "to_y": {
+        "description": "Destination Y coordinate for drag.",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "x": {
+        "description": "X coordinate in desktop pixels (used when no ref is provided or as fallback).",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "y": {
+        "description": "Y coordinate in desktop pixels (used when no ref is provided or as fallback).",
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "type": "object"
+  },
+  "computer_observe": {
+    "additionalProperties": false,
+    "properties": {
+      "observe": {
+        "description": "What to observe from the desktop.",
+        "enum": [
+          "snapshot",
+          "screenshot"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "observe"
+    ],
+    "type": "object"
+  }
+}

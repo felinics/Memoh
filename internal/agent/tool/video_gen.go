@@ -11,6 +11,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/settings"
 	videopkg "github.com/felinics/memoh/internal/video"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -60,7 +61,7 @@ func NewVideoGenProvider(
 	}
 }
 
-func (p *VideoGenProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *VideoGenProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.settings == nil || p.video == nil || p.bgManager == nil {
 		return nil, nil
 	}
@@ -75,31 +76,29 @@ func (p *VideoGenProvider) Tools(ctx context.Context, session SessionContext) ([
 	if strings.TrimSpace(botSettings.VideoModelID) == "" {
 		return nil, nil
 	}
-	sess := session
-	return []sdk.Tool{
-		{
-			Name:        ToolGenerateVideo().String(),
-			Description: "Start a background video generation task using the configured video generation model. Returns a task_id immediately; use wait_until(task_id), then get_background_status(task_id) to inspect the result.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"prompt":           map[string]any{"type": "string", "description": "Detailed description of the video to generate"},
-					"duration_seconds": map[string]any{"type": "integer", "description": "Optional duration in seconds"},
-					"resolution":       map[string]any{"type": "string", "description": "Optional resolution, e.g. 720p or 1080p"},
-					"aspect_ratio":     map[string]any{"type": "string", "description": "Optional aspect ratio, e.g. 16:9, 9:16, or 1:1"},
-					"size":             map[string]any{"type": "string", "description": "Optional provider-specific size, e.g. 1280x720"},
-					"generate_audio":   map[string]any{"type": "boolean", "description": "Whether the provider should generate audio when supported"},
-				},
-				"required": []string{"prompt"},
-			},
-			Execute: func(execCtx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execGenerateVideo(execCtx.Context, sess, inputAsMap(input))
-			},
-		},
-	}, nil
+	return p.videoTools(session), nil
 }
 
-func (p *VideoGenProvider) execGenerateVideo(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+type generateVideoArgs struct {
+	Prompt          string `json:"prompt" jsonschema:"Detailed description of the video to generate"`
+	DurationSeconds *int   `json:"duration_seconds,omitempty" jsonschema:"Optional duration in seconds"`
+	Resolution      string `json:"resolution,omitempty" jsonschema:"Optional resolution, e.g. 720p or 1080p"`
+	AspectRatio     string `json:"aspect_ratio,omitempty" jsonschema:"Optional aspect ratio, e.g. 16:9, 9:16, or 1:1"`
+	Size            string `json:"size,omitempty" jsonschema:"Optional provider-specific size, e.g. 1280x720"`
+	GenerateAudio   *bool  `json:"generate_audio,omitempty" jsonschema:"Whether the provider should generate audio when supported"`
+}
+
+func (p *VideoGenProvider) videoTools(session SessionContext) []toolexec.Tool {
+	sess := session
+	return []toolexec.Tool{toolexec.Define(ToolGenerateVideo().String(),
+		"Start a background video generation task using the configured video generation model. Returns a task_id immediately; use wait_until(task_id), then get_background_status(task_id) to inspect the result.",
+		func(execCtx *toolexec.ToolExecContext, args generateVideoArgs) (sdk.ToolOutput, error) {
+			return toolexec.OutputPair(p.execGenerateVideo(execCtx.Context, sess, args))
+		},
+	)}
+}
+
+func (p *VideoGenProvider) execGenerateVideo(ctx context.Context, session SessionContext, args generateVideoArgs) (any, error) {
 	if p.bgManager == nil {
 		return nil, errors.New("background task manager is not available")
 	}
@@ -107,7 +106,7 @@ func (p *VideoGenProvider) execGenerateVideo(ctx context.Context, session Sessio
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
 	}
-	prompt := strings.TrimSpace(StringArg(args, "prompt"))
+	prompt := strings.TrimSpace(args.Prompt)
 	if prompt == "" {
 		return nil, errors.New("prompt is required")
 	}
@@ -126,10 +125,7 @@ func (p *VideoGenProvider) execGenerateVideo(ctx context.Context, session Sessio
 		return nil, fmt.Errorf("failed to resolve video model: %w", err)
 	}
 
-	opts, err := videoOptionsFromArgs(model, cfg, prompt, args)
-	if err != nil {
-		return nil, err
-	}
+	opts := videoOptions(model, cfg, prompt, args)
 	description := "generate video"
 	if prompt != "" {
 		description = "generate video: " + truncateStr(prompt, 80)
@@ -150,32 +146,28 @@ func (p *VideoGenProvider) execGenerateVideo(ctx context.Context, session Sessio
 	}, nil
 }
 
-func videoOptionsFromArgs(model *sdk.VideoModel, cfg map[string]any, prompt string, args map[string]any) ([]sdk.VideoOption, error) {
+func videoOptions(model *sdk.VideoModel, cfg map[string]any, prompt string, args generateVideoArgs) []sdk.VideoOption {
 	opts := []sdk.VideoOption{
 		sdk.WithVideoModel(model),
 		sdk.WithVideoPrompt(prompt),
 		sdk.WithVideoConfig(cfg),
 	}
-	if v := strings.TrimSpace(StringArg(args, "size")); v != "" {
+	if v := strings.TrimSpace(args.Size); v != "" {
 		opts = append(opts, sdk.WithVideoSize(v))
 	}
-	if v := strings.TrimSpace(StringArg(args, "resolution")); v != "" {
+	if v := strings.TrimSpace(args.Resolution); v != "" {
 		opts = append(opts, sdk.WithVideoResolution(v))
 	}
-	if v := strings.TrimSpace(StringArg(args, "aspect_ratio")); v != "" {
+	if v := strings.TrimSpace(args.AspectRatio); v != "" {
 		opts = append(opts, sdk.WithVideoAspectRatio(v))
 	}
-	if v, ok, err := IntArg(args, "duration_seconds"); err != nil {
-		return nil, err
-	} else if ok && v > 0 {
-		opts = append(opts, sdk.WithVideoDuration(v))
+	if args.DurationSeconds != nil && *args.DurationSeconds > 0 {
+		opts = append(opts, sdk.WithVideoDuration(*args.DurationSeconds))
 	}
-	if v, ok, err := BoolArg(args, "generate_audio"); err != nil {
-		return nil, err
-	} else if ok {
-		opts = append(opts, sdk.WithVideoGenerateAudio(v))
+	if args.GenerateAudio != nil {
+		opts = append(opts, sdk.WithVideoGenerateAudio(*args.GenerateAudio))
 	}
-	return opts, nil
+	return opts
 }
 
 func (p *VideoGenProvider) runVideoTask(ctx context.Context, taskID, botID string, model *sdk.VideoModel, opts []sdk.VideoOption) {

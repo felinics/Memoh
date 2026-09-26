@@ -10,6 +10,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
@@ -60,37 +61,28 @@ func NewACPAgentsProvider(log *slog.Logger, pool ACPRuntimePool, queries dbstore
 	}
 }
 
-func (p *ACPAgentsProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *ACPAgentsProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.pool == nil || p.queries == nil {
 		return nil, nil
 	}
 	sess := session
-	return []sdk.Tool{
+	return []toolexec.Tool{
 		{
 			Name: ToolListACPAgents().String(),
 			Description: "List generic ACP agents enabled for this bot. Without arguments this returns the agent catalog instantly. " +
 				"Pass agent_id to also fetch that agent's available models and reasoning efforts — this boots a temporary agent runtime and can take many seconds, so only do it when you actually need model/effort ids (e.g. for create_schedule).",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"agent_id": map[string]any{
-						"type":        "string",
-						"description": "Optional ACP agent id from the catalog. When set, the response includes that agent's models and reasoning efforts.",
-					},
-				},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				args := inputAsMap(input)
+			Parameters: toolexec.SchemaFor[listACPAgentsArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args listACPAgentsArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, errors.New("bot_id is required")
+					return sdk.ToolOutput{}, errors.New("bot_id is required")
 				}
-				agentID := acpprofile.NormalizeAgentID(StringArg(args, "agent_id"))
+				agentID := acpprofile.NormalizeAgentID(args.AgentID)
 				if agentID == "" {
-					return p.listAgents(ctx.Context, botID)
+					return toolexec.OutputPair(p.listAgents(ctx.Context, botID))
 				}
-				return p.describeAgent(ctx.Context, botID, agentID, sess)
-			},
+				return toolexec.OutputPair(p.describeAgent(ctx.Context, botID, agentID, sess))
+			}),
 		},
 	}, nil
 }
@@ -187,4 +179,8 @@ func (p *ACPAgentsProvider) botMetadata(ctx context.Context, botID string) ([]by
 		return nil, fmt.Errorf("get bot: %w", err)
 	}
 	return bot.Metadata, nil
+}
+
+type listACPAgentsArgs struct {
+	AgentID string `json:"agent_id,omitempty" jsonschema:"Optional ACP agent id from the catalog. When set, the response includes that agent's models and reasoning efforts."`
 }

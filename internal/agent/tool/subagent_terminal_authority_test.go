@@ -10,6 +10,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 type terminalRaceSpawnAgent struct {
@@ -132,7 +133,7 @@ func TestSpawnedResolvedTerminalSurvivesLateBackgroundStop(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Tools returned error: %v", err)
 			}
-			var spawnTool sdk.Tool
+			var spawnTool toolexec.Tool
 			for _, tool := range toolList {
 				if tool.Name == "spawn_agent" {
 					spawnTool = tool
@@ -149,11 +150,11 @@ func TestSpawnedResolvedTerminalSurvivesLateBackgroundStop(t *testing.T) {
 			}
 			done := make(chan execution, 1)
 			go func() {
-				result, err := spawnTool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+				result, err := spawnTool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{
 					"id":   "worker",
 					"task": "finish once",
-				})
-				done <- execution{result: result, err: err}
+				}))
+				done <- execution{result: toolexec.OutputValue(result), err: err}
 			}()
 
 			select {

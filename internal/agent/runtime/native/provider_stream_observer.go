@@ -11,15 +11,19 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/telemetry"
 )
 
+// providerCallObserver wraps the provider for both loop entry points: it
+// times every model call as its own span, forwards part timings to the live
+// event stream, and gives the steer gate its view of the raw part stream.
 type providerCallObserver struct {
 	sdk.Provider
 	observe func(StreamEvent)
 	steer   *modelSteerGate
 	// model names the call for the span. It is captured here rather than read
-	// from GenerateParams because the provider is handed params, not the model
+	// from the request because the provider is handed a request, not the model
 	// record the rest of the runtime knows the call by.
 	model modelIdentity
 	// calls counts provider calls within one run, so a waterfall says which
@@ -39,8 +43,8 @@ func modelWithProviderCallObserver(model *sdk.Model, observe func(StreamEvent), 
 	}
 	observed := *model
 	provider := model.Provider
-	// A final-steer continuation reuses the model from the preceding call.
-	// Replace our observer instead of nesting another stream/notification loop.
+	// A continuation reuses the model from the preceding segment. Replace our
+	// observer instead of nesting another stream/notification loop.
 	for {
 		previous, ok := provider.(providerCallObserver)
 		if !ok {
@@ -67,7 +71,7 @@ func modelWithProviderCallObserver(model *sdk.Model, observe func(StreamEvent), 
 //
 // Unlike the rest of the runtime this hands the span's context to the layer
 // below. That is safe here and nowhere above: the wrapped provider only makes
-// the HTTP request, it does not run tools, so nothing the SDK executes can
+// the HTTP request, it does not run tools, so nothing the loop executes can
 // end up parented to a model span.
 func (p providerCallObserver) startCallSpan(ctx context.Context, name string) (context.Context, trace.Span) {
 	index := p.calls.Add(1) - 1
@@ -104,14 +108,16 @@ func endCallSpan(ctx context.Context, span trace.Span, err error) {
 	span.End()
 }
 
-func (p providerCallObserver) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+//nolint:gocritic // hugeParam: DoGenerate implements the sdk.Provider seam, which passes Request by value.
+func (p providerCallObserver) DoGenerate(ctx context.Context, req sdk.Request) (sdk.ModelResult, error) {
 	ctx, span := p.startCallSpan(ctx, spanModelGenerate)
-	result, err := p.Provider.DoGenerate(ctx, params)
+	result, err := p.Provider.DoGenerate(ctx, req)
 	endCallSpan(ctx, span, err)
 	return result, err
 }
 
-func (p providerCallObserver) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+//nolint:gocritic // hugeParam: DoStream implements the sdk.Provider seam, which passes Request by value.
+func (p providerCallObserver) DoStream(ctx context.Context, req sdk.Request) (<-chan sdk.StreamPart, error) {
 	// Every provider call begins a fresh attempt. For ordinary multi-step runs
 	// the previous step has already consumed or checkpointed its timings; for a
 	// retry this discards the failed attempt before replacement parts arrive.
@@ -121,22 +127,20 @@ func (p providerCallObserver) DoStream(ctx context.Context, params sdk.GenerateP
 	ctx, span := p.startCallSpan(ctx, spanModelStream)
 	started := time.Now()
 	p.steer.begin()
-	result, err := p.Provider.DoStream(ctx, params)
-	if err != nil || result == nil || result.Stream == nil {
+	source, err := p.Provider.DoStream(ctx, req)
+	if err != nil || source == nil {
 		endCallSpan(ctx, span, err)
-		return result, err
+		return source, err
 	}
 	// Nothing to watch for and nothing to record: hand the provider's own
 	// channel straight back rather than paying for a goroutine and a hop on
 	// every part of every call.
 	if p.observe == nil && p.steer == nil && !span.IsRecording() {
 		span.End()
-		return result, nil
+		return source, nil
 	}
 
-	source := result.Stream
 	observed := make(chan sdk.StreamPart)
-	result.Stream = observed
 	go func() {
 		var streamErr error
 		sawFirstPart := false
@@ -164,9 +168,6 @@ func (p providerCallObserver) DoStream(ctx context.Context, params sdk.GenerateP
 			// almost none of that waiting. It is recorded here rather than as
 			// a span of its own because one call producing two nested spans
 			// would double every model row in a waterfall.
-			//
-			// Measured at this layer the number is the provider's, not ours:
-			// the SDK buffers parts 64 deep before the runtime sees them.
 			if !sawFirstPart && partCarriesContent(part) {
 				sawFirstPart = true
 				span.SetAttributes(attribute.Int64("agent.model.first_part_ms", time.Since(started).Milliseconds()))
@@ -184,7 +185,7 @@ func (p providerCallObserver) DoStream(ctx context.Context, params sdk.GenerateP
 			}
 		}
 	}()
-	return result, nil
+	return observed, nil
 }
 
 // partCarriesContent reports whether the provider has said something.
@@ -222,12 +223,10 @@ func providerPartTimingEvent(part sdk.StreamPart) (StreamEvent, bool) {
 		return StreamEvent{Type: EventToolCallInputStart}, true
 	case *sdk.StreamToolCallPart:
 		return StreamEvent{Type: EventToolCallStart}, true
-	case *sdk.ToolProgressPart:
+	case *toolexec.ToolProgressPart:
 		return StreamEvent{Type: EventToolCallProgress}, true
-	case *sdk.ToolApprovalRequestPart:
+	case *toolexec.ToolApprovalRequestPart:
 		return StreamEvent{Type: EventToolApprovalRequest}, true
-	case *sdk.AbortPart:
-		return StreamEvent{Type: EventAgentAbort}, true
 	default:
 		return StreamEvent{}, false
 	}

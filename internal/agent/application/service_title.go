@@ -293,19 +293,18 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 		sdkModel, cacheTTL, "", []sdk.Message{sdk.UserMessage(prompt)}, nil,
 	)
 
-	client := sdk.NewClient()
-	text, err := client.GenerateText(genCtx,
-		sdk.WithModel(sdkModel),
-		sdk.WithSystem(system),
-		sdk.WithMessages(messages),
-		sdk.WithMaxTokens(titleGenerateMaxTokens),
-	)
+	maxTokens := titleGenerateMaxTokens
+	result, err := sdkModel.Generate(genCtx, sdk.Request{
+		System:    system,
+		Messages:  messages,
+		MaxTokens: &maxTokens,
+	})
 	if err != nil {
 		s.logger.WarnContext(ctx, "title gen: LLM call failed", slog.Any("error", err))
 		return ""
 	}
 
-	title := strings.TrimSpace(text)
+	title := strings.TrimSpace(result.Text)
 	title = strings.Trim(title, "\"'`")
 	title = strings.TrimSpace(title)
 	return title

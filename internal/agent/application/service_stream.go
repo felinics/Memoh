@@ -269,7 +269,6 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		go s.maybeGenerateSessionTitle(context.WithoutCancel(streamCtx), streamReq, streamReq.RawQuery)
 
 		cfg := rc.runConfig
-		cfg.StepIndexOffset = streamReq.StepIndexOffset
 		cfg.LiveToolStream = true
 		cfg.CanRequestUserInput = s.canDeliverUserInputStream()
 		reasoningTiming := newReasoningTimingTracker(nil)
@@ -648,7 +647,6 @@ func (s *Service) streamChatWSResultWithHooks(
 	}()
 
 	cfg := rc.runConfig
-	cfg.StepIndexOffset = req.StepIndexOffset
 	cfg.LiveToolStream = true
 	cfg.CanRequestUserInput = s.canDeliverUserInputWS(eventCh)
 	reasoningTiming := newReasoningTimingTracker(nil)

@@ -10,6 +10,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/step"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -57,8 +58,11 @@ func TestStepCommitSeparatesHistoryFailureFromQueueFailure(t *testing.T) {
 			} else {
 				backend.applyErr = failure
 			}
-			step := &sdk.StepResult{FinishReason: sdk.FinishReasonStop, Messages: []sdk.Message{sdk.AssistantMessage("committed response")}}
-			if err := committer.commit(ctx, 0, step); !errors.Is(err, failure) {
+			record := &step.Record{
+				Result:   sdk.ModelResult{FinishReason: sdk.FinishReasonStop},
+				Messages: []sdk.Message{sdk.AssistantMessage("committed response")},
+			}
+			if _, err := committer.commit(ctx, 0, record); !errors.Is(err, failure) {
 				t.Fatalf("commit error=%v", err)
 			}
 			pending, _, err := service.sessionManager.PendingQueues(ctx, sessionruntime.Key{BotID: handle.BotID, SessionID: handle.SessionID}, 0)
@@ -73,7 +77,7 @@ func TestStepCommitSeparatesHistoryFailureFromQueueFailure(t *testing.T) {
 				if len(committer.persistedMessages()) != 1 || committer.nextStep != 1 || backend.releases != 0 || len(pending) != 0 {
 					t.Fatal("committed prefix was lost or its claim was released")
 				}
-				if err := committer.commit(ctx, 0, step); err == nil {
+				if _, err := committer.commit(ctx, 0, record); err == nil {
 					t.Fatal("already-persisted step was accepted twice")
 				}
 				if len(store.steps) != 1 {

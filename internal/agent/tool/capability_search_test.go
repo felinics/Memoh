@@ -9,13 +9,12 @@ import (
 	"reflect"
 	"testing"
 
-	sdk "github.com/felinics/twilight/sdk"
-
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/supermarket"
 )
 
-func catalogToolFixture(t *testing.T, handler http.HandlerFunc) (sdk.Tool, *capabilityTestApproval) {
+func catalogToolFixture(t *testing.T, handler http.HandlerFunc) (toolexec.Tool, *capabilityTestApproval) {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -39,7 +38,7 @@ func catalogToolFixture(t *testing.T, handler http.HandlerFunc) (sdk.Tool, *capa
 		}
 	}
 	t.Fatal("App search not registered")
-	return sdk.Tool{}, nil
+	return toolexec.Tool{}, nil
 }
 
 func TestAppCategoriesFilterCountsBeforePagination(t *testing.T) {
@@ -75,13 +74,17 @@ func TestAppCategoriesFilterCountsBeforePagination(t *testing.T) {
 			if tc.registry != "" {
 				args["registry"] = tc.registry
 			}
-			result, err := tool.Execute(&sdk.ToolExecContext{Context: t.Context()}, args)
+			result, err := tool.Execute(&toolexec.ToolExecContext{Context: t.Context()}, toolexec.ArgumentsFromValue(args))
 			if err != nil {
 				t.Fatal(err)
 			}
-			data := result.(map[string]any)
+			data := toolexec.OutputValue(result).(map[string]any)
 			assertCapabilityMessage(t, data)
-			items := data["items"].([]supermarket.AppCategory)
+			// The executor encodes the output; read the categories back through JSON.
+			var items []supermarket.AppCategory
+			if raw, err := json.Marshal(data["items"]); err != nil || json.Unmarshal(raw, &items) != nil {
+				t.Fatalf("categories did not decode: %#v", data["items"])
+			}
 			ids := make([]string, 0, len(items))
 			for _, item := range items {
 				ids = append(ids, item.ID)
@@ -94,7 +97,7 @@ func TestAppCategoriesFilterCountsBeforePagination(t *testing.T) {
 					}
 				}
 			}
-			if data["total"] != tc.total || !reflect.DeepEqual(ids, tc.ids) {
+			if data["total"] != float64(tc.total) || !reflect.DeepEqual(ids, tc.ids) {
 				t.Fatalf("category page = %#v", data)
 			}
 		})
@@ -118,14 +121,14 @@ func TestAppSearchBrowsesCategoryWithoutKeywords(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	result, err := tool.Execute(&sdk.ToolExecContext{Context: t.Context()}, map[string]any{"action": "search", "category": "developer-tools", "registry": "openai", "page": 2, "limit": 2})
+	result, err := tool.Execute(&toolexec.ToolExecContext{Context: t.Context()}, toolexec.ArgumentsFromValue(map[string]any{"action": "search", "category": "developer-tools", "registry": "openai", "page": 2, "limit": 2}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := result.(map[string]any)
+	data := toolexec.OutputValue(result).(map[string]any)
 	assertCapabilityMessage(t, data)
-	items := data["items"].([]map[string]any)
-	if len(items) != 2 || items[0]["app_id"] != "app-c" || items[1]["category"] != "developer-tools" || data["total"] != 5 {
+	items := asMapSlice(t, data["items"])
+	if len(items) != 2 || items[0]["app_id"] != "app-c" || items[1]["category"] != "developer-tools" || data["total"] != float64(5) {
 		t.Fatalf("browse result = %#v", data)
 	}
 	if review.reviews != 0 {
@@ -137,13 +140,13 @@ func TestAppCategoriesFailureDoesNotBecomeEmptyCatalog(t *testing.T) {
 	tool, _ := catalogToolFixture(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "PRIVATE upstream diagnostic", http.StatusBadGateway)
 	})
-	result, err := tool.Execute(&sdk.ToolExecContext{Context: t.Context()}, map[string]any{"action": "categories"})
+	result, err := tool.Execute(&toolexec.ToolExecContext{Context: t.Context()}, toolexec.ArgumentsFromValue(map[string]any{"action": "categories"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertCapabilityCode(t, result, apperror.CodeCapabilityOperationFailed)
 	assertCapabilityMessage(t, result)
-	if _, ok := result.(map[string]any)["items"]; ok {
+	if _, ok := toolexec.OutputValue(result).(map[string]any)["items"]; ok {
 		t.Fatal("upstream failure reported as empty catalog")
 	}
 }

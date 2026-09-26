@@ -32,9 +32,7 @@ func TestVideoGenStartsBackgroundTaskAndCompletes(t *testing.T) {
 	}
 	p := newTestVideoGenProvider(mgr, "model-row", prov)
 
-	res, err := p.execGenerateVideo(context.Background(), SessionContext{BotID: "bot1", SessionID: "sess1"}, map[string]any{
-		"prompt": "waves at sunrise",
-	})
+	res, err := p.execGenerateVideo(context.Background(), SessionContext{BotID: "bot1", SessionID: "sess1"}, generateVideoArgs{Prompt: "waves at sunrise"})
 	if err != nil {
 		t.Fatalf("execGenerateVideo returned error: %v", err)
 	}
@@ -61,9 +59,7 @@ func TestVideoGenProviderFailureCompletesFailedTask(t *testing.T) {
 	prov := &fakeVideoProvider{createErr: errors.New("provider down")}
 	p := newTestVideoGenProvider(mgr, "model-row", prov)
 
-	res, err := p.execGenerateVideo(context.Background(), SessionContext{BotID: "bot1", SessionID: "sess1"}, map[string]any{
-		"prompt": "waves at sunrise",
-	})
+	res, err := p.execGenerateVideo(context.Background(), SessionContext{BotID: "bot1", SessionID: "sess1"}, generateVideoArgs{Prompt: "waves at sunrise"})
 	if err != nil {
 		t.Fatalf("execGenerateVideo returned error: %v", err)
 	}
@@ -82,9 +78,7 @@ func TestVideoGenKillCancelsProviderJob(t *testing.T) {
 	}
 	p := newTestVideoGenProvider(mgr, "model-row", prov)
 
-	res, err := p.execGenerateVideo(context.Background(), SessionContext{BotID: "bot1", SessionID: "sess1"}, map[string]any{
-		"prompt": "waves at sunrise",
-	})
+	res, err := p.execGenerateVideo(context.Background(), SessionContext{BotID: "bot1", SessionID: "sess1"}, generateVideoArgs{Prompt: "waves at sunrise"})
 	if err != nil {
 		t.Fatalf("execGenerateVideo returned error: %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 	compaction "github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	dbpkg "github.com/felinics/memoh/internal/db"
@@ -69,9 +70,9 @@ func TestProjectInterruptedHistoryReasoningKeepsOpaqueBlock(t *testing.T) {
 				ID:     "r1",
 				Format: sdk.ReasoningFormatAnthropic,
 				Model:  "claude-sonnet-4-20250514",
-				ProviderMetadata: map[string]any{
+				ProviderMetadata: partmeta.Fold(map[string]any{
 					"anthropic": map[string]any{"redactedData": "BLOB"},
-				},
+				}),
 			}},
 		}})[0],
 		Metadata: map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true},
@@ -89,8 +90,8 @@ func TestProjectInterruptedHistoryReasoningKeepsOpaqueBlock(t *testing.T) {
 		part.Model != "claude-sonnet-4-20250514" {
 		t.Fatalf("reasoning provenance was not preserved: %#v", part)
 	}
-	meta, _ := part.ProviderMetadata["anthropic"].(map[string]any)
-	if data, _ := meta["redactedData"].(string); data != "BLOB" {
+	meta := part.ProviderMetadata["anthropic"]
+	if data := meta["redactedData"]; data != "BLOB" {
 		t.Fatalf("redactedData = %q, want BLOB", data)
 	}
 }

@@ -1,0 +1,380 @@
+{
+  "react": {
+    "properties": {
+      "bot_id": {
+        "description": "Bot ID, optional and defaults to current bot",
+        "type": "string"
+      },
+      "emoji": {
+        "description": "Emoji to react with (e.g. 👍, ❤️). Required when adding a reaction.",
+        "type": "string"
+      },
+      "message_id": {
+        "description": "The message ID to react to",
+        "type": "string"
+      },
+      "platform": {
+        "description": "Channel platform name. Defaults to current session platform.",
+        "type": "string"
+      },
+      "remove": {
+        "description": "If true, remove the reaction instead of adding it. Default false.",
+        "type": "boolean"
+      },
+      "target": {
+        "description": "Channel target (chat/group ID). Defaults to current session reply target.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "message_id"
+    ],
+    "type": "object"
+  },
+  "send": {
+    "additionalProperties": false,
+    "properties": {
+      "attachments": {
+        "description": "File paths, URLs, data URLs, or attachment objects to attach.",
+        "items": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "path"
+                  ]
+                },
+                {
+                  "required": [
+                    "url"
+                  ]
+                },
+                {
+                  "required": [
+                    "base64"
+                  ]
+                },
+                {
+                  "required": [
+                    "content_hash"
+                  ]
+                },
+                {
+                  "required": [
+                    "platform_key"
+                  ]
+                }
+              ],
+              "properties": {
+                "base64": {
+                  "type": "string"
+                },
+                "caption": {
+                  "type": "string"
+                },
+                "content_hash": {
+                  "type": "string"
+                },
+                "duration_ms": {
+                  "type": "integer"
+                },
+                "height": {
+                  "type": "integer"
+                },
+                "metadata": {
+                  "type": "object"
+                },
+                "mime": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "platform_key": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "source_platform": {
+                  "type": "string"
+                },
+                "thumbnail_url": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "image",
+                    "audio",
+                    "video",
+                    "voice",
+                    "file",
+                    "gif"
+                  ],
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "width": {
+                  "type": "integer"
+                }
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "type": "array"
+      },
+      "bot_id": {
+        "description": "Bot ID, optional and defaults to current bot",
+        "type": "string"
+      },
+      "message": {
+        "additionalProperties": false,
+        "description": "Structured message payload. Use text for ordinary messages; use parts only when you need explicit links, code blocks, mentions, emoji, headings, quotes, list items, or inline styles.",
+        "properties": {
+          "actions": {
+            "description": "Optional action buttons. URL actions render only on channels with button support.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "row": {
+                  "type": "integer"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "url"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "attachments": {
+            "description": "File paths, URLs, data URLs, or attachment objects to attach.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": false,
+                  "anyOf": [
+                    {
+                      "required": [
+                        "path"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "url"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "base64"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "content_hash"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "platform_key"
+                      ]
+                    }
+                  ],
+                  "properties": {
+                    "base64": {
+                      "type": "string"
+                    },
+                    "caption": {
+                      "type": "string"
+                    },
+                    "content_hash": {
+                      "type": "string"
+                    },
+                    "duration_ms": {
+                      "type": "integer"
+                    },
+                    "height": {
+                      "type": "integer"
+                    },
+                    "metadata": {
+                      "type": "object"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "platform_key": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "source_platform": {
+                      "type": "string"
+                    },
+                    "thumbnail_url": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "enum": [
+                        "image",
+                        "audio",
+                        "video",
+                        "voice",
+                        "file",
+                        "gif"
+                      ],
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "format": {
+            "description": "Rendering hint for text. Use markdown for ordinary Markdown text; use rich only with parts.",
+            "enum": [
+              "plain",
+              "markdown",
+              "rich"
+            ],
+            "type": "string"
+          },
+          "parts": {
+            "description": "Structured rich body. Use only for explicit link/code_block/mention/emoji/heading/blockquote/list_item parts or styled spans.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "channel_identity_id": {
+                  "description": "Platform identity ID for mention parts when known.",
+                  "type": "string"
+                },
+                "emoji": {
+                  "description": "Emoji fallback for emoji parts.",
+                  "type": "string"
+                },
+                "language": {
+                  "description": "Language hint for code_block parts.",
+                  "type": "string"
+                },
+                "styles": {
+                  "description": "Inline styles for text-like parts.",
+                  "items": {
+                    "enum": [
+                      "bold",
+                      "italic",
+                      "strikethrough",
+                      "code",
+                      "underline",
+                      "spoiler"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "text": {
+                  "description": "Visible text for text/code_block/mention/emoji/heading/blockquote/list_item parts. Optional label for link parts; required for mention parts.",
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "text",
+                    "link",
+                    "code_block",
+                    "mention",
+                    "emoji",
+                    "heading",
+                    "blockquote",
+                    "list_item"
+                  ],
+                  "type": "string"
+                },
+                "url": {
+                  "description": "URL for link parts.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "reply": {
+            "additionalProperties": false,
+            "description": "Reply reference; normally use the top-level reply_to shortcut instead.",
+            "properties": {
+              "message_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message_id"
+            ],
+            "type": "object"
+          },
+          "text": {
+            "description": "Message body. Prefer this for ordinary prose and Markdown replies.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "platform": {
+        "description": "Channel platform name. Defaults to current session platform.",
+        "type": "string"
+      },
+      "reply_to": {
+        "description": "Message ID to reply to. The reply will reference this message on the platform.",
+        "type": "string"
+      },
+      "target": {
+        "description": "Channel target (chat/group/thread ID). Optional only for current-conversation attachments; specify it for another channel/person.",
+        "type": "string"
+      },
+      "text": {
+        "description": "Message text shortcut when message object is omitted",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

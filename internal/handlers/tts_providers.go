@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	audiopkg "github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/models"
 )
@@ -546,7 +547,7 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 		Text:            result.Text,
 		Language:        result.Language,
 		DurationSeconds: result.DurationSeconds,
-		Metadata:        result.ProviderMetadata,
+		Metadata:        partmeta.Unfold(result.ProviderMetadata),
 	}
 	if len(result.Words) > 0 {
 		resp.Words = make([]audiopkg.TranscriptionWord, 0, len(result.Words))

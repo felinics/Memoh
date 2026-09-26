@@ -18,6 +18,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
 	workspacepkg "github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -169,7 +170,7 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 	return usageSection("Basic Tools", parts)
 }
 
-func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	workspace := p.resolveToolWorkspace(ctx, session)
 	// Tool descriptions tell the model where relative paths land; with a
 	// workdir bound, that is the working directory.
@@ -178,82 +179,45 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 		wd = workspace.workdirPath
 	}
 	sess := session
-	targetParameter := p.workspaceTargetParameter(sess)
+	targetShape := toolexec.Describe("target_id", workspaceTargetDescription(sess))
+	filePathShape := toolexec.Describe("path", fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription))
 
 	readDesc := fmt.Sprintf("Read file content %s. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported.", workspace.locationDescription)
 	if sess.SupportsImageInput {
 		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) — binary images are loaded into model context automatically."
 	}
 
-	toolList := []sdk.Tool{
-		{
-			Name:        ToolRead().String(),
-			Description: readDesc,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id":   targetParameter,
-					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"line_offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
-					"n_lines":     map[string]any{"type": "integer", "description": "Number of lines to read. Default: read entire file.", "minimum": 1},
-				},
-				"required": []string{"path"},
+	toolList := []toolexec.Tool{
+		toolexec.Define(ToolRead().String(), readDesc,
+			func(ctx *toolexec.ToolExecContext, args readArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execRead(ctx.Context, sess, args))
 			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execRead(ctx.Context, sess, inputAsMap(input))
+			targetShape, filePathShape,
+			toolexec.Minimum("line_offset", 1), toolexec.Default("line_offset", 1),
+			toolexec.Minimum("n_lines", 1),
+		),
+		toolexec.Define(ToolWrite().String(), fmt.Sprintf("Write file content %s. Creates parent directories automatically. Handles files of any size.", workspace.locationDescription),
+			func(ctx *toolexec.ToolExecContext, args writeArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execWrite(ctx.Context, sess, args))
 			},
-		},
-		{
-			Name:        ToolWrite().String(),
-			Description: fmt.Sprintf("Write file content %s. Creates parent directories automatically. Handles files of any size.", workspace.locationDescription),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id": targetParameter,
-					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"content":   map[string]any{"type": "string", "description": "File content"},
-				},
-				"required": []string{"path", "content"},
+			targetShape, filePathShape,
+		),
+		toolexec.Define(ToolList().String(), fmt.Sprintf("List directory entries %s. Supports pagination. Max %d entries per call. In recursive mode, subdirectories with >%d items are collapsed to a summary.", workspace.locationDescription, listMaxEntries, listCollapseThreshold),
+			func(ctx *toolexec.ToolExecContext, args listArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execList(ctx.Context, sess, args))
 			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWrite(ctx.Context, sess, inputAsMap(input))
+			targetShape,
+			toolexec.Describe("path", fmt.Sprintf("Directory path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)),
+			toolexec.Minimum("offset", 0), toolexec.Default("offset", 0),
+			toolexec.Describe("limit", fmt.Sprintf("Max entries to return per call. Default: %d. Max: %d.", listMaxEntries, listMaxEntries)),
+			toolexec.Range("limit", 1, listMaxEntries), toolexec.Default("limit", listMaxEntries),
+		),
+		toolexec.Define(ToolEdit().String(), fmt.Sprintf("Replace exact text in a file %s.", workspace.locationDescription),
+			func(ctx *toolexec.ToolExecContext, args editArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execEdit(ctx.Context, sess, args))
 			},
-		},
-		{
-			Name:        ToolList().String(),
-			Description: fmt.Sprintf("List directory entries %s. Supports pagination. Max %d entries per call. In recursive mode, subdirectories with >%d items are collapsed to a summary.", workspace.locationDescription, listMaxEntries, listCollapseThreshold),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id": targetParameter,
-					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"recursive": map[string]any{"type": "boolean", "description": "List recursively"},
-					"offset":    map[string]any{"type": "integer", "description": "Entry offset to start from (0-indexed). Default: 0.", "minimum": 0, "default": 0},
-					"limit":     map[string]any{"type": "integer", "description": fmt.Sprintf("Max entries to return per call. Default: %d. Max: %d.", listMaxEntries, listMaxEntries), "minimum": 1, "maximum": listMaxEntries, "default": listMaxEntries},
-				},
-				"required": []string{"path"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execList(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolEdit().String(),
-			Description: fmt.Sprintf("Replace exact text in a file %s.", workspace.locationDescription),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id": targetParameter,
-					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"old_text":  map[string]any{"type": "string", "description": "Exact text to find"},
-					"new_text":  map[string]any{"type": "string", "description": "Replacement text"},
-				},
-				"required": []string{"path", "old_text", "new_text"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execEdit(ctx.Context, sess, inputAsMap(input))
-			},
-		},
+			targetShape, filePathShape,
+		),
 		{
 			Name: ToolApplyPatch().String(),
 			Description: fmt.Sprintf(`Apply a structured patch %s. This is a Memoh/Codex-style patch format, not a standard unified diff or git patch.
@@ -300,21 +264,14 @@ Delete a file:
 *** Delete File: obsolete.txt
 *** End Patch
 `, workspace.locationDescription),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id": targetParameter,
-					"patch":     map[string]any{"type": "string", "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."},
-				},
-				"required": []string{"patch"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execApplyPatch(ctx.Context, sess, input)
+			Parameters: toolexec.SchemaFor[applyPatchArgs](targetShape),
+			// apply_patch keeps the raw arguments: a JSON string document
+			// carrying the patch text is accepted as well as the object.
+			Execute: func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execApplyPatch(ctx.Context, sess, input))
 			},
 		},
-		{
-			Name: ToolExec().String(),
-			Description: fmt.Sprintf(`Execute a %s command %s. Runs in %s by default.
+		toolexec.Define(ToolExec().String(), fmt.Sprintf(`Execute a %s command %s. Runs in %s by default.
 
 # Instructions
 %s
@@ -329,36 +286,30 @@ Delete a file:
   - Do not retry failing commands in a delay loop — diagnose the root cause.
   - If waiting for a background task, use wait_until(task_id).
 %s`, workspace.shellDescription, workspace.locationDescription, wd, workspace.platformInstructions, background.MaxExecTimeout, background.DefaultExecTimeout, workspace.delayInstruction),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id":         targetParameter,
-					"command":           map[string]any{"type": "string", "description": fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)},
-					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory (default: %s)", wd)},
-					"description":       map[string]any{"type": "string", "description": workspace.descriptionExamples},
-					"timeout":           map[string]any{"type": "integer", "description": fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout), "minimum": 1, "maximum": background.MaxExecTimeout},
-					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."},
-				},
-				"required": []string{"command"},
+			func(ctx *toolexec.ToolExecContext, args execArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execExec(ctx.Context, sess, args))
 			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execExec(ctx.Context, sess, inputAsMap(input))
-			},
-		},
+			targetShape,
+			toolexec.Describe("command", fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)),
+			toolexec.Describe("work_dir", fmt.Sprintf("Working directory (default: %s)", wd)),
+			toolexec.Describe("description", workspace.descriptionExamples),
+			toolexec.Describe("timeout", fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout)),
+			toolexec.Range("timeout", 1, float64(background.MaxExecTimeout)),
+		),
 	}
 	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
-		locationTool := sdk.Tool{
+		locationTool := toolexec.Tool{
 			Name: ToolListExecutionLocations().String(),
 			Description: "List the execution locations configured for this Bot for file operations and command execution, with current availability and status. " +
 				"The default field identifies the current turn's default (the request-selected target when present, otherwise the Bot's Primary). " +
 				"Use the returned target_id with file and command tools when a non-default location is needed. " +
 				"The available field says whether a location can currently be used. This tool does not change the default location or starting folder.",
-			Parameters: emptyObjectSchema(),
-			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
+			Parameters: toolexec.SchemaFromValue(emptyObjectSchema()),
+			Execute: func(ctx *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
 				ctx.Context = workspaceContextForSession(ctx.Context, sess)
 				targets, err := resolver.ListWorkspaceTargets(ctx.Context, sess.BotID)
 				if err != nil {
-					return nil, fmt.Errorf("list execution locations: %w", err)
+					return sdk.ToolOutput{}, fmt.Errorf("list execution locations: %w", err)
 				}
 				locations := make([]executionLocation, 0, len(targets))
 				for _, target := range targets {
@@ -367,12 +318,57 @@ Delete a file:
 					}
 					locations = append(locations, executionLocationFromTarget(target, sess.WorkspaceTargetID))
 				}
-				return listExecutionLocationsResult{Locations: locations}, nil
+				return toolexec.OutputFromValue(listExecutionLocationsResult{Locations: locations}), nil
 			},
 		}
-		toolList = append([]sdk.Tool{locationTool}, toolList...)
+		toolList = append([]toolexec.Tool{locationTool}, toolList...)
 	}
 	return toolList, nil
+}
+
+// Workspace tool arguments. target_id is described per session (see
+// workspaceTargetDescription), path text names the working directory, so
+// both are set by shape functions rather than tags.
+type readArgs struct {
+	TargetID   string `json:"target_id,omitempty"`
+	Path       string `json:"path"`
+	LineOffset *int   `json:"line_offset,omitempty" jsonschema:"Line number to start reading from (1-indexed). Default: 1."`
+	NLines     *int   `json:"n_lines,omitempty" jsonschema:"Number of lines to read. Default: read entire file."`
+}
+
+type writeArgs struct {
+	TargetID string `json:"target_id,omitempty"`
+	Path     string `json:"path"`
+	Content  string `json:"content" jsonschema:"File content"`
+}
+
+type listArgs struct {
+	TargetID  string `json:"target_id,omitempty"`
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"List recursively"`
+	Offset    *int   `json:"offset,omitempty" jsonschema:"Entry offset to start from (0-indexed). Default: 0."`
+	Limit     *int   `json:"limit,omitempty"`
+}
+
+type editArgs struct {
+	TargetID string `json:"target_id,omitempty"`
+	Path     string `json:"path"`
+	OldText  string `json:"old_text" jsonschema:"Exact text to find"`
+	NewText  string `json:"new_text" jsonschema:"Replacement text"`
+}
+
+type applyPatchArgs struct {
+	TargetID string `json:"target_id,omitempty"`
+	Patch    string `json:"patch" jsonschema:"Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."`
+}
+
+type execArgs struct {
+	TargetID        string `json:"target_id,omitempty"`
+	Command         string `json:"command"`
+	WorkDir         string `json:"work_dir,omitempty"`
+	Description     string `json:"description,omitempty"`
+	Timeout         *int   `json:"timeout,omitempty"`
+	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."`
 }
 
 type toolWorkspace struct {
@@ -484,7 +480,7 @@ func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir, workdirPa
 	return workspace
 }
 
-func (*ContainerProvider) workspaceTargetParameter(session SessionContext) map[string]any {
+func workspaceTargetDescription(session SessionContext) string {
 	description := "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn."
 	if sessionIsWorkdirBound(session) {
 		// A bound session's directory only exists on one machine, so the
@@ -492,10 +488,7 @@ func (*ContainerProvider) workspaceTargetParameter(session SessionContext) map[s
 		// rejecting it at execution time.
 		description = "Exact target_id returned by list_execution_locations. This chat has a fixed working directory, which pins its execution location: omit this parameter. The only other accepted value is native, for reading files Browser Use and Computer Use leave on the Server Workspace; any other target_id is rejected."
 	}
-	return map[string]any{
-		"type":        "string",
-		"description": description,
-	}
+	return description
 }
 
 // sessionIsWorkdirBound reports whether the session derives its working
@@ -586,9 +579,9 @@ func executionLocationFromTarget(target workspacepkg.WorkspaceTarget, requestTar
 	}
 }
 
-func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session SessionContext, args map[string]any) (resolvedToolTarget, error) {
+func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session SessionContext, requestedTargetID string) (resolvedToolTarget, error) {
 	ctx = workspaceContextForSession(ctx, session)
-	targetID := StringArg(args, "target_id")
+	targetID := strings.TrimSpace(requestedTargetID)
 	if err := ensureWorkdirPinnedTarget(session, targetID); err != nil {
 		return resolvedToolTarget{}, err
 	}
@@ -602,12 +595,6 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 		}
 		if resolved.Client == nil {
 			return resolvedToolTarget{}, errors.New("workspace target is not reachable: client is unavailable")
-		}
-		// Keep the canonical target on the original input map. Besides making
-		// retries deterministic if the Bot Primary changes, this also leaves an
-		// unambiguous target_id in the persisted tool-call history.
-		if args != nil {
-			args["target_id"] = strings.TrimSpace(resolved.TargetID)
 		}
 		return resolvedToolTarget{
 			id:        resolved.TargetID,
@@ -766,34 +753,30 @@ func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridg
 	return client, nil
 }
 
-func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext, args readArgs) (any, error) {
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, args)
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
+	filePath := target.workspace.resolveToolPath(strings.TrimSpace(args.Path))
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
 
 	lineOffset := 1
-	if offset, ok, err := IntArg(args, "line_offset"); err != nil {
-		return nil, fmt.Errorf("invalid line_offset: %w", err)
-	} else if ok {
-		if offset < 1 {
+	if args.LineOffset != nil {
+		if *args.LineOffset < 1 {
 			return nil, errors.New("line_offset must be >= 1")
 		}
-		lineOffset = offset
+		lineOffset = *args.LineOffset
 	}
 	nLines := 0 // 0 = read entire file
-	if n, ok, err := IntArg(args, "n_lines"); err != nil {
-		return nil, fmt.Errorf("invalid n_lines: %w", err)
-	} else if ok && n > 0 {
-		nLines = n
+	if args.NLines != nil && *args.NLines > 0 {
+		nLines = *args.NLines
 	}
 
 	// Pre-check file size to avoid loading excessively large files into
@@ -869,17 +852,17 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	return map[string]any{"content": content, "total_lines": totalLines}, nil
 }
 
-func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContext, args writeArgs) (any, error) {
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, args)
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
-	content := StringArg(args, "content")
+	filePath := target.workspace.resolveToolPath(strings.TrimSpace(args.Path))
+	content := strings.TrimSpace(args.Content)
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
@@ -978,25 +961,24 @@ func readFileForDiff(ctx context.Context, client *bridge.Client, filePath string
 	return string(raw), true
 }
 
-func (p *ContainerProvider) execList(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execList(ctx context.Context, session SessionContext, args listArgs) (any, error) {
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, args)
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	dirPath := target.workspace.resolveToolPath(StringArg(args, "path"))
+	dirPath := target.workspace.resolveToolPath(strings.TrimSpace(args.Path))
 	if dirPath == "" {
 		dirPath = "."
 	}
-	recursive, _, _ := BoolArg(args, "recursive")
+	recursive := args.Recursive
 
 	offset := int32(0)
-	if v, ok, err := IntArg(args, "offset"); err != nil {
-		return nil, fmt.Errorf("invalid offset: %w", err)
-	} else if ok {
+	if args.Offset != nil {
+		v := *args.Offset
 		if v < 0 {
 			return nil, errors.New("offset must be >= 0")
 		}
@@ -1007,9 +989,8 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 	}
 
 	limit := int32(listMaxEntries)
-	if v, ok, err := IntArg(args, "limit"); err != nil {
-		return nil, fmt.Errorf("invalid limit: %w", err)
-	} else if ok {
+	if args.Limit != nil {
+		v := *args.Limit
 		if v < 1 {
 			return nil, errors.New("limit must be >= 1")
 		}
@@ -1051,18 +1032,18 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 	}, nil
 }
 
-func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext, args editArgs) (any, error) {
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, args)
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
-	oldText := StringArg(args, "old_text")
-	newText := StringArg(args, "new_text")
+	filePath := target.workspace.resolveToolPath(strings.TrimSpace(args.Path))
+	oldText := strings.TrimSpace(args.OldText)
+	newText := strings.TrimSpace(args.NewText)
 	if filePath == "" || oldText == "" {
 		return nil, errors.New("path, old_text and new_text are required")
 	}
@@ -1123,17 +1104,17 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	return result, nil
 }
 
-func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	target, err := p.resolveToolTarget(ctx, session, args)
+func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args execArgs) (any, error) {
+	target, err := p.resolveToolTarget(ctx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	command := strings.TrimSpace(StringArg(args, "command"))
+	command := strings.TrimSpace(args.Command)
 	if command == "" {
 		return nil, errors.New("command is required")
 	}
-	workDir := strings.TrimSpace(StringArg(args, "work_dir"))
+	workDir := strings.TrimSpace(args.WorkDir)
 	switch {
 	case workDir != "":
 		// A relative work_dir resolves against the working directory like
@@ -1144,15 +1125,14 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	default:
 		workDir = target.workspace.defaultWorkDir
 	}
-	description := strings.TrimSpace(StringArg(args, "description"))
+	description := strings.TrimSpace(args.Description)
 	hookWorkspace := target.hookWorkspaceInfo(p.execWorkDir)
 	backgroundOutputDir := target.backgroundOutputDir()
 
 	// Parse timeout (default 30s, max 600s).
 	timeout := background.DefaultExecTimeout
-	if t, ok, err := IntArg(args, "timeout"); err != nil {
-		return nil, fmt.Errorf("invalid timeout: %w", err)
-	} else if ok {
+	if args.Timeout != nil {
+		t := *args.Timeout
 		if t < 1 {
 			return nil, errors.New("timeout must be >= 1")
 		}
@@ -1164,7 +1144,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	}
 
 	// Block sleep N (N>=2) in foreground — nudge model toward run_in_background.
-	runInBg, _, _ := BoolArg(args, "run_in_background")
+	runInBg := args.RunInBackground
 	if !runInBg {
 		if reason := detectBlockedSleep(command); reason != "" {
 			return nil, fmt.Errorf("blocked: %s. Run blocking commands in the background with run_in_background: true, then use wait_until(task_id) and get_background_status(task_id). If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds", reason)

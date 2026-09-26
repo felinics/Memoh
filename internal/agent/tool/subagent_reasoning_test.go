@@ -24,9 +24,9 @@ import (
 //  1. Provider construction — models.NewSDKChatModel wires Anthropic
 //     thinking{adaptive} / thinking{enabled,budget_tokens} from the
 //     ReasoningConfig (internal/models/sdk.go:121-132).
-//  2. Per-request options — models.BuildReasoningOptions emits the effort string
-//     (internal/models/sdk.go:181-228), fed from native.RunConfig's five
-//     reasoning fields (native/agent.go:935-945).
+//  2. Per-request reasoning — models.ApplyReasoningToRequest sets the effort
+//     string on the sdk.Request (internal/models/sdk.go:181-228), fed from
+//     native.RunConfig's five reasoning fields (native/agent.go:935-945).
 //
 // The subagent path loses both. SpawnProvider.resolveModel builds a fresh
 // *sdk.Model with no ReasoningConfig, and runSubagentTask never assigned the lone

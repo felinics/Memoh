@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	approval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/apps"
 	"github.com/felinics/memoh/internal/mcp"
@@ -113,11 +114,11 @@ func (*CapabilityProvider) Usage(_ context.Context, _ SessionContext, available 
 	return usageSection("Capability management", hints)
 }
 
-func (p *CapabilityProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *CapabilityProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.opts.Access == nil || session.IsSubagent || session.BotID == "" || session.ChannelIdentityID == "" {
 		return nil, nil
 	}
-	var result []sdk.Tool
+	var result []toolexec.Tool
 	for _, spec := range capabilitySpecs() {
 		if spec.name == ToolMCPManage().String() && (p.opts.Connections == nil || p.opts.OAuth == nil || p.opts.Probe == nil) {
 			continue
@@ -125,20 +126,20 @@ func (p *CapabilityProvider) Tools(_ context.Context, session SessionContext) ([
 		if spec.name != ToolMCPManage().String() && (p.opts.Apps == nil || p.opts.Registry == nil || p.opts.Catalog == nil) {
 			continue
 		}
-		tool := sdk.Tool{Name: ToolMCPManage().String(), Description: spec.description, Parameters: spec.schema(), Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) { //nolint:contextcheck // FreezeDependencies returns a child of ctx.Context retained through approval.
+		tool := toolexec.Tool{Name: ToolMCPManage().String(), Description: spec.description, Parameters: toolexec.SchemaFromValue(spec.schema()), Execute: func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) { //nolint:contextcheck // FreezeDependencies returns a child of ctx.Context retained through approval.
 			args := inputAsMap(input)
 			result, err := p.execute(ctx, session, spec, args)
 			if spec.name != ToolAppSearch().String() && (StringArg(args, "action") != "list" || args["refresh"] == true) && session.CapabilitiesChanged != nil {
 				session.CapabilitiesChanged()
 			}
 			if err == nil {
-				return result, nil
+				return toolexec.OutputFromValue(result), nil
 			}
 			// Causes remain server-side. Even transport errors can include URLs or
 			// credential-bearing request data, so never echo them into tool history.
 			code := apperror.CodeCapabilityOperationFailed
 			if public, ok := apperror.PublicFrom(err, ""); ok {
-				return map[string]any{"ok": false, "code": public.Code, "detail": public.Detail, "message": public.Detail}, nil
+				return toolexec.OutputFromValue(map[string]any{"ok": false, "code": public.Code, "detail": public.Detail, "message": public.Detail}), nil
 			}
 			switch {
 			case errors.Is(err, apps.ErrInvalidRequest):
@@ -148,7 +149,7 @@ func (p *CapabilityProvider) Tools(_ context.Context, session SessionContext) ([
 			}
 			p.logger.Warn("capability operation failed", slog.String("tool", spec.name), slog.String("action", StringArg(args, "action")))
 			public, _ := apperror.PublicFrom(apperror.New(code, nil), "")
-			return map[string]any{"ok": false, "code": public.Code, "detail": public.Detail, "message": public.Detail}, nil
+			return toolexec.OutputFromValue(map[string]any{"ok": false, "code": public.Code, "detail": public.Detail, "message": public.Detail}), nil
 		}}
 		switch spec.name {
 		case "mcp_manage":
@@ -175,7 +176,7 @@ func (p *CapabilityProvider) access(ctx context.Context, session SessionContext,
 	return nil
 }
 
-func (p *CapabilityProvider) execute(ctx *sdk.ToolExecContext, session SessionContext, spec capabilitySpec, args map[string]any) (any, error) {
+func (p *CapabilityProvider) execute(ctx *toolexec.ToolExecContext, session SessionContext, spec capabilitySpec, args map[string]any) (any, error) {
 	if err := spec.validate(args); err != nil {
 		return nil, err
 	}
@@ -192,7 +193,7 @@ func (p *CapabilityProvider) execute(ctx *sdk.ToolExecContext, session SessionCo
 	}
 }
 
-func (p *CapabilityProvider) approve(ctx *sdk.ToolExecContext, session SessionContext, name string, prepared map[string]any) error {
+func (p *CapabilityProvider) approve(ctx *toolexec.ToolExecContext, session SessionContext, name string, prepared map[string]any) error {
 	if p.opts.Approval == nil {
 		return apperror.New(apperror.CodeCapabilityApprovalRequired, nil)
 	}
@@ -410,7 +411,7 @@ func (p *CapabilityProvider) freeze(ctx context.Context, ids []string) (context.
 	return frozen, revisions, nil
 }
 
-func (p *CapabilityProvider) manageApp(ctx *sdk.ToolExecContext, session SessionContext, args map[string]any) (any, error) {
+func (p *CapabilityProvider) manageApp(ctx *toolexec.ToolExecContext, session SessionContext, args map[string]any) (any, error) {
 	action := StringArg(args, "action")
 	if action == "list" {
 		if args["refresh"] == true {
@@ -546,7 +547,7 @@ func (p *CapabilityProvider) manageApp(ctx *sdk.ToolExecContext, session Session
 	}
 	sink := apps.EventFunc(func(evt apps.Event) {
 		if ctx.SendProgress != nil && evt.Type != apps.EventLog {
-			ctx.SendProgress(map[string]any{"type": evt.Type, "kind": evt.Kind, "id": evt.ID, "status": evt.Status, "message": appProgressMessage(action, evt)})
+			ctx.SendProgress(toolexec.OutputFromValue(map[string]any{"type": evt.Type, "kind": evt.Kind, "id": evt.ID, "status": evt.Status, "message": appProgressMessage(action, evt)}))
 		}
 	})
 	// Operations can publish some components before failing; always invalidate.

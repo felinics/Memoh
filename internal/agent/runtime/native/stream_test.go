@@ -13,16 +13,18 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
-type agentStreamTestProvider func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error)
+type agentStreamTestProvider func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error)
 
 type streamEmitterCaptureProvider struct {
 	emitter chan agenttools.StreamEmitter
 }
 
-func (p *streamEmitterCaptureProvider) Tools(_ context.Context, session agenttools.SessionContext) ([]sdk.Tool, error) {
+func (p *streamEmitterCaptureProvider) Tools(_ context.Context, session agenttools.SessionContext) ([]toolexec.Tool, error) {
 	p.emitter <- session.Emitter
 	return nil, nil
 }
@@ -40,25 +42,25 @@ func (agentStreamTestProvider) TestModel(context.Context, string) (*sdk.ModelTes
 	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
 }
 
-func (agentStreamTestProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
-	return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+func (agentStreamTestProvider) DoGenerate(context.Context, sdk.Request) (sdk.ModelResult, error) {
+	return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
 }
 
-func (p agentStreamTestProvider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (p agentStreamTestProvider) DoStream(ctx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 	return p(ctx, params)
 }
 
-func closedAgentTestStream(parts ...sdk.StreamPart) *sdk.StreamResult {
+func closedAgentTestStream(parts ...sdk.StreamPart) <-chan sdk.StreamPart {
 	ch := make(chan sdk.StreamPart, len(parts))
 	for _, part := range parts {
 		ch <- part
 	}
 	close(ch)
-	return &sdk.StreamResult{Stream: ch}
+	return ch
 }
 
 func finishedTextTestProvider(text string) agentStreamTestProvider {
-	return func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	return func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		return closedAgentTestStream(
 			&sdk.StartStepPart{},
 			&sdk.TextDeltaPart{ID: "text", Text: text},
@@ -70,7 +72,7 @@ func finishedTextTestProvider(text string) agentStreamTestProvider {
 func TestAgentStreamObservesReasoningEndBeforeStepCommit(t *testing.T) {
 	t.Parallel()
 
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		return closedAgentTestStream(
 			&sdk.StartPart{},
 			&sdk.StartStepPart{},
@@ -92,9 +94,9 @@ func TestAgentStreamObservesReasoningEndBeforeStepCommit(t *testing.T) {
 		OnProviderStreamEventObserved: func(event StreamEvent) {
 			observed = append(observed, event.Type)
 		},
-		OnStepCommitted: func(context.Context, int, *sdk.StepResult) error {
+		OnStepCommitted: func(context.Context, int, *step.Record) (StepDirective, error) {
 			commitSawReasoningEnd = slices.Contains(observed, EventReasoningEnd)
-			return nil
+			return StepDirective{}, nil
 		},
 	})
 	for range events {
@@ -105,14 +107,12 @@ func TestAgentStreamObservesReasoningEndBeforeStepCommit(t *testing.T) {
 	}
 }
 
-func TestAgentStreamReopensAfterFinalSteer(t *testing.T) {
+func TestAgentStreamContinuesAfterFinalSteer(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
 	var secondInput atomic.Bool
 	var observedText atomic.Int32
-	var continueAfter atomic.Bool
-	nextInputs := []sdk.Message{}
-	provider := agentStreamTestProvider(func(_ context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(_ context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 		call := calls.Add(1)
 		if call == 2 {
 			for _, message := range params.Messages {
@@ -127,20 +127,19 @@ func TestAgentStreamReopensAfterFinalSteer(t *testing.T) {
 	var commits int
 	events := a.Stream(context.Background(), RunConfig{
 		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
-		Messages: []sdk.Message{sdk.UserMessage("hello")}, Identity: SessionContext{BotID: "bot-1"},
-		ContinueAfterFinal: &continueAfter, NextModelInputs: &nextInputs,
+		Messages: []sdk.Message{sdk.UserMessage("hello")},
+		Identity: SessionContext{BotID: "bot-1"},
 		OnProviderStreamEventObserved: func(event StreamEvent) {
 			if event.Type == EventTextDelta {
 				observedText.Add(1)
 			}
 		},
-		OnStepCommitted: func(_ context.Context, _ int, _ *sdk.StepResult) error {
+		OnStepCommitted: func(_ context.Context, _ int, _ *step.Record) (StepDirective, error) {
 			commits++
 			if commits == 1 {
-				nextInputs = []sdk.Message{sdk.UserMessage("change direction")}
-				continueAfter.Store(true)
+				return StepDirective{NextInputs: []DirectiveInput{{ID: "steer-1", Text: "change direction"}}}, nil
 			}
-			return nil
+			return StepDirective{}, nil
 		},
 	})
 	var terminal, starts int
@@ -161,6 +160,45 @@ func TestAgentStreamReopensAfterFinalSteer(t *testing.T) {
 	}
 	if calls.Load() != 2 || !secondInput.Load() || terminal != 1 {
 		t.Fatalf("calls=%d second_input=%v terminal=%d", calls.Load(), secondInput.Load(), terminal)
+	}
+}
+
+func TestAgentStreamPersistsDirectiveInputOnceWithStepOffset(t *testing.T) {
+	t.Parallel()
+	const marker = "offset continuation steer"
+	var calls atomic.Int32
+	provider := agentStreamTestProvider(func(_ context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
+		call := calls.Add(1)
+		if call == 2 && !providerAttemptContainsText(params.Messages, marker) {
+			t.Fatalf("second provider call lost offset steer: %#v", params.Messages)
+		}
+		return closedAgentTestStream(&sdk.StartPart{}, &sdk.StartStepPart{}, &sdk.TextDeltaPart{ID: "text", Text: "answer"}, &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}, &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}), nil
+	})
+	committedByIndex := map[int][]sdk.Message{}
+	events := New(Deps{}).Stream(context.Background(), RunConfig{
+		Model:           &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages:        []sdk.Message{sdk.UserMessage("hello")},
+		Identity:        SessionContext{BotID: "bot-1"},
+		StepIndexOffset: 2,
+		OnStepCommitted: func(_ context.Context, stepIndex int, step *step.Record) (StepDirective, error) {
+			committedByIndex[stepIndex] = append([]sdk.Message(nil), step.Messages...)
+			if stepIndex == 2 {
+				return StepDirective{NextInputs: []DirectiveInput{{Text: marker}}}, nil
+			}
+			return StepDirective{}, nil
+		},
+	})
+	for range events {
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("calls=%d, want 2", calls.Load())
+	}
+	second := committedByIndex[3]
+	if !providerAttemptContainsText(second, marker) {
+		t.Fatalf("committed step 3 = %#v, want steer persisted once", second)
+	}
+	if providerAttemptContainsText(committedByIndex[2], marker) {
+		t.Fatalf("committed step 2 included steer: %#v", committedByIndex[2])
 	}
 }
 
@@ -185,11 +223,11 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 	t.Parallel()
 
 	a := New(Deps{})
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 		return closedAgentTestStream(
 			&sdk.StartPart{}, &sdk.StartStepPart{},
 			&sdk.ToolInputStartPart{ID: "call-1", ToolName: "write"},
-			&sdk.StreamToolCallPart{ToolCallID: "call-1", ToolName: "write", Input: map[string]any{"path": "/tmp/long.txt"}},
+			&sdk.StreamToolCallPart{ToolCallID: "call-1", ToolName: "write", Input: toolexec.ArgumentsFromValue(map[string]any{"path": "/tmp/long.txt"})},
 			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop},
 			&sdk.FinishPart{FinishReason: sdk.FinishReasonStop},
 		), nil
@@ -202,9 +240,9 @@ func TestAgentStreamEmitsToolCallInputStartThenStart(t *testing.T) {
 		Messages:         []sdk.Message{sdk.UserMessage("write a long file")},
 		SupportsToolCall: false,
 		Identity:         SessionContext{BotID: "bot-1"},
-		OnStepCommitted: func(context.Context, int, *sdk.StepResult) error {
+		OnStepCommitted: func(context.Context, int, *step.Record) (StepDirective, error) {
 			commits++
-			return nil
+			return StepDirective{}, nil
 		},
 	}) {
 		events = append(events, event)
@@ -246,8 +284,8 @@ func TestAgentStreamCancellationDoesNotWaitForProviderToClose(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	provider := agentStreamTestProvider(func(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
-		return &sdk.StreamResult{Stream: make(chan sdk.StreamPart)}, nil
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
+		return make(chan sdk.StreamPart), nil
 	})
 	events := New(Deps{}).Stream(ctx, RunConfig{
 		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
@@ -359,24 +397,24 @@ func TestAgentStreamPersistsInterruptedInferenceStep(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	provider := agentStreamTestProvider(func(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+	provider := agentStreamTestProvider(func(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 		ch := make(chan sdk.StreamPart, 3)
 		ch <- &sdk.StartStepPart{}
 		ch <- &sdk.ReasoningDeltaPart{ID: "reasoning", Text: "thinking"}
 		ch <- &sdk.TextDeltaPart{ID: "text", Text: "partial"}
 		go func() { <-ctx.Done(); close(ch) }()
-		return &sdk.StreamResult{Stream: ch}, nil
+		return ch, nil
 	})
-	var interrupted *sdk.StepResult
+	var interrupted *step.Record
 	events := New(Deps{}).Stream(ctx, RunConfig{
 		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
 		Messages: []sdk.Message{sdk.UserMessage("keep streaming")},
 		Identity: SessionContext{BotID: "bot-1"},
-		OnStepInterrupted: func(callbackCtx context.Context, stepIndex int, step *sdk.StepResult) error {
+		OnStepInterrupted: func(callbackCtx context.Context, stepIndex int, record *step.Record) error {
 			if !errors.Is(context.Cause(callbackCtx), context.Canceled) || stepIndex != 0 {
 				t.Errorf("callback context/index = %v/%d", callbackCtx.Err(), stepIndex)
 			}
-			interrupted = step
+			interrupted = record
 			return nil
 		},
 	})
@@ -389,7 +427,7 @@ func TestAgentStreamPersistsInterruptedInferenceStep(t *testing.T) {
 			terminal = event
 		}
 	}
-	if interrupted == nil || interrupted.Reasoning != "thinking" || interrupted.Text != "partial" {
+	if interrupted == nil || interrupted.Result.Reasoning != "thinking" || interrupted.Result.Text != "partial" {
 		t.Fatalf("interrupted step = %#v", interrupted)
 	}
 	var messages []sdk.Message
@@ -435,12 +473,12 @@ func TestAgentStreamDoesNotCheckpointAnAlreadyCommittedStep(t *testing.T) {
 		Model:    &sdk.Model{ID: "mock-model", Provider: finishedTextTestProvider("final answer")},
 		Messages: []sdk.Message{sdk.UserMessage("hi")},
 		Identity: SessionContext{BotID: "bot-1"},
-		OnStepCommitted: func(_ context.Context, _ int, step *sdk.StepResult) error {
-			committed <- step.Text
-			return nil
+		OnStepCommitted: func(_ context.Context, _ int, step *step.Record) (StepDirective, error) {
+			committed <- step.Result.Text
+			return StepDirective{}, nil
 		},
-		OnStepInterrupted: func(_ context.Context, _ int, step *sdk.StepResult) error {
-			interrupted <- step.Text
+		OnStepInterrupted: func(_ context.Context, _ int, step *step.Record) error {
+			interrupted <- step.Result.Text
 			return nil
 		},
 	})
@@ -477,13 +515,13 @@ func TestAgentStreamCheckpointsWhenCompleteCommitLosesAbortRace(t *testing.T) {
 		Model:    &sdk.Model{ID: "mock-model", Provider: finishedTextTestProvider("final answer")},
 		Messages: []sdk.Message{sdk.UserMessage("hi")},
 		Identity: SessionContext{BotID: "bot-1"},
-		OnStepCommitted: func(context.Context, int, *sdk.StepResult) error {
+		OnStepCommitted: func(context.Context, int, *step.Record) (StepDirective, error) {
 			close(commitStarted)
 			<-ctx.Done()
-			return errors.New("abort won")
+			return StepDirective{}, errors.New("abort won")
 		},
-		OnStepInterrupted: func(_ context.Context, _ int, step *sdk.StepResult) error {
-			interrupted <- step.Text
+		OnStepInterrupted: func(_ context.Context, _ int, step *step.Record) error {
+			interrupted <- step.Result.Text
 			return nil
 		},
 	})

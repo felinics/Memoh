@@ -8,6 +8,8 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // toolExecutionMetadataRegistry keeps UI-only metadata beside a tool call
@@ -36,12 +38,12 @@ func newToolExecutionMetadataRegistry(onUpdate func(sdk.ToolCall, map[string]any
 // authoritative point where an omitted target resolves to the current
 // default, so metadata recorded earlier could be wrong.
 func (r *toolExecutionMetadataRegistry) wrap(
-	next func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error),
-) func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+	next func(context.Context, sdk.ToolCall) (toolexec.ToolApprovalResult, error),
+) func(context.Context, sdk.ToolCall) (toolexec.ToolApprovalResult, error) {
 	if r == nil || next == nil {
 		return next
 	}
-	return func(ctx context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+	return func(ctx context.Context, call sdk.ToolCall) (toolexec.ToolApprovalResult, error) {
 		result, err := next(ctx, call)
 		if err != nil {
 			return result, err
@@ -113,14 +115,9 @@ func (r *toolExecutionMetadataRegistry) annotate(messages []sdk.Message) []sdk.M
 			if metadata == nil {
 				continue
 			}
-			providerMetadata := make(map[string]any, len(call.ProviderMetadata)+1)
-			for key, value := range call.ProviderMetadata {
-				providerMetadata[key] = value
-			}
 			for key, value := range metadata {
-				providerMetadata[key] = value
+				call.ProviderMetadata = partmeta.Set(call.ProviderMetadata, key, value)
 			}
-			call.ProviderMetadata = providerMetadata
 			parts[partIndex] = call
 			messageChanged = true
 		}

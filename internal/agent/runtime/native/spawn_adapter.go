@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 )
 
@@ -26,8 +27,8 @@ type SpawnStepCommitFactory func(
 	contextLifecycle *contextfrag.LifecycleHolder,
 	onPersisted func(),
 ) (
-	func(context.Context, int, *sdk.StepResult) error,
-	func(context.Context, int, *sdk.StepResult) error,
+	func(context.Context, int, *step.Record) error,
+	func(context.Context, int, *step.Record) error,
 )
 
 // SpawnRunObservation carries the terminal outcome selected by the session
@@ -90,7 +91,9 @@ func (s *SpawnAdapter) installStepCommit(ctx context.Context, cfg tools.SpawnRun
 	if commit == nil || interrupt == nil {
 		return false
 	}
-	rc.OnStepCommitted = commit
+	rc.OnStepCommitted = func(ctx context.Context, stepIndex int, step *step.Record) (StepDirective, error) {
+		return StepDirective{}, commit(ctx, stepIndex, step)
+	}
 	rc.OnStepInterrupted = interrupt
 	return true
 }

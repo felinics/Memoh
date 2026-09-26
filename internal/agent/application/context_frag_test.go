@@ -11,6 +11,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/hooks"
@@ -189,7 +190,7 @@ func TestNormalizeContextMessagesRemapsCurrentAndMemory(t *testing.T) {
 		}},
 	}})[0]
 	webResult := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(sdk.ToolResultPart{
-		ToolCallID: "web-call", ToolName: "web_fetch", Result: "discarded",
+		ToolCallID: "web-call", ToolName: "web_fetch", Result: toolexec.OutputFromValue("discarded"),
 	})})[0]
 	askCall := sdkMessagesToModelMessages([]sdk.Message{{
 		Role: sdk.MessageRoleAssistant,

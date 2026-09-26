@@ -12,22 +12,24 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/apperror"
 )
 
 type staticToolProvider struct {
-	tools []sdk.Tool
+	tools []toolexec.Tool
 }
 
-func (p staticToolProvider) Tools(context.Context, agenttools.SessionContext) ([]sdk.Tool, error) {
+func (p staticToolProvider) Tools(context.Context, agenttools.SessionContext) ([]toolexec.Tool, error) {
 	return p.tools, nil
 }
 
 type atomicMockProvider struct {
 	calls   atomic.Int32
-	handler func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error)
-	stream  func(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error)
+	handler func(call int, params sdk.Request) (sdk.ModelResult, error)
+	stream  func(ctx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error)
 }
 
 func (*atomicMockProvider) Name() string {
@@ -46,12 +48,12 @@ func (*atomicMockProvider) TestModel(context.Context, string) (*sdk.ModelTestRes
 	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
 }
 
-func (m *atomicMockProvider) DoGenerate(_ context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (m *atomicMockProvider) DoGenerate(_ context.Context, params sdk.Request) (sdk.ModelResult, error) {
 	call := int(m.calls.Add(1))
 	return m.handler(call, params)
 }
 
-func (m *atomicMockProvider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (m *atomicMockProvider) DoStream(ctx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 	if m.stream != nil {
 		return m.stream(ctx, params)
 	}
@@ -74,7 +76,7 @@ func (m *atomicMockProvider) DoStream(ctx context.Context, params sdk.GeneratePa
 			ch <- &sdk.StreamToolCallPart{
 				ToolCallID: tc.ToolCallID,
 				ToolName:   tc.ToolName,
-				Input:      tc.Input,
+				Input:      toolexec.ArgumentsFromValue(tc.Input),
 			}
 		}
 		ch <- &sdk.FinishStepPart{
@@ -87,29 +89,103 @@ func (m *atomicMockProvider) DoStream(ctx context.Context, params sdk.GeneratePa
 			TotalUsage:   result.Usage,
 		}
 	}()
-	return &sdk.StreamResult{Stream: ch}, nil
+	return ch, nil
 }
 
-func TestContextBudgetGuardProviderNeverDelegatesCanceledContext(t *testing.T) {
+func TestAgentGenerateNeverDispatchesOnCanceledContext(t *testing.T) {
 	t.Parallel()
 
 	provider := &atomicMockProvider{
-		handler: func(int, sdk.GenerateParams) (*sdk.GenerateResult, error) {
-			return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+		handler: func(int, sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
-	guarded := contextBudgetGuardProvider{Provider: provider}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := guarded.DoGenerate(ctx, sdk.GenerateParams{}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("DoGenerate() error = %v, want context canceled", err)
-	}
-	if _, err := guarded.DoStream(ctx, sdk.GenerateParams{}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("DoStream() error = %v, want context canceled", err)
+	a := New(Deps{})
+	if _, err := a.Generate(ctx, RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages:         []sdk.Message{sdk.UserMessage("task")},
+		Identity:         SessionContext{BotID: "bot-1"},
+		ContextMutations: contextfrag.NewMutationLedger(),
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Generate() error = %v, want context canceled", err)
 	}
 	if got := provider.calls.Load(); got != 0 {
-		t.Fatalf("underlying provider calls = %d, want 0 for canceled context", got)
+		t.Fatalf("provider calls = %d, want 0 for canceled context", got)
+	}
+}
+
+func TestAgentGenerateContinuesAfterFinalSteer(t *testing.T) {
+	t.Parallel()
+
+	provider := &atomicMockProvider{
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
+			if call == 2 {
+				if !providerAttemptContainsText(params.Messages, "change direction") {
+					t.Fatalf("second provider call lost steer: %#v", params.Messages)
+				}
+				return sdk.ModelResult{Text: "adjusted", FinishReason: sdk.FinishReasonStop}, nil
+			}
+			return sdk.ModelResult{Text: "answer", FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+	a := New(Deps{})
+	var commits int
+	result, err := a.Generate(context.Background(), RunConfig{
+		Model:    &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages: []sdk.Message{sdk.UserMessage("hello")},
+		Identity: SessionContext{BotID: "bot-1"},
+		OnStepCommitted: func(_ context.Context, _ int, _ *step.Record) (StepDirective, error) {
+			commits++
+			if commits == 1 {
+				return StepDirective{NextInputs: []DirectiveInput{{Text: "change direction"}}}, nil
+			}
+			return StepDirective{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if provider.calls.Load() != 2 {
+		t.Fatalf("provider calls = %d, want 2", provider.calls.Load())
+	}
+	// The answer before the steer stays in the result, joined the way the
+	// segment continuation joined it before the loop moved in-process.
+	if result == nil || result.Text != "answer\nadjusted" {
+		t.Fatalf("result text = %q, want the pre-steer answer kept", result.Text)
+	}
+}
+
+func TestAgentStreamNeverDispatchesOnCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	provider := &atomicMockProvider{
+		handler: func(int, sdk.Request) (sdk.ModelResult, error) {
+			return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a := New(Deps{})
+	var terminal StreamEvent
+	for event := range a.Stream(ctx, RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages:         []sdk.Message{sdk.UserMessage("task")},
+		Identity:         SessionContext{BotID: "bot-1"},
+		ContextMutations: contextfrag.NewMutationLedger(),
+	}) {
+		if event.IsTerminal() {
+			terminal = event
+		}
+	}
+	if terminal.Type != EventAgentAbort {
+		t.Fatalf("terminal event = %q, want %q", terminal.Type, EventAgentAbort)
+	}
+	if got := provider.calls.Load(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0 for canceled context", got)
 	}
 }
 
@@ -118,19 +194,19 @@ func TestAgentGenerateStopsOnTerminalTextLoopAbort(t *testing.T) {
 
 	repeatedText := "abcdefghijklmnopqrstuvwxyz0123456789 repeated text chunk for loop detection"
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			finishReason := sdk.FinishReasonToolCalls
 			var toolCalls []sdk.ToolCall
 			if call < 4 {
 				toolCalls = []sdk.ToolCall{{
 					ToolCallID: "call-terminal",
 					ToolName:   "noop_tool",
-					Input:      map[string]any{"step": call},
+					Input:      toolexec.ArgumentsFromValue(map[string]any{"step": call}),
 				}}
 			} else {
 				finishReason = sdk.FinishReasonStop
 			}
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				Text:         repeatedText,
 				FinishReason: finishReason,
 				ToolCalls:    toolCalls,
@@ -141,11 +217,11 @@ func TestAgentGenerateStopsOnTerminalTextLoopAbort(t *testing.T) {
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
 		staticToolProvider{
-			tools: []sdk.Tool{{
+			tools: []toolexec.Tool{{
 				Name:       "noop_tool",
 				Parameters: &jsonschema.Schema{Type: "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return map[string]any{"ok": true}, nil
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 				},
 			}},
 		},
@@ -172,25 +248,25 @@ func TestAgentGenerateRunsStepReselectorBeforeNextProviderCall(t *testing.T) {
 	ledger := contextfrag.NewMutationLedger()
 	var secondCallMessages []sdk.Message
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 			switch call {
 			case 1:
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-1",
 						ToolName:   "lookup",
-						Input:      map[string]any{"q": "one"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 					}},
 				}, nil
 			case 2:
 				secondCallMessages = append([]sdk.Message(nil), params.Messages...)
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					Text:         "ok",
 					FinishReason: sdk.FinishReasonStop,
 				}, nil
 			default:
-				return nil, errors.New("unexpected provider call")
+				return sdk.ModelResult{}, errors.New("unexpected provider call")
 			}
 		},
 	}
@@ -198,11 +274,11 @@ func TestAgentGenerateRunsStepReselectorBeforeNextProviderCall(t *testing.T) {
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
 		staticToolProvider{
-			tools: []sdk.Tool{{
+			tools: []toolexec.Tool{{
 				Name:       "lookup",
 				Parameters: &jsonschema.Schema{Type: "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return map[string]any{"answer": strings.Repeat("tool-result ", 64)}, nil
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue(map[string]any{"answer": strings.Repeat("tool-result ", 64)}), nil
 				},
 			}},
 		},
@@ -263,29 +339,29 @@ func TestAgentGenerateRecordsMidTaskPruneForProtectedRescue(t *testing.T) {
 
 	ledger := contextfrag.NewMutationLedger()
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call == 1 {
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-1",
 						ToolName:   "lookup",
-						Input:      map[string]any{"q": "one"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 					}},
 				}, nil
 			}
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
 		staticToolProvider{
-			tools: []sdk.Tool{{
+			tools: []toolexec.Tool{{
 				Name:       "lookup",
 				Parameters: &jsonschema.Schema{Type: "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return map[string]any{"answer": strings.Repeat("tool-result ", 64)}, nil
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue(map[string]any{"answer": strings.Repeat("tool-result ", 64)}), nil
 				},
 			}},
 		},
@@ -324,28 +400,28 @@ func TestAgentGeneratePassesRemainingBudgetToStepReselector(t *testing.T) {
 	const budget = 1_000
 
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call == 1 {
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-budget",
 						ToolName:   "lookup",
-						Input:      map[string]any{"q": "one"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 					}},
 				}, nil
 			}
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 
 	a := New(Deps{})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []sdk.Tool{{
+		staticToolProvider{tools: []toolexec.Tool{{
 			Name:       "lookup",
 			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{"answer": "ok"}, nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 			},
 		}}},
 	})
@@ -374,11 +450,11 @@ func TestAgentGeneratePassesRemainingBudgetToStepReselector(t *testing.T) {
 func TestAgentGenerateActivePlanStepBudgetSubtractsFixedEnvelopeOnce(t *testing.T) {
 	t.Parallel()
 
-	lookupTool := sdk.Tool{
+	lookupTool := toolexec.Tool{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-			return map[string]any{"answer": "ok"}, nil
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 		},
 	}
 	toolCost := contextfrag.ToolDefAccountingFor("native", lookupTool).TokenEstimate
@@ -387,21 +463,21 @@ func TestAgentGenerateActivePlanStepBudgetSubtractsFixedEnvelopeOnce(t *testing.
 		OutputReserve: toolCost + 200,
 	}
 
-	var firstParams sdk.GenerateParams
+	var firstParams sdk.Request
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 			if call == 1 {
 				firstParams = cloneGenerateParams(params)
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-budget-plan",
 						ToolName:   "lookup",
-						Input:      map[string]any{"q": "one"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 					}},
 				}, nil
 			}
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 
@@ -409,7 +485,7 @@ func TestAgentGenerateActivePlanStepBudgetSubtractsFixedEnvelopeOnce(t *testing.
 		return cfg, nil
 	}})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []sdk.Tool{lookupTool}},
+		staticToolProvider{tools: []toolexec.Tool{lookupTool}},
 	})
 
 	var seenBudget int
@@ -452,16 +528,16 @@ func TestAgentGenerateFailsClosedOnProtectedStepOverflow(t *testing.T) {
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call != 1 {
-				return nil, fmt.Errorf("unexpected provider call %d after protected overflow", call)
+				return sdk.ModelResult{}, fmt.Errorf("unexpected provider call %d after protected overflow", call)
 			}
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls: []sdk.ToolCall{{
 					ToolCallID: "call-step-overflow",
 					ToolName:   "lookup",
-					Input:      map[string]any{"q": "one"},
+					Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 				}},
 			}, nil
 		},
@@ -471,11 +547,11 @@ func TestAgentGenerateFailsClosedOnProtectedStepOverflow(t *testing.T) {
 		return cfg, nil
 	}})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []sdk.Tool{{
+		staticToolProvider{tools: []toolexec.Tool{{
 			Name:       "lookup",
 			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{"answer": "ok"}, nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 			},
 		}}},
 	})
@@ -515,16 +591,16 @@ func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
 	t.Parallel()
 
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call != 1 {
-				return nil, fmt.Errorf("unexpected provider call %d after protected overflow", call)
+				return sdk.ModelResult{}, fmt.Errorf("unexpected provider call %d after protected overflow", call)
 			}
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls: []sdk.ToolCall{{
 					ToolCallID: "call-stream-step-overflow",
 					ToolName:   "lookup",
-					Input:      map[string]any{"q": "one"},
+					Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 				}},
 			}, nil
 		},
@@ -533,11 +609,11 @@ func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
 		return cfg, nil
 	}})
 	a.SetToolProviders([]agenttools.ToolProvider{
-		staticToolProvider{tools: []sdk.Tool{{
+		staticToolProvider{tools: []toolexec.Tool{{
 			Name:       "lookup",
 			Parameters: &jsonschema.Schema{Type: "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{"answer": "ok"}, nil
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 			},
 		}}},
 	})
@@ -566,5 +642,68 @@ func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
 	}
 	if errorEvents[0].Code != string(apperror.CodeContextProtectedOverflow) {
 		t.Fatalf("error code = %q, want %q", errorEvents[0].Code, apperror.CodeContextProtectedOverflow)
+	}
+}
+
+// TestAgentGenerateStepRecordJoinsToolResultsWithCallInput pins the shape of a
+// committed step's ToolResults: each entry pairs the originating call's Input
+// with the loop's Output, which is what makes the field an toolexec.ToolResult
+// rather than a bare result part. The lossless parts stay in Messages.
+func TestAgentGenerateStepRecordJoinsToolResultsWithCallInput(t *testing.T) {
+	t.Parallel()
+
+	provider := &atomicMockProvider{
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
+			if call == 1 {
+				return sdk.ModelResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls: []sdk.ToolCall{{
+						ToolCallID: "join-call",
+						ToolName:   "join_tool",
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"city": "Kyoto"}),
+					}},
+				}, nil
+			}
+			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		},
+	}
+	a := New(Deps{})
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
+		Name: "join_tool",
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue("sunny"), nil
+		},
+	}}}})
+
+	var records []step.Record
+	if _, err := a.Generate(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "join-model", Provider: provider},
+		Messages:         []sdk.Message{sdk.UserMessage("weather?")},
+		SupportsToolCall: true,
+		OnStepCommitted: func(_ context.Context, _ int, record *step.Record) (StepDirective, error) {
+			records = append(records, *record)
+			return StepDirective{}, nil
+		},
+	}); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("committed steps = %d, want 2", len(records))
+	}
+	results := records[0].ToolResults
+	if len(results) != 1 {
+		t.Fatalf("step 0 tool results = %#v, want exactly one", results)
+	}
+	if got := results[0].ToolCallID; got != "join-call" {
+		t.Errorf("ToolCallID = %q, want join-call", got)
+	}
+	if got := results[0].ToolName; got != "join_tool" {
+		t.Errorf("ToolName = %q, want join_tool", got)
+	}
+	if got, ok := toolexec.ArgumentsValue(results[0].Input).(map[string]any); !ok || got["city"] != "Kyoto" {
+		t.Errorf("Input = %#v, want the originating call's input", results[0].Input)
+	}
+	if got := toolexec.OutputValue(results[0].Output); got != "sunny" {
+		t.Errorf("Output = %#v, want sunny", got)
 	}
 }

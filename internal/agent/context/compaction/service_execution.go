@@ -332,12 +332,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		selectedSystemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
 	)
 
-	result, err := sdk.GenerateTextResult(ctx,
-		sdk.WithModel(model),
-		sdk.WithSystem(systemPromptDecorated),
-		sdk.WithMessages(sdkMessages),
-		sdk.WithMaxTokens(maxOutputTokens),
-	)
+	result, err := model.Generate(ctx, sdk.Request{
+		System:    systemPromptDecorated,
+		Messages:  sdkMessages,
+		MaxTokens: &maxOutputTokens,
+	})
 	if err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err

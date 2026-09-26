@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/background"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -370,7 +371,7 @@ func (*SpawnProvider) Usage(_ context.Context, _ SessionContext, available Avail
 	return usageSection("Subagents", parts)
 }
 
-func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if session.IsSubagent || p.agent == nil {
 		return nil, nil
 	}
@@ -381,87 +382,38 @@ func (p *SpawnProvider) Tools(ctx context.Context, session SessionContext) ([]sd
 			spawnDescription = appendModelCatalogToSpawnDescription(spawnDescription, catalog, session)
 		}
 	}
-	return []sdk.Tool{
+	return []toolexec.Tool{
 		{
 			Name:        ToolSpawnAgent().String(),
 			Description: spawnDescription,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Optional memorable agent id. If omitted, an id like agent_1 is assigned. Must be lowercase letters, digits, underscore, or hyphen.",
-					},
-					"task": map[string]any{
-						"type":        "string",
-						"description": "Task instruction for the new agent.",
-					},
-					"model_id": map[string]any{
-						"type":        "string",
-						"description": "Optional external model name from the current session's provider. Omit to use the current session model.",
-					},
-					"provider": map[string]any{
-						"type":        "string",
-						"description": "Optional provider name. Must match the current session's provider.",
-					},
-					"fork": map[string]any{
-						"type":        "boolean",
-						"description": "If true, inherit the parent model's current message context while keeping the subagent system prompt and tools.",
-					},
-					"run_in_background": map[string]any{
-						"type":        "boolean",
-						"description": "If true, return immediately with a task_id. Use wait_until(task_id), then get_background_status(task_id) to inspect result.",
-					},
-				},
-				"required": []string{"task"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSpawnAgent(ctx.Context, sess, inputAsMap(input))
-			},
+			Parameters:  toolexec.SchemaFor[spawnAgentArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args spawnAgentArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execSpawnAgent(ctx.Context, sess, args))
+			}),
 		},
 		{
 			Name:        ToolSendMessage().String(),
 			Description: "Send a follow-up message to an existing managed subagent. Messages to a busy agent are queued and run serially.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{
-						"type":        "string",
-						"description": "Existing agent id returned when the agent was created or listed.",
-					},
-					"message": map[string]any{
-						"type":        "string",
-						"description": "Follow-up instruction for the agent.",
-					},
-					"run_in_background": map[string]any{
-						"type":        "boolean",
-						"description": "If true, return immediately with a task_id. If the agent is busy, the message is queued regardless of this value. Use wait_until(task_id), then get_background_status(task_id) to inspect result.",
-					},
-				},
-				"required": []string{"id", "message"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSendMessage(ctx.Context, sess, inputAsMap(input))
-			},
+			Parameters:  toolexec.SchemaFor[sendMessageArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args sendMessageArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execSendMessage(ctx.Context, sess, args))
+			}),
 		},
 		{
 			Name:        ToolListAgents().String(),
 			Description: "List managed subagents created in the current session only.",
-			Parameters: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execListAgents(ctx.Context, sess, inputAsMap(input))
-			},
+			Parameters:  toolexec.SchemaFor[listAgentsArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, _ listAgentsArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execListAgents(ctx.Context, sess))
+			}),
 		},
 		{
 			Name:        ToolListModels().String(),
 			Description: "List enabled chat models, including model_id, provider, description, and the current session model marker. Subagents can only use models from the current session's provider.",
-			Parameters:  emptyObjectSchema(),
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execListModels(ctx.Context, sess, inputAsMap(input))
-			},
+			Parameters:  toolexec.SchemaFor[listModelsArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, _ listModelsArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execListModels(ctx.Context, sess))
+			}),
 		},
 	}, nil
 }
@@ -577,15 +529,15 @@ func (c *agentCoordinator) snapshot(botID, parentSessionID, agentID string) agen
 	}
 }
 
-func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionContext, args spawnAgentArgs) (any, error) {
 	if err := validateParentSession(session); err != nil {
 		return nil, err
 	}
-	task := strings.TrimSpace(StringArg(args, "task"))
+	task := strings.TrimSpace(args.Task)
 	if task == "" {
 		return nil, errors.New("task is required")
 	}
-	agentID, err := p.resolveNewAgentID(ctx, session, StringArg(args, "id"))
+	agentID, err := p.resolveNewAgentID(ctx, session, args.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -594,8 +546,8 @@ func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionConte
 	} else if err != nil && !errors.Is(err, errAgentNotFound) {
 		return nil, err
 	}
-	requestedModelID := strings.TrimSpace(StringArg(args, "model_id"))
-	requestedProvider := strings.TrimSpace(StringArg(args, "provider"))
+	requestedModelID := strings.TrimSpace(args.ModelID)
+	requestedProvider := strings.TrimSpace(args.Provider)
 	if requestedModelID == "" && requestedProvider != "" {
 		return nil, errors.New("provider requires model_id")
 	}
@@ -603,7 +555,7 @@ func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionConte
 	if err != nil {
 		return nil, fmt.Errorf("resolve subagent model: %w", err)
 	}
-	forked, _, _ := BoolArg(args, "fork")
+	forked := args.Fork
 	var forkContext []sessionpkg.SubagentForkContextMessage
 	if forked {
 		if session.ForkContext == nil {
@@ -615,7 +567,12 @@ func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionConte
 		}
 		forkContext = make([]sessionpkg.SubagentForkContextMessage, 0, len(entries))
 		for i, entry := range entries {
-			content, marshalErr := json.Marshal(entry.Message)
+			// Fork rows share bot_history_messages' stored shape so every
+			// reader types them the same way as ordinary history. That
+			// includes the row rule that document bytes are never stored: a
+			// forked agent inherits images and file names, and reads a
+			// document's content from the workspace itself.
+			content, marshalErr := historyfrag.MarshalStoredSDKMessage(entry.Message)
 			if marshalErr != nil {
 				return nil, fmt.Errorf("marshal fork context message %d: %w", i, marshalErr)
 			}
@@ -630,19 +587,19 @@ func (p *SpawnProvider) execSpawnAgent(ctx context.Context, session SessionConte
 	if err != nil {
 		return nil, err
 	}
-	runInBackground, _, _ := BoolArg(args, "run_in_background")
+	runInBackground := args.RunInBackground
 	return p.submitAgentTask(ctx, session, rec, config, task, runInBackground)
 }
 
-func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionContext, args sendMessageArgs) (any, error) {
 	if err := validateParentSession(session); err != nil {
 		return nil, err
 	}
-	agentID, err := normalizeAgentID(StringArg(args, "id"))
+	agentID, err := normalizeAgentID(args.ID)
 	if err != nil {
 		return nil, err
 	}
-	message := strings.TrimSpace(StringArg(args, "message"))
+	message := strings.TrimSpace(args.Message)
 	if message == "" {
 		return nil, errors.New("message is required")
 	}
@@ -654,11 +611,11 @@ func (p *SpawnProvider) execSendMessage(ctx context.Context, session SessionCont
 	if err != nil {
 		return nil, err
 	}
-	runInBackground, _, _ := BoolArg(args, "run_in_background")
+	runInBackground := args.RunInBackground
 	return p.submitAgentTask(ctx, session, rec, config, message, runInBackground)
 }
 
-func (p *SpawnProvider) execListModels(ctx context.Context, session SessionContext, _ map[string]any) (any, error) {
+func (p *SpawnProvider) execListModels(ctx context.Context, session SessionContext) (any, error) {
 	catalog, err := p.listModelCatalog(ctx, "")
 	if err != nil {
 		return nil, err
@@ -687,7 +644,7 @@ func (p *SpawnProvider) execListModels(ctx context.Context, session SessionConte
 	}, nil
 }
 
-func (p *SpawnProvider) execListAgents(ctx context.Context, session SessionContext, _ map[string]any) (any, error) {
+func (p *SpawnProvider) execListAgents(ctx context.Context, session SessionContext) (any, error) {
 	if err := validateParentSession(session); err != nil {
 		return nil, err
 	}
@@ -1415,9 +1372,18 @@ func (p *SpawnProvider) loadAgentForkContext(ctx context.Context, sessionID stri
 	}
 	messages := make([]sdk.Message, 0, len(rows))
 	for _, row := range rows {
+		// A row without content (an empty assistant message the parent kept)
+		// is skipped, as the direct-turn reader skips it; the fork is not
+		// worth less for it.
 		converted, ok := sdkMessageFromPersisted(messagepkg.Message{Role: row.Role, Content: row.Message})
 		if !ok {
-			return nil, fmt.Errorf("invalid fork context message role %q", row.Role)
+			if strings.TrimSpace(string(row.Message)) != "" && p.logger != nil {
+				// A row with bytes but no decodable content is corruption
+				// worth a trace, not a reason to refuse the fork.
+				p.logger.WarnContext(ctx, "fork context row has no decodable content; skipping",
+					slog.String("session_id", sessionID), slog.String("role", row.Role))
+			}
+			continue
 		}
 		messages = append(messages, converted)
 	}
@@ -1442,48 +1408,19 @@ func (p *SpawnProvider) loadAgentMessages(ctx context.Context, sessionID string)
 	return out
 }
 
+// sdkMessageFromPersisted types one history row for the SDK. Rows hold the
+// stored shape (arguments object, output value, nested annotations), so they
+// go through the history codec rather than being decoded as SDK JSON.
 func sdkMessageFromPersisted(msg messagepkg.Message) (sdk.Message, bool) {
-	var full sdk.Message
-	if err := json.Unmarshal(msg.Content, &full); err == nil && (full.Role != "" || len(full.Content) > 0) {
-		if full.Role == "" {
-			full.Role = sdk.MessageRole(msg.Role)
-		}
-		return full, true
+	stored := historyfrag.DecodeStoredModelMessage(nil, msg.ID, msg.Role, msg.Content)
+	converted := historyfrag.StoredModelMessageToSDKMessage(stored)
+	if converted.Role == "" {
+		converted.Role = sdk.MessageRole(msg.Role)
 	}
-
-	var envelope struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
+	if len(converted.Content) == 0 {
+		return sdk.Message{}, false
 	}
-	if err := json.Unmarshal(msg.Content, &envelope); err == nil {
-		role := envelope.Role
-		if role == "" {
-			role = msg.Role
-		}
-		var text string
-		if err := json.Unmarshal(envelope.Content, &text); err == nil {
-			return sdk.Message{
-				Role:    sdk.MessageRole(role),
-				Content: []sdk.MessagePart{sdk.TextPart{Text: text}},
-			}, true
-		}
-		wrapped, _ := json.Marshal(struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		}{Role: role, Content: envelope.Content})
-		if err := json.Unmarshal(wrapped, &full); err == nil {
-			return full, true
-		}
-	}
-
-	var text string
-	if err := json.Unmarshal(msg.Content, &text); err == nil {
-		return sdk.Message{
-			Role:    sdk.MessageRole(msg.Role),
-			Content: []sdk.MessagePart{sdk.TextPart{Text: text}},
-		}, true
-	}
-	return sdk.Message{}, false
+	return converted, true
 }
 
 func dropLatestMatchingUserMessage(messages []sdk.Message, query string) []sdk.Message {
@@ -1998,3 +1935,22 @@ func (p *SpawnProvider) resolveSubagentReasoning(
 		clientType,
 	), nil
 }
+
+type spawnAgentArgs struct {
+	Fork            bool   `json:"fork,omitempty" jsonschema:"If true, inherit the parent model's current message context while keeping the subagent system prompt and tools."`
+	ID              string `json:"id,omitempty" jsonschema:"Optional memorable agent id. If omitted, an id like agent_1 is assigned. Must be lowercase letters, digits, underscore, or hyphen."`
+	ModelID         string `json:"model_id,omitempty" jsonschema:"Optional external model name from the current session's provider. Omit to use the current session model."`
+	Provider        string `json:"provider,omitempty" jsonschema:"Optional provider name. Must match the current session's provider."`
+	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"If true, return immediately with a task_id. Use wait_until(task_id), then get_background_status(task_id) to inspect result."`
+	Task            string `json:"task" jsonschema:"Task instruction for the new agent."`
+}
+
+type sendMessageArgs struct {
+	ID              string `json:"id" jsonschema:"Existing agent id returned when the agent was created or listed."`
+	Message         string `json:"message" jsonschema:"Follow-up instruction for the agent."`
+	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"If true, return immediately with a task_id. If the agent is busy, the message is queued regardless of this value. Use wait_until(task_id), then get_background_status(task_id) to inspect result."`
+}
+
+type listAgentsArgs struct{}
+
+type listModelsArgs struct{}

@@ -1,11 +1,13 @@
 package tools
 
-import sdk "github.com/felinics/twilight/sdk"
+import (
+	"github.com/felinics/memoh/internal/agent/toolexec"
+)
 
 // FilterSubagentTools applies the small denylist for capabilities that require
 // direct parent/user coordination. All other native and federated tools remain
 // available and keep their existing capability/configuration gates.
-func FilterSubagentTools(toolList []sdk.Tool) []sdk.Tool {
+func FilterSubagentTools(toolList []toolexec.Tool) []toolexec.Tool {
 	if len(toolList) == 0 {
 		return toolList
 	}
@@ -18,7 +20,7 @@ func FilterSubagentTools(toolList []sdk.Tool) []sdk.Tool {
 		ToolListAgents().String():  {},
 		ToolListModels().String():  {},
 	}
-	filtered := make([]sdk.Tool, 0, len(toolList))
+	filtered := make([]toolexec.Tool, 0, len(toolList))
 	for _, tool := range toolList {
 		if _, denied := blocked[tool.Name]; denied {
 			continue

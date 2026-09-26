@@ -6,6 +6,8 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // Some agents deliver the reply only as final text. A command receipt earlier
@@ -18,7 +20,7 @@ func TestTranscriptCommandOutputKeepsFallbackText(t *testing.T) {
 		t.Fatalf("messages = %d, want the receipt and the reply", len(messages))
 	}
 	receipt, ok := messages[0].Content[0].(sdk.TextPart)
-	if !ok || receipt.Text != "Goal set: review" || receipt.ProviderMetadata["runtime_command"] != "goal" {
+	if !ok || receipt.Text != "Goal set: review" || partmeta.Unfold(receipt.ProviderMetadata)["runtime_command"] != "goal" {
 		t.Fatalf("receipt = %#v", messages[0].Content[0])
 	}
 	reply, ok := messages[1].Content[0].(sdk.TextPart)
@@ -45,7 +47,7 @@ func TestTranscriptKeepsNativeToolFailure(t *testing.T) {
 		{Type: event.ToolCallEnd, ToolCallID: "read", Status: "failed", Result: "file not found"},
 	}, "")
 	result := messages[1].Content[0].(sdk.ToolResultPart)
-	if !result.IsError || result.Result != "file not found" {
+	if !result.IsError || toolexec.OutputValue(result.Result) != "file not found" {
 		t.Fatalf("native failure became a successful tool result: %#v", result)
 	}
 }

@@ -2,12 +2,16 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
+	"github.com/google/jsonschema-go/jsonschema"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	sched "github.com/felinics/memoh/internal/schedule"
 )
 
@@ -81,213 +85,151 @@ func (*ScheduleProvider) Usage(_ context.Context, _ SessionContext, available Av
 	return usageSection("Scheduled tasks", parts)
 }
 
-func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.service == nil {
 		return nil, nil
 	}
 	sess := session
-	return []sdk.Tool{
+	return []toolexec.Tool{
 		{
 			Name: ToolListSchedule().String(), Description: "List schedules for current bot",
-			Parameters: emptyObjectSchema(),
-			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
+			Parameters: toolexec.SchemaFor[listScheduleArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, _ listScheduleArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, errors.New("bot_id is required")
+					return sdk.ToolOutput{}, errors.New("bot_id is required")
 				}
 				items, err := p.service.List(ctx.Context, botID)
 				if err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
-				return map[string]any{"items": items}, nil
-			},
+				return toolexec.OutputFromValue(map[string]any{"items": items}), nil
+			}),
 		},
 		{
 			Name: ToolGetSchedule().String(), Description: "Get a schedule by id",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{"type": "string", "description": "Schedule ID"},
-				},
-				"required": []string{"id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				args := inputAsMap(input)
+			Parameters: toolexec.SchemaFor[scheduleIDArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args scheduleIDArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, errors.New("bot_id is required")
+					return sdk.ToolOutput{}, errors.New("bot_id is required")
 				}
-				id := StringArg(args, "id")
+				id := strings.TrimSpace(args.ID)
 				if id == "" {
-					return nil, errors.New("id is required")
+					return sdk.ToolOutput{}, errors.New("id is required")
 				}
 				item, err := p.service.Get(ctx.Context, id)
 				if err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
 				if item.BotID != botID {
-					return nil, errors.New("bot mismatch")
+					return sdk.ToolOutput{}, errors.New("bot mismatch")
 				}
-				return item, nil
-			},
+				return toolexec.OutputFromValue(item), nil
+			}),
 		},
 		{
 			Name: ToolCreateSchedule().String(), Description: "Create a new cron-scheduled task. Fill `command` with a natural-language instruction; when the cron `pattern` fires, the task runs and you receive a message containing that `command`. Include explicit platform and target in delivery instructions when results should be sent to a person or channel. Set `max_calls` to null for unlimited runs. " +
 				"By default each fire runs in a fresh session with the bot's default model. Optional execution parameters: `session_id` runs every fire inside that existing session (its runtime and workdir are inherited; only model/effort overrides apply). For fresh sessions, `acp_agent_id` (from list_acp_agents) runs fires through an ACP agent — combine with `acp_model_id`; `model_id` (a model_uuid from list_models) picks a native model instead; `workdir_id` (from list_workdirs) pins the session's working directory. `reasoning_effort` overrides the effort in both modes.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"},
-					"pattern": map[string]any{"type": "string"}, "command": map[string]any{"type": "string"},
-					"max_calls":        map[string]any{"anyOf": []map[string]any{{"type": "integer"}, {"type": "null"}}, "description": "Optional max calls, null means unlimited"},
-					"enabled":          map[string]any{"type": "boolean"},
-					"session_id":       map[string]any{"type": "string", "description": "Run every fire in this existing session instead of a fresh one. The session's runtime and workdir are inherited."},
-					"model_id":         map[string]any{"type": "string", "description": "Native model override: a model_uuid from list_models. Not valid together with acp_agent_id/acp_model_id."},
-					"acp_agent_id":     map[string]any{"type": "string", "description": "Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions."},
-					"acp_model_id":     map[string]any{"type": "string", "description": "ACP agent model id (from list_acp_agents with agent_id). Requires acp_agent_id or an ACP session_id."},
-					"reasoning_effort": map[string]any{"type": "string", "description": "Reasoning effort override (native: none|minimal|low|medium|high|xhigh|max as supported by the model; ACP: the agent's effort ids)."},
-					"workdir_id":       map[string]any{"type": "string", "description": "Bind fresh sessions to this workdir (id from list_workdirs)."},
-				},
-				"required": []string{"name", "description", "pattern", "command"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				args := inputAsMap(input)
+			Parameters: toolexec.SchemaFor[createScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema("Optional max calls, null means unlimited"))),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args createScheduleArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, errors.New("bot_id is required")
+					return sdk.ToolOutput{}, errors.New("bot_id is required")
 				}
-				name := StringArg(args, "name")
-				description := StringArg(args, "description")
-				pattern := StringArg(args, "pattern")
-				command := StringArg(args, "command")
+				name := strings.TrimSpace(args.Name)
+				description := strings.TrimSpace(args.Description)
+				pattern := strings.TrimSpace(args.Pattern)
+				command := strings.TrimSpace(args.Command)
 				if name == "" || description == "" || pattern == "" || command == "" {
-					return nil, errors.New("name, description, pattern, command are required")
+					return sdk.ToolOutput{}, errors.New("name, description, pattern, command are required")
 				}
 				req := sched.CreateRequest{Name: name, Description: description, Pattern: pattern, Command: command}
-				req.ExecutionConfig = executionConfigFromArgs(args)
-				maxCalls, err := parseNullableIntArg(args, "max_calls")
-				if err != nil {
-					return nil, err
-				}
-				req.MaxCalls = maxCalls
-				if enabled, ok, err := BoolArg(args, "enabled"); err != nil {
-					return nil, err
-				} else if ok {
-					req.Enabled = &enabled
+				req.ExecutionConfig = args.executionConfig()
+				req.MaxCalls = args.MaxCalls.nullableInt()
+				if args.Enabled != nil {
+					req.Enabled = args.Enabled
 				}
 				item, err := p.service.Create(ctx.Context, botID, req)
 				if err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
-				return item, nil
-			},
+				return toolexec.OutputFromValue(item), nil
+			}),
 		},
 		{
 			Name: ToolUpdateSchedule().String(), Description: "Update an existing schedule. To change execution parameters (session_id / model_id / acp_agent_id / acp_model_id / reasoning_effort / workdir_id), set `update_execution` to true and pass the FULL desired execution state — the whole block is replaced as one unit, and omitted execution fields reset to their defaults.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"},
-					"description": map[string]any{"type": "string"}, "pattern": map[string]any{"type": "string"},
-					"command":          map[string]any{"type": "string"},
-					"max_calls":        map[string]any{"anyOf": []map[string]any{{"type": "integer"}, {"type": "null"}}},
-					"enabled":          map[string]any{"type": "boolean"},
-					"update_execution": map[string]any{"type": "boolean", "description": "Set true to replace the execution parameter block with the values below."},
-					"session_id":       map[string]any{"type": "string", "description": "Run every fire in this existing session. The session's runtime and workdir are inherited."},
-					"model_id":         map[string]any{"type": "string", "description": "Native model override: a model_uuid from list_models."},
-					"acp_agent_id":     map[string]any{"type": "string", "description": "Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions."},
-					"acp_model_id":     map[string]any{"type": "string", "description": "ACP agent model id (from list_acp_agents with agent_id)."},
-					"reasoning_effort": map[string]any{"type": "string", "description": "Reasoning effort override."},
-					"workdir_id":       map[string]any{"type": "string", "description": "Bind fresh sessions to this workdir (id from list_workdirs)."},
-				},
-				"required": []string{"id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				args := inputAsMap(input)
+			Parameters: toolexec.SchemaFor[updateScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema(""))),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args updateScheduleArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, errors.New("bot_id is required")
+					return sdk.ToolOutput{}, errors.New("bot_id is required")
 				}
-				id := StringArg(args, "id")
+				id := strings.TrimSpace(args.ID)
 				if id == "" {
-					return nil, errors.New("id is required")
+					return sdk.ToolOutput{}, errors.New("id is required")
 				}
 				// Ownership check before any write: Update itself has no bot
 				// scope, so the read guards it.
 				existing, err := p.service.Get(ctx.Context, id)
 				if err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
 				if existing.BotID != botID {
-					return nil, errors.New("bot mismatch")
+					return sdk.ToolOutput{}, errors.New("bot mismatch")
 				}
 				req := sched.UpdateRequest{}
-				maxCalls, err := parseNullableIntArg(args, "max_calls")
-				if err != nil {
-					return nil, err
-				}
-				req.MaxCalls = maxCalls
-				if v := StringArg(args, "name"); v != "" {
+				req.MaxCalls = args.MaxCalls.nullableInt()
+				if v := strings.TrimSpace(args.Name); v != "" {
 					req.Name = &v
 				}
-				if v := StringArg(args, "description"); v != "" {
+				if v := strings.TrimSpace(args.Description); v != "" {
 					req.Description = &v
 				}
-				if v := StringArg(args, "pattern"); v != "" {
+				if v := strings.TrimSpace(args.Pattern); v != "" {
 					req.Pattern = &v
 				}
-				if v := StringArg(args, "command"); v != "" {
+				if v := strings.TrimSpace(args.Command); v != "" {
 					req.Command = &v
 				}
-				if enabled, ok, err := BoolArg(args, "enabled"); err != nil {
-					return nil, err
-				} else if ok {
-					req.Enabled = &enabled
+				if args.Enabled != nil {
+					req.Enabled = args.Enabled
 				}
-				if updateExec, ok, err := BoolArg(args, "update_execution"); err != nil {
-					return nil, err
-				} else if ok && updateExec {
-					exec := executionConfigFromArgs(args)
+				if args.UpdateExecution {
+					exec := args.executionConfig()
 					req.Execution = &exec
 				}
 				item, err := p.service.Update(ctx.Context, id, req)
 				if err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
-				return item, nil
-			},
+				return toolexec.OutputFromValue(item), nil
+			}),
 		},
 		{
 			Name: ToolDeleteSchedule().String(), Description: "Delete a schedule by id",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"id": map[string]any{"type": "string", "description": "Schedule ID"},
-				},
-				"required": []string{"id"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				args := inputAsMap(input)
+			Parameters: toolexec.SchemaFor[deleteScheduleArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args deleteScheduleArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, errors.New("bot_id is required")
+					return sdk.ToolOutput{}, errors.New("bot_id is required")
 				}
-				id := StringArg(args, "id")
+				id := strings.TrimSpace(args.ID)
 				if id == "" {
-					return nil, errors.New("id is required")
+					return sdk.ToolOutput{}, errors.New("id is required")
 				}
 				item, err := p.service.Get(ctx.Context, id)
 				if err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
 				if item.BotID != botID {
-					return nil, errors.New("bot mismatch")
+					return sdk.ToolOutput{}, errors.New("bot mismatch")
 				}
 				if err := p.service.Delete(ctx.Context, id); err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
-				return map[string]any{"success": true}, nil
-			},
+				return toolexec.OutputFromValue(map[string]any{"success": true}), nil
+			}),
 		},
 	}, nil
 }
@@ -296,14 +238,16 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]s
 // execution block. run_target is derived: a session_id selects
 // existing_session mode, an acp_agent_id selects the ACP runtime; the
 // schedule service validates the combination.
-func executionConfigFromArgs(args map[string]any) sched.ExecutionConfig {
+// scheduleExecutionConfig builds the execution block create and update share;
+// their argument structs spell their own descriptions and hand the values here.
+func scheduleExecutionConfig(sessionID, acpAgentID, modelID, acpModelID, reasoningEffort, workdirID string) sched.ExecutionConfig {
 	exec := sched.ExecutionConfig{
-		TargetSessionID: StringArg(args, "session_id"),
-		ACPAgentID:      StringArg(args, "acp_agent_id"),
-		ModelID:         StringArg(args, "model_id"),
-		ACPModelID:      StringArg(args, "acp_model_id"),
-		ReasoningEffort: StringArg(args, "reasoning_effort"),
-		WorkdirID:       StringArg(args, "workdir_id"),
+		TargetSessionID: strings.TrimSpace(sessionID),
+		ACPAgentID:      strings.TrimSpace(acpAgentID),
+		ModelID:         strings.TrimSpace(modelID),
+		ACPModelID:      strings.TrimSpace(acpModelID),
+		ReasoningEffort: strings.TrimSpace(reasoningEffort),
+		WorkdirID:       strings.TrimSpace(workdirID),
 	}
 	if exec.TargetSessionID != "" {
 		exec.RunTarget = sched.RunTargetExistingSession
@@ -314,28 +258,91 @@ func executionConfigFromArgs(args map[string]any) sched.ExecutionConfig {
 	return exec
 }
 
-func parseNullableIntArg(arguments map[string]any, key string) (sched.NullableInt, error) {
-	req := sched.NullableInt{}
-	if arguments == nil {
-		return req, nil
+func (a createScheduleArgs) executionConfig() sched.ExecutionConfig {
+	return scheduleExecutionConfig(a.SessionID, a.ACPAgentID, a.ModelID, a.ACPModelID, a.ReasoningEffort, a.WorkdirID)
+}
+
+func (a updateScheduleArgs) executionConfig() sched.ExecutionConfig {
+	return scheduleExecutionConfig(a.SessionID, a.ACPAgentID, a.ModelID, a.ACPModelID, a.ReasoningEffort, a.WorkdirID)
+}
+
+// scheduleMaxCalls keeps the three states of max_calls apart: omitted (leave
+// the limit alone), null (unlimited), or a number. A plain *int cannot tell
+// the first two apart, which is what sched.NullableInt.Set records.
+type scheduleMaxCalls struct {
+	set   bool
+	value *int
+}
+
+func (m *scheduleMaxCalls) UnmarshalJSON(data []byte) error {
+	m.set = true
+	if string(data) == "null" {
+		m.value = nil
+		return nil
 	}
-	raw, exists := arguments[key]
-	if !exists {
-		return req, nil
+	var value int
+	if err := json.Unmarshal(data, &value); err != nil {
+		return fmt.Errorf("max_calls must be an integer or null: %w", err)
 	}
-	req.Set = true
-	if raw == nil {
-		req.Value = nil
-		return req, nil
+	m.value = &value
+	return nil
+}
+
+func (m scheduleMaxCalls) nullableInt() sched.NullableInt {
+	return sched.NullableInt{Set: m.set, Value: m.value}
+}
+
+// nullableIntegerSchema is the wire shape max_calls has always had: an
+// integer-or-null union the struct type above cannot express on its own.
+func nullableIntegerSchema(description string) *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Description: description,
+		AnyOf:       []*jsonschema.Schema{{Type: "integer"}, {Type: "null"}},
 	}
-	value, _, err := IntArg(arguments, key)
-	if err != nil {
-		return sched.NullableInt{}, err
-	}
-	req.Value = &value
-	return req, nil
 }
 
 func emptyObjectSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+
+type listScheduleArgs struct{}
+
+type scheduleIDArgs struct {
+	ID string `json:"id" jsonschema:"Schedule ID"`
+}
+
+type createScheduleArgs struct {
+	ACPAgentID      string           `json:"acp_agent_id,omitempty" jsonschema:"Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions."`
+	ACPModelID      string           `json:"acp_model_id,omitempty" jsonschema:"ACP agent model id (from list_acp_agents with agent_id). Requires acp_agent_id or an ACP session_id."`
+	Command         string           `json:"command"`
+	Description     string           `json:"description"`
+	Enabled         *bool            `json:"enabled,omitempty"`
+	MaxCalls        scheduleMaxCalls `json:"max_calls,omitempty" jsonschema:"Optional max calls, null means unlimited"`
+	ModelID         string           `json:"model_id,omitempty" jsonschema:"Native model override: a model_uuid from list_models. Not valid together with acp_agent_id/acp_model_id."`
+	Name            string           `json:"name"`
+	Pattern         string           `json:"pattern"`
+	ReasoningEffort string           `json:"reasoning_effort,omitempty" jsonschema:"Reasoning effort override (native: none|minimal|low|medium|high|xhigh|max as supported by the model; ACP: the agent's effort ids)."`
+	SessionID       string           `json:"session_id,omitempty" jsonschema:"Run every fire in this existing session instead of a fresh one. The session's runtime and workdir are inherited."`
+	WorkdirID       string           `json:"workdir_id,omitempty" jsonschema:"Bind fresh sessions to this workdir (id from list_workdirs)."`
+}
+
+type updateScheduleArgs struct {
+	ACPAgentID      string           `json:"acp_agent_id,omitempty" jsonschema:"Run fires through this ACP agent (id from list_acp_agents). Only for fresh sessions."`
+	ACPModelID      string           `json:"acp_model_id,omitempty" jsonschema:"ACP agent model id (from list_acp_agents with agent_id)."`
+	Command         string           `json:"command,omitempty"`
+	Description     string           `json:"description,omitempty"`
+	Enabled         *bool            `json:"enabled,omitempty"`
+	ID              string           `json:"id"`
+	MaxCalls        scheduleMaxCalls `json:"max_calls,omitempty"`
+	ModelID         string           `json:"model_id,omitempty" jsonschema:"Native model override: a model_uuid from list_models."`
+	Name            string           `json:"name,omitempty"`
+	Pattern         string           `json:"pattern,omitempty"`
+	ReasoningEffort string           `json:"reasoning_effort,omitempty" jsonschema:"Reasoning effort override."`
+	SessionID       string           `json:"session_id,omitempty" jsonschema:"Run every fire in this existing session. The session's runtime and workdir are inherited."`
+	UpdateExecution bool             `json:"update_execution,omitempty" jsonschema:"Set true to replace the execution parameter block with the values below."`
+	WorkdirID       string           `json:"workdir_id,omitempty" jsonschema:"Bind fresh sessions to this workdir (id from list_workdirs)."`
+}
+
+type deleteScheduleArgs struct {
+	ID string `json:"id" jsonschema:"Schedule ID"`
 }

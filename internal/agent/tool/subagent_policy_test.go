@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	sdk "github.com/felinics/twilight/sdk"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestFilterSubagentToolsBlocksOnlyDirectInteractionAndDelegation(t *testing.T) {
@@ -16,9 +16,9 @@ func TestFilterSubagentToolsBlocksOnlyDirectInteractionAndDelegation(t *testing.
 		ToolGenerateImage().String(), ToolGenerateVideo().String(), ToolTranscribeAudio().String(),
 		"external_mcp_tool",
 	}
-	toolList := make([]sdk.Tool, 0, len(names))
+	toolList := make([]toolexec.Tool, 0, len(names))
 	for _, name := range names {
-		toolList = append(toolList, sdk.Tool{Name: name})
+		toolList = append(toolList, toolexec.Tool{Name: name})
 	}
 	filtered := FilterSubagentTools(toolList)
 	got := make([]string, 0, len(filtered))

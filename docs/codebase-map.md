@@ -38,6 +38,8 @@ Memoh/
 │   │   │   ├── session/        #       Per-thread runtime state and control
 │   │   │   └── toolmount/      #       Memoh tool gateway mounts for direct runtimes
 │   │   ├── sessionmode/        #     Session mode resolution
+│   │   ├── partmeta/           #     Memoh annotations (approval, user input, execution location) on sdk.ProviderMetadata, plus the stored-shape fold/unfold
+│   │   ├── step/               #     Runtime-neutral step record (model result, tool results, messages, deferred approval)
 │   │   ├── tool/               #     Native tool providers (package name remains tools)
 │   │       ├── message.go      #       Send message tool
 │   │       ├── contacts.go     #       Contact list tool
@@ -62,6 +64,7 @@ Memoh/
 │   │       ├── prune.go        #       Pruning tool
 │   │       ├── history.go      #       History access tool
 │   │       └── read_media.go   #       Media reading tool
+│   │   ├── toolexec/           #     Tool executor copied from the twilight SDK before felinics/twilight#53 removed it: Tool, ExecuteTools, approvals, step assembly
 │   │   └── turn/               #     Pure Turn port plus authenticated gRPC transport
 │   ├── attachment/             #   Attachment normalization (MIME types, base64)
 │   ├── audio/                  #   Audio/TTS processing utilities

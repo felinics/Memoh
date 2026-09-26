@@ -8,6 +8,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/messaging"
 )
 
@@ -62,18 +63,18 @@ func (*MessageProvider) Usage(_ context.Context, session SessionContext, availab
 	return usageSection("Messaging", parts)
 }
 
-func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if session.IsSubagent {
 		return nil, nil
 	}
-	var tools []sdk.Tool
+	var tools []toolexec.Tool
 	sess := session
 	if p.exec.CanSend() {
 		sendDescription, sendPlatformDescription, sendTargetDescription, sendRequired := sendToolPromptMetadata(session)
-		tools = append(tools, sdk.Tool{
+		tools = append(tools, toolexec.Tool{
 			Name:        ToolSend().String(),
 			Description: sendDescription,
-			Parameters: map[string]any{
+			Parameters: toolexec.SchemaFromValue(map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
@@ -90,18 +91,18 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 					"message": sendMessageObjectSchema(),
 				},
 				"required": sendRequired,
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSend(ctx.Context, sess, ctx.ToolCallID, inputAsMap(input))
+			}),
+			Execute: func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execSend(ctx.Context, sess, ctx.ToolCallID, inputAsMap(input)))
 			},
 		})
 	}
 	if p.exec.CanReact() {
 		reactDescription, reactPlatformDescription, reactTargetDescription, reactRequired := reactToolPromptMetadata(session)
-		tools = append(tools, sdk.Tool{
+		tools = append(tools, toolexec.Tool{
 			Name:        ToolReact().String(),
 			Description: reactDescription,
-			Parameters: map[string]any{
+			Parameters: toolexec.SchemaFromValue(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"bot_id":     map[string]any{"type": "string", "description": "Bot ID, optional and defaults to current bot"},
@@ -112,9 +113,9 @@ func (p *MessageProvider) Tools(_ context.Context, session SessionContext) ([]sd
 					"remove":     map[string]any{"type": "boolean", "description": "If true, remove the reaction instead of adding it. Default false."},
 				},
 				"required": reactRequired,
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execReact(ctx.Context, sess, inputAsMap(input))
+			}),
+			Execute: func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execReact(ctx.Context, sess, inputAsMap(input)))
 			},
 		})
 	}

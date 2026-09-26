@@ -1,0 +1,25 @@
+{
+  "web_fetch": {
+    "properties": {
+      "format": {
+        "description": "Output format (default: auto - detects from content type)",
+        "enum": [
+          "auto",
+          "markdown",
+          "json",
+          "xml",
+          "text"
+        ],
+        "type": "string"
+      },
+      "url": {
+        "description": "The URL to fetch",
+        "type": "string"
+      }
+    },
+    "required": [
+      "url"
+    ],
+    "type": "object"
+  }
+}

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,26 +32,54 @@ func (abortAlignmentProvider) TestModel(context.Context, string) (*sdk.ModelTest
 	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
 }
 
-func (abortAlignmentProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
-	return &sdk.GenerateResult{FinishReason: sdk.FinishReasonStop}, nil
+func (abortAlignmentProvider) DoGenerate(context.Context, sdk.Request) (sdk.ModelResult, error) {
+	return sdk.ModelResult{FinishReason: sdk.FinishReasonStop}, nil
 }
 
-func (p abortAlignmentProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
-	parts := make(chan sdk.StreamPart, 7)
-	parts <- &sdk.StartPart{}
-	parts <- &sdk.StartStepPart{}
+// DoStream either completes normally or streams the same 256-character chunk
+// until the loop's text-loop guard aborts the run. The SDK has no abort part:
+// an abort the run raises itself is the loop's own decision, and this is the
+// one path that produces it from provider output.
+func (p abortAlignmentProvider) DoStream(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
+	parts := make(chan sdk.StreamPart, 16)
 	if p.complete {
+		parts <- &sdk.StartPart{}
+		parts <- &sdk.StartStepPart{}
 		parts <- &sdk.TextStartPart{ID: "completed"}
 		parts <- &sdk.TextDeltaPart{ID: "completed", Text: "done"}
 		parts <- &sdk.TextEndPart{ID: "completed"}
 		parts <- &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}
 		parts <- &sdk.FinishPart{FinishReason: sdk.FinishReasonStop}
 		close(parts)
-		return &sdk.StreamResult{Stream: parts}, nil
+		return parts, nil
 	}
-	parts <- &sdk.AbortPart{}
-	close(parts)
-	return &sdk.StreamResult{Stream: parts}, nil
+	go func() {
+		defer close(parts)
+		send := func(part sdk.StreamPart) bool {
+			select {
+			case <-ctx.Done():
+				return false
+			case parts <- part:
+				return true
+			}
+		}
+		if !send(&sdk.StartPart{}) || !send(&sdk.StartStepPart{}) || !send(&sdk.TextStartPart{ID: "loop"}) {
+			return
+		}
+		repeated := strings.Repeat("abcd", 64)
+		for range 4 {
+			if !send(&sdk.TextDeltaPart{ID: "loop", Text: repeated}) {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
+		_ = send(&sdk.FinishPart{FinishReason: sdk.FinishReasonStop})
+	}()
+	return parts, nil
 }
 
 type abortAlignmentFence struct{}
@@ -92,7 +121,8 @@ func TestSpawnAbortAlignsManagerLedgerAndLifecycle(t *testing.T) {
 			Provider: abortAlignmentProvider{},
 			Type:     sdk.ModelTypeChat,
 		},
-		Query: "abort internally",
+		Query:         "abort internally",
+		LoopDetection: tools.SpawnLoopConfig{Enabled: true},
 		Identity: tools.SpawnIdentity{
 			BotID:      lifecycleTestBotID,
 			SessionID:  lifecycleTestSessionID,

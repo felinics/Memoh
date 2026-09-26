@@ -3,6 +3,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/attachment"
 	audiopkg "github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/media"
@@ -54,7 +56,7 @@ func NewTranscriptionProvider(log *slog.Logger, settingsSvc *settings.Service, a
 	}
 }
 
-func (p *TranscriptionProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *TranscriptionProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.settings == nil || p.audio == nil || p.media == nil {
 		return nil, nil
 	}
@@ -66,28 +68,56 @@ func (p *TranscriptionProvider) Tools(ctx context.Context, session SessionContex
 	if err != nil || strings.TrimSpace(botSettings.TranscriptionModelID) == "" {
 		return nil, nil
 	}
-	sess := session
-	return []sdk.Tool{{
-		Name:        ToolTranscribeAudio().String(),
-		Description: "Transcribe an audio or voice message into text. Use this when the user sent a voice message and you need to understand its contents. Accepts a bot media path such as /data/.memoh/media/... or a direct URL.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"path":        map[string]any{"type": "string", "description": "Audio file path from the message context, usually under /data/.memoh/media/..."},
-				"url":         map[string]any{"type": "string", "description": "Direct audio URL when a path is unavailable"},
-				"language":    map[string]any{"type": "string", "description": "Optional language hint"},
-				"prompt":      map[string]any{"type": "string", "description": "Optional transcription prompt"},
-				"contentType": map[string]any{"type": "string", "description": "Optional MIME type override"},
-			},
-			"required": []string{},
-		},
-		Execute: func(execCtx *sdk.ToolExecContext, input any) (any, error) {
-			return p.execTranscribe(execCtx.Context, sess, inputAsMap(input))
-		},
-	}}, nil
+	return p.transcribeTools(session), nil
 }
 
-func (p *TranscriptionProvider) execTranscribe(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+// transcribeArgs is the wire shape of transcribe_audio. The alias names
+// (audio_path, file_path, audio_url, content_type) are not in the schema
+// but have always been accepted, so decoding folds them in.
+type transcribeArgs struct {
+	Path        string `json:"path,omitempty" jsonschema:"Audio file path from the message context, usually under /data/.memoh/media/..."`
+	URL         string `json:"url,omitempty" jsonschema:"Direct audio URL when a path is unavailable"`
+	Language    string `json:"language,omitempty" jsonschema:"Optional language hint"`
+	Prompt      string `json:"prompt,omitempty" jsonschema:"Optional transcription prompt"`
+	ContentType string `json:"contentType,omitempty" jsonschema:"Optional MIME type override"`
+}
+
+func (a *transcribeArgs) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Path         string `json:"path"`
+		AudioPath    string `json:"audio_path"`
+		FilePath     string `json:"file_path"`
+		URL          string `json:"url"`
+		AudioURL     string `json:"audio_url"`
+		Language     string `json:"language"`
+		Prompt       string `json:"prompt"`
+		ContentType  string `json:"contentType"`
+		ContentType2 string `json:"content_type"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*a = transcribeArgs{
+		Path:        firstNonEmpty(wire.Path, wire.AudioPath, wire.FilePath),
+		URL:         firstNonEmpty(wire.URL, wire.AudioURL),
+		Language:    strings.TrimSpace(wire.Language),
+		Prompt:      strings.TrimSpace(wire.Prompt),
+		ContentType: firstNonEmpty(wire.ContentType, wire.ContentType2),
+	}
+	return nil
+}
+
+func (p *TranscriptionProvider) transcribeTools(session SessionContext) []toolexec.Tool {
+	sess := session
+	return []toolexec.Tool{toolexec.Define(ToolTranscribeAudio().String(),
+		"Transcribe an audio or voice message into text. Use this when the user sent a voice message and you need to understand its contents. Accepts a bot media path such as /data/.memoh/media/... or a direct URL.",
+		func(execCtx *toolexec.ToolExecContext, args transcribeArgs) (sdk.ToolOutput, error) {
+			return toolexec.OutputPair(p.execTranscribe(execCtx.Context, sess, args))
+		},
+	)}
+}
+
+func (p *TranscriptionProvider) execTranscribe(ctx context.Context, session SessionContext, args transcribeArgs) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
@@ -101,22 +131,22 @@ func (p *TranscriptionProvider) execTranscribe(ctx context.Context, session Sess
 		return nil, errors.New("bot has no transcription model configured")
 	}
 
-	path := FirstStringArg(args, "path", "audio_path", "file_path")
-	rawURL := FirstStringArg(args, "url", "audio_url")
+	path := args.Path
+	rawURL := args.URL
 	if path == "" && rawURL == "" {
 		return nil, errors.New("path or url is required")
 	}
 
-	audio, filename, contentType, err := p.loadAudio(ctx, botID, path, rawURL, FirstStringArg(args, "contentType", "content_type"))
+	audio, filename, contentType, err := p.loadAudio(ctx, botID, path, rawURL, args.ContentType)
 	if err != nil {
 		return nil, err
 	}
 
 	override := map[string]any{}
-	if language := FirstStringArg(args, "language"); language != "" {
+	if language := args.Language; language != "" {
 		override["language"] = language
 	}
-	if prompt := FirstStringArg(args, "prompt"); prompt != "" {
+	if prompt := args.Prompt; prompt != "" {
 		override["prompt"] = prompt
 	}
 	result, err := p.audio.Transcribe(ctx, modelID, audio, filename, contentType, override)

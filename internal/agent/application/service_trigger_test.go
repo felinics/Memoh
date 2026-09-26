@@ -39,11 +39,11 @@ func (*silentTriggerProvider) TestModel(context.Context, string) (*sdk.ModelTest
 	return &sdk.ModelTestResult{Supported: true}, nil
 }
 
-func (*silentTriggerProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
-	return nil, errors.New("unexpected non-streaming call")
+func (*silentTriggerProvider) DoGenerate(context.Context, sdk.Request) (sdk.ModelResult, error) {
+	return sdk.ModelResult{}, errors.New("unexpected non-streaming call")
 }
 
-func (p *silentTriggerProvider) DoStream(ctx context.Context, _ sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (p *silentTriggerProvider) DoStream(ctx context.Context, _ sdk.Request) (<-chan sdk.StreamPart, error) {
 	p.mu.Lock()
 	p.attempts++
 	p.mu.Unlock()
@@ -54,7 +54,7 @@ func (p *silentTriggerProvider) DoStream(ctx context.Context, _ sdk.GeneratePara
 		<-ctx.Done()
 		close(stream)
 	}()
-	return &sdk.StreamResult{Stream: stream}, nil
+	return stream, nil
 }
 
 func (p *silentTriggerProvider) attemptCount() int {

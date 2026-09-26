@@ -5,20 +5,22 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
-)
 
-// Providers verify the thinking blocks of the latest assistant message and
-// reject a sequence they did not produce, so that turn's reasoning has to
-// survive context stripping. Older turns are filtered server-side, and dropping
-// them here is what keeps encrypted reasoning from accumulating across a long
-// conversation.
+	// Providers verify the thinking blocks of the latest assistant message and
+	// reject a sequence they did not produce, so that turn's reasoning has to
+	// survive context stripping. Older turns are filtered server-side, and dropping
+	// them here is what keeps encrypted reasoning from accumulating across a long
+	// conversation.
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
+)
 
 func reasoningPart(text, signature string) sdk.ReasoningPart {
 	return sdk.ReasoningPart{
 		Text: text,
-		ProviderMetadata: map[string]any{
+		ProviderMetadata: partmeta.Fold(map[string]any{
 			"anthropic": map[string]any{"signature": signature},
-		},
+		}),
 	}
 }
 
@@ -28,8 +30,8 @@ func signatureOf(t *testing.T, part sdk.MessagePart) string {
 	if !ok {
 		return ""
 	}
-	am, _ := rp.ProviderMetadata["anthropic"].(map[string]any)
-	sig, _ := am["signature"].(string)
+	am := rp.ProviderMetadata["anthropic"]
+	sig := am["signature"]
 	return sig
 }
 
@@ -52,13 +54,13 @@ func conversationWithTwoReasoningTurns() []ModelMessage {
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 			reasoningPart("old thinking", "SIG_OLD"),
 			sdk.TextPart{Text: "old answer"},
-			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "read_file", Input: map[string]any{}},
+			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "read_file", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 		}},
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "second"}}},
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 			reasoningPart("new thinking", "SIG_NEW"),
 			sdk.TextPart{Text: "new answer"},
-			sdk.ToolCallPart{ToolCallID: "c2", ToolName: "read_file", Input: map[string]any{}},
+			sdk.ToolCallPart{ToolCallID: "c2", ToolName: "read_file", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 		}},
 	})
 }
@@ -96,12 +98,12 @@ func TestStripToolMessagesKeepsLatestTurnEmptyReasoning(t *testing.T) {
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "hi"}}},
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 			sdk.ReasoningPart{
-				ProviderMetadata: map[string]any{
+				ProviderMetadata: partmeta.Fold(map[string]any{
 					"anthropic": map[string]any{"redactedData": "BLOB"},
-				},
+				}),
 			},
 			sdk.TextPart{Text: "answer"},
-			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "read_file", Input: map[string]any{}},
+			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "read_file", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 		}},
 	})
 
@@ -118,8 +120,8 @@ func TestStripToolMessagesKeepsLatestTurnEmptyReasoning(t *testing.T) {
 		t.Fatalf("reasoning parts: got %d, want 1 — an empty-text redacted block was dropped", len(parts))
 	}
 	rp := parts[0].(sdk.ReasoningPart)
-	am, _ := rp.ProviderMetadata["anthropic"].(map[string]any)
-	if data, _ := am["redactedData"].(string); data != "BLOB" {
+	am := rp.ProviderMetadata["anthropic"]
+	if data := am["redactedData"]; data != "BLOB" {
 		t.Errorf("redactedData: got %q, want BLOB", data)
 	}
 }
@@ -133,7 +135,7 @@ func TestStripToolMessagesKeepsEveryBlockOfLatestTurn(t *testing.T) {
 			reasoningPart("first", "SIG_1"),
 			reasoningPart("second", "SIG_2"),
 			reasoningPart("third", "SIG_3"),
-			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "read_file", Input: map[string]any{}},
+			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "read_file", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 		}},
 	})
 
@@ -223,12 +225,12 @@ func TestStripToolMessagesBoundsReplayedReasoning(t *testing.T) {
 			sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "q"}}},
 			sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 				// Several redacted blocks per turn, as a real response returns.
-				sdk.ReasoningPart{ProviderMetadata: map[string]any{
+				sdk.ReasoningPart{ProviderMetadata: partmeta.Fold(map[string]any{
 					"anthropic": map[string]any{"redactedData": "BLOB_A"},
-				}},
-				sdk.ReasoningPart{ProviderMetadata: map[string]any{
+				})},
+				sdk.ReasoningPart{ProviderMetadata: partmeta.Fold(map[string]any{
 					"anthropic": map[string]any{"redactedData": "BLOB_B"},
-				}},
+				})},
 				sdk.TextPart{Text: "a"},
 			}},
 		)
@@ -310,10 +312,10 @@ func TestStripToolMessagesKeepsLatestTurnToolCallWithReasoning(t *testing.T) {
 		{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: "search"}}},
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 			reasoningPart("I should search", "SIG_LATEST"),
-			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "web_search", Input: map[string]any{}},
+			sdk.ToolCallPart{ToolCallID: "c1", ToolName: "web_search", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 		}},
 		{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
-			sdk.ToolResultPart{ToolCallID: "c1", ToolName: "web_search", Result: "results"},
+			sdk.ToolResultPart{ToolCallID: "c1", ToolName: "web_search", Result: toolexec.OutputFromValue("results")},
 		}},
 	})
 

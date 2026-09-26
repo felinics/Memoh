@@ -8,12 +8,11 @@ import (
 	"reflect"
 	"strings"
 
-	sdk "github.com/felinics/twilight/sdk"
-
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/mcp"
 )
 
-func (p *CapabilityProvider) manageMCP(ctx *sdk.ToolExecContext, session SessionContext, args map[string]any) (any, error) {
+func (p *CapabilityProvider) manageMCP(ctx *toolexec.ToolExecContext, session SessionContext, args map[string]any) (any, error) {
 	action := StringArg(args, "action")
 	if action == "list" {
 		list, err := p.opts.Connections.ListByBot(ctx.Context, session.BotID)

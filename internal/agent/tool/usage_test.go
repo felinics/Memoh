@@ -6,9 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/felinics/twilight/sdk"
-
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/messaging"
 )
 
@@ -31,9 +30,9 @@ func (usageTestReactor) React(context.Context, string, messaging.Platform, messa
 }
 
 func availableToolsForTest(names ...ToolName) AvailableTools {
-	sdkTools := make([]sdk.Tool, 0, len(names))
+	sdkTools := make([]toolexec.Tool, 0, len(names))
 	for _, name := range names {
-		sdkTools = append(sdkTools, sdk.Tool{Name: name.String()})
+		sdkTools = append(sdkTools, toolexec.Tool{Name: name.String()})
 	}
 	return NewAvailableTools(sdkTools)
 }
@@ -74,7 +73,7 @@ func assertNoMultipleToolSentencesOnOneLine(t *testing.T, usage string) {
 	}
 }
 
-func toolByNameForTest(t *testing.T, tools []sdk.Tool, name ToolName) sdk.Tool {
+func toolByNameForTest(t *testing.T, tools []toolexec.Tool, name ToolName) toolexec.Tool {
 	t.Helper()
 	for _, tool := range tools {
 		if tool.Name == name.String() {
@@ -82,14 +81,17 @@ func toolByNameForTest(t *testing.T, tools []sdk.Tool, name ToolName) sdk.Tool {
 		}
 	}
 	t.Fatalf("tool %s not found", name)
-	return sdk.Tool{}
+	return toolexec.Tool{}
 }
 
-func requiredToolFieldsForTest(t *testing.T, tool sdk.Tool) []string {
+func requiredToolFieldsForTest(t *testing.T, tool toolexec.Tool) []string {
 	t.Helper()
-	params, ok := tool.Parameters.(map[string]any)
+	params, ok := toolexec.SchemaValue(tool.Parameters), tool.Parameters != nil
 	if !ok {
 		t.Fatalf("tool %s parameters = %T, want map[string]any", tool.Name, tool.Parameters)
+	}
+	if params["required"] == nil {
+		return nil
 	}
 	raw, ok := params["required"].([]string)
 	if ok {
@@ -346,7 +348,7 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	}
 
 	send := toolByNameForTest(t, tools, ToolSend())
-	params, ok := send.Parameters.(map[string]any)
+	params, ok := toolexec.SchemaValue(send.Parameters), send.Parameters != nil
 	if !ok {
 		t.Fatalf("send parameters = %T, want map[string]any", send.Parameters)
 	}
@@ -406,8 +408,8 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	if actionItems["additionalProperties"] != false {
 		t.Fatalf("message action schema should be strict, got %#v", actionItems["additionalProperties"])
 	}
-	actionRequired, ok := actionItems["required"].([]string)
-	if !ok || !requiredContainsForTest(actionRequired, "label") || !requiredContainsForTest(actionRequired, "url") {
+	actionRequired, ok := actionItems["required"].([]any)
+	if !ok || !requiredAnyContainsForTest(actionRequired, "label") || !requiredAnyContainsForTest(actionRequired, "url") {
 		t.Fatalf("message action schema should require label and url, required=%#v", actionItems["required"])
 	}
 	actionProps, ok := actionItems["properties"].(map[string]any)
@@ -427,8 +429,8 @@ func TestMessageProviderSendToolExposesStructuredMessagePartsSchema(t *testing.T
 	if reply["additionalProperties"] != false {
 		t.Fatalf("message reply schema should be strict, got %#v", reply["additionalProperties"])
 	}
-	replyRequired, ok := reply["required"].([]string)
-	if !ok || !requiredContainsForTest(replyRequired, "message_id") {
+	replyRequired, ok := reply["required"].([]any)
+	if !ok || !requiredAnyContainsForTest(replyRequired, "message_id") {
 		t.Fatalf("message reply schema should require message_id, required=%#v", reply["required"])
 	}
 	replyProps, ok := reply["properties"].(map[string]any)

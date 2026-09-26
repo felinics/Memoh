@@ -1,0 +1,159 @@
+{
+  "apply_patch": {
+    "properties": {
+      "patch": {
+        "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend.",
+        "type": "string"
+      },
+      "target_id": {
+        "description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "patch"
+    ],
+    "type": "object"
+  },
+  "edit": {
+    "properties": {
+      "new_text": {
+        "description": "Replacement text",
+        "type": "string"
+      },
+      "old_text": {
+        "description": "Exact text to find",
+        "type": "string"
+      },
+      "path": {
+        "description": "File path (relative to /data or absolute inside the workspace)",
+        "type": "string"
+      },
+      "target_id": {
+        "description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "old_text",
+      "new_text"
+    ],
+    "type": "object"
+  },
+  "exec": {
+    "properties": {
+      "command": {
+        "description": "Command to run (e.g. ls -la, npm install, python script.py)",
+        "type": "string"
+      },
+      "description": {
+        "description": "Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → \"List files with details\". For complex commands add enough context: curl -s url | jq '.data[]' → \"Fetch JSON and extract data array\".",
+        "type": "string"
+      },
+      "run_in_background": {
+        "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '\u0026' at the end of the command.",
+        "type": "boolean"
+      },
+      "target_id": {
+        "description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn.",
+        "type": "string"
+      },
+      "timeout": {
+        "description": "Timeout in seconds (default: 30, max: 600). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.",
+        "maximum": 600,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "work_dir": {
+        "description": "Working directory (default: /data)",
+        "type": "string"
+      }
+    },
+    "required": [
+      "command"
+    ],
+    "type": "object"
+  },
+  "list": {
+    "properties": {
+      "limit": {
+        "default": 200,
+        "description": "Max entries to return per call. Default: 200. Max: 200.",
+        "maximum": 200,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "offset": {
+        "default": 0,
+        "description": "Entry offset to start from (0-indexed). Default: 0.",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "path": {
+        "description": "Directory path (relative to /data or absolute inside the workspace)",
+        "type": "string"
+      },
+      "recursive": {
+        "description": "List recursively",
+        "type": "boolean"
+      },
+      "target_id": {
+        "description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "type": "object"
+  },
+  "read": {
+    "properties": {
+      "line_offset": {
+        "default": 1,
+        "description": "Line number to start reading from (1-indexed). Default: 1.",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "n_lines": {
+        "description": "Number of lines to read. Default: read entire file.",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "path": {
+        "description": "File path (relative to /data or absolute inside the workspace)",
+        "type": "string"
+      },
+      "target_id": {
+        "description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "type": "object"
+  },
+  "write": {
+    "properties": {
+      "content": {
+        "description": "File content",
+        "type": "string"
+      },
+      "path": {
+        "description": "File path (relative to /data or absolute inside the workspace)",
+        "type": "string"
+      },
+      "target_id": {
+        "description": "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "content"
+    ],
+    "type": "object"
+  }
+}

@@ -49,10 +49,10 @@ func newDeferredSteerTestService(t *testing.T, backends ...sessionruntime.Backen
 	return service, handle
 }
 
-// A deferred step parks the loop, so its commit must not claim a steer: the
-// inject channel is never read again and a claim would sit unapplied across
-// the decision and across any owner change. The continuation's first committed
-// step claims and injects it instead, and the next step applies it once.
+// A deferred step parks the loop, so its commit must not claim a steer: a
+// claim would sit unapplied across the decision and across any owner change
+// while the run waits. The continuation's first committed step claims it
+// instead, and the next step applies it once.
 func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 	service, handle := newDeferredSteerTestService(t)
 	ctx := context.Background()
@@ -98,10 +98,13 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 		t.Fatalf("continuation commit: %v", err)
 	}
 	if outcome.appliedSteerItemID != "" {
-		t.Fatalf("continuation applied a steer it never injected: %#v", outcome)
+		t.Fatalf("continuation applied a steer it never delivered: %#v", outcome)
 	}
 	if outcome.claimedSteer == nil || outcome.claimedSteer.ID != item.ID {
 		t.Fatalf("continuation did not claim the steer: %#v", outcome)
+	}
+	if got := QueuePayloadText(outcome.claimedSteer.Payload); got != "steer me" {
+		t.Fatalf("claimed payload = %q", got)
 	}
 
 	steers, _, err := service.sessionManager.PendingQueues(ctx, key, 0)
@@ -114,7 +117,7 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("final commit: %v", err)
 	}
-	if outcome.appliedSteerItemID != string(item.ID) || outcome.claimedSteer != nil || outcome.continueAfterFinal {
+	if outcome.appliedSteerItemID != string(item.ID) || outcome.claimedSteer != nil {
 		t.Fatalf("final outcome = %#v", outcome)
 	}
 	if _, err := service.sessionManager.UpdateSteer(ctx, key, item.ID, []byte("x")); err == nil {
@@ -122,5 +125,35 @@ func TestDeferredStepDoesNotClaimSteerAndContinuationDeliversIt(t *testing.T) {
 	}
 	if _, err := service.EnqueueSteer(ctx, testQueueInput(handle.BotID, handle.SessionID, "invoke-2", "late")); !errors.Is(err, sessionruntime.ErrQueueNoActiveRun) {
 		t.Fatalf("late steer after sealed final = %v", err)
+	}
+}
+
+func TestFinalStepClaimsSteerForLoopContinuation(t *testing.T) {
+	service, handle := newDeferredSteerTestService(t)
+	ctx := context.Background()
+	item, err := service.EnqueueSteer(ctx, testQueueInput(handle.BotID, handle.SessionID, "invoke-1", "change direction"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	coordinator := newQueueStepCoordinator(service, ChatRequest{
+		BotID: handle.BotID, ThreadID: handle.SessionID, RunID: handle.RunID,
+		RunHandle: handle, QueueSteerEnabled: true,
+	})
+	if coordinator == nil {
+		t.Fatal("queue step coordinator unavailable")
+	}
+	outcome, err := coordinator.commit(ctx, queueStepFinal, messagepkg.AgentStep{RunID: handle.RunID}, nil)
+	if err != nil {
+		t.Fatalf("final commit: %v", err)
+	}
+	if outcome.claimedSteer == nil || outcome.claimedSteer.ID != item.ID {
+		t.Fatalf("final did not claim the steer: %#v", outcome)
+	}
+	if got := QueuePayloadText(outcome.claimedSteer.Payload); got != "change direction" {
+		t.Fatalf("claimed payload = %q", got)
+	}
+	if _, err := service.EnqueueSteer(ctx, testQueueInput(handle.BotID, handle.SessionID, "invoke-2", "late")); err != nil {
+		t.Fatalf("run should stay open after a claimed final steer: %v", err)
 	}
 }

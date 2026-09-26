@@ -18,6 +18,7 @@ import (
 	openaiimages "github.com/felinics/twilight/provider/openai/images"
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/models"
@@ -80,7 +81,7 @@ func NewImageGenProvider(
 	}
 }
 
-func (p *ImageGenProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *ImageGenProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.settings == nil || p.models == nil || p.queries == nil {
 		return nil, nil
 	}
@@ -101,24 +102,21 @@ func (p *ImageGenProvider) Tools(ctx context.Context, session SessionContext) ([
 	} else {
 		description += " The image is not shown to the user automatically."
 	}
+	return p.imageTools(session, description), nil
+}
+
+type generateImageArgs struct {
+	Prompt string `json:"prompt" jsonschema:"Detailed description of the image to generate"`
+	Size   string `json:"size,omitempty" jsonschema:"Optional image size, e.g. 1024x1024, 1792x1024, 1024x1792. Leave empty to use the provider default."`
+}
+
+func (p *ImageGenProvider) imageTools(session SessionContext, description string) []toolexec.Tool {
 	sess := session
-	return []sdk.Tool{
-		{
-			Name:        ToolGenerateImage().String(),
-			Description: description,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"prompt": map[string]any{"type": "string", "description": "Detailed description of the image to generate"},
-					"size":   map[string]any{"type": "string", "description": "Optional image size, e.g. 1024x1024, 1792x1024, 1024x1792. Leave empty to use the provider default."},
-				},
-				"required": []string{"prompt"},
-			},
-			Execute: func(execCtx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execGenerateImage(execCtx.Context, sess, execCtx.ToolCallID, inputAsMap(input))
-			},
+	return []toolexec.Tool{toolexec.Define(ToolGenerateImage().String(), description,
+		func(execCtx *toolexec.ToolExecContext, args generateImageArgs) (sdk.ToolOutput, error) {
+			return toolexec.OutputPair(p.execGenerateImage(execCtx.Context, sess, execCtx.ToolCallID, args))
 		},
-	}, nil
+	)}
 }
 
 func (*ImageGenProvider) Usage(_ context.Context, session SessionContext, available AvailableTools) string {
@@ -139,16 +137,16 @@ func (*ImageGenProvider) Usage(_ context.Context, session SessionContext, availa
 	return usageSection("Image generation", items)
 }
 
-func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session SessionContext, toolCallID string, args map[string]any) (any, error) {
+func (p *ImageGenProvider) execGenerateImage(ctx context.Context, session SessionContext, toolCallID string, args generateImageArgs) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
 	}
-	prompt := strings.TrimSpace(StringArg(args, "prompt"))
+	prompt := strings.TrimSpace(args.Prompt)
 	if prompt == "" {
 		return nil, errors.New("prompt is required")
 	}
-	size := strings.TrimSpace(StringArg(args, "size"))
+	size := strings.TrimSpace(args.Size)
 
 	botSettings, err := p.settings.GetBot(ctx, botID)
 	if err != nil {
@@ -398,11 +396,10 @@ func generateChatImage(ctx context.Context, provider sqlc.Provider, apiKey, mode
 		[]sdk.Message{sdk.UserMessage(userMsg)},
 		nil,
 	)
-	result, err := sdk.GenerateTextResult(ctx,
-		sdk.WithModel(sdkModel),
-		sdk.WithSystem(system),
-		sdk.WithMessages(messages),
-	)
+	result, err := sdkModel.Generate(ctx, sdk.Request{
+		System:   system,
+		Messages: messages,
+	})
 	if err != nil {
 		return generatedImage{}, err
 	}

@@ -7,7 +7,13 @@ import (
 	"log/slog"
 	"testing"
 
+	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/turn"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/messageconv"
 )
 
 // fakeSubagentThreadService extends the background fake with the subagent
@@ -136,10 +142,14 @@ func TestSubagentForkContextModelMessages(t *testing.T) {
 		"role":    "user",
 		"content": []map[string]any{{"type": "text", "text": "parent context"}},
 	})
+	// Fork rows are written in the stored shape: argument objects and
+	// nested annotations, never SDK JSON.
+	storedCall := json.RawMessage(`{"role":"assistant","content":[{"type":"tool-call","toolCallId":"call-1","toolName":"exec","input":{"command":"ls && pwd"},"providerMetadata":{"approval":{"approval_id":"a1","status":"approved"}}}]}`)
 	svc := &fakeSubagentThreadService{
 		forkContext: []session.SubagentForkContextMessage{
 			{Role: "user", Message: forkMsg},
 			{Role: "user", Message: json.RawMessage(`not json`)},
+			{Role: "assistant", Message: storedCall},
 		},
 	}
 	s := &Service{sessionService: svc}
@@ -147,11 +157,21 @@ func TestSubagentForkContextModelMessages(t *testing.T) {
 	messages := s.subagentForkContextModelMessages(context.Background(), ChatRequest{
 		ThreadID: "sub-1", SessionType: session.TypeSubagent,
 	})
-	if len(messages) != 1 {
-		t.Fatalf("got %d fork messages, want 1 (invalid row skipped)", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("got %d fork messages, want 2 (invalid row skipped)", len(messages))
 	}
 	if messages[0].Role != "user" {
 		t.Fatalf("fork message role = %q, want user", messages[0].Role)
+	}
+	call, ok := messageconv.ModelMessageToSDKMessage(turn.ModelMessage{Role: messages[1].Role, Content: messages[1].Content}).Content[0].(sdk.ToolCallPart)
+	if !ok {
+		t.Fatalf("fork tool-call row = %s, want a typed tool call", messages[1].Content)
+	}
+	if args, _ := toolexec.ArgumentsValue(call.Input).(map[string]any); args["command"] != "ls && pwd" {
+		t.Fatalf("fork tool call input = %#v", toolexec.ArgumentsValue(call.Input))
+	}
+	if approval, ok := partmeta.Object(call.ProviderMetadata, partmeta.KeyApproval); !ok || approval["status"] != "approved" {
+		t.Fatalf("fork approval annotation = %#v", call.ProviderMetadata)
 	}
 
 	// Non-subagent turns never load fork context.
