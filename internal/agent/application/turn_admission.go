@@ -163,6 +163,15 @@ func (s *Service) admitTurnRun(
 		// call has no execution to perform and the caller has its answer.
 		return sessionruntime.Admission{}, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, invocationID)
 	}
+	if cmd.Mode == turn.ModeDiscuss {
+		req := chatRequestFromCommand(cmd)
+		req.RunID = admission.RunID
+		req.SessionType = "discuss"
+		if err := s.recordRunResumeContext(s.withAdmissionRuntimeFence(ctx, admission), req); err != nil {
+			s.turnRunFinisher(ctx, admission)(sessionruntime.RunStatusErrored, err)
+			return sessionruntime.Admission{}, err
+		}
+	}
 	return admission, nil
 }
 

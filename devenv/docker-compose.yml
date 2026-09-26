@@ -117,6 +117,7 @@ services:
     restart: unless-stopped
 
   server:
+    stop_grace_period: 45s
     build:
       context: ..
       dockerfile: devenv/Dockerfile.server

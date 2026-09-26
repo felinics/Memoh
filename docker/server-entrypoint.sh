@@ -59,6 +59,8 @@ echo "Starting memoh-server..."
 shutdown() {
   echo "Shutting down..."
   kill "$SERVER_PID" 2>/dev/null || true
+  # Keep workspace processes reachable until the server records interruptions.
+  wait "$SERVER_PID" 2>/dev/null || true
   if [ -n "$CONTAINERD_PID" ]; then
     kill "$CONTAINERD_PID" 2>/dev/null || true
   fi

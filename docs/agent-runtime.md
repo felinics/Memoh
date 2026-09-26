@@ -121,3 +121,41 @@ provider once more; unfinished or unobservable jobs retain their identity and an
 `unknown` outcome. They are not automatically canceled or resubmitted. An explicit
 user stop still requests provider cancellation. Receipts support operator recovery;
 they do not constitute automatic job adoption after a server restart.
+
+## Graceful shutdown and session resume
+
+Server shutdown closes admission and records `session_runtime.interrupted` on
+running session runs before canceling producers or stopping HTTP, RPC, schedules,
+external runtimes and workspaces. The existing `lost` terminal state carries this
+specific reason; no schema migration is needed. Completed finish proposals and
+explicit user aborts retain their authoritative outcomes. Waiting decisions keep
+their existing recovery semantics and are not converted into automatic answers.
+
+At turn start, the server saves a versioned resume context in `session_runs.input_json`.
+It preserves the original query, identity, execution location, model selection and
+absolute ancestor deadline. Only verified credential scopes are retained, never
+bearer tokens. Account-backed credentials are revalidated against current account
+state and Bot chat permissions before renewal; scoped chat credentials retain their
+original Bot, chat and route scope. External runtimes retain their existing owner
+and Workspace Exec authorization checks.
+
+After startup, a bounded worker discovers interrupted sessions, waits for the
+workspace bridge to become reachable, and submits a continuation with the stable
+invocation ID `resume:<interrupted-run-id>`. Normal admission and fencing prevent
+two workers from executing that continuation. A later admitted turn supersedes the
+old intent. Expired budgets do not restart. Each continuation reloads committed
+history and instructs the model to inspect interrupted tool outcomes before taking
+further action. Native, direct-agent and subagent sessions use their existing
+runtime dispatch; this is session-level continuation, not process-memory restore.
+Recovered output is published into the session runtime and saved to history.
+
+Uncommitted streaming tokens can be lost. Background command handles from the old
+process are not reattached; workspace output and external job receipts must be
+checked. Subagent sessions can continue, but old in-memory parent waiters are gone.
+SIGKILL, OOM, host failure and a shutdown unable to write PostgreSQL cannot reliably
+record a marker and therefore retain the existing `lost` behavior. Once a resumed
+run is admitted, ordinary failures are reported rather than automatically replayed.
+
+The server has a 30-second graceful shutdown budget. Compose allows 45 seconds,
+and the entrypoint waits for Server exit before terminating embedded containerd.
+The development Air supervisor gives the server the same shutdown allowance.

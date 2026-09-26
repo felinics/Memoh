@@ -2,12 +2,14 @@ package sessionruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 )
 
@@ -137,7 +139,7 @@ func (m *Manager) stopAllLocalControls(ctx context.Context) error {
 const runtimeOwnerShutdownError = "runtime owner shut down"
 
 func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
-	if m == nil || m.distributed == nil {
+	if m == nil || (m.distributed == nil && m.runs == nil) {
 		return nil
 	}
 	m.mu.Lock()
@@ -165,7 +167,8 @@ func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 
 // releaseLocalRunOnShutdown makes the durable terminal decision before the
 // live owner route disappears. A run that already crossed the finishing
-// boundary keeps its stored proposal; every other active run becomes lost.
+// boundary keeps its stored proposal. Running work with a saved resume context
+// gets an interrupt marker; other active work follows the existing lost path.
 // If PostgreSQL is temporarily unavailable, the live lease is deliberately
 // retained so a peer reaper can make the same decision after it expires.
 func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runControl) error {
@@ -174,7 +177,19 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 	}
 	handle := ctrl.handle()
 	if m.runs != nil && handle.FencingToken > 0 {
-		terminal, err := m.finalizeLedgerRun(ctx, handle, RunStatusLost, "", runtimeOwnerShutdownError)
+		code := ""
+		run, err := m.runs.Get(ctx, handle.RunID)
+		if err != nil {
+			return err
+		}
+		var input struct {
+			Resume json.RawMessage `json:"resume"`
+		}
+		if run.State == ledger.StateRunning && run.AbortRequestedAt.IsZero() &&
+			json.Unmarshal(run.Input, &input) == nil && len(input.Resume) > 0 && string(input.Resume) != "null" {
+			code = RunErrorInterrupted
+		}
+		terminal, err := m.finalizeLedgerRun(ctx, handle, RunStatusLost, code, runtimeOwnerShutdownError)
 		if terminal.RunID != "" {
 			requestRunControlStop(ctrl)
 			m.reconcileAndObserveTerminalRun(ctx, terminal)
@@ -546,4 +561,19 @@ func (*Manager) stopLeaseRenewalContext(ctx context.Context, ctrl *runControl) e
 	ctrl.leaseDone = nil
 	ctrl.leaseLifecycleMu.Unlock()
 	return nil
+}
+
+// RunErrorInterrupted distinguishes an intentional server handoff from a crash
+// or user cancellation without introducing a new durable state/schema version.
+const RunErrorInterrupted = "session_runtime.interrupted"
+
+// InterruptForShutdown closes admission and records interrupted work before any
+// transport, runtime process, or workspace lifecycle hook can cancel execution.
+// CloseContext still owns final backend/resource cleanup and retries failures.
+func (m *Manager) InterruptForShutdown(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	m.closeOnce.Do(func() { close(m.closeCh) })
+	return m.releaseAllLocalRuns(ctx)
 }

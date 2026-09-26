@@ -207,6 +207,10 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			default:
 			}
 		}
+		if err := s.recordRunResumeContext(ctx, req); err != nil {
+			fail(err)
+			return
+		}
 		streamReq := req
 		if streamReq.RawQuery == "" {
 			streamReq.RawQuery = strings.TrimSpace(streamReq.Query)
@@ -568,6 +572,9 @@ func (s *Service) streamChatWSResultWithHooks(
 	preflight func(context.Context) error,
 	postPersist func(context.Context, []messagepkg.Message) error,
 ) (_ []messagepkg.Message, turnErr error) {
+	if err := s.recordRunResumeContext(ctx, req); err != nil {
+		return nil, err
+	}
 	// Named so the deferred span close sees whatever any of this function's
 	// returns produced. Tracking it by hand would mean touching fifteen
 	// return statements and being wrong the first time someone adds a

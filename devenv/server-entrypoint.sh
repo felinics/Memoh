@@ -89,7 +89,15 @@ echo "Bridge binary ready."
 
 echo "Starting server..."
 
-trap 'kill ${SERVER_PID:-0} 2>/dev/null || true; kill ${CONTAINERD_PID:-0} 2>/dev/null || true; wait' TERM INT
+shutdown() {
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+  kill "$CONTAINERD_PID" 2>/dev/null || true
+  wait "$CONTAINERD_PID" 2>/dev/null || true
+}
+trap shutdown TERM INT
 
 "$@" &
 SERVER_PID=$!

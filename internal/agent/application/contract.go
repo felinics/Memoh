@@ -12,6 +12,8 @@ import (
 // turn. Transport callers should prefer turn.StartTurnCommand; the additional
 // channel and function fields below are strictly in-process runtime state.
 type ChatRequest struct {
+	// ShutdownResume rebuilds saved history without the transient channel pipeline.
+	ShutdownResume bool `json:"-"`
 	// OnModelPreferenceSettled releases subsequent picker writes once this
 	// turn can no longer overwrite them. It does not acknowledge generation.
 	OnModelPreferenceSettled func() `json:"-"`

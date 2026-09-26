@@ -57,6 +57,7 @@ services:
       - memoh-network
 
   server:
+    stop_grace_period: 45s
     image: memohai/server:latest
     container_name: memoh-server
     privileged: true

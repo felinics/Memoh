@@ -155,3 +155,4 @@ workspace_dependency.request_invalid	400
 workspace_dependency.rollback_unavailable	409
 workspace_dependency.workspace_missing	409
 workspace_dependency.workspace_not_running	409
+session_runtime.interrupted	503
