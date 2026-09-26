@@ -12,7 +12,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/accounts"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/bots"
@@ -42,6 +44,11 @@ type resumeContext struct {
 	ChatClaims        map[string]string `json:"chat_claims,omitempty"`
 	DeadlineAt        *time.Time        `json:"deadline_at,omitempty"`
 }
+
+// errResumeUnrecoverable marks an interrupted intent that no later scan can
+// continue. The worker retires it instead of retrying it every pass; failures
+// that may clear (workspace readiness, database errors) stay unwrapped.
+var errResumeUnrecoverable = errors.New("interrupted session cannot resume")
 
 func (s *Service) SetResumeSecret(secret string) { s.resumeSecret = secret }
 
@@ -121,7 +128,7 @@ func (s *Service) renewResumeCredential(ctx context.Context, botID string, claim
 	}
 	if claims["typ"] == "chat_route" {
 		if claims["bot_id"] != botID || claims["chat_id"] == "" {
-			return "", errors.New("resume credential scope mismatch")
+			return "", fmt.Errorf("%w: resume credential scope mismatch", errResumeUnrecoverable)
 		}
 	} else {
 		accountID := claims["user_id"]
@@ -132,6 +139,9 @@ func (s *Service) renewResumeCredential(ctx context.Context, botID string, claim
 			return "", errors.New("resume authorization unavailable")
 		}
 		if err := s.accountService.ValidateSession(ctx, accountID); err != nil {
+			if errors.Is(err, accounts.ErrInactiveAccount) {
+				return "", fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
+			}
 			return "", err
 		}
 		allowed, err := s.botPermissions.HasBotPermission(ctx, botID, accountID, bots.PermissionChat)
@@ -139,7 +149,7 @@ func (s *Service) renewResumeCredential(ctx context.Context, botID string, claim
 			return "", err
 		}
 		if !allowed {
-			return "", errors.New("resume permission revoked")
+			return "", fmt.Errorf("%w: resume permission revoked", errResumeUnrecoverable)
 		}
 	}
 	renewed := jwt.MapClaims{}
@@ -239,6 +249,14 @@ func (s *Service) scanInterruptedSessions(ctx context.Context, scopes SessionRes
 			return err
 		}
 		if !scan.runCursor.Valid {
+			// Each pass over a scope starts by retiring intents a later turn or
+			// a session deletion has made moot, so the pending-resume index and
+			// the listing below only carry work that can still continue.
+			if retired, err := s.queries.RetireSupersededInterruptedSessionRuns(scopeCtx); err != nil {
+				s.logger.WarnContext(scopeCtx, "retire superseded interrupted sessions failed", slog.Any("error", err))
+			} else if retired > 0 {
+				s.logger.InfoContext(scopeCtx, "retired superseded interrupted sessions", slog.Int64("count", retired))
+			}
 			scan.runCursor = pgtype.UUID{Valid: true}
 		}
 		rows, err := s.queries.ListInterruptedSessionRuns(scopeCtx, scan.runCursor)
@@ -257,7 +275,10 @@ func (s *Service) scanInterruptedSessions(ctx context.Context, scopes SessionRes
 			select {
 			case slots <- struct{}{}:
 				done, startErr := s.resumeInterruptedSession(scopeCtx, row)
-				if startErr != nil {
+				switch {
+				case errors.Is(startErr, errResumeUnrecoverable):
+					s.retireInterruptedSession(scopeCtx, row, startErr)
+				case startErr != nil:
 					s.logger.WarnContext(scopeCtx, "resume interrupted session deferred", slog.String("run_id", row.RunID.String()), slog.Any("error", startErr))
 				}
 				if done == nil {
@@ -295,6 +316,16 @@ func (s *Service) StopSessionResume() {
 	}
 }
 
+// retireInterruptedSession drops a resume intent that can never continue, so
+// later scans neither list nor retry it. The run itself stays lost.
+func (s *Service) retireInterruptedSession(ctx context.Context, row sqlc.SessionRun, cause error) {
+	if _, err := s.queries.RetireInterruptedSessionRun(ctx, row.RunID); err != nil {
+		s.logger.WarnContext(ctx, "retire interrupted session failed", slog.String("run_id", row.RunID.String()), slog.Any("error", err))
+		return
+	}
+	s.logger.InfoContext(ctx, "interrupted session will not resume", slog.String("run_id", row.RunID.String()), slog.Any("reason", cause))
+}
+
 const resumeInstruction = "The server gracefully shut down during the previous run. Continue the unfinished user task using the saved session history and current workspace. Do not repeat completed work. A tool interrupted before its result was saved may already have produced side effects: inspect files, process/job status and saved output before deciding what to do; do not blindly replay it. Background task handles from the previous process are no longer live; consult subagent session histories and external job receipts. If the task is already complete, report that. Original task: "
 
 func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.SessionRun) (<-chan struct{}, error) {
@@ -305,14 +336,14 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		Resume *resumeContext `json:"resume"`
 	}
 	if err := json.Unmarshal(row.InputJson, &input); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
 	}
 	data := input.Resume
 	if data == nil || data.Version != 1 || data.ChatID == "" {
-		return nil, errors.New("unsupported resume context")
+		return nil, fmt.Errorf("%w: unsupported resume context", errResumeUnrecoverable)
 	}
 	if data.DeadlineAt != nil && !time.Now().Before(*data.DeadlineAt) {
-		return nil, nil
+		return nil, fmt.Errorf("%w: execution budget expired", errResumeUnrecoverable)
 	}
 	if s.resumeReady != nil {
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -348,6 +379,11 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 	runCtx, admission, _, err := s.admitTriggeredRun(runBase, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil, row.RunID.String())
 	if err != nil {
 		cancel()
+		if errors.Is(err, ledger.ErrResumeSuperseded) || errors.Is(err, sessionruntime.ErrInvocationConflict) {
+			// A newer turn answered the session, or another worker already
+			// admitted this continuation.
+			return nil, fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
+		}
 		return nil, err
 	}
 	req := ChatRequest{

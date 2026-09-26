@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/db"
@@ -78,8 +80,8 @@ func TestResumeRejectsInvalidCredentialAndForeignBotScope(t *testing.T) {
 	if _, err := s.resumeClaims(token); err == nil {
 		t.Fatal("accepted invalid signature")
 	}
-	if _, err := s.renewResumeCredential(t.Context(), "bot", map[string]string{"typ": "chat_route", "bot_id": "other", "chat_id": "chat"}); err == nil {
-		t.Fatal("accepted cross-bot credential")
+	if _, err := s.renewResumeCredential(t.Context(), "bot", map[string]string{"typ": "chat_route", "bot_id": "other", "chat_id": "chat"}); !errors.Is(err, errResumeUnrecoverable) {
+		t.Fatalf("cross-bot credential = %v, want an unrecoverable intent", err)
 	}
 	if _, err := s.renewResumeCredential(t.Context(), "bot", map[string]string{"sub": "account"}); err == nil {
 		t.Fatal("renewed account without reauthorization")
@@ -132,14 +134,14 @@ func TestResumeReentersSavedSessionOnceAndKeepsDeadline(t *testing.T) {
 	admitter.mu.Lock()
 	admitter.started = false
 	admitter.mu.Unlock()
-	if _, err := s.resumeInterruptedSession(t.Context(), row); err == nil {
-		t.Fatal("duplicate admission executed")
+	if _, err := s.resumeInterruptedSession(t.Context(), row); !errors.Is(err, errResumeUnrecoverable) {
+		t.Fatalf("duplicate admission = %v, want an unrecoverable intent", err)
 	}
 	expired := time.Now().Add(-time.Second)
 	data.DeadlineAt = &expired
 	row.InputJson, _ = json.Marshal(map[string]any{"resume": data})
-	if done, err := s.resumeInterruptedSession(t.Context(), row); err != nil || done != nil {
-		t.Fatal("expired budget resumed")
+	if done, err := s.resumeInterruptedSession(t.Context(), row); !errors.Is(err, errResumeUnrecoverable) || done != nil {
+		t.Fatalf("expired budget: done=%v err=%v, want an unrecoverable intent", done, err)
 	}
 	if len(admitter.admitted()) != 2 {
 		t.Fatal("expired task reached admission")
@@ -157,5 +159,76 @@ func TestResumeWaitsForWorkspaceBeforeAdmission(t *testing.T) {
 	}
 	if len(admitter.admitted()) != 0 {
 		t.Fatal("readiness failure consumed resume identity")
+	}
+}
+
+type retireResumeQueries struct {
+	dbstore.Queries
+	rows    []sqlc.SessionRun
+	swept   int
+	retired []string
+}
+
+func (q *retireResumeQueries) ListInterruptedSessionRuns(context.Context, pgtype.UUID) ([]sqlc.SessionRun, error) {
+	rows := q.rows
+	q.rows = nil
+	return rows, nil
+}
+
+func (q *retireResumeQueries) RetireSupersededInterruptedSessionRuns(context.Context) (int64, error) {
+	q.swept++
+	return 0, nil
+}
+
+func (q *retireResumeQueries) RetireInterruptedSessionRun(_ context.Context, runID pgtype.UUID) (int64, error) {
+	q.retired = append(q.retired, runID.String())
+	return 1, nil
+}
+
+// An intent that can never continue is retired once instead of being retried
+// on every pass; one that may still clear (the workspace is not up yet) keeps
+// its intent, and a resumable one is admitted.
+func TestResumeScanRetiresIntentsThatCannotContinue(t *testing.T) {
+	const teamID = "00000000-0000-0000-0000-000000000001"
+	runner := &fakeRunner{chunks: []string{`{"type":"agent_end"}`}}
+	s, admitter := newAdmittedTurnTestService(runner)
+	s.SetAllowedTeam(teamID)
+	s.logger = slog.Default()
+	unreadyBot := uuid.NewString()
+	s.resumeReady = func(_ context.Context, botID, _ string) error {
+		if botID == unreadyBot {
+			return errors.New("bridge not ready")
+		}
+		return nil
+	}
+	future, past := time.Now().Add(time.Minute), time.Now().Add(-time.Second)
+	row := func(botID string, data resumeContext) sqlc.SessionRun {
+		raw, err := json.Marshal(map[string]any{"resume": data})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sqlc.SessionRun{TeamID: db.ParseUUIDOrEmpty(teamID), RunID: db.ParseUUIDOrEmpty(uuid.NewString()), BotID: db.ParseUUIDOrEmpty(botID), SessionID: db.ParseUUIDOrEmpty(uuid.NewString()), InputJson: raw}
+	}
+	expired := row(uuid.NewString(), resumeContext{Version: 1, ChatID: "chat", Query: "late", DeadlineAt: &past})
+	unsupported := row(uuid.NewString(), resumeContext{Version: 2, ChatID: "chat", Query: "future format"})
+	unready := row(unreadyBot, resumeContext{Version: 1, ChatID: "chat", Query: "wait", DeadlineAt: &future})
+	resumable := row(uuid.NewString(), resumeContext{Version: 1, ChatID: "chat", Query: "go on", DeadlineAt: &future})
+	q := &retireResumeQueries{rows: []sqlc.SessionRun{expired, unsupported, unready, resumable}}
+	s.queries = q
+
+	scan := sessionResumeScan{}
+	if err := s.scanInterruptedSessions(t.Context(), s.sessionResumeScopes(), &scan, make(chan struct{}, 4)); err != nil {
+		t.Fatal(err)
+	}
+	if q.swept != 1 {
+		t.Fatalf("superseded sweep ran %d times, want once per scope pass", q.swept)
+	}
+	want := []string{expired.RunID.String(), unsupported.RunID.String()}
+	if fmt.Sprint(q.retired) != fmt.Sprint(want) {
+		t.Fatalf("retired %v, want %v", q.retired, want)
+	}
+	inputs := admitter.admitted()
+	if len(inputs) != 1 || inputs[0].InvocationID != "resume:"+resumable.RunID.String() {
+		t.Fatalf("admission=%+v, want only the resumable run", inputs)
 	}
 }

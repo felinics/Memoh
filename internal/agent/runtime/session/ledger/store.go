@@ -13,6 +13,7 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -284,4 +285,17 @@ type ResetStore interface {
 // valid. PostgreSQL implements this as one parent-locked transaction.
 type OrphanResetStore interface {
 	FenceAndFinalizeOrphan(ctx context.Context, reset ResetLease, run Run) (Run, bool, error)
+}
+
+// HasResumeContext reports whether a run's admission input still carries the
+// resume intent saved at turn start. The recovery worker retires the intent
+// once it can no longer continue, which also removes the run from the
+// pending-resume index.
+func HasResumeContext(input []byte) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(input, &fields) != nil {
+		return false
+	}
+	resume, ok := fields["resume"]
+	return ok && len(resume) > 0 && string(resume) != "null"
 }

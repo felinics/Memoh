@@ -367,7 +367,26 @@ SELECT EXISTS (
  SELECT 1 FROM session_runs source
  WHERE source.team_id = public.memoh_current_team_id() AND source.run_id = sqlc.arg(run_id)
   AND source.state = 'lost' AND source.error_code = 'session_runtime.interrupted'
-  AND source.abort_requested_at IS NULL
+  AND source.abort_requested_at IS NULL AND source.input_json ? 'resume'
   AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = source.team_id
    AND later.session_id = source.session_id AND later.turn_position > source.turn_position)
 )::boolean;
+
+-- name: RetireSupersededInterruptedSessionRuns :execrows
+-- Drops the resume intent of interrupted runs a later turn has answered or whose
+-- session was deleted. Interrupted runs stay lost forever; retiring the intent
+-- keeps idx_session_runs_resume_pending limited to work that can still continue.
+UPDATE session_runs r SET input_json = r.input_json - 'resume'
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.state = 'lost' AND r.error_code = 'session_runtime.interrupted' AND r.input_json ? 'resume'
+  AND (EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
+      AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
+    OR EXISTS (SELECT 1 FROM bot_sessions s WHERE s.team_id = r.team_id
+      AND s.id = r.session_id AND s.deleted_at IS NOT NULL));
+
+-- name: RetireInterruptedSessionRun :execrows
+-- Drops a resume intent that can never continue: its budget expired, its saved
+-- context is unsupported, or its credential scope was revoked.
+UPDATE session_runs SET input_json = input_json - 'resume'
+WHERE team_id = public.memoh_current_team_id() AND run_id = sqlc.arg(run_id)
+  AND state = 'lost' AND error_code = 'session_runtime.interrupted' AND input_json ? 'resume';

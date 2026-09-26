@@ -2,7 +2,6 @@ package sessionruntime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -182,11 +181,7 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 		if err != nil {
 			return err
 		}
-		var input struct {
-			Resume json.RawMessage `json:"resume"`
-		}
-		if run.State == ledger.StateRunning && run.AbortRequestedAt.IsZero() &&
-			json.Unmarshal(run.Input, &input) == nil && len(input.Resume) > 0 && string(input.Resume) != "null" {
+		if run.State == ledger.StateRunning && run.AbortRequestedAt.IsZero() && ledger.HasResumeContext(run.Input) {
 			code = RunErrorInterrupted
 		}
 		terminal, err := m.finalizeLedgerRun(ctx, handle, RunStatusLost, code, runtimeOwnerShutdownError)
