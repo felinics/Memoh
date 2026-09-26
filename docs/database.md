@@ -24,6 +24,7 @@ PostgreSQL migrations live in `db/postgres/migrations/`:
 - **Idempotent DDL**: Use `IF NOT EXISTS` / `IF EXISTS` guards (e.g., `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `DROP TABLE IF EXISTS`) so migrations are safe to re-run.
 - **Down migration must fully reverse up**: The `.down.sql` must cleanly undo everything its `.up.sql` does, in reverse order.
 - **After creating or modifying migrations**, run `mise run sqlc-generate` to regenerate Go sqlc code, then validate the PostgreSQL migration path.
+- **0157 is reserved**: `0157_reserved_cloud_alignment` is intentionally empty. It realigns this stream with Memoh-Cloud's copy, which numbers every migration from 0141 onward one higher, so both use the same numbers from 0158 on. Never reuse a number or renumber a merged migration; Cloud-only schema changes belong in Cloud's own migration stream.
 
 ## Database Tables
 
