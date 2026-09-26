@@ -1,7 +1,6 @@
 package compaction
 
 import (
-	"encoding/json"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -9,6 +8,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/messageconv"
 )
 
 func summaryProviderReplayTokens(summary string) int {
@@ -25,12 +25,8 @@ func retainedReplayTokens(messages []CompactionCandidate, compacted []pgtype.UUI
 		if selected[message.ID] || isProtectedSource(message, sources) {
 			continue
 		}
-		encoded, err := json.Marshal(message.Record.ModelMessage)
-		var sdkMessage sdk.Message
-		if err == nil {
-			err = json.Unmarshal(encoded, &sdkMessage)
-		}
-		if err != nil {
+		sdkMessage := messageconv.ModelMessageToSDKMessage(message.Record.ModelMessage)
+		if len(sdkMessage.Content) == 0 {
 			tokens += contextfrag.ProviderBudgetTokensFromBytes(len(message.RawContent))
 			continue
 		}
