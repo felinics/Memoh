@@ -24,7 +24,6 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/hooks"
-	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -1661,7 +1660,10 @@ func (p *SpawnProvider) persistMessages(
 				slog.Int("message_index", i))
 			continue
 		}
-		usage := messageconv.MarshalUsage(msg.Usage)
+		var usage json.RawMessage
+		if msg.Usage != nil {
+			usage, _ = json.Marshal(msg.Usage)
+		}
 		var metadata map[string]any
 		if i == lastAssistantIdx && result.ContextLifecycle != nil {
 			metadata = map[string]any{

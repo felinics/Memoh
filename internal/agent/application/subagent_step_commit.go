@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,7 +18,6 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
-	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -136,7 +136,10 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 		if err != nil {
 			continue
 		}
-		usage := messageconv.MarshalUsage(msg.Usage)
+		var usage json.RawMessage
+		if msg.Usage != nil {
+			usage, _ = json.Marshal(msg.Usage)
+		}
 		var metadata map[string]any
 		if interrupted && msg.Role == sdk.MessageRoleAssistant {
 			metadata = map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true}

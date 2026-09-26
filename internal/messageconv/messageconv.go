@@ -33,10 +33,14 @@ func SDKMessagesToModelMessagesWithLogger(log *slog.Logger, msgs []sdk.Message) 
 			}
 			continue
 		}
+		var usage json.RawMessage
+		if msg.Usage != nil {
+			usage, _ = json.Marshal(msg.Usage)
+		}
 		result = append(result, turn.ModelMessage{
 			Role:    string(msg.Role),
 			Content: envelope.Content,
-			Usage:   MarshalUsage(msg.Usage),
+			Usage:   usage,
 		})
 	}
 	return result
