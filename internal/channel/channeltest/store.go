@@ -3,6 +3,7 @@ package channeltest
 import (
 	"bytes"
 	"context"
+	"crypto/md5" //nolint:gosec // compatibility digest required by the Weixin upload protocol
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -128,6 +129,7 @@ func (s *MemoryAttachmentStore) SeedContainerFile(botID, containerPath string, d
 
 func (s *MemoryAttachmentStore) ingestBytes(botID string, data []byte, mimeType, originalExt string) (media.Asset, error) {
 	sum := sha256.Sum256(data)
+	md5sum := md5.Sum(data) //nolint:gosec
 	contentHash := hex.EncodeToString(sum[:])
 	ext := strings.TrimSpace(originalExt)
 	if ext == "" {
@@ -146,6 +148,7 @@ func (s *MemoryAttachmentStore) ingestBytes(botID string, data []byte, mimeType,
 		Mime:        mimeType,
 		SizeBytes:   int64(len(data)),
 		StorageKey:  contentHash[:2] + "/" + contentHash + ext,
+		RawMD5:      hex.EncodeToString(md5sum[:]),
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

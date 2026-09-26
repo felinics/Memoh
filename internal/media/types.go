@@ -20,6 +20,7 @@ type Asset struct {
 	Mime        string `json:"mime"`
 	SizeBytes   int64  `json:"size_bytes"`
 	StorageKey  string `json:"storage_key"`
+	RawMD5      string `json:"raw_md5,omitempty"`
 }
 
 // IngestInput carries the data needed to persist a new media asset.

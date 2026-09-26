@@ -67,6 +67,24 @@ func TestAESECBPaddedSize(t *testing.T) {
 	}
 }
 
+func TestEncryptAESECBStreamMatchesBufferedEncryption(t *testing.T) {
+	key := []byte("0123456789abcdef")
+	for _, size := range []int{0, 1, 15, 16, 17, 64*1024 - 1, 64 * 1024, 64*1024 + 1} {
+		plaintext := bytes.Repeat([]byte("w"), size)
+		want, err := encryptAESECB(plaintext, key)
+		if err != nil {
+			t.Fatalf("encrypt size %d: %v", size, err)
+		}
+		var got bytes.Buffer
+		if err := encryptAESECBStream(&got, bytes.NewReader(plaintext), key); err != nil {
+			t.Fatalf("stream encrypt size %d: %v", size, err)
+		}
+		if !bytes.Equal(got.Bytes(), want) {
+			t.Fatalf("stream ciphertext differs at plaintext size %d", size)
+		}
+	}
+}
+
 func TestParseAESKey_Raw16Bytes(t *testing.T) {
 	raw := []byte("0123456789abcdef")
 	b64 := base64.StdEncoding.EncodeToString(raw)

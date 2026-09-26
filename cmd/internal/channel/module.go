@@ -49,6 +49,7 @@ func wireOwnerOnlyChannels(aclService *acl.Service, registry *channel.Registry) 
 func ServerLocalModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
+			provideLocalChannelAttachmentStore,
 			provideCommandHandler,
 			provideLocalCommandHandler,
 			provideLocalQueueCommandHandler,
@@ -66,6 +67,7 @@ func ServerLocalModule() fx.Option {
 func RuntimeModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
+			provideRemoteChannelAttachmentStore,
 			provideLocalMediaService,
 			provideRemoteCommandHandler,
 			provideRemoteQueueCommandHandler,
@@ -96,6 +98,7 @@ func RuntimeModule() fx.Option {
 func EmbeddedModule() fx.Option {
 	return fx.Options(
 		fx.Provide(
+			provideLocalChannelAttachmentStore,
 			provideCommandHandler,
 			provideLocalCommandHandler,
 			provideLocalQueueCommandHandler,

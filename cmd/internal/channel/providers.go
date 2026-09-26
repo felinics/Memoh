@@ -209,7 +209,7 @@ func provideChannelRouter(
 	accountService *accounts.Service,
 	aclService *acl.Service,
 	policyService *policy.Service,
-	mediaService *media.Service,
+	attachmentStore *outboundAttachmentStore,
 	audioService channelAudio,
 	settingsService channelSettings,
 	pipeline *timeline.Pipeline,
@@ -241,7 +241,7 @@ func provideChannelRouter(
 	if adapter, ok := registry.Get(telegram.Type); ok {
 		adapter.(*telegram.TelegramAdapter).SetUserInputAuthorizer(processor.AuthorizeUserInputInteraction)
 	}
-	processor.SetMediaService(mediaService)
+	processor.SetMediaService(attachmentStore)
 	processor.SetStreamObserver(local.NewRouteHubBroadcaster(hub))
 	processor.SetSpeechService(audioService, &settingsSpeechModelResolver{settings: settingsService})
 	processor.SetTranscriptionService(audioService, &settingsTranscriptionModelResolver{settings: settingsService})
@@ -293,14 +293,14 @@ func provideCommandHandler(
 	return cmdHandler
 }
 
-func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor, mediaService *media.Service) *channel.Manager {
+func provideChannelManager(log *slog.Logger, registry *channel.Registry, channelStore *channel.Store, channelRouter *inbound.ChannelInboundProcessor, attachmentStore *outboundAttachmentStore) *channel.Manager {
 	if adapter, ok := registry.Get(matrix.Type); ok {
 		if matrixAdapter, ok := adapter.(*matrix.MatrixAdapter); ok {
 			matrixAdapter.SetSyncStateSaver(channelStore.SaveMatrixSyncSinceToken)
 		}
 	}
 	mgr := channel.NewManager(log, registry, channelStore, channelRouter)
-	mgr.SetAttachmentStore(mediaService)
+	mgr.SetAttachmentStore(attachmentStore)
 	if mw := channelRouter.IdentityMiddleware(); mw != nil {
 		mgr.Use(mw)
 	}

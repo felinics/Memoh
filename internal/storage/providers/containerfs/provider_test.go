@@ -89,12 +89,14 @@ func TestSplitRoutingKey(t *testing.T) {
 // recordingReadServer captures the exact path the client sends over the wire.
 type recordingReadServer struct {
 	pb.UnimplementedContainerServiceServer
-	path string
-	data []byte
+	root         string
+	relativePath string
+	data         []byte
 }
 
-func (s *recordingReadServer) ReadRaw(req *pb.ReadRawRequest, stream pb.ContainerService_ReadRawServer) error {
-	s.path = req.GetPath()
+func (s *recordingReadServer) ReadRawNoFollow(req *pb.ReadRawNoFollowRequest, stream pb.ContainerService_ReadRawNoFollowServer) error {
+	s.root = req.GetRoot()
+	s.relativePath = req.GetRelativePath()
 	if len(s.data) > 0 {
 		return stream.Send(&pb.DataChunk{Data: s.data})
 	}
@@ -136,13 +138,9 @@ func newRecordingClient(t *testing.T, server pb.ContainerServiceServer) *bridge.
 	return bridge.NewClientFromConn(conn)
 }
 
-// OpenContainerFile must send the absolute container path to the workspace
-// client. Clients resolve relative paths against different bases (the bridge
-// joins its /data workdir; the runtime-worker chain resolves against the
-// sandbox home), so stripping /data and sending a relative subPath reads the
-// wrong file anywhere off the bridge — this regressed outbound attachment
-// ingestion for runtime-worker workspaces.
-func TestProvider_OpenContainerFileSendsAbsolutePath(t *testing.T) {
+// OpenContainerFile must use the bridge's anchored no-follow read for files
+// under /data so a symlink cannot escape the workspace data directory.
+func TestProvider_OpenContainerFileUsesNoFollowForDataPath(t *testing.T) {
 	t.Parallel()
 
 	server := &recordingReadServer{data: []byte("png-bytes")}
@@ -162,7 +160,7 @@ func TestProvider_OpenContainerFileSendsAbsolutePath(t *testing.T) {
 	if string(got) != "png-bytes" {
 		t.Errorf("content = %q, want %q", got, "png-bytes")
 	}
-	if server.path != "/data/repro935-big.png" {
-		t.Errorf("client received path %q, want absolute %q", server.path, "/data/repro935-big.png")
+	if server.root != "/data" || server.relativePath != "repro935-big.png" {
+		t.Errorf("client received root/path %q/%q, want /data/repro935-big.png", server.root, server.relativePath)
 	}
 }

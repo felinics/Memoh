@@ -9,6 +9,8 @@ option go_package = "github.com/felinics/memoh/internal/rpc/runtimepb";
 // encodings of package-owned DTOs, never database or Fx types.
 service RuntimeService {
   rpc Call(CallRequest) returns (CallResponse);
+  rpc ResolveAttachment(ResolveAttachmentRequest) returns (ResolveAttachmentResponse);
+  rpc ReadAttachment(ReadAttachmentRequest) returns (stream AttachmentChunk);
 }
 
 message CallRequest {
@@ -18,4 +20,28 @@ message CallRequest {
 
 message CallResponse {
   bytes payload = 1;
+}
+
+message ResolveAttachmentRequest {
+  string bot_id = 1;
+  string content_hash = 2;
+  string container_path = 3;
+}
+
+message ResolveAttachmentResponse {
+  string bot_id = 1;
+  string content_hash = 2;
+  string mime = 3;
+  int64 size_bytes = 4;
+  string storage_key = 5;
+  string raw_md5 = 6;
+}
+
+message ReadAttachmentRequest {
+  string bot_id = 1;
+  string content_hash = 2;
+}
+
+message AttachmentChunk {
+  bytes data = 1;
 }

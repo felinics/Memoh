@@ -128,12 +128,7 @@ func (p *Provider) OpenContainerFile(ctx context.Context, botID, containerPath s
 	if err != nil {
 		return nil, fmt.Errorf("get client: %w", err)
 	}
-	// Read with the absolute container path, not the stripped subPath: workspace
-	// clients resolve relative paths against different bases (the in-container
-	// bridge joins its /data workdir, but the runtime-worker chain resolves
-	// against the sandbox home), so a relative subPath reads the wrong file
-	// anywhere off the bridge. Absolute paths resolve consistently everywhere.
-	return client.ReadRaw(ctx, filepath.Clean(containerPath))
+	return client.ReadRawNoFollow(ctx, attachmentpkg.DataMountPath(""), filepath.Clean(subPath))
 }
 
 // ListPrefix returns all keys under the given routing prefix.

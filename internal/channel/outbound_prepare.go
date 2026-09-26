@@ -37,6 +37,10 @@ type ContainerAttachmentIngester interface {
 	IngestContainerFile(ctx context.Context, botID, containerPath string) (media.Asset, error)
 }
 
+type PreparedAssetOpener interface {
+	OpenPrepared(ctx context.Context, botID, contentHash string) (io.ReadCloser, error)
+}
+
 // PrepareOutboundMessage resolves the logical outbound message into the
 // adapter-facing prepared model.
 func PrepareOutboundMessage(
@@ -201,7 +205,7 @@ func preparePersistedAttachment(
 		return Attachment{}, PreparedAttachment{}, fmt.Errorf("stat content hash attachment: %w", err)
 	}
 	applyPreparedAsset(ctx, store, asset, botID, &item, sourcePath)
-	return item, preparedUploadAttachment(store, botID, item), nil
+	return item, preparedUploadAttachment(store, botID, item, asset.RawMD5), nil
 }
 
 func prepareBase64Attachment(
@@ -292,7 +296,7 @@ func prepareContainerAttachment(
 		asset, err = store.GetByStorageKey(ctx, botID, storageKey)
 		if err == nil {
 			applyPreparedAsset(ctx, store, asset, botID, &item, sourcePath)
-			return item, preparedUploadAttachment(store, botID, item), nil
+			return item, preparedUploadAttachment(store, botID, item, asset.RawMD5), nil
 		}
 	}
 	ingester, ok := store.(ContainerAttachmentIngester)
@@ -310,7 +314,7 @@ func prepareContainerAttachment(
 		return Attachment{}, PreparedAttachment{}, fmt.Errorf("prepare workspace attachment: %w", ingestErr)
 	}
 	applyPreparedAsset(ctx, store, asset, botID, &item, sourcePath)
-	return item, preparedUploadAttachment(store, botID, item), nil
+	return item, preparedUploadAttachment(store, botID, item, asset.RawMD5), nil
 }
 
 func ingestPreparedAttachment(
@@ -346,10 +350,10 @@ func ingestPreparedAttachment(
 	}
 	item.Mime = attachmentpkg.NormalizeMime(finalMime)
 	applyPreparedAsset(ctx, store, asset, botID, &item, sourcePath)
-	return item, preparedUploadAttachment(store, botID, item), nil
+	return item, preparedUploadAttachment(store, botID, item, asset.RawMD5), nil
 }
 
-func preparedUploadAttachment(store OutboundAttachmentStore, botID string, item Attachment) PreparedAttachment {
+func preparedUploadAttachment(store OutboundAttachmentStore, botID string, item Attachment, rawMD5 string) PreparedAttachment {
 	contentHash := strings.TrimSpace(item.ContentHash)
 	return PreparedAttachment{
 		Logical: item,
@@ -357,7 +361,11 @@ func preparedUploadAttachment(store OutboundAttachmentStore, botID string, item 
 		Name:    preparedAttachmentName(item, ""),
 		Mime:    preparedAttachmentMime(item, ""),
 		Size:    item.Size,
+		RawMD5:  rawMD5,
 		Open: func(ctx context.Context) (io.ReadCloser, error) {
+			if opener, ok := store.(PreparedAssetOpener); ok {
+				return opener.OpenPrepared(ctx, botID, contentHash)
+			}
 			reader, _, err := store.Open(ctx, botID, contentHash)
 			if err != nil {
 				return nil, err

@@ -22,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/handlers"
+	"github.com/felinics/memoh/internal/media"
 	intrpc "github.com/felinics/memoh/internal/rpc"
 	"github.com/felinics/memoh/internal/rpc/channelruntime"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
@@ -126,13 +127,13 @@ func provideLocalWebhookTunnelStatus(manager *webhooktunnel.Manager) interface{ 
 	return manager
 }
 
-func provideServerRPC(log *slog.Logger, cfg config.Config, turnService turn.Service, commandHandler *command.Handler, queueHandler inbound.QueueCommandHandler, skillHandler *handlers.ContainerdHandler, audioService *audio.Service) (*serverRPC, error) {
+func provideServerRPC(log *slog.Logger, cfg config.Config, turnService turn.Service, commandHandler *command.Handler, queueHandler inbound.QueueCommandHandler, skillHandler *handlers.ContainerdHandler, audioService *audio.Service, mediaService *media.Service) (*serverRPC, error) {
 	if err := cfg.ValidateServerRuntime(); err != nil {
 		return nil, err
 	}
 	server := intrpc.NewServer(cfg.InternalRPC.SharedSecret)
 	turnpb.RegisterTurnServiceServer(server, turntransport.NewServer(log, turnService))
-	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(log, serverruntime.Handlers(commandHandler, queueHandler, skillHandler, audioService)))
+	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(log, serverruntime.Handlers(commandHandler, queueHandler, skillHandler, audioService), mediaService))
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(server, healthServer)
