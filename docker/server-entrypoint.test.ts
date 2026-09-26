@@ -14,7 +14,7 @@ function writeExecutable(path: string, content: string): void {
   chmodSync(path, 0o755)
 }
 
-function runEntrypoint(backend?: string, configPath = '/app/config.toml', ctrStatus = 1) {
+function runEntrypoint(backend?: string, configPath = '/app/config.toml', ctrStatus = 1, env: string[] = []) {
   const tempDir = mkdtempSync(join(tmpdir(), 'memoh-server-entrypoint-'))
   const appDir = join(tempDir, 'app')
   const configDir = join(tempDir, 'config')
@@ -34,6 +34,7 @@ function runEntrypoint(backend?: string, configPath = '/app/config.toml', ctrSta
     writeFileSync(hostConfigPath, `[container]\n${backendConfig}`)
     writeExecutable(join(appDir, 'memoh-server'), `#!/bin/sh
 printf 'memoh-server %s\n' "$*" >> "$ENTRYPOINT_TEST_LOG"
+printf 'memoh-server env OTEL_SDK_DISABLED=%s\n' "$OTEL_SDK_DISABLED" >> "$ENTRYPOINT_TEST_LOG"
 `)
 
     const fakeCommand = `#!/bin/sh
@@ -41,6 +42,7 @@ command_name=\${0##*/}
 printf '%s %s\n' "$command_name" "$*" >> "$ENTRYPOINT_TEST_LOG"
 case "$command_name" in
   containerd)
+    printf 'containerd env OTEL_SDK_DISABLED=%s\n' "$OTEL_SDK_DISABLED" >> "$ENTRYPOINT_TEST_LOG"
     trap 'printf "containerd-stopped\\n" >> "$ENTRYPOINT_TEST_LOG"; exit 0' TERM INT
     : > "$ENTRYPOINT_TEST_CONTAINERD_READY"
     while :; do /bin/sleep 0.05; done
@@ -86,6 +88,7 @@ exit 0
       '--env',
       'PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
       ...(configPath === '/app/config.toml' ? [] : ['--env', `CONFIG_PATH=${configPath}`]),
+      ...env.flatMap(value => ['--env', value]),
       '--entrypoint',
       '/bin/sh',
       TEST_IMAGE,
@@ -134,4 +137,14 @@ test('omitted backend preserves embedded containerd setup and cleanup', () => {
   expect(calls).toMatch(/^ctr version$/m)
   expect(calls).toMatch(/^memoh-server serve$/m)
   expect(calls).toMatch(/^containerd-stopped$/m)
+})
+
+test('embedded containerd does not export the OpenTelemetry settings meant for the server', () => {
+  const { calls, result } = runEntrypoint(undefined, '/app/config.toml', 0, [
+    'OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4317',
+  ])
+
+  expect(result.status, result.stderr || result.stdout).toBe(0)
+  expect(calls).toMatch(/^containerd env OTEL_SDK_DISABLED=true$/m)
+  expect(calls).toMatch(/^memoh-server env OTEL_SDK_DISABLED=$/m)
 })

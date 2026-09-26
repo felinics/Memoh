@@ -351,6 +351,7 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 		LogStatus:   true,
 		LogURI:      true,
 		LogMethod:   true,
+		LogLatency:  true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
 			// Same fields and the same URI sanitizer as the main server: the
 			// media paths this listener serves carry an authorising token in

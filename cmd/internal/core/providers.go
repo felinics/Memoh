@@ -118,7 +118,7 @@ func provideLogger(cfg config.Config) *slog.Logger {
 }
 
 // setupTelemetry installs context propagation and, when a collector is
-// configured, trace export. It is an fx.Invoke rather than a provider because
+// configured, trace and metric export. It is an fx.Invoke rather than a provider because
 // nothing depends on its result: it configures OpenTelemetry's globals, which
 // is how the instrumentation in libraries and in internal/telemetry finds it.
 //
@@ -130,7 +130,7 @@ func setupTelemetry(lc fx.Lifecycle, cfg config.Config, svc telemetry.Service, l
 	svc.InstanceID = cfg.InstanceID
 	shutdown, err := telemetry.Setup(context.Background(), cfg.Telemetry, svc, log)
 	if err != nil {
-		log.Error("tracing setup failed; continuing without it", slog.Any("error", err))
+		log.Error("telemetry setup failed; continuing without it", slog.Any("error", err))
 		return
 	}
 	lc.Append(fx.Hook{
