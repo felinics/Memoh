@@ -130,12 +130,19 @@ type StartTurnCommand struct {
 	DiscussAddressed bool
 }
 
+type ContextMessageSource struct {
+	Kind    string `json:"kind"`
+	ID      string `json:"id,omitempty"`
+	Current bool   `json:"current,omitempty"`
+}
+
 // DiscussMessage is one composed context message for a discuss turn.
 type DiscussMessage struct {
-	Role                 string          `json:"role"`
-	Content              string          `json:"content"`
-	RawContent           json.RawMessage `json:"raw_content,omitempty"`
-	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
+	Source               *ContextMessageSource `json:"source,omitempty"`
+	Role                 string                `json:"role"`
+	Content              string                `json:"content"`
+	RawContent           json.RawMessage       `json:"raw_content,omitempty"`
+	CompactionArtifactID string                `json:"compaction_artifact_id,omitempty"`
 }
 
 // DiscussImageRef references an image attachment to inline as vision input.
