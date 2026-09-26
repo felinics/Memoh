@@ -5,7 +5,7 @@ WHERE team_id = public.memoh_current_team_id() AND session_id = sqlc.arg(session
 
 -- name: GetLatestAssistantUsage :one
 SELECT
-  COALESCE(public.memoh_usage_input_tokens(m.usage, m.metadata, m.runtime_type), 0)::bigint AS input_tokens
+  COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens
 FROM bot_visible_history_messages m
 WHERE m.team_id = public.memoh_current_team_id()
   AND m.session_id = sqlc.arg(session_id)
@@ -24,7 +24,7 @@ LIMIT 1;
 
 -- name: GetSessionCacheStats :one
 SELECT
-  COALESCE(SUM(public.memoh_usage_input_tokens(m.usage, m.metadata, m.runtime_type)), 0)::bigint AS total_input_tokens,
+  COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS total_input_tokens,
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens
 FROM bot_visible_history_messages m
 WHERE m.team_id = public.memoh_current_team_id()

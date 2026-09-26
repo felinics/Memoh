@@ -21,7 +21,7 @@ SELECT
     )
   END::text AS session_type,
   date_trunc('day', m.created_at)::date AS day,
-  COALESCE(SUM(public.memoh_usage_input_tokens(m.usage, m.metadata, m.runtime_type)), 0)::bigint AS input_tokens,
+  COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
   COALESCE(SUM((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
   COALESCE(SUM((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
@@ -70,7 +70,7 @@ SELECT
   COALESCE(mo.model_id, 'unknown') AS model_slug,
   COALESCE(mo.name, mo.model_id, 'Unknown') AS model_name,
   COALESCE(lp.name, 'Unknown') AS provider_name,
-  COALESCE(SUM(public.memoh_usage_input_tokens(m.usage, m.metadata, m.runtime_type)), 0)::bigint AS input_tokens,
+  COALESCE(SUM((m.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
   COALESCE(SUM((m.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens
 FROM bot_history_messages m
 LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
@@ -142,7 +142,7 @@ SELECT
   COALESCE(mo.model_id, 'unknown')::text AS model_slug,
   COALESCE(mo.name, mo.model_id, 'Unknown')::text AS model_name,
   COALESCE(lp.name, 'Unknown')::text AS provider_name,
-  COALESCE(public.memoh_usage_input_tokens(m.usage, m.metadata, m.runtime_type), 0)::bigint AS input_tokens,
+  COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
   COALESCE((m.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,
   COALESCE((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
   COALESCE((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
