@@ -21,6 +21,7 @@ agent.provider_quota_exhausted	402
 agent.provider_rate_limited	429
 agent.response_interrupted	502
 agent.response_timeout	504
+agent.tool_timeout	504
 agent_authorization.code_invalid	400
 agent_authorization.expired	410
 agent_authorization.failed	503
@@ -106,6 +107,7 @@ runtime_control.request_invalid	400
 runtime_control.steer_failed	409
 runtime_control.thread_unavailable	409
 runtime_control.unsupported	400
+schedule.execution_timeout	504
 search_provider.type_conflict	409
 session.model_preference_conflict	409
 session_runtime.abort_failed	500
@@ -132,6 +134,7 @@ tools_unavailable	503
 user_input.expired	409
 user_input.forbidden	403
 user_input.operation_failed	500
+video.job_outcome_unknown	502
 workdir.git_branch_unavailable	400
 workdir.git_busy	409
 workdir.git_switch_failed	409
@@ -152,4 +155,3 @@ workspace_dependency.request_invalid	400
 workspace_dependency.rollback_unavailable	409
 workspace_dependency.workspace_missing	409
 workspace_dependency.workspace_not_running	409
-agent.tool_timeout	504

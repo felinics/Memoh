@@ -669,6 +669,8 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	notices.apply(&result)
 	if idleCancel.DidFire() {
 		promptErr = context.Cause(idleCtx)
+	} else if errors.Is(context.Cause(ctx), schedule.ErrExecutionTimeout) {
+		promptErr = agentAbortCause(ctx)
 	}
 	lifecycleCause = promptErr
 	// Same contract as the chat path: the round must not commit past a lost

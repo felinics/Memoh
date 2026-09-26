@@ -890,6 +890,7 @@ CREATE INDEX IF NOT EXISTS idx_lifecycle_events_container_id ON lifecycle_events
 CREATE INDEX IF NOT EXISTS idx_lifecycle_events_event_type ON lifecycle_events(event_type);
 
 CREATE TABLE IF NOT EXISTS schedule (
+  max_run_seconds integer NOT NULL DEFAULT 3600 CHECK (max_run_seconds BETWEEN 300 AND 86400),
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   description TEXT NOT NULL,

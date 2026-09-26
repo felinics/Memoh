@@ -1283,6 +1283,7 @@ func configureMemoryProviderRegistry(mpService *memprovider.Service, registry *m
 
 func startScheduleService(lc fx.Lifecycle, scheduleService *schedule.Service) {
 	lc.Append(fx.Hook{
+		OnStop: scheduleService.Shutdown,
 		OnStart: func(ctx context.Context) error {
 			return scheduleService.Bootstrap(ctx)
 		},

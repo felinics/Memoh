@@ -155,13 +155,13 @@
       "protected_overflow": "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."
     },
     "agent": {
-      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying.",
       "response_timeout": "The model did not respond in time. Please try again.",
       "response_interrupted": "The model response was interrupted. Please try again.",
       "provider_overloaded": "The model provider is overloaded right now. Please try again in a moment.",
       "provider_rate_limited": "The model provider rate limit was reached. Please wait a moment before sending again.",
       "provider_quota_exhausted": "The model provider account has no remaining balance or quota.",
-      "provider_auth_failed": "The model provider rejected the credentials. Check the provider API key."
+      "provider_auth_failed": "The model provider rejected the credentials. Check the provider API key.",
+      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying."
     },
     "queue_request_invalid": "Enter text after /steer or /queue in an existing conversation.",
     "queue_no_active_run": "The current response has ended. Send this as a new message.",
@@ -333,6 +333,12 @@
       "forbidden": "You do not have access to this conversation.",
       "request_invalid": "The runtime control request is invalid.",
       "cancelled": "Operation cancelled."
+    },
+    "schedule": {
+      "execution_timeout": "This scheduled run reached its execution limit. Review its progress or increase the limit."
+    },
+    "video": {
+      "job_outcome_unknown": "The video job status could not be confirmed. Check the saved job before creating another video."
     }
   },
   "auth": {
@@ -3513,7 +3519,10 @@
         "pattern": "Schedule",
         "maxCalls": "Run Limit",
         "enabled": "Enable Task",
-        "invalidPattern": "Invalid pattern"
+        "invalidPattern": "Invalid pattern",
+        "maxRunMinutes": "Execution limit (minutes)",
+        "maxRunMinutesHelp": "A single run can last 5 minutes to 24 hours.",
+        "invalidMaxRunMinutes": "Enter a whole number from 5 to 1440."
       },
       "mode": {
         "minutes": "Every N minutes",

@@ -26100,6 +26100,10 @@ const docTemplate = `{
                 "max_calls": {
                     "$ref": "#/definitions/schedule.NullableInt"
                 },
+                "max_run_seconds": {
+                    "description": "MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.",
+                    "type": "integer"
+                },
                 "model_id": {
                     "description": "ModelID is a native model UUID override (models.id).",
                     "type": "string"
@@ -26146,6 +26150,10 @@ const docTemplate = `{
                 "bot_agent_id": {
                     "description": "BotAgentID selects one persisted BotAgent for a new session. Empty means\nthe built-in Native runtime (or the legacy ACP fields below).",
                     "type": "string"
+                },
+                "max_run_seconds": {
+                    "description": "MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.",
+                    "type": "integer"
                 },
                 "model_id": {
                     "description": "ModelID is a native model UUID override (models.id).",
@@ -26279,6 +26287,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "max_calls": {
+                    "type": "integer"
+                },
+                "max_run_seconds": {
+                    "description": "MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.",
                     "type": "integer"
                 },
                 "model_id": {

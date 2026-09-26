@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -159,6 +160,7 @@ type fakeVideoProvider struct {
 	mu           sync.Mutex
 	createJob    *sdk.VideoJob
 	createErr    error
+	createWait   bool
 	getJobs      []*sdk.VideoJob
 	getErr       error
 	downloadData []byte
@@ -171,7 +173,11 @@ func (*fakeVideoProvider) ListModels(context.Context) ([]*sdk.VideoModel, error)
 	return nil, nil
 }
 
-func (f *fakeVideoProvider) DoCreate(context.Context, sdk.VideoParams) (*sdk.VideoJob, error) {
+func (f *fakeVideoProvider) DoCreate(ctx context.Context, _ sdk.VideoParams) (*sdk.VideoJob, error) {
+	if f.createWait {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
@@ -221,4 +227,44 @@ func cloneVideoJob(job *sdk.VideoJob) *sdk.VideoJob {
 	clone := *job
 	clone.Outputs = append([]sdk.VideoOutput(nil), job.Outputs...)
 	return &clone
+}
+
+func TestVideoDeadlinePreservesRunningProviderJob(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := background.New(nil)
+		job := &sdk.VideoJob{ID: "still-running", ModelID: "video-model", Status: sdk.VideoJobRunning}
+		prov := &fakeVideoProvider{createJob: job, getJobs: []*sdk.VideoJob{job}, cancelCh: make(chan struct{})}
+		p := newTestVideoGenProvider(mgr, "model-row", prov)
+		result, err := p.execGenerateVideo(t.Context(), SessionContext{BotID: "bot1", SessionID: "sess1"}, generateVideoArgs{Prompt: "test", MaxDurationSeconds: intPtr(4)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := result.(map[string]any)["task_id"].(string)
+		snap, reason, err := mgr.WaitForSessionTask(t.Context(), "bot1", "sess1", id, 0)
+		if err != nil || reason != background.WaitUnknown || snap.Result["job_id"] != "still-running" {
+			t.Fatalf("%+v %s %v", snap, reason, err)
+		}
+		select {
+		case <-prov.cancelCh:
+			t.Fatal("monitoring deadline canceled provider work")
+		default:
+		}
+	})
+}
+
+func TestVideoCreationDeadlineDoesNotConfirmFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := background.New(nil)
+		prov := &fakeVideoProvider{createWait: true}
+		p := newTestVideoGenProvider(mgr, "model-row", prov)
+		result, err := p.execGenerateVideo(t.Context(), SessionContext{BotID: "bot1", SessionID: "sess1"}, generateVideoArgs{Prompt: "test", MaxDurationSeconds: intPtr(1)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := result.(map[string]any)["task_id"].(string)
+		snap, reason, err := mgr.WaitForSessionTask(t.Context(), "bot1", "sess1", id, 0)
+		if err != nil || reason != background.WaitUnknown || snap.Result["error_code"] != "video.job_outcome_unknown" {
+			t.Fatalf("%+v %s %v", snap, reason, err)
+		}
+	})
 }

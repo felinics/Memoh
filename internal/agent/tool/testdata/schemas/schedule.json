@@ -29,6 +29,12 @@
         ],
         "description": "Optional max calls, null means unlimited"
       },
+      "max_run_seconds": {
+        "description": "Per-fire execution budget, default 3600 seconds. Overlapping fires are skipped.",
+        "maximum": 86400,
+        "minimum": 300,
+        "type": "integer"
+      },
       "model_id": {
         "description": "Native model override: a model_uuid from list_models. Not valid together with acp_agent_id/acp_model_id.",
         "type": "string"
@@ -119,6 +125,12 @@
             "type": "null"
           }
         ]
+      },
+      "max_run_seconds": {
+        "description": "Per-fire execution budget, default 3600 seconds. Overlapping fires are skipped.",
+        "maximum": 86400,
+        "minimum": 300,
+        "type": "integer"
       },
       "model_id": {
         "description": "Native model override: a model_uuid from list_models.",

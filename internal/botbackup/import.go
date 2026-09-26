@@ -1163,12 +1163,13 @@ func (s *Service) restoreSchedules(ctx context.Context, botID string, state *imp
 	for _, item := range items {
 		enabled := item.Enabled
 		_, err := s.schedules.Create(ctx, botID, schedule.CreateRequest{
-			Name:        item.Name,
-			Description: item.Description,
-			Pattern:     item.Pattern,
-			MaxCalls:    schedule.NullableInt{Value: item.MaxCalls, Set: true},
-			Command:     item.Command,
-			Enabled:     &enabled,
+			Name:            item.Name,
+			Description:     item.Description,
+			Pattern:         item.Pattern,
+			MaxCalls:        schedule.NullableInt{Value: item.MaxCalls, Set: true},
+			Command:         item.Command,
+			Enabled:         &enabled,
+			ExecutionConfig: schedule.ExecutionConfig{MaxRunSeconds: item.MaxRunSeconds},
 		})
 		if err != nil {
 			if e := state.itemErr("schedule", err); e != nil {
