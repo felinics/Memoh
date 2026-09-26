@@ -41,7 +41,7 @@ type Profile struct {
 	// mcpCapabilities.http. This is for agents that accept session/new
 	// mcpServers but do not advertise the capability yet.
 	ForceHTTPMCPServer bool
-	// RuntimeStorage is the internal allowlist and environment contract that
+	// RuntimeStorage is the internal environment contract that
 	// separates durable configuration/credentials from process-local state.
 	RuntimeStorage    RuntimeStoragePolicy
 	ManagedFields     []ManagedField

@@ -414,6 +414,12 @@ const docTemplate = `{
                 "summary": "Create bot user",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "Client-generated key for one logical create. A resend with the same key is answered with the bot the first attempt created instead of a second one.",
+                        "name": "Idempotency-Key",
+                        "in": "header"
+                    },
+                    {
                         "description": "Bot payload",
                         "name": "payload",
                         "in": "body",
@@ -14565,6 +14571,31 @@ const docTemplate = `{
                 }
             }
         },
+        "/site-icon": {
+            "get": {
+                "tags": [
+                    "site-icon"
+                ],
+                "summary": "Resolve a public site's favicons for light and dark color schemes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Public page or site URL; only its origin is fetched",
+                        "name": "url",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SiteIconResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/speech-models": {
             "get": {
                 "description": "List all models of type 'speech' (filtered view of unified models table)",
@@ -22990,6 +23021,23 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "handlers.SiteIconResponse": {
+            "type": "object",
+            "properties": {
+                "dark": {
+                    "type": "string"
+                },
+                "dark_mask": {
+                    "type": "string"
+                },
+                "light": {
+                    "type": "string"
+                },
+                "light_mask": {
+                    "type": "string"
                 }
             }
         },

@@ -206,9 +206,8 @@ func (c *Client) ListDirAll(ctx context.Context, path string, recursive bool) ([
 
 // ListDirBounded lists at most maxEntries entries. The bridge stops traversing
 // once the bound is exceeded and fails with a resource-exhausted error, so
-// server-side memory stays bounded BEFORE collection - callers with a hard
-// ceiling (the ACP session-state capture) must use this instead of judging an
-// unbounded listing after the fact.
+// server-side memory stays bounded before collection. Callers with a hard
+// ceiling use this instead of judging an unbounded listing after the fact.
 func (c *Client) ListDirBounded(ctx context.Context, path string, recursive bool, maxEntries int32) ([]*pb.FileEntry, error) {
 	resp, err := c.svc.ListDir(ctx, &pb.ListDirRequest{
 		Path:       path,
@@ -466,22 +465,6 @@ func (c *Client) ReadRaw(ctx context.Context, path string) (io.ReadCloser, error
 	return newStreamReader(stream, cancel)
 }
 
-// ReadRawNoFollow streams a regular file below root without following any
-// symbolic-link component. The bridge performs validation and open as one
-// descriptor-anchored operation; callers must pass a clean relative path.
-func (c *Client) ReadRawNoFollow(ctx context.Context, root, relativePath string) (io.ReadCloser, error) {
-	streamCtx, cancel := context.WithCancel(ctx)
-	stream, err := c.svc.ReadRawNoFollow(streamCtx, &pb.ReadRawNoFollowRequest{
-		Root:         root,
-		RelativePath: relativePath,
-	})
-	if err != nil {
-		cancel()
-		return nil, mapError(err)
-	}
-	return newStreamReader(stream, cancel)
-}
-
 // WriteRaw writes raw bytes to a file in the container.
 func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64, error) {
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -523,47 +506,6 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
 		return 0, err
-	}
-	return resp.GetBytesWritten(), nil
-}
-
-// WriteRawNoFollow creates a new regular file below root without following any
-// symbolic-link component. It fails closed if the target already exists.
-func (c *Client) WriteRawNoFollow(ctx context.Context, root, relativePath string, r io.Reader) (int64, error) {
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	stream, err := c.svc.WriteRawNoFollow(streamCtx)
-	if err != nil {
-		return 0, mapError(err)
-	}
-	if err := stream.Send(&pb.WriteRawNoFollowChunk{Root: root, RelativePath: relativePath}); err != nil {
-		return 0, mapError(err)
-	}
-
-	buf := make([]byte, 64*1024)
-	for {
-		n, readErr := r.Read(buf)
-		if n > 0 {
-			if sendErr := stream.Send(&pb.WriteRawNoFollowChunk{Data: buf[:n]}); sendErr != nil {
-				return 0, mapError(sendErr)
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil {
-			// Mirror WriteRaw: an explicit abort keeps the failure terminal on
-			// the bridge side before this call returns.
-			_ = stream.Send(&pb.WriteRawNoFollowChunk{Abort: true})
-			_, _ = stream.CloseAndRecv()
-			return 0, readErr
-		}
-	}
-
-	resp, err := stream.CloseAndRecv()
-	if err != nil {
-		return 0, mapError(err)
 	}
 	return resp.GetBytesWritten(), nil
 }

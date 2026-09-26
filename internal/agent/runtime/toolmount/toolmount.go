@@ -18,6 +18,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -110,7 +111,7 @@ func mintRouteURL(rawURL string) (string, string, error) {
 func EmitUnavailableNotice(sink external.EventSink, reason string) {
 	sink.EmitStreamEvent(event.StreamEvent{
 		Type:  event.RuntimeNotice,
-		Code:  "tools_unavailable",
+		Code:  string(apperror.CodeRuntimeToolsUnavailable),
 		Delta: "Memoh tools are unavailable for this turn: " + reason,
 	})
 }

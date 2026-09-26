@@ -9,29 +9,21 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 )
 
-func TestRuntimeRoundHeadFollowsCapturedNativeState(t *testing.T) {
+func TestRuntimeRoundPublishesOnlyCompletedRequestedHead(t *testing.T) {
 	t.Parallel()
 
 	failure := errors.New("codex turn failed")
 	for _, tc := range []struct {
-		name       string
-		checkpoint external.CheckpointOutcome
-		promptErr  error
-		completed  bool
-		published  bool
-		reset      bool
+		name        string
+		publishHead bool
+		promptErr   error
+		completed   bool
+		published   bool
 	}{
-		{"staged_completed", external.CheckpointStaged, nil, true, true, false},
-		// Restoring the older snapshot would make the runtime forget a round the
-		// user can see, so a captured abort or failure moves the head too.
-		{"staged_aborted", external.CheckpointStaged, nil, false, true, false},
-		{"staged_failed", external.CheckpointStaged, failure, false, true, false},
-		{"declined_completed", external.CheckpointDeclined, nil, true, true, true},
-		// ACP declines on every result; an unfinished round of it must keep the
-		// head its warm session is fenced against.
-		{"declined_aborted", external.CheckpointDeclined, nil, false, false, false},
-		{"declined_failed", external.CheckpointDeclined, failure, false, false, false},
-		{"none_completed", external.CheckpointNone, nil, true, false, false},
+		{"requested_completed", true, nil, true, true},
+		{"requested_aborted", true, nil, false, false},
+		{"requested_failed", true, failure, false, false},
+		{"not_requested", false, nil, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -41,7 +33,7 @@ func TestRuntimeRoundHeadFollowsCapturedNativeState(t *testing.T) {
 				context.Background(),
 				ChatRequest{BotID: "bot-1", ThreadID: "session-1", RunID: "run-1", Query: "inspect"},
 				"codex", "/data/app",
-				external.PromptResult{Text: "partial", Checkpoint: tc.checkpoint},
+				external.PromptResult{Text: "partial", PublishHead: tc.publishHead},
 				tc.promptErr, tc.completed, nil, nil,
 			)
 			if err != nil {
@@ -51,7 +43,7 @@ func TestRuntimeRoundHeadFollowsCapturedNativeState(t *testing.T) {
 			if (publication != nil) != tc.published {
 				t.Fatalf("publication = %#v", publication)
 			}
-			if publication != nil && (publication.RunID != "run-1" || publication.CheckpointReset != tc.reset) {
+			if publication != nil && (publication.RunID != "run-1") {
 				t.Fatalf("publication = %#v", publication)
 			}
 		})

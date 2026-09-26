@@ -24,8 +24,6 @@ var clientMethods = []clientMethod{
 	{Method: "thread/resume", Response: "ThreadResumeResponse"},
 	{Method: "thread/settings/update", Response: "ThreadSettingsUpdateResponse"},
 	{Method: "thread/fork", Response: "ThreadForkResponse"},
-	{Method: "thread/read", Response: "ThreadReadResponse"},
-	{Method: "thread/unsubscribe", Response: "ThreadUnsubscribeResponse"},
 	{Method: "thread/goal/set", Response: "ThreadGoalSetResponse"},
 	{Method: "thread/goal/get", Response: "ThreadGoalGetResponse"},
 	{Method: "thread/goal/clear", Response: "ThreadGoalClearResponse"},

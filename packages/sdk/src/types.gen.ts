@@ -2375,6 +2375,13 @@ export type HandlersSessionInfoResponse = {
     skills?: Array<string>;
 };
 
+export type HandlersSiteIconResponse = {
+    dark?: string;
+    dark_mask?: string;
+    light?: string;
+    light_mask?: string;
+};
+
 export type HandlersSkillItem = {
     app_id?: string;
     content?: string;
@@ -4607,6 +4614,12 @@ export type PostBotsData = {
      * Bot payload
      */
     body: BotsCreateBotRequest;
+    headers?: {
+        /**
+         * Client-generated key for one logical create. A resend with the same key is answered with the bot the first attempt created instead of a second one.
+         */
+        'Idempotency-Key'?: string;
+    };
     path?: never;
     query?: never;
     url: '/bots';
@@ -15825,6 +15838,27 @@ export type PutSearchProvidersByIdResponses = {
 };
 
 export type PutSearchProvidersByIdResponse = PutSearchProvidersByIdResponses[keyof PutSearchProvidersByIdResponses];
+
+export type GetSiteIconData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Public page or site URL; only its origin is fetched
+         */
+        url: string;
+    };
+    url: '/site-icon';
+};
+
+export type GetSiteIconResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSiteIconResponse;
+};
+
+export type GetSiteIconResponse = GetSiteIconResponses[keyof GetSiteIconResponses];
 
 export type GetSpeechModelsData = {
     body?: never;

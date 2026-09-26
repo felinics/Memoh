@@ -29,7 +29,7 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 		return external.CompactionResult{}, err
 	}
 	input.Command = "compact"
-	threadID, _, err := d.ensureThread(ctx, srv, cfg, input)
+	threadID, err := d.ensureThread(ctx, srv, cfg, input)
 	if err != nil {
 		return external.CompactionResult{}, err
 	}
@@ -46,11 +46,8 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 	srv.registerTurn(threadID, turn)
 	defer srv.unregisterTurn(threadID, turn)
 	metadata, err := awaitCompaction(ctx, srv.conn, turn, srv.proc.Done(), func() { d.cancelOperation(srv, input, turn) })
-	result := external.CompactionResult{RuntimeMetadata: metadata}
-	if terminal, ok := turn.capturableTurn(); err == nil && ok && d.stateStore != nil {
-		result.Checkpoint = d.checkpointTurn(ctx, srv, input, threadID, terminal)
-	}
-	return result, err
+	recordThreadMetadata(&metadata, input.RuntimeMetadata, threadID, srv.threadPath(threadID))
+	return external.CompactionResult{RuntimeMetadata: metadata}, err
 }
 
 // Acknowledgement only starts the operation; turn/completed owns its outcome.
@@ -72,7 +69,7 @@ func awaitCompaction(ctx context.Context, connection *conn, turn *turnState, pro
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	result, err := turn.result("")
+	result, err := turn.result()
 	if err != nil {
 		return nil, err
 	}

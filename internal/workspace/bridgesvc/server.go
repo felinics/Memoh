@@ -228,11 +228,9 @@ func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListD
 	}
 	dir = s.resolvePath(dir)
 
-	// Without max_entries, listings are unbounded on purpose: general callers
-	// (data export, data counting, secret cleanup) must see every entry,
-	// matching the pre-existing behavior. Callers with a hard ceiling - the
-	// ACP session-state capture - pass max_entries so the walk STOPS at the
-	// bound instead of collecting an attacker-sized tree into memory first.
+	// Without max_entries, callers such as data export and counting receive
+	// every entry. A positive limit stops traversal before an unbounded tree
+	// can be collected into memory.
 	maxEntries := int(req.GetMaxEntries())
 	var all []*pb.FileEntry
 	appendEntry := func(entry *pb.FileEntry) error {

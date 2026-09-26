@@ -8,19 +8,14 @@ import (
 )
 
 type SessionContextInput struct {
-	AgentID     string
-	SetupMode   SetupMode
 	Backend     string
 	ProjectPath string
 }
 
 type ResolvedSessionContext struct {
-	AgentID       string
-	SetupMode     SetupMode
 	Backend       WorkspaceBackend
 	WorkspaceRoot string
 	ProjectPath   string
-	CWD           string
 }
 
 func ResolveSessionContext(input SessionContextInput) (ResolvedSessionContext, error) {
@@ -38,12 +33,9 @@ func ResolveSessionContext(input SessionContextInput) (ResolvedSessionContext, e
 	}
 
 	ctx := ResolvedSessionContext{
-		AgentID:       strings.TrimSpace(input.AgentID),
-		SetupMode:     normalizeSetupMode(input.SetupMode),
 		Backend:       backend,
 		WorkspaceRoot: resolvedRoot,
 		ProjectPath:   projectPath,
-		CWD:           projectPath,
 	}
 	return ctx, nil
 }

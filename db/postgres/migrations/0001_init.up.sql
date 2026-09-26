@@ -230,6 +230,8 @@ CREATE TABLE IF NOT EXISTS bots (
   timezone TEXT,
   is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'ready',
+  -- Idempotency-Key of the POST /bots that created this row.
+  create_request_key TEXT,
   -- Retired setting: no code reads or writes this column. Kept so dropping it
   -- never becomes a breaking schema change for an already-deployed server.
   language TEXT NOT NULL DEFAULT 'auto',
@@ -1636,6 +1638,10 @@ DROP INDEX IF EXISTS idx_bots_name;
 CREATE UNIQUE INDEX idx_bots_name
     ON public.bots (team_id, name);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bots_create_request_key
+    ON public.bots (team_id, owner_user_id, create_request_key)
+    WHERE create_request_key IS NOT NULL;
+
 DROP INDEX IF EXISTS idx_session_events_dedup;
 CREATE UNIQUE INDEX idx_session_events_dedup
     ON public.bot_session_events (team_id, session_id, event_kind, external_message_id)
@@ -2625,117 +2631,14 @@ ALTER TABLE public.schedule
     ADD CONSTRAINT schedule_workdir_id_fkey
     FOREIGN KEY (team_id, workdir_id)
     REFERENCES public.bot_workdirs(team_id, id) ON DELETE SET NULL (workdir_id);
--- Runtimes that own native session state (ACP agents, codex, claude-code)
--- use a fresh process-local home for every process. Persist the resumable
--- native session separately from the runtime home so a later process can
--- reconstruct the runtime's JSONL transcript before resuming. Snapshots are
--- staged by run: canonical history promotes a staged version by committing
--- the session's publication head in the same transaction as the round's
--- messages.
-CREATE TABLE IF NOT EXISTS public.agent_session_states (
-    team_id               UUID        NOT NULL DEFAULT public.memoh_current_team_id()
-                                      REFERENCES public.teams(id) ON DELETE RESTRICT,
-    session_id            UUID        NOT NULL,
-    through_run_id        UUID        NOT NULL,
-    agent_id              TEXT        NOT NULL,
-    agent_session_id        TEXT        NOT NULL,
-    cwd                   TEXT        NOT NULL,
-    transcript_path       TEXT        NOT NULL,
-    runtime_fencing_token BIGINT      NOT NULL,
-    file_count            INTEGER     NOT NULL,
-    record_count          BIGINT      NOT NULL,
-    file_shapes           JSONB       NOT NULL DEFAULT '[]'::jsonb,
-    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (team_id, session_id, through_run_id),
-    CONSTRAINT agent_session_states_session_id_fkey
-        FOREIGN KEY (team_id, session_id)
-        REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
-    CONSTRAINT agent_session_states_run_fkey
-        FOREIGN KEY (team_id, session_id, through_run_id)
-        REFERENCES public.session_runs(team_id, session_id, run_id) ON DELETE CASCADE,
-    CONSTRAINT agent_session_states_agent_id_check
-        CHECK (btrim(agent_id) <> '' AND octet_length(btrim(agent_id)) <= 256),
-    CONSTRAINT agent_session_states_agent_session_id_check
-        CHECK (btrim(agent_session_id) <> '' AND octet_length(btrim(agent_session_id)) <= 1024),
-    CONSTRAINT agent_session_states_cwd_check
-        CHECK (btrim(cwd) <> '' AND octet_length(btrim(cwd)) <= 16384),
-    CONSTRAINT agent_session_states_transcript_path_check
-        CHECK (
-            transcript_path <> ''
-            AND octet_length(transcript_path) <= 4096
-            AND left(transcript_path, 1) <> '/'
-            AND right(transcript_path, 6) = '.jsonl'
-            AND position(chr(92) in transcript_path) = 0
-            AND transcript_path !~ '(^|/)\.\.?(/|$)'
-            AND transcript_path !~ E'[\r\n]'
-        ),
-    CONSTRAINT agent_session_states_runtime_fencing_token_check
-        CHECK (runtime_fencing_token > 0),
-    CONSTRAINT agent_session_states_file_count_check
-        CHECK (file_count > 0 AND file_count <= 1024),
-    CONSTRAINT agent_session_states_record_count_check
-        CHECK (record_count > 0 AND record_count <= 2000000),
-    CONSTRAINT agent_session_states_file_shapes_check
-        CHECK (jsonb_typeof(file_shapes) = 'array')
-);
-
--- Single line set per session: staging appends each file's tail after proving
--- the stored canonical prefix byte-identical. When the proof fails, staging
--- DECLINES without touching canonical rows - the turn publishes a reset head,
--- and only once that reset is canonical may the next turn stage a full
--- rewrite. Lines reference the session directly (not a version header)
--- because versions share them; version membership is defined by the header's
--- file_shapes.
-CREATE TABLE IF NOT EXISTS public.agent_session_state_lines (
-    team_id       UUID   NOT NULL DEFAULT public.memoh_current_team_id()
-                          REFERENCES public.teams(id) ON DELETE RESTRICT,
-    session_id    UUID   NOT NULL,
-    file_path     TEXT COLLATE "C" NOT NULL,
-    line_number   BIGINT NOT NULL,
-    -- Verbatim compacted JSON text. TEXT (not JSONB) is deliberate: the
-    -- capture digest, the append-only prefix proof, and the load-time digest
-    -- verification all promise byte fidelity across the database round trip,
-    -- which JSONB normalization (key order, whitespace, number rendering)
-    -- would silently break. JSON validity is enforced by the adapter.
-    content       TEXT   NOT NULL,
-    content_bytes INTEGER NOT NULL,
-    PRIMARY KEY (team_id, session_id, file_path, line_number),
-    CONSTRAINT agent_session_state_lines_session_fkey
-        FOREIGN KEY (team_id, session_id)
-        REFERENCES public.bot_sessions(team_id, id) ON DELETE CASCADE,
-    CONSTRAINT agent_session_state_lines_file_path_check
-        CHECK (
-            file_path <> ''
-            AND octet_length(file_path) <= 4096
-            AND left(file_path, 1) <> '/'
-            AND right(file_path, 6) = '.jsonl'
-            AND position(chr(92) in file_path) = 0
-            AND file_path !~ '(^|/)\.\.?(/|$)'
-            AND file_path !~ E'[\r\n]'
-        ),
-    CONSTRAINT agent_session_state_lines_content_size_check
-        CHECK (
-            content_bytes = octet_length(content)
-            AND content_bytes > 0
-            AND content_bytes <= 8388608
-        ),
-    CONSTRAINT agent_session_state_lines_line_number_check
-        CHECK (line_number > 0)
-);
-
--- The canonical publication head: one row per session naming the run whose
--- native state the canonical chat history is at. It is written in the same
--- transaction as the round's messages, so a crash can never publish a
--- "ghost transcript" that history does not contain. checkpoint_reset = true
--- means the head is canonical but nothing is resumable (the profile cannot
--- snapshot, or the runtime deliberately started fresh).
+-- Last committed round observed by a warm external runtime. Written with the
+-- round's messages to invalidate processes that have fallen behind. Native
+-- conversation state remains in Agent-owned workspace files.
 CREATE TABLE IF NOT EXISTS public.agent_session_publications (
     team_id          UUID        NOT NULL DEFAULT public.memoh_current_team_id()
                                  REFERENCES public.teams(id) ON DELETE RESTRICT,
     session_id       UUID        NOT NULL,
     run_id           UUID        NOT NULL,
-    checkpoint_reset BOOLEAN     NOT NULL DEFAULT false,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (team_id, session_id),
     CONSTRAINT agent_session_publications_session_fkey
@@ -2758,33 +2661,6 @@ CREATE POLICY agent_session_publications_team_update ON public.agent_session_pub
     USING (team_id = public.memoh_current_team_id())
     WITH CHECK (team_id = public.memoh_current_team_id());
 CREATE POLICY agent_session_publications_team_delete ON public.agent_session_publications
-    FOR DELETE USING (team_id = public.memoh_current_team_id());
-
-ALTER TABLE public.agent_session_states ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.agent_session_states FORCE ROW LEVEL SECURITY;
-ALTER TABLE public.agent_session_state_lines ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.agent_session_state_lines FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY agent_session_states_team_select ON public.agent_session_states
-    FOR SELECT USING (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_states_team_insert ON public.agent_session_states
-    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_states_team_update ON public.agent_session_states
-    FOR UPDATE
-    USING (team_id = public.memoh_current_team_id())
-    WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_states_team_delete ON public.agent_session_states
-    FOR DELETE USING (team_id = public.memoh_current_team_id());
-
-CREATE POLICY agent_session_state_lines_team_select ON public.agent_session_state_lines
-    FOR SELECT USING (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_state_lines_team_insert ON public.agent_session_state_lines
-    FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_state_lines_team_update ON public.agent_session_state_lines
-    FOR UPDATE
-    USING (team_id = public.memoh_current_team_id())
-    WITH CHECK (team_id = public.memoh_current_team_id());
-CREATE POLICY agent_session_state_lines_team_delete ON public.agent_session_state_lines
     FOR DELETE USING (team_id = public.memoh_current_team_id());
 
 -- ---------------------------------------------------------------------------

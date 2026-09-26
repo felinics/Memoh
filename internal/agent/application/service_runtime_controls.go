@@ -16,9 +16,6 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
-	dbpkg "github.com/felinics/memoh/internal/db"
-	"github.com/felinics/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -241,41 +238,9 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 			return err
 		}
 		_, err = s.sessionService.MergeRuntimeMetadata(ctx, sess.ID, sess.RuntimeType, result.RuntimeMetadata)
-		if err != nil || result.Checkpoint == external.CheckpointNone {
-			return err
-		}
-		return s.publishRuntimeOperation(ctx, input, result.Checkpoint)
+		return err
 	})
 	return turn.RuntimeCommandResult{}, err
-}
-
-// Operations publish native state under their own run without inserting a
-// user/assistant message. The same guarded publication query serves chat rounds.
-func (s *Service) publishRuntimeOperation(ctx context.Context, input external.PromptInput, checkpoint external.CheckpointOutcome) error {
-	botID, err := dbpkg.ParseUUID(input.BotID)
-	if err != nil {
-		return err
-	}
-	sessionID, err := dbpkg.ParseUUID(input.ThreadID)
-	if err != nil {
-		return err
-	}
-	runID, err := dbpkg.ParseUUID(input.RunID)
-	if err != nil {
-		return err
-	}
-	return runtimefence.InTransaction(ctx, s.queries, input.BotID, input.ThreadID, func(queries dbstore.Queries) error {
-		moved, err := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
-			BotID: botID, SessionID: sessionID, RunID: runID, CheckpointReset: checkpoint != external.CheckpointStaged,
-		})
-		if err != nil {
-			return err
-		}
-		if moved == 0 {
-			return runtimefence.ErrStale
-		}
-		return nil
-	})
 }
 
 func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlRequest, run func(context.Context, session.Thread, external.Driver, external.PromptInput) error) (resultErr error) {

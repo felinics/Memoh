@@ -20,6 +20,7 @@ import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils
 import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
 import { writeCreatedBotSession, type CreatedBotSession, type CreatedBotSessionRuntime } from '@/pages/bots/created-bot-session'
+import { randomUUID } from '@/utils/uuid'
 import { installCreatedAgent } from './install-created-agent'
 
 // The Bot row exists from the first `bot_created` event on, so every failure
@@ -186,6 +187,9 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
 
   let lastPayload: BotsCreateBotRequest | null = null
   let lastOptions: StartBotCreateOptions = {}
+  // retry() resends the same Idempotency-Key, so a lost response is answered
+  // with the Bot already made; each start() from the form mints a new key.
+  let lastRequestKey = ''
   let grantsApplied = false
 
   const percent = computed(() => botCreateProgressPercent(progress.value))
@@ -434,11 +438,13 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   async function start(
     payload: BotsCreateBotRequest,
     options: StartBotCreateOptions = {},
+    requestKey: string = randomUUID(),
   ): Promise<BotCreateStartResult> {
     if (status.value === 'creating') return NOTHING_APPLIED
     lastPayload = payload
     hasPayload.value = true
     lastOptions = options
+    lastRequestKey = requestKey
     grantsApplied = false
     writeCreatedBotSession(null, options.onboarding)
     beginStep()
@@ -450,7 +456,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     display.value = options.display ?? { display_name: payload.display_name ?? payload.name ?? '', avatar_url: payload.avatar_url }
     lines.value = pushBotCreateTerminalLine([], { kind: 'command', status: 'info', message: display.value.display_name })
     try {
-      const { stream } = await postBotsStream({ body: payload, throwOnError: true })
+      const { stream } = await postBotsStream({ body: payload, headers: { 'Idempotency-Key': requestKey }, throwOnError: true })
       const result = await followWorkspaceStream(stream)
       bot.value = result.bot ?? null
       if (!bot.value) {
@@ -485,7 +491,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       beginStep()
       return await applySetup(true)
     }
-    if (lastPayload) return await start(lastPayload, lastOptions)
+    if (lastPayload) return await start(lastPayload, lastOptions, lastRequestKey)
   }
 
   function restore(saved: CreatedBotSession, onboarding = false) {

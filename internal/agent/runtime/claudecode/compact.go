@@ -30,5 +30,5 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 	if !result.TurnCompleted {
 		return external.CompactionResult{}, errors.New("claude compaction did not complete")
 	}
-	return external.CompactionResult{RuntimeMetadata: result.RuntimeMetadata, Checkpoint: result.Checkpoint}, nil
+	return external.CompactionResult{RuntimeMetadata: result.RuntimeMetadata}, nil
 }

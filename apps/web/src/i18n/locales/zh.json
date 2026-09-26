@@ -627,12 +627,9 @@
         }
       }
     },
-    "langZh": "简体中文",
-    "langEn": "English",
     "version": "当前版本",
     "versionTag": "v{version}",
     "commitHash": "提交记录",
-    "langJa": "日本語",
     "changeEmail": "修改邮箱",
     "emailRequired": "请填写邮箱",
     "emailUpdated": "邮箱已更新",
@@ -717,6 +714,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "workspaceLinkUnavailable": "此处无法打开工作区链接，请在有工作区访问权限的 Memoh 对话中打开。",
     "runtimeStatus": {
       "compacting": "正在压缩上下文…",
       "api_retry": "{seconds} 秒后重试（{attempt}/{max_retries}）…"
@@ -3341,7 +3339,13 @@
         "expired": "二维码已过期",
         "refresh": "刷新二维码",
         "success": "微信连接成功！",
-        "retry": "重试"
+        "retry": "重试",
+        "verifyCodePrompt": "输入手机微信上显示的数字以继续连接",
+        "verifyCodeWrong": "数字不匹配，请重新输入",
+        "verifyCodePlaceholder": "手机上显示的数字",
+        "verifyCodeSubmit": "确认",
+        "verifyCodeBlocked": "多次输入错误，请刷新二维码稍后再试",
+        "alreadyBound": "该微信已连接到此 Bot"
       },
       "types": {
         "feishu": "飞书",

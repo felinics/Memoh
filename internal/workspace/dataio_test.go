@@ -21,30 +21,26 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridgesvc"
 )
 
-func TestTarGzDirSkipsRuntimeSecrets(t *testing.T) {
+func TestTarGzDirPreservesWorkspaceData(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceArchiveFixture(t, root)
-	writeTestSymlink(t, root, "../.codex/auth.json", "notes/auth-link")
 
 	var buf bytes.Buffer
-	if err := tarGzDir(&buf, root, false); err != nil {
+	if err := tarGzDir(&buf, root); err != nil {
 		t.Fatalf("tarGzDir error = %v", err)
 	}
 
 	names := tarGzNames(t, buf.Bytes())
-	assertNoWorkspaceSecretsInArchive(t, names)
-	assertNoWorkspaceSecretAliasesInArchive(t, names)
-	assertWorkspaceUserDataInArchive(t, names)
+	assertWorkspaceDataInArchive(t, names)
 }
 
-func TestExportDataViaGRPCSkipsRuntimeSecrets(t *testing.T) {
+func TestExportDataViaGRPCPreservesWorkspaceData(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceArchiveFixture(t, root)
-	writeTestSymlink(t, root, "../.codex/auth.json", "notes/auth-link")
 
 	client := newDataIOTestBridgeClient(t, root)
 	manager := &Manager{service: &dataIOBridgeProvider{client: client}}
-	reader, err := manager.exportDataViaGRPC(context.Background(), "bot-1", false)
+	reader, err := manager.exportDataViaGRPC(context.Background(), "bot-1")
 	if err != nil {
 		t.Fatalf("exportDataViaGRPC error = %v", err)
 	}
@@ -55,48 +51,44 @@ func TestExportDataViaGRPCSkipsRuntimeSecrets(t *testing.T) {
 	}
 
 	names := tarGzNames(t, raw)
-	assertNoWorkspaceSecretsInArchive(t, names)
-	assertNoWorkspaceSecretAliasesInArchive(t, names)
-	assertWorkspaceUserDataInArchive(t, names)
+	assertWorkspaceDataInArchive(t, names)
 }
 
-func TestImportDataViaGRPCSkipsRuntimeSecrets(t *testing.T) {
+func TestImportDataViaGRPCPreservesWorkspaceData(t *testing.T) {
 	root := t.TempDir()
-	writeWorkspaceSecretFixture(t, root)
+	writeTestFile(t, root, ".codex/auth.json", `{"token":"old"}`)
 	writeTestFile(t, root, ".codex/auth/stale-target.json", `{"refresh_token":"old"}`)
 	writeTestFile(t, root, ".claude/projects/stale/session.jsonl", `{"message":"old"}`)
 	client := newDataIOTestBridgeClient(t, root)
 	manager := &Manager{service: &dataIOBridgeProvider{client: client}}
 	raw := buildWorkspaceArchive(t, workspaceArchiveFixture())
 
-	if err := manager.importDataViaGRPC(context.Background(), "bot-1", bytes.NewReader(raw), false); err != nil {
+	if err := manager.importDataViaGRPC(context.Background(), "bot-1", bytes.NewReader(raw)); err != nil {
 		t.Fatalf("importDataViaGRPC error = %v", err)
 	}
 
-	assertWorkspaceSecretsMissingOnDisk(t, root)
-	assertPathMissing(t, root, ".codex/auth/stale-target.json")
-	assertPathMissing(t, root, ".claude/projects/stale/session.jsonl")
-	assertWorkspaceUserDataOnDisk(t, root)
+	assertWorkspaceDataOnDisk(t, root)
+	assertPathContent(t, root, ".codex/auth/stale-target.json", `{"refresh_token":"old"}`)
+	assertPathContent(t, root, ".claude/projects/stale/session.jsonl", `{"message":"old"}`)
 }
 
-func TestUntarGzDirSkipsRuntimeSecrets(t *testing.T) {
+func TestUntarGzDirPreservesWorkspaceData(t *testing.T) {
 	root := t.TempDir()
-	writeWorkspaceSecretFixture(t, root)
+	writeTestFile(t, root, ".codex/auth.json", `{"token":"old"}`)
 	writeTestFile(t, root, ".codex/auth/stale-target.json", `{"refresh_token":"old"}`)
 	writeTestFile(t, root, ".claude/projects/stale/session.jsonl", `{"message":"old"}`)
 	raw := buildWorkspaceArchive(t, workspaceArchiveFixture())
 
-	if err := untarGzDir(bytes.NewReader(raw), root, false); err != nil {
+	if err := untarGzDir(bytes.NewReader(raw), root); err != nil {
 		t.Fatalf("untarGzDir error = %v", err)
 	}
 
-	assertWorkspaceSecretsMissingOnDisk(t, root)
-	assertPathMissing(t, root, ".codex/auth/stale-target.json")
-	assertPathMissing(t, root, ".claude/projects/stale/session.jsonl")
-	assertWorkspaceUserDataOnDisk(t, root)
+	assertWorkspaceDataOnDisk(t, root)
+	assertPathContent(t, root, ".codex/auth/stale-target.json", `{"refresh_token":"old"}`)
+	assertPathContent(t, root, ".claude/projects/stale/session.jsonl", `{"message":"old"}`)
 }
 
-func TestPreservedDataKeepsCredentialsAndSkipsRuntimeFiles(t *testing.T) {
+func TestWorkspaceArchiveRoundTripSkipsSockets(t *testing.T) {
 	root, err := os.MkdirTemp("/tmp", "memoh-archive-")
 	if err != nil {
 		t.Fatal(err)
@@ -113,48 +105,40 @@ func TestPreservedDataKeepsCredentialsAndSkipsRuntimeFiles(t *testing.T) {
 	defer func() { _ = listener.Close() }()
 
 	var archive bytes.Buffer
-	if err := tarGzDir(&archive, root, true); err != nil {
+	if err := tarGzDir(&archive, root); err != nil {
 		t.Fatal(err)
 	}
 	names := tarGzNames(t, archive.Bytes())
-	if !hasArchiveName(names, ".codex/auth.json") {
-		t.Fatalf("archive did not preserve Codex credentials: %v", names)
-	}
-	if !hasArchiveName(names, ".claude/.credentials.json") {
-		t.Fatalf("archive did not preserve Claude credentials: %v", names)
-	}
-	for _, path := range []string{".codex/sessions/latest.json", ".claude/projects/workspace/session.jsonl", ".codex/state.db", "runtime.sock"} {
-		if hasArchiveName(names, path) {
-			t.Fatalf("archive included runtime file %s: %v", path, names)
-		}
+	assertWorkspaceDataInArchive(t, names)
+	if hasArchiveName(names, "runtime.sock") {
+		t.Fatalf("archive included socket: %v", names)
 	}
 
 	restored := t.TempDir()
-	if err := untarGzDir(bytes.NewReader(archive.Bytes()), restored, true); err != nil {
+	if err := untarGzDir(bytes.NewReader(archive.Bytes()), restored); err != nil {
 		t.Fatal(err)
 	}
-	assertPathContent(t, restored, ".codex/auth.json", `{"OPENAI_API_KEY":"secret"}`)
-	assertPathContent(t, restored, ".claude/.credentials.json", `{"claudeAiOauth":"secret"}`)
+	assertWorkspaceDataOnDisk(t, restored)
 }
 
 func workspaceArchiveFixture() map[string]string {
-	files := workspaceSecretFiles()
-	files[".codex/config.toml"] = "model = \"gpt-5.4-codex\"\n"
-	files[".claude/settings.json"] = `{"permissions":{"defaultMode":"default"}}`
-	files["notes/readme.txt"] = "hello\n"
-	return files
-}
-
-func workspaceSecretFiles() map[string]string {
-	return map[string]string{ //nolint:gosec // synthetic credentials exercise archive redaction
-		".codex/auth.json":                         `{"OPENAI_API_KEY":"secret"}`,
-		".codex/auth/token.json":                   `{"token":"secret"}`,
-		".codex/sessions/latest.json":              `{"message":"private runtime transcript"}`,
-		".codex/state.db":                          "runtime state",
-		".claude/.credentials.json":                `{"claudeAiOauth":"secret"}`,
-		".claude/projects/workspace/session.jsonl": `{"message":"private runtime transcript"}`,
-		".memoh-hermes/.env":                       "OPENAI_API_KEY=legacy-secret\n",
-		".hermes/auth.json":                        `{"token":"legacy-secret"}`,
+	return map[string]string{ //nolint:gosec // synthetic credentials exercise archive preservation
+		".codex/auth.json":                                        `{"OPENAI_API_KEY":"secret"}`,
+		".codex/auth/token.json":                                  `{"token":"secret"}`,
+		".codex/sessions/latest.json":                             `{"message":"private runtime transcript"}`,
+		".codex/state.db":                                         "runtime state",
+		".codex/state.db-wal":                                     "runtime write-ahead log",
+		".codex/agents/agent-1/auth.json":                         `{"token":"agent-secret"}`,
+		".codex/agents/agent-1/state_5.sqlite":                    "agent session index",
+		".codex/agents/agent-1/sessions/2026/09/22/rollout.jsonl": `{"message":"agent transcript"}`,
+		".claude/.credentials.json":                               `{"claudeAiOauth":"secret"}`,
+		".claude/projects/workspace/session.jsonl":                `{"message":"private runtime transcript"}`,
+		".claude/mcp-tokens/server.json":                          `{"token":"mcp-secret"}`,
+		".memoh-hermes/.env":                                      "OPENAI_API_KEY=legacy-secret\n",
+		".hermes/auth.json":                                       `{"token":"legacy-secret"}`,
+		".codex/config.toml":                                      "model = \"gpt-5.4-codex\"\n",
+		".claude/settings.json":                                   `{"permissions":{"defaultMode":"default"}}`,
+		"notes/readme.txt":                                        "hello\n",
 	}
 }
 
@@ -165,50 +149,20 @@ func writeWorkspaceArchiveFixture(t *testing.T, root string) {
 	}
 }
 
-func writeWorkspaceSecretFixture(t *testing.T, root string) {
+func assertWorkspaceDataInArchive(t *testing.T, names []string) {
 	t.Helper()
-	for path, content := range workspaceSecretFiles() {
-		writeTestFile(t, root, path, content)
-	}
-}
-
-func assertNoWorkspaceSecretsInArchive(t *testing.T, names []string) {
-	t.Helper()
-	for path := range workspaceSecretFiles() {
-		if hasArchiveName(names, path) {
-			t.Fatalf("archive leaked runtime secret %s: %v", path, names)
-		}
-	}
-}
-
-func assertNoWorkspaceSecretAliasesInArchive(t *testing.T, names []string) {
-	t.Helper()
-	if hasArchiveName(names, "notes/auth-link") {
-		t.Fatalf("archive included symlink alias to runtime secret: %v", names)
-	}
-}
-
-func assertWorkspaceUserDataInArchive(t *testing.T, names []string) {
-	t.Helper()
-	for _, path := range []string{".codex/config.toml", ".claude/settings.json", "notes/readme.txt"} {
+	for path := range workspaceArchiveFixture() {
 		if !hasArchiveName(names, path) {
-			t.Fatalf("archive names = %v, want %s", names, path)
+			t.Fatalf("archive did not preserve %s: %v", path, names)
 		}
 	}
 }
 
-func assertWorkspaceSecretsMissingOnDisk(t *testing.T, root string) {
+func assertWorkspaceDataOnDisk(t *testing.T, root string) {
 	t.Helper()
-	for path := range workspaceSecretFiles() {
-		assertPathMissing(t, root, path)
+	for path, content := range workspaceArchiveFixture() {
+		assertPathContent(t, root, path, content)
 	}
-}
-
-func assertWorkspaceUserDataOnDisk(t *testing.T, root string) {
-	t.Helper()
-	assertPathContent(t, root, ".codex/config.toml", "model = \"gpt-5.4-codex\"\n")
-	assertPathContent(t, root, ".claude/settings.json", `{"permissions":{"defaultMode":"default"}}`)
-	assertPathContent(t, root, "notes/readme.txt", "hello\n")
 }
 
 type dataIOBridgeProvider struct {
@@ -265,17 +219,6 @@ func writeTestFile(t *testing.T, root, rel, content string) {
 	}
 }
 
-func writeTestSymlink(t *testing.T, root, target, rel string) {
-	t.Helper()
-	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, path); err != nil {
-		t.Skipf("symlink not supported in this environment: %v", err)
-	}
-}
-
 func buildWorkspaceArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -301,14 +244,6 @@ func buildWorkspaceArchive(t *testing.T, files map[string]string) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
-}
-
-func assertPathMissing(t *testing.T, root, rel string) {
-	t.Helper()
-	path := filepath.Join(root, filepath.FromSlash(rel))
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("%s exists or stat failed with non-not-exist error: %v", rel, err)
-	}
 }
 
 func assertPathContent(t *testing.T, root, rel, want string) {

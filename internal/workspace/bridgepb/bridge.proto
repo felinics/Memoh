@@ -16,12 +16,6 @@ service ContainerService {
   rpc ReverseHTTP(stream ReverseHTTPFrame) returns (stream ReverseHTTPFrame);
   rpc ReadRaw(ReadRawRequest) returns (stream DataChunk);
   rpc WriteRaw(stream WriteRawChunk) returns (WriteRawResponse);
-  // These anchored variants are security boundaries for ACP session state.
-  // The server opens root and every relative_path component without following
-  // symbolic links. WriteRawNoFollow creates a new regular file and fails if
-  // the final component already exists.
-  rpc ReadRawNoFollow(ReadRawNoFollowRequest) returns (stream DataChunk);
-  rpc WriteRawNoFollow(stream WriteRawNoFollowChunk) returns (WriteRawResponse);
   rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
 }
 
@@ -172,19 +166,6 @@ message WriteRawChunk {
 
 message WriteRawResponse {
   int64 bytes_written = 1;
-}
-
-message ReadRawNoFollowRequest {
-  string root = 1;
-  string relative_path = 2;
-}
-
-message WriteRawNoFollowChunk {
-  string root = 1;
-  string relative_path = 2;
-  bytes data = 3;
-  // abort mirrors WriteRawChunk.abort for the anchored variant.
-  bool abort = 4;
 }
 
 message DeleteFileRequest {

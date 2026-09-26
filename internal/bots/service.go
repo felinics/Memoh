@@ -48,6 +48,8 @@ var (
 	ErrBotNameTaken      = errors.New("bot name already taken")
 	ErrBotNameInvalid    = errors.New("bot name is invalid")
 	ErrBotNameReserved   = errors.New("bot name is reserved")
+	// ErrCreateRequestDeleted: the bot an Idempotency-Key created is being deleted.
+	ErrCreateRequestDeleted = errors.New("the bot this create request made is being deleted")
 )
 
 // NewService creates a new bot service.
@@ -148,63 +150,74 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 	if err != nil {
 		return Bot{}, err
 	}
-	row, err := s.queries.CreateBot(ctx, sqlc.CreateBotParams{
-		OwnerUserID: ownerUUID,
-		Name:        botName,
-		DisplayName: pgtype.Text{String: displayName, Valid: displayName != ""},
-		AvatarUrl:   pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
-		Timezone:    timezoneValue,
-		IsActive:    isActive,
-		Metadata:    payload,
-		Status:      BotStatusCreating,
+	status := BotStatusCreating
+	if s.workspaceIntents == nil {
+		// No workspace subsystem is wired (tests, partial deployments). Keep
+		// the bot usable instead of leaving it in creating with nothing that
+		// would ever change that status.
+		status = BotStatusReady
+	}
+	var row sqlc.CreateBotRow
+	// The bot, its ACL preset and its workspace intent commit together, so a
+	// resend never finds a half-made bot to finish.
+	err = s.inTx(ctx, func(q dbstore.Queries) error {
+		created, err := q.CreateBot(ctx, sqlc.CreateBotParams{
+			OwnerUserID:      ownerUUID,
+			Name:             botName,
+			DisplayName:      pgtype.Text{String: displayName, Valid: displayName != ""},
+			AvatarUrl:        pgtype.Text{String: avatarURL, Valid: avatarURL != ""},
+			Timezone:         timezoneValue,
+			IsActive:         isActive,
+			Metadata:         payload,
+			Status:           status,
+			CreateRequestKey: pgtype.Text{String: req.RequestKey, Valid: req.RequestKey != ""},
+		})
+		if err != nil {
+			if db.IsUniqueViolation(err) {
+				return ErrBotNameTaken
+			}
+			return err
+		}
+		botID := created.ID.String()
+		if err := acl.ApplyPreset(ctx, q, botID, ownerID, aclPresetKey); err != nil {
+			return fmt.Errorf("apply acl preset: %w", err)
+		}
+		if s.workspaceIntents != nil {
+			// The workspace is provisioned by the reconciler; the request only
+			// records the intent. A failed provisioning leaves the bot in
+			// status failed with its diagnostics, never stranded in creating.
+			if err := s.workspaceIntents.RecordPresent(ctx, q, botID, workspaceImageFromMetadata(metadata)); err != nil {
+				return fmt.Errorf("record workspace intent: %w", err)
+			}
+		}
+		row = created
+		return nil
 	})
 	if err != nil {
-		if db.IsUniqueViolation(err) {
-			return Bot{}, ErrBotNameTaken
-		}
 		return Bot{}, err
 	}
 	bot, err := toBot(asSQLCBot(row))
 	if err != nil {
 		return Bot{}, err
 	}
-	if err := acl.ApplyPreset(ctx, s.queries, bot.ID, ownerID, aclPresetKey); err != nil {
-		if cleanupErr := s.queries.DeleteBotByID(ctx, row.ID); cleanupErr != nil {
-			return Bot{}, errors.Join(
-				fmt.Errorf("apply acl preset: %w", err),
-				fmt.Errorf("cleanup bot after acl preset failure: %w", cleanupErr),
-			)
-		}
-		return Bot{}, fmt.Errorf("apply acl preset: %w", err)
-	}
 	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
 		return Bot{}, err
 	}
-	if req.SkipLifecycle {
-		return bot, nil
+	if s.workspaceIntents != nil && !req.DeferWake {
+		s.workspaceIntents.Wake(ctx)
 	}
-	if s.workspaceIntents == nil {
-		// No workspace subsystem is wired (tests, partial deployments). Keep
-		// the bot usable instead of leaving it in creating with nothing that
-		// would ever change that status.
-		if err := s.updateStatus(ctx, bot.ID, BotStatusReady); err != nil {
-			return Bot{}, err
-		}
-		return s.Get(ctx, bot.ID)
-	}
-	// The workspace is provisioned by the reconciler; the request only
-	// records the intent. A failed provisioning leaves the bot in status
-	// failed with its diagnostics, never stranded in creating.
-	generation, err := s.workspaceIntents.EnsurePresent(ctx, bot.ID, workspaceImageFromMetadata(metadata))
-	if err != nil {
-		return Bot{}, fmt.Errorf("record workspace intent: %w", err)
-	}
-	if !req.WaitForReady {
+	return s.AwaitCreated(ctx, bot, req)
+}
+
+// AwaitCreated answers a create, first attempt or resend, with its bot: with
+// WaitForReady, once the workspace has settled.
+func (s *Service) AwaitCreated(ctx context.Context, bot Bot, req CreateBotRequest) (Bot, error) {
+	if !req.WaitForReady || s.workspaceIntents == nil {
 		return bot, nil
 	}
 	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), botLifecycleOperationTimeout)
 	defer cancel()
-	outcome, err := s.workspaceIntents.AwaitSettled(waitCtx, bot.ID, generation)
+	outcome, err := s.workspaceIntents.AwaitSettled(waitCtx, bot.ID, 0)
 	if err != nil {
 		return Bot{}, fmt.Errorf("wait for workspace: %w", err)
 	}
@@ -212,6 +225,52 @@ func (s *Service) Create(ctx context.Context, ownerUserID string, req CreateBotR
 		return Bot{}, workspaceOutcomeError(outcome)
 	}
 	return s.Get(waitCtx, bot.ID)
+}
+
+// inTx runs fn in one transaction; test stores without InTx run it directly.
+func (s *Service) inTx(ctx context.Context, fn func(dbstore.Queries) error) error {
+	if txer, ok := s.queries.(interface {
+		InTx(context.Context, func(dbstore.Queries) error) error
+	}); ok {
+		return txer.InTx(ctx, fn)
+	}
+	return fn(s.queries)
+}
+
+// FindCreated returns the bot an earlier create with this Idempotency-Key made
+// for the owner; ok is false when there is none.
+func (s *Service) FindCreated(ctx context.Context, ownerUserID, requestKey string) (Bot, bool, error) {
+	if requestKey == "" {
+		return Bot{}, false, nil
+	}
+	if s.queries == nil {
+		return Bot{}, false, errors.New("bot queries not configured")
+	}
+	ownerUUID, err := db.ParseUUID(strings.TrimSpace(ownerUserID))
+	if err != nil {
+		return Bot{}, false, err
+	}
+	row, err := s.queries.GetBotByCreateRequestKey(ctx, sqlc.GetBotByCreateRequestKeyParams{
+		OwnerUserID:      ownerUUID,
+		CreateRequestKey: pgtype.Text{String: requestKey, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Bot{}, false, nil
+		}
+		return Bot{}, false, err
+	}
+	if strings.TrimSpace(row.Status) == BotStatusDeleting {
+		return Bot{}, false, ErrCreateRequestDeleted
+	}
+	bot, err := toBot(asSQLCBot(row))
+	if err != nil {
+		return Bot{}, false, err
+	}
+	if err := s.attachCheckSummary(ctx, &bot, asSQLCBot(row)); err != nil {
+		return Bot{}, false, err
+	}
+	return bot, true, nil
 }
 
 // workspaceOutcomeError turns a failed observation into the stable errors the
@@ -794,6 +853,8 @@ func asSQLCBot(v any) sqlc.Bot {
 	case sqlc.CreateBotRow:
 		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.GetBotByIDRow:
+		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, CompactionEnabled: r.CompactionEnabled, CompactionThreshold: r.CompactionThreshold, CompactionModelID: r.CompactionModelID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+	case sqlc.GetBotByCreateRequestKeyRow:
 		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, CompactionEnabled: r.CompactionEnabled, CompactionThreshold: r.CompactionThreshold, CompactionModelID: r.CompactionModelID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	case sqlc.GetBotByNameRow:
 		return sqlc.Bot{ID: r.ID, OwnerUserID: r.OwnerUserID, Name: r.Name, DisplayName: r.DisplayName, AvatarUrl: r.AvatarUrl, Timezone: r.Timezone, IsActive: r.IsActive, Status: r.Status, ReasoningEffort: r.ReasoningEffort, ChatModelID: r.ChatModelID, SearchProviderID: r.SearchProviderID, MemoryProviderID: r.MemoryProviderID, CompactionEnabled: r.CompactionEnabled, CompactionThreshold: r.CompactionThreshold, CompactionModelID: r.CompactionModelID, Metadata: r.Metadata, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}

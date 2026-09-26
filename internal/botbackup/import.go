@@ -1428,12 +1428,7 @@ func (s *Service) restoreHistory(ctx context.Context, actorUserID, botID string,
 		if runtimeType == "" {
 			runtimeType = sessionpkg.RuntimeModel
 		}
-		// Bundles carry no ACP publication heads or snapshots, so imported ACP
-		// sessions always start a fresh native session.
 		metadata := item.Metadata
-		if runtimeType == sessionpkg.RuntimeACPAgent {
-			state.warnings = appendWarningOnce(state.warnings, acpCheckpointBackupWarning)
-		}
 		eventID := pgtype.UUID{}
 		if item.EventID.Valid {
 			eventID = eventMap[item.EventID.String()]

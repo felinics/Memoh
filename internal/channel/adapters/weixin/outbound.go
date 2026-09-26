@@ -93,11 +93,11 @@ func sendMediaBytes(ctx context.Context, client *Client, cfg adapterConfig, targ
 	if err != nil {
 		return fmt.Errorf("weixin: get upload url: %w", err)
 	}
-	if strings.TrimSpace(uploadResp.UploadParam) == "" {
-		return errors.New("weixin: empty upload_param")
+	if strings.TrimSpace(uploadResp.UploadFullURL) == "" && strings.TrimSpace(uploadResp.UploadParam) == "" {
+		return errors.New("weixin: getuploadurl returned neither upload_full_url nor upload_param")
 	}
 
-	downloadParam, err := uploadToCDN(cfg.CDNBaseURL, uploadResp.UploadParam, filekeyHex, data, aesKey)
+	downloadParam, err := uploadToCDN(cfg.CDNBaseURL, uploadResp, filekeyHex, data, aesKey)
 	if err != nil {
 		return fmt.Errorf("weixin: cdn upload: %w", err)
 	}
@@ -195,11 +195,11 @@ func sendMediaBytesAsFile(ctx context.Context, client *Client, cfg adapterConfig
 	if err != nil {
 		return fmt.Errorf("weixin: get upload url: %w", err)
 	}
-	if strings.TrimSpace(uploadResp.UploadParam) == "" {
-		return errors.New("weixin: empty upload_param")
+	if strings.TrimSpace(uploadResp.UploadFullURL) == "" && strings.TrimSpace(uploadResp.UploadParam) == "" {
+		return errors.New("weixin: getuploadurl returned neither upload_full_url nor upload_param")
 	}
 
-	downloadParam, err := uploadToCDN(cfg.CDNBaseURL, uploadResp.UploadParam, filekeyHex, data, aesKey)
+	downloadParam, err := uploadToCDN(cfg.CDNBaseURL, uploadResp, filekeyHex, data, aesKey)
 	if err != nil {
 		return fmt.Errorf("weixin: cdn upload: %w", err)
 	}

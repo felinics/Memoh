@@ -18,6 +18,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 // dispatchElicitation sends runtime requests to a uniquely owned turn.
@@ -254,7 +255,7 @@ func (t *turnState) runElicitationFlow(ctx context.Context, input any) (userinpu
 func (t *turnState) emitElicitationDeclinedNotice(reason string) {
 	t.emit(event.StreamEvent{
 		Type:  event.RuntimeNotice,
-		Code:  "elicitation_declined",
+		Code:  string(apperror.CodeRuntimeElicitationDeclined),
 		Delta: "A tool asked for user input that could not be shown: " + reason,
 	})
 }

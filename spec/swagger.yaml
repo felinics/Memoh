@@ -4154,6 +4154,17 @@ definitions:
           type: string
         type: array
     type: object
+  handlers.SiteIconResponse:
+    properties:
+      dark:
+        type: string
+      dark_mask:
+        type: string
+      light:
+        type: string
+      light_mask:
+        type: string
+    type: object
   handlers.SkillItem:
     properties:
       app_id:
@@ -7592,6 +7603,12 @@ paths:
     post:
       description: Create a bot user owned by current user (or admin-specified owner)
       parameters:
+      - description: Client-generated key for one logical create. A resend with the
+          same key is answered with the bot the first attempt created instead of a
+          second one.
+        in: header
+        name: Idempotency-Key
+        type: string
       - description: Bot payload
         in: body
         name: payload
@@ -17086,6 +17103,22 @@ paths:
       summary: List search provider metadata
       tags:
       - search-providers
+  /site-icon:
+    get:
+      parameters:
+      - description: Public page or site URL; only its origin is fetched
+        in: query
+        name: url
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SiteIconResponse'
+      summary: Resolve a public site's favicons for light and dark color schemes
+      tags:
+      - site-icon
   /speech-models:
     get:
       description: List all models of type 'speech' (filtered view of unified models

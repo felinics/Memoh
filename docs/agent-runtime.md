@@ -35,46 +35,40 @@ Use a stable code, public fallback text, and public string arguments; never put
 private diagnostics in a notice. A round that cannot commit still follows the
 normal persistence failure/rollback contract.
 
-## Codex session checkpoints
+## Native session state of direct runtimes
 
-The direct Codex runtime persists its primary native rollout through the existing
-`agent_session_state_lines`, `agent_session_states`, and
-`agent_session_publications` tables. A completed turn or compaction, and a turn
-the user interrupted, waits for its own terminal JSONL record (`task_complete`,
-`turn_aborted`), proves the existing prefix unchanged, and stages only the new
-records in PostgreSQL. The application publishes the checkpoint in the same
-transaction as the round or compaction operation, so an aborted half-round the
-user can see is also what Codex remembers. Failed turns retain the preceding
-publication: Codex does not reliably write a terminal record for them.
+Codex and Claude Code keep their own conversation record on the bot's data
+volume: Codex writes rollouts under `CODEX_HOME` (`/data/.codex/agents/<agent>/`),
+Claude Code writes transcripts under `/data/.claude/projects/`. These files are
+the authoritative native conversation record; Memoh does not snapshot them into the
+database. Chat history stays in PostgreSQL as usual, so losing the native file
+costs the model its own memory of tool details, not the visible conversation.
 
-The publication is authoritative; `codex_thread_id` is a lookup hint. Warm
-threads are reused only while their checkpoint matches the publication. Cold
-resume validates the local rollout against the committed record count and
-digest, restores missing or different files, and passes the explicit rollout
-path to `thread/resume`. This also works when Codex's local SQLite index is gone.
-A dirty loaded thread must acknowledge `thread/closed` before its rollout is
-restored.
+Workspace exports, rebuilds with data preservation, and workspace snapshots
+archive and restore native sessions, CLI indexes, and credentials together.
+Workspace archives do not filter runtime files, and importing an archive does
+not clear existing credentials or sessions absent from that archive.
 
-Checkpointing never makes a thread unusable. A completed turn that cannot be
-staged still commits its round and publishes a reset head instead of failing.
-Restoring the snapshot is what rolls unpublished native writes back, and it is
-best effort: with no snapshot to restore — the head is a reset, its rows are
-missing or do not match, or the stale thread never unloads — the thread
-continues from Codex's own files by `codex_thread_id`, as sessions without a
-publication do. Those conditions are identical on every later turn, so failing
-would never clear. Only when Codex itself refuses `thread/resume` is its memory
-already gone: the turn starts a new native thread and says so with a
-`native_history_lost` runtime notice. Failures a retry can cure (reading the
-publication, restoring files, transport errors) still surface as
-`session_runtime.history_inconsistent`.
+Session runtime metadata records what resumes the native session: the Codex
+thread id and, once Codex has reported it, the rollout path
+(`codex_rollout_path`); the Claude Code session id. Codex resumes by path
+first, which also works when its own SQLite index no longer lists the thread,
+and by id when the path is refused. Claude Code checks that the transcript
+still exists before passing `--resume`.
 
-New threads use self-contained legacy history, not paginated history with
-external base references. Checkpoints contain the primary conversation rollout,
-not workspace files, credentials, native goals, or live child-agent processes.
-Existing sessions without a database publication continue from their local
-native state and gain a checkpoint after their next completed turn. Newly
-forked sessions likewise gain their own checkpoint after their first completed
-turn; the fork operation reads an independent temporary copy of the source's
-committed rollout without replacing files of a concurrently running source.
-Rollouts saved by the former ACP integration under `state/sessions/` remain
-readable.
+When the native session cannot be resumed — Codex refuses `thread/resume`, or
+the Claude transcript is gone — the turn starts a new native session and says
+so with a `native_history_lost` runtime notice; the next turns continue from
+Memoh's composed context. A transport failure while resuming is reported as
+`external_runtime.session_resume_failed` instead, since a retry may still resume
+the thread. Nothing here can make a thread permanently unusable.
+
+Forks use Codex's native `thread/fork` on the running app-server; the branch
+records its own rollout path. Threads created before this behaviour still
+resume by their thread id and gain a rollout path after their next turn.
+
+Migration 0156 removes the obsolete `agent_session_states` and
+`agent_session_state_lines` tables and their saved snapshots.
+`agent_session_publications` retains only the run ID used to fence ACP warm
+processes; it contains no conversation state. Downgrading restores the old table
+structure, not deleted snapshot data.

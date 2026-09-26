@@ -2,10 +2,8 @@ package acp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -195,11 +193,11 @@ func TestSessionPoolPromptForceFreshRuntimeReplacesBoundRuntime(t *testing.T) {
 	}
 }
 
-func TestSessionPoolRecordsResetHeadAfterSuccessfulPrompt(t *testing.T) {
+func TestSessionPoolRecordsHeadAfterSuccessfulPrompt(t *testing.T) {
 	pool := newFakeScriptPool(t)
 	pool.timeout = time.Hour
-	store := &recordingSessionStateStore{}
-	pool.SetSessionStateStore(store)
+	store := &emptyRuntimeStateStore{}
+	pool.SetRuntimeStateStore(store)
 
 	runID := uuid.NewString()
 	if _, err := pool.Prompt(context.Background(), PromptInput{
@@ -220,16 +218,10 @@ func TestSessionPoolRecordsResetHeadAfterSuccessfulPrompt(t *testing.T) {
 	handle.state.Lock()
 	nativeHead, nativeHeadFound := handle.nativeHead, handle.nativeHeadFound
 	handle.state.Unlock()
-	// No snapshots are captured: every completed turn records a reset head so
+	// No snapshots are captured: every completed turn records a head so
 	// warm-handle fencing still tracks canonical history per turn.
-	if !nativeHeadFound || nativeHead.RunID != runID || nativeHead.Kind != agentstate.SessionPublicationReset {
-		t.Fatalf("native head = %#v found=%v, want reset head for run", nativeHead, nativeHeadFound)
-	}
-	store.mu.Lock()
-	replaceCalls := store.replaceCalls
-	store.mu.Unlock()
-	if replaceCalls != 0 {
-		t.Fatalf("store.Replace was called %d times, want none", replaceCalls)
+	if !nativeHeadFound || nativeHead.RunID != runID {
+		t.Fatalf("native head = %#v found=%v, want head for run", nativeHead, nativeHeadFound)
 	}
 }
 
@@ -2148,117 +2140,18 @@ func (g fakeSessionGetter) Get(context.Context, string) (SessionDescriptor, erro
 	return g.session, g.err
 }
 
-type recordingSessionStateStore struct {
-	mu              sync.Mutex
-	head            agentstate.SessionPublicationHead
-	headSet         bool
-	headFound       bool
-	headErr         error
-	headCalls       int
-	epoch           agentstate.RuntimeConfigEpoch
-	epochErr        error
-	epochCalls      int
-	state           agentstate.PersistedSessionState
-	records         []agentstate.SessionStateRecord
-	found           bool
-	loadErr         error
-	replaceErr      error
-	loadCalls       int
-	replaceCalls    int
-	replaced        agentstate.PersistedSessionState
-	replacedRecords []agentstate.SessionStateRecord
-	replaceFence    runtimefence.Fence
-	guardCalls      int
-	guardErr        error
+type emptyRuntimeStateStore struct{}
+
+func (*emptyRuntimeStateStore) RuntimeConfigEpoch(context.Context, string, string) (agentstate.RuntimeConfigEpoch, error) {
+	return agentstate.RuntimeConfigEpoch{}, nil
 }
 
-func (s *recordingSessionStateStore) RuntimeConfigEpoch(context.Context, string, string) (agentstate.RuntimeConfigEpoch, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.epochCalls++
-	return s.epoch, s.epochErr
-}
-
-func (s *recordingSessionStateStore) GuardRuntimeSync(ctx context.Context, _ string, _ int64, fn func(context.Context) error) error {
-	s.mu.Lock()
-	s.guardCalls++
-	err := s.guardErr
-	s.mu.Unlock()
-	if err != nil {
-		return err
-	}
+func (*emptyRuntimeStateStore) GuardRuntimeSync(ctx context.Context, _ string, _ int64, fn func(context.Context) error) error {
 	return fn(ctx)
 }
 
-func (s *recordingSessionStateStore) CanonicalShape(context.Context, string, string) (map[string]agentstate.SessionStateFileShape, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.found {
-		return nil, false, nil
-	}
-	shapes := make(map[string]agentstate.SessionStateFileShape, len(s.state.Files))
-	for _, file := range s.state.Files {
-		shapes[file.Path] = file.SessionStateFileShape
-	}
-	return shapes, true, nil
-}
-
-func (s *recordingSessionStateStore) Head(context.Context, string, string) (agentstate.SessionPublicationHead, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.headCalls++
-	if s.headSet {
-		return s.head, s.headFound, s.headErr
-	}
-	if s.found {
-		return agentstate.SessionPublicationHead{
-			RunID: s.state.ThroughRunID,
-			Kind:  agentstate.SessionPublicationCheckpoint,
-		}, true, s.headErr
-	}
-	return agentstate.SessionPublicationHead{}, false, s.headErr
-}
-
-func (s *recordingSessionStateStore) Load(ctx context.Context, _, _ string, consume agentstate.SessionStateRecordConsumer) (bool, error) {
-	s.mu.Lock()
-	s.loadCalls++
-	state, found, loadErr := s.state, s.found, s.loadErr
-	records := append([]agentstate.SessionStateRecord(nil), s.records...)
-	s.mu.Unlock()
-	if loadErr != nil || !found {
-		return found, loadErr
-	}
-	index := 0
-	reader := func(context.Context) (agentstate.SessionStateRecord, error) {
-		if index == len(records) {
-			return agentstate.SessionStateRecord{}, io.EOF
-		}
-		record := records[index]
-		index++
-		return record, nil
-	}
-	return true, consume(ctx, state, reader)
-}
-
-func (s *recordingSessionStateStore) Replace(ctx context.Context, _, _ string, state agentstate.PersistedSessionState, reader agentstate.SessionStateRecordReader) error {
-	var records []agentstate.SessionStateRecord
-	for {
-		record, err := reader(ctx)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		records = append(records, record)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.replaceCalls++
-	s.replaced = state
-	s.replacedRecords = records
-	s.replaceFence, _ = runtimefence.FromContext(ctx)
-	return s.replaceErr
+func (*emptyRuntimeStateStore) Head(context.Context, string, string) (agentstate.SessionPublicationHead, bool, error) {
+	return agentstate.SessionPublicationHead{}, false, nil
 }
 
 type fakeToolApprovalService struct {
@@ -2631,65 +2524,6 @@ func (a *sessionPoolFakeAgent) Prompt(ctx context.Context, p acp.PromptRequest) 
 		image := p.Prompt[0].Image
 		if image.Data != "aW1hZ2U=" || image.MimeType != "image/png" {
 			return acp.PromptResponse{}, fmt.Errorf("image block = %#v, want inline PNG", image)
-		}
-	}
-	if os.Getenv("MEMOH_ACP_SESSION_POOL_FAKE_AGENT_WRITE_STATE") == "1" {
-		home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-		if home == "" {
-			return acp.PromptResponse{}, errors.New("CODEX_HOME is missing")
-		}
-		dir := filepath.Join(home, "sessions", "2026", "08", "12")
-		if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // fake agent writes beneath its process-owned test home.
-			return acp.PromptResponse{}, err
-		}
-		var promptText strings.Builder
-		for _, block := range p.Prompt {
-			if block.Text != nil {
-				promptText.WriteString(block.Text.Text)
-			}
-		}
-		meta, err := json.Marshal(map[string]any{
-			"type":    "session_meta",
-			"payload": map[string]string{"id": string(p.SessionId)},
-		})
-		if err != nil {
-			return acp.PromptResponse{}, err
-		}
-		line, err := json.Marshal(map[string]string{"type": "message", "prompt": promptText.String()})
-		if err != nil {
-			return acp.PromptResponse{}, err
-		}
-		transcript := filepath.Join(dir, "rollout-"+string(p.SessionId)+".jsonl")
-		terminal, err := json.Marshal(map[string]any{
-			"type": "event_msg",
-			"payload": map[string]string{
-				"type": "task_complete",
-			},
-		})
-		if err != nil {
-			return acp.PromptResponse{}, err
-		}
-		data := make([]byte, 0, len(meta)+len(line)+len(terminal)+3)
-		if _, statErr := os.Stat(transcript); errors.Is(statErr, os.ErrNotExist) { //nolint:gosec // fake session ID is generated by the in-process test agent.
-			data = append(data, meta...)
-			data = append(data, '\n')
-		} else if statErr != nil {
-			return acp.PromptResponse{}, statErr
-		}
-		data = append(data, line...)
-		data = append(data, '\n')
-		data = append(data, terminal...)
-		data = append(data, '\n')
-		file, err := os.OpenFile(transcript, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // fake agent writes its process-owned test transcript.
-		if err != nil {
-			return acp.PromptResponse{}, err
-		}
-		if _, err := file.Write(data); err != nil {
-			_ = file.Close()
-			return acp.PromptResponse{}, err
-		}
-		if err := file.Close(); err != nil {
-			return acp.PromptResponse{}, err
 		}
 	}
 	a.appendConfigLog(fmt.Sprintf("prompt:model=%s,reasoning=%s", a.modelID, a.reasoningEffort))

@@ -46,7 +46,6 @@ const (
 )
 
 type processOptions struct {
-	Backend          WorkspaceBackend
 	BotID            string
 	AgentID          string
 	SetupMode        SetupMode
@@ -58,20 +57,16 @@ type processOptions struct {
 }
 
 type bridgeProcess struct {
-	stream       *bridge.ExecStream
-	stdin        *io.PipeWriter
-	stdout       *io.PipeReader
-	tail         *stderrTail
-	done         chan struct{}
-	lifecycleCtx context.Context
-	env          []string
-	toolEnv      []string
-	unsetEnv     []string
-	lease        *runtimeLease
-	logger       *slog.Logger
+	stream   *bridge.ExecStream
+	stdin    *io.PipeWriter
+	stdout   *io.PipeReader
+	tail     *stderrTail
+	done     chan struct{}
+	toolEnv  []string
+	unsetEnv []string
+	lease    *runtimeLease
+	logger   *slog.Logger
 
-	stateMu      sync.Mutex
-	activated    bool
 	closeOnce    sync.Once
 	finalizeOnce sync.Once
 	finalizeDone chan struct{}
@@ -134,8 +129,6 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		stdout:       stdoutR,
 		tail:         &stderrTail{},
 		done:         make(chan struct{}),
-		lifecycleCtx: ctx,
-		env:          append([]string(nil), env...),
 		toolEnv:      append([]string(nil), lease.toolEnv...),
 		unsetEnv:     append([]string(nil), lease.unsetEnv...),
 		lease:        lease,
@@ -348,17 +341,6 @@ func (p *bridgeProcess) Close() error {
 	}
 	<-p.finalizeDone
 	return p.finalizeErr
-}
-
-// Activate marks a fully initialized ACP process. Startup failures call
-// Close before activation and only remove their process-local directory.
-func (p *bridgeProcess) Activate() {
-	if p == nil {
-		return
-	}
-	p.stateMu.Lock()
-	p.activated = true
-	p.stateMu.Unlock()
 }
 
 func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {

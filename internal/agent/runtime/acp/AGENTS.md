@@ -28,7 +28,7 @@ conditionals.
   Pre-planted symlinks under `/tmp` (runtime and shared-cache tiers) must fail
   the lease with no side effects at the symlink target.
 - Conversation continuity is Memoh's context document. Every ACP session
-  starts fresh; each completed turn publishes an explicit reset head
+  starts fresh; each completed turn publishes a publication head
   (`agent_session_publications`) in the same transaction as the round's
   messages. The durable head is the single authority: a warm process records
   the head its native conversation corresponds to and compares it against the
@@ -40,9 +40,9 @@ conditionals.
 
 ## Profiles
 
-`profile.RuntimeStoragePolicy` is the source of truth. Each profile declares
-its launcher-owned environment bindings (`HOME=/data`, runtime-local `TMPDIR`,
-shared `NPM_CONFIG_CACHE`) and the setup modes allowed to start a process.
+`profile.RuntimeStoragePolicy` declares launcher-owned environment bindings
+(`HOME=/data`, runtime-local `TMPDIR`, shared `NPM_CONFIG_CACHE`).
+`Profile.SetupModes` declares the setup modes allowed to start a process.
 
 The ACP terminal/tool environment is separate from the agent environment. Its
 working directory and `HOME` remain under `/data`; do not expose the agent's
@@ -60,9 +60,8 @@ Behavior-level coverage should include:
 - consecutive processes get different runtime roots;
 - startup failure removes its runtime root without changing `/data`;
 - pre-planted symlinks under `/tmp` fail the lease with no side effects;
-- a completed prompt records a reset publication head under the round's fence;
-- a legacy checkpoint head found on cold start logs a warning and starts a
-  fresh session.
+- a completed prompt records a publication head under the round's fence;
+- history clear removes the publication head and fences stale processes.
 
 Run at minimum:
 

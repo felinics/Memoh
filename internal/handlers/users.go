@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
@@ -408,6 +407,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 // @Summary Create bot user
 // @Description Create a bot user owned by current user (or admin-specified owner)
 // @Tags bots
+// @Param Idempotency-Key header string false "Client-generated key for one logical create. A resend with the same key is answered with the bot the first attempt created instead of a second one."
 // @Param payload body bots.CreateBotRequest true "Bot payload"
 // @Success 201 {object} bots.Bot
 // @Failure 400 {object} ErrorResponse
@@ -454,10 +454,24 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid ACP metadata: "+err.Error())
 		}
 	}
-	if acceptsEventStream(c) {
-		return h.createBotStream(c, ownerID, ownerFromToken, req)
+	req.RequestKey = strings.TrimSpace(c.Request().Header.Get(createRequestKeyHeader))
+	if len(req.RequestKey) > maxCreateRequestKeyLen {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("%s must be at most %d characters", createRequestKeyHeader, maxCreateRequestKeyLen))
 	}
-	resp, err := h.botService.Create(c.Request().Context(), ownerID, req)
+	// Look a resend up before anything that could refuse it, such as a quota
+	// the first attempt's bot already counts against.
+	var resent *bots.Bot
+	existing, found, err := h.botService.FindCreated(c.Request().Context(), ownerID, req.RequestKey)
+	if err != nil {
+		return createBotHTTPError(err, ownerFromToken)
+	}
+	if found {
+		resent = &existing
+	}
+	if acceptsEventStream(c) {
+		return h.createBotStream(c, ownerID, ownerFromToken, req, resent)
+	}
+	resp, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}
@@ -470,6 +484,27 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	// config be written on a later settings update.
 	//
 	return c.JSON(http.StatusCreated, scrubBotForResponse(resp))
+}
+
+const createRequestKeyHeader = "Idempotency-Key"
+
+const maxCreateRequestKeyLen = 255
+
+// createOrReplay creates the bot, or answers with the one this Idempotency-Key
+// already made: found before the call, or by the winner of a race.
+func (h *UsersHandler) createOrReplay(ctx context.Context, ownerID string, req bots.CreateBotRequest, resent *bots.Bot) (bots.Bot, error) {
+	if resent == nil {
+		bot, err := h.botService.Create(ctx, ownerID, req)
+		if !errors.Is(err, bots.ErrBotNameTaken) || req.RequestKey == "" {
+			return bot, err
+		}
+		winner, found, lookupErr := h.botService.FindCreated(ctx, ownerID, req.RequestKey)
+		if lookupErr != nil || !found {
+			return bot, err
+		}
+		resent = &winner
+	}
+	return h.botService.AwaitCreated(ctx, *resent, req)
 }
 
 func acceptsEventStream(c echo.Context) bool {
@@ -499,10 +534,13 @@ func createBotHTTPError(err error, ownerFromToken bool) error {
 	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if errors.Is(err, bots.ErrCreateRequestDeleted) {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
 	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 }
 
-func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFromToken bool, req bots.CreateBotRequest) error {
+func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFromToken bool, req bots.CreateBotRequest, resent *bots.Bot) error {
 	flusher, ok := c.Response().Writer.(http.Flusher)
 	if !ok {
 		return echo.NewHTTPError(http.StatusInternalServerError, "streaming not supported")
@@ -511,11 +549,10 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		return echo.NewHTTPError(http.StatusInternalServerError, "workspace lifecycle not configured")
 	}
 
-	// The bot row is created first; the workspace intent is recorded below so
-	// the subscription is in place before the reconciler starts emitting.
+	// Wake the reconciler only once subscribed below, so every event is relayed.
 	req.WaitForReady = false
-	req.SkipLifecycle = true
-	bot, err := h.botService.Create(c.Request().Context(), ownerID, req)
+	req.DeferWake = true
+	bot, err := h.createOrReplay(c.Request().Context(), ownerID, req, resent)
 	if err != nil {
 		return createBotHTTPError(err, ownerFromToken)
 	}
@@ -553,24 +590,12 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 
 	events, unsubscribe := h.workspaceSetup.Subscribe(bot.ID)
 	defer unsubscribe()
-
-	// Recording the intent must not depend on the client staying connected.
-	intentCtx, cancelIntent := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 15*time.Second)
-	intent, err := h.workspaceSetup.EnsurePresent(intentCtx, bot.ID, workspaceImageFromCreateRequest(req))
-	cancelIntent()
-	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed",
-			slog.String("bot_id", bot.ID),
-			slog.Any("error", err),
-		)
-		sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup could not be scheduled")
-		return nil
-	}
+	h.workspaceSetup.Kick()
 
 	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), workspaceStreamBudget)
 	defer cancel()
 	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
-		return h.workspaceSetup.Await(ctx, bot.ID, intent.DesiredGeneration)
+		return h.workspaceSetup.Await(ctx, bot.ID, 0)
 	}, httpx.RequestID(c), sendError)
 	if outcome.Failed || outcome.Disconnected {
 		return nil
@@ -592,17 +617,6 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil
-}
-
-// workspaceImageFromCreateRequest reads the optional workspace.image preference
-// from the create request metadata.
-func workspaceImageFromCreateRequest(req bots.CreateBotRequest) string {
-	section, ok := req.Metadata["workspace"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	image, _ := section["image"].(string)
-	return strings.TrimSpace(image)
 }
 
 // CheckBotName godoc

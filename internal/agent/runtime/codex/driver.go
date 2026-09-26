@@ -11,12 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/event"
-	"github.com/felinics/memoh/internal/agent/runtime/agentstate"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
@@ -56,8 +53,7 @@ type Driver struct {
 
 	// servers owns the shared per-Agent app-server lifecycle: reference
 	// counting for concurrent users, drain-on-recycle instead of kill-by-bot.
-	servers    *serverTable
-	stateStore agentstate.SessionStateStore
+	servers *serverTable
 }
 
 // NewDriver constructs the codex runtime driver.
@@ -67,7 +63,6 @@ func NewDriver(
 	credentials *agentcredential.Service,
 	approvalSvc ApprovalService,
 	userInput UserInputService,
-	stateStore agentstate.SessionStateStore,
 	toolGateway toolmount.Gateway,
 	logger *slog.Logger,
 ) *Driver {
@@ -77,7 +72,6 @@ func NewDriver(
 		credentials: credentials,
 		approval:    approvalSvc,
 		userInput:   userInput,
-		stateStore:  stateStore,
 		toolGateway: toolGateway,
 		logger:      logger.With(slog.String("runtime", RuntimeType)),
 	}
@@ -281,7 +275,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if err != nil {
 		return external.PromptResult{}, err
 	}
-	threadID, isNewThread, err := d.ensureThread(ctx, srv, cfg, input)
+	threadID, err := d.ensureThread(ctx, srv, cfg, input)
 	if err != nil {
 		return external.PromptResult{}, err
 	}
@@ -335,13 +329,13 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 				d.ResetBotAgent(input.BotID, input.BotAgentID)
 			}
 		}
-		return d.turnResultAfterError(turn, isNewThread, threadID, err)
+		return srv.turnResultAfterError(turn, err)
 	}
 	turn.setTurnID(turnResp.Turn.ID)
 	if continueGoal {
 		if err := srv.activateGoal(ctx, threadID); err != nil {
 			d.interruptTurn(srv, threadID, turn.currentTurnID())
-			return d.turnResultAfterError(turn, isNewThread, threadID, err)
+			return srv.turnResultAfterError(turn, err)
 		}
 	}
 	settings := srv.settingsForThread(threadID)
@@ -375,19 +369,14 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		}
 	case <-srv.proc.Done():
 		stopSteering()
-		result, _ := turn.result(newThreadMetadata(isNewThread, threadID))
+		result, _ := srv.turnResult(turn)
 		return result, fmt.Errorf("codex app-server exited mid-turn: %s", srv.proc.StderrTail())
 	}
 
 	stopSteering()
-	result, resultErr := turn.result(newThreadMetadata(isNewThread, threadID))
+	result, resultErr := srv.turnResult(turn)
 	if cfg.Auth == AuthChatGPT {
 		d.persistChatGPTCredential(ctx, srv.client, input, credential)
-	}
-	if terminal, ok := turn.capturableTurn(); ok && d.stateStore != nil && !input.ForceFreshRuntime {
-		// A goal continuation must not append to the rollout being captured.
-		d.pauseGoalOnExit(ctx, srv, turn)
-		result.Checkpoint = d.checkpointTurn(ctx, srv, input, threadID, terminal)
 	}
 	if ctx.Err() != nil && resultErr == nil {
 		// The application layer distinguishes stop from failure by context
@@ -397,16 +386,16 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	return result, resultErr
 }
 
-// newThreadMetadata reports the thread id to persist when it was just created.
-func newThreadMetadata(isNew bool, threadID string) string {
-	if isNew {
-		return threadID
-	}
-	return ""
+// turnResult keeps the native session anchor together on every return path,
+// including a rejected start, a failed goal activation, and a process exit.
+func (s *appServer) turnResult(turn *turnState) (external.PromptResult, error) {
+	result, err := turn.result()
+	recordThreadMetadata(&result.RuntimeMetadata, turn.input.RuntimeMetadata, turn.threadID, s.threadPath(turn.threadID))
+	return result, err
 }
 
-func (*Driver) turnResultAfterError(turn *turnState, isNewThread bool, threadID string, err error) (external.PromptResult, error) {
-	result, _ := turn.result(newThreadMetadata(isNewThread, threadID))
+func (s *appServer) turnResultAfterError(turn *turnState, err error) (external.PromptResult, error) {
+	result, _ := s.turnResult(turn)
 	var rpcErr *protocol.RPCError
 	if errors.As(err, &rpcErr) {
 		return result, fmt.Errorf("codex turn/start rejected: %s", rpcErr.Message)
@@ -415,22 +404,8 @@ func (*Driver) turnResultAfterError(turn *turnState, isNewThread bool, threadID 
 }
 
 // ensureThread starts or resumes the session's codex thread.
-func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, input external.PromptInput) (threadID string, isNew bool, err error) {
-	recoveryCtx, cancel := context.WithTimeout(ctx, checkpointTimeout)
-	defer cancel()
-	fs, fsErr := checkpointFSFor(srv.client)
-	if fsErr != nil {
-		d.logger.WarnContext(ctx, "codex workspace cannot host checkpoints; continuing from codex's own files",
-			slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID), slog.Any("error", fsErr))
-	}
-	checkpoint, err := d.prepareCheckpoint(recoveryCtx, srv, fs, input)
-	if err != nil {
-		return "", false, checkpointError(err)
-	}
-	threadID = strings.TrimSpace(checkpoint.NativeID)
-	// Any mutation now belongs to the admitted run, which is not canonical
-	// until the application commits its staged checkpoint with the messages.
-	srv.rememberCheckpoint(input.ThreadID, checkpointHandle{})
+func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, input external.PromptInput) (threadID string, err error) {
+	threadID = strings.TrimSpace(metadataString(input.RuntimeMetadata, metadataThreadIDKey))
 	if input.ForceFreshRuntime {
 		// Discuss turns re-inject the full composed context every round;
 		// resuming the stored thread would duplicate it on top of codex's
@@ -443,7 +418,7 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	}
 	preset, err := permissions(cfg, input)
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 
 	if threadID == "" {
@@ -451,11 +426,11 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	}
 
 	if srv.threadLoaded(threadID) {
-		return threadID, threadID != metadataString(input.RuntimeMetadata, metadataThreadIDKey), nil
+		return threadID, nil
 	}
 	toolsConfig, bindTools, err := d.prepareThreadTools(srv, input)
 	if err != nil {
-		return "", false, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return "", apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
 	params := protocol.ThreadResumeParams{
 		ThreadID:          threadID,
@@ -465,26 +440,28 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 		Sandbox:           &preset.sandbox,
 		Config:            toolsConfig,
 	}
-	if checkpoint.Path != "" {
-		params.Path = &checkpoint.Path
+	// The rollout path outlives codex's own index of it; the id alone still
+	// works while that index is intact.
+	if rolloutPath := metadataString(input.RuntimeMetadata, metadataRolloutPathKey); rolloutPath != "" {
+		params.Path = &rolloutPath
 	}
-	var resp protocol.ThreadResumeResponse
-	err = srv.conn.Call(ctx, protocol.MethodThreadResume, params, &resp)
+	resp, err := srv.resumeThread(ctx, params)
 	if err == nil && resp.Thread.ID == threadID {
 		bindTools(threadID)
 		srv.markThreadLoaded(threadID)
+		srv.rememberThreadPath(threadID, resp.Thread.Path)
 		srv.rememberThreadSettings(threadID, resp.Model, resp.ReasoningEffort)
 		srv.setThreadToolless(threadID, toolsConfig == nil)
-		return threadID, threadID != metadataString(input.RuntimeMetadata, metadataThreadIDKey), nil
+		return threadID, nil
 	}
 	bindTools("")
 	var refused *protocol.RPCError
 	if err != nil && !errors.As(err, &refused) {
 		// A transport failure says nothing about the thread; a retry may resume it.
-		return "", false, checkpointError(fmt.Errorf("codex thread/resume: %w", err))
+		return "", apperror.Wrap(apperror.CodeExternalRuntimeSessionResumeFailed, fmt.Errorf("codex thread/resume: %w", err), nil)
 	}
 	if input.Command == "compact" {
-		return "", false, external.ErrThreadUnavailable
+		return "", external.ErrThreadUnavailable
 	}
 	// Codex itself refused the thread, or resumed a different one, and will do
 	// so again on every later turn: its memory of this conversation is already
@@ -496,21 +473,19 @@ func (d *Driver) ensureThread(ctx context.Context, srv *appServer, cfg Config, i
 	if input.Sink != nil {
 		input.Sink.EmitStreamEvent(event.StreamEvent{
 			Type:  event.RuntimeNotice,
-			Code:  "native_history_lost",
+			Code:  string(apperror.CodeRuntimeNativeHistoryLost),
 			Delta: "Codex could not resume this conversation's session and started a new one. It does not remember the earlier messages shown here.",
 		})
 	}
 	return d.startThread(ctx, srv, cfg, input, cwd, preset)
 }
 
-func (d *Driver) startThread(ctx context.Context, srv *appServer, cfg Config, input external.PromptInput, cwd string, preset permissionPreset) (string, bool, error) {
+func (d *Driver) startThread(ctx context.Context, srv *appServer, cfg Config, input external.PromptInput, cwd string, preset permissionPreset) (string, error) {
 	toolsConfig, bindTools, err := d.prepareThreadTools(srv, input)
 	if err != nil {
-		return "", false, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return "", apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 	}
-	historyMode := protocol.ThreadHistoryModeLegacy
 	params := protocol.ThreadStartParams{
-		HistoryMode:       &historyMode,
 		Cwd:               &cwd,
 		ApprovalPolicy:    &preset.approval,
 		ApprovalsReviewer: &preset.reviewer,
@@ -523,17 +498,18 @@ func (d *Driver) startThread(ctx context.Context, srv *appServer, cfg Config, in
 	var resp protocol.ThreadStartResponse
 	if err := srv.conn.Call(ctx, protocol.MethodThreadStart, params, &resp); err != nil {
 		bindTools("")
-		return "", false, fmt.Errorf("codex thread/start: %w", err)
+		return "", fmt.Errorf("codex thread/start: %w", err)
 	}
 	if resp.Thread.ID == "" {
 		bindTools("")
-		return "", false, errors.New("codex thread/start returned no thread id")
+		return "", errors.New("codex thread/start returned no thread id")
 	}
 	bindTools(resp.Thread.ID)
 	srv.markThreadLoaded(resp.Thread.ID)
+	srv.rememberThreadPath(resp.Thread.ID, resp.Thread.Path)
 	srv.rememberThreadSettings(resp.Thread.ID, resp.Model, resp.ReasoningEffort)
 	srv.setThreadToolless(resp.Thread.ID, toolsConfig == nil)
-	return resp.Thread.ID, true, nil
+	return resp.Thread.ID, nil
 }
 
 // interruptTurn asks the app-server to stop the running turn; it runs on a
@@ -738,7 +714,7 @@ func (d *Driver) CloseBot(botID string) {
 // sharing history up to lastTurnID (inclusive; empty forks at the head) and
 // returns the runtime-metadata delta naming the forked thread. The session's
 // runtime metadata supplies the source thread id and working directory.
-func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID, sourceThreadID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error) {
+func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error) {
 	threadID := strings.TrimSpace(metadataString(runtimeMetadata, metadataThreadIDKey))
 	if threadID == "" {
 		return nil, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, errors.New("session has no codex thread to fork"), map[string]string{"runtime": RuntimeType})
@@ -748,31 +724,6 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID, sourceThread
 		return nil, wrapServerError(err)
 	}
 	defer releaseServer()
-	recoveryCtx, cancel := context.WithTimeout(ctx, checkpointTimeout)
-	defer cancel()
-	forkRoot := path.Join(codexHome(botAgentID), "tmp", "memoh-fork-"+uuid.NewString())
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if err := srv.client.DeleteFile(cleanupCtx, forkRoot, true); err != nil {
-			d.logger.WarnContext(ctx, "remove codex fork checkpoint", slog.Any("error", err))
-		}
-	}()
-	// A workspace that cannot host checkpoints has no snapshot to restore into
-	// the fork root; the fork falls back to codex's own copy of the thread.
-	fs, fsErr := checkpointFSFor(srv.client)
-	if fsErr != nil {
-		d.logger.WarnContext(ctx, "codex workspace cannot host checkpoints; forking from codex's own files",
-			slog.String("bot_id", botID), slog.String("session_id", sourceThreadID), slog.Any("error", fsErr))
-	}
-	checkpoint, err := d.prepareCheckpointAt(recoveryCtx, nil, fs, external.PromptInput{BotID: botID, BotAgentID: botAgentID, ThreadID: sourceThreadID, RuntimeMetadata: runtimeMetadata}, forkRoot)
-	if err != nil {
-		return nil, checkpointError(err)
-	}
-	if checkpoint.NativeID == "" {
-		return nil, external.ErrThreadUnavailable
-	}
-	threadID = checkpoint.NativeID
 	toolsConfig, bindTools, err := d.prepareThreadTools(srv, external.PromptInput{BotID: botID, BotAgentID: botAgentID})
 	if err != nil {
 		return nil, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
@@ -790,8 +741,8 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID, sourceThread
 		ApprovalPolicy:        &approvalPolicy,
 		Config:                toolsConfig,
 	}
-	if checkpoint.Path != "" {
-		params.Path = &checkpoint.Path
+	if rolloutPath := metadataString(runtimeMetadata, metadataRolloutPathKey); rolloutPath != "" {
+		params.Path = &rolloutPath
 	}
 	if trimmed := strings.TrimSpace(lastTurnID); trimmed != "" {
 		params.LastTurnID = &trimmed
@@ -809,9 +760,14 @@ func (d *Driver) ForkThread(ctx context.Context, botID, botAgentID, sourceThread
 	// above; resuming an already loaded thread would ignore new overrides.
 	bindTools(resp.Thread.ID)
 	srv.markThreadLoaded(resp.Thread.ID)
+	srv.rememberThreadPath(resp.Thread.ID, resp.Thread.Path)
 	srv.rememberThreadSettings(resp.Thread.ID, resp.Model, resp.ReasoningEffort)
 	srv.setThreadToolless(resp.Thread.ID, toolsConfig == nil)
-	return map[string]any{metadataThreadIDKey: resp.Thread.ID, metadataCheckpointRequiredKey: false}, nil
+	// The fork overlays the source's metadata; its rollout path must not
+	// survive into the branch, or the branch would resume the source's file.
+	var delta map[string]any
+	recordThreadMetadata(&delta, runtimeMetadata, resp.Thread.ID, srv.threadPath(resp.Thread.ID))
+	return delta, nil
 }
 
 func firstNonEmpty(values ...string) string {

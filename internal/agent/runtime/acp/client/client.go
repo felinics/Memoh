@@ -181,7 +181,6 @@ type clientCallbacks struct {
 	client         *bridge.Client
 	logger         *slog.Logger
 	root           string
-	cwd            string
 	approval       ToolApprovalService
 	userInput      UserInputService
 	toolGateway    *mcp.ToolGatewayService
@@ -275,7 +274,6 @@ func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd st
 	return &clientCallbacks{
 		client:      client,
 		root:        root,
-		cwd:         cwd,
 		approval:    approval,
 		toolGateway: toolGateway,
 		baseSession: toolSession,

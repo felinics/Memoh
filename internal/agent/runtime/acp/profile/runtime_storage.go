@@ -7,17 +7,15 @@ import (
 )
 
 // RuntimeStoragePolicy is the persistent/runtime boundary for an ACP agent:
-// the launcher-owned environment plus the setup modes that may start a
-// process. All durable agent state lives directly under HOME=/data; the
-// process-owned runtime directory holds only ephemeral state and is removed
-// when the process exits.
+// the launcher-owned environment. All durable agent state lives directly under
+// HOME=/data; the process-owned runtime directory holds only ephemeral state
+// and is removed when the process exits.
 //
 // This policy is deliberately internal to the server and is not exposed by
 // PublicProfile. Adding an ACP agent without a complete policy is a developer
 // error: Register validates the contract before the profile becomes usable.
 type RuntimeStoragePolicy struct {
 	AgentEnv []RuntimeEnvBinding
-	Modes    map[string]RuntimeStorageMode
 }
 
 // RuntimeEnvBinding declares one environment variable owned by the runtime
@@ -30,30 +28,14 @@ type RuntimeEnvBinding struct {
 	Value       string
 }
 
-// RuntimeStorageMode marks a setup mode as allowed to start a process. It
-// carries no per-mode staging configuration: agents own their durable state
-// under /data directly.
-type RuntimeStorageMode struct{}
-
 func genericACPRuntimeStorage() RuntimeStoragePolicy {
 	return RuntimeStoragePolicy{
-		AgentEnv: stateEnv(),
-		Modes: map[string]RuntimeStorageMode{
-			setupModeAPIKey: {},
+		AgentEnv: []RuntimeEnvBinding{
+			{Name: "HOME", Value: "/data"},
+			{Name: "TMPDIR", RuntimePath: "tmp"},
+			{Name: "NPM_CONFIG_CACHE", Value: "/tmp/memoh-acp-cache/npm"},
 		},
 	}
-}
-
-func stateEnv(stateNames ...string) []RuntimeEnvBinding {
-	env := []RuntimeEnvBinding{
-		{Name: "HOME", Value: "/data"},
-		{Name: "TMPDIR", RuntimePath: "tmp"},
-		{Name: "NPM_CONFIG_CACHE", Value: "/tmp/memoh-acp-cache/npm"},
-	}
-	for _, name := range stateNames {
-		env = append(env, RuntimeEnvBinding{Name: name, RuntimePath: "state"})
-	}
-	return env
 }
 
 func validateRuntimeStorage(p Profile) error {
@@ -84,12 +66,6 @@ func validateRuntimeStorage(p Profile) error {
 		}
 	}
 
-	for _, setupMode := range p.SetupModes {
-		mode := NormalizeAgentID(setupMode)
-		if _, ok := policy.Modes[mode]; !ok {
-			return fmt.Errorf("profile %q has no runtime storage policy for setup mode %q", p.ID, mode)
-		}
-	}
 	return nil
 }
 

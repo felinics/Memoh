@@ -239,18 +239,6 @@ func (q *clearHistoryQueries) ClearHistoryBySession(_ context.Context, id pgtype
 	return nil
 }
 
-func (*clearHistoryQueries) DeleteAgentSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error) {
-	return 0, nil
-}
-
-func (*clearHistoryQueries) DeleteAgentSessionStatesBySession(context.Context, pgtype.UUID) (int64, error) {
-	return 0, nil
-}
-
-func (*clearHistoryQueries) DeleteAgentSessionStateLinesBySession(context.Context, pgtype.UUID) (int64, error) {
-	return 0, nil
-}
-
 func TestDeleteByScopeClearsCanonicalHistory(t *testing.T) {
 	queries := &clearHistoryQueries{}
 	svc := NewService(nil, queries)

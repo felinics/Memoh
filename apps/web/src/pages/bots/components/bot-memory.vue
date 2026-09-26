@@ -31,7 +31,6 @@
             <FieldStack :label="$t('bots.memory.compactRatio')">
               <Select v-model="compactRatio">
                 <SelectTrigger
-                  size="sm"
                   class="w-full"
                 >
                   <SelectValue />
@@ -61,7 +60,7 @@
                 <PopoverTrigger
                   type="button"
                   data-slot="select-trigger"
-                  data-size="sm"
+                  data-size="default"
                   :data-placeholder="compactDecayRange ? undefined : ''"
                   :class="[selectTriggerClass, 'w-full']"
                 >

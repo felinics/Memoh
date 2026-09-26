@@ -1323,7 +1323,7 @@ func TestPersistACPRoundUsesDedicatedSessionMetadata(t *testing.T) {
 	publication := messages.roundOptions[len(messages.roundOptions)-1].AgentPublication
 	// ACP captures no runtime snapshots: every completed turn publishes an
 	// explicit reset head so warm-handle fencing still tracks history.
-	if publication == nil || !publication.CheckpointReset {
+	if publication == nil {
 		t.Fatalf("ACP publication = %#v, want reset head", publication)
 	}
 }
@@ -1408,7 +1408,7 @@ func TestPersistACPRoundStoresACPEventsAsNativeToolMessages(t *testing.T) {
 	publication := messages.roundOptions[len(messages.roundOptions)-1].AgentPublication
 	// ACP captures no runtime snapshots: every completed turn publishes an
 	// explicit reset head so warm-handle fencing still tracks history.
-	if publication == nil || !publication.CheckpointReset {
+	if publication == nil {
 		t.Fatalf("ACP publication = %#v, want reset head", publication)
 	}
 }

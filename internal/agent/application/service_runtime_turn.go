@@ -155,8 +155,8 @@ func runtimeSessionMeta(sess session.Thread) map[string]any {
 // streamRuntimeWS runs one turn on a runtime driver (ACP, codex,
 // claude-code) and streams events to the WS surface. The runtime owns its
 // durable session state (keyed through runtime metadata), Memoh's history is
-// a projection persisted per round, and runtimes that checkpoint report the
-// staging outcome on the result so the round publishes the matching head.
+// a projection persisted per round. Runtimes may request an observed-round
+// publication for warm-process fencing.
 func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
 	req.RunID = runIDForChatRequest(req.RunID)
 	if s.sessionRuntime != nil {
@@ -840,10 +840,9 @@ func (s *Service) logRuntimeRoundDivergence(req ChatRequest, runtimeType string)
 
 // persistRuntimeRound stores one external turn as a normal history round.
 // Shared outcome markers and reconciliation keep commit-unknown handling
-// runtime-neutral. Runtimes that implement
-// checkpoint stage their snapshot at turn end and report the outcome on the
-// result; the round commit publishes the matching head in the same
-// transaction as the messages. Runtimes without checkpoints publish nothing.
+// runtime-neutral. Runtimes that request publication advance their
+// observed-round head in the same
+// transaction as the messages. Native conversation state stays with the Agent.
 func (s *Service) persistRuntimeRound(
 	ctx context.Context,
 	req ChatRequest,
@@ -957,18 +956,11 @@ func (s *Service) persistRuntimeRound(
 	if firstAssistantIndex >= 0 && len(result.Notices) > 0 {
 		metadataByIndex[firstAssistantIndex+metadataOffset][event.RuntimeNoticesMetadataKey] = result.Notices
 	}
-	// A staged snapshot is the native side of exactly this round, so the head
-	// follows it however the turn ended; otherwise the next turn would restore
-	// an older snapshot over a round the user can see. A declined capture only
-	// resets after a completed turn: ACP declines on every result, and an
-	// unfinished round of it must keep the head its warm session is fenced on.
+	// ACP uses the committed run ID to detect stale warm processes. Failed or
+	// interrupted turns keep the previously observed head.
 	var publication *messagepkg.AgentPublication
-	completed := promptErr == nil && turnCompleted
-	if lastAssistantIndex >= 0 && (result.Checkpoint == external.CheckpointStaged || (completed && result.Checkpoint == external.CheckpointDeclined)) {
-		publication = &messagepkg.AgentPublication{
-			RunID:           req.RunID,
-			CheckpointReset: result.Checkpoint == external.CheckpointDeclined,
-		}
+	if promptErr == nil && turnCompleted && lastAssistantIndex >= 0 && result.PublishHead {
+		publication = &messagepkg.AgentPublication{RunID: req.RunID}
 	}
 	skipMemory := promptErr != nil || req.UserMessagePersisted || req.ReusePersistedUserMessage || req.SkipMemoryExtraction
 	persisted, err := s.storeRoundWithOptionsResult(ctx, req, round, "", storeRoundOptions{
@@ -1029,10 +1021,10 @@ func runtimeUserFacingFailureMessage(err error) string {
 
 // runtimeTurnRan reports evidence that the runtime accepted the turn. "Nothing
 // ran" is otherwise only a driver's promise about its error codes, and a wrong
-// code must cost a stored failure round, never the user's message. A declined
-// checkpoint is no evidence: ACP reports it on every result.
+// code must cost a stored failure round, never the user's message. A publication
+// request is no evidence: ACP reports it on every result.
 func runtimeTurnRan(result external.PromptResult) bool {
-	return strings.TrimSpace(result.AgentTurnID) != "" || len(result.Output) > 0 || result.Checkpoint == external.CheckpointStaged
+	return strings.TrimSpace(result.AgentTurnID) != "" || len(result.Output) > 0
 }
 
 // isRuntimeConfigurationError reports failures where nothing ran:

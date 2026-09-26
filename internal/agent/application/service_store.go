@@ -212,9 +212,8 @@ func (s *Service) storeMessagesResult(ctx context.Context, req ChatRequest, mess
 	if err != nil {
 		return nil, fmt.Errorf("prepare messages for persistence: %w", err)
 	}
-	// Persist the complete round and any runtime checkpoint watermark in one
-	// transaction so a staged snapshot cannot become canonical before every
-	// message in its round exists.
+	// Persist the complete round and its runtime publication in one
+	// transaction so warm processes observe only committed rounds.
 	if opts.RequireCompletePersist {
 		atomic, ok := s.messageService.(messagepkg.AtomicRoundPersister)
 		if !ok {

@@ -17,11 +17,10 @@ import (
 
 // appServer is one long-lived `codex app-server` process for one Bot Agent.
 type appServer struct {
-	botID      string
-	botAgentID string
-	proc       *appServerProcess
-	conn       *conn
-	logger     *slog.Logger
+	botID  string
+	proc   *appServerProcess
+	conn   *conn
+	logger *slog.Logger
 	// client is the workspace bridge the process runs over; tool-gateway
 	// mounts reuse it.
 	client *bridge.Client
@@ -42,9 +41,10 @@ type appServer struct {
 	// loadedThreads tracks thread ids this process has started or resumed;
 	// resuming an already-loaded thread is a no-op server-side but tracking
 	// avoids redundant calls.
-	loadedThreads  map[string]bool
-	checkpoints    map[string]checkpointHandle
-	threadClosed   map[string]chan struct{}
+	loadedThreads map[string]bool
+	// threadPaths remembers each thread's rollout file as codex reported it,
+	// so the session can be resumed by path when codex's own index is gone.
+	threadPaths    map[string]string
 	threadSettings map[string]protocol.Settings
 	// toollessThreads marks threads whose start-time config carried no Memoh
 	// tool gateway; the driver re-emits a notice for them every turn.
@@ -85,7 +85,6 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 	mountCtx, mountCancel := context.WithCancel(ctx)
 	srv := &appServer{
 		botID:           botID,
-		botAgentID:      botAgentID,
 		proc:            proc,
 		logger:          logger,
 		client:          client,
@@ -94,6 +93,7 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 		mountCancel:     mountCancel,
 		turns:           map[string]*turnState{},
 		loadedThreads:   map[string]bool{},
+		threadPaths:     map[string]string{},
 		toollessThreads: map[string]bool{},
 		logins:          map[string]*loginOutcome{},
 		toolMounts:      map[string]*toolmount.Mount{},
@@ -242,6 +242,29 @@ func (s *appServer) threadLoaded(threadID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.loadedThreads[threadID]
+}
+
+// forgetThread drops a thread codex reported closed; the next turn resumes it
+// from its rollout.
+func (s *appServer) forgetThread(threadID string) {
+	s.mu.Lock()
+	delete(s.loadedThreads, threadID)
+	s.mu.Unlock()
+}
+
+func (s *appServer) rememberThreadPath(threadID string, path *string) {
+	if path == nil || strings.TrimSpace(*path) == "" {
+		return
+	}
+	s.mu.Lock()
+	s.threadPaths[threadID] = *path
+	s.mu.Unlock()
+}
+
+func (s *appServer) threadPath(threadID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.threadPaths[threadID]
 }
 
 func (s *appServer) setThreadToolless(threadID string, toolless bool) {

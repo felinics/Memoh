@@ -303,59 +303,6 @@ func TestClientWriteRawDoesNotReplaceTargetOnReaderFailure(t *testing.T) {
 	}
 }
 
-func TestClientNoFollowRawIORejectsSymlinksAndExistingTargets(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("strict anchored nofollow I/O requires Linux openat2")
-	}
-	t.Parallel()
-
-	root := t.TempDir()
-	outside := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "sessions"), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	victim := filepath.Join(outside, "victim.jsonl")
-	if err := os.WriteFile(victim, []byte("secret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(victim, filepath.Join(root, "sessions", "read-link.jsonl")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(victim, filepath.Join(root, "sessions", "write-link.jsonl")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(root, "escaped")); err != nil {
-		t.Fatal(err)
-	}
-
-	client := newTestClient(t, bridgesvc.New(bridgesvc.Options{AllowHostAbsolute: true}))
-	if _, err := client.ReadRawNoFollow(context.Background(), root, "sessions/read-link.jsonl"); err == nil {
-		t.Fatal("ReadRawNoFollow() followed a final symlink")
-	}
-	if _, err := client.WriteRawNoFollow(context.Background(), root, "sessions/write-link.jsonl", strings.NewReader("replacement\n")); err == nil {
-		t.Fatal("WriteRawNoFollow() replaced a final symlink")
-	}
-	if _, err := client.WriteRawNoFollow(context.Background(), root, "escaped/new.jsonl", strings.NewReader("outside\n")); err == nil {
-		t.Fatal("WriteRawNoFollow() followed a parent symlink")
-	}
-	if _, err := client.WriteRawNoFollow(context.Background(), root, "new/tree/session.jsonl", strings.NewReader("restored\n")); err != nil {
-		t.Fatalf("WriteRawNoFollow() create nested file: %v", err)
-	}
-	if _, err := client.WriteRawNoFollow(context.Background(), root, "new/tree/session.jsonl", strings.NewReader("overwrite\n")); err == nil {
-		t.Fatal("WriteRawNoFollow() replaced an existing target")
-	}
-
-	if got, err := os.ReadFile(victim); err != nil || string(got) != "secret\n" { //nolint:gosec // victim is below t.TempDir.
-		t.Fatalf("outside victim changed: data=%q err=%v", got, err)
-	}
-	if _, err := os.Stat(filepath.Join(outside, "new.jsonl")); !os.IsNotExist(err) {
-		t.Fatalf("parent symlink received a file: %v", err)
-	}
-	if got, err := os.ReadFile(filepath.Join(root, "new", "tree", "session.jsonl")); err != nil || string(got) != "restored\n" { //nolint:gosec // root is t.TempDir.
-		t.Fatalf("nested restore = %q, %v", got, err)
-	}
-}
-
 func TestClientTunnelSurvivesDialContextCancellation(t *testing.T) {
 	t.Parallel()
 

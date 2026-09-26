@@ -400,7 +400,7 @@ func TestClaudeExitFailureDoesNotOverrideResult(t *testing.T) {
 				t.Fatalf("diagnostic lost or published as prose: %+v, %v", result, err)
 			}
 		default:
-			if err != nil || !result.TurnCompleted || !r.exitFailed() {
+			if err != nil || !result.TurnCompleted {
 				t.Fatalf("success overwritten: %+v, %v", result, err)
 			}
 		}

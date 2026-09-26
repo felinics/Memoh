@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -77,8 +78,10 @@ func prepareRuntimeLeaseUnguarded(ctx context.Context, client *bridge.Client, op
 		return nil, fmt.Errorf("ACP profile %q is not registered", opts.AgentID)
 	}
 	modeName := string(normalizeSetupMode(opts.SetupMode))
-	if _, ok := profile.RuntimeStorage.Modes[modeName]; !ok {
-		return nil, fmt.Errorf("ACP profile %q has no runtime storage policy for setup mode %q", profile.ID, modeName)
+	if !slices.ContainsFunc(profile.SetupModes, func(mode string) bool {
+		return acpprofile.NormalizeAgentID(mode) == modeName
+	}) {
+		return nil, fmt.Errorf("ACP profile %q does not support setup mode %q", profile.ID, modeName)
 	}
 	agentID := acpprofile.NormalizeAgentID(profile.ID)
 	if !safeRuntimeAgentID(agentID) {

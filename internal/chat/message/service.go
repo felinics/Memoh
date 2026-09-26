@@ -381,10 +381,9 @@ func (s *DBService) PersistRound(ctx context.Context, inputs []PersistInput, opt
 					return fmt.Errorf("runtime publication requires run_id: %w", parseErr)
 				}
 				moved, upsertErr := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
-					SessionID:       pgSessionID,
-					BotID:           pgBotID,
-					RunID:           pgRunID,
-					CheckpointReset: options.AgentPublication.CheckpointReset,
+					SessionID: pgSessionID,
+					BotID:     pgBotID,
+					RunID:     pgRunID,
 				})
 				if upsertErr != nil {
 					return fmt.Errorf("publish runtime session head: %w", upsertErr)

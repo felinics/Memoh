@@ -132,7 +132,6 @@ func parityNativeSession(runID string) mcp.ToolSessionContext {
 func parityCallbacks(approval ToolApprovalService, runID string, nativeTools ...string) (*clientCallbacks, *eventCollector) {
 	callbacks := &clientCallbacks{
 		root:     "/data",
-		cwd:      "/data",
 		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:             "bot-1",

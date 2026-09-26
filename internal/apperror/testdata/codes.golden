@@ -68,11 +68,13 @@ context_lifecycle.authentication_required	401
 context_lifecycle.load_failed	500
 context_lifecycle.not_found	404
 context_lifecycle.request_invalid	400
+elicitation_declined	422
 external_agent.turn_replacement_unsupported	400
 external_runtime.auth_required	409
 external_runtime.session_resume_failed	502
 external_runtime.unavailable	503
 history.delete_failed	500
+native_history_lost	503
 profile.request_invalid	400
 profile.title_model_invalid	400
 profile.update_failed	500
@@ -126,6 +128,7 @@ tool_approval.forbidden	403
 tool_approval.not_found	404
 tool_approval.operation_failed	500
 tool_approval.request_invalid	400
+tools_unavailable	503
 user_input.expired	409
 user_input.forbidden	403
 user_input.operation_failed	500

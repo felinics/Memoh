@@ -602,12 +602,13 @@ type botWorkspaceIntents struct {
 	svc *botworkspace.Service
 }
 
-func (a botWorkspaceIntents) EnsurePresent(ctx context.Context, botID, image string) (int64, error) {
-	w, err := a.svc.EnsurePresent(ctx, botID, image)
-	if err != nil {
-		return 0, err
-	}
-	return w.DesiredGeneration, nil
+func (botWorkspaceIntents) RecordPresent(ctx context.Context, q dbstore.Queries, botID, image string) error {
+	_, err := botworkspace.NewRepository(q).Upsert(ctx, botID, botworkspace.DesiredPresent, strings.TrimSpace(image), false)
+	return err
+}
+
+func (a botWorkspaceIntents) Wake(context.Context) {
+	a.svc.Kick()
 }
 
 func (a botWorkspaceIntents) RequestAbsent(ctx context.Context, botID string, preserve bool) (int64, error) {
@@ -659,7 +660,7 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, agentsessionadapter.NewSource(sessionService))
 	pool.SetSessionRuntime(sessionRuntime)
-	pool.SetSessionStateStore(agentsessionadapter.NewStateStore(queries))
+	pool.SetRuntimeStateStore(agentsessionadapter.NewRuntimeStateStore(queries))
 	pool.SetToolGateway(toolGateway)
 	pool.SetToolSessionContextStore(toolContexts)
 	pool.SetToolApprovalService(toolApproval)
@@ -678,14 +679,13 @@ func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.
 	return pool
 }
 
-func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
+func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *codexruntime.Driver {
 	driver := codexruntime.NewDriver(
 		workspaceManager,
 		botAgents,
 		credentials,
 		toolApproval,
 		userInput,
-		agentsessionadapter.NewStateStore(queries),
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
 		log,
 	)
@@ -703,13 +703,12 @@ func provideCodexDriver(lc fx.Lifecycle, log *slog.Logger, workspaceManager *wor
 	return driver
 }
 
-func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *claudecoderuntime.Driver {
+func provideClaudeCodeDriver(log *slog.Logger, workspaceManager *workspace.Manager, botAgents *botagents.Service, credentials *agentcredential.Service, toolApproval *toolapproval.Service, userInput *userinput.Service, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, workspaceDeps *workspacedeps.Service) *claudecoderuntime.Driver {
 	driver := claudecoderuntime.NewDriver(
 		workspaceManager,
 		botAgents,
 		credentials,
 		toolApproval,
-		agentsessionadapter.NewStateStore(queries),
 		toolmount.Gateway{Tools: toolGateway, Contexts: toolContexts, Logger: log},
 		log,
 	)

@@ -628,12 +628,9 @@
         }
       }
     },
-    "langZh": "中文",
-    "langEn": "英語",
     "version": "バージョン",
     "versionTag": "v{version}",
-    "commitHash": "コミット",
-    "langJa": "日本語"
+    "commitHash": "コミット"
   },
   "people": {
     "title": "メンバー",
@@ -714,6 +711,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "workspaceLinkUnavailable": "ここではワークスペースのリンクを開けません。ワークスペースへのアクセス権がある Memoh の会話で開いてください。",
     "runtimeStatus": {
       "compacting": "コンテキストを圧縮中…",
       "api_retry": "{seconds} 秒後に再試行（{attempt}/{max_retries}）…"
@@ -3340,7 +3338,13 @@
         "expired": "QRコードの有効期限が切れました",
         "refresh": "リフレッシュQRコード",
         "success": "WeChat が正常に接続されました。",
-        "retry": "もう一度やり直してください"
+        "retry": "もう一度やり直してください",
+        "verifyCodePrompt": "続行するには、スマートフォンの WeChat に表示された数字を入力してください",
+        "verifyCodeWrong": "数字が一致しません。もう一度入力してください",
+        "verifyCodePlaceholder": "スマートフォンに表示された数字",
+        "verifyCodeSubmit": "確認",
+        "verifyCodeBlocked": "入力の誤りが多すぎます。QR コードを更新して、しばらくしてから再試行してください",
+        "alreadyBound": "この WeChat アカウントはすでにこのボットに接続されています"
       },
       "types": {
         "feishu": "フェイシュ",

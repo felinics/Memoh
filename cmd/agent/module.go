@@ -99,6 +99,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(provideExternalAgentCodexServerHandler),
 			provideServerHandler(handlers.NewFetchProvidersHandler),
 			provideServerHandler(handlers.NewSearchProvidersHandler),
+			provideServerHandler(handlers.NewSiteIconHandler),
 			provideServerHandler(handlers.NewModelsHandler),
 			provideServerHandler(provideBotAgentsHandler),
 			provideServerHandler(handlers.NewSettingsHandler),

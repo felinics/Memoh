@@ -175,12 +175,10 @@ type TurnReplacement struct {
 	SessionMetadata         map[string]any
 }
 
-// AgentPublication moves the session's canonical runtime-checkpoint head to
-// the round's run inside the same transaction as the round's messages. A head
-// with CheckpointReset=true is canonical but not resumable.
+// AgentPublication advances the runtime's observed-round marker atomically
+// with the round's messages. It contains no native conversation state.
 type AgentPublication struct {
-	RunID           string
-	CheckpointReset bool
+	RunID string
 }
 
 type RoundPersistenceOptions struct {

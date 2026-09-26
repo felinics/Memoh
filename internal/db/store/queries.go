@@ -26,6 +26,7 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
+	DeleteAgentSessionPublicationsBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	CreateAgentAuthorization(context.Context, dbsqlc.CreateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
 	GetAgentAuthorization(context.Context, dbsqlc.GetAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
 	UpdateAgentAuthorization(context.Context, dbsqlc.UpdateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
@@ -145,13 +146,7 @@ type Queries interface {
 	CreateUserInputRequest(ctx context.Context, arg dbsqlc.CreateUserInputRequestParams) (dbsqlc.UserInputRequest, error)
 	CreateUser(ctx context.Context, arg dbsqlc.CreateUserParams) (dbsqlc.CreateUserRow, error)
 	DeleteBotACLRuleByID(ctx context.Context, id pgtype.UUID) error
-	TrimAgentSessionStateLines(ctx context.Context, arg dbsqlc.TrimAgentSessionStateLinesParams) (int64, error)
-	DeleteAgentSessionStateLineFilesNotIn(ctx context.Context, arg dbsqlc.DeleteAgentSessionStateLineFilesNotInParams) (int64, error)
-	DeleteAgentSessionStateLinesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
-	DeleteAgentSessionStatesBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
-	DeleteAgentSessionPublicationsBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	UpsertAgentSessionPublication(ctx context.Context, arg dbsqlc.UpsertAgentSessionPublicationParams) (int64, error)
-	GetAgentSessionCanonicalStateShape(ctx context.Context, arg dbsqlc.GetAgentSessionCanonicalStateShapeParams) (dbsqlc.GetAgentSessionCanonicalStateShapeRow, error)
 	DeleteBotByID(ctx context.Context, id pgtype.UUID) error
 	DeleteBotChannelConfig(ctx context.Context, arg dbsqlc.DeleteBotChannelConfigParams) error
 	DeleteBotDependencyInstallation(ctx context.Context, arg dbsqlc.DeleteBotDependencyInstallationParams) (int64, error)
@@ -205,16 +200,16 @@ type Queries interface {
 	FindChatRoute(ctx context.Context, arg dbsqlc.FindChatRouteParams) (dbsqlc.FindChatRouteRow, error)
 	GetAccountByIdentity(ctx context.Context, identity pgtype.Text) (dbsqlc.TeamAccount, error)
 	GetAccountByUserID(ctx context.Context, userID pgtype.UUID) (dbsqlc.TeamAccount, error)
-	GetAgentSessionPublicationHead(ctx context.Context, arg dbsqlc.GetAgentSessionPublicationHeadParams) (dbsqlc.GetAgentSessionPublicationHeadRow, error)
+	GetAgentSessionPublicationHead(ctx context.Context, arg dbsqlc.GetAgentSessionPublicationHeadParams) (pgtype.UUID, error)
 	GetRuntimeConfigEpoch(ctx context.Context, arg dbsqlc.GetRuntimeConfigEpochParams) (dbsqlc.GetRuntimeConfigEpochRow, error)
 	GetBotRuntimeReset(ctx context.Context, botID pgtype.UUID) (dbsqlc.GetBotRuntimeResetRow, error)
-	GetAgentSessionState(ctx context.Context, arg dbsqlc.GetAgentSessionStateParams) (dbsqlc.GetAgentSessionStateRow, error)
 	GetRuntimeRoundOutcome(ctx context.Context, arg dbsqlc.GetRuntimeRoundOutcomeParams) (string, error)
 	GetRuntimeLeadingUserMessageID(ctx context.Context, arg dbsqlc.GetRuntimeLeadingUserMessageIDParams) (pgtype.UUID, error)
 	DeleteRuntimeDecisionProjectionsByRun(ctx context.Context, arg dbsqlc.DeleteRuntimeDecisionProjectionsByRunParams) (int64, error)
 	GetBotACLDefaultEffect(ctx context.Context, id pgtype.UUID) (string, error)
 	GetBotByID(ctx context.Context, id pgtype.UUID) (dbsqlc.GetBotByIDRow, error)
 	GetBotByName(ctx context.Context, name string) (dbsqlc.GetBotByNameRow, error)
+	GetBotByCreateRequestKey(ctx context.Context, arg dbsqlc.GetBotByCreateRequestKeyParams) (dbsqlc.GetBotByCreateRequestKeyRow, error)
 	GetBotAgentByID(ctx context.Context, arg dbsqlc.GetBotAgentByIDParams) (dbsqlc.BotAgent, error)
 	FindActiveBotAgentByRuntimeProvider(ctx context.Context, arg dbsqlc.FindActiveBotAgentByRuntimeProviderParams) (dbsqlc.BotAgent, error)
 	ListBotAgents(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.BotAgent, error)
@@ -311,8 +306,6 @@ type Queries interface {
 	GetVersionSnapshotRuntimeName(ctx context.Context, arg dbsqlc.GetVersionSnapshotRuntimeNameParams) (string, error)
 	IncrementScheduleCalls(ctx context.Context, id pgtype.UUID) (dbsqlc.Schedule, error)
 	InsertLifecycleEvent(ctx context.Context, arg dbsqlc.InsertLifecycleEventParams) error
-	InsertAgentSessionStateLines(ctx context.Context, arg dbsqlc.InsertAgentSessionStateLinesParams) (dbsqlc.InsertAgentSessionStateLinesRow, error)
-	ListAgentSessionStateLinePage(ctx context.Context, arg dbsqlc.ListAgentSessionStateLinePageParams) ([]dbsqlc.ListAgentSessionStateLinePageRow, error)
 	InsertVersion(ctx context.Context, arg dbsqlc.InsertVersionParams) (dbsqlc.ContainerVersion, error)
 	ListAccounts(ctx context.Context) ([]dbsqlc.TeamAccount, error)
 	ListCompactionArtifactLineageBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.BotHistoryMessageCompact, error)
@@ -499,8 +492,6 @@ type Queries interface {
 	UpsertAccountByUsername(ctx context.Context, arg dbsqlc.UpsertAccountByUsernameParams) (dbsqlc.UpsertAccountByUsernameRow, error)
 	UpsertAbortedContextLifecycle(ctx context.Context, arg dbsqlc.UpsertAbortedContextLifecycleParams) (dbsqlc.UpsertAbortedContextLifecycleRow, error)
 	UpsertTerminalContextLifecycle(ctx context.Context, arg dbsqlc.UpsertTerminalContextLifecycleParams) (dbsqlc.UpsertTerminalContextLifecycleRow, error)
-	UpsertAgentSessionState(ctx context.Context, arg dbsqlc.UpsertAgentSessionStateParams) (dbsqlc.AgentSessionState, error)
-	PruneAgentSessionStateVersions(ctx context.Context, arg dbsqlc.PruneAgentSessionStateVersionsParams) (int64, error)
 	UpsertBotChannelConfig(ctx context.Context, arg dbsqlc.UpsertBotChannelConfigParams) (dbsqlc.BotChannelConfig, error)
 	UpsertBotSettings(ctx context.Context, arg dbsqlc.UpsertBotSettingsParams) (dbsqlc.UpsertBotSettingsRow, error)
 	UpsertBotStorageBinding(ctx context.Context, arg dbsqlc.UpsertBotStorageBindingParams) (dbsqlc.BotStorageBinding, error)

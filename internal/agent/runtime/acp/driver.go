@@ -2,7 +2,7 @@
 // sits at the same level as the other out-of-process external agent runtimes
 // (codex, claude-code) and the application keeps one turn orchestration for
 // all of them. The pool keeps owning everything ACP-specific — warm process
-// handles, runtime storage, checkpoint capture, fencing — while this adapter
+// handles, runtime storage, publication fencing — while this adapter
 // owns only the contract translation.
 package acp
 
@@ -122,7 +122,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 }
 
 // DriverPromptResult maps a pool result onto the port result: transcript
-// fallback from events, checkpoint outcome, and round provenance. Exported
+// fallback from events, publication request, and round provenance. Exported
 // so tests can hold the mapping fixed while exercising the unified flow.
 func DriverPromptResult(result client.PromptResult, agentID string) external.PromptResult {
 	if len(result.Output) == 0 {
@@ -133,10 +133,10 @@ func DriverPromptResult(result client.PromptResult, agentID string) external.Pro
 		Text:       result.Text,
 		Usage:      result.Usage,
 		StopReason: result.StopReason,
-		// Every ACP turn participates in publication with a reset head: no
+		// Every completed ACP turn publishes its run ID: no
 		// runtime snapshots are captured, but pool fencing still compares warm
 		// handles against the canonical head watermark.
-		Checkpoint: external.CheckpointDeclined,
+		PublishHead: true,
 	}
 	if agentID != "" {
 		out.RoundMetadata = map[string]any{metadataAgentIDKey: agentID}

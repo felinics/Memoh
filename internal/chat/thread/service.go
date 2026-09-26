@@ -270,8 +270,6 @@ type sessionDescriptorTransactionQueries interface {
 	LockSessionRuntimeFenceForActivation(context.Context, sqlc.LockSessionRuntimeFenceForActivationParams) (int64, error)
 	NextSessionRuntimeFenceToken(context.Context) (int64, error)
 	ActivateSessionRuntimeFence(context.Context, sqlc.ActivateSessionRuntimeFenceParams) (int64, error)
-	DeleteAgentSessionStatesBySession(context.Context, pgtype.UUID) (int64, error)
-	DeleteAgentSessionStateLinesBySession(context.Context, pgtype.UUID) (int64, error)
 	DeleteAgentSessionPublicationsBySession(context.Context, pgtype.UUID) (int64, error)
 }
 
@@ -949,13 +947,7 @@ func (s *Service) UpdateEmptyDescriptorAndMetadataWithOwner(ctx context.Context,
 		}); activateErr != nil {
 			return activateErr
 		}
-		if _, deleteErr := queries.DeleteAgentSessionPublicationsBySession(ctx, pgSessionID); deleteErr != nil {
-			return deleteErr
-		}
-		if _, deleteErr := queries.DeleteAgentSessionStatesBySession(ctx, pgSessionID); deleteErr != nil {
-			return deleteErr
-		}
-		_, deleteErr := queries.DeleteAgentSessionStateLinesBySession(ctx, pgSessionID)
+		_, deleteErr := queries.DeleteAgentSessionPublicationsBySession(ctx, pgSessionID)
 		return deleteErr
 	})
 	if err != nil {

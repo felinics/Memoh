@@ -7,21 +7,19 @@
             :model-value="language"
             @update:model-value="(value) => value && setLanguage(value as Locale)"
           >
-            <SelectTrigger size="sm">
+            <SelectTrigger>
               <SelectValue :placeholder="t('settings.languagePlaceholder')" />
             </SelectTrigger>
             <SelectContent
               align="end"
               :align-offset="0"
             >
-              <SelectItem value="en">
-                {{ t('settings.langEn') }}
-              </SelectItem>
-              <SelectItem value="zh">
-                {{ t('settings.langZh') }}
-              </SelectItem>
-              <SelectItem value="ja">
-                {{ t('settings.langJa') }}
+              <SelectItem
+                v-for="option in LOCALE_OPTIONS"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -49,7 +47,6 @@
             @update:model-value="(value) => value && setColorScheme(value as ColorSchemeId)"
           >
             <SelectTrigger
-              size="sm"
               class="min-w-36"
             >
               <span class="flex min-w-0 items-center gap-1.5">
@@ -105,7 +102,6 @@
             :max="20"
             :step="1"
             :placeholder="String(DEFAULT_UI_FONT_SIZE_PX)"
-            size="sm"
             disable-wheel-change
             class="w-32"
             @update:model-value="(value) => setUiFontSizePx(value ?? '')"
@@ -123,7 +119,6 @@
             :max="20"
             :step="1"
             :placeholder="String(DEFAULT_CODE_FONT_SIZE_PX)"
-            size="sm"
             disable-wheel-change
             class="w-32"
             @update:model-value="(value) => setCodeFontSizePx(value ?? '')"
@@ -138,7 +133,7 @@
             id="ui-font-family"
             :model-value="uiFontFamilyDraft"
             :placeholder="defaultUiFontFamily"
-            class="h-8 w-48 font-mono text-xs"
+            class="w-48 font-mono"
             @update:model-value="(value) => updateUiFontFamilyDraft(value)"
             @change="commitUiFontFamilyDraft"
             @blur="commitUiFontFamilyDraft"
@@ -154,7 +149,7 @@
             id="code-font-family"
             :model-value="codeFontFamilyDraft"
             :placeholder="defaultCodeFontFamily"
-            class="h-8 w-48 font-mono text-xs"
+            class="w-48 font-mono"
             @update:model-value="(value) => updateCodeFontFamilyDraft(value)"
             @change="commitCodeFontFamilyDraft"
             @blur="commitCodeFontFamilyDraft"
@@ -274,7 +269,6 @@
                 @update:model-value="(value) => isMermaidTheme(value) && setMermaidTheme(value)"
               >
                 <SelectTrigger
-                  size="sm"
                   class="min-w-36"
                 >
                   <SelectValue>
@@ -371,7 +365,7 @@ import { useI18n } from 'vue-i18n'
 import MarkdownRender, { enableMermaid, setCustomComponents } from 'markstream-vue'
 import { PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
-import type { Locale } from '@/i18n'
+import { LOCALE_OPTIONS, type Locale } from '@/i18n'
 import type { BundledTheme } from 'shiki'
 import SearchableSelectPopover from '@/components/searchable-select-popover/index.vue'
 import type { SearchableSelectOption } from '@/components/searchable-select-popover/index.vue'

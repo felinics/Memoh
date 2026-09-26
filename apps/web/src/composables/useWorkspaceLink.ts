@@ -1,15 +1,21 @@
+import { toast } from '@felinic/ui'
+import { useI18n } from 'vue-i18n'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
-import { tryParseLocalhostHref } from '@/utils/localhost-link'
+import { classifyWorkspaceLink } from '@/utils/workspace-link'
 
-// Markdown and plain-text questions share the same workspace URL routing.
+// Workspace addresses cannot be opened by the user's OS browser, including
+// modifier/middle clicks. Keep them in their owning workspace or explain why
+// that workspace is unavailable instead of silently navigating elsewhere.
 export function useWorkspaceLink() {
   const tabs = useWorkspaceTabsStore()
+  const { t } = useI18n()
   return (event: MouseEvent, href: string) => {
-    const parsed = tryParseLocalhostHref(href)
-    if (!parsed || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    const link = classifyWorkspaceLink(href)
+    if (!link || link.kind === 'external' || event.button > 1) return
     event.preventDefault()
-    if (!tabs.openBrowserAt(parsed.display)) {
-      window.open(href, '_blank', 'noopener')
-    }
+    const opened = link.kind === 'file'
+      ? tabs.openFile(link.path)
+      : tabs.openBrowserAt(link.address)
+    if (!opened) toast.error(t('chat.workspaceLinkUnavailable'))
   }
 }

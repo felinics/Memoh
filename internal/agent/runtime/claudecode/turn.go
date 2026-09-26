@@ -72,8 +72,8 @@ type turnRunner struct {
 	protocolErr     error
 	// exitErr records a process teardown failure (non-zero exit, transport
 	// loss, or no exit after stdin EOF). It never changes the protocol
-	// outcome the CLI already reported; it only gates checkpoint staging and
-	// explains a turn that ended without a result.
+	// outcome the CLI already reported; it only explains a turn that ended
+	// without a result.
 	exitErr         error
 	compactBoundary bool
 	compactFailed   bool
@@ -707,13 +707,6 @@ func (t *turnRunner) observeExit(err error) {
 	t.exitErr = errors.Join(t.exitErr, err)
 	t.mu.Unlock()
 	t.logger.Warn("claude CLI did not exit cleanly", slog.Any("error", err), slog.String("stderr", t.proc.StderrTail()))
-}
-
-// exitFailed reports whether the process teardown failed.
-func (t *turnRunner) exitFailed() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.exitErr != nil
 }
 
 // interrupt asks the CLI to stop the running turn.

@@ -157,7 +157,6 @@
                     @update:model-value="(val: string) => updateValue(field.key, val)"
                   >
                     <SelectTrigger
-                      size="sm"
                       class="w-full"
                     >
                       <SelectValue :placeholder="placeholderOf(field)" />
@@ -356,7 +355,6 @@
                   @update:model-value="(val: string) => updateValue(field.key, val)"
                 >
                   <SelectTrigger
-                    size="sm"
                     class="w-full"
                   >
                     <SelectValue :placeholder="placeholderOf(field)" />

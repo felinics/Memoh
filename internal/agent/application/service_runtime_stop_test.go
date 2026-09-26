@@ -10,7 +10,7 @@ import (
 )
 
 // stopDuringSetupDriver behaves like a driver the user stops while it is still
-// setting up (starting its process, restoring a checkpoint): it reports the
+// setting up (starting its process, resuming its native session): it reports the
 // cancellation under the configuration-class code that stage wraps errors in.
 type stopDuringSetupDriver struct{ started chan struct{} }
 
