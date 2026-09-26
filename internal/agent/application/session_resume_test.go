@@ -101,6 +101,7 @@ func TestResumeRejectsInvalidCredentialAndForeignBotScope(t *testing.T) {
 func TestResumeReentersSavedSessionOnceAndKeepsDeadline(t *testing.T) {
 	runner := &fakeRunner{chunks: []string{`{"type":"text_delta","delta":"continued"}`, `{"type":"agent_end"}`}}
 	s, admitter := newAdmittedTurnTestService(runner)
+	s.SetAllowedTeam("00000000-0000-0000-0000-000000000001")
 	s.logger = slog.Default()
 	deadline := time.Now().Add(time.Minute)
 	data := resumeContext{Version: 1, ChatID: "chat", UserID: "sender", Query: "original task", DeadlineAt: &deadline}
@@ -108,7 +109,7 @@ func TestResumeReentersSavedSessionOnceAndKeepsDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := sqlc.SessionRun{RunID: db.ParseUUIDOrEmpty(uuid.NewString()), BotID: db.ParseUUIDOrEmpty(uuid.NewString()), SessionID: db.ParseUUIDOrEmpty(uuid.NewString()), InputJson: raw}
+	row := sqlc.SessionRun{TeamID: db.ParseUUIDOrEmpty("00000000-0000-0000-0000-000000000001"), RunID: db.ParseUUIDOrEmpty(uuid.NewString()), BotID: db.ParseUUIDOrEmpty(uuid.NewString()), SessionID: db.ParseUUIDOrEmpty(uuid.NewString()), InputJson: raw}
 	done, err := s.resumeInterruptedSession(t.Context(), row)
 	if err != nil {
 		t.Fatal(err)
@@ -147,9 +148,10 @@ func TestResumeReentersSavedSessionOnceAndKeepsDeadline(t *testing.T) {
 
 func TestResumeWaitsForWorkspaceBeforeAdmission(t *testing.T) {
 	s, admitter := newAdmittedTurnTestService(&fakeRunner{})
+	s.SetAllowedTeam("00000000-0000-0000-0000-000000000001")
 	s.resumeReady = func(context.Context, string, string) error { return errors.New("bridge not ready") }
 	raw, _ := json.Marshal(map[string]any{"resume": resumeContext{Version: 1, ChatID: "chat", Query: "work"}})
-	done, err := s.resumeInterruptedSession(t.Context(), sqlc.SessionRun{InputJson: raw})
+	done, err := s.resumeInterruptedSession(t.Context(), sqlc.SessionRun{TeamID: db.ParseUUIDOrEmpty("00000000-0000-0000-0000-000000000001"), InputJson: raw})
 	if err == nil || done != nil {
 		t.Fatal("unready workspace admitted")
 	}

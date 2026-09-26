@@ -57,6 +57,17 @@ func (f *Store) Admit(_ context.Context, params ledger.AdmitParams) (ledger.Run,
 			return ledger.Run{}, false, ledger.ErrSessionBusy
 		}
 	}
+	if params.ResumeRunID != "" {
+		source, ok := f.Runs[params.ResumeRunID]
+		if !ok || source.BotID != params.BotID || source.SessionID != params.SessionID || source.State != ledger.StateLost || source.ErrorCode != "session_runtime.interrupted" || !source.AbortRequestedAt.IsZero() {
+			return ledger.Run{}, false, ledger.ErrResumeSuperseded
+		}
+		for _, run := range f.Runs {
+			if run.SessionID == params.SessionID && run.TurnPosition > source.TurnPosition {
+				return ledger.Run{}, false, ledger.ErrResumeSuperseded
+			}
+		}
+	}
 	position := int64(1)
 	for _, id := range f.Order {
 		if f.Runs[id].SessionID == params.SessionID {

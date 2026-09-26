@@ -460,6 +460,26 @@ func (q *Queries) GetSessionRunByInvocation(ctx context.Context, arg GetSessionR
 	return i, err
 }
 
+const isInterruptedSessionRunLatest = `-- name: IsInterruptedSessionRunLatest :one
+SELECT EXISTS (
+ SELECT 1 FROM session_runs source
+ WHERE source.team_id = public.memoh_current_team_id() AND source.run_id = $1
+  AND source.state = 'lost' AND source.error_code = 'session_runtime.interrupted'
+  AND source.abort_requested_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = source.team_id
+   AND later.session_id = source.session_id AND later.turn_position > source.turn_position)
+)::boolean
+`
+
+// Called under the same parent lock as admission. A newer accepted turn must
+// supersede recovery even if it has already completed since discovery.
+func (q *Queries) IsInterruptedSessionRunLatest(ctx context.Context, runID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, isInterruptedSessionRunLatest, runID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listActiveSessionRunsByBot = `-- name: ListActiveSessionRunsByBot :many
 SELECT run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
 FROM session_runs

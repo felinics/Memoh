@@ -159,3 +159,29 @@ run is admitted, ordinary failures are reported rather than automatically replay
 The server has a 30-second graceful shutdown budget. Compose allows 45 seconds,
 and the entrypoint waits for Server exit before terminating embedded containerd.
 The development Air supervisor gives the server the same shutdown allowance.
+
+### Hosted tenant scope integration
+
+The composition root installs `SetSessionResumeScopeProvider` before startup.
+Its provider enumerates a bounded page of opaque Team IDs through the hosted
+scope catalog, binds each ID to the ordinary database context, and reports the
+current binding. A hosted adapter can delegate to its existing session-runtime
+reaper scope provider, converting the page to `SessionResumeScopePage`.
+
+Every run query, workspace readiness probe, authorization check, admission,
+stream and terminal write retains that bound context. The worker rejects a run
+whose `team_id` differs from the current scope. Discovery never uses a privileged
+cross-team run query. The OSS fallback uses the composition root's allowed Team;
+if neither an allowed Team nor a hosted scope provider is installed, startup
+fails closed. No schema change or additional role is required by this port.
+
+A recovery admission also carries `ResumeRunID`. Under the same parent lock as
+ordinary admission, PostgreSQL verifies that the source is still interrupted and
+has no newer turn. This closes the gap between discovery and admission, including
+when an intervening user turn has already completed. Invocation replay retains
+its existing result. Hosted credential renewal and remote workspace adapters
+remain separate integration responsibilities.
+
+HTTP shutdown cancels the server request base context after run interruption has
+been recorded. Long-lived SSE requests can then finish before the later event-hub
+cleanup hooks; they must not consume the entire graceful shutdown deadline.
