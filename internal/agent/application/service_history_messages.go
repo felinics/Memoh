@@ -12,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -96,37 +97,26 @@ func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID st
 // the context token budget using character-based estimation. Pinned messages
 // (compaction summaries) survive the dropped prefix.
 func trimPipelineMessagesByTokens(log *slog.Logger, messages []ModelMessage, pinned []bool, maxTokens int) []ModelMessage {
-	totalTokens := 0
-	cutoff := 0
-	for i := len(messages) - 1; i >= 0; i-- {
-		totalTokens += estimateMessageTokens(messages[i])
-		if totalTokens > maxTokens {
-			cutoff = i + 1
-			break
-		}
+	entries := make([]turn.AdmissionEntry, len(messages))
+	for i, message := range messages {
+		entries[i] = turn.AdmissionEntry{Cost: estimateMessageTokens(message), Pinned: i < len(pinned) && pinned[i], ToolResponse: strings.EqualFold(strings.TrimSpace(message.Role), "tool")}
 	}
-
-	// Avoid orphaned tool messages at the cutoff boundary.
-	for cutoff < len(messages) && strings.EqualFold(strings.TrimSpace(messages[cutoff].Role), "tool") {
-		cutoff++
-	}
-
-	if cutoff == 0 {
+	decision := turn.AdmitContextEntries(entries, maxTokens)
+	if decision.ProtectedOverflow || decision.DroppedEntries == 0 {
+		// Keep irreducible input intact for the final provider admission.
 		return messages
 	}
-
-	kept := make([]ModelMessage, 0, len(messages)-cutoff)
-	for i := 0; i < cutoff; i++ {
-		if i < len(pinned) && pinned[i] {
-			kept = append(kept, messages[i])
+	kept := make([]ModelMessage, 0, len(messages)-decision.DroppedEntries)
+	for i, message := range messages {
+		if decision.Selected[i] {
+			kept = append(kept, message)
 		}
 	}
-	kept = append(kept, messages[cutoff:]...)
 
 	if log != nil {
 		log.Info("trimPipelineMessagesByTokens: context trimmed",
 			slog.Int("total_messages", len(messages)),
-			slog.Int("estimated_tokens", totalTokens),
+			slog.Int("estimated_tokens", decision.EstimatedTokens),
 			slog.Int("max_tokens", maxTokens),
 			slog.Int("kept_messages", len(kept)),
 		)

@@ -265,6 +265,17 @@ func TestTrimPipelineMessagesKeepsPinnedSummaries(t *testing.T) {
 	}
 }
 
+func TestTrimPipelineMessagesNeverDropsOversizedCurrentSource(t *testing.T) {
+	messages := []ModelMessage{
+		{Role: "user", Content: newTextContent("summary")},
+		{Role: "user", Content: newTextContent(strings.Repeat("current", 1000))},
+	}
+	got := trimPipelineMessagesByTokens(nil, messages, []bool{true, false}, 100)
+	if len(got) != 2 || string(got[1].Content) != string(messages[1].Content) {
+		t.Fatal("oversized current input must reach fail-closed provider admission, not disappear")
+	}
+}
+
 func TestBuildMessagesFromPipelineKeepsSummaryUnderBudget(t *testing.T) {
 	t.Parallel()
 
