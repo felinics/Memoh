@@ -155,6 +155,7 @@
       "protected_overflow": "必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。"
     },
     "agent": {
+      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。",
       "response_timeout": "模型未能及时响应，请重试。",
       "response_interrupted": "模型响应意外中断，请重试。",
       "provider_overloaded": "模型服务当前过载，请稍后重试。",

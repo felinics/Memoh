@@ -189,6 +189,9 @@ func TestWatchdogTouchFromMultipleGoroutines(t *testing.T) {
 
 func TestWatchdogDefaultTimeout(t *testing.T) {
 	t.Parallel()
+	if subagentWatchdogTimeout != 10*time.Minute {
+		t.Fatalf("subagent watchdog timeout = %v, want 10m", subagentWatchdogTimeout)
+	}
 
 	// Passing zero timeout should use the default (subagentWatchdogTimeout).
 	parentCtx := context.Background()

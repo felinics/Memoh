@@ -349,10 +349,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		}
 	}
 	emit := func(ev native.StreamEvent) {
-		idleCancel.Reset()
-		if ev.Type == native.EventToolCallStart {
-			idleCancel.RecordToolCall()
-		}
+		idleCancel.Observe(ev)
 		emitWithContext(streamCtx, ev)
 	}
 
@@ -665,10 +662,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		CanRequestUserInput: false,
 		Sink: external.EventSinkFunc(func(ev native.StreamEvent) {
 			notices.observe(ev)
-			idleCancel.Reset()
-			if ev.Type == native.EventToolCallStart {
-				idleCancel.RecordToolCall()
-			}
+			idleCancel.Observe(ev)
 			reasoningTiming.observe(ev)
 		}),
 	})

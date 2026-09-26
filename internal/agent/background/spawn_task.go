@@ -24,10 +24,6 @@ const (
 	KindDependency TaskKind = "dependency"
 )
 
-// SpawnTaskTimeout is the safety ceiling for a background spawn task,
-// mirroring BackgroundExecTimeout for exec tasks.
-const SpawnTaskTimeout = 30 * time.Minute
-
 // MaxRunningSpawnTasks caps concurrently running background spawn tasks per
 // bot+session to prevent subagent storms across agent runs.
 const MaxRunningSpawnTasks = 3
@@ -81,7 +77,7 @@ func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, ag
 	if queued {
 		status = TaskQueued
 	} else {
-		ctx, cancel = detachedContextWithTimeout(parentCtx, SpawnTaskTimeout)
+		ctx, cancel = detachedTaskContext(parentCtx)
 	}
 
 	m.mu.Lock()
@@ -121,7 +117,7 @@ func (m *Manager) StartAgentTask(parentCtx context.Context, botID, sessionID, ag
 // and returns the cancelable run context. If the task was killed while queued,
 // ok is false and no run should start.
 func (m *Manager) MarkAgentTaskRunning(parentCtx context.Context, taskID string) (context.Context, bool, error) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, SpawnTaskTimeout)
+	ctx, cancel := detachedTaskContext(parentCtx)
 	m.mu.Lock()
 	task := m.tasks[taskID]
 	m.mu.Unlock()
@@ -209,7 +205,7 @@ func (m *Manager) CompleteSpawnTask(taskID string, branches []SpawnBranch) {
 	if task == nil || task.Kind != KindSpawn {
 		return
 	}
-	defer task.Cancel() // release the safety-timeout context
+	defer task.Cancel() // release the detached task context
 
 	branches = clampSpawnBranches(branches)
 
@@ -285,7 +281,7 @@ func (m *Manager) runningSpawnCountLocked(botID, sessionID string) int {
 // detached, cancelable context that subagent branches must derive from so
 // Kill can stop in-flight work.
 func (m *Manager) StartSpawnTask(parentCtx context.Context, botID, sessionID, description string) (string, context.Context, error) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, SpawnTaskTimeout)
+	ctx, cancel := detachedTaskContext(parentCtx)
 
 	m.mu.Lock()
 	if m.runningSpawnCountLocked(botID, sessionID) >= MaxRunningSpawnTasks {
@@ -315,4 +311,14 @@ func (m *Manager) StartSpawnTask(parentCtx context.Context, botID, sessionID, de
 	)
 	m.emitTaskEvent(task, TaskEventStarted, "", "")
 	return taskID, ctx, nil
+}
+
+// Detaching a child removes transient caller cancellation, but an explicit
+// execution deadline (for example a schedule budget) still bounds descendants.
+func detachedTaskContext(parent context.Context) (context.Context, context.CancelFunc) {
+	base := context.WithoutCancel(parent)
+	if deadline, ok := parent.Deadline(); ok {
+		return context.WithDeadline(base, deadline)
+	}
+	return context.WithCancel(base)
 }

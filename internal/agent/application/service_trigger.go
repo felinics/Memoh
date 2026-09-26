@@ -204,10 +204,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			terminalSeen = true
 		}
 		if idle != nil {
-			idle.Reset()
-			if event.Type == native.EventToolCallStart {
-				idle.RecordToolCall()
-			}
+			idle.Observe(event)
 		}
 		if eventErr := agentStreamEventError(event); eventErr != nil {
 			s.logger.ErrorContext(ctx, "triggered run stream error",
