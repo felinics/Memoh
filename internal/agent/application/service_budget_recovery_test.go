@@ -147,7 +147,7 @@ func TestChatBudgetRecoveryCannotBypassFailure(t *testing.T) {
 			}
 			got, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg)
 			if outcome == "droppable reload" {
-				if err != nil || len(runner.configs) != 1 || countRecoveryText(got.Messages, strings.Repeat("h", 8000)) != 0 {
+				if err != nil || len(runner.configs) != 2 || countRecoveryText(got.Messages, strings.Repeat("h", 8000)) != 0 {
 					t.Fatalf("final admission did not drop oversized reload: error=%v calls=%d", err, len(runner.configs))
 				}
 				return
@@ -415,5 +415,39 @@ func TestBudgetRecoveryRetainsPressureAfterAllHistoryWasTrimmed(t *testing.T) {
 				t.Fatalf("reloaded history/current lost: err=%v loads=%d messages=%v", err, history.loads, got.Messages)
 			}
 		})
+	}
+}
+
+func TestChatBudgetRecoveryContinuesAfterPartialProgress(t *testing.T) {
+	_, history, runner, cfg := chatRecoveryFixture(t)
+	runner.run = func() (compaction.Result, error) {
+		text := strings.Repeat("h", 8000)
+		status := compaction.StatusProgress
+		if len(runner.configs) == 2 {
+			text = "fitting final summary"
+			status = compaction.StatusOK
+		}
+		history.messages = []messagepkg.Message{{ID: "history-new", BotID: syncCompactBotID, SessionID: syncCompactThreadID, Role: "assistant", Content: newTextContent(text)}}
+		return compaction.Result{Status: status}, nil
+	}
+	got, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg)
+	if err != nil || len(runner.configs) != 2 || countRecoveryText(got.Messages, "fitting final summary") != 1 {
+		t.Fatalf("progress did not reach admission: error=%v calls=%d", err, len(runner.configs))
+	}
+}
+
+func TestChatBudgetRecoveryInsertsEmptyHistoryBeforeFrozenSuffix(t *testing.T) {
+	s, _, _, cfg := chatRecoveryFixture(t)
+	cfg.Messages = []sdk.Message{sdk.UserMessage("frozen memory"), sdk.UserMessage("current request")}
+	cfg.ContextFrags = nil
+	cfg.ContextTrimmableMessages = 0
+	cfg.ContextCurrentUserMessageIndex = intPointer(1)
+	cfg.ContextMemoryMessageIndex = intPointer(0)
+	cfg.ContextSourceFrags = buildProviderSourceFrags(t.Context(), cfg, []native.SystemSection{{ID: "system", Kind: contextfrag.KindSystemPrompt, Text: strings.Repeat("s", 3200)}}, nil)
+	cfg.RecoverContextBudget = s.chatBudgetRecovery(ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID}, chatHistoryLayout{pressureTokens: 20000})
+	got, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg)
+	want := []sdk.Message{sdk.AssistantMessage("compacted history"), sdk.UserMessage("frozen memory"), sdk.UserMessage("frozen hook"), sdk.UserMessage("current request")}
+	if err != nil || !reflect.DeepEqual(got.Messages, want) {
+		t.Fatalf("recovery reordered context: err=%v messages=%v", err, got.Messages)
 	}
 }

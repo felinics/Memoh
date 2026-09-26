@@ -45,7 +45,7 @@ func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) 
 		}
 		compactionReq := req
 		compactionReq.RunID = cfg.RunID
-		if result := s.runBudgetCompactionSync(ctx, compactionReq, pressure, budget, cfg.CurrentModelUUID); result.Status != compaction.StatusOK {
+		if result := s.runBudgetCompactionSync(ctx, compactionReq, pressure, budget, cfg.CurrentModelUUID); result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
 			return cfg, false, nil
 		}
 		var messages []ModelMessage
@@ -60,7 +60,15 @@ func (s *Service) chatBudgetRecovery(req ChatRequest, layout chatHistoryLayout) 
 			messages, records = prepared.messages, prepared.records
 		}
 		recovered, err := layout.replaceHistory(ctx, cfg, req, messages, records)
-		return recovered, err == nil, err
+		if err != nil {
+			return cfg, false, err
+		}
+		if reflect.DeepEqual(recovered.Messages, cfg.Messages) {
+			return cfg, false, nil
+		}
+		layout.historyCount = recovered.ContextTrimmableMessages
+		layout.pressureTokens = 0
+		return recovered, true, nil
 	}
 }
 
@@ -183,6 +191,11 @@ func (l chatHistoryLayout) replaceSourceFrags(ctx context.Context, old, cfg nati
 	out := make([]contextfrag.ContextFrag, 0, len(old.ContextSourceFrags)+len(history))
 	inserted := false
 	for _, frag := range old.ContextSourceFrags {
+		if !inserted && frag.Slot != contextfrag.SlotSystem &&
+			(l.owns(frag) || frag.Provenance.Index >= l.historyCount || frag.Kind == contextfrag.KindMemoryRecall || frag.Kind == contextfrag.KindHookContext) {
+			out = append(out, history...)
+			inserted = true
+		}
 		if l.owns(frag) {
 			if !inserted {
 				out = append(out, history...)
@@ -239,7 +252,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 		return cfg, false, nil
 	}
 	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID}, pressure, available, modelID)
-	if result.Status != compaction.StatusOK {
+	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
 		return cfg, false, nil
 	}
 	return cfg, false, native.ErrContextRecompose

@@ -23,7 +23,7 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 			if err := ctx.Err(); err != nil {
 				return req, err
 			}
-			if result.Status == compaction.StatusOK {
+			if result.Status == compaction.StatusOK || result.Status == compaction.StatusProgress {
 				return req, native.ErrContextRecompose
 			}
 		}
