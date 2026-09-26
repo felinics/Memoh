@@ -377,6 +377,26 @@ func applyProviderRunConfig(ctx context.Context, logger *slog.Logger, cfg agentp
 		},
 		DynamicMutators: cfg.ContextDynamicMutators,
 	})
+	if budgetErr == nil && (err == nil || errors.Is(err, contextfrag.ErrProtectedContextOverflow)) &&
+		cfg.RecoverContextBudget != nil && budgetPlan != nil && budgetPlan.HistoryBudget > 0 &&
+		budgetPlan.ActualSystemCost <= budgetPlan.SystemBudget && ctx.Err() == nil {
+		recovery := cfg
+		recovery.ContextManifest.BudgetPlan = budgetPlan
+		recovery, recovered, recoveryErr := cfg.RecoverContextBudget(ctx, recovery)
+		if ctx.Err() != nil {
+			return cfg, ctx.Err()
+		}
+		if errors.Is(recoveryErr, agentpkg.ErrContextRecompose) {
+			return cfg, recoveryErr
+		}
+		if recoveryErr != nil && logger != nil {
+			logger.WarnContext(ctx, "context budget recovery failed", slog.Any("error", recoveryErr))
+		}
+		if recovered && recoveryErr == nil {
+			recovery.RecoverContextBudget = nil
+			return applyProviderRunConfig(ctx, logger, recovery)
+		}
+	}
 	if budgetErr != nil {
 		recordContextBudgetFailure(ledger, budgetErr)
 		return providerBudgetAuditConfig(cfg, view, ledger, budgetPlan), budgetErr

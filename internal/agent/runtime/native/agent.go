@@ -312,9 +312,10 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	}()
 	aborted := false
 	continued := false
+	recompose := false
 	turnError := ""
 	defer func() {
-		if continued {
+		if continued || recompose {
 			return
 		}
 		event := hooks.EventTurnEnd
@@ -366,6 +367,11 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	var contextViewErr error
 	cfg, contextViewErr = a.applyContextView(streamCtx, cfg)
 	if contextViewErr != nil {
+		if errors.Is(contextViewErr, ErrContextRecompose) {
+			recompose = true
+			sendEvent(ctx, ch, StreamEvent{Type: EventContextRecompose})
+			return
+		}
 		publicError := contextViewStreamError(contextViewErr)
 		turnError = publicError.Error
 		a.logger.WarnContext(ctx, "context view preflight failed", slog.Any("error", contextViewErr))
@@ -1084,6 +1090,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (result *Generat
 	// steer, so the observer here exists for the spans alone.
 	cfg.Model = modelWithProviderCallObserver(cfg.Model, nil, nil)
 	defer func() {
+		if errors.Is(retErr, ErrContextRecompose) {
+			return
+		}
 		event := hooks.EventTurnEnd
 		errMsg := ""
 		if retErr != nil {
