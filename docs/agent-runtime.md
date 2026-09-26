@@ -72,3 +72,16 @@ Migration 0156 removes the obsolete `agent_session_states` and
 `agent_session_publications` retains only the run ID used to fence ACP warm
 processes; it contains no conversation state. Downgrading restores the old table
 structure, not deleted snapshot data.
+
+## Inactivity watchdogs
+
+Model generation and tool execution use separate inactivity clocks. The model
+window defaults to five minutes and scales with reasoning effort up to fifteen
+minutes. Active tools have a fifteen-minute inactivity window. Waiting for an
+approval or user input pauses only that tool; parallel tools remain supervised.
+Completed tools do not accumulate extra timeout allowance for later model calls.
+
+Subagents use a ten-minute inactivity watchdog instead of a fixed ten-minute
+execution limit. Background agent tasks do not have the command task's fixed
+thirty-minute limit. Explicit ancestor deadlines are still inherited. Progress
+from a waiting parent does not reset the child's watchdog.

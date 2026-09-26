@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 )
 
@@ -27,6 +29,30 @@ func TestIdleTimeoutPublishesStableResponseTimeoutCause(t *testing.T) {
 	}
 	if private := apperror.CauseOf(cause); !errors.Is(private, context.DeadlineExceeded) {
 		t.Fatalf("private cause = %v, want context deadline exceeded", private)
+	}
+}
+
+func TestDefaultIdleTimeoutMatchesModelRequestWindow(t *testing.T) {
+	if defaultIdleTimeout != 5*time.Minute {
+		t.Fatalf("default idle timeout = %v, want 5m", defaultIdleTimeout)
+	}
+	_, idle := withIdleTimeout(context.Background())
+	defer idle.Stop()
+	if got := idle.currentTimeout(); got != 5*time.Minute {
+		t.Fatalf("initial idle window = %v, want 5m", got)
+	}
+}
+
+func TestIdleTimeoutCapsInitialWindow(t *testing.T) {
+	ctx, idle := withIdleTimeout(context.Background(), time.Second, 20*time.Millisecond)
+	defer idle.Stop()
+	select {
+	case <-ctx.Done():
+		if !idle.DidFire() {
+			t.Fatal("idle window ended without firing")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("initial idle window ignored the configured maximum")
 	}
 }
 
@@ -80,16 +106,72 @@ func TestScaleIdleTimeoutForEffort(t *testing.T) {
 	}
 }
 
-func TestIdleTimeoutToolCallRearmsCurrentWindow(t *testing.T) {
-	ctx, idle := withIdleTimeout(context.Background(), 80*time.Millisecond)
-	defer idle.Stop()
+func TestIdleTimeoutPhases(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, idle := withIdleTimeout(t.Context(), time.Minute)
+		defer idle.Stop()
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallStart, ToolCallID: "tool"})
+		time.Sleep(2 * time.Minute)
+		if ctx.Err() != nil {
+			t.Fatal("model deadline interrupted a tool")
+		}
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallEnd, ToolCallID: "tool"})
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if !idle.DidFire() {
+			t.Fatal("completed tool extended the next model window")
+		}
+	})
+}
 
-	time.Sleep(50 * time.Millisecond)
-	idle.RecordToolCall()
+func TestIdleTimeoutWaitsForAllDecisions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, idle := withIdleTimeout(t.Context(), time.Minute)
+		defer idle.Stop()
+		for _, id := range []string{"a", "b"} {
+			idle.Observe(native.StreamEvent{Type: native.EventToolCallStart, ToolCallID: id})
+			idle.Observe(native.StreamEvent{Type: native.EventToolApprovalRequest, ToolCallID: id, ApprovalID: id, Status: "pending"})
+		}
+		time.Sleep(9 * time.Minute)
+		idle.Observe(native.StreamEvent{Type: native.EventToolApprovalRequest, ToolCallID: "a", ApprovalID: "a", Status: "approved"})
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallEnd, ToolCallID: "a"})
+		time.Sleep(2 * time.Minute)
+		if ctx.Err() != nil {
+			t.Fatal("remaining decision lost its wait")
+		}
+		idle.Observe(native.StreamEvent{Type: native.EventToolApprovalRequest, ToolCallID: "b", ApprovalID: "b", Status: "approved"})
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallEnd, ToolCallID: "b"})
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if !idle.DidFire() {
+			t.Fatal("model watchdog did not resume")
+		}
+	})
+}
 
-	select {
-	case <-ctx.Done():
-		t.Fatal("tool call did not rearm the current idle window")
-	case <-time.After(50 * time.Millisecond):
-	}
+func TestIdleTimeoutParallelToolStillExpiresDuringDecision(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, idle := withIdleTimeout(t.Context())
+		defer idle.Stop()
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallStart, ToolCallID: "waiting"})
+		idle.Observe(native.StreamEvent{Type: native.EventUserInputRequest, ToolCallID: "waiting", UserInputID: "q", Status: "pending"})
+		idle.Observe(native.StreamEvent{Type: native.EventToolCallStart, ToolCallID: "stalled"})
+		time.Sleep(15 * time.Minute)
+		synctest.Wait()
+		if apperror.CodeOf(context.Cause(ctx)) != apperror.CodeAgentToolTimeout {
+			t.Fatalf("cause = %v", context.Cause(ctx))
+		}
+	})
+}
+
+func TestIdleTimeoutStopCannotBeRearmed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, idle := withIdleTimeout(t.Context(), time.Second)
+		idle.Stop()
+		idle.Reset()
+		time.Sleep(2 * time.Second)
+		if ctx.Err() != nil {
+			t.Fatal("stopped timer fired")
+		}
+	})
 }

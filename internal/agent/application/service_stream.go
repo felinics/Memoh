@@ -34,11 +34,12 @@ type terminalSnapshot struct {
 }
 
 func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
-	if idleFired {
+	if idleFired && apperror.CodeOf(cause) == "" {
 		return apperror.CodeAgentResponseTimeout
 	}
 	switch code := apperror.CodeOf(cause); code {
 	case apperror.CodeAgentResponseTimeout,
+		apperror.CodeAgentToolTimeout,
 		apperror.CodeAgentResponseInterrupted,
 		apperror.CodeAgentProviderOverloaded,
 		apperror.CodeAgentProviderRateLimited,
@@ -303,12 +304,11 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		var failureEventForwarded bool
 		var deferredRuntimeTerminal *native.StreamEvent
 		for event := range eventCh {
-			idleCancel.Reset() // each event resets the idle timer
+			idleCancel.Observe(event)
 
 			// Track tool calls for adaptive idle timeout and progress events
 			if event.Type == native.EventToolCallStart {
 				toolCallCount++
-				idleCancel.RecordToolCall()
 			}
 
 			if eventErr := agentStreamLifecycleError(event); eventErr != nil {
@@ -509,7 +509,8 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		}
 
 		if idleCancel.DidFire() {
-			s.logger.WarnContext(ctx, "agent stream aborted: idle timeout (no events from provider)",
+			s.logger.WarnContext(ctx, "agent stream aborted: inactivity timeout",
+				slog.String("code", string(apperror.CodeOf(context.Cause(idleCtx)))),
 				slog.String("bot_id", streamReq.BotID),
 				slog.String("chat_id", streamReq.ChatID),
 				slog.String("model_id", rc.model.ID),
@@ -681,12 +682,11 @@ func (s *Service) streamChatWSResultWithHooks(
 	terminalEventSeen := false
 	failureEventForwarded := false
 	for event := range agentEventCh {
-		idleCancel.Reset() // each event resets the idle timer
+		idleCancel.Observe(event)
 
 		// Track tool calls for adaptive idle timeout
 		if event.Type == native.EventToolCallStart {
 			toolCallCount++
-			idleCancel.RecordToolCall()
 		}
 
 		if eventErr := agentStreamLifecycleError(event); eventErr != nil {
@@ -839,7 +839,8 @@ func (s *Service) streamChatWSResultWithHooks(
 	}
 
 	if idleCancel.DidFire() {
-		s.logger.WarnContext(ctx, "agent ws stream aborted: idle timeout (no events from provider)",
+		s.logger.WarnContext(ctx, "agent ws stream aborted: inactivity timeout",
+			slog.String("code", string(apperror.CodeOf(context.Cause(idleCtx)))),
 			slog.String("bot_id", req.BotID),
 			slog.String("chat_id", req.ChatID),
 			slog.String("model_id", modelID),
