@@ -70,14 +70,14 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 		}
 	}
 	start := time.Now()
-	res := s.runCompactionSync(ctx, ChatRequest{
-		BotID:                 cmd.BotID,
-		ChatID:                cmd.BotID,
-		ThreadID:              cmd.ThreadID,
-		RunID:                 runID,
-		discussCurrentSources: cmd.DiscussCurrentSources,
-		discussMessages:       cmd.DiscussMessages,
-	}, pressure, budget, resolved.ModelID)
+	req := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: runID, discussCurrentSources: cmd.DiscussCurrentSources, discussMessages: cmd.DiscussMessages}
+	var res compaction.Result
+	if rejected {
+		res = s.runBudgetCompactionSync(ctx, req, pressure, budget, resolved.ModelID)
+	} else {
+		res = s.runCompactionSync(ctx, req, pressure, budget, resolved.ModelID)
+	}
+
 	s.logger.InfoContext(ctx, "sync_compaction_backstop",
 		slog.String("path", "discuss"),
 		slog.String("mode", "active"),
@@ -87,7 +87,7 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 		slog.String("session_id", cmd.ThreadID),
 		slog.Int("pressure_tokens", pressure),
 		slog.Int("threshold_tokens", threshold))
-	return res.Status == compaction.StatusOK
+	return res.Status == compaction.StatusOK || (rejected && res.Status == compaction.StatusProgress)
 }
 
 // maybeCompactDiscuss re-evaluates compaction pressure after a native discuss
