@@ -378,6 +378,8 @@ type AgentConfig struct {
 	// compacts synchronously before the model call at the hard threshold,
 	// "off" disables the backstop. The legacy history chat path keeps its
 	// existing always-on synchronous backstop regardless of this setting.
+	// Admission recovery can compact in shadow or active mode when enabled;
+	// off disables recovery. Pressure includes raw history and active summaries.
 	SyncCompaction string `toml:"sync_compaction"`
 }
 
