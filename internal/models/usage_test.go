@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/felinics/twilight/sdk"
@@ -75,7 +76,7 @@ func TestAnthropicSDKUsageIncludesCache(t *testing.T) {
 						return
 					}
 					w.Header().Set("Content-Type", "text/event-stream")
-					_, _ = fmt.Fprintf(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_usage\",\"role\":\"assistant\",\"content\":[],\"usage\":%s}}\n\n", tc.usage)
+					_, _ = fmt.Fprintf(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_usage\",\"role\":\"assistant\",\"content\":[],\"usage\":%s}}\n\n", strings.Replace(tc.usage, `"output_tokens":5`, `"output_tokens":0`, 1))
 					_, _ = fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 				}))
 				defer srv.Close()
