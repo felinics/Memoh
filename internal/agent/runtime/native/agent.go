@@ -83,8 +83,11 @@ func captureProviderAttemptPrefix(cfg RunConfig) RunConfig {
 // users retain the legacy refresh path.
 func (a *Agent) applyContextView(ctx context.Context, cfg RunConfig) (RunConfig, error) {
 	if a != nil && a.contextViewApplier != nil {
-		return a.contextViewApplier(ctx, cfg)
+		prepared, err := a.contextViewApplier(ctx, cfg)
+		prepared.RecoverContextBudget = nil
+		return prepared, err
 	}
+	cfg.RecoverContextBudget = nil
 	return cfg.RefreshContextFrag(), nil
 }
 

@@ -21,17 +21,28 @@ type discussTurnPlan struct {
 // before materialization (CM-ADM-001); a ProtectedOverflow admission returns
 // ok=false so the caller fails closed instead of running the turn.
 func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
+	budget.After = &after
 	composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, budget)
-	if composed == nil {
+	if composed == nil && !admission.ProtectedOverflow {
 		return discussTurnPlan{}, admission, false
 	}
+	if composed == nil {
+		composed = &timeline.ComposeContextResult{}
+	}
 
+	currentSources := make([]turn.ContextMessageSource, 0)
+	for _, segment := range rc {
+		if !segment.IsMyself && !segment.IsSelfSent && !after.Covers(segment) {
+			currentSources = append(currentSources, turn.ContextMessageSource{Kind: "external", ID: segment.MessageID, Current: true})
+		}
+	}
 	isMentioned := wasRecentlyMentioned(rc, after)
 	addressed := isMentioned || turn.IsPrivateConversationType(cfg.ConversationType)
 	msgs := make([]turn.DiscussMessage, 0, len(composed.Messages))
 	for _, message := range composed.Messages {
 		msgs = append(msgs, turn.DiscussMessage{
 			Role:                 message.Role,
+			Source:               message.Source,
 			Content:              message.Content,
 			RawContent:           message.RawContent,
 			CompactionArtifactID: message.CompactionArtifactID,
@@ -62,13 +73,17 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			ChatToken:               cfg.ChatToken,
 			ToolHTTPURL:             cfg.ToolHTTPURL,
 			DiscussMessages:         msgs,
+			DiscussCurrentSources:   currentSources,
 			DiscussImageRefs:        imageRefs,
 			DiscussAddressed:        addressed,
+			DiscussContextTokens:    admission.EstimatedTokens,
+			DiscussContextOverflow:  admission.ProtectedOverflow,
+			DiscussCurrentTokens:    admission.CurrentTokens,
 		},
 		consumed:        timeline.ConsumedDiscussCursor(rc),
 		messageCount:    len(composed.Messages),
 		estimatedTokens: composed.EstimatedTokens,
-	}, admission, true
+	}, admission, !admission.ProtectedOverflow
 }
 
 // extractNewImageRefs collects image references from external RC segments

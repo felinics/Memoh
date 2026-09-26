@@ -116,8 +116,15 @@ type StartTurnCommand struct {
 	// turn (Mode == ModeDiscuss), already rendered by the caller's
 	// projection. Image parts are injected into the last real user message
 	// before the runtime starts streaming.
-	DiscussMessages  []DiscussMessage
-	DiscussImageRefs []DiscussImageRef
+	DiscussCurrentSources []ContextMessageSource
+	DiscussMessages       []DiscussMessage
+	DiscussImageRefs      []DiscussImageRef
+	// Pressure is measured before Channel selection. Overflow requests recovery
+	// without materializing or forwarding the rejected context.
+	DiscussContextTokens     int
+	DiscussRecoveryExhausted bool
+	DiscussContextOverflow   bool
+	DiscussCurrentTokens     int
 	// DiscussAddressed covers an explicit @-mention, a reply-to, or a direct
 	// (1:1) conversation. Expensive external runtimes (ACP) use it as a
 	// participation gate and skip the run when false. Mention/reply details
@@ -125,12 +132,19 @@ type StartTurnCommand struct {
 	DiscussAddressed bool
 }
 
+type ContextMessageSource struct {
+	Kind    string `json:"kind"`
+	ID      string `json:"id,omitempty"`
+	Current bool   `json:"current,omitempty"`
+}
+
 // DiscussMessage is one composed context message for a discuss turn.
 type DiscussMessage struct {
-	Role                 string          `json:"role"`
-	Content              string          `json:"content"`
-	RawContent           json.RawMessage `json:"raw_content,omitempty"`
-	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
+	Source               *ContextMessageSource `json:"source,omitempty"`
+	Role                 string                `json:"role"`
+	Content              string                `json:"content"`
+	RawContent           json.RawMessage       `json:"raw_content,omitempty"`
+	CompactionArtifactID string                `json:"compaction_artifact_id,omitempty"`
 }
 
 // DiscussImageRef references an image attachment to inline as vision input.

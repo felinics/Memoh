@@ -128,6 +128,23 @@ func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Drive
 				done = nil
 				continue
 			}
+			if errors.Is(err, native.ErrContextRecompose) && !cancelled {
+				if ctx.Err() != nil {
+					cancelled = true
+					ctxDone = nil
+					fail(ctx.Err())
+					continue
+				}
+				data, _ := json.Marshal(native.StreamEvent{Type: native.EventContextRecompose})
+				select {
+				case chunkCh <- data:
+				case <-ctx.Done():
+					cancelled = true
+					ctxDone = nil
+					fail(ctx.Err())
+				}
+				continue
+			}
 			if err != nil && !cancelled {
 				fail(err)
 			}
@@ -208,6 +225,21 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	}
 	if memoryTrace != nil {
 		contextLifecycle.SetMemoryRecall(*memoryTrace)
+	}
+	if req.discussMessages != nil {
+		req, err = s.prepareExternalDiscussContext(ctx, req, contextMarkdown, len(preparedAttachments.Images))
+		if err != nil {
+			if !errors.Is(err, native.ErrContextRecompose) {
+				s.contextLifecycleTerminal(ctx, native.RunConfig{
+					RunID: req.RunID, Identity: native.SessionContext{BotID: req.BotID, SessionID: req.ThreadID}, ContextLifecycle: contextLifecycle,
+				})(err)
+			}
+			return err
+		}
+		contextMarkdown, contextURI, contextManifest = runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
+		if contextManifest != nil {
+			contextLifecycle.SetManifest(*contextManifest)
+		}
 	}
 	var leadingUser *messagepkg.Message
 	req, leadingUser, err = s.persistRuntimeLeadingUserMessage(context.WithoutCancel(ctx), req)

@@ -463,6 +463,38 @@ func TestAdmittedDiscussBudgetFailurePersistsFailedBudgetLifecycle(t *testing.T)
 	}
 }
 
+func TestDiscussMetadataOnlyRejectionNeverStartsRuntime(t *testing.T) {
+	for _, runtimeType := range []string{sessionpkg.RuntimeModel, sessionpkg.RuntimeACPAgent, sessionpkg.RuntimeCodex} {
+		t.Run(runtimeType, func(t *testing.T) {
+			runner := &fakeRunner{}
+			agent := &fakeAgentStreamer{}
+			resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{RuntimeType: runtimeType}}
+			service := newDiscussTestService(runner, agent, resolver)
+			configureDiscussLifecycle(service)
+			cmd := lifecycleDiscussCommand()
+			cmd.DiscussMessages = nil
+			cmd.DiscussContextOverflow = true
+			cmd.DiscussContextTokens = 300000
+			handle, err := service.StartTurn(t.Context(), cmd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range handle.Events() {
+			}
+			var failures int
+			for err := range handle.Errs() {
+				if apperror.CodeOf(err) != apperror.CodeContextProtectedOverflow {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				failures++
+			}
+			if failures != 1 || agent.lastConfig != nil || runner.gotReq.Query != "" || resolver.storeCalls != 0 {
+				t.Fatalf("metadata rejection ran a runtime: failures=%d native=%v external=%v stored=%d", failures, agent.lastConfig != nil, runner.gotReq.Query != "", resolver.storeCalls)
+			}
+		})
+	}
+}
+
 func TestAdmittedDiscussDecisionPauseDoesNotPersistLifecycle(t *testing.T) {
 	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
 	service := newDiscussTestService(&fakeRunner{}, &decisionDiscussAgentStreamer{}, resolver)

@@ -113,13 +113,25 @@ func TestAsyncCompactionInputTokensPrefersKnownCompactableHistory(t *testing.T) 
 		want          int
 	}{
 		{
-			name:          "excludes summaries and prompt overhead",
+			name:          "includes summary pressure without provider overhead",
+			resolved:      resolvedContext{compactableTokens: 4000, compactableTokensKnown: true, historyPressureTokens: 8000},
+			providerInput: 12000,
+			want:          8000,
+		},
+		{
+			name:          "summary-only history can recover",
+			resolved:      resolvedContext{compactableTokensKnown: true, historyPressureTokens: 8000},
+			providerInput: 12000,
+			want:          8000,
+		},
+		{
+			name:          "legacy raw projection excludes provider overhead",
 			resolved:      resolvedContext{compactableTokens: 4000, compactableTokensKnown: true},
 			providerInput: 9000,
 			want:          4000,
 		},
 		{
-			name:          "known summary-only history stays zero",
+			name:          "known empty history stays zero",
 			resolved:      resolvedContext{compactableTokensKnown: true},
 			providerInput: 9000,
 			want:          0,

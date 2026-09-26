@@ -11,6 +11,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -126,6 +127,19 @@ func assertDiscussIDs(t *testing.T, frags []contextfrag.ContextFrag, want []stri
 		if frags[i].ID != id {
 			t.Fatalf("frag %d ID = %q, want %q", i, frags[i].ID, id)
 		}
+	}
+}
+
+func TestDiscussCollectorPreservesExplicitSourcesAndImage(t *testing.T) {
+	frags := collectDiscussContext(t, DiscussContextConfig{ComposedMessages: []timeline.ContextMessage{
+		{Role: "user", Content: "input", Source: &turn.ContextMessageSource{Kind: "external", ID: "input-id", Current: true}},
+		{Role: "user", Content: "echo", Source: &turn.ContextMessageSource{Kind: "self", ID: "echo-id"}},
+	}, InlineImages: []sdk.ImagePart{{Image: "data:image/png;base64,YQ=="}}})
+	if frags[0].Kind != contextfrag.KindCurrentUserMessage || frags[1].Kind == contextfrag.KindCurrentUserMessage || frags[0].Provenance.SourceID != "input-id" {
+		t.Fatalf("source lost: %+v", frags)
+	}
+	if len(contextfrag.FragMessage(frags[0]).Content) != 2 || len(contextfrag.FragMessage(frags[1]).Content) != 1 {
+		t.Fatal("image attached to echo")
 	}
 }
 

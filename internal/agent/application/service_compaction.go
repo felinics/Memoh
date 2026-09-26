@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -71,7 +72,7 @@ func syncCompactionShouldRun(pressure, contextTokenBudget int) bool {
 
 func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int {
 	if rc.compactableTokensKnown {
-		return rc.compactableTokens
+		return max(rc.compactableTokens, rc.historyPressureTokens)
 	}
 	return providerInputTokens
 }
@@ -126,6 +127,18 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		return
 	}
 	cfg.TargetTokens = compactionTargetTokens(botSettings.CompactionTargetPercent, rc.contextTokenBudget)
+	cfg.ProtectedSources = append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
+	for _, message := range req.discussMessages {
+		if message.Source != nil && message.Source.Current {
+			cfg.ProtectedSources = append(cfg.ProtectedSources, *message.Source)
+		}
+	}
+	if req.ExternalMessageID != "" {
+		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
+	}
+	if req.RequiredHistoryMessageID != "" {
+		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
+	}
 	cfg.AllowFrontierFusion = true
 	cfg.ContextWindowTokens = rc.contextTokenBudget
 	cfg.HardPressure = syncCompactionShouldRun(inputTokens, rc.contextTokenBudget)
@@ -169,6 +182,17 @@ func (s *Service) runCompactionPass(ctx context.Context, cfg compaction.TriggerC
 // compact) leaves this turn's context untouched: the request proceeds as-is,
 // possibly still above the threshold, and the next turn re-evaluates.
 func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string) compaction.Result {
+	return s.runSyncCompaction(ctx, req, inputTokens, contextTokenBudget, turnModelID, syncCompactionShouldRun(inputTokens, contextTokenBudget), 0)
+}
+
+func (s *Service) runBudgetCompactionSync(ctx context.Context, req ChatRequest, inputTokens, historyBudget int, modelID string) compaction.Result {
+	return s.runSyncCompaction(ctx, req, inputTokens, historyBudget, modelID, true, historyBudget)
+}
+
+func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string, hardPressure bool, historyBudget int) compaction.Result {
+	if ctx.Err() != nil {
+		return compaction.Result{}
+	}
 	if s.compactionService == nil || s.settingsService == nil {
 		s.logger.WarnContext(ctx, "compaction sync: skipped, service or settings nil")
 		return compaction.Result{}
@@ -192,9 +216,23 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
+	cfg.ProtectedSources = append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
+	for _, message := range req.discussMessages {
+		if message.Source != nil && message.Source.Current {
+			cfg.ProtectedSources = append(cfg.ProtectedSources, *message.Source)
+		}
+	}
+	if req.ExternalMessageID != "" {
+		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
+	}
+	if req.RequiredHistoryMessageID != "" {
+		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
+	}
+	cfg.AllowFrontierFusion = true
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 	cfg.ContextWindowTokens = contextTokenBudget
-	cfg.HardPressure = syncCompactionShouldRun(inputTokens, contextTokenBudget)
+	cfg.HardPressure = hardPressure
+	cfg.HistoryBudgetTokens = historyBudget
 
 	s.logger.InfoContext(ctx, "compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),

@@ -20,10 +20,11 @@ type TurnResponseEntry struct {
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
 type ContextMessage struct {
-	Role                 string          `json:"role"`
-	Content              string          `json:"content"`
-	RawContent           json.RawMessage `json:"raw_content,omitempty"`
-	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
+	Source               *turn.ContextMessageSource `json:"source,omitempty"`
+	Role                 string                     `json:"role"`
+	Content              string                     `json:"content"`
+	RawContent           json.RawMessage            `json:"raw_content,omitempty"`
+	CompactionArtifactID string                     `json:"compaction_artifact_id,omitempty"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -60,9 +61,10 @@ func ActiveRenderedContext(rc RenderedContext, artifacts []CompactionArtifact) R
 const earliestMergeTime int64 = -1 << 63
 
 type mergeEntry struct {
-	kind string // "summary_before_rc", "rc", "summary", or "tr"
-	time int64
-	step int
+	source *turn.ContextMessageSource
+	kind   string // "summary_before_rc", "rc", "summary", or "tr"
+	time   int64
+	step   int
 	// For RC entries
 	rcContent []RenderedContentPiece
 	// For summary entries
@@ -77,7 +79,7 @@ type mergeEntry struct {
 // MergeContext interleaves RC segments and TR entries by timestamp.
 // RC entries use receivedAtMs; TR entries use requestedAtMs.
 // Tiebreaker: RC before TR on equal timestamp.
-// Consecutive RC entries between TR entries are merged into one user message.
+// Each RC entry remains a separate user message so selection preserves its source boundary.
 func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage {
 	entries := make([]mergeEntry, 0, len(rc)+len(trs))
 	entries = appendRenderedContextEntries(entries, rc)
@@ -92,6 +94,7 @@ func appendRenderedContextEntries(entries []mergeEntry, rc RenderedContext) []me
 			time:      seg.ReceivedAtMs,
 			step:      2 * i,
 			rcContent: seg.Content,
+			source:    renderedMessageSource(seg),
 		})
 	}
 	return entries
@@ -115,6 +118,7 @@ func appendActiveRenderedContextEntries(
 			time:      segment.ReceivedAtMs,
 			step:      2 * i,
 			rcContent: segment.Content,
+			source:    renderedMessageSource(segment),
 		})
 	}
 	return entries
@@ -127,6 +131,7 @@ func appendTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEntry) []
 			time:         tr.RequestedAtMs,
 			step:         2 * i,
 			trRole:       tr.Role,
+			source:       &turn.ContextMessageSource{Kind: "history", ID: tr.SourceMessageID},
 			trContent:    tr.Content,
 			trRawContent: tr.RawContent,
 		})
@@ -147,6 +152,7 @@ func appendActiveTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEnt
 			time:         tr.RequestedAtMs,
 			step:         2 * i,
 			trRole:       tr.Role,
+			source:       &turn.ContextMessageSource{Kind: "history", ID: tr.SourceMessageID},
 			trContent:    tr.Content,
 			trRawContent: tr.RawContent,
 		})
@@ -156,6 +162,7 @@ func appendActiveTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEnt
 
 func mergeEntries(entries []mergeEntry) []ContextMessage {
 	sortMergeEntries(entries)
+	markCurrentEntries(entries, nil, nil)
 	return materializeMergeEntries(entries)
 }
 
@@ -187,18 +194,11 @@ func mergeKindOrder(kind string) int {
 
 func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 	var messages []ContextMessage
-	var pendingText strings.Builder
-
-	flushRC := func() {
-		if pendingText.Len() > 0 {
-			messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String()})
-			pendingText.Reset()
-		}
-	}
 
 	for _, entry := range entries {
 		switch entry.kind {
 		case "rc":
+			var pendingText strings.Builder
 			for _, piece := range entry.rcContent {
 				if piece.Type == "text" {
 					if pendingText.Len() > 0 {
@@ -207,23 +207,24 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 					pendingText.WriteString(piece.Text)
 				}
 			}
+			if pendingText.Len() > 0 {
+				messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String(), Source: entry.source})
+			}
 		case "summary", "summary_slot", "summary_before_rc", "summary_tr_slot":
-			flushRC()
 			messages = append(messages, ContextMessage{
 				Role:                 "user",
 				Content:              entry.summaryContent,
 				CompactionArtifactID: entry.summaryArtifactID,
 			})
 		case "tr":
-			flushRC()
 			messages = append(messages, ContextMessage{
 				Role:       entry.trRole,
+				Source:     entry.source,
 				Content:    entry.trContent,
 				RawContent: entry.trRawContent,
 			})
 		}
 	}
-	flushRC()
 
 	return messages
 }
@@ -274,6 +275,7 @@ func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, artifacts 
 
 // ComposeBudget bounds composition before materialization (CM-ADM-001).
 type ComposeBudget struct {
+	After *DiscussCursorPosition
 	// MaxTokens is the admission budget in shared-estimator tokens. Zero or
 	// negative disables budgeting (legacy behavior).
 	MaxTokens int
@@ -285,6 +287,7 @@ type ComposeAdmission struct {
 	EstimatedTokens int
 	// SelectedTokens is the estimate of what was actually materialized.
 	SelectedTokens int
+	CurrentTokens  int
 	// TotalEntries and DroppedEntries count merge entries, not messages.
 	TotalEntries   int
 	DroppedEntries int
@@ -311,11 +314,13 @@ func ComposeContextWithArtifactsBudgeted(
 		return nil, ComposeAdmission{}
 	}
 	sortMergeEntries(entries)
+	markCurrentEntries(entries, rc, budget.After)
 
 	admitted := make([]turn.AdmissionEntry, len(entries))
 	for i := range entries {
 		admitted[i] = turn.AdmissionEntry{
 			Cost:   mergeEntryTokens(entries[i]),
+			Source: entries[i].source,
 			Pinned: isSummaryMergeKind(entries[i].kind),
 			ToolResponse: entries[i].kind == "tr" &&
 				strings.EqualFold(strings.TrimSpace(entries[i].trRole), "tool"),
@@ -328,6 +333,11 @@ func ComposeContextWithArtifactsBudgeted(
 		TotalEntries:      len(entries),
 		DroppedEntries:    decision.DroppedEntries,
 		ProtectedOverflow: decision.ProtectedOverflow,
+	}
+	for i, current := range turn.CurrentAdmissionEntries(admitted) {
+		if current {
+			admission.CurrentTokens += admitted[i].Cost
+		}
 	}
 	if decision.ProtectedOverflow {
 		return nil, admission
@@ -365,6 +375,9 @@ func mergeEntryTokens(entry mergeEntry) int {
 		n := 0
 		for _, piece := range entry.rcContent {
 			if piece.Type == "text" {
+				if n > 0 {
+					n++
+				}
 				n += len(piece.Text)
 			}
 		}

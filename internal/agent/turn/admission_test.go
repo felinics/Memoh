@@ -164,3 +164,18 @@ func TestAdmitContextEntriesNewestOrphanToolFailsClosed(t *testing.T) {
 		t.Fatalf("overflow decision must not offer a selection: %+v", decision)
 	}
 }
+
+func TestAdmissionProtectsExplicitCurrentSources(t *testing.T) {
+	entries := []turn.AdmissionEntry{
+		{Cost: 900, Source: &turn.ContextMessageSource{Kind: "external", ID: "a", Current: true}},
+		{Cost: 200, Source: &turn.ContextMessageSource{Kind: "external", ID: "b", Current: true}},
+		{Cost: 1, Source: &turn.ContextMessageSource{Kind: "external", ID: "echo"}},
+	}
+	if got := turn.AdmitContextEntries(entries, 1000); !got.ProtectedOverflow {
+		t.Fatalf("discarded current input: %+v", got)
+	}
+	got := turn.AdmitContextEntries(entries, 1100)
+	if got.ProtectedOverflow || !got.Selected[0] || !got.Selected[1] || got.Selected[2] {
+		t.Fatalf("source selection=%+v", got)
+	}
+}

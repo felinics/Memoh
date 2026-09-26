@@ -11,9 +11,7 @@ import (
 
 const discussIdleTimeout = 10 * time.Minute
 
-// maxDiscussRecomposeAttempts bounds consecutive compact→recompose→resubmit
-// cycles within one trigger; parity with maxAsyncCompactionPasses.
-const maxDiscussRecomposeAttempts = 3
+const maxDiscussRecoveries = 3
 
 func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 	initialConfig := d.sessionConfigSnapshot(sess)
@@ -110,12 +108,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 		return
 	}
 
-	// A recompose outcome means the runtime compacted synchronously instead
-	// of running the model (CM-CMP-001); each retry reloads the artifact
-	// frontier and rebuilds the plan. Every recompose implies a summary
-	// landed, so the cap only bounds a pathological backlog drain — parity
-	// with maxAsyncCompactionPasses on the async trigger.
-	for attempt := 1; attempt <= maxDiscussRecomposeAttempts; attempt++ {
+	for recoveries := 0; recoveries <= maxDiscussRecoveries; recoveries++ {
 		artifacts, artifactsErr := d.loadArtifacts(ctx, cfg)
 		if artifactsErr != nil {
 			log.WarnContext(ctx, "context_admission_degraded",
@@ -125,15 +118,13 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 		plan, admission, ok := d.trigger.Build(cfg, rc, trs, sess.lastProcessed, artifacts, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
 		if !ok {
 			if admission.ProtectedOverflow {
-				// Fail closed without advancing the cursor: nothing was
-				// materialized, and a later compaction can shrink the
-				// protected set enough for the next attempt to pass.
 				log.ErrorContext(ctx, "context_admission_rejected",
 					slog.String("code", "context.protected_overflow"),
 					slog.Int("estimated_tokens", admission.EstimatedTokens),
 					slog.Int("budget_tokens", d.admissionMaxTokens()))
+			} else {
+				return
 			}
-			return
 		}
 		if admission.DroppedEntries > 0 {
 			log.InfoContext(ctx, "context_admission",
@@ -145,23 +136,27 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 				slog.Int("total_entries", admission.TotalEntries),
 				slog.Bool("degraded_artifacts", artifactsErr != nil))
 		}
-		log.InfoContext(ctx, "triggering discuss LLM call",
+		log.InfoContext(ctx, "triggering discuss turn",
 			slog.Int("messages", plan.messageCount),
 			slog.Int("estimated_tokens", plan.estimatedTokens))
 
+		plan.command.DiscussRecoveryExhausted = recoveries == maxDiscussRecoveries
 		outcome, started := d.runner.Run(ctx, turnSvc, plan.command, log)
 		if !started || outcome.cancelled || outcome.runtimeType == "" {
 			return
 		}
 		if outcome.recomposeRequested {
-			if attempt == maxDiscussRecomposeAttempts {
+			if plan.command.DiscussRecoveryExhausted {
 				log.WarnContext(ctx, "discuss recompose limit reached, deferring to next trigger",
-					slog.Int("attempts", attempt))
+					slog.Int("recoveries", recoveries))
 				return
 			}
 			log.InfoContext(ctx, "discuss recompose requested, rebuilding context",
-				slog.Int("attempt", attempt))
+				slog.Int("recoveries", recoveries+1))
 			continue
+		}
+		if admission.ProtectedOverflow {
+			return
 		}
 		if outcome.runtimeType == sessionRuntimeACPAgent {
 			if outcome.skipped || (outcome.streamed && outcome.terminal && !outcome.failed) {

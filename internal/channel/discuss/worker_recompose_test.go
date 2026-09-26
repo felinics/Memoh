@@ -2,14 +2,62 @@ package discuss
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
 type countingArtifactProvider struct {
 	calls atomic.Int64
+}
+
+type recoveringArtifactProvider struct {
+	calls int
+}
+
+func (p *recoveringArtifactProvider) ActiveCompactionArtifacts(context.Context, string, string) ([]timeline.CompactionArtifact, error) {
+	p.calls++
+	summary := "small"
+	if p.calls == 1 {
+		summary = strings.Repeat("s", 8000)
+	}
+	return []timeline.CompactionArtifact{{ID: "summary", Summary: summary}}, nil
+}
+
+func TestDiscussChannelOverflowRequestsRecoveryWithoutPayload(t *testing.T) {
+	artifacts := &recoveringArtifactProvider{}
+	svc := &fakeTurnService{recomposeRuns: 1}
+	svc.onStart = func(cmd turn.StartTurnCommand) {
+		if svc.calls == 1 && (!cmd.DiscussContextOverflow || len(cmd.DiscussMessages) != 0 || cmd.DiscussContextTokens <= 1000 || cmd.DiscussCurrentTokens <= 0 || cmd.DiscussCurrentTokens >= 1000) {
+			t.Errorf("overflow must carry recovery metadata only: overflow=%v messages=%d pressure=%d", cmd.DiscussContextOverflow, len(cmd.DiscussMessages), cmd.DiscussContextTokens)
+		}
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{Artifacts: artifacts, AdmissionMaxTokens: 1000})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"}}
+	driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
+	if svc.calls != 2 || sess.lastProcessed.SourceCursor != 200 || svc.lastCmd.DiscussContextOverflow {
+		t.Fatalf("recovery failed: calls=%d cursor=%+v overflow=%v", svc.calls, sess.lastProcessed, svc.lastCmd.DiscussContextOverflow)
+	}
+}
+
+func TestDiscussChannelOverflowRecoveryIsBoundedAndDoesNotConsume(t *testing.T) {
+	for _, retries := range []int{0, 99} {
+		svc := &fakeTurnService{recomposeRuns: retries}
+		artifacts := &fakeArtifactProvider{artifacts: []timeline.CompactionArtifact{{ID: "summary", Summary: strings.Repeat("s", 8000)}}}
+		driver := NewDiscussDriver(DiscussDriverDeps{Artifacts: artifacts, AdmissionMaxTokens: 1000})
+		sess := &discussSession{config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"}}
+		driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
+		want := 1
+		if retries > 0 {
+			want = (maxDiscussRecoveries + 1)
+		}
+		if svc.calls != want || sess.lastProcessed.SourceCursor != 0 || len(svc.lastCmd.DiscussMessages) != 0 {
+			t.Fatalf("unsafe overflow retry: calls=%d want=%d cursor=%+v payloads=%d", svc.calls, want, sess.lastProcessed, len(svc.lastCmd.DiscussMessages))
+		}
+	}
 }
 
 func (p *countingArtifactProvider) ActiveCompactionArtifacts(context.Context, string, string) ([]timeline.CompactionArtifact, error) {
@@ -56,10 +104,29 @@ func TestHandleReplyWithTurn_RecomposeLimitDefersToNextTrigger(t *testing.T) {
 
 	driver.handleReplyWithTurn(context.Background(), sess, recomposeTestRC(), driver.logger, svc)
 
-	if svc.calls != maxDiscussRecomposeAttempts {
-		t.Fatalf("StartTurn calls = %d, want %d", svc.calls, maxDiscussRecomposeAttempts)
+	if svc.calls != (maxDiscussRecoveries + 1) {
+		t.Fatalf("StartTurn calls = %d, want %d", svc.calls, (maxDiscussRecoveries + 1))
 	}
 	if sess.lastProcessed.SourceCursor == 200 {
 		t.Fatal("cursor must not advance when every attempt ended in recompose")
+	}
+}
+
+func TestHandleReplyWithTurnThirdRecoveryCompletesOriginalInput(t *testing.T) {
+	svc := &fakeTurnService{recomposeRuns: 3}
+	svc.onStart = func(cmd turn.StartTurnCommand) {
+		if cmd.DiscussRecoveryExhausted != (svc.calls == 4) {
+			t.Errorf("attempt %d exhausted=%v", svc.calls, cmd.DiscussRecoveryExhausted)
+		}
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"}}
+	driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
+	if svc.calls != 4 || sess.lastProcessed.SourceCursor != 200 {
+		t.Fatalf("calls=%d cursor=%+v; third recovery must complete original input", svc.calls, sess.lastProcessed)
+	}
+	driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
+	if svc.calls != 4 {
+		t.Fatal("same input processed twice")
 	}
 }

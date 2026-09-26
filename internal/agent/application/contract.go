@@ -12,6 +12,10 @@ import (
 // turn. Transport callers should prefer turn.StartTurnCommand; the additional
 // channel and function fields below are strictly in-process runtime state.
 type ChatRequest struct {
+	discussCurrentSources    []turn.ContextMessageSource
+	discussMessages          []turn.DiscussMessage
+	discussContextTokens     int
+	discussRecoveryExhausted bool
 	// OnModelPreferenceSettled releases subsequent picker writes once this
 	// turn can no longer overwrite them. It does not acknowledge generation.
 	OnModelPreferenceSettled func() `json:"-"`
