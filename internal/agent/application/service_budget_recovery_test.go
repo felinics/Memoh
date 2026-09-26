@@ -451,3 +451,16 @@ func TestChatBudgetRecoveryInsertsEmptyHistoryBeforeFrozenSuffix(t *testing.T) {
 		t.Fatalf("recovery reordered context: err=%v messages=%v", err, got.Messages)
 	}
 }
+
+func TestPipelineMediaFollowsExplicitCurrentInput(t *testing.T) {
+	s, _, _, cfg := chatRecoveryFixture(t)
+	cfg.Messages = []sdk.Message{sdk.UserMessage("current"), sdk.UserMessage("self echo"), sdk.UserMessage("memory")}
+	cfg.ContextCurrentUserMessageIndex = intPointer(0)
+	cfg.ContextMemoryMessageIndex = intPointer(2)
+	cfg.InlineImages = []sdk.ImagePart{{Image: "data:image/png;base64,YQ=="}}
+	cfg.InlineAttachments = []sdk.MessagePart{sdk.FilePart{Data: "Yg==", MediaType: "application/pdf"}}
+	cfg = s.prepareRunConfig(t.Context(), cfg)
+	if len(cfg.Messages[0].Content) != 3 || len(cfg.Messages[1].Content) != 1 || len(cfg.Messages[2].Content) != 1 {
+		t.Fatalf("media detached from current input: %v", cfg.Messages)
+	}
+}

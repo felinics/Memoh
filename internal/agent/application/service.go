@@ -1498,7 +1498,7 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 	} else if len(cfg.InlineImages) > 0 || len(cfg.InlineAttachments) > 0 {
 		// Pipeline path: the user query is already embedded in the RC messages,
 		// but media parts are not rendered by the pipeline renderer. Inject the
-		// inline media into the last user message so the model receives them.
+		// inline media into the identified current input.
 		imageParts := make([]sdk.MessagePart, 0, len(cfg.InlineImages)+len(cfg.InlineAttachments))
 		for _, img := range cfg.InlineImages {
 			if strings.TrimSpace(img.Image) != "" {
@@ -1512,18 +1512,13 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 				cfg.ContextCurrentUserMessageIndex,
 				cfg.ContextMemoryMessageIndex,
 			)
-			injected := false
-			for i := len(cfg.Messages) - 1; i >= 0; i-- {
-				if cfg.Messages[i].Role == sdk.MessageRoleUser {
-					cfg.Messages[i].Content = append(cfg.Messages[i].Content, imageParts...)
-					if i < len(cfg.ForkContextSourceMessageIDs) {
-						cfg.ForkContextSourceMessageIDs[i] = ""
-					}
-					injected = true
-					break
+			if currentIndex != nil {
+				i := *currentIndex
+				cfg.Messages[i].Content = append(cfg.Messages[i].Content, imageParts...)
+				if i < len(cfg.ForkContextSourceMessageIDs) {
+					cfg.ForkContextSourceMessageIDs[i] = ""
 				}
-			}
-			if !injected {
+			} else {
 				cfg.Messages = append(cfg.Messages, sdk.UserMessage("", imageParts...))
 				cfg.ForkContextSourceMessageIDs = append(cfg.ForkContextSourceMessageIDs, "")
 				index := len(cfg.Messages) - 1

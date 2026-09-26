@@ -76,7 +76,9 @@ func protectCurrentSources(messages []CompactionCandidate, sources []turn.Contex
 		if isProtectedSource(messages[i], sources) {
 			for j := i; j < len(messages); j++ {
 				messages[j].Policies = appendPolicy(messages[j].Policies, CompactPolicyPreserveRecent)
+				messages[j].Policies = appendPolicy(messages[j].Policies, CompactPolicyMustKeep)
 			}
+			propagateMustKeepAcrossToolExchanges(messages)
 			return
 		}
 	}

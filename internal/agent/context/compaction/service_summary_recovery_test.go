@@ -179,3 +179,37 @@ func TestSummaryRecoveryProtectsCurrentSourcesAndCountsThemOnce(t *testing.T) {
 		t.Fatalf("old history failed to progress: claims=%v", q.markedIDs)
 	}
 }
+
+type protectedTruncatedQueries struct{ *fakeQueries }
+
+func (q protectedTruncatedQueries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Context, p sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
+	rows, e := q.fakeQueries.ListUncompactedMessagesBySessionWithinBytes(ctx, p)
+	for i := range rows {
+		rows[i].CandidateCount = int64(len(rows) + 1)
+	}
+	return rows, e
+}
+func TestProtectedSourcesSurviveTruncatedRead(t *testing.T) {
+	first := mkRow(t, "user", jsonStr(strings.Repeat("first unconsumed request ", 80)), 1000)
+	second := mkRow(t, "user", jsonStr("second unconsumed request"), 100)
+	for _, truncated := range []bool{false, true} {
+		q := &fakeQueries{uncompacted: []sqlc.ListUncompactedMessagesBySessionRow{first, second}}
+		stub := &stubModel{summary: "short summary"}
+		cfg := machineryConfig(stub, 200)
+		cfg.AllowFrontierFusion = true
+		cfg.HistoryBudgetTokens = 500
+		cfg.ProtectedSources = []turn.ContextMessageSource{{Kind: "history", ID: first.ID.String(), Current: true}, {Kind: "history", ID: second.ID.String(), Current: true}}
+		svc := newMachineryService(q)
+		if truncated {
+			svc = newMachineryService(protectedTruncatedQueries{q})
+		}
+		result, err := svc.RunCompactionSync(t.Context(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("truncated=%v status=%s marked=%v", truncated, result.Status, q.markedIDs)
+		if len(q.markedIDs) > 0 {
+			t.Fatal("protected batch input was compacted")
+		}
+	}
+}
