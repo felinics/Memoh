@@ -28,6 +28,44 @@ func discussMessageTokens(m turn.DiscussMessage) int {
 	return contextfrag.TokensFromBytes(len(m.Content))
 }
 
+func admitDiscussAgentMessages(messages []turn.DiscussMessage, budgetTokens int) ([]turn.DiscussMessage, discussAdmission) {
+	fixedBytes := len(discussAgentPromptPrefix) + len(discussAgentPromptSuffix)
+	entries := make([]turn.AdmissionEntry, len(messages))
+	total := fixedBytes
+	for i, message := range messages {
+		role := strings.TrimSpace(message.Role)
+		if role == "" {
+			role = "user"
+		}
+		cost := 0
+		if content := strings.TrimSpace(message.Content); content != "" {
+			cost = len(role) + len(content) + len("[]\n\n\n")
+		}
+		entries[i] = turn.AdmissionEntry{Cost: cost, Pinned: message.CompactionArtifactID != "", ToolResponse: strings.EqualFold(role, "tool")}
+		total += cost
+	}
+	admission := discussAdmission{BudgetTokens: budgetTokens, EstimatedTokens: turn.EstimateTokensFromBytes(total)}
+	available := int(turn.ContextBudgetBytes(budgetTokens)) - fixedBytes
+	if available <= 0 {
+		admission.ProtectedOverflow = true
+		return nil, admission
+	}
+	decision := turn.AdmitContextEntries(entries, available)
+	admission.SelectedTokens = turn.EstimateTokensFromBytes(fixedBytes + decision.SelectedTokens)
+	admission.DroppedMessages = decision.DroppedEntries
+	admission.ProtectedOverflow = decision.ProtectedOverflow
+	if decision.ProtectedOverflow {
+		return nil, admission
+	}
+	kept := make([]turn.DiscussMessage, 0, len(messages)-decision.DroppedEntries)
+	for i, message := range messages {
+		if decision.Selected[i] {
+			kept = append(kept, message)
+		}
+	}
+	return kept, admission
+}
+
 // admitDiscussMessages trims a composed discuss context to the token budget
 // before SDK conversion by delegating to the shared turn admission core.
 // Artifact-summary messages and the newest message are protected; older raw

@@ -24,6 +24,10 @@ func EstimateTokensFromBytes(n int) int {
 	return contextfrag.TokensFromBytes(n)
 }
 
+func ContextBudgetBytes(tokens int) int64 {
+	return contextfrag.BudgetBytesForTokens(tokens)
+}
+
 // AdmissionEntry describes one context entry, ordered oldest to newest, for
 // the shared pre-materialization admission decision (CM-ADM-001).
 type AdmissionEntry struct {

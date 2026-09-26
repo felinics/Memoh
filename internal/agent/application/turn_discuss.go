@@ -588,7 +588,7 @@ func discussCompactableTokens(messages []turn.DiscussMessage) int {
 func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
 	// ACP resolution carries no model window, so the prompt is budgeted by
 	// the absolute cap before any concatenation (CM-ADM-001).
-	admitted, admission := admitDiscussMessages(cmd.DiscussMessages, s.contextAbsoluteMaxTokens())
+	admitted, admission := admitDiscussAgentMessages(cmd.DiscussMessages, s.contextAbsoluteMaxTokens())
 	if admission.ProtectedOverflow {
 		s.logger.ErrorContext(ctx, "context_admission_rejected",
 			slog.String("path", "discuss_agent"),
@@ -830,30 +830,4 @@ func injectImagePartsIntoLastUserMessage(msgs []sdk.Message, parts []sdk.ImagePa
 			return
 		}
 	}
-}
-
-// discussAgentFullContextPrompt renders the composed context into the single
-// reset-each-turn prompt used by external ACP runtimes. ACP does not receive
-// native ToolUsage, so its stable preamble owns the send-only output contract.
-func discussAgentFullContextPrompt(messages []turn.DiscussMessage) string {
-	var b strings.Builder
-	b.WriteString("You are replying in a discuss-mode conversation. The runtime is reset each turn, so use the complete context below as the source of truth.\n\n")
-	b.WriteString("IMPORTANT: You MUST use the `send` tool to speak in the observed conversation. Ordinary text output is internal and invisible to everyone.\n\n")
-	for _, msg := range messages {
-		role := strings.TrimSpace(msg.Role)
-		if role == "" {
-			role = "user"
-		}
-		content := strings.TrimSpace(msg.Content)
-		if content == "" {
-			continue
-		}
-		b.WriteString("[")
-		b.WriteString(role)
-		b.WriteString("]\n")
-		b.WriteString(content)
-		b.WriteString("\n\n")
-	}
-	b.WriteString("Reply to the latest user-visible message when a response is appropriate.")
-	return b.String()
 }

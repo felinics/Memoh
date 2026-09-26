@@ -35,6 +35,10 @@ func TokensFromBytes(n int) int {
 	return n / EstimateBytesPerToken
 }
 
+func BudgetBytesForTokens(tokens int) int64 {
+	return int64(max(0, tokens)) * EstimateBytesPerToken
+}
+
 // ProviderBudgetTokensFromBytes converts bytes for provider-envelope decisions,
 // including selection under a provider budget. Compaction, cache metrics, and
 // other ledger consumers keep the legacy floor-based TokensFromBytes contract.
