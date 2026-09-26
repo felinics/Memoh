@@ -206,3 +206,5 @@ require (
 )
 
 tool github.com/swaggo/swag/cmd/swag
+
+replace github.com/felinics/twilight => github.com/ChrAlpha/memoh-twilight-ai v0.0.0-20260924141546-9b7207ddd764
