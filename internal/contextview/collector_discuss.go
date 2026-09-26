@@ -43,8 +43,16 @@ func (*DiscussContextCollector) Collect(_ context.Context, req CollectRequest) (
 
 	frags := make([]contextfrag.ContextFrag, 0, len(cfg.ComposedMessages))
 	currentUserIndex := latestComposedUserMessageIndex(cfg.ComposedMessages)
+	knownSources := false
+	for _, message := range cfg.ComposedMessages {
+		knownSources = knownSources || message.Source != nil
+	}
 	for i, message := range cfg.ComposedMessages {
-		frags = append(frags, discussComposedMessageFrag(message, i, i == currentUserIndex, req.Scope))
+		current := i == currentUserIndex
+		if knownSources {
+			current = message.Source != nil && message.Source.Current
+		}
+		frags = append(frags, discussComposedMessageFrag(message, i, current, req.Scope))
 	}
 	if req.Intent == contextfrag.IntentRunConfigPreProvider {
 		frags = contextfrag.RepairToolClosureFrags(frags, req.Scope, discussContextCollectorName)
@@ -78,6 +86,9 @@ func discussComposedMessageFrag(message timeline.ContextMessage, index int, curr
 		Collector:  discussContextCollectorName,
 		Index:      index,
 	}
+	if message.Source != nil {
+		input.SourceID = message.Source.ID
+	}
 	if message.CompactionArtifactID != "" {
 		input.Kind = contextfrag.KindConversationSummary
 		input.Slot = contextfrag.SlotBeforeHistory
@@ -109,7 +120,7 @@ func injectDiscussImages(frags []contextfrag.ContextFrag, images []sdk.ImagePart
 	}
 	for i := len(frags) - 1; i >= 0; i-- {
 		msg := contextfrag.FragMessage(frags[i])
-		if msg == nil || msg.Role != sdk.MessageRoleUser {
+		if msg == nil || frags[i].Kind != contextfrag.KindCurrentUserMessage {
 			continue
 		}
 		enriched := *msg

@@ -47,7 +47,7 @@ func admitDiscussAgentContext(messages []turn.DiscussMessage, budgetTokens, cont
 		if content := strings.TrimSpace(message.Content); content != "" {
 			cost = len(role) + len(content) + len("[]\n\n\n")
 		}
-		entries[i] = turn.AdmissionEntry{Cost: cost, Pinned: message.CompactionArtifactID != "", ToolResponse: strings.EqualFold(role, "tool")}
+		entries[i] = turn.AdmissionEntry{Source: message.Source, Cost: cost, Pinned: message.CompactionArtifactID != "", ToolResponse: strings.EqualFold(role, "tool")}
 		total += cost
 	}
 	admission := discussAdmission{BudgetTokens: budgetTokens, EstimatedTokens: turn.EstimateTokensFromBytes(total) + imageTokens}
@@ -58,11 +58,13 @@ func admitDiscussAgentContext(messages []turn.DiscussMessage, budgetTokens, cont
 	}
 	decision := turn.AdmitContextEntries(entries, available)
 	admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(available)
-	for _, entry := range entries {
-		if !entry.Pinned {
-			admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(max(0, available-entry.Cost))
+	currentCost := 0
+	for i, current := range turn.CurrentAdmissionEntries(entries) {
+		if current {
+			currentCost += entries[i].Cost
 		}
 	}
+	admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(max(0, available-currentCost))
 	admission.SelectedTokens = turn.EstimateTokensFromBytes(fixedBytes+decision.SelectedTokens) + imageTokens
 	admission.DroppedMessages = decision.DroppedEntries
 	admission.ProtectedOverflow = decision.ProtectedOverflow
@@ -93,13 +95,17 @@ func admitDiscussMessages(messages []turn.DiscussMessage, budgetTokens int) ([]t
 	for i := range messages {
 		entries[i] = turn.AdmissionEntry{
 			Cost:         discussMessageTokens(messages[i]),
+			Source:       messages[i].Source,
 			Pinned:       messages[i].CompactionArtifactID != "",
 			ToolResponse: strings.EqualFold(strings.TrimSpace(messages[i].Role), "tool"),
 		}
-		if !entries[i].Pinned {
-			admission.RecoveryBudgetTokens = max(0, budgetTokens-entries[i].Cost)
+	}
+	for i, current := range turn.CurrentAdmissionEntries(entries) {
+		if current {
+			admission.RecoveryBudgetTokens -= entries[i].Cost
 		}
 	}
+	admission.RecoveryBudgetTokens = max(0, admission.RecoveryBudgetTokens)
 	decision := turn.AdmitContextEntries(entries, budgetTokens)
 	admission.EstimatedTokens = decision.EstimatedTokens
 	admission.SelectedTokens = decision.SelectedTokens

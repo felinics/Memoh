@@ -202,6 +202,8 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		return
 	}
 	if admission.DroppedMessages > 0 {
+		cmd.DiscussContextTokens = max(cmd.DiscussContextTokens, admission.EstimatedTokens)
+		cmd.DiscussCurrentTokens = max(cmd.DiscussCurrentTokens, budgetTokens-admission.RecoveryBudgetTokens)
 		s.logger.InfoContext(ctx, "context_admission",
 			slog.String("path", "discuss_turn"),
 			slog.String("bot_id", cmd.BotID),
@@ -233,9 +235,15 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			refs[i] = timeline.ImageAttachmentRef{ContentHash: r.ContentHash, Mime: r.Mime}
 		}
 		imageParts = s.inlineDiscussImages(ctx, cmd.BotID, refs)
-		injectImagePartsIntoLastUserMessage(runConfig.Messages, imageParts)
 	}
 	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, imageParts)
+	for _, frag := range runConfig.ContextSourceFrags {
+		if frag.Kind == contextfrag.KindCurrentUserMessage && frag.Provenance.Collector == "discuss_context" {
+			if message := contextfrag.FragMessage(frag); message != nil {
+				runConfig.Messages[frag.Provenance.Index] = *message
+			}
+		}
+	}
 	runConfig = runConfig.RefreshContextFrag()
 	terminal := s.contextLifecycleTerminal(ctx, runConfig)
 	var lifecycleCause error
@@ -733,6 +741,7 @@ func discussMessagesToTimeline(messages []turn.DiscussMessage) []timeline.Contex
 	for i, message := range messages {
 		result[i] = timeline.ContextMessage{
 			Role:                 message.Role,
+			Source:               message.Source,
 			Content:              message.Content,
 			RawContent:           message.RawContent,
 			CompactionArtifactID: message.CompactionArtifactID,

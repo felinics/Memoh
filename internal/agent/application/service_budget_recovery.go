@@ -233,7 +233,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 			available -= cost
 		}
 	}
-	originalHistory := max(0, discussContextPressure(cmd)-cmd.DiscussCurrentTokens)
+	originalHistory := max(0, cmd.DiscussContextTokens-cmd.DiscussCurrentTokens)
 	pressure = max(pressure, contextfrag.ProviderBudgetTokensFromBytes(int(contextfrag.BudgetBytesForTokens(originalHistory))))
 	if pressure <= available || available <= 0 {
 		return cfg, false, nil
