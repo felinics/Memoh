@@ -20,10 +20,11 @@ type TurnResponseEntry struct {
 
 // ContextMessage is a unified message for LLM context, produced by MergeContext.
 type ContextMessage struct {
-	Role                 string          `json:"role"`
-	Content              string          `json:"content"`
-	RawContent           json.RawMessage `json:"raw_content,omitempty"`
-	CompactionArtifactID string          `json:"compaction_artifact_id,omitempty"`
+	Source               *turn.ContextMessageSource `json:"source,omitempty"`
+	Role                 string                     `json:"role"`
+	Content              string                     `json:"content"`
+	RawContent           json.RawMessage            `json:"raw_content,omitempty"`
+	CompactionArtifactID string                     `json:"compaction_artifact_id,omitempty"`
 }
 
 // ComposeContextResult holds the output of ComposeContext.
@@ -60,9 +61,10 @@ func ActiveRenderedContext(rc RenderedContext, artifacts []CompactionArtifact) R
 const earliestMergeTime int64 = -1 << 63
 
 type mergeEntry struct {
-	kind string // "summary_before_rc", "rc", "summary", or "tr"
-	time int64
-	step int
+	source *turn.ContextMessageSource
+	kind   string // "summary_before_rc", "rc", "summary", or "tr"
+	time   int64
+	step   int
 	// For RC entries
 	rcContent []RenderedContentPiece
 	// For summary entries
@@ -92,6 +94,7 @@ func appendRenderedContextEntries(entries []mergeEntry, rc RenderedContext) []me
 			time:      seg.ReceivedAtMs,
 			step:      2 * i,
 			rcContent: seg.Content,
+			source:    renderedMessageSource(seg),
 		})
 	}
 	return entries
@@ -115,6 +118,7 @@ func appendActiveRenderedContextEntries(
 			time:      segment.ReceivedAtMs,
 			step:      2 * i,
 			rcContent: segment.Content,
+			source:    renderedMessageSource(segment),
 		})
 	}
 	return entries
@@ -127,6 +131,7 @@ func appendTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEntry) []
 			time:         tr.RequestedAtMs,
 			step:         2 * i,
 			trRole:       tr.Role,
+			source:       &turn.ContextMessageSource{Kind: "history", ID: tr.SourceMessageID},
 			trContent:    tr.Content,
 			trRawContent: tr.RawContent,
 		})
@@ -147,6 +152,7 @@ func appendActiveTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEnt
 			time:         tr.RequestedAtMs,
 			step:         2 * i,
 			trRole:       tr.Role,
+			source:       &turn.ContextMessageSource{Kind: "history", ID: tr.SourceMessageID},
 			trContent:    tr.Content,
 			trRawContent: tr.RawContent,
 		})
@@ -156,6 +162,7 @@ func appendActiveTurnResponseEntries(entries []mergeEntry, trs []TurnResponseEnt
 
 func mergeEntries(entries []mergeEntry) []ContextMessage {
 	sortMergeEntries(entries)
+	markCurrentEntries(entries, nil, nil)
 	return materializeMergeEntries(entries)
 }
 
@@ -201,7 +208,7 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 				}
 			}
 			if pendingText.Len() > 0 {
-				messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String()})
+				messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String(), Source: entry.source})
 			}
 		case "summary", "summary_slot", "summary_before_rc", "summary_tr_slot":
 			messages = append(messages, ContextMessage{
@@ -212,6 +219,7 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 		case "tr":
 			messages = append(messages, ContextMessage{
 				Role:       entry.trRole,
+				Source:     entry.source,
 				Content:    entry.trContent,
 				RawContent: entry.trRawContent,
 			})
@@ -267,6 +275,7 @@ func composeMergeEntries(rc RenderedContext, trs []TurnResponseEntry, artifacts 
 
 // ComposeBudget bounds composition before materialization (CM-ADM-001).
 type ComposeBudget struct {
+	After *DiscussCursorPosition
 	// MaxTokens is the admission budget in shared-estimator tokens. Zero or
 	// negative disables budgeting (legacy behavior).
 	MaxTokens int
@@ -305,11 +314,13 @@ func ComposeContextWithArtifactsBudgeted(
 		return nil, ComposeAdmission{}
 	}
 	sortMergeEntries(entries)
+	markCurrentEntries(entries, rc, budget.After)
 
 	admitted := make([]turn.AdmissionEntry, len(entries))
 	for i := range entries {
 		admitted[i] = turn.AdmissionEntry{
 			Cost:   mergeEntryTokens(entries[i]),
+			Source: entries[i].source,
 			Pinned: isSummaryMergeKind(entries[i].kind),
 			ToolResponse: entries[i].kind == "tr" &&
 				strings.EqualFold(strings.TrimSpace(entries[i].trRole), "tool"),
@@ -323,9 +334,9 @@ func ComposeContextWithArtifactsBudgeted(
 		DroppedEntries:    decision.DroppedEntries,
 		ProtectedOverflow: decision.ProtectedOverflow,
 	}
-	for _, entry := range admitted {
-		if !entry.Pinned {
-			admission.CurrentTokens = entry.Cost
+	for i, current := range turn.CurrentAdmissionEntries(admitted) {
+		if current {
+			admission.CurrentTokens += admitted[i].Cost
 		}
 	}
 	if decision.ProtectedOverflow {

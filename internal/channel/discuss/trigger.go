@@ -21,6 +21,7 @@ type discussTurnPlan struct {
 // before materialization (CM-ADM-001); a ProtectedOverflow admission returns
 // ok=false so the caller fails closed instead of running the turn.
 func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
+	budget.After = &after
 	composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, budget)
 	if composed == nil && !admission.ProtectedOverflow {
 		return discussTurnPlan{}, admission, false
@@ -35,6 +36,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 	for _, message := range composed.Messages {
 		msgs = append(msgs, turn.DiscussMessage{
 			Role:                 message.Role,
+			Source:               message.Source,
 			Content:              message.Content,
 			RawContent:           message.RawContent,
 			CompactionArtifactID: message.CompactionArtifactID,

@@ -140,3 +140,31 @@ func TestComposeBudgetedDropsLeadingOrphanToolResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeProtectsExternalInputBeforeSelfEcho(t *testing.T) {
+	rc := budgetTestRC(strings.Repeat("u", 4400), "echo")
+	rc[1].IsSelfSent = true
+	_, got := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 1000})
+	if !got.ProtectedOverflow {
+		t.Fatalf("external input dropped for echo: %+v", got)
+	}
+}
+
+func TestComposeProtectsEveryUnconsumedExternalInput(t *testing.T) {
+	rc := budgetTestRC(strings.Repeat("h", 8000), strings.Repeat("a", 1600), strings.Repeat("b", 1600), "echo")
+	rc[3].IsMyself = true
+	after := DiscussCursorPosition{SourceCursor: 100}
+	composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 810, After: &after})
+	if composed == nil || admission.CurrentTokens != 800 || len(composed.Messages) != 3 {
+		t.Fatalf("batch selection=%+v result=%+v", admission, composed)
+	}
+	for _, message := range composed.Messages[:2] {
+		if message.Source == nil || !message.Source.Current || message.Source.ID == "" {
+			t.Fatalf("lost source: %+v", message)
+		}
+	}
+	_, admission = ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 700, After: &after})
+	if !admission.ProtectedOverflow {
+		t.Fatal("partially consumed an oversized current batch")
+	}
+}
