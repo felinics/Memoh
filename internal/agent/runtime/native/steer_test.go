@@ -130,6 +130,13 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 				}
 				return
 			}
+			// The provider observer stops forwarding as soon as the model
+			// context is cancelled, without waiting for the provider's stream to
+			// close, so the run can finish before an interrupted invocation's
+			// own goroutine records the disconnect.
+			for deadline := time.Now().Add(2 * time.Second); disconnected.Load() < int32(interruptions) && time.Now().Before(deadline); {
+				time.Sleep(time.Millisecond)
+			}
 			if calls.Load() != int32(interruptions+retryAttempts+1) || disconnected.Load() != int32(interruptions) || starts != 1 || terminals != 1 {
 				t.Fatalf("calls=%d disconnected=%d starts=%d terminals=%d", calls.Load(), disconnected.Load(), starts, terminals)
 			}
