@@ -125,3 +125,17 @@ func admitDiscussMessages(messages []turn.DiscussMessage, budgetTokens int) ([]t
 	}
 	return kept, admission
 }
+
+func discussCurrentMessageTokens(messages []turn.DiscussMessage) int {
+	entries := make([]turn.AdmissionEntry, len(messages))
+	for i, message := range messages {
+		entries[i] = turn.AdmissionEntry{Source: message.Source, Pinned: message.CompactionArtifactID != "", Cost: discussMessageTokens(message)}
+	}
+	tokens := 0
+	for i, current := range turn.CurrentAdmissionEntries(entries) {
+		if current {
+			tokens += entries[i].Cost
+		}
+	}
+	return tokens
+}

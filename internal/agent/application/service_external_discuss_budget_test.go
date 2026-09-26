@@ -179,3 +179,13 @@ func TestExternalDiscussRecoversPretrimmedHistoryPressure(t *testing.T) {
 		t.Fatalf("lost pretrim pressure: err=%v calls=%d", err, len(runner.configs))
 	}
 }
+
+func TestExternalDiscussOriginalPressureUsesFinalHistoryAllowance(t *testing.T) {
+	service, runner := newControllerPolicyService(t, nil)
+	service.SetContextAbsoluteMaxTokens(1000)
+	req := ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussContextTokens: 900, discussMessages: []turn.DiscussMessage{{Role: "user", Content: "current"}}}
+	_, err := service.prepareExternalDiscussContext(t.Context(), req, strings.Repeat("m", 2800), 0)
+	if !errors.Is(err, native.ErrContextRecompose) || len(runner.configs) != 1 {
+		t.Fatalf("ignored final fixed overhead: err=%v calls=%d", err, len(runner.configs))
+	}
+}
