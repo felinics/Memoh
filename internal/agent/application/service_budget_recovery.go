@@ -91,7 +91,7 @@ func (l chatHistoryLayout) availableHistoryBudget(cfg native.RunConfig) (int, in
 		}
 	}
 	pressure := max(contextfrag.ProviderBudgetTokensFromBytes(int(contextfrag.BudgetBytesForTokens(l.pressureTokens))), raw+summaries)
-	if raw+summaries == 0 || pressure <= available {
+	if pressure <= available {
 		return 0, pressure
 	}
 	return max(0, available), pressure
@@ -210,6 +210,9 @@ func (l chatHistoryLayout) replaceSourceFrags(ctx context.Context, old, cfg nati
 		}
 		out = append(out, frag)
 	}
+	if !inserted {
+		out = append(out, history...)
+	}
 	return out
 }
 
@@ -230,6 +233,8 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 			available -= cost
 		}
 	}
+	originalHistory := max(0, discussContextPressure(cmd)-cmd.DiscussCurrentTokens)
+	pressure = max(pressure, contextfrag.ProviderBudgetTokensFromBytes(int(contextfrag.BudgetBytesForTokens(originalHistory))))
 	if pressure <= available || available <= 0 {
 		return cfg, false, nil
 	}

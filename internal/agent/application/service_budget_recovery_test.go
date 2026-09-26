@@ -20,6 +20,7 @@ import (
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -380,5 +381,39 @@ func TestChatBudgetRecoveryFusesSummaryOnlyHistoryInShadow(t *testing.T) {
 	got, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg)
 	if err != nil || len(runner.configs) != 1 || history.loads != 1 || countRecoveryText(got.Messages, "compacted history") != 1 {
 		t.Fatalf("summary-only recovery: err=%v compactions=%d loads=%d", err, len(runner.configs), history.loads)
+	}
+}
+
+func TestBudgetRecoveryRetainsPressureAfterAllHistoryWasTrimmed(t *testing.T) {
+	for _, mode := range []string{"chat", "discuss"} {
+		t.Run(mode, func(t *testing.T) {
+			s, history, runner, cfg := chatRecoveryFixture(t)
+			s.SetSyncCompactionMode("shadow")
+			cfg.Messages = []sdk.Message{sdk.UserMessage("current request")}
+			cfg.ContextFrags = nil
+			cfg.ContextTrimmableMessages = 0
+			cfg.ContextCurrentUserMessageIndex = intPointer(0)
+			cfg.ContextMemoryMessageIndex = nil
+			cfg.ContextHookText = ""
+			cfg.ContextSourceFrags = buildProviderSourceFrags(t.Context(), cfg, []native.SystemSection{{ID: "system", Kind: contextfrag.KindSystemPrompt, Text: strings.Repeat("s", 3200)}}, nil)
+			if mode == "chat" {
+				cfg.RecoverContextBudget = s.chatBudgetRecovery(ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID}, chatHistoryLayout{pressureTokens: 20000})
+			} else {
+				cfg.RecoverContextBudget = func(ctx context.Context, c native.RunConfig) (native.RunConfig, bool, error) {
+					return s.recoverDiscussContextBudget(ctx, turn.StartTurnCommand{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, DiscussContextTokens: 20004, DiscussCurrentTokens: 4}, "", c)
+				}
+			}
+			got, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg)
+			if len(runner.configs) != 1 {
+				t.Fatalf("lost original pressure: calls=%d err=%v", len(runner.configs), err)
+			}
+			if mode == "discuss" {
+				if !errors.Is(err, native.ErrContextRecompose) {
+					t.Fatalf("expected recompose: %v", err)
+				}
+			} else if err != nil || history.loads != 1 || countRecoveryText(got.Messages, "compacted history") != 1 || countRecoveryText(got.Messages, "current request") != 1 {
+				t.Fatalf("reloaded history/current lost: err=%v loads=%d messages=%v", err, history.loads, got.Messages)
+			}
+		})
 	}
 }
