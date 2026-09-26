@@ -35,7 +35,11 @@ if [ "$CONTAINER_BACKEND" != "docker" ] && [ "$CONTAINER_BACKEND" != "apple" ]; 
 
   # ---- Start containerd in background ----
   mkdir -p /run/containerd
-  containerd &
+  # OTEL_* in this environment configures Memoh, and containerd reads the same
+  # variables: with an endpoint set it starts exporting its own spans, by
+  # default over http/protobuf and under Memoh's OTEL_SERVICE_NAME. Against
+  # Memoh's default gRPC collector port that fails on every export.
+  OTEL_SDK_DISABLED=true containerd &
   CONTAINERD_PID=$!
 
   echo "Waiting for containerd..."

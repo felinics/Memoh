@@ -115,3 +115,32 @@ func TestServerRequestLogOmitsQuery(t *testing.T) {
 		})
 	}
 }
+
+// latency is the field an operator sorts by to find a slow request. Echo only
+// measures it when asked, and without that every line reads 0s.
+func TestServerRequestLogReportsLatency(t *testing.T) {
+	var logs bytes.Buffer
+	srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", requestLogTestHandler{
+		handle: func(c echo.Context) error {
+			time.Sleep(20 * time.Millisecond)
+			return c.NoContent(http.StatusNoContent)
+		},
+	})
+	srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	var entry struct {
+		Msg     string `json:"msg"`
+		Latency int64  `json:"latency"`
+	}
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if err := json.Unmarshal([]byte(line), &entry); err == nil && entry.Msg == "request" {
+			break
+		}
+	}
+	if entry.Msg != "request" {
+		t.Fatalf("no request line in %s", logs.String())
+	}
+	if got := time.Duration(entry.Latency); got < 20*time.Millisecond {
+		t.Errorf("latency = %v, want at least the 20ms the handler took", got)
+	}
+}
