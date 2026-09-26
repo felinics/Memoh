@@ -235,8 +235,8 @@ func TestAutomaticCompactionPathsApplyTargetAndBoundAsyncDrain(t *testing.T) {
 	if got := runner.configs[0].TargetTokens; got != 100000 {
 		t.Fatalf("sync TargetTokens = %d, want 100000 soft-share cap", got)
 	}
-	if runner.configs[0].AllowFrontierFusion {
-		t.Fatal("sync AllowFrontierFusion = true, want false")
+	if !runner.configs[0].AllowFrontierFusion {
+		t.Fatal("sync recovery must be able to replace oversized summaries")
 	}
 	if got := runner.configs[0].ContextWindowTokens; got != 200000 {
 		t.Fatalf("sync ContextWindowTokens = %d, want 200000", got)

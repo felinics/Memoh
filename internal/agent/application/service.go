@@ -403,6 +403,7 @@ type resolvedContext struct {
 	estimatedTokens             int // estimated input token count for compaction
 	compactableTokens           int // raw history eligible for compaction
 	compactableTokensKnown      bool
+	historyPressureTokens       int
 	contextTokenBudget          int // token budget used to clamp compaction triggers
 }
 
@@ -559,16 +560,17 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	var historyRecords []historyfrag.HistoryRecord
 	var estimatedTokens int
 	var compactableTokens int
+	var historyPressureTokens int
 	var compactableTokensKnown bool
 	var currentMessageIndex *int
 	if usePipeline {
-		messages, compactableTokens = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+		messages, compactableTokens, historyPressureTokens = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
 		compactableTokensKnown = true
 		// Pre-turn synchronous compaction backstop (CM-CMP-001), gated per
 		// CM-CMP-003. Mirrors the legacy path below: only a pass that
 		// actually produced a summary triggers recomposition; a noop keeps
 		// this turn's (already trimmed) context untouched.
-		if mode := s.effectiveSyncCompactionMode(); mode != syncCompactionModeOff && syncCompactionShouldRun(compactableTokens, contextTokenBudget) {
+		if mode := s.effectiveSyncCompactionMode(); mode != syncCompactionModeOff && syncCompactionShouldRun(historyPressureTokens, contextTokenBudget) {
 			threshold := hardCompactionThreshold(contextTokenBudget)
 			if mode == syncCompactionModeShadow {
 				s.logger.InfoContext(ctx, "sync_compaction_backstop",
@@ -581,7 +583,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 					slog.Int("threshold_tokens", threshold))
 			} else {
 				start := time.Now()
-				res := s.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget, chatModel.ID)
+				res := s.runCompactionSync(ctx, req, historyPressureTokens, contextTokenBudget, chatModel.ID)
 				s.logger.InfoContext(ctx, "sync_compaction_backstop",
 					slog.String("path", "pipeline_chat"),
 					slog.String("mode", "active"),
@@ -592,7 +594,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 					slog.Int("pressure_tokens", compactableTokens),
 					slog.Int("threshold_tokens", threshold))
 				if res.Status == compaction.StatusOK {
-					messages, compactableTokens = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
+					messages, compactableTokens, historyPressureTokens = s.buildMessagesFromPipeline(ctx, req, contextTokenBudget)
 				}
 			}
 		}
@@ -612,11 +614,9 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		historyRecords = prepared.records
 		estimatedTokens = prepared.estimatedTokens
 		compactableTokens = prepared.compactableTokens
+		historyPressureTokens = prepared.pressureTokens
 		compactableTokensKnown = true
-		// The trigger only counts raw (compactable) rows: active summaries can
-		// never be compacted away, so including them would make the trigger
-		// self-sustaining once accumulated summaries cross the threshold.
-		if syncCompactionShouldRun(compactableTokens, contextTokenBudget) {
+		if syncCompactionShouldRun(historyPressureTokens, contextTokenBudget) {
 			compactionThreshold := hardCompactionThreshold(contextTokenBudget)
 			s.logger.WarnContext(ctx, "resolve: context reached compaction threshold, running synchronous compaction",
 				slog.String("bot_id", req.BotID),
@@ -629,7 +629,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 			// summary. A noop (cooldown, in-flight, nothing markable) keeps
 			// this turn's context untouched — possibly still above the
 			// threshold — and the next turn re-evaluates.
-			if res := s.runCompactionSync(ctx, req, compactableTokens, contextTokenBudget, chatModel.ID); res.Status == compaction.StatusOK {
+			if res := s.runCompactionSync(ctx, req, historyPressureTokens, contextTokenBudget, chatModel.ID); res.Status == compaction.StatusOK {
 				prepared, loadErr = s.prepareHistoryContext(ctx, req, historyFallback, contextTokenBudget)
 				if loadErr != nil {
 					s.logger.ErrorContext(ctx, "resolve: prepare history context failed",
@@ -643,6 +643,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 				historyRecords = prepared.records
 				estimatedTokens = prepared.estimatedTokens
 				compactableTokens = prepared.compactableTokens
+				historyPressureTokens = prepared.pressureTokens
 				// Remove tool messages from the recent context — they are large
 				// and unnecessary when we already have a summary. Keep only
 				// user/assistant conversation turns.
@@ -775,6 +776,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 		injectedRecords:             injectedRecords,
 		estimatedTokens:             estimatedTokens,
 		compactableTokens:           compactableTokens,
+		historyPressureTokens:       historyPressureTokens,
 		compactableTokensKnown:      compactableTokensKnown,
 		contextTokenBudget:          contextTokenBudget,
 	}, req, nil

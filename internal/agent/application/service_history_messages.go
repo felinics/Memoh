@@ -20,15 +20,15 @@ import (
 // bot_history_messages. This gives chat mode the same event-driven context
 // that discuss mode uses, replacing the legacy loadMessages path. The second
 // return value is the raw (compactable) token pressure measured before
-// trimming — what admission drops is exactly what compaction must cover.
-func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int) {
+// trimming; the third also includes active summaries.
+func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest, contextTokenBudget int) ([]ModelMessage, int, int) {
 	sessionID := strings.TrimSpace(req.ThreadID)
 	if s.pipeline == nil || sessionID == "" {
-		return nil, 0
+		return nil, 0, 0
 	}
 	rc := s.pipeline.GetRC(sessionID)
 	if len(rc) == 0 {
-		return nil, 0
+		return nil, 0, 0
 	}
 
 	trs := s.loadTurnResponses(ctx, sessionID, contextTokenBudget)
@@ -36,12 +36,12 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 
 	composed := timeline.ComposeContextWithArtifacts(rc, trs, artifacts)
 	if composed == nil {
-		return nil, 0
+		return nil, 0, 0
 	}
 
 	messages := make([]ModelMessage, 0, len(composed.Messages))
 	pinned := make([]bool, 0, len(composed.Messages))
-	compactable := 0
+	compactable, pressure := 0, 0
 	for _, m := range composed.Messages {
 		contentJSON := m.RawContent
 		if len(contentJSON) == 0 {
@@ -57,8 +57,10 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		})
 		isPinned := m.CompactionArtifactID != ""
 		pinned = append(pinned, isPinned)
+		cost := estimateMessageTokens(messages[len(messages)-1])
+		pressure += cost
 		if !isPinned {
-			compactable += estimateMessageTokens(messages[len(messages)-1])
+			compactable += cost
 		}
 	}
 
@@ -67,7 +69,7 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 		messages = trimPipelineMessagesByTokens(s.logger, messages, pinned, contextTokenBudget)
 	}
 
-	return messages, compactable
+	return messages, compactable, pressure
 }
 
 // loadTimelineArtifacts projects the session's active compaction frontier for

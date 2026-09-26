@@ -206,11 +206,14 @@ func TestBuildMessagesFromPipelineInsertsArtifactSummary(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages, _ := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	messages, raw, pressure := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 0)
 
+	if pressure <= raw {
+		t.Fatalf("summary pressure missing: raw=%d pressure=%d", raw, pressure)
+	}
 	if len(messages) != 2 {
 		t.Fatalf("expected summary + current message, got %d: %s", len(messages), messagesDebug(messages))
 	}
@@ -276,14 +279,14 @@ func TestBuildMessagesFromPipelineKeepsSummaryUnderBudget(t *testing.T) {
 		logger:   slog.New(slog.DiscardHandler),
 	}
 
-	messages, _ := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
+	messages, raw, pressure := svc.buildMessagesFromPipeline(context.Background(), ChatRequest{
 		BotID:    pipelineTestBotID,
 		ThreadID: pipelineTestSessionID,
 	}, 200)
 
-	// Consecutive rendered segments merge into one user message, so the tail
-	// here is a single oversized block: without pinning the budget would drop
-	// everything and the model would receive no context at all.
+	if pressure <= raw || raw < 1000 {
+		t.Fatalf("pressure lost discarded history or summaries: raw=%d pressure=%d", raw, pressure)
+	}
 	if len(messages) == 0 {
 		t.Fatal("artifact summary must survive a budget that drops the whole tail")
 	}

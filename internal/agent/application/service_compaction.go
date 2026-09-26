@@ -71,7 +71,7 @@ func syncCompactionShouldRun(pressure, contextTokenBudget int) bool {
 
 func asyncCompactionInputTokens(rc resolvedContext, providerInputTokens int) int {
 	if rc.compactableTokensKnown {
-		return rc.compactableTokens
+		return max(rc.compactableTokens, rc.historyPressureTokens)
 	}
 	return providerInputTokens
 }
@@ -192,6 +192,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
+	cfg.AllowFrontierFusion = true
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 	cfg.ContextWindowTokens = contextTokenBudget
 	cfg.HardPressure = syncCompactionShouldRun(inputTokens, contextTokenBudget)

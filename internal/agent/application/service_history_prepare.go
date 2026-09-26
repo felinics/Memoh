@@ -14,6 +14,7 @@ type preparedHistoryContext struct {
 	records           []historyfrag.HistoryRecord
 	estimatedTokens   int
 	compactableTokens int
+	pressureTokens    int
 }
 
 func (s *Service) prepareHistoryContext(
@@ -53,6 +54,7 @@ func (s *Service) prepareHistoryContext(
 		records:           records,
 		estimatedTokens:   estimatedTokens,
 		compactableTokens: compactableTokens,
+		pressureTokens:    estimateMessagesTokens(loaded),
 	}, nil
 }
 
