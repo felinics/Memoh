@@ -77,7 +77,7 @@ type mergeEntry struct {
 // MergeContext interleaves RC segments and TR entries by timestamp.
 // RC entries use receivedAtMs; TR entries use requestedAtMs.
 // Tiebreaker: RC before TR on equal timestamp.
-// Consecutive RC entries between TR entries are merged into one user message.
+// Each RC entry remains a separate user message so selection preserves its source boundary.
 func MergeContext(rc RenderedContext, trs []TurnResponseEntry) []ContextMessage {
 	entries := make([]mergeEntry, 0, len(rc)+len(trs))
 	entries = appendRenderedContextEntries(entries, rc)
@@ -187,18 +187,11 @@ func mergeKindOrder(kind string) int {
 
 func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 	var messages []ContextMessage
-	var pendingText strings.Builder
-
-	flushRC := func() {
-		if pendingText.Len() > 0 {
-			messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String()})
-			pendingText.Reset()
-		}
-	}
 
 	for _, entry := range entries {
 		switch entry.kind {
 		case "rc":
+			var pendingText strings.Builder
 			for _, piece := range entry.rcContent {
 				if piece.Type == "text" {
 					if pendingText.Len() > 0 {
@@ -207,15 +200,16 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 					pendingText.WriteString(piece.Text)
 				}
 			}
+			if pendingText.Len() > 0 {
+				messages = append(messages, ContextMessage{Role: "user", Content: pendingText.String()})
+			}
 		case "summary", "summary_slot", "summary_before_rc", "summary_tr_slot":
-			flushRC()
 			messages = append(messages, ContextMessage{
 				Role:                 "user",
 				Content:              entry.summaryContent,
 				CompactionArtifactID: entry.summaryArtifactID,
 			})
 		case "tr":
-			flushRC()
 			messages = append(messages, ContextMessage{
 				Role:       entry.trRole,
 				Content:    entry.trContent,
@@ -223,7 +217,6 @@ func materializeMergeEntries(entries []mergeEntry) []ContextMessage {
 			})
 		}
 	}
-	flushRC()
 
 	return messages
 }
@@ -365,6 +358,9 @@ func mergeEntryTokens(entry mergeEntry) int {
 		n := 0
 		for _, piece := range entry.rcContent {
 			if piece.Type == "text" {
+				if n > 0 {
+					n++
+				}
 				n += len(piece.Text)
 			}
 		}
