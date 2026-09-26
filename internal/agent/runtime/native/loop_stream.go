@@ -32,7 +32,6 @@ import (
 // ahead of a consumer that has not drained the live events yet.
 const streamEventBuffer = 64
 
-//nolint:gocyclo,cyclop,maintidx // the segment inlines the previous SDK-driven consumer plus its option assembly; splitting it would scatter the event-order invariants the tests pin.
 func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEvent) {
 	// Tools report capability changes here; the loop re-assembles its tool
 	// set at the next committed step.
@@ -194,7 +193,6 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		cancel:                cancel,
 		events:                make(chan StreamEvent, streamEventBuffer),
 		done:                  make(chan struct{}),
-		dispatch:              dispatch,
 		sdkTools:              sdkTools,
 		approvalTools:         approvalTools,
 		prepareStep:           prepareStep,
@@ -223,6 +221,7 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	// Durable step cursors are absolute: a continuation segment starts counting
 	// at its offset so the interrupted/steered checkpoint matches the index
 	// OnStepCommitted would have used.
+	eng.reset(dispatch)
 	eng.nextDurableStep = cfg.StepIndexOffset
 	eng.interruptedStep.rebase(cfg.StepIndexOffset)
 	if textLoopGuard != nil {
@@ -460,7 +459,9 @@ type streamEngine struct {
 	// published state may be read even when events are still queued.
 	done chan struct{}
 
-	dispatch      generateDispatch
+	// stepThread is the request state the loop advances call by call; a
+	// mid-stream retry resets it from the rebuilt dispatch.
+	stepThread
 	sdkTools      []toolexec.Tool
 	approvalTools []toolexec.Tool
 	prepareStep   func(*sdk.Request) *sdk.Request
@@ -471,14 +472,9 @@ type streamEngine struct {
 	textLoopProbeBuffer   *TextLoopProbeBuffer
 	resetTextLoopGuard    func()
 	toolLoopAbortCallIDs  *toolAbortRegistry
-	// refused counts consecutive steps whose whole batch the executor
-	// refused; see refusedBatches.
-	refused                refusedBatches
-	pendingDirectiveInputs []DirectiveInput
 	// refreshTools re-assembles the tool set after a committed step reported a
-	// capability change; pendingRefresh holds the result until the next call.
-	refreshTools   func() (refreshedTools, error)
-	pendingRefresh *refreshedTools
+	// capability change; the thread holds the result until the next call.
+	refreshTools func() (refreshedTools, error)
 
 	// steer is nil unless the caller supplied both a pending-steer probe and a
 	// checkpoint callback. modelCtx is the cancellation scope of the current
@@ -516,8 +512,6 @@ func (e *streamEngine) emit(evt StreamEvent) bool {
 // run drives the step loop until a final step, a deferred approval, an abort,
 // or an unrecoverable error. The mid-stream retry that used to restart the SDK
 // loop is a continue here: same thread, same durable step counting.
-//
-//nolint:gocyclo,cyclop,maintidx // the loop inlines the previous SDK step accumulation plus the event switch and retry fold; splitting it would scatter the ordering invariants the tests pin.
 func (e *streamEngine) run() {
 	defer close(e.done)
 	defer close(e.events)
@@ -535,8 +529,6 @@ func (e *streamEngine) run() {
 	}
 	retryAttempts := 0
 
-	params := e.dispatch.params
-	convo := append([]sdk.Message(nil), params.Messages...)
 	// attemptSteps are the steps committed by the current dispatch, in
 	// call-local order: providerAttemptState.retryInput indexes them by the
 	// call-local step index it stored at publish time.
@@ -544,37 +536,14 @@ func (e *streamEngine) run() {
 	attemptStep := 0
 
 	for {
-		if e.pendingRefresh != nil {
-			// A refreshed tool set is installed before the prepare chain runs,
-			// so envelope budgeting and reselection price the request that is
-			// actually sent.
-			convo = e.pendingRefresh.apply(&e.dispatch, &params, convo)
-			e.pendingRefresh = nil
-		}
-		if attemptStep > 0 {
-			// Input refresh at the step boundary: the loop drains its own
-			// dynamic inputs (read-media carriers, then injected messages)
-			// into the thread, then the remaining prepare chain
-			// (before-model-call hook, background summary, provider-attempt
-			// budgeting/reselection) runs before every call after a
-			// dispatch's first. A retried dispatch's first call skips the
-			// drain, exactly like the initial dispatch's step zero.
-			boundary := len(e.steps)
-			e.dynamic.beginBoundary(boundary)
-			if e.baseCfg.BackgroundManager != nil {
-				convo = removeBackgroundSummaryMessages(convo, e.dispatch.initialMessageCount)
-			}
-			convo = drainReadMediaMessage(e.readMedia, e.dynamic, e.baseCfg.ContextMutations, boundary, convo)
-			convo = e.drainInjectedMessages(boundary, convo)
-			convo = e.drainDirectiveInputs(convo)
-			params.Messages = convo
-			if override := e.dispatch.prepareStep(&params); override != nil {
-				params = *override
-			}
-			convo = params.Messages
-		}
-		stepParams := params
-		stepParams.Messages = convo
+		// A retried dispatch's first call skips the boundary drain, exactly
+		// like the initial dispatch's step zero.
+		stepParams := e.advance(e.baseCfg, e.dynamic, stepBoundary{
+			first:         attemptStep == 0,
+			committed:     len(e.steps),
+			readMedia:     e.readMedia,
+			drainInjected: e.drainInjectedMessages,
+		})
 
 		// Dispatch boundary: never invoke the provider on a dead or
 		// budget-failed context, and publish the staged provider-attempt state
@@ -597,7 +566,7 @@ func (e *streamEngine) run() {
 			retryMsg, retryableFailure = e.streamFailure(fmt.Errorf("twilightai: stream step %d: %w", attemptStep, err))
 		} else {
 			var stepDone bool
-			retryMsg, retryableFailure, stepDone = e.callModel(attemptStep, &stepParams, &convo, &attemptSteps)
+			retryMsg, retryableFailure, stepDone = e.callModel(attemptStep, &stepParams, &attemptSteps)
 			if stepDone {
 				return
 			}
@@ -674,14 +643,12 @@ func (e *streamEngine) run() {
 			e.aborted = true
 			return
 		}
-		e.dispatch = dispatch
+		e.reset(dispatch)
 		if contextStepBudgetError(e.streamCtx) != nil {
 			e.aborted = true
 			return
 		}
 		e.turnError = ""
-		params = e.dispatch.params
-		convo = append([]sdk.Message(nil), params.Messages...)
 		attemptSteps = nil
 		attemptStep = 0
 	}
@@ -696,7 +663,6 @@ func (e *streamEngine) run() {
 func (e *streamEngine) callModel(
 	attemptStep int,
 	stepParams *sdk.Request,
-	convo *[]sdk.Message,
 	attemptSteps *[]step.Record,
 ) (retryMsg string, retryable bool, done bool) {
 	e.modelCtx = e.streamCtx
@@ -712,7 +678,7 @@ func (e *streamEngine) callModel(
 		// A provider that reports the cancellation instead of closing a part
 		// stream still leaves a steered attempt: checkpoint it exactly like a
 		// stream that ended before finish-step.
-		return e.checkpointSteeredStep(attemptStep, convo, attemptSteps)
+		return e.checkpointSteeredStep(attemptStep, attemptSteps)
 	case err != nil && e.streamCtx.Err() != nil:
 		// The run was cancelled while the request was in flight; the
 		// provider's report of it is the abort, not a failure to retry.
@@ -725,7 +691,7 @@ func (e *streamEngine) callModel(
 		msg, retriable := e.streamFailure(fmt.Errorf("twilightai: stream step %d ended before finish-step", attemptStep))
 		return msg, retriable, false
 	}
-	return e.consumeStep(attemptStep, provParts, convo, attemptSteps)
+	return e.consumeStep(attemptStep, provParts, attemptSteps)
 }
 
 // steeredAttempt reports whether the current model call was stopped by the
@@ -743,7 +709,6 @@ func (e *streamEngine) steeredAttempt() bool {
 // unfinished reasoning, which providers reject on replay.
 func (e *streamEngine) checkpointSteeredStep(
 	attemptStep int,
-	convo *[]sdk.Message,
 	attemptSteps *[]step.Record,
 ) (retryMsg string, retryable bool, done bool) {
 	stepIndex := e.baseCfg.StepIndexOffset + len(e.steps)
@@ -790,10 +755,8 @@ func (e *streamEngine) checkpointSteeredStep(
 		e.resetTextLoopGuard()
 	}
 	e.takeDirective(dir)
-	// A steer checkpoint begins a fresh answer on new input; the refused-batch
-	// count starts over.
-	e.refused = 0
-	*convo = append(*convo, steerCheckpointMessages(snapshot.Messages)...)
+	e.resetRefused()
+	e.extend(steerCheckpointMessages(snapshot.Messages))
 	return "", false, false
 }
 
@@ -805,7 +768,6 @@ func (e *streamEngine) checkpointSteeredStep(
 func (e *streamEngine) consumeStep(
 	attemptStep int,
 	provParts <-chan sdk.StreamPart,
-	convo *[]sdk.Message,
 	attemptSteps *[]step.Record,
 ) (retryMsg string, retryable bool, done bool) {
 	var (
@@ -1015,126 +977,74 @@ partLoop:
 			return "", false, true
 		}
 		if e.steeredAttempt() {
-			return e.checkpointSteeredStep(attemptStep, convo, attemptSteps)
+			return e.checkpointSteeredStep(attemptStep, attemptSteps)
 		}
 		msg, retriable := e.streamFailure(fmt.Errorf("twilightai: stream step %d ended before finish-step", attemptStep))
 		return msg, retriable, e.aborted
 	}
 
-	// stepResult assembles this step's model result from the parts the loop
-	// consumed. The loop assembles rather than reading ModelStream.Result because
-	// finish-step detection, interruption and the live events all run on these
-	// same accumulators.
-	stepResult := func() sdk.ModelResult {
-		return sdk.ModelResult{
-			Text:                 stepText,
-			TextProviderMetadata: stepTextMeta,
-			Reasoning:            stepReasoning.text(),
-			ReasoningParts:       stepReasoning.parts,
-			FinishReason:         stepFinishReason,
-			RawFinishReason:      stepRawFinishReason,
-			Usage:                stepUsage,
-			ToolCalls:            stepToolCalls,
-			Response:             stepResponse,
-		}
+	// The step's model result is assembled from the parts the loop consumed
+	// rather than read from a provider-side result: finish-step detection,
+	// interruption and the live events all run on these same accumulators.
+	result := sdk.ModelResult{
+		Text:                 stepText,
+		TextProviderMetadata: stepTextMeta,
+		Reasoning:            stepReasoning.text(),
+		ReasoningParts:       stepReasoning.parts,
+		FinishReason:         stepFinishReason,
+		RawFinishReason:      stepRawFinishReason,
+		Usage:                stepUsage,
+		ToolCalls:            stepToolCalls,
+		Response:             stepResponse,
 	}
-
-	// No tool calls or a non-tool-calls finish → final step. A call to a tool
-	// the model was not offered is a tool step like any other: the executor
-	// answers it with an error result, so the step never carries an open call.
-	if stepFinishReason != sdk.FinishReasonToolCalls || len(stepToolCalls) == 0 {
-		stepMsgs := toolexec.BuildStepMessages(stepText, stepTextMeta, stepReasoning.parts, stepToolCalls, nil, &stepUsage)
-		sr := step.Record{Result: stepResult(), Messages: stepMsgs}
-		dir, err := e.commitStep(attemptStep, &sr)
-		if err != nil {
-			msg, retriable := e.streamFailure(err)
-			return msg, retriable, e.aborted
-		}
-		e.steps = append(e.steps, sr)
-		e.outMessages = append(e.outMessages, stepMsgs...)
-		*attemptSteps = append(*attemptSteps, sr)
-		e.afterStep(attemptStep, &sr)
-		e.takeDirective(dir)
-		e.refused.note(false)
-		// A directive or a refreshed tool set gives the model another call
-		// on the same thread; the step is committed either way.
-		if len(e.pendingDirectiveInputs) > 0 || e.pendingRefresh != nil {
-			*convo = append(*convo, stepMsgs...)
-			return "", false, false
-		}
-		return "", false, true
-	}
-
-	// Execute the tool batch through the single-batch primitive; its OnPart
-	// callback bridges approval, progress, result, and error parts onto the
-	// event channel exactly where the SDK loop used to forward them.
-	outcome, err := toolexec.ExecuteTools(e.streamCtx, stepToolCalls, toolexec.ToolExecOptions{
-		Tools:   e.dispatch.execTools,
-		Approve: e.dispatch.approve,
-		OnPart:  e.bridgeToolPart,
-	})
+	// The tool batch's OnPart callback bridges approval, progress, result,
+	// and error parts onto the event channel.
+	sr, kind, err := settleStep(e.streamCtx, e.dispatch, result, stepTextMeta, e.bridgeToolPart)
 	if err != nil {
 		msg, retriable := e.streamFailure(err)
 		return msg, retriable, e.aborted
 	}
-	if outcome.Deferred != nil {
-		// A deferred batch executes nothing: outcome.Results is empty and every
-		// call of the step stays a dangling ToolCallPart until the decision
-		// resumes the run. The approved call executes there; the step's other
-		// open calls are closed with synthetic error results.
-		stepMsgs := toolexec.BuildStepMessages(stepText, stepTextMeta, stepReasoning.parts, stepToolCalls, outcome.Results, &stepUsage)
-		sr := step.Record{
-			Result:      stepResult(),
-			Deferred:    outcome.Deferred,
-			ToolResults: toolexec.ToolCallResults(stepToolCalls, outcome.Results),
-			Messages:    stepMsgs,
-		}
-		if _, err := e.commitStep(attemptStep, &sr); err != nil {
-			msg, retriable := e.streamFailure(err)
-			return msg, retriable, e.aborted
-		}
-		e.steps = append(e.steps, sr)
-		e.outMessages = append(e.outMessages, stepMsgs...)
-		*attemptSteps = append(*attemptSteps, sr)
-		e.deferred = outcome.Deferred
-		e.afterStep(attemptStep, &sr)
-		return "", false, true
-	}
-
-	stepMsgs := toolexec.BuildStepMessages(stepText, stepTextMeta, stepReasoning.parts, stepToolCalls, outcome.Results, &stepUsage)
-	sr := step.Record{Result: stepResult(), ToolResults: toolexec.ToolCallResults(stepToolCalls, outcome.Results), Messages: stepMsgs}
 	dir, err := e.commitStep(attemptStep, &sr)
 	if err != nil {
 		msg, retriable := e.streamFailure(err)
 		return msg, retriable, e.aborted
 	}
 	e.steps = append(e.steps, sr)
-	e.outMessages = append(e.outMessages, stepMsgs...)
+	e.outMessages = append(e.outMessages, sr.Messages...)
 	*attemptSteps = append(*attemptSteps, sr)
+	if kind == stepDeferred {
+		e.deferred = sr.Deferred
+		e.afterStep(attemptStep, &sr)
+		return "", false, true
+	}
 	e.afterStep(attemptStep, &sr)
 	e.takeDirective(dir)
+	refusedOut := e.refusedBatchEndsRun(kind)
+	if kind == stepFinal {
+		// A directive or a refreshed tool set gives the model another call
+		// on the same thread; the step is committed either way.
+		if !e.continues() {
+			return "", false, true
+		}
+		e.extend(sr.Messages)
+		return "", false, false
+	}
 	// A tool-loop abort raised by the batch stops the run after the step
 	// committed, matching the legacy flow where the guard fenced only the
 	// next provider call.
 	if e.aborted {
 		return "", false, true
 	}
-	if e.refused.note(batchRefused(outcome.Refused, len(stepToolCalls))) {
-		if len(e.pendingDirectiveInputs) > 0 || e.pendingRefresh != nil {
-			// The commit handed back new input (a claimed steer, a refreshed
-			// tool set); it reaches the model and the count starts over.
-			e.refused = 0
-		} else {
-			// Every call of the last maxRefusedBatches steps was refused and
-			// nothing new arrived: the model is not converging on a call the
-			// loop can run. Ended like a detected tool loop, with the answered
-			// steps committed.
-			e.cancel(ErrToolLoopDetected)
-			e.aborted = true
-			return "", false, true
-		}
+	if refusedOut {
+		// Every call of the last maxRefusedBatches steps was refused and
+		// nothing new arrived: the model is not converging on a call the
+		// loop can run. Ended like a detected tool loop, with the answered
+		// steps committed.
+		e.cancel(ErrToolLoopDetected)
+		e.aborted = true
+		return "", false, true
 	}
-	*convo = append(*convo, stepMsgs...)
+	e.extend(sr.Messages)
 	return "", false, false
 }
 
@@ -1182,19 +1092,6 @@ func (e *streamEngine) commitStep(attemptStep int, sr *step.Record) (StepDirecti
 		e.pendingRefresh = &refreshed
 	}
 	return dir, nil
-}
-
-func (e *streamEngine) takeDirective(dir StepDirective) {
-	e.pendingDirectiveInputs = collectDirectiveInputs(e.pendingDirectiveInputs, dir.NextInputs)
-}
-
-func (e *streamEngine) drainDirectiveInputs(messages []sdk.Message) []sdk.Message {
-	if len(e.pendingDirectiveInputs) == 0 {
-		return messages
-	}
-	inputs := e.pendingDirectiveInputs
-	e.pendingDirectiveInputs = nil
-	return appendDirectiveInputs(e.baseCfg, e.dynamic, messages, inputs)
 }
 
 // drainInjectedMessages moves queued live injections into the thread at the

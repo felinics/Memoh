@@ -22,8 +22,6 @@ import (
 // loop: every step performs exactly one provider model call and executes its
 // tool batch through toolexec.ExecuteTools. A final step whose commit returns
 // NextInputs continues on the next inner-loop iteration of the same engine.
-//
-//nolint:gocyclo,cyclop,maintidx // the loop inlines the previous SDK loop plus its option assembly; splitting it would scatter the step-order invariants the tests pin.
 func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResult, retErr error) {
 	if cfg.ContextLifecycle == nil {
 		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
@@ -129,9 +127,8 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		return nil, fmt.Errorf("generate: %w", fmt.Errorf("twilightai: model %q has no provider", cfg.Model.ID))
 	}
 
-	var pendingDirectiveInputs []DirectiveInput
-	var pendingRefresh *refreshedTools
-	var refused refusedBatches
+	var thread stepThread
+	thread.reset(dispatch)
 	commitStep := func(sdkStep int, sr *step.Record) (StepDirective, error) {
 		var dir StepDirective
 		if cfg.OnStepCommitted != nil {
@@ -149,7 +146,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 			if err != nil {
 				return StepDirective{}, fmt.Errorf("generate: refresh capabilities after step %d: %w", sdkStep, err)
 			}
-			pendingRefresh = &refreshed
+			thread.pendingRefresh = &refreshed
 		}
 		return dir, nil
 	}
@@ -173,9 +170,6 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		return nil
 	}
 
-	params := dispatch.params
-	messages := append([]sdk.Message(nil), params.Messages...)
-
 	var (
 		lastResult sdk.ModelResult
 		// deferred is the decision that parked the last step; the returned
@@ -191,50 +185,24 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 	)
 
 	for sdkStep := 0; ; sdkStep++ {
-		if pendingRefresh != nil {
-			// Installed before the prepare chain so budgeting and reselection
-			// price the request that is actually sent.
-			messages = pendingRefresh.apply(&dispatch, &params, messages)
-			pendingRefresh = nil
+		stepParams := thread.advance(cfg, dynamic, stepBoundary{
+			first:     sdkStep == 0,
+			committed: len(allSteps),
+			readMedia: readMediaState,
+		})
+		if stepErr := failure.err(); stepErr != nil {
+			return nil, stepErr
 		}
-		if sdkStep > 0 {
-			// Input refresh at the step boundary: the loop drains its own
-			// dynamic inputs (read-media carriers) into the thread, then the
-			// remaining prepare chain (before-model-call hook, background
-			// summary, provider-attempt budgeting/reselection) runs before
-			// every model call after the first.
-			boundary := len(allSteps)
-			dynamic.beginBoundary(boundary)
-			if cfg.BackgroundManager != nil {
-				messages = removeBackgroundSummaryMessages(messages, dispatch.initialMessageCount)
-			}
-			messages = drainReadMediaMessage(readMediaState, dynamic, cfg.ContextMutations, boundary, messages)
-			if len(pendingDirectiveInputs) > 0 {
-				messages = appendDirectiveInputs(cfg, dynamic, messages, pendingDirectiveInputs)
-				pendingDirectiveInputs = nil
-			}
-			params.Messages = messages
-			if override := dispatch.prepareStep(&params); override != nil {
-				params = *override
-			}
-			messages = params.Messages
-			if stepErr := failure.err(); stepErr != nil {
-				return nil, stepErr
-			}
-		}
-
-		stepParams := params
-		stepParams.Messages = messages
 		// Dispatch boundary: never invoke the provider on a dead context, and
 		// publish the staged provider-attempt state exactly once per call.
 		if ctxErr := genCtx.Err(); ctxErr != nil {
-			dispatch.handoff.reject()
+			thread.dispatch.handoff.reject()
 			if loopErr := detectGenerateLoopAbort(genCtx, ctxErr); loopErr != nil {
 				return nil, loopErr
 			}
 			return nil, fmt.Errorf("generate: %w", ctxErr)
 		}
-		if err := dispatch.handoff.publish(stepParams); err != nil {
+		if err := thread.dispatch.handoff.publish(stepParams); err != nil {
 			return nil, fmt.Errorf("generate: %w", err)
 		}
 		result, err := cfg.Model.Generate(genCtx, stepParams)
@@ -246,94 +214,42 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		}
 		lastResult = result
 
-		// No tool calls or a non-tool-calls finish → final step; a call to a tool
-		// the model was not offered is answered by the executor like any other.
-		if result.FinishReason != sdk.FinishReasonToolCalls || len(result.ToolCalls) == 0 {
-			stepMsgs := toolexec.BuildStepMessages(result.Text, result.TextProviderMetadata, result.ReasoningParts, result.ToolCalls, nil, &result.Usage)
-			// The step's model result is the call's result verbatim: this path
-			// executes no tools and defers nothing.
-			sr := step.Record{Result: result, Messages: stepMsgs}
-			dir, err := commitStep(sdkStep, &sr)
-			if err != nil {
-				return nil, err
-			}
-			allSteps = append(allSteps, sr)
-			allMessages = append(allMessages, stepMsgs...)
-			if loopErr := afterStep(sdkStep, &sr); loopErr != nil {
-				return nil, loopErr
-			}
-			pendingDirectiveInputs = collectDirectiveInputs(pendingDirectiveInputs, dir.NextInputs)
-			refused.note(false)
-			// A directive or a refreshed tool set gives the model another
-			// call on the same thread; the step is committed either way.
-			if len(pendingDirectiveInputs) > 0 || pendingRefresh != nil {
-				if text := strings.TrimSpace(result.Text); text != "" {
-					finalTexts = append(finalTexts, text)
-				}
-				messages = append(messages, stepMsgs...)
-				continue
-			}
-			break
-		}
-
-		// Execute the tool batch through the single-batch primitive. Deferral is
-		// a normal outcome; handler failures are errors.
-		outcome, err := toolexec.ExecuteTools(genCtx, result.ToolCalls, toolexec.ToolExecOptions{
-			Tools:   dispatch.execTools,
-			Approve: dispatch.approve,
-		})
+		sr, kind, err := settleStep(genCtx, thread.dispatch, result, result.TextProviderMetadata, nil)
 		if err != nil {
 			return nil, fmt.Errorf("generate: %w", err)
 		}
-		if outcome.Deferred != nil {
-			// A deferred batch executes nothing: outcome.Results is empty and every
-			// call of the step stays a dangling ToolCallPart until the decision
-			// resumes the run. The approved call executes there; the step's other
-			// open calls are closed with synthetic error results.
-			stepMsgs := toolexec.BuildStepMessages(result.Text, result.TextProviderMetadata, result.ReasoningParts, result.ToolCalls, outcome.Results, &result.Usage)
-			sr := step.Record{
-				Result:      result,
-				Deferred:    outcome.Deferred,
-				ToolResults: toolexec.ToolCallResults(result.ToolCalls, outcome.Results),
-				Messages:    stepMsgs,
-			}
-			if _, err := commitStep(sdkStep, &sr); err != nil {
-				return nil, err
-			}
-			allSteps = append(allSteps, sr)
-			allMessages = append(allMessages, stepMsgs...)
-			if loopErr := afterStep(sdkStep, &sr); loopErr != nil {
-				return nil, loopErr
-			}
-			deferred = outcome.Deferred
-			break
-		}
-
-		stepMsgs := toolexec.BuildStepMessages(result.Text, result.TextProviderMetadata, result.ReasoningParts, result.ToolCalls, outcome.Results, &result.Usage)
-		sr := step.Record{Result: result, ToolResults: toolexec.ToolCallResults(result.ToolCalls, outcome.Results), Messages: stepMsgs}
 		dir, err := commitStep(sdkStep, &sr)
 		if err != nil {
 			return nil, err
 		}
 		allSteps = append(allSteps, sr)
-		allMessages = append(allMessages, stepMsgs...)
+		allMessages = append(allMessages, sr.Messages...)
 		if loopErr := afterStep(sdkStep, &sr); loopErr != nil {
 			return nil, loopErr
 		}
-		pendingDirectiveInputs = collectDirectiveInputs(pendingDirectiveInputs, dir.NextInputs)
-		if refused.note(batchRefused(outcome.Refused, len(result.ToolCalls))) {
-			if len(pendingDirectiveInputs) > 0 || pendingRefresh != nil {
-				// The commit handed back new input; it reaches the model and
-				// the count starts over.
-				refused = 0
-			} else {
-				// Every call of the last maxRefusedBatches steps was refused and
-				// nothing new arrived; the run ends like a detected tool loop,
-				// its answered steps committed.
-				return nil, ErrToolLoopDetected
+		if kind == stepDeferred {
+			deferred = sr.Deferred
+			break
+		}
+		thread.takeDirective(dir)
+		refusedOut := thread.refusedBatchEndsRun(kind)
+		if kind == stepFinal {
+			// A directive or a refreshed tool set gives the model another
+			// call on the same thread; the step is committed either way.
+			if !thread.continues() {
+				break
+			}
+			if text := strings.TrimSpace(result.Text); text != "" {
+				finalTexts = append(finalTexts, text)
 			}
 		}
-		messages = append(messages, stepMsgs...)
+		if refusedOut {
+			// Every call of the last maxRefusedBatches steps was refused and
+			// nothing new arrived; the run ends like a detected tool loop, its
+			// answered steps committed.
+			return nil, ErrToolLoopDetected
+		}
+		thread.extend(sr.Messages)
 	}
 
 	// Drain collected tool-emitted side effects into the result.
