@@ -155,12 +155,20 @@ func (s *Service) renewResumeCredential(ctx context.Context, botID string, claim
 	return "Bearer " + token, nil
 }
 
-// StartSessionResume runs only after all server dependencies have started.
-// The bounded sweep retries admission/DB availability; admitted executions are
-// never retried by this worker. Their normal lifecycle owns the outcome.
+// StartSessionResume probes the scope catalog before launching a bounded worker.
+// The worker retains a cursor per current tenant instead of querying tenant data
+// from the startup context. Run contexts retain the same binding after detaching.
 func (s *Service) StartSessionResume(ctx context.Context) error {
 	if s.queries == nil || s.sessionManager == nil || s.resumeSecret == "" {
 		return nil
+	}
+	scopes := s.sessionResumeScopes()
+	first, err := scopes.ListScopePage(ctx, "", 16)
+	if err != nil {
+		return fmt.Errorf("list session resume scopes: %w", err)
+	}
+	if err := validateResumeScopePage(first, ""); err != nil {
+		return err
 	}
 	workerCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.resumeStop = cancel
@@ -169,42 +177,15 @@ func (s *Service) StartSessionResume(ctx context.Context) error {
 		defer close(s.resumeDone)
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
-		cursor := pgtype.UUID{Valid: true}
+		scan := sessionResumeScan{page: first, loaded: true}
 		slots := make(chan struct{}, 4)
 		for {
 			if workerCtx.Err() != nil {
 				return
 			}
-			rows, err := s.queries.ListInterruptedSessionRuns(workerCtx, cursor)
-			if err != nil {
-				s.logger.WarnContext(workerCtx, "list interrupted sessions failed", slog.Any("error", err))
-			} else {
-				for _, row := range rows {
-					if workerCtx.Err() != nil {
-						return
-					}
-					select {
-					case slots <- struct{}{}:
-						done, startErr := s.resumeInterruptedSession(workerCtx, row)
-						if startErr != nil {
-							s.logger.WarnContext(workerCtx, "resume interrupted session deferred", slog.String("run_id", row.RunID.String()), slog.Any("error", startErr))
-						}
-						if done == nil {
-							<-slots
-						} else {
-							go func() { <-done; <-slots }()
-						}
-					default:
-						// Keep this page as the retry point until a worker becomes available.
-						goto wait
-					}
-					cursor = row.RunID
-				}
-				if len(rows) < 100 {
-					cursor = pgtype.UUID{Valid: true}
-				}
+			if err := s.scanInterruptedSessions(workerCtx, scopes, &scan, slots); err != nil && workerCtx.Err() == nil {
+				s.logger.WarnContext(workerCtx, "scan interrupted sessions failed", slog.Any("error", err))
 			}
-		wait:
 			select {
 			case <-workerCtx.Done():
 				return
@@ -212,6 +193,94 @@ func (s *Service) StartSessionResume(ctx context.Context) error {
 			}
 		}
 	}()
+	return nil
+}
+
+type sessionResumeScan struct {
+	page        SessionResumeScopePage
+	loaded      bool
+	scopeCursor string
+	scopeIndex  int
+	runCursor   pgtype.UUID
+}
+
+func validateResumeScopePage(page SessionResumeScopePage, after string) error {
+	if len(page.Scopes) > 16 || (!page.Complete && (page.NextCursor == "" || page.NextCursor == after)) {
+		return errors.New("invalid session resume scope page")
+	}
+	for _, scope := range page.Scopes {
+		if strings.TrimSpace(scope) == "" {
+			return errResumeScopeMismatch
+		}
+	}
+	return nil
+}
+
+func (s *Service) scanInterruptedSessions(ctx context.Context, scopes SessionResumeScopeProvider, scan *sessionResumeScan, slots chan struct{}) error {
+	if !scan.loaded {
+		page, err := scopes.ListScopePage(ctx, scan.scopeCursor, 16)
+		if err != nil {
+			return err
+		}
+		if err := validateResumeScopePage(page, scan.scopeCursor); err != nil {
+			return err
+		}
+		scan.page, scan.loaded = page, true
+		scan.scopeIndex = 0
+	}
+	for scan.scopeIndex < len(scan.page.Scopes) {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		scopeCtx, err := bindSessionResumeScope(ctx, scopes, scan.page.Scopes[scan.scopeIndex])
+		if err != nil {
+			scan.scopeIndex++
+			scan.runCursor = pgtype.UUID{}
+			return err
+		}
+		if !scan.runCursor.Valid {
+			scan.runCursor = pgtype.UUID{Valid: true}
+		}
+		rows, err := s.queries.ListInterruptedSessionRuns(scopeCtx, scan.runCursor)
+		if err != nil {
+			scan.scopeIndex++
+			scan.runCursor = pgtype.UUID{}
+			return err
+		}
+		for _, row := range rows {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if row.TeamID.String() != scopes.CurrentScope(scopeCtx) {
+				return errResumeScopeMismatch
+			}
+			select {
+			case slots <- struct{}{}:
+				done, startErr := s.resumeInterruptedSession(scopeCtx, row)
+				if startErr != nil {
+					s.logger.WarnContext(scopeCtx, "resume interrupted session deferred", slog.String("run_id", row.RunID.String()), slog.Any("error", startErr))
+				}
+				if done == nil {
+					<-slots
+				} else {
+					go func() { <-done; <-slots }()
+				}
+			default:
+				return nil
+			}
+			scan.runCursor = row.RunID
+		}
+		if len(rows) == 100 {
+			return nil
+		}
+		scan.scopeIndex++
+		scan.runCursor = pgtype.UUID{}
+	}
+	scan.scopeCursor = scan.page.NextCursor
+	if scan.page.Complete {
+		scan.scopeCursor = ""
+	}
+	scan.loaded = false
 	return nil
 }
 
@@ -229,6 +298,9 @@ func (s *Service) StopSessionResume() {
 const resumeInstruction = "The server gracefully shut down during the previous run. Continue the unfinished user task using the saved session history and current workspace. Do not repeat completed work. A tool interrupted before its result was saved may already have produced side effects: inspect files, process/job status and saved output before deciding what to do; do not blindly replay it. Background task handles from the previous process are no longer live; consult subagent session histories and external job receipts. If the task is already complete, report that. Original task: "
 
 func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.SessionRun) (<-chan struct{}, error) {
+	if row.TeamID.String() != s.sessionResumeScopes().CurrentScope(ctx) {
+		return nil, errResumeScopeMismatch
+	}
 	var input struct {
 		Resume *resumeContext `json:"resume"`
 	}
@@ -273,7 +345,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		cancel()
 		return nil, err
 	}
-	runCtx, admission, _, err := s.admitTriggeredRun(runBase, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil)
+	runCtx, admission, _, err := s.admitTriggeredRun(runBase, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil, row.RunID.String())
 	if err != nil {
 		cancel()
 		return nil, err
@@ -294,7 +366,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		publishAgentEvent: s.turnAgentEventPublisher(admission.Handle),
 	}
 	done := make(chan struct{})
-	go h.pump(turn.StartTurnCommand{TeamID: s.allowedTeam, BotID: req.BotID, ThreadID: req.ThreadID}, chunks, errs)
+	go h.pump(turn.StartTurnCommand{TeamID: row.TeamID.String(), BotID: req.BotID, ThreadID: req.ThreadID}, chunks, errs)
 	go func() { defer close(done); drainDeferredTurn(h) }()
 	s.logger.InfoContext(runCtx, "interrupted session resumed", slog.String("previous_run_id", row.RunID.String()), slog.String("run_id", admission.RunID), slog.String("session_id", req.ThreadID))
 	return done, nil

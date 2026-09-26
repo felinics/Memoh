@@ -3,6 +3,7 @@ package ledger_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -77,7 +78,7 @@ func TestPostgresGracefulShutdownResumeSurvivesNewManager(t *testing.T) {
 		wg.Go(func() {
 			next := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{Ledger: runs, Fence: resumeTestFence{}})
 			defer func() { _ = next.CloseContext(context.WithoutCancel(ctx)) }()
-			admission, err := next.Admit(ctx, sessionruntime.AdmitInput{BotID: botID, SessionID: sessionID, InvocationID: "resume:" + first.RunID, Payload: []byte(`{"query":"continue"}`), Execution: sessionruntime.Execution{Admission: build}})
+			admission, err := next.Admit(ctx, sessionruntime.AdmitInput{BotID: botID, SessionID: sessionID, InvocationID: "resume:" + first.RunID, ResumeRunID: first.RunID, Payload: []byte(`{"query":"continue"}`), Execution: sessionruntime.Execution{Admission: build}})
 			if err != nil {
 				t.Error(err)
 				return
@@ -99,5 +100,32 @@ func TestPostgresGracefulShutdownResumeSurvivesNewManager(t *testing.T) {
 		if row.RunID.String() == first.RunID {
 			t.Fatal("already resumed source reselected")
 		}
+	}
+}
+
+func TestPostgresResumeRejectsCandidateSupersededAfterScan(t *testing.T) {
+	ctx := t.Context()
+	pool := openLedgerResetPostgres(t, ctx)
+	botID, sessionID := createLedgerResetFixture(t, ctx, pool)
+	runs := ledger.NewPostgres(dbsqlc.New(pool), pool)
+	oldID, token := createClaimedLedgerRun(t, ctx, pool, botID, sessionID)
+	if _, _, err := runs.Finalize(ctx, ledger.FinalizeParams{RunID: oldID, FencingToken: token, State: ledger.StateLost, ErrorCode: sessionruntime.RunErrorInterrupted}); err != nil {
+		t.Fatal(err)
+	}
+	// A user finishes another turn after the recovery worker discovered oldID.
+	newerID, newerToken := createClaimedLedgerRun(t, ctx, pool, botID, sessionID)
+	if _, err := pool.Exec(ctx, "UPDATE session_runs SET turn_position=2 WHERE run_id=$1", newerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runs.Finalize(ctx, ledger.FinalizeParams{RunID: newerID, FencingToken: newerToken, State: ledger.StateCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	_, created, err := runs.Admit(ctx, ledger.AdmitParams{RunID: uuid.NewString(), BotID: botID, SessionID: sessionID, InvocationID: "resume:" + oldID, TurnID: uuid.NewString(), Input: []byte(`{}`), InputFingerprint: "resume", ResumeRunID: oldID})
+	if created || !errors.Is(err, ledger.ErrResumeSuperseded) {
+		t.Fatalf("stale continuation admitted: %v %v", created, err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM session_runs WHERE session_id=$1", sessionID).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("count=%d err=%v", count, err)
 	}
 }

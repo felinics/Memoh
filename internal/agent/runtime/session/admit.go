@@ -60,8 +60,10 @@ var (
 // adapter or a schedule. Every caller supplies the same three
 // identities, which is what lets one admission path serve all of them.
 type AdmitInput struct {
-	BotID     string
-	SessionID string
+	// ResumeRunID requires the interrupted source to remain the latest run.
+	ResumeRunID string
+	BotID       string
+	SessionID   string
 	// InvocationID is the caller's retry identity. Callers that cannot mint one
 	// must derive it deterministically from their source (for example a channel
 	// message id), because a fresh id per attempt turns a retry into a second
@@ -206,6 +208,7 @@ func (m *Manager) Admit(ctx context.Context, in AdmitInput) (Admission, error) {
 		TurnID:           uuid.NewString(),
 		Input:            in.Payload,
 		InputFingerprint: fingerprint,
+		ResumeRunID:      in.ResumeRunID,
 	})
 	switch {
 	case errors.Is(err, ledger.ErrHistoryResetInProgress):

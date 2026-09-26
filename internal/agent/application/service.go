@@ -106,6 +106,7 @@ type compactionRunner interface {
 // Service orchestrates chat with the internal agent.
 type Service struct {
 	resumeSecret            string
+	resumeScopes            SessionResumeScopeProvider
 	resumeReady             func(context.Context, string, string) error
 	resumeStop              context.CancelFunc
 	resumeDone              chan struct{}

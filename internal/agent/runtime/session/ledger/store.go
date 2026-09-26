@@ -67,6 +67,8 @@ func (s State) Terminal() bool {
 var (
 	// ErrRunNotFound is returned when no row matches the requested identity.
 	ErrRunNotFound = errors.New("ledger: session run not found")
+	// ErrResumeSuperseded means the interrupted intent no longer owns the latest turn.
+	ErrResumeSuperseded = errors.New("ledger: interrupted run has been superseded")
 	// ErrSessionNotFound is returned by Admit when the target session does not
 	// exist or was deleted, which is distinguishable from a duplicate
 	// invocation because a duplicate still resolves to a row.
@@ -156,6 +158,8 @@ type Run struct {
 // caller so the identity it hands back to a client is the identity that was
 // committed.
 type AdmitParams struct {
+	// ResumeRunID is checked inside the admission transaction, under the parent lock.
+	ResumeRunID      string
 	RunID            string
 	BotID            string
 	SessionID        string

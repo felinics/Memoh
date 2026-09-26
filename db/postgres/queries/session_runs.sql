@@ -359,3 +359,15 @@ WHERE r.team_id = public.memoh_current_team_id()
   AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
     AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
 ORDER BY r.run_id LIMIT 100;
+
+-- name: IsInterruptedSessionRunLatest :one
+-- Called under the same parent lock as admission. A newer accepted turn must
+-- supersede recovery even if it has already completed since discovery.
+SELECT EXISTS (
+ SELECT 1 FROM session_runs source
+ WHERE source.team_id = public.memoh_current_team_id() AND source.run_id = sqlc.arg(run_id)
+  AND source.state = 'lost' AND source.error_code = 'session_runtime.interrupted'
+  AND source.abort_requested_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = source.team_id
+   AND later.session_id = source.session_id AND later.turn_position > source.turn_position)
+)::boolean;

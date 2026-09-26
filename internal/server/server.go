@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"net"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -16,9 +17,10 @@ import (
 )
 
 type Server struct {
-	echo   *echo.Echo
-	addr   string
-	logger *slog.Logger
+	stopRequests context.CancelFunc
+	echo         *echo.Echo
+	addr         string
+	logger       *slog.Logger
 }
 
 type Handler interface {
@@ -45,6 +47,10 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	}
 
 	e := echo.New()
+	requestCtx, stopRequests := context.WithCancel(context.Background())
+	baseContext := func(net.Listener) context.Context { return requestCtx }
+	e.Server.BaseContext = baseContext
+	e.TLSServer.BaseContext = baseContext
 	e.HideBanner = true
 	e.HTTPErrorHandler = newHTTPErrorHandler(log, e.DefaultHTTPErrorHandler)
 	e.Use(middleware.RequestID())
@@ -98,7 +104,7 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	}
 
 	return &Server{
-		echo:   e,
+		stopRequests: stopRequests, echo: e,
 		addr:   addr,
 		logger: log.With(slog.String("component", "server")),
 	}
@@ -109,6 +115,12 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Stop(ctx context.Context) error {
+	// Agent interruption is recorded by the earlier lifecycle hook. Cancel
+	// request contexts now so SSE handlers release before their hubs are closed
+	// by later hooks; otherwise HTTP drain consumes the whole shutdown budget.
+	if s.stopRequests != nil {
+		s.stopRequests()
+	}
 	return s.echo.Shutdown(ctx)
 }
 
