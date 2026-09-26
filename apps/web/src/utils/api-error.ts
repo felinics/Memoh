@@ -95,7 +95,6 @@ function pickApiFeedbackMessage(error: unknown): string {
       || (typeof record.error_code === 'string' && record.error_code.trim())
     if (code) {
       const rendered = renderI18nMessage(`errors.${code}`, args)
-        || renderI18nMessage(`runtimeNotices.${code}`, args)
       if (rendered) return rendered
     }
   }

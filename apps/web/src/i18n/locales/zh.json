@@ -1,9 +1,4 @@
 {
-  "runtimeNotices": {
-    "native_history_lost": "Agent 无法恢复此前的对话上下文，已重新开始。上方消息仅保留作历史记录；继续前，请重新提供所需信息。",
-    "tools_unavailable": "此会话的 Memoh 工具不可用，请新建会话后重试。",
-    "elicitation_declined": "工具请求的交互未能展示，此次请求已拒绝。"
-  },
   "common": {
     "toast": {
       "notice": "提示",
@@ -120,6 +115,9 @@
     "finish": "完成"
   },
   "errors": {
+    "native_history_lost": "Agent 无法恢复此前的对话上下文，已重新开始。上方消息仅保留作历史记录；继续前，请重新提供所需信息。",
+    "tools_unavailable": "此会话的 Memoh 工具不可用，请新建会话后重试。",
+    "elicitation_declined": "工具请求的交互未能展示，此次请求已拒绝。",
     "capability": {
       "access_denied": "需要此 Bot 的管理权限才能管理其能力。",
       "request_invalid": "能力管理请求无效，请检查操作和参数。",

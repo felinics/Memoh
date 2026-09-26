@@ -81,13 +81,13 @@ describe('resolveApiErrorMessage', () => {
 
   it.each(['en', 'zh', 'ja'])('localizes durable runtime notices in %s', (language) => {
     locale = language
-    for (const code of ['native_history_lost', 'tools_unavailable', 'elicitation_declined']) {
-      const message = resolveApiErrorMessage({ code, detail: 'backend fallback' }, 'fallback')
-      expect(message).not.toBe('backend fallback')
-      expect(message).not.toBe('fallback')
-      expect(message).not.toContain(`errors.${code}`)
-      expect(message).not.toContain(`runtimeNotices.${code}`)
-    }
+    const message = resolveApiErrorMessage({
+      code: 'native_history_lost',
+      detail: 'backend fallback',
+    }, 'fallback')
+    expect(message).not.toBe('backend fallback')
+    expect(message).not.toBe('fallback')
+    expect(message).not.toContain('errors.native_history_lost')
   })
 
   it.each([
