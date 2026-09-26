@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -126,6 +127,18 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		return
 	}
 	cfg.TargetTokens = compactionTargetTokens(botSettings.CompactionTargetPercent, rc.contextTokenBudget)
+	cfg.ProtectedSources = append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
+	for _, message := range req.discussMessages {
+		if message.Source != nil && message.Source.Current {
+			cfg.ProtectedSources = append(cfg.ProtectedSources, *message.Source)
+		}
+	}
+	if req.ExternalMessageID != "" {
+		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
+	}
+	if req.RequiredHistoryMessageID != "" {
+		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
+	}
 	cfg.AllowFrontierFusion = true
 	cfg.ContextWindowTokens = rc.contextTokenBudget
 	cfg.HardPressure = syncCompactionShouldRun(inputTokens, rc.contextTokenBudget)
@@ -202,6 +215,18 @@ func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputT
 		// Same skip path as the async trigger above — no model or model
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
+	}
+	cfg.ProtectedSources = append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
+	for _, message := range req.discussMessages {
+		if message.Source != nil && message.Source.Current {
+			cfg.ProtectedSources = append(cfg.ProtectedSources, *message.Source)
+		}
+	}
+	if req.ExternalMessageID != "" {
+		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
+	}
+	if req.RequiredHistoryMessageID != "" {
+		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
 	}
 	cfg.AllowFrontierFusion = true
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)

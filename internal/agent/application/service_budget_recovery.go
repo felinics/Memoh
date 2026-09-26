@@ -251,7 +251,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	if pressure <= available || available <= 0 {
 		return cfg, false, nil
 	}
-	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID}, pressure, available, modelID)
+	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: cmd.DiscussCurrentSources, discussMessages: cmd.DiscussMessages}, pressure, available, modelID)
 	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
 		return cfg, false, nil
 	}

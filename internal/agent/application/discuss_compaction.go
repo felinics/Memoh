@@ -71,10 +71,12 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 	}
 	start := time.Now()
 	res := s.runCompactionSync(ctx, ChatRequest{
-		BotID:    cmd.BotID,
-		ChatID:   cmd.BotID,
-		ThreadID: cmd.ThreadID,
-		RunID:    runID,
+		BotID:                 cmd.BotID,
+		ChatID:                cmd.BotID,
+		ThreadID:              cmd.ThreadID,
+		RunID:                 runID,
+		discussCurrentSources: cmd.DiscussCurrentSources,
+		discussMessages:       cmd.DiscussMessages,
 	}, pressure, budget, resolved.ModelID)
 	s.logger.InfoContext(ctx, "sync_compaction_backstop",
 		slog.String("path", "discuss"),

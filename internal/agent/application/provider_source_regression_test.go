@@ -66,3 +66,16 @@ func TestDiscussAdmissionProtectsExplicitCurrentBatch(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscussRecoveryCarriesCurrentSourcesEvenWithoutMaterializedMessages(t *testing.T) {
+	service, runner := newControllerPolicyService(t, nil)
+	sources := []turn.ContextMessageSource{{Kind: "external", ID: "a", Current: true}, {Kind: "external", ID: "b", Current: true}}
+	cmd := turn.StartTurnCommand{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, DiscussContextOverflow: true, DiscussContextTokens: 2000, DiscussCurrentTokens: 100, DiscussCurrentSources: sources}
+	if !service.maybeSyncCompactDiscuss(t.Context(), cmd, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "recovery") || len(runner.configs) != 1 {
+		t.Fatal("recovery did not run")
+	}
+	cfg := runner.configs[0]
+	if len(cfg.ProtectedSources) != 2 || cfg.ProtectedSources[0].ID != "a" || cfg.ProtectedSources[1].ID != "b" {
+		t.Fatalf("current identities lost: %+v", cfg.ProtectedSources)
+	}
+}

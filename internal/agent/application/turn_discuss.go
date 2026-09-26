@@ -575,6 +575,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 		SkipMemoryExtraction:    true,
 		ForceFreshRuntime:       true,
 		discussMessages:         cmd.DiscussMessages,
+		discussCurrentSources:   cmd.DiscussCurrentSources,
 		discussContextTokens:    discussContextPressure(cmd),
 	})
 	for chunks != nil || errs != nil {

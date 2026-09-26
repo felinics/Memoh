@@ -30,6 +30,12 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 		composed = &timeline.ComposeContextResult{}
 	}
 
+	currentSources := make([]turn.ContextMessageSource, 0)
+	for _, segment := range rc {
+		if !segment.IsMyself && !segment.IsSelfSent && !after.Covers(segment) {
+			currentSources = append(currentSources, turn.ContextMessageSource{Kind: "external", ID: segment.MessageID, Current: true})
+		}
+	}
 	isMentioned := wasRecentlyMentioned(rc, after)
 	addressed := isMentioned || turn.IsPrivateConversationType(cfg.ConversationType)
 	msgs := make([]turn.DiscussMessage, 0, len(composed.Messages))
@@ -67,6 +73,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			ChatToken:               cfg.ChatToken,
 			ToolHTTPURL:             cfg.ToolHTTPURL,
 			DiscussMessages:         msgs,
+			DiscussCurrentSources:   currentSources,
 			DiscussImageRefs:        imageRefs,
 			DiscussAddressed:        addressed,
 			DiscussContextTokens:    admission.EstimatedTokens,

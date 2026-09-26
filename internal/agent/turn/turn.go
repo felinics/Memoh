@@ -116,8 +116,9 @@ type StartTurnCommand struct {
 	// turn (Mode == ModeDiscuss), already rendered by the caller's
 	// projection. Image parts are injected into the last real user message
 	// before the runtime starts streaming.
-	DiscussMessages  []DiscussMessage
-	DiscussImageRefs []DiscussImageRef
+	DiscussCurrentSources []ContextMessageSource
+	DiscussMessages       []DiscussMessage
+	DiscussImageRefs      []DiscussImageRef
 	// Pressure is measured before Channel selection. Overflow requests recovery
 	// without materializing or forwarding the rejected context.
 	DiscussContextTokens   int
