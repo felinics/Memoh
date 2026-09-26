@@ -1,0 +1,11 @@
+{
+  "long_ledger": "93af3716-e660-44a2-8919-2473797b33df|completed|2026-09-26 01:14:54.648736+00|2026-09-26 01:25:54.870271+00|660.221535\n34abb3b2-27fb-4ba6-83fc-4480aeae5d8a|completed|2026-09-26 01:14:54.709353+00|2026-09-26 01:25:54.843705+00|660.134352\n",
+  "first_roll": "0011a8f8-a354-479f-997f-280f466dd9ee|lost|session_runtime.interrupted|023269c3-27a6-4562-82e8-d829798a6c0d|24|165758b5-890e-4534-bd62-87276013850f\n25a3777b-8a04-41b7-9bdb-5be473c0842d|completed||caf4cd0a-14b8-4c20-ad4d-55fa03771c98|25|resume:0011a8f8-a354-479f-997f-280f466dd9ee\n1 /data/qa-roll-once.log\nlong-start\nlong-done\n",
+  "final_roll": "14b2bfb2-cd6c-4923-ba4b-27389bbefade|lost|session_runtime.interrupted|b9429f17-d70c-4b67-83d3-fefeb9b2bf92|26|b74ee628-4cca-4058-ac4b-4f1ab30dd319\naa9fcd11-638a-4717-a7b5-5e48772b346d|completed||b9424217-5f95-452a-b908-97366c0b34bc|27|resume:14b2bfb2-cd6c-4923-ba4b-27389bbefade\n1 /data/qa-roll-drain-once.log\nexit_code=0 finished_at=2026-09-26T01:40:47.343224756Z\n",
+  "health": {
+    "samples": 200,
+    "errors": 0,
+    "duration_seconds": 42.18
+  },
+  "binary_sha256": "b5b5ad3430bdc3f3977257570073f8d5a977f9a2552a89ee522f3ed838b325c9  /opt/memoh/data/qa/server-c\n"
+}
