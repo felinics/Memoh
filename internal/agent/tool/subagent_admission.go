@@ -84,6 +84,14 @@ func (p *SpawnProvider) admitAgentRun(ctx context.Context, req *agentRequest) (c
 	if err != nil {
 		return nil, nil, err
 	}
+	if recorder, ok := p.admitter.(interface {
+		RecordSubagentResume(context.Context, SessionContext, string, string, string) error
+	}); ok {
+		if err := recorder.RecordSubagentResume(runCtx, req.parentSession, req.agentSessionID, req.message, req.config.ModelID); err != nil {
+			finish(SubagentTerminal{Cause: err})
+			return nil, nil, err
+		}
+	}
 	req.admission = admission
 	return runCtx, func(result agentRunResult) {
 		terminal := SubagentTerminal{

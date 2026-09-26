@@ -163,6 +163,15 @@ func (s *Service) admitTurnRun(
 		// call has no execution to perform and the caller has its answer.
 		return sessionruntime.Admission{}, fmt.Errorf("%w: %s", turn.ErrDuplicateTurn, invocationID)
 	}
+	if cmd.Mode == turn.ModeDiscuss {
+		req := chatRequestFromCommand(cmd)
+		req.RunID = admission.RunID
+		req.SessionType = "discuss"
+		if err := s.recordRunResumeContext(s.withAdmissionRuntimeFence(ctx, admission), req); err != nil {
+			s.turnRunFinisher(ctx, admission)(sessionruntime.RunStatusErrored, err)
+			return sessionruntime.Admission{}, err
+		}
+	}
 	return admission, nil
 }
 
@@ -281,9 +290,13 @@ type triggeredRunTerminal struct {
 // Nil means the run projects no request user turn (the historical default).
 type triggeredAdmissionView func(handle sessionruntime.RunHandle) *sessionruntime.RunAdmissionView
 
-func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte, viewFn triggeredAdmissionView) (context.Context, sessionruntime.Admission, func(triggeredRunTerminal), error) {
+func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invocationID string, submission []byte, viewFn triggeredAdmissionView, resumeRunIDs ...string) (context.Context, sessionruntime.Admission, func(triggeredRunTerminal), error) {
 	if s.sessionRuntime == nil {
 		return nil, sessionruntime.Admission{}, nil, errors.New("session runtime is not configured")
+	}
+	resumeRunID := ""
+	if len(resumeRunIDs) > 0 {
+		resumeRunID = resumeRunIDs[0]
 	}
 	runCtx, cancelCause := context.WithCancelCause(ctx)
 	admission, err := s.sessionRuntime.Admit(runCtx, sessionruntime.AdmitInput{
@@ -291,6 +304,7 @@ func (s *Service) admitTriggeredRun(ctx context.Context, botID, threadID, invoca
 		SessionID:    threadID,
 		InvocationID: invocationID,
 		Payload:      submission,
+		ResumeRunID:  resumeRunID,
 		Execution: sessionruntime.Execution{
 			Admission: func(_ context.Context, handle sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
 				if viewFn == nil {

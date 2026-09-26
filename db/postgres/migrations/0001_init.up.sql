@@ -2247,6 +2247,12 @@ CREATE INDEX IF NOT EXISTS idx_session_runs_orphan
     ON public.session_runs (team_id, created_at, run_id)
     WHERE state = 'accepted' AND owner_id IS NULL;
 
+-- Interrupted runs whose resume intent is still pending; the recovery worker
+-- lists these instead of walking a team's run history.
+CREATE INDEX IF NOT EXISTS idx_session_runs_resume_pending
+    ON public.session_runs (team_id, run_id)
+    WHERE state = 'lost' AND error_code = 'session_runtime.interrupted' AND input_json ? 'resume';
+
 ALTER TABLE public.session_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.session_runs FORCE ROW LEVEL SECURITY;
 

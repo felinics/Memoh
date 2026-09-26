@@ -339,3 +339,54 @@ LIMIT sqlc.arg(batch_size);
 
 -- name: NextSessionRunFencingToken :one
 SELECT nextval('session_runtime_fencing_token_seq')::bigint AS token;
+
+-- name: SaveSessionRunResumeContext :execrows
+-- Credentials are represented by verified claim scopes, never bearer tokens.
+UPDATE session_runs SET input_json = jsonb_set(input_json, '{resume}', sqlc.arg(resume_context)::jsonb), updated_at = now()
+WHERE team_id = public.memoh_current_team_id() AND run_id = sqlc.arg(run_id)
+  AND fencing_token = sqlc.arg(fencing_token) AND state = 'running';
+
+-- name: ListInterruptedSessionRuns :many
+-- A later user turn supersedes the old intent. Admission's existing unique
+-- invocation index arbitrates concurrent startup workers without another lease.
+SELECT r.* FROM session_runs r
+JOIN bot_sessions s ON s.team_id = r.team_id AND s.id = r.session_id
+JOIN bots b ON b.team_id = r.team_id AND b.id = r.bot_id
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.state = 'lost' AND r.error_code = 'session_runtime.interrupted'
+  AND r.input_json ? 'resume' AND s.deleted_at IS NULL AND b.status <> 'deleting'
+  AND r.run_id > sqlc.arg(after_run_id)::uuid
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
+    AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
+ORDER BY r.run_id LIMIT 100;
+
+-- name: IsInterruptedSessionRunLatest :one
+-- Called under the same parent lock as admission. A newer accepted turn must
+-- supersede recovery even if it has already completed since discovery.
+SELECT EXISTS (
+ SELECT 1 FROM session_runs source
+ WHERE source.team_id = public.memoh_current_team_id() AND source.run_id = sqlc.arg(run_id)
+  AND source.state = 'lost' AND source.error_code = 'session_runtime.interrupted'
+  AND source.abort_requested_at IS NULL AND source.input_json ? 'resume'
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = source.team_id
+   AND later.session_id = source.session_id AND later.turn_position > source.turn_position)
+)::boolean;
+
+-- name: RetireSupersededInterruptedSessionRuns :execrows
+-- Drops the resume intent of interrupted runs a later turn has answered or whose
+-- session was deleted. Interrupted runs stay lost forever; retiring the intent
+-- keeps idx_session_runs_resume_pending limited to work that can still continue.
+UPDATE session_runs r SET input_json = r.input_json - 'resume'
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.state = 'lost' AND r.error_code = 'session_runtime.interrupted' AND r.input_json ? 'resume'
+  AND (EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
+      AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
+    OR EXISTS (SELECT 1 FROM bot_sessions s WHERE s.team_id = r.team_id
+      AND s.id = r.session_id AND s.deleted_at IS NOT NULL));
+
+-- name: RetireInterruptedSessionRun :execrows
+-- Drops a resume intent that can never continue: its budget expired, its saved
+-- context is unsupported, or its credential scope was revoked.
+UPDATE session_runs SET input_json = input_json - 'resume'
+WHERE team_id = public.memoh_current_team_id() AND run_id = sqlc.arg(run_id)
+  AND state = 'lost' AND error_code = 'session_runtime.interrupted' AND input_json ? 'resume';

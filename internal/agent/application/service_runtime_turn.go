@@ -599,6 +599,9 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		SessionType:     sessionmode.Schedule,
 	}
 
+	if err := s.recordRunResumeContext(ctx, req); err != nil {
+		return schedule.TriggerResult{}, err
+	}
 	schedulePrompt := native.GenerateSchedulePrompt(native.Schedule{
 		ID:          payload.ID,
 		Name:        payload.Name,

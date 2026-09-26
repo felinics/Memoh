@@ -77,6 +77,33 @@ func (s *PostgresStore) Admit(ctx context.Context, params AdmitParams) (Run, boo
 		}
 		return Run{}, false, fmt.Errorf("ledger(postgres): lock admission bot: %w", err)
 	}
+	if params.ResumeRunID != "" {
+		existing, lookupErr := txq.GetSessionRunByInvocation(ctx, dbsqlc.GetSessionRunByInvocationParams{SessionID: sessionID, InvocationID: params.InvocationID})
+		if lookupErr == nil && existing.BotID == botID {
+			return runFromRow(existing), false, nil
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return Run{}, false, lookupErr
+		}
+		sourceID, parseErr := dbpkg.ParseUUID(params.ResumeRunID)
+		if parseErr != nil {
+			return Run{}, false, ErrResumeSuperseded
+		}
+		source, sourceErr := txq.GetSessionRun(ctx, sourceID)
+		if sourceErr != nil {
+			if errors.Is(sourceErr, pgx.ErrNoRows) {
+				return Run{}, false, ErrResumeSuperseded
+			}
+			return Run{}, false, sourceErr
+		}
+		current, currentErr := txq.IsInterruptedSessionRunLatest(ctx, sourceID)
+		if currentErr != nil {
+			return Run{}, false, currentErr
+		}
+		if source.BotID != botID || source.SessionID != sessionID || !current {
+			return Run{}, false, ErrResumeSuperseded
+		}
+	}
 	row, err := txq.AdmitLockedSessionRun(ctx, dbsqlc.AdmitLockedSessionRunParams{
 		RunID:            runID,
 		BotID:            botID,

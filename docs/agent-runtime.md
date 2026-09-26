@@ -121,3 +121,79 @@ provider once more; unfinished or unobservable jobs retain their identity and an
 `unknown` outcome. They are not automatically canceled or resubmitted. An explicit
 user stop still requests provider cancellation. Receipts support operator recovery;
 they do not constitute automatic job adoption after a server restart.
+
+## Graceful shutdown and session resume
+
+Server shutdown closes admission and records `session_runtime.interrupted` on
+running session runs before canceling producers or stopping HTTP, RPC, schedules,
+external runtimes and workspaces. The existing `lost` terminal state carries this
+specific reason; no schema migration is needed. Completed finish proposals and
+explicit user aborts retain their authoritative outcomes. Waiting decisions keep
+their existing recovery semantics and are not converted into automatic answers.
+
+At turn start, the server saves a versioned resume context in `session_runs.input_json`.
+It preserves the original query, identity, execution location, model selection and
+absolute ancestor deadline. Only verified credential scopes are retained, never
+bearer tokens. Account-backed credentials are revalidated against current account
+state and Bot chat permissions before renewal; scoped chat credentials retain their
+original Bot, chat and route scope. External runtimes retain their existing owner
+and Workspace Exec authorization checks.
+
+After startup, a bounded worker discovers interrupted sessions, waits for the
+workspace bridge to become reachable, and submits a continuation with the stable
+invocation ID `resume:<interrupted-run-id>`. Normal admission and fencing prevent
+two workers from executing that continuation. A later admitted turn supersedes the
+old intent. Expired budgets do not restart. Each continuation reloads committed
+history and instructs the model to inspect interrupted tool outcomes before taking
+further action. Native, direct-agent and subagent sessions use their existing
+runtime dispatch; this is session-level continuation, not process-memory restore.
+Recovered output is published into the session runtime and saved to history.
+
+The worker lists interrupted runs through the partial index
+`idx_session_runs_resume_pending`, which covers only lost runs with the
+interrupted code that still carry `input_json.resume`; it never walks a team's
+run history. An interrupted run stays `lost` permanently, so the worker retires
+its intent (removes the `resume` key) once it can no longer continue. At the
+start of every pass over a team it retires intents a later turn answered or
+whose session was deleted, and it retires an individual intent when its budget
+expired, its context version is unsupported, its credential scope was revoked,
+or admission reports it superseded or already continued. Retired intents leave
+the index and are not retried; transient failures such as an unready workspace
+keep the intent for the next pass.
+
+Uncommitted streaming tokens can be lost. Background command handles from the old
+process are not reattached; workspace output and external job receipts must be
+checked. Subagent sessions can continue, but old in-memory parent waiters are gone.
+SIGKILL, OOM, host failure and a shutdown unable to write PostgreSQL cannot reliably
+record a marker and therefore retain the existing `lost` behavior. Once a resumed
+run is admitted, ordinary failures are reported rather than automatically replayed.
+
+The server has a 30-second graceful shutdown budget. Compose allows 45 seconds,
+and the entrypoint waits for Server exit before terminating embedded containerd.
+The development Air supervisor gives the server the same shutdown allowance.
+
+### Hosted tenant scope integration
+
+The composition root installs `SetSessionResumeScopeProvider` before startup.
+Its provider enumerates a bounded page of opaque Team IDs through the hosted
+scope catalog, binds each ID to the ordinary database context, and reports the
+current binding. A hosted adapter can delegate to its existing session-runtime
+reaper scope provider, converting the page to `SessionResumeScopePage`.
+
+Every run query, workspace readiness probe, authorization check, admission,
+stream and terminal write retains that bound context. The worker rejects a run
+whose `team_id` differs from the current scope. Discovery never uses a privileged
+cross-team run query. The OSS fallback uses the composition root's allowed Team;
+if neither an allowed Team nor a hosted scope provider is installed, startup
+fails closed. No schema change or additional role is required by this port.
+
+A recovery admission also carries `ResumeRunID`. Under the same parent lock as
+ordinary admission, PostgreSQL verifies that the source is still interrupted and
+has no newer turn. This closes the gap between discovery and admission, including
+when an intervening user turn has already completed. Invocation replay retains
+its existing result. Hosted credential renewal and remote workspace adapters
+remain separate integration responsibilities.
+
+HTTP shutdown cancels the server request base context after run interruption has
+been recorded. Long-lived SSE requests can then finish before the later event-hub
+cleanup hooks; they must not consume the entire graceful shutdown deadline.

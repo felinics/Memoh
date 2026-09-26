@@ -105,6 +105,11 @@ type compactionRunner interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
+	resumeSecret            string
+	resumeScopes            SessionResumeScopeProvider
+	resumeReady             func(context.Context, string, string) error
+	resumeStop              context.CancelFunc
+	resumeDone              chan struct{}
 	agent                   *native.Agent
 	modelsService           *models.Service
 	queries                 dbstore.Queries
@@ -543,7 +548,7 @@ func (s *Service) resolveWithHTTPClient(ctx context.Context, req ChatRequest, mo
 	// the rendered event stream (RC) + bot turn responses (TR) instead of
 	// loading raw history from bot_history_messages. The current inbound
 	// message is already in the RC, so it must not be appended again.
-	usePipeline := s.pipeline != nil &&
+	usePipeline := !req.ShutdownResume && s.pipeline != nil &&
 		strings.TrimSpace(req.ThreadID) != "" &&
 		strings.TrimSpace(req.HistoryCutoffBeforeMessageID) == "" &&
 		len(req.RequestedSkills) == 0

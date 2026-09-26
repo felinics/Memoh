@@ -278,6 +278,7 @@
       "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。"
     },
     "session_runtime": {
+      "interrupted": "服务关闭时中断了本次运行，重启后可从已保存的进度继续。",
       "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
       "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",
       "history_inconsistent": "会话记录保存出错，请刷新后重试。",
