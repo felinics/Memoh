@@ -69,6 +69,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			DiscussAddressed:        addressed,
 			DiscussContextTokens:    admission.EstimatedTokens,
 			DiscussContextOverflow:  admission.ProtectedOverflow,
+			DiscussCurrentTokens:    admission.CurrentTokens,
 		},
 		consumed:        timeline.ConsumedDiscussCursor(rc),
 		messageCount:    len(composed.Messages),

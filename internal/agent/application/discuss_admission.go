@@ -10,10 +10,11 @@ import (
 // discussAdmission reports the agent-side admission decision made on a
 // composed discuss context before any SDK materialization (CM-ADM-001).
 type discussAdmission struct {
-	EstimatedTokens int
-	SelectedTokens  int
-	BudgetTokens    int
-	DroppedMessages int
+	EstimatedTokens      int
+	SelectedTokens       int
+	BudgetTokens         int
+	DroppedMessages      int
+	RecoveryBudgetTokens int
 	// ProtectedOverflow is set when artifact summaries plus the newest
 	// message alone exceed the budget, or when the newest message is a tool
 	// response that cannot open a valid window; the turn must fail closed
@@ -51,6 +52,12 @@ func admitDiscussAgentMessages(messages []turn.DiscussMessage, budgetTokens int)
 		return nil, admission
 	}
 	decision := turn.AdmitContextEntries(entries, available)
+	admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(available)
+	for _, entry := range entries {
+		if !entry.Pinned {
+			admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(max(0, available-entry.Cost))
+		}
+	}
 	admission.SelectedTokens = turn.EstimateTokensFromBytes(fixedBytes + decision.SelectedTokens)
 	admission.DroppedMessages = decision.DroppedEntries
 	admission.ProtectedOverflow = decision.ProtectedOverflow
@@ -73,7 +80,7 @@ func admitDiscussAgentMessages(messages []turn.DiscussMessage, budgetTokens int)
 // tool response at the window start. The input slice is not modified; the
 // returned slice shares its backing payloads.
 func admitDiscussMessages(messages []turn.DiscussMessage, budgetTokens int) ([]turn.DiscussMessage, discussAdmission) {
-	admission := discussAdmission{BudgetTokens: budgetTokens}
+	admission := discussAdmission{BudgetTokens: budgetTokens, RecoveryBudgetTokens: budgetTokens}
 	if len(messages) == 0 {
 		return messages, admission
 	}
@@ -83,6 +90,9 @@ func admitDiscussMessages(messages []turn.DiscussMessage, budgetTokens int) ([]t
 			Cost:         discussMessageTokens(messages[i]),
 			Pinned:       messages[i].CompactionArtifactID != "",
 			ToolResponse: strings.EqualFold(strings.TrimSpace(messages[i].Role), "tool"),
+		}
+		if !entries[i].Pinned {
+			admission.RecoveryBudgetTokens = max(0, budgetTokens-entries[i].Cost)
 		}
 	}
 	decision := turn.AdmitContextEntries(entries, budgetTokens)

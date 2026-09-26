@@ -278,6 +278,7 @@ type ComposeAdmission struct {
 	EstimatedTokens int
 	// SelectedTokens is the estimate of what was actually materialized.
 	SelectedTokens int
+	CurrentTokens  int
 	// TotalEntries and DroppedEntries count merge entries, not messages.
 	TotalEntries   int
 	DroppedEntries int
@@ -321,6 +322,11 @@ func ComposeContextWithArtifactsBudgeted(
 		TotalEntries:      len(entries),
 		DroppedEntries:    decision.DroppedEntries,
 		ProtectedOverflow: decision.ProtectedOverflow,
+	}
+	for _, entry := range admitted {
+		if !entry.Pinned {
+			admission.CurrentTokens = entry.Cost
+		}
 	}
 	if decision.ProtectedOverflow {
 		return nil, admission

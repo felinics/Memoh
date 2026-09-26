@@ -31,7 +31,7 @@ func TestDiscussChannelOverflowRequestsRecoveryWithoutPayload(t *testing.T) {
 	artifacts := &recoveringArtifactProvider{}
 	svc := &fakeTurnService{recomposeRuns: 1}
 	svc.onStart = func(cmd turn.StartTurnCommand) {
-		if svc.calls == 1 && (!cmd.DiscussContextOverflow || len(cmd.DiscussMessages) != 0 || cmd.DiscussContextTokens <= 1000) {
+		if svc.calls == 1 && (!cmd.DiscussContextOverflow || len(cmd.DiscussMessages) != 0 || cmd.DiscussContextTokens <= 1000 || cmd.DiscussCurrentTokens <= 0 || cmd.DiscussCurrentTokens >= 1000) {
 			t.Errorf("overflow must carry recovery metadata only: overflow=%v messages=%d pressure=%d", cmd.DiscussContextOverflow, len(cmd.DiscussMessages), cmd.DiscussContextTokens)
 		}
 	}

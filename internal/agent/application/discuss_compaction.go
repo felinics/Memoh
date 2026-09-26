@@ -56,6 +56,19 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 			slog.Int("threshold_tokens", threshold))
 		return false
 	}
+	if rejected {
+		if cmd.DiscussContextOverflow {
+			budget = max(0, budget-cmd.DiscussCurrentTokens)
+			if resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType) {
+				budget -= turn.EstimateTokensFromBytes(len(discussAgentPromptPrefix) + len(discussAgentPromptSuffix) + len("[assistant]\n\n\n") + turn.ContextBytesPerToken - 1)
+			}
+		} else {
+			budget = admission.RecoveryBudgetTokens
+		}
+		if budget <= 0 {
+			return false
+		}
+	}
 	start := time.Now()
 	res := s.runCompactionSync(ctx, ChatRequest{
 		BotID:    cmd.BotID,
