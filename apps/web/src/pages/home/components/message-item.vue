@@ -857,7 +857,9 @@ function errorBlockContent(block: Pick<ErrorBlock, 'code' | 'content'> & { args?
 }
 
 function noticeBlockContent(block: { name?: string; content: string; args?: Record<string, string> }): string {
-  return errorBlockContent({ code: block.name, content: block.content, args: block.args })
+  const name = block.name?.trim()
+  const key = name ? `runtimeNotices.${name}` : ''
+  return key && te(key) ? t(key, block.args ?? {}) : errorBlockContent({ code: name, content: block.content, args: block.args })
 }
 
 // Consecutive tools and reasoning form one process, regardless of tool kind.

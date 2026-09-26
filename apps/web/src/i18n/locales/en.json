@@ -1,4 +1,9 @@
 {
+  "runtimeNotices": {
+    "native_history_lost": "The agent could not restore its previous context and started over. Earlier messages remain as history only. Provide any context needed to continue.",
+    "tools_unavailable": "Memoh tools are unavailable for this conversation. Start a new session to restore them.",
+    "elicitation_declined": "A tool requested an interaction that could not be shown. The request was declined."
+  },
   "common": {
     "toast": {
       "notice": "Notice",
@@ -115,9 +120,6 @@
     "finish": "Done"
   },
   "errors": {
-    "native_history_lost": "The agent could not restore its previous context and started over. Earlier messages remain as history only. Provide any context needed to continue.",
-    "tools_unavailable": "Memoh tools are unavailable for this conversation. Start a new session to restore them.",
-    "elicitation_declined": "A tool requested an interaction that could not be shown. The request was declined.",
     "capability": {
       "access_denied": "You need Manage permission on this bot to manage its capabilities.",
       "request_invalid": "The capability request is invalid. Check the action and its parameters.",
