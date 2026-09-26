@@ -107,7 +107,7 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		resolver.resolveResult.RunConfig.Model.Provider = provider
 		service.compactionService = postgresBudgetCompactor{queries: queries, url: server.URL}
 		stored := 0
-		service.turnHooks.storeRound = func(ctx context.Context, _, _, _, _, _ string, response []sdk.Message, _ string, _ *contextfrag.LifecycleHolder) error {
+		service.turnHooks.storeRound = func(_ context.Context, _, _, _, _, _ string, response []sdk.Message, _ string, _ *contextfrag.LifecycleHolder) error {
 			stored++
 			for _, msg := range sdkMessagesToModelMessages(response) {
 				appendMessage(fmt.Sprintf("reply-%d", round), msg.Role, msg.TextContent(), true)
@@ -143,7 +143,6 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 			t.Fatalf("round %d invalid frontier: %v %+v", round, err, frontier.Issues)
 		}
 		driver.StopAll()
-
 	}
 	if summaries.Load() < rounds || summaries.Load() > rounds*3 {
 		t.Fatalf("unexpected bounded recovery count=%d", summaries.Load())

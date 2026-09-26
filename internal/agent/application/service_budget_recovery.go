@@ -197,10 +197,6 @@ func (l chatHistoryLayout) replaceSourceFrags(ctx context.Context, old, cfg nati
 			inserted = true
 		}
 		if l.owns(frag) {
-			if !inserted {
-				out = append(out, history...)
-				inserted = true
-			}
 			continue
 		}
 		oldIndex, newIndex := frag.Provenance.Index, frag.Provenance.Index

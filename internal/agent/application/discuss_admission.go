@@ -57,7 +57,6 @@ func admitDiscussAgentContext(messages []turn.DiscussMessage, budgetTokens, cont
 		return nil, admission
 	}
 	decision := turn.AdmitContextEntries(entries, available)
-	admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(available)
 	currentCost := 0
 	for i, current := range turn.CurrentAdmissionEntries(entries) {
 		if current {
