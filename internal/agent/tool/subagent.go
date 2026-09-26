@@ -148,13 +148,13 @@ type SpawnResult struct {
 }
 
 const (
-	// subagentTimeout caps total execution time as a safety net per attempt.
-	subagentTimeout = 10 * time.Minute
 	// spawnProgressInterval keeps the parent stream active during foreground waits.
-	spawnProgressInterval   = 30 * time.Second
-	subagentMaxRetries      = 3
-	subagentRetryBaseDelay  = 2 * time.Second
-	subagentWatchdogTimeout = 3 * time.Minute
+	spawnProgressInterval  = 30 * time.Second
+	subagentMaxRetries     = 3
+	subagentRetryBaseDelay = 2 * time.Second
+	// Match Claude Code's inactivity window: progress extends the run, while
+	// ten minutes without a stream event ends the attempt.
+	subagentWatchdogTimeout = 10 * time.Minute
 
 	agentControlVersion = "v2"
 )
@@ -745,7 +745,7 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 		}, nil
 	}
 
-	taskID, taskCtx, err := p.bgManager.StartAgentTask(context.WithoutCancel(ctx), session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, false)
+	taskID, taskCtx, err := p.bgManager.StartAgentTask(ctx, session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, false)
 	if err != nil {
 		p.coord.mu.Unlock()
 		return nil, err
@@ -1049,8 +1049,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			}
 		}
 
-		safetyCtx, safetyCancel := context.WithTimeout(ctx, subagentTimeout)
-		wdCtx, wd := NewSubagentWatchdog(safetyCtx, subagentWatchdogTimeout, p.logger)
+		wdCtx, wd := NewSubagentWatchdog(ctx, subagentWatchdogTimeout, p.logger)
 		cfg.Attempt = attempt + 1
 		cfg.MaxAttempts = subagentMaxRetries + 1
 		attemptDisposition := SpawnAttemptFailure
@@ -1087,7 +1086,6 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		}
 		genResult, err := p.agent.GenerateWithWatchdog(wdCtx, cfg, wd.Touch)
 		wd.Stop()
-		safetyCancel()
 
 		if genResult != nil && genResult.ContextLifecycle != nil {
 			res.ContextLifecycle = genResult.ContextLifecycle

@@ -155,6 +155,7 @@
       "protected_overflow": "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."
     },
     "agent": {
+      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying.",
       "response_timeout": "The model did not respond in time. Please try again.",
       "response_interrupted": "The model response was interrupted. Please try again.",
       "provider_overloaded": "The model provider is overloaded right now. Please try again in a moment.",

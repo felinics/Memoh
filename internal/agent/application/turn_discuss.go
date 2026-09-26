@@ -310,10 +310,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	var terminalPayload []byte
 	var hasTerminalEvent bool
 	for event := range eventCh {
-		idleCancel.Reset()
-		if event.Type == native.EventToolCallStart {
-			idleCancel.RecordToolCall()
-		}
+		idleCancel.Observe(event)
 		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
 		}
