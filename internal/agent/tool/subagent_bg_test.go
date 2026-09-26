@@ -307,6 +307,10 @@ func (*fakeAgentMessageService) ListActiveSinceWithinBytes(context.Context, stri
 	return nil, nil
 }
 
+func (*fakeAgentMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
 func (*fakeAgentMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
 	return messagepkg.ActiveMessagesMeasure{}, nil
 }
