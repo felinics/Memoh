@@ -14,7 +14,7 @@ function writeExecutable(path: string, content: string): void {
   chmodSync(path, 0o755)
 }
 
-function runEntrypoint(backend?: string, configPath = '/app/config.toml', ctrStatus = 1) {
+function runEntrypoint(backend?: string, configPath = '/app/config.toml', ctrStatus = 1, shutdown = false) {
   const tempDir = mkdtempSync(join(tmpdir(), 'memoh-server-entrypoint-'))
   const appDir = join(tempDir, 'app')
   const configDir = join(tempDir, 'config')
@@ -34,6 +34,12 @@ function runEntrypoint(backend?: string, configPath = '/app/config.toml', ctrSta
     writeFileSync(hostConfigPath, `[container]\n${backendConfig}`)
     writeExecutable(join(appDir, 'memoh-server'), `#!/bin/sh
 printf 'memoh-server %s\n' "$*" >> "$ENTRYPOINT_TEST_LOG"
+if [ "$ENTRYPOINT_TEST_SHUTDOWN" = 1 ]; then
+  entrypoint_pid=$PPID
+  trap '/bin/sleep 0.1; printf "interrupt-saved\\n" >> "$ENTRYPOINT_TEST_LOG"; exit 0' TERM INT
+  (/bin/sleep 0.1; kill -TERM "$entrypoint_pid") &
+  while :; do /bin/sleep 0.01; done
+fi
 `)
 
     const fakeCommand = `#!/bin/sh
@@ -79,6 +85,8 @@ exit 0
       `type=bind,src=${stateDir},dst=/test/state`,
       '--env',
       'ENTRYPOINT_TEST_LOG=/test/state/calls.log',
+      '--env',
+      `ENTRYPOINT_TEST_SHUTDOWN=${shutdown ? 1 : 0}`,
       '--env',
       `ENTRYPOINT_TEST_CTR_STATUS=${ctrStatus}`,
       '--env',
@@ -134,4 +142,13 @@ test('omitted backend preserves embedded containerd setup and cleanup', () => {
   expect(calls).toMatch(/^ctr version$/m)
   expect(calls).toMatch(/^memoh-server serve$/m)
   expect(calls).toMatch(/^containerd-stopped$/m)
+})
+
+
+test('SIGTERM preserves containerd until the server saves its interruption marker', () => {
+  const { calls, result } = runEntrypoint(undefined, '/app/config.toml', 0, true)
+  expect(result.error).toBeUndefined()
+  expect(calls).toMatch(/interrupt-saved/)
+  expect(calls).toMatch(/containerd-stopped/)
+  expect(calls.indexOf('interrupt-saved')).toBeLessThan(calls.indexOf('containerd-stopped'))
 })

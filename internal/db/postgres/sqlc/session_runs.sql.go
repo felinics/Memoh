@@ -513,6 +513,65 @@ func (q *Queries) ListActiveSessionRunsByBot(ctx context.Context, botID pgtype.U
 	return items, nil
 }
 
+const listInterruptedSessionRuns = `-- name: ListInterruptedSessionRuns :many
+SELECT r.run_id, r.team_id, r.bot_id, r.session_id, r.invocation_id, r.turn_id, r.turn_position, r.state, r.input_json, r.input_fingerprint, r.owner_id, r.fencing_token, r.owner_since, r.live_generation, r.abort_requested_at, r.proposed_terminal_state, r.proposed_error_code, r.proposed_error_message, r.finish_proposed_at, r.error_code, r.error_message, r.created_at, r.updated_at FROM session_runs r
+JOIN bot_sessions s ON s.team_id = r.team_id AND s.id = r.session_id
+JOIN bots b ON b.team_id = r.team_id AND b.id = r.bot_id
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.state = 'lost' AND r.error_code = 'session_runtime.interrupted'
+  AND r.input_json ? 'resume' AND s.deleted_at IS NULL AND b.status <> 'deleting'
+  AND r.run_id > $1::uuid
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
+    AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
+ORDER BY r.run_id LIMIT 100
+`
+
+// A later user turn supersedes the old intent. Admission's existing unique
+// invocation index arbitrates concurrent startup workers without another lease.
+func (q *Queries) ListInterruptedSessionRuns(ctx context.Context, afterRunID pgtype.UUID) ([]SessionRun, error) {
+	rows, err := q.db.Query(ctx, listInterruptedSessionRuns, afterRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SessionRun
+	for rows.Next() {
+		var i SessionRun
+		if err := rows.Scan(
+			&i.RunID,
+			&i.TeamID,
+			&i.BotID,
+			&i.SessionID,
+			&i.InvocationID,
+			&i.TurnID,
+			&i.TurnPosition,
+			&i.State,
+			&i.InputJson,
+			&i.InputFingerprint,
+			&i.OwnerID,
+			&i.FencingToken,
+			&i.OwnerSince,
+			&i.LiveGeneration,
+			&i.AbortRequestedAt,
+			&i.ProposedTerminalState,
+			&i.ProposedErrorCode,
+			&i.ProposedErrorMessage,
+			&i.FinishProposedAt,
+			&i.ErrorCode,
+			&i.ErrorMessage,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrphanedSessionRuns = `-- name: ListOrphanedSessionRuns :many
 SELECT run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
 FROM session_runs
@@ -1015,6 +1074,27 @@ func (q *Queries) ResumeSessionRun(ctx context.Context, arg ResumeSessionRunPara
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const saveSessionRunResumeContext = `-- name: SaveSessionRunResumeContext :execrows
+UPDATE session_runs SET input_json = jsonb_set(input_json, '{resume}', $1::jsonb), updated_at = now()
+WHERE team_id = public.memoh_current_team_id() AND run_id = $2
+  AND fencing_token = $3 AND state = 'running'
+`
+
+type SaveSessionRunResumeContextParams struct {
+	ResumeContext []byte      `json:"resume_context"`
+	RunID         pgtype.UUID `json:"run_id"`
+	FencingToken  int64       `json:"fencing_token"`
+}
+
+// Credentials are represented by verified claim scopes, never bearer tokens.
+func (q *Queries) SaveSessionRunResumeContext(ctx context.Context, arg SaveSessionRunResumeContextParams) (int64, error) {
+	result, err := q.db.Exec(ctx, saveSessionRunResumeContext, arg.ResumeContext, arg.RunID, arg.FencingToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setSessionRunWaitingDecision = `-- name: SetSessionRunWaitingDecision :one

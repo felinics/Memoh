@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 
 	channelmodule "github.com/felinics/memoh/cmd/internal/channel"
 	coremodule "github.com/felinics/memoh/cmd/internal/core"
+	"github.com/felinics/memoh/internal/agent/application"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	channelpkg "github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/weixin"
 	"github.com/felinics/memoh/internal/config"
@@ -23,7 +27,7 @@ func runServe() {
 		fmt.Fprintf(os.Stderr, "memoh: %v\n", err)
 		os.Exit(1)
 	}
-	fx.New(optionsFor(cfg)).Run()
+	fx.New(optionsFor(cfg), fx.StopTimeout(30*time.Second)).Run()
 }
 
 // optionsFor assembles the server for one of two deployment shapes.
@@ -34,9 +38,9 @@ func runServe() {
 // endpoints keep working with a single binary and an unchanged config.
 func optionsFor(cfg config.Config) fx.Option {
 	if cfg.SplitChannelRuntime() {
-		return fx.Options(commonOptions(), splitOptions())
+		return fx.Options(commonOptions(), splitOptions(), fx.Invoke(startSessionResume))
 	}
-	return fx.Options(commonOptions(), embeddedOptions())
+	return fx.Options(commonOptions(), embeddedOptions(), fx.Invoke(startSessionResume))
 }
 
 func splitOptions() fx.Option {
@@ -135,4 +139,16 @@ func commonOptions() fx.Option {
 			return &fxevent.SlogLogger{Logger: logger.With(slog.String("component", "fx"))}
 		}),
 	)
+}
+
+// Registered last: stop admission and persist interruptions before HTTP/gRPC,
+// schedule, external runtime and workspace shutdown hooks tear down producers.
+func startSessionResume(lc fx.Lifecycle, service *application.Service, manager *sessionruntime.Manager) {
+	lc.Append(fx.Hook{
+		OnStart: service.StartSessionResume,
+		OnStop: func(ctx context.Context) error {
+			service.StopSessionResume()
+			return manager.InterruptForShutdown(ctx)
+		},
+	})
 }

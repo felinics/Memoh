@@ -130,6 +130,7 @@ const (
 	CodeSessionPublishFailed                     Code = "session_runtime.publish_failed"
 	CodeSessionAbortFailed                       Code = "session_runtime.abort_failed"
 	CodeAgentResponseTimeout                     Code = "agent.response_timeout"
+	CodeSessionInterrupted                       Code = "session_runtime.interrupted"
 	CodeAgentToolTimeout                         Code = "agent.tool_timeout"
 	CodeVideoJobOutcomeUnknown                   Code = "video.job_outcome_unknown"
 	CodeScheduleExecutionTimeout                 Code = "schedule.execution_timeout"
@@ -661,6 +662,7 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The conversation was deleted, but its running task could not be stopped. Refresh and try again.",
 	},
+	CodeSessionInterrupted:       {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server interrupted this run during shutdown. It can resume from saved progress after restart."},
 	CodeAgentToolTimeout:         {HTTPStatus: http.StatusGatewayTimeout, Detail: "The tool stopped reporting progress. Review its saved result before retrying."},
 	CodeScheduleExecutionTimeout: {HTTPStatus: http.StatusGatewayTimeout, Detail: "This scheduled run reached its execution limit. Review its progress or increase the limit."},
 	CodeVideoJobOutcomeUnknown:   {HTTPStatus: http.StatusBadGateway, Detail: "The video job status could not be confirmed. Check the saved job before creating another video."},
