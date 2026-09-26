@@ -5,13 +5,14 @@ failed — the question that matters most here, because one agent turn strings
 together a model call, tool executions inside a workspace container, database
 work, and compaction, and "the reply was slow" does not say which of them was.
 
-Log records are covered by [logging.md](logging.md). This file covers tracing:
-what is instrumented, how to turn it on, and what it costs when it is off.
+Log records are covered by [logging.md](logging.md). This file covers tracing
+and the metrics exported with it: what is instrumented, how to turn it on, and
+what it costs when it is off.
 
 ## Off by default, and off means off
 
-With no collector configured, the process installs **no tracer provider**. It
-does not build an exporter pointed at a default address, so nothing retries a
+With no collector configured, the process installs **no tracer provider and
+no meter provider**. It does not build an exporter pointed at a default address, so nothing retries a
 connection that cannot succeed, and nothing is batched or dropped in the
 background.
 
@@ -45,6 +46,8 @@ knows:
 | `OTEL_TRACES_SAMPLER_ARG` | Sample ratio |
 | `OTEL_SERVICE_NAME` | Overrides the reported `service.name` |
 | `OTEL_SDK_DISABLED=true` | Disables export whatever else is set |
+| `OTEL_METRICS_EXPORTER=none` | Disables metric export; traces stay on |
+| `OTEL_METRIC_EXPORT_INTERVAL` | Milliseconds between metric exports (SDK default 60000) |
 
 `OTEL_TRACES_SAMPLER` is deliberately **not** read beyond that ratio: claiming
 to support sampler names that are not implemented would be worse than not
@@ -143,6 +146,34 @@ same reason its logs are not collected: it runs inside the per-bot workspace
 container, which has no collector to export to. The host side of every bridge
 call is traced as a client span, so the call is visible; what happens inside
 the container is not.
+
+## Metrics
+
+Metrics go to the same collector as traces, over the same protocol, with the
+same headers and the same resource. Setting `OTEL_METRICS_EXPORTER=none`
+keeps traces and drops metrics, for a collector that accepts only one of them.
+
+`telemetry.EchoServer` records `http.server.request.duration`, in seconds, for
+the same requests it traces: WebSocket upgrades and probes are left out. The
+attributes are `http.request.method` (unknown methods become `_OTHER`),
+`url.scheme`, `http.route`, `http.response.status_code` and
+`network.protocol.version`. The status is the one the client received, so a
+handler that returns an unmapped error counts as a 500. A response with
+`Content-Type: text/event-stream` also carries `http.response.streaming=true`;
+its duration is how long the page stayed open, so latency panels should
+exclude it.
+
+The path, the host, the port and the request id are not attributes. Each
+distinct value would be a separate series for the life of the process.
+
+The buckets run from 5 ms to 300 s. The first fourteen are the ones the HTTP
+semantic conventions recommend and stop at 10 s; the rest are added so that a
+slow chat request still has a quantile.
+
+Installing a meter provider also turns on the RPC metrics that `otelgrpc`
+records on every gRPC connection in the table above, and the HTTP client
+metrics of libraries instrumented with OpenTelemetry, the Docker client among
+them.
 
 ## What must never be on a span
 

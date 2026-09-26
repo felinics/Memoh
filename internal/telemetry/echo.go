@@ -1,13 +1,17 @@
 package telemetry
 
 import (
-	"errors"
+	"mime"
+	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
@@ -18,7 +22,8 @@ import (
 // livenessRoute is the path both processes answer probes on.
 const livenessRoute = "/health"
 
-// EchoServer traces inbound HTTP requests.
+// EchoServer traces inbound HTTP requests and records their duration as
+// http.server.request.duration.
 //
 // This is written here rather than taken from a library because the
 // contributed Echo instrumentation is deprecated in favour of a replacement
@@ -32,6 +37,12 @@ const livenessRoute = "/health"
 // Install it after middleware.RequestID and httpx.RequestIDContext, so the
 // span can carry the id the client is given.
 //
+// The span and the metric cover the same requests, with the same exceptions
+// below. The metric carries fewer attributes: every attribute value is a
+// separate series for as long as the process runs, so it keeps only what is
+// bounded. The concrete path, the request id and the client address are per
+// request; server.address is whatever Host the caller sent.
+//
 // A WebSocket is skipped, and has to be. Echo calls the handler and the
 // handler does not return until the socket closes, which for a chat
 // connection is hours. A span around that measures how long someone left a
@@ -42,6 +53,14 @@ const livenessRoute = "/health"
 func EchoServer(next echo.HandlerFunc) echo.HandlerFunc {
 	tracer := otel.Tracer(ScopeName)
 	propagator := otel.GetTextMapPropagator()
+	duration, err := otel.Meter(ScopeName).Float64Histogram(semconv.HTTPServerRequestDurationName,
+		metric.WithUnit(semconv.HTTPServerRequestDurationUnit),
+		metric.WithDescription(semconv.HTTPServerRequestDurationDescription),
+	)
+	if err != nil {
+		// The API still returns a usable no-op instrument alongside the error.
+		otel.Handle(err)
+	}
 
 	return func(c echo.Context) error {
 		req := c.Request()
@@ -61,6 +80,7 @@ func EchoServer(next echo.HandlerFunc) echo.HandlerFunc {
 		if c.Path() == livenessRoute {
 			return next(c)
 		}
+		start := time.Now()
 		// Continue the caller's trace when there is one. A public entrance
 		// will usually not have one; an internal caller will.
 		ctx := propagator.Extract(req.Context(), propagation.HeaderCarrier(req.Header))
@@ -73,18 +93,21 @@ func EchoServer(next echo.HandlerFunc) echo.HandlerFunc {
 
 		c.SetRequest(req.WithContext(ctx))
 		err := next(c)
+		if err != nil {
+			span.RecordError(err)
+			// Until the error handler has run, the response status is the
+			// default 200 for anything a handler returned rather than wrote,
+			// and only the handler knows what the error becomes: an
+			// apperror maps to its own status and anything else to 500.
+			// Running it here is what RequestLogger's HandleError does; the
+			// router's call on the way out then finds the response committed
+			// and does nothing.
+			if !c.Response().Committed {
+				c.Error(err)
+			}
+		}
 
 		status := c.Response().Status
-		if err != nil {
-			// The error handler has not run yet, so the response status is
-			// still the zero value for anything a handler returned rather
-			// than wrote. echo.HTTPError carries the status it will become.
-			var httpErr *echo.HTTPError
-			if errors.As(err, &httpErr) {
-				status = httpErr.Code
-			}
-			span.RecordError(err)
-		}
 		span.SetAttributes(semconv.HTTPResponseStatusCode(status))
 		// 4xx is the caller's problem, not this service failing, and marking
 		// it an error makes every backend's error rate track ordinary traffic
@@ -92,7 +115,61 @@ func EchoServer(next echo.HandlerFunc) echo.HandlerFunc {
 		if status >= 500 {
 			span.SetStatus(codes.Error, "")
 		}
+		streaming := isEventStream(c.Response().Header())
+		if streaming {
+			span.SetAttributes(httpResponseStreaming)
+		}
+		duration.Record(ctx, time.Since(start).Seconds(),
+			metric.WithAttributeSet(echoMetricAttrs(c, status, streaming)))
 		return err
+	}
+}
+
+// httpResponseStreaming marks a Server-Sent Events response. The HTTP
+// conventions have no attribute for it, so the name is our own. An event
+// stream's duration is how long someone kept the page
+// open, not how long they waited, so latency panels leave these out while
+// request and error counts keep them.
+var httpResponseStreaming = attribute.Bool("http.response.streaming", true)
+
+// isEventStream decides from the response alone. The web client subscribes
+// without sending Accept: text/event-stream, so the request says nothing.
+func isEventStream(header http.Header) bool {
+	mediaType, _, err := mime.ParseMediaType(header.Get(echo.HeaderContentType))
+	return err == nil && mediaType == "text/event-stream"
+}
+
+func echoMetricAttrs(c echo.Context, status int, streaming bool) attribute.Set {
+	req := c.Request()
+	scheme := "http"
+	if req.TLS != nil {
+		scheme = "https"
+	}
+	attrs := []attribute.KeyValue{
+		semconv.HTTPRequestMethodKey.String(boundedMethod(req.Method)),
+		semconv.URLScheme(scheme),
+		semconv.HTTPResponseStatusCode(status),
+		semconv.NetworkProtocolVersion(httpProtocolVersion(req.Proto)),
+	}
+	if route := c.Path(); route != "" {
+		attrs = append(attrs, semconv.HTTPRoute(route))
+	}
+	if streaming {
+		attrs = append(attrs, httpResponseStreaming)
+	}
+	return attribute.NewSet(attrs...)
+}
+
+// boundedMethod folds a method outside the registered set into _OTHER, as the
+// HTTP conventions require of metrics: the method is whatever the caller
+// sent, and each distinct value would otherwise be a series of its own.
+func boundedMethod(method string) string {
+	switch method = strings.ToUpper(method); method {
+	case http.MethodConnect, http.MethodDelete, http.MethodGet, http.MethodHead, http.MethodOptions,
+		http.MethodPatch, http.MethodPost, http.MethodPut, http.MethodTrace:
+		return method
+	default:
+		return "_OTHER"
 	}
 }
 

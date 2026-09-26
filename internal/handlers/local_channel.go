@@ -81,6 +81,9 @@ type LocalChannelHandler struct {
 	logger              *slog.Logger
 	jwtSecret           string
 	tokenTTL            time.Duration
+	// wsHeartbeat is the chat socket's ping and read-deadline timing. The
+	// zero value means chatWSHeartbeat; tests set shorter intervals.
+	wsHeartbeat wsHeartbeat
 }
 
 type runtimeSkillResolver interface {
@@ -1823,6 +1826,14 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	// opened the connection it arrived on without joining that span.
 	connTrigger := telemetry.TriggerFrom(handshakeCtx)
 	defer func() { _ = conn.Close() }()
+	heartbeat := h.wsHeartbeat
+	if heartbeat == (wsHeartbeat{}) {
+		heartbeat = chatWSHeartbeat
+	}
+	// Deferred after Close, so it runs first: the ping goroutine is gone
+	// before the connection it writes to is closed.
+	keepalive := heartbeat.start(conn)
+	defer keepalive.Stop()
 
 	rawToken := extractRawBearerToken(c)
 	bearerToken := "Bearer " + rawToken
@@ -1851,12 +1862,19 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	}
 
 	for {
+		// Re-armed before each read rather than when a message arrives:
+		// handling a message can take a while, and pongs are only processed
+		// inside ReadMessage, so time spent here must not count against the
+		// client.
+		keepalive.extend()
 		_, raw, readErr := conn.ReadMessage()
 		if readErr != nil {
 			connCancel()
-			h.logger.DebugContext(c.Request().Context(), "ws disconnected; active stream can finish in background",
-				slog.String("bot_id", botID),
-				slog.Any("error", readErr),
+			// Info: a disconnect is how a chat connection ends, and the
+			// reason is what tells a closed tab from a proxy cutting an idle
+			// connection.
+			h.logger.InfoContext(c.Request().Context(), "ws disconnected; active stream can finish in background",
+				append([]any{slog.String("bot_id", botID)}, wsDisconnectAttrs(readErr)...)...,
 			)
 			break
 		}
