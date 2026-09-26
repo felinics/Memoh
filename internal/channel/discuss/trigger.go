@@ -22,8 +22,11 @@ type discussTurnPlan struct {
 // ok=false so the caller fails closed instead of running the turn.
 func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.RenderedContext, trs []timeline.TurnResponseEntry, after timeline.DiscussCursorPosition, artifacts []timeline.CompactionArtifact, budget timeline.ComposeBudget) (discussTurnPlan, timeline.ComposeAdmission, bool) {
 	composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, trs, artifacts, budget)
-	if composed == nil {
+	if composed == nil && !admission.ProtectedOverflow {
 		return discussTurnPlan{}, admission, false
+	}
+	if composed == nil {
+		composed = &timeline.ComposeContextResult{}
 	}
 
 	isMentioned := wasRecentlyMentioned(rc, after)
@@ -64,11 +67,13 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			DiscussMessages:         msgs,
 			DiscussImageRefs:        imageRefs,
 			DiscussAddressed:        addressed,
+			DiscussContextTokens:    admission.EstimatedTokens,
+			DiscussContextOverflow:  admission.ProtectedOverflow,
 		},
 		consumed:        timeline.ConsumedDiscussCursor(rc),
 		messageCount:    len(composed.Messages),
 		estimatedTokens: composed.EstimatedTokens,
-	}, admission, true
+	}, admission, !admission.ProtectedOverflow
 }
 
 // extractNewImageRefs collects image references from external RC segments

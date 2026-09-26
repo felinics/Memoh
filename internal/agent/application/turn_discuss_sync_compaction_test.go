@@ -40,6 +40,53 @@ func TestMaybeSyncCompactDiscussDefaultsToShadow(t *testing.T) {
 	}
 }
 
+func TestDiscussAdmissionRecoveryCanRunInShadow(t *testing.T) {
+	service, runner := newControllerPolicyService(t, nil)
+	fired := service.maybeSyncCompactDiscuss(t.Context(), turn.StartTurnCommand{
+		BotID: syncCompactBotID, ThreadID: syncCompactThreadID,
+		DiscussContextOverflow: true, DiscussContextTokens: 2000,
+	}, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "recovery")
+	if !fired || len(runner.configs) != 1 || !runner.configs[0].AllowFrontierFusion {
+		t.Fatalf("rejected context did not enter recovery: fired=%v configs=%+v", fired, runner.configs)
+	}
+}
+
+func TestDiscussRecoveryHonorsExplicitOffAndCancellation(t *testing.T) {
+	for _, mode := range []string{"off", "active"} {
+		service, runner := newControllerPolicyService(t, nil)
+		service.SetSyncCompactionMode(mode)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		if mode == "active" {
+			cancel()
+		}
+		fired := service.maybeSyncCompactDiscuss(ctx, turn.StartTurnCommand{
+			BotID: syncCompactBotID, ThreadID: syncCompactThreadID,
+			DiscussContextOverflow: true, DiscussContextTokens: 2000,
+		}, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "recovery")
+		if fired || len(runner.configs) != 0 {
+			t.Fatalf("disabled/cancelled recovery ran: mode=%s configs=%+v", mode, runner.configs)
+		}
+	}
+}
+
+func TestDiscussCompactionSeesSummaryAndDroppedHistoryPressure(t *testing.T) {
+	for _, pressure := range []int{0, 3000} {
+		service, runner := newControllerPolicyService(t, nil)
+		service.SetSyncCompactionMode("active")
+		fired := service.maybeSyncCompactDiscuss(t.Context(), turn.StartTurnCommand{
+			BotID: syncCompactBotID, ThreadID: syncCompactThreadID, DiscussContextTokens: pressure,
+			DiscussMessages: []turn.DiscussMessage{
+				{Role: "user", Content: strings.Repeat("s", 2400), CompactionArtifactID: "summary"},
+				{Role: "user", Content: strings.Repeat("r", 1200)},
+			},
+		}, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "recovery")
+		if !fired || len(runner.configs) != 1 || runner.configs[0].TotalInputTokens != max(900, pressure) {
+			t.Fatalf("lost pre-selection pressure: fired=%v configs=%+v", fired, runner.configs)
+		}
+	}
+}
+
 func TestMaybeSyncCompactDiscussActiveCompactsAtHardThreshold(t *testing.T) {
 	t.Parallel()
 

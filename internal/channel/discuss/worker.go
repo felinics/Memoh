@@ -125,15 +125,13 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 		plan, admission, ok := d.trigger.Build(cfg, rc, trs, sess.lastProcessed, artifacts, timeline.ComposeBudget{MaxTokens: d.admissionMaxTokens()})
 		if !ok {
 			if admission.ProtectedOverflow {
-				// Fail closed without advancing the cursor: nothing was
-				// materialized, and a later compaction can shrink the
-				// protected set enough for the next attempt to pass.
 				log.ErrorContext(ctx, "context_admission_rejected",
 					slog.String("code", "context.protected_overflow"),
 					slog.Int("estimated_tokens", admission.EstimatedTokens),
 					slog.Int("budget_tokens", d.admissionMaxTokens()))
+			} else {
+				return
 			}
-			return
 		}
 		if admission.DroppedEntries > 0 {
 			log.InfoContext(ctx, "context_admission",
@@ -145,7 +143,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 				slog.Int("total_entries", admission.TotalEntries),
 				slog.Bool("degraded_artifacts", artifactsErr != nil))
 		}
-		log.InfoContext(ctx, "triggering discuss LLM call",
+		log.InfoContext(ctx, "triggering discuss turn",
 			slog.Int("messages", plan.messageCount),
 			slog.Int("estimated_tokens", plan.estimatedTokens))
 
@@ -162,6 +160,9 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 			log.InfoContext(ctx, "discuss recompose requested, rebuilding context",
 				slog.Int("attempt", attempt))
 			continue
+		}
+		if admission.ProtectedOverflow {
+			return
 		}
 		if outcome.runtimeType == sessionRuntimeACPAgent {
 			if outcome.skipped || (outcome.streamed && outcome.terminal && !outcome.failed) {

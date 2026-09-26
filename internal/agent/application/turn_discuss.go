@@ -6,11 +6,9 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
-	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -20,7 +18,6 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
-	"github.com/felinics/memoh/internal/models"
 )
 
 // turnRuntimeHooks are test seams for the transport-facing turn lifecycle.
@@ -149,21 +146,11 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		return
 	}
 
-	if runtimeType := strings.TrimSpace(resolved.RuntimeType); runtimeType == sessionpkg.RuntimeACPAgent ||
-		sessionpkg.IsDirectRuntimeType(runtimeType) {
-		if !cmd.DiscussAddressed {
-			if h.emit(turn.DiscussEventSkipped, nil) {
-				h.contentLightTerminal = true
-			}
-			return
+	external := resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType)
+	if external && !cmd.DiscussAddressed {
+		if h.emit(turn.DiscussEventSkipped, nil) {
+			h.contentLightTerminal = true
 		}
-		if s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id) {
-			if h.emit(turn.DiscussEventRecompose, nil) {
-				h.contentLightTerminal = true
-			}
-			return
-		}
-		s.pumpDiscussAgent(ctx, cmd, h)
 		return
 	}
 	if s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id) {
@@ -172,60 +159,22 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		}
 		return
 	}
+	if cmd.DiscussContextOverflow {
+		cause := apperror.New(apperror.CodeContextProtectedOverflow, nil)
+		cfg := resolved.RunConfig
+		cfg.RunID = h.id
+		cfg.Identity.BotID, cfg.Identity.SessionID = cmd.BotID, cmd.ThreadID
+		cfg.ContextLifecycle = contextfrag.NewLifecycleHolder()
+		cfg.ContextLifecycle.SetManifest(contextfrag.BuildManifest(nil))
+		s.contextLifecycleTerminal(ctx, cfg)(cause)
+		h.emitErr(cause)
+		return
+	}
+	if external {
+		s.pumpDiscussAgent(ctx, cmd, h)
+		return
+	}
 	s.pumpDiscussNative(ctx, cmd, h, resolved)
-}
-
-// maybeSyncCompactDiscuss is the pre-turn synchronous compaction backstop
-// (CM-CMP-001): when raw compactable pressure reaches the hard threshold it
-// compacts synchronously before any model call and reports true so the caller
-// ends the run with DiscussEventRecompose — the driver then recomposes
-// against the refreshed artifact frontier and resubmits. Compaction failure,
-// cooldown, disabled settings, or a missing summarizer model all return
-// false: the turn proceeds with the admission-trimmed context (CM-ADM-002
-// remains the hard boundary). Rollout is gated per CM-CMP-003: shadow mode
-// only logs the decision.
-func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTurnCommand, resolved ResolveRunConfigResult, runID string) bool {
-	mode := s.effectiveSyncCompactionMode()
-	if mode == syncCompactionModeOff || s.compactionService == nil || s.settingsService == nil {
-		return false
-	}
-	compactable := discussCompactableTokens(cmd.DiscussMessages)
-	budget := resolved.ContextBudgetMaxTokens
-	if budget <= 0 {
-		budget = s.contextAbsoluteMaxTokens()
-	}
-	if !syncCompactionShouldRun(compactable, budget) {
-		return false
-	}
-	threshold := hardCompactionThreshold(budget)
-	if mode == syncCompactionModeShadow {
-		s.logger.InfoContext(ctx, "sync_compaction_backstop",
-			slog.String("path", "discuss"),
-			slog.String("mode", "shadow"),
-			slog.Bool("would_fire", true),
-			slog.String("bot_id", cmd.BotID),
-			slog.String("session_id", cmd.ThreadID),
-			slog.Int("pressure_tokens", compactable),
-			slog.Int("threshold_tokens", threshold))
-		return false
-	}
-	start := time.Now()
-	res := s.runCompactionSync(ctx, ChatRequest{
-		BotID:    cmd.BotID,
-		ChatID:   cmd.BotID,
-		ThreadID: cmd.ThreadID,
-		RunID:    runID,
-	}, compactable, budget, resolved.ModelID)
-	s.logger.InfoContext(ctx, "sync_compaction_backstop",
-		slog.String("path", "discuss"),
-		slog.String("mode", "active"),
-		slog.String("status", res.Status),
-		slog.Int64("duration_ms", time.Since(start).Milliseconds()),
-		slog.String("bot_id", cmd.BotID),
-		slog.String("session_id", cmd.ThreadID),
-		slog.Int("pressure_tokens", compactable),
-		slog.Int("threshold_tokens", threshold))
-	return res.Status == compaction.StatusOK
 }
 
 func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle, resolved ResolveRunConfigResult) {
@@ -422,13 +371,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		return
 	}
 
-	// Compute pressure on this goroutine so the detached trigger holds a few
-	// scalars instead of pinning the whole composed context until it runs.
-	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
-		// Pressure is measured on the full composed context, not the admitted
-		// window: what admission dropped is exactly what compaction must cover.
-		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
-	}
+	s.scheduleDiscussCompaction(ctx, cmd, resolved.ModelID)
 }
 
 func (s *Service) persistDiscussTerminalSnapshot(
@@ -550,41 +493,6 @@ func (s *Service) collectDiscussSourceFrags(
 	return out
 }
 
-// maybeCompactDiscuss re-evaluates compaction pressure after a native discuss
-// turn with the same trigger policy as the chat path. ACP discuss turns run
-// through streamTurnChat and inherit its trigger directly.
-func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, modelID string, compactable int) {
-	// The absolute cap keeps compaction triggers alive even when the model
-	// has no configured context window; a zero budget would disable them.
-	budget := s.contextAbsoluteMaxTokens()
-	var turnModel models.GetResponse
-	if s.modelsService != nil && strings.TrimSpace(modelID) != "" {
-		if model, err := s.modelsService.GetByID(ctx, modelID); err == nil {
-			turnModel = model
-			budget = s.effectiveContextTokenBudget(model)
-		}
-	}
-	s.maybeCompact(ctx, ChatRequest{BotID: botID, ThreadID: threadID}, resolvedContext{
-		model:                  turnModel,
-		compactableTokens:      compactable,
-		compactableTokensKnown: true,
-		contextTokenBudget:     budget,
-	}, compactable)
-}
-
-// discussCompactableTokens estimates the raw history share of a discuss
-// context, excluding artifact summaries, in the shared estimator's unit.
-func discussCompactableTokens(messages []turn.DiscussMessage) int {
-	total := 0
-	for _, message := range messages {
-		if message.CompactionArtifactID != "" {
-			continue
-		}
-		total += discussMessageTokens(message)
-	}
-	return total
-}
-
 func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
 	// ACP resolution carries no model window, so the prompt is budgeted by
 	// the absolute cap before any concatenation (CM-ADM-001).
@@ -674,6 +582,9 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 			h.failed.Store(true)
 			return
 		}
+	}
+	if !h.failed.Load() {
+		s.scheduleDiscussCompaction(ctx, cmd, "")
 	}
 }
 
