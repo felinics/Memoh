@@ -154,7 +154,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		}
 		return
 	}
-	if s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id) {
+	if !cmd.DiscussRecoveryExhausted && s.maybeSyncCompactDiscuss(ctx, cmd, resolved, h.id) {
 		if h.emit(turn.DiscussEventRecompose, nil) {
 			h.contentLightTerminal = true
 		}
@@ -259,8 +259,10 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
-	runConfig.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
-		return s.recoverDiscussContextBudget(ctx, cmd, resolved.ModelID, cfg)
+	if !cmd.DiscussRecoveryExhausted {
+		runConfig.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
+			return s.recoverDiscussContextBudget(ctx, cmd, resolved.ModelID, cfg)
+		}
 	}
 	runConfig = pauseIdleDuringBudgetRecovery(runConfig, idleCancel)
 	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
@@ -558,26 +560,27 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 		return
 	}
 	chunks, errs := s.streamTurnChat(ctx, ChatRequest{
-		BotID:                   cmd.BotID,
-		ChatID:                  cmd.BotID,
-		ThreadID:                cmd.ThreadID,
-		RunID:                   h.id,
-		RouteID:                 cmd.RouteID,
-		SourceChannelIdentityID: cmd.SourceChannelIdentityID,
-		CurrentChannel:          cmd.CurrentChannel,
-		ReplyTarget:             cmd.ReplyTarget,
-		ConversationType:        cmd.ConversationType,
-		Token:                   cmd.SessionToken,
-		ChatToken:               cmd.ChatToken,
-		ToolHTTPURL:             cmd.ToolHTTPURL,
-		Query:                   prompt,
-		RawQuery:                prompt,
-		UserMessagePersisted:    true,
-		SkipMemoryExtraction:    true,
-		ForceFreshRuntime:       true,
-		discussMessages:         cmd.DiscussMessages,
-		discussCurrentSources:   cmd.DiscussCurrentSources,
-		discussContextTokens:    discussContextPressure(cmd),
+		BotID:                    cmd.BotID,
+		ChatID:                   cmd.BotID,
+		ThreadID:                 cmd.ThreadID,
+		RunID:                    h.id,
+		RouteID:                  cmd.RouteID,
+		SourceChannelIdentityID:  cmd.SourceChannelIdentityID,
+		CurrentChannel:           cmd.CurrentChannel,
+		ReplyTarget:              cmd.ReplyTarget,
+		ConversationType:         cmd.ConversationType,
+		Token:                    cmd.SessionToken,
+		ChatToken:                cmd.ChatToken,
+		ToolHTTPURL:              cmd.ToolHTTPURL,
+		Query:                    prompt,
+		RawQuery:                 prompt,
+		UserMessagePersisted:     true,
+		SkipMemoryExtraction:     true,
+		ForceFreshRuntime:        true,
+		discussMessages:          cmd.DiscussMessages,
+		discussCurrentSources:    cmd.DiscussCurrentSources,
+		discussContextTokens:     discussContextPressure(cmd),
+		discussRecoveryExhausted: cmd.DiscussRecoveryExhausted,
 	})
 	for chunks != nil || errs != nil {
 		select {

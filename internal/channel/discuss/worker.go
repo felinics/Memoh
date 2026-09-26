@@ -11,9 +11,7 @@ import (
 
 const discussIdleTimeout = 10 * time.Minute
 
-// maxDiscussRecomposeAttempts bounds consecutive compact→recompose→resubmit
-// cycles within one trigger; parity with maxAsyncCompactionPasses.
-const maxDiscussRecomposeAttempts = 3
+const maxDiscussRecoveries = 3
 
 func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 	initialConfig := d.sessionConfigSnapshot(sess)
@@ -110,12 +108,7 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 		return
 	}
 
-	// A recompose outcome means the runtime compacted synchronously instead
-	// of running the model (CM-CMP-001); each retry reloads the artifact
-	// frontier and rebuilds the plan. Every recompose implies a summary
-	// landed, so the cap only bounds a pathological backlog drain — parity
-	// with maxAsyncCompactionPasses on the async trigger.
-	for attempt := 1; attempt <= maxDiscussRecomposeAttempts; attempt++ {
+	for recoveries := 0; recoveries <= maxDiscussRecoveries; recoveries++ {
 		artifacts, artifactsErr := d.loadArtifacts(ctx, cfg)
 		if artifactsErr != nil {
 			log.WarnContext(ctx, "context_admission_degraded",
@@ -147,18 +140,19 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 			slog.Int("messages", plan.messageCount),
 			slog.Int("estimated_tokens", plan.estimatedTokens))
 
+		plan.command.DiscussRecoveryExhausted = recoveries == maxDiscussRecoveries
 		outcome, started := d.runner.Run(ctx, turnSvc, plan.command, log)
 		if !started || outcome.cancelled || outcome.runtimeType == "" {
 			return
 		}
 		if outcome.recomposeRequested {
-			if attempt == maxDiscussRecomposeAttempts {
+			if plan.command.DiscussRecoveryExhausted {
 				log.WarnContext(ctx, "discuss recompose limit reached, deferring to next trigger",
-					slog.Int("attempts", attempt))
+					slog.Int("recoveries", recoveries))
 				return
 			}
 			log.InfoContext(ctx, "discuss recompose requested, rebuilding context",
-				slog.Int("attempt", attempt))
+				slog.Int("recoveries", recoveries+1))
 			continue
 		}
 		if admission.ProtectedOverflow {

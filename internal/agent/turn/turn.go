@@ -121,9 +121,10 @@ type StartTurnCommand struct {
 	DiscussImageRefs      []DiscussImageRef
 	// Pressure is measured before Channel selection. Overflow requests recovery
 	// without materializing or forwarding the rejected context.
-	DiscussContextTokens   int
-	DiscussContextOverflow bool
-	DiscussCurrentTokens   int
+	DiscussContextTokens     int
+	DiscussRecoveryExhausted bool
+	DiscussContextOverflow   bool
+	DiscussCurrentTokens     int
 	// DiscussAddressed covers an explicit @-mention, a reply-to, or a direct
 	// (1:1) conversation. Expensive external runtimes (ACP) use it as a
 	// participation gate and skip the run when false. Mention/reply details

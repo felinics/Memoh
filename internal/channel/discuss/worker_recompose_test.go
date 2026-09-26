@@ -52,7 +52,7 @@ func TestDiscussChannelOverflowRecoveryIsBoundedAndDoesNotConsume(t *testing.T) 
 		driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
 		want := 1
 		if retries > 0 {
-			want = maxDiscussRecomposeAttempts
+			want = (maxDiscussRecoveries + 1)
 		}
 		if svc.calls != want || sess.lastProcessed.SourceCursor != 0 || len(svc.lastCmd.DiscussMessages) != 0 {
 			t.Fatalf("unsafe overflow retry: calls=%d want=%d cursor=%+v payloads=%d", svc.calls, want, sess.lastProcessed, len(svc.lastCmd.DiscussMessages))
@@ -104,10 +104,29 @@ func TestHandleReplyWithTurn_RecomposeLimitDefersToNextTrigger(t *testing.T) {
 
 	driver.handleReplyWithTurn(context.Background(), sess, recomposeTestRC(), driver.logger, svc)
 
-	if svc.calls != maxDiscussRecomposeAttempts {
-		t.Fatalf("StartTurn calls = %d, want %d", svc.calls, maxDiscussRecomposeAttempts)
+	if svc.calls != (maxDiscussRecoveries + 1) {
+		t.Fatalf("StartTurn calls = %d, want %d", svc.calls, (maxDiscussRecoveries + 1))
 	}
 	if sess.lastProcessed.SourceCursor == 200 {
 		t.Fatal("cursor must not advance when every attempt ended in recompose")
+	}
+}
+
+func TestHandleReplyWithTurnThirdRecoveryCompletesOriginalInput(t *testing.T) {
+	svc := &fakeTurnService{recomposeRuns: 3}
+	svc.onStart = func(cmd turn.StartTurnCommand) {
+		if cmd.DiscussRecoveryExhausted != (svc.calls == 4) {
+			t.Errorf("attempt %d exhausted=%v", svc.calls, cmd.DiscussRecoveryExhausted)
+		}
+	}
+	driver := NewDiscussDriver(DiscussDriverDeps{})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1"}}
+	driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
+	if svc.calls != 4 || sess.lastProcessed.SourceCursor != 200 {
+		t.Fatalf("calls=%d cursor=%+v; third recovery must complete original input", svc.calls, sess.lastProcessed)
+	}
+	driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
+	if svc.calls != 4 {
+		t.Fatal("same input processed twice")
 	}
 }
