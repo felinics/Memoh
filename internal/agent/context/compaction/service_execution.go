@@ -88,6 +88,16 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if cfg.SummaryWindowTokens > 0 {
 		maxOutputTokens = min(maxCompactionSummaryTokens, max(1, cfg.SummaryWindowTokens/10))
 	}
+	if cfg.HistoryBudgetTokens > 0 {
+		outputBudget := cfg.HistoryBudgetTokens
+		if cfg.TargetTokens > 0 {
+			outputBudget = min(outputBudget, cfg.TargetTokens)
+		}
+		maxOutputTokens = summaryOutputLimit(outputBudget, maxOutputTokens)
+		if maxOutputTokens <= 0 {
+			return Result{Status: StatusNoop}, nil
+		}
+	}
 	maxCompactTokens, err := boundedCompactionInputTokens(cfg, baseMaxCompactTokens, maxOutputTokens, systemPrompt)
 	if err != nil {
 		return Result{}, err
@@ -210,6 +220,22 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if cost := entriesPromptCost(entries); cost+contextTokens > maxCompactTokens {
 		return Result{}, fmt.Errorf("%w: entries=%d entry_tokens=%d max_compact_tokens=%d",
 			errCompactionInputOverflow, len(entries), cost, maxCompactTokens)
+	}
+
+	replayBudget, retainedTokens := 0, 0
+	if cfg.HistoryBudgetTokens > 0 {
+		retainedTokens = retainedReplayTokens(messages, compactedMessageIDs, frontier.Artifacts, fusing)
+		replayBudget = cfg.TargetTokens
+		if replayBudget <= 0 {
+			replayBudget = cfg.HistoryBudgetTokens
+		}
+		if remaining := cfg.HistoryBudgetTokens - retainedTokens; remaining > summaryProviderReplayTokens("") {
+			replayBudget = min(replayBudget, remaining)
+		}
+		maxOutputTokens = summaryOutputLimit(replayBudget, maxOutputTokens)
+		if maxOutputTokens <= 0 {
+			return Result{Status: StatusNoop}, nil
+		}
 	}
 
 	expectedCompactIDs, err := expectedCompactionClaims(rows, compactedMessageIDs)
@@ -336,6 +362,12 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{}, err
 	}
 
+	if replayBudget > 0 && summaryProviderReplayTokens(summary) > replayBudget {
+		err = fmt.Errorf("compaction: summary replay exceeds output budget: replay=%d budget=%d", summaryProviderReplayTokens(summary), replayBudget)
+		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		return Result{}, err
+	}
+
 	usageJSON, _ := json.Marshal(result.Usage)
 
 	modelUUID := db.ParseUUIDOrEmpty(cfg.ModelRecordID)
@@ -351,7 +383,11 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err
 	}
-	return Result{Status: StatusOK, Summary: summary, MessageCount: len(compactedMessageIDs)}, nil
+	status := StatusOK
+	if cfg.HistoryBudgetTokens > 0 && (truncatedRead || retainedTokens+summaryProviderReplayTokens(summary) > cfg.HistoryBudgetTokens) {
+		status = StatusProgress
+	}
+	return Result{Status: status, Summary: summary, MessageCount: len(compactedMessageIDs)}, nil
 }
 
 func boundedCompactionInputTokens(cfg TriggerConfig, maxCompactTokens, maxOutputTokens int, prompt string) (int, error) {

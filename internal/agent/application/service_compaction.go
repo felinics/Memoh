@@ -169,14 +169,14 @@ func (s *Service) runCompactionPass(ctx context.Context, cfg compaction.TriggerC
 // compact) leaves this turn's context untouched: the request proceeds as-is,
 // possibly still above the threshold, and the next turn re-evaluates.
 func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string) compaction.Result {
-	return s.runSyncCompaction(ctx, req, inputTokens, contextTokenBudget, turnModelID, syncCompactionShouldRun(inputTokens, contextTokenBudget))
+	return s.runSyncCompaction(ctx, req, inputTokens, contextTokenBudget, turnModelID, syncCompactionShouldRun(inputTokens, contextTokenBudget), 0)
 }
 
 func (s *Service) runBudgetCompactionSync(ctx context.Context, req ChatRequest, inputTokens, historyBudget int, modelID string) compaction.Result {
-	return s.runSyncCompaction(ctx, req, inputTokens, historyBudget, modelID, true)
+	return s.runSyncCompaction(ctx, req, inputTokens, historyBudget, modelID, true, historyBudget)
 }
 
-func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string, hardPressure bool) compaction.Result {
+func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputTokens, contextTokenBudget int, turnModelID string, hardPressure bool, historyBudget int) compaction.Result {
 	if ctx.Err() != nil {
 		return compaction.Result{}
 	}
@@ -207,6 +207,7 @@ func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputT
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 	cfg.ContextWindowTokens = contextTokenBudget
 	cfg.HardPressure = hardPressure
+	cfg.HistoryBudgetTokens = historyBudget
 
 	s.logger.InfoContext(ctx, "compaction sync: running synchronously",
 		slog.String("bot_id", req.BotID),

@@ -7,8 +7,9 @@ import (
 
 // Compaction result statuses reported by RunCompactionSync.
 const (
-	StatusOK   = "ok"   // messages were compacted into a summary
-	StatusNoop = "noop" // nothing to compact (already compact, cooled down, or in flight)
+	StatusProgress = "progress" // compacted history still exceeds the requested replay budget
+	StatusOK       = "ok"       // messages were compacted into a summary
+	StatusNoop     = "noop"     // nothing to compact (already compact, cooled down, or in flight)
 )
 
 // Result is the scoped outcome of a synchronous compaction. Callers use it to
@@ -63,6 +64,7 @@ type TriggerConfig struct {
 	SummaryWindowTokens int
 	// ContextWindowTokens is the chat model's context window. It is separate
 	// from SummaryWindowTokens, which belongs to the summarizer model.
+	HistoryBudgetTokens int
 	ContextWindowTokens int
 	PromptCacheTTL      string
 	AllowFrontierFusion bool
