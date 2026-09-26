@@ -12,14 +12,15 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
+	"github.com/google/uuid"
+
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
-	sdk "github.com/felinics/twilight/sdk"
-	"github.com/google/uuid"
 )
 
 type postgresBudgetCompactor struct {
@@ -33,7 +34,7 @@ func (r postgresBudgetCompactor) RunCompactionSync(ctx context.Context, cfg comp
 	return r.service.RunCompactionSync(ctx, cfg)
 }
 
-func TestPostgresDiscussRecoveryPreservesBatchAcrossRestart(t *testing.T) {
+func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	pool := openTurnAdmissionPostgres(t, ctx)
@@ -47,7 +48,7 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossRestart(t *testing.T) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Error(err)
-			w.WriteHeader(400)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		if max(request.MaxTokens, request.MaxCompletionTokens) > 400 {

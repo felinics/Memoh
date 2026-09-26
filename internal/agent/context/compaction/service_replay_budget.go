@@ -2,12 +2,13 @@ package compaction
 
 import (
 	"encoding/json"
-	"github.com/felinics/memoh/internal/agent/turn"
 	"strings"
 
-	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 func summaryProviderReplayTokens(summary string) int {

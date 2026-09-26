@@ -1,9 +1,10 @@
 package compaction
 
 import (
-	"github.com/felinics/memoh/internal/agent/turn"
 	"net/http"
 	"time"
+
+	"github.com/felinics/memoh/internal/agent/turn"
 )
 
 // Compaction result statuses reported by RunCompactionSync.

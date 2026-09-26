@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
@@ -189,6 +189,7 @@ func (q protectedTruncatedQueries) ListUncompactedMessagesBySessionWithinBytes(c
 	}
 	return rows, e
 }
+
 func TestProtectedSourcesSurviveTruncatedRead(t *testing.T) {
 	first := mkRow(t, "user", jsonStr(strings.Repeat("first unconsumed request ", 80)), 1000)
 	second := mkRow(t, "user", jsonStr("second unconsumed request"), 100)
