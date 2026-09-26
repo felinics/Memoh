@@ -67,6 +67,7 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 		AllowHeaders:  []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID, "Idempotency-Key"},
 		ExposeHeaders: []string{echo.HeaderXRequestID},
 	}))
+	e.Use(recordUpgradeStatus)
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		HandleError: true,
 		LogStatus:   true,
