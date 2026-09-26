@@ -13,25 +13,26 @@ import (
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
-	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
-	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/channel/discuss"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 )
 
 type postgresBudgetCompactor struct {
-	service *compaction.Service
+	queries *postgresstore.Queries
 	url     string
 }
 
 func (r postgresBudgetCompactor) RunCompactionSync(ctx context.Context, cfg compaction.TriggerConfig) (compaction.Result, error) {
 	cfg.BaseURL = r.url
 	cfg.ModelRecordID = ""
-	return r.service.RunCompactionSync(ctx, cfg)
+	cfg.MaxCompactTokens = 5000
+	return compaction.NewService(slog.Default(), r.queries).RunCompactionSync(ctx, cfg)
 }
 
 func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.T) {
@@ -61,24 +62,32 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 	defer server.Close()
 	var rc timeline.RenderedContext
 	var after timeline.DiscussCursorPosition
-	base := time.Now().Add(-time.Hour).Truncate(time.Millisecond)
+	logger := slog.Default()
+	cursors := timeline.NewEventStore(logger, queries)
+	messages := messagepkg.NewService(logger, queries)
+	base := time.Now().Add(time.Minute).Truncate(time.Millisecond)
 	appendMessage := func(id, role, text string, self bool) {
 		created := base.Add(time.Duration(len(rc)+1) * time.Second)
 		content, _ := json.Marshal(text)
-		_, err := pool.Exec(ctx, `INSERT INTO bot_history_messages(id,bot_id,session_id,source_message_id,role,content,session_mode,created_at,turn_visible,turn_position,turn_message_seq,turn_id) VALUES($1,$2,$3,$4,$5,$6,'discuss',$7,true,$8,0,gen_random_uuid())`, uuid.NewString(), botID, sessionID, id, role, content, created, len(rc)+1)
+		msg, err := messages.Persist(ctx, messagepkg.PersistInput{BotID: botID, SessionID: sessionID, ExternalMessageID: id, Role: role, Content: content, SessionMode: "discuss"})
 		if err != nil {
 			t.Fatal(err)
 		}
+		if _, err := pool.Exec(ctx, `UPDATE bot_history_messages SET created_at=$2 WHERE id=$1`, msg.ID, created); err != nil {
+			t.Fatal(err)
+		}
+
 		rc = append(rc, timeline.RenderedSegment{MessageID: id, ReceivedAtMs: created.UnixMilli(), IsSelfSent: self, Content: []timeline.RenderedContentPiece{{Type: "text", Text: text}}})
 	}
-	appendMessage("old-user", "user", strings.Repeat("old user ", 1000), false)
-	appendMessage("old-answer", "assistant", strings.Repeat("old answer ", 1000), true)
+	for i := range 6 {
+		appendMessage(fmt.Sprintf("old-%d", i), "user", strings.Repeat("history ", 1000), false)
+	}
 	after = timeline.ConsumedDiscussCursor(rc)
 	const rounds = 32
 	for round := 0; round < rounds; round++ {
 		// Grow consumed history again so each round must make durable progress.
 		if round > 0 {
-			appendMessage(fmt.Sprintf("old-%d", round), "assistant", strings.Repeat("old history ", 1000), true)
+			appendMessage(fmt.Sprintf("growth-%d", round), "assistant", strings.Repeat("old history ", 1000), true)
 			after = timeline.ConsumedDiscussCursor(rc)
 		}
 		a, b := fmt.Sprintf("input-a-%d", round), fmt.Sprintf("input-b-%d", round)
@@ -86,76 +95,57 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		appendMessage(a, "user", textA, false)
 		appendMessage(b, "user", textB, false)
 		appendMessage(fmt.Sprintf("echo-%d", round), "assistant", "self echo", true)
-		service, resolver, _, _, cmd := discussBudgetRecoveryFixture(t)
+
+		if err := cursors.UpsertDiscussCursor(ctx, sessionID, "default", "", "", after); err != nil {
+			t.Fatal(err)
+		}
+		service, resolver, _, _, _ := discussBudgetRecoveryFixture(t)
 		configureDiscussLifecycle(service)
+		service.logger = logger
+		resolver.resolveResult.RuntimeType = "model"
 		provider := &triggerLifecycleProvider{}
 		resolver.resolveResult.RunConfig.Model.Provider = provider
-		cmd.BotID, cmd.ThreadID = botID, sessionID
+		service.compactionService = postgresBudgetCompactor{queries: queries, url: server.URL}
 		stored := 0
-		service.turnHooks.storeRound = func(_ context.Context, _, _, _, _, _ string, _ []sdk.Message, _ string, _ *contextfrag.LifecycleHolder) error {
+		service.turnHooks.storeRound = func(ctx context.Context, _, _, _, _, _ string, response []sdk.Message, _ string, _ *contextfrag.LifecycleHolder) error {
 			stored++
-			appendMessage(fmt.Sprintf("reply-%d", round), "assistant", "completed", true)
+			for _, msg := range sdkMessagesToModelMessages(response) {
+				appendMessage(fmt.Sprintf("reply-%d", round), msg.Role, msg.TextContent(), true)
+			}
 			return nil
 		}
-		completed := false
-		for attempt := 0; attempt < 3; attempt++ {
-			// A new service instance must recover solely from committed PostgreSQL state.
-			service.compactionService = postgresBudgetCompactor{service: compaction.NewService(slog.New(slog.DiscardHandler), queries), url: server.URL}
-			artifacts, err := compaction.NewTimelineArtifactSource(queries).ActiveCompactionArtifacts(ctx, botID, sessionID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			composed, admission := timeline.ComposeContextWithArtifactsBudgeted(rc, nil, artifacts, timeline.ComposeBudget{MaxTokens: 16000, After: &after})
-			if composed == nil {
-				t.Fatalf("unexpected channel rejection: %+v", admission)
-			}
-			wire, _ := json.Marshal(composed.Messages)
-			cmd.DiscussMessages = nil
-			if err := json.Unmarshal(wire, &cmd.DiscussMessages); err != nil {
-				t.Fatal(err)
-			}
-			cmd.DiscussCurrentSources = []turn.ContextMessageSource{{Kind: "external", ID: a, Current: true}, {Kind: "external", ID: b, Current: true}}
-			cmd.DiscussContextTokens, cmd.DiscussCurrentTokens = admission.EstimatedTokens, admission.CurrentTokens
-			handle, err := service.StartTurn(ctx, cmd)
-			if err != nil {
-				t.Fatal(err)
-			}
-			recompose := false
-			for event := range handle.Events() {
-				if event.Kind == turn.DiscussEventRecompose {
-					recompose = true
-				}
-			}
-			for err := range handle.Errs() {
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			var compacted int
-			if err := pool.QueryRow(ctx, `SELECT count(*) FROM bot_history_messages WHERE session_id=$1 AND source_message_id=ANY($2) AND compact_id IS NOT NULL`, sessionID, []string{a, b}).Scan(&compacted); err != nil {
-				t.Fatal(err)
-			}
-			if compacted != 0 {
-				t.Fatal("current batch was compacted")
-			}
-			if recompose {
-				if provider.callCount() != 0 || stored != 0 {
-					t.Fatal("recovery dispatched or persisted a response")
-				}
-				continue
-			}
-			if provider.callCount() != 1 || stored != 1 || countRecoveryText(provider.params.Messages, textA) != 1 || countRecoveryText(provider.params.Messages, textB) != 1 {
-				t.Fatalf("batch failed after recovery: provider=%d stored=%d", provider.callCount(), stored)
-			}
-			after = timeline.ConsumedDiscussCursor(rc)
-			completed = true
-			break
+		cursor := &notifyingRecoveryCursor{EventStore: cursors, advanced: make(chan timeline.DiscussCursorPosition, 2)}
+		driver := discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: service, CursorStore: cursor, MessageService: messages, Artifacts: compaction.NewTimelineArtifactSource(queries), AdmissionMaxTokens: 16000, Logger: logger})
+		t.Cleanup(driver.StopAll)
+		cfg := discuss.DiscussSessionConfig{BotID: botID, ThreadID: sessionID, TeamID: "team-1"}
+		before := summaries.Load()
+		driver.NotifyRC(ctx, sessionID, rc, cfg)
+		select {
+		case after = <-cursor.advanced:
+		case <-ctx.Done():
+			t.Fatalf("round %d did not complete: summary_calls=%d provider_calls=%d", round, summaries.Load()-before, provider.callCount())
 		}
-		if !completed {
-			t.Fatalf("round %d exhausted recovery without progress", round)
+		if round == 0 && summaries.Load()-before != 3 {
+			t.Fatalf("fixture must require exactly three recoveries, got %d", summaries.Load()-before)
 		}
+		if provider.callCount() != 1 || stored != 1 || countRecoveryText(provider.params.Messages, textA) != 1 || countRecoveryText(provider.params.Messages, textB) != 1 {
+			t.Fatalf("round %d: provider=%d stored=%d", round, provider.callCount(), stored)
+		}
+		var compacted int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM bot_history_messages WHERE session_id=$1 AND source_message_id=ANY($2) AND compact_id IS NOT NULL`, sessionID, []string{a, b}).Scan(&compacted); err != nil {
+			t.Fatal(err)
+		}
+		if compacted != 0 {
+			t.Fatal("current batch was compacted")
+		}
+		frontier, err := compaction.NewArtifactProjection(queries).LoadActiveSession(ctx, compaction.ArtifactOwner{BotID: botID, SessionID: sessionID, SessionIDKnown: true})
+		if err != nil || len(frontier.Issues) > 0 {
+			t.Fatalf("round %d invalid frontier: %v %+v", round, err, frontier.Issues)
+		}
+		driver.StopAll()
+
 	}
-	if summaries.Load() < rounds || summaries.Load() > rounds*2 {
+	if summaries.Load() < rounds || summaries.Load() > rounds*3 {
 		t.Fatalf("unexpected bounded recovery count=%d", summaries.Load())
 	}
 	var replies, pending int
@@ -169,4 +159,17 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		t.Fatalf("replies=%d pending=%d", replies, pending)
 	}
 	t.Logf("rounds=%d summary_calls=%d provider_calls=%d stored_replies=%d pending=0 duplicate_current=0", rounds, summaries.Load(), rounds, replies)
+}
+
+type notifyingRecoveryCursor struct {
+	*timeline.EventStore
+	advanced chan timeline.DiscussCursorPosition
+}
+
+func (c *notifyingRecoveryCursor) UpsertDiscussCursor(ctx context.Context, sessionID, scope, route, source string, position timeline.DiscussCursorPosition) error {
+	if err := c.EventStore.UpsertDiscussCursor(ctx, sessionID, scope, route, source, position); err != nil {
+		return err
+	}
+	c.advanced <- position
+	return nil
 }
