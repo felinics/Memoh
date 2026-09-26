@@ -21267,12 +21267,14 @@ const docTemplate = `{
             "enum": [
                 "native",
                 "jina",
-                "cloudflare_markdown"
+                "cloudflare_markdown",
+                "firecrawl"
             ],
             "x-enum-varnames": [
                 "ProviderNative",
                 "ProviderJina",
-                "ProviderCloudflareMarkdown"
+                "ProviderCloudflareMarkdown",
+                "ProviderFirecrawl"
             ]
         },
         "fetchproviders.UpdateRequest": {
@@ -26445,6 +26447,7 @@ const docTemplate = `{
                 "bing",
                 "google",
                 "tavily",
+                "firecrawl",
                 "sogou",
                 "serper",
                 "searxng",
@@ -26459,6 +26462,7 @@ const docTemplate = `{
                 "ProviderBing",
                 "ProviderGoogle",
                 "ProviderTavily",
+                "ProviderFirecrawl",
                 "ProviderSogou",
                 "ProviderSerper",
                 "ProviderSearXNG",

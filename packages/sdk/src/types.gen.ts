@@ -1662,7 +1662,7 @@ export type FetchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type FetchprovidersProviderName = 'native' | 'jina' | 'cloudflare_markdown';
+export type FetchprovidersProviderName = 'native' | 'jina' | 'cloudflare_markdown' | 'firecrawl';
 
 export type FetchprovidersUpdateRequest = {
     config?: {
@@ -3859,7 +3859,7 @@ export type SearchprovidersProviderMeta = {
     provider?: string;
 };
 
-export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex';
+export type SearchprovidersProviderName = 'brave' | 'bing' | 'google' | 'tavily' | 'firecrawl' | 'sogou' | 'serper' | 'searxng' | 'jina' | 'exa' | 'bocha' | 'duckduckgo' | 'yandex';
 
 export type SearchprovidersUpdateRequest = {
     config?: {

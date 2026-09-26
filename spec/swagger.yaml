@@ -2971,11 +2971,13 @@ definitions:
     - native
     - jina
     - cloudflare_markdown
+    - firecrawl
     type: string
     x-enum-varnames:
     - ProviderNative
     - ProviderJina
     - ProviderCloudflareMarkdown
+    - ProviderFirecrawl
   fetchproviders.UpdateRequest:
     properties:
       config:
@@ -6586,6 +6588,7 @@ definitions:
     - bing
     - google
     - tavily
+    - firecrawl
     - sogou
     - serper
     - searxng
@@ -6600,6 +6603,7 @@ definitions:
     - ProviderBing
     - ProviderGoogle
     - ProviderTavily
+    - ProviderFirecrawl
     - ProviderSogou
     - ProviderSerper
     - ProviderSearXNG

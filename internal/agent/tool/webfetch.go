@@ -118,9 +118,91 @@ func (p *WebFetchProvider) callFetchProvider(ctx context.Context, providerName s
 		return p.callJinaReaderFetch(ctx, configJSON, rawURL)
 	case string(fetchproviders.ProviderCloudflareMarkdown):
 		return p.callCloudflareMarkdownFetch(ctx, configJSON, rawURL)
+	case string(fetchproviders.ProviderFirecrawl):
+		return p.callFirecrawlScrape(ctx, configJSON, rawURL)
 	default:
 		return nil, errors.New("unsupported fetch provider")
 	}
+}
+
+func (*WebFetchProvider) callFirecrawlScrape(ctx context.Context, configJSON []byte, rawURL string) (any, error) {
+	cfg := parseFetchConfig(configJSON)
+	apiKey := stringValue(cfg["api_key"])
+	if apiKey == "" {
+		return nil, errors.New("firecrawl API key is required")
+	}
+	endpoint := firstNonEmpty(stringValue(cfg["base_url"]), "https://api.firecrawl.dev/v2/scrape")
+	timeout := parseFetchTimeout(configJSON, webFetchTimeout)
+	if timeout < time.Second {
+		timeout = time.Second
+	}
+	if timeout > 300*time.Second {
+		timeout = 300 * time.Second
+	}
+	payload, err := json.Marshal(map[string]any{
+		"url":                rawURL,
+		"formats":            []string{"markdown"},
+		"onlyMainContent":    true,
+		"removeBase64Images": true,
+		"timeout":            timeout.Milliseconds(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, errors.New("invalid fetch provider base_url")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", bearerValue(apiKey))
+	resp, err := (&http.Client{Timeout: timeout}).Do(req) //nolint:gosec // endpoint is administrator-configured
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, buildFetchHTTPError(resp.StatusCode, body)
+	}
+	var raw struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+		Data    struct {
+			Markdown string `json:"markdown"`
+			Metadata struct {
+				Title       string `json:"title"`
+				Description string `json:"description"`
+				SourceURL   string `json:"sourceURL"`
+				URL         string `json:"url"`
+				ContentType string `json:"contentType"`
+			} `json:"metadata"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, errors.New("invalid fetch response")
+	}
+	if !raw.Success {
+		if strings.TrimSpace(raw.Error) != "" {
+			return nil, fmt.Errorf("firecrawl scrape failed: %s", raw.Error)
+		}
+		return nil, errors.New("firecrawl scrape failed")
+	}
+	content := strings.TrimSpace(raw.Data.Markdown)
+	length := len(content)
+	if length > webFetchMaxTextContent {
+		content = strings.ToValidUTF8(content[:webFetchMaxTextContent], "")
+	}
+	resultURL := firstNonEmpty(raw.Data.Metadata.URL, raw.Data.Metadata.SourceURL, rawURL)
+	return map[string]any{
+		"success": true, "url": resultURL, "provider": string(fetchproviders.ProviderFirecrawl),
+		"format": "markdown", "contentType": raw.Data.Metadata.ContentType,
+		"title": raw.Data.Metadata.Title, "description": raw.Data.Metadata.Description,
+		"content": content, "length": length,
+	}, nil
 }
 
 func (p *WebFetchProvider) callNativeWebFetch(ctx context.Context, rawURL, format string) (any, error) {
@@ -395,6 +477,8 @@ func fetchProviderDisplayName(provider sqlc.FetchProvider) string {
 		return "Jina Reader"
 	case string(fetchproviders.ProviderCloudflareMarkdown):
 		return "Cloudflare Markdown"
+	case string(fetchproviders.ProviderFirecrawl):
+		return "Firecrawl"
 	default:
 		return "Native"
 	}

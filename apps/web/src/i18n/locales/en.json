@@ -1766,6 +1766,7 @@
       "bing": "Bing",
       "google": "Google",
       "tavily": "Tavily",
+      "firecrawl": "Firecrawl",
       "sogou": "Sogou",
       "serper": "Serper",
       "searxng": "SearXNG",
@@ -1778,7 +1779,8 @@
     "fetchProviderNames": {
       "native": "Native",
       "jina": "Jina Reader",
-      "cloudflare_markdown": "Cloudflare Markdown"
+      "cloudflare_markdown": "Cloudflare Markdown",
+      "firecrawl": "Firecrawl"
     }
   },
   "memory": {
