@@ -10,16 +10,17 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
-// ListDiscussHistorySinceBySessionWithinBytes projects only the fields used by
-// timeline composition. In particular, legacy lifecycle audits must stay in the
-// database, rather than being transferred and decoded alongside a small content
-// window. Display fields and asset enrichment are not needed on this path.
-func (s *DBService) ListDiscussHistorySinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error) {
+// ListTurnResponseSourcesSinceBySessionWithinBytes projects only the fields
+// used by timeline turn-response composition. In particular, legacy lifecycle
+// audits must stay in the database, rather than being transferred and decoded
+// alongside a small content window. Display fields and asset enrichment are
+// not needed on this path.
+func (s *DBService) ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.queries.ListDiscussHistorySinceBySessionWithinBytes(ctx, sqlc.ListDiscussHistorySinceBySessionWithinBytesParams{
+	rows, err := s.queries.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sqlc.ListTurnResponseSourcesSinceBySessionWithinBytesParams{
 		SessionID: pgSessionID,
 		CreatedAt: pgtype.Timestamptz{Time: since, Valid: true},
 		MaxBytes:  maxBytes,

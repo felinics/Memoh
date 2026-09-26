@@ -35,9 +35,12 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 
 	modelMessage := DecodeStoredModelMessage(log, msg.ID, msg.Role, msg.Content)
 	inputTokens, outputTokens := parseUsage(msg.Usage)
+	// Compaction coverage persisted hashes over the full row metadata, so the
+	// hash still covers lifecycle audits the record itself does not keep.
+	metadata := dbMessageMetadata(msg)
 	ref.HashAlgo = contextfrag.HashAlgoSHA256
 	ref.HashScope = contextfrag.HashScopeSourcePayload
-	ref.ContentHash = DBMessageSourceHash(msg).Value
+	ref.ContentHash = dbMessageSourceHash(msg, metadata).Value
 	scope := scopeFromDBMessage(msg, fallback)
 	provenance := contextfrag.Provenance{
 		Source:    string(SourceDBMessage),
@@ -53,7 +56,7 @@ func FromDBMessageWithLogger(log *slog.Logger, msg messagepkg.Message, fallback 
 
 		ModelMessage: modelMessage,
 		Assets:       mediaRefsFromDBMessage(msg),
-		Metadata:     cloneMetadata(msg.Metadata),
+		Metadata:     withoutLifecycleAudit(metadata),
 
 		Scope:      scope,
 		Provenance: provenance,
@@ -94,6 +97,10 @@ func DBMessageIdentityRef(id string) (contextfrag.ContextRef, error) {
 }
 
 func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
+	return dbMessageSourceHash(msg, dbMessageMetadata(msg))
+}
+
+func dbMessageSourceHash(msg messagepkg.Message, metadata map[string]any) contextfrag.FragmentHash {
 	payload := dbMessageSourceHashPayload{
 		ID:                      strings.TrimSpace(msg.ID),
 		BotID:                   strings.TrimSpace(msg.BotID),
@@ -105,7 +112,7 @@ func DBMessageSourceHash(msg messagepkg.Message) contextfrag.FragmentHash {
 		SourceReplyToMessageID:  strings.TrimSpace(msg.SourceReplyToMessageID),
 		Role:                    strings.TrimSpace(msg.Role),
 		Content:                 string(msg.Content),
-		Metadata:                cloneMetadata(msg.Metadata),
+		Metadata:                metadata,
 		Usage:                   string(msg.Usage),
 		EventID:                 strings.TrimSpace(msg.EventID),
 		Assets:                  mediaRefsFromDBMessage(msg),
@@ -198,6 +205,31 @@ func mediaRefsFromDBMessage(msg messagepkg.Message) []MediaRef {
 		})
 	}
 	return out
+}
+
+// dbMessageMetadata returns an owned, JSON-normalized copy of a row's
+// metadata. Byte-budgeted loaders leave it undecoded in RawMetadata so only
+// the row being converted is ever decoded.
+func dbMessageMetadata(msg messagepkg.Message) map[string]any {
+	if msg.Metadata != nil {
+		return cloneMetadata(msg.Metadata)
+	}
+	var out map[string]any
+	if json.Unmarshal(msg.RawMetadata, &out) != nil || len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// withoutLifecycleAudit drops the per-run lifecycle audit: its readers take it
+// straight from the stored row, never from a history record. Legacy snapshots
+// carry every selection decision and can be far larger than the message.
+func withoutLifecycleAudit(metadata map[string]any) map[string]any {
+	delete(metadata, contextfrag.MetadataContextLifecycleKey)
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }
 
 func cloneMetadata(metadata map[string]any) map[string]any {

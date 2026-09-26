@@ -16,22 +16,10 @@ import (
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 )
 
-func TestPostgresDiscussHistoryProjectsMetadataAndPreservesWindow(t *testing.T) {
+func TestPostgresTurnResponseSourcesProjectMetadataAndPreserveWindow(t *testing.T) {
 	ctx := context.Background()
 	tx := beginPostgresMessageTestTx(t, ctx)
-	if _, err := tx.Exec(ctx, `
-		WITH owner AS (
-			INSERT INTO users (id, username, is_active) VALUES ($1, 'discuss-history-test', true) RETURNING id
-		), member AS (
-			INSERT INTO team_members (user_id, role) SELECT id, 'admin' FROM owner RETURNING user_id
-		), bot AS (
-			INSERT INTO bots (id, owner_user_id, type, name)
-			SELECT $2, user_id, 'personal', 'discuss-history-test' FROM member RETURNING id
-		)
-		INSERT INTO bot_sessions (id, bot_id, channel_type) SELECT $3, id, 'telegram' FROM bot`,
-		postgresMessageTestUserID, postgresMessageTestBotID, postgresMessageTestSessionID); err != nil {
-		t.Fatal(err)
-	}
+	setupPostgresMessageTestFixtures(t, ctx, tx)
 	queries := dbsqlc.New(tx)
 	svc := NewService(nil, postgresstore.NewQueries(queries))
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -79,7 +67,7 @@ func TestPostgresDiscussHistoryProjectsMetadataAndPreservesWindow(t *testing.T) 
 				if err != nil {
 					t.Fatal(err)
 				}
-				got, err := svc.ListDiscussHistorySinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, since, budget)
+				got, err := svc.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, since, budget)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -111,6 +99,20 @@ func TestPostgresDiscussHistoryProjectsMetadataAndPreservesWindow(t *testing.T) 
 				if since.Equal(time.Unix(0, 0)) && budget == 1<<20 && len(got) != len(flags) {
 					t.Fatalf("loaded %d rows, want %d active rows", len(got), len(flags))
 				}
+				// Full-row admission keeps the same window but hands metadata
+				// over undecoded, for history records to decode row by row.
+				full, err := svc.ListActiveSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, since, budget)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(full) != len(old) {
+					t.Fatalf("full window length=%d, want %d", len(full), len(old))
+				}
+				for i, m := range full {
+					if m.ID != old[i].ID.String() || m.Metadata != nil || !bytes.Equal(m.RawMetadata, old[i].Metadata) {
+						t.Fatalf("full row %d decoded or lost its metadata", i)
+					}
+				}
 			})
 		}
 	}
@@ -118,7 +120,7 @@ func TestPostgresDiscussHistoryProjectsMetadataAndPreservesWindow(t *testing.T) 
 	if _, err := tx.Exec(ctx, "SELECT set_config('memoh.team_id', $1, true)", uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
-	got, err := svc.ListDiscussHistorySinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, time.Unix(0, 0), 1<<20)
+	got, err := svc.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, postgresMessageTestSessionID, time.Unix(0, 0), 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}

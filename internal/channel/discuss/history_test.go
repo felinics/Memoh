@@ -20,7 +20,7 @@ func (*lightweightHistoryStub) MeasureActiveBySession(context.Context, string, t
 	return messagepkg.ActiveMessagesMeasure{MessageCount: 100, ContentBytes: 10000}, nil
 }
 
-func (s *lightweightHistoryStub) ListDiscussHistorySinceBySessionWithinBytes(_ context.Context, sessionID string, _ time.Time, maxBytes int64) ([]messagepkg.Message, error) {
+func (s *lightweightHistoryStub) ListTurnResponseSourcesSinceBySessionWithinBytes(_ context.Context, sessionID string, _ time.Time, maxBytes int64) ([]messagepkg.Message, error) {
 	s.sessionID = sessionID
 	s.maxBytes = maxBytes
 	return s.messages, nil

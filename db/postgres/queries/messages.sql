@@ -1735,10 +1735,11 @@ WHERE m.team_id = public.memoh_current_team_id()
   AND m.created_at >= sqlc.arg(created_at)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
 
--- name: ListDiscussHistorySinceBySessionWithinBytes :many
--- Discuss only needs content and the interrupted-checkpoint flag. Never return
--- full metadata: legacy context_lifecycle snapshots can dwarf the content budget.
--- Preserve the active-history window, including its crossing row and turn order.
+-- name: ListTurnResponseSourcesSinceBySessionWithinBytes :many
+-- Turn-response (TR) composition, in Discuss and in pipeline chat, only needs
+-- content and the interrupted-checkpoint flag. Never return full metadata:
+-- legacy context_lifecycle snapshots can dwarf the content budget. Preserve
+-- the active-history window, including its crossing row and turn order.
 SELECT
   ranked.id,
   ranked.role,
@@ -1770,8 +1771,9 @@ ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_a
 -- Byte-budgeted variant of ListActiveMessagesSinceBySession (CM-ADM-001):
 -- rows are admitted newest-first until their running content byte total
 -- crosses max_bytes (the crossing row is kept, so the newest row always
--- loads), then returned in ascending order. Process memory is bounded by
--- max_bytes regardless of total history size.
+-- loads), then returned in ascending order. Only content is budgeted: full
+-- rows, metadata included, still load, so callers that need content alone
+-- use ListTurnResponseSourcesSinceBySessionWithinBytes.
 SELECT
   ranked.id,
   ranked.bot_id,

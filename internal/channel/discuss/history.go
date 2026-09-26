@@ -13,7 +13,7 @@ import (
 // it separate from the general message service prevents loading UI/audit data.
 type HistoryReader interface {
 	MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error)
-	ListDiscussHistorySinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error)
+	ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error)
 }
 
 type discussHistoryReader struct {
@@ -49,7 +49,7 @@ func (r discussHistoryReader) Load(ctx context.Context, sessionID string) ([]tim
 	} else {
 		r.logger.WarnContext(ctx, "measure TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 	}
-	messages, err := r.messages.ListDiscussHistorySinceBySessionWithinBytes(ctx, sessionID, since, r.maxBytes)
+	messages, err := r.messages.ListTurnResponseSourcesSinceBySessionWithinBytes(ctx, sessionID, since, r.maxBytes)
 	if err != nil {
 		r.logger.WarnContext(ctx, "load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil, measure
