@@ -155,13 +155,13 @@
       "protected_overflow": "必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。"
     },
     "agent": {
-      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。",
       "response_timeout": "模型未能及时响应，请重试。",
       "response_interrupted": "模型响应意外中断，请重试。",
       "provider_overloaded": "模型服务当前过载，请稍后重试。",
       "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送。",
       "provider_quota_exhausted": "模型服务账户的余额或配额已用尽。",
-      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。"
+      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。",
+      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。"
     },
     "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
     "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",
@@ -333,6 +333,12 @@
       "forbidden": "你没有访问此会话的权限。",
       "request_invalid": "请求无效，请刷新后重试。",
       "cancelled": "操作已中止。"
+    },
+    "schedule": {
+      "execution_timeout": "定时任务已达到执行时限，请检查执行进度或延长时限。"
+    },
+    "video": {
+      "job_outcome_unknown": "无法确认视频任务状态，请先检查已保存的任务，再决定是否重新生成。"
     }
   },
   "auth": {
@@ -3513,7 +3519,10 @@
         "pattern": "调度规则",
         "maxCalls": "运行次数限制",
         "enabled": "启用任务",
-        "invalidPattern": "表达式无效"
+        "invalidPattern": "表达式无效",
+        "maxRunMinutes": "单次执行时限（分钟）",
+        "maxRunMinutesHelp": "每次可运行 5 分钟至 24 小时。",
+        "invalidMaxRunMinutes": "请输入 5 至 1440 的整数。"
       },
       "mode": {
         "minutes": "每 N 分钟",

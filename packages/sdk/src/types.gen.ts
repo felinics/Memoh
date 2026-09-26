@@ -3645,6 +3645,10 @@ export type ScheduleCreateRequest = {
     enabled?: boolean;
     max_calls?: ScheduleNullableInt;
     /**
+     * MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.
+     */
+    max_run_seconds?: number;
+    /**
      * ModelID is a native model UUID override (models.id).
      */
     model_id?: string;
@@ -3690,6 +3694,10 @@ export type ScheduleExecutionConfig = {
      * the built-in Native runtime (or the legacy ACP fields below).
      */
     bot_agent_id?: string;
+    /**
+     * MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.
+     */
+    max_run_seconds?: number;
     /**
      * ModelID is a native model UUID override (models.id).
      */
@@ -3769,6 +3777,10 @@ export type ScheduleSchedule = {
     enabled?: boolean;
     id?: string;
     max_calls?: number;
+    /**
+     * MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.
+     */
+    max_run_seconds?: number;
     /**
      * ModelID is a native model UUID override (models.id).
      */

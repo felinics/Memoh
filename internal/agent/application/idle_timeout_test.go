@@ -11,6 +11,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/schedule"
 )
 
 func TestIdleTimeoutPublishesStableResponseTimeoutCause(t *testing.T) {
@@ -174,4 +175,16 @@ func TestIdleTimeoutStopCannotBeRearmed(t *testing.T) {
 			t.Fatal("stopped timer fired")
 		}
 	})
+}
+
+func TestScheduleBudgetHasDistinctCause(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(schedule.ErrExecutionTimeout)
+	cause := agentAbortCause(ctx)
+	if apperror.CodeOf(cause) != apperror.CodeScheduleExecutionTimeout {
+		t.Fatalf("cause=%v", cause)
+	}
+	if snapshotFailureCode(false, cause) != apperror.CodeScheduleExecutionTimeout {
+		t.Fatal("budget cause lost in terminal snapshot")
+	}
 }

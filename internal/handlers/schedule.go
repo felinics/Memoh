@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/workdir"
@@ -332,6 +333,9 @@ func (h *ScheduleHandler) authorizeBotAccess(ctx context.Context, userID, botID 
 // scheduleServiceError maps schedule domain errors onto HTTP status codes:
 // user-correctable validation failures answer 400, everything else stays 500.
 func scheduleServiceError(err error) error {
+	if errors.Is(err, schedule.ErrExecutionTimeout) {
+		return apperror.Wrap(apperror.CodeScheduleExecutionTimeout, err, nil)
+	}
 	if botAgentErr := botAgentHTTPError(err); botAgentErr != nil {
 		return botAgentErr
 	}

@@ -253,9 +253,10 @@ type ExecResult struct {
 // inherited environment keys before Env is appended, so explicit Env entries
 // remain authoritative.
 type ExecOptions struct {
-	Env      []string
-	CleanEnv bool
-	UnsetEnv []string
+	ReportLiveness bool
+	Env            []string
+	CleanEnv       bool
+	UnsetEnv       []string
 }
 
 // Exec runs a command and collects all output. For streaming, use ExecStream.
@@ -296,6 +297,7 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		TimeoutSeconds: timeout,
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
+		ReportLiveness: opts.ReportLiveness,
 	})
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
@@ -366,6 +368,7 @@ func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir str
 		TimeoutSeconds: timeout,
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
+		ReportLiveness: opts.ReportLiveness,
 	})
 	if err != nil {
 		cancel()

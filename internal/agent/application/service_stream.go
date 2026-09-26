@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/schedule"
 )
 
 // WSStreamEvent represents a raw JSON event forwarded from the agent.
@@ -40,6 +41,7 @@ func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
 	switch code := apperror.CodeOf(cause); code {
 	case apperror.CodeAgentResponseTimeout,
 		apperror.CodeAgentToolTimeout,
+		apperror.CodeScheduleExecutionTimeout,
 		apperror.CodeAgentResponseInterrupted,
 		apperror.CodeAgentProviderOverloaded,
 		apperror.CodeAgentProviderRateLimited,
@@ -135,6 +137,9 @@ func publicAgentStreamEvent(event native.StreamEvent) native.StreamEvent {
 func agentAbortCause(ctx context.Context) error {
 	if ctx != nil {
 		if cause := context.Cause(ctx); cause != nil {
+			if errors.Is(cause, schedule.ErrExecutionTimeout) {
+				return apperror.Wrap(apperror.CodeScheduleExecutionTimeout, cause, nil)
+			}
 			return cause
 		}
 	}

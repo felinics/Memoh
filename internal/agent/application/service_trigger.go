@@ -24,6 +24,9 @@ func attachCurrentTurnPrompt(cfg native.RunConfig, prompt string) native.RunConf
 
 // TriggerSchedule executes a scheduled command via the internal agent.
 func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (triggerResult schedule.TriggerResult, err error) {
+	if strings.TrimSpace(payload.FireID) == "" {
+		return schedule.TriggerResult{}, errors.New("schedule fire id is required")
+	}
 	if strings.TrimSpace(botID) == "" {
 		return schedule.TriggerResult{}, errors.New("bot id is required")
 	}
@@ -316,8 +319,8 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			}
 		}
 	}
-	if streamErr == nil {
-		streamErr = context.Cause(ctx)
+	if streamErr == nil && context.Cause(ctx) != nil {
+		streamErr = agentAbortCause(ctx)
 	}
 
 	// Mid-run abort/error: finalize whatever the step committer already landed
@@ -382,13 +385,7 @@ type scheduleSubmission struct {
 	Command    string `json:"command"`
 }
 
-// scheduleInvocationID names one fire.
-//
-// Each fire runs in a thread of its own, and invocation uniqueness is already
-// scoped per thread, so the thread id is what distinguishes consecutive fires.
-// Naming it explicitly also keeps these ids correct if a schedule ever reuses one
-// thread across fires, which would otherwise make every fire after the first look
-// like a replay of the first.
+// scheduleInvocationID identifies one persisted fire, independently of its target session.
 func scheduleInvocationID(payload schedule.TriggerPayload) string {
-	return "schedule:" + strings.TrimSpace(payload.ID) + ":" + strings.TrimSpace(payload.SessionID)
+	return "schedule:" + strings.TrimSpace(payload.ID) + ":" + strings.TrimSpace(payload.FireID)
 }

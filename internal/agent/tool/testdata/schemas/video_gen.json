@@ -13,6 +13,12 @@
         "description": "Whether the provider should generate audio when supported",
         "type": "boolean"
       },
+      "max_duration_seconds": {
+        "description": "How long to monitor this job (default two hours, max 24 hours). Expiry preserves the job identity and does not submit a duplicate job.",
+        "maximum": 86400,
+        "minimum": 1,
+        "type": "integer"
+      },
       "prompt": {
         "description": "Detailed description of the video to generate",
         "type": "string"

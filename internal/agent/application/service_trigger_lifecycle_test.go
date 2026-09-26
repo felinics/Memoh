@@ -166,6 +166,7 @@ func hasLifecycleMutation(snapshot contextfrag.LifecycleSnapshot, kind contextfr
 func triggerDirectSchedule(t *testing.T, service *Service) (schedule.TriggerResult, error) {
 	t.Helper()
 	return service.TriggerSchedule(context.Background(), lifecycleTestBotID, schedule.TriggerPayload{
+		FireID:      "test-fire",
 		SessionID:   lifecycleTestSessionID,
 		Command:     directLifecyclePrompt,
 		OwnerUserID: "user-1",
@@ -340,6 +341,7 @@ func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {
 		context.Background(),
 		lifecycleTestBotID,
 		schedule.TriggerPayload{
+			FireID:          "test-fire",
 			SessionID:       lifecycleTestSessionID,
 			Command:         "run scheduled task",
 			OwnerUserID:     "user-1",
@@ -390,7 +392,7 @@ func TestTriggerScheduleRuntimeRejectsIncompleteTurn(t *testing.T) {
 	_, err := service.triggerScheduleRuntime(
 		ctx,
 		lifecycleTestBotID,
-		schedule.TriggerPayload{SessionID: lifecycleTestSessionID, Command: "run scheduled task", OwnerUserID: "user-1"},
+		schedule.TriggerPayload{FireID: "test-fire", SessionID: lifecycleTestSessionID, Command: "run scheduled task", OwnerUserID: "user-1"},
 		"",
 		lifecycleTestRunID,
 		driver,

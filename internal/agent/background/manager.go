@@ -25,8 +25,9 @@ const (
 	DefaultExecTimeout int32 = 30
 	// MaxExecTimeout is the maximum allowed timeout (10 minutes).
 	MaxExecTimeout int32 = 600
-	// BackgroundExecTimeout is the timeout for background tasks (30 minutes).
-	BackgroundExecTimeout int32 = 1800
+	// BackgroundExecTimeout is the default finite command budget (two hours).
+	BackgroundExecTimeout    int32 = 7200
+	MaxBackgroundExecTimeout int32 = 86400
 	// DefaultWaitTimeout bounds a single wait_until call. The task keeps
 	// running afterwards; callers re-wait to keep observing.
 	DefaultWaitTimeout = 120 * time.Second
@@ -175,6 +176,14 @@ func (m *Manager) Spawn(
 	return taskID, outputFile
 }
 
+// AdoptOptions transfers ownership of a running stream. Deadline is absolute,
+// so moving to background never restarts the command's execution budget.
+// A zero deadline explicitly means a service that runs until stopped.
+type AdoptOptions struct {
+	Deadline time.Time
+	Cancel   context.CancelFunc
+}
+
 // SpawnAdopt registers a background task for a command that is already running
 // externally (e.g. via ExecStream). Instead of re-executing the command, it
 // waits for the result on the provided channel. This enables "flip to background"
@@ -184,7 +193,25 @@ func (m *Manager) SpawnAdopt(
 	botID, sessionID, command, workDir, description, outputDir string,
 	resultCh <-chan AdoptResult,
 	writeFn WriteFileFunc,
+	options ...AdoptOptions,
 ) (taskID, outputFile string) {
+	option := AdoptOptions{Deadline: time.Now().Add(time.Duration(BackgroundExecTimeout) * time.Second)}
+	if len(options) > 0 {
+		option = options[0]
+	}
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if option.Deadline.IsZero() {
+		ctx, cancel = context.WithCancel(context.WithoutCancel(parentCtx))
+	} else {
+		ctx, cancel = context.WithDeadline(context.WithoutCancel(parentCtx), option.Deadline)
+	}
+	stop := func() {
+		cancel()
+		if option.Cancel != nil {
+			option.Cancel()
+		}
+	}
 	m.mu.Lock()
 	taskID = m.newTaskIDLocked(botID)
 	outputFile = backgroundOutputFile(outputDir, taskID)
@@ -201,6 +228,8 @@ func (m *Manager) SpawnAdopt(
 		OutputFile:  outputFile,
 		StartedAt:   time.Now(),
 		changed:     make(chan struct{}),
+		cancel:      stop,
+		deadlineAt:  option.Deadline,
 	}
 	m.tasks[taskID] = task
 	m.mu.Unlock()
@@ -214,7 +243,7 @@ func (m *Manager) SpawnAdopt(
 	)
 	m.emitTaskEvent(task, TaskEventStarted, "", "")
 
-	go m.runAdopt(parentCtx, task, resultCh, writeFn)
+	go m.runAdopt(ctx, task, resultCh, writeFn)
 	return taskID, outputFile
 }
 
@@ -256,12 +285,8 @@ func shortRandHex(n int) string {
 }
 
 // runAdopt waits for the adopted stream result and handles completion.
-func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-chan AdoptResult, writeFn WriteFileFunc) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, time.Duration(BackgroundExecTimeout)*time.Second)
-	task.mu.Lock()
-	task.cancel = cancel
-	task.mu.Unlock()
-	defer cancel()
+func (m *Manager) runAdopt(ctx context.Context, task *Task, resultCh <-chan AdoptResult, writeFn WriteFileFunc) {
+	defer task.Cancel()
 
 	// Ensure output directory exists.
 	_ = ensureOutputDir(ctx, writeFn, task.OutputFile)
@@ -274,7 +299,15 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 	select {
 	case result = <-resultCh:
 	case <-ctx.Done():
-		result = AdoptResult{Err: ctx.Err()}
+		task.Cancel()
+		select {
+		case result = <-resultCh:
+			if result.Err == nil {
+				result.Err = ctx.Err()
+			}
+		case <-time.After(5 * time.Second):
+			result = AdoptResult{Err: ctx.Err()}
+		}
 	}
 
 	// Write output to log file in container.
@@ -285,7 +318,7 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 		}
 		if combined != "" || result.Err != nil {
 			if err := writeFn(context.WithoutCancel(ctx), task.OutputFile, []byte(combined)); err != nil {
-				m.logger.WarnContext(parentCtx, "background task: write output log failed",
+				m.logger.WarnContext(ctx, "background task: write output log failed",
 					slog.String("task_id", task.ID),
 					slog.String("output_file", task.OutputFile),
 					slog.Any("error", err),
@@ -300,7 +333,7 @@ func (m *Manager) runAdopt(parentCtx context.Context, task *Task, resultCh <-cha
 		stdout = ""
 		stderr = ""
 	}
-	m.completeTask(task, stdout, stderr, result.Err, result.ExitCode, result.ExitReceived)
+	m.completeTask(task, stdout, stderr, result.Err, result.ExitCode, result.ExitReceived, true)
 }
 
 func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, writeFn WriteFileFunc, readFn ReadFileFunc) {
@@ -380,25 +413,37 @@ func (m *Manager) run(parentCtx context.Context, task *Task, execFn ExecFunc, wr
 //     real — record it instead of overwriting with -1.
 //   - exitKnown=false: we genuinely have no exit code (stream died before
 //     EXIT, sentinel unreadable) — fall back to -1 to flag the unknown.
-func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error, exitCode int32, exitKnown bool) {
-	if execErr != nil {
-		task.AppendOutput(fmt.Sprintf("[error] %v\n", execErr))
-	} else {
-		task.AppendOutput(stdout)
-		if stderr != "" {
-			task.AppendOutput(stderr)
-		}
-	}
-
+func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error, exitCode int32, exitKnown bool, adopted ...bool) {
 	task.mu.Lock()
 	if task.Status == TaskKilled {
 		task.mu.Unlock()
 		return
 	}
+	errorMessage := ""
+	if execErr != nil {
+		errorMessage = execErr.Error()
+	}
+	if execErr != nil && !exitKnown && len(adopted) > 0 && adopted[0] {
+		m.logger.Warn("background execution outcome unknown", slog.String("task_id", task.ID), slog.Any("error", execErr))
+		errorMessage = "Execution stopped without a confirmed exit. Check the saved output before retrying."
+	}
+
+	if execErr != nil {
+		task.appendOutputLocked(fmt.Sprintf("[error] %s\n", errorMessage))
+	} else {
+		task.appendOutputLocked(stdout)
+		if stderr != "" {
+			task.appendOutputLocked(stderr)
+		}
+	}
+
 	task.CompletedAt = time.Now()
 	switch {
 	case execErr != nil && !exitKnown:
 		task.Status = TaskFailed
+		if len(adopted) > 0 && adopted[0] {
+			task.Status = TaskUnknown
+		}
 		task.ExitCode = -1
 	case execErr != nil && exitKnown:
 		task.Status = TaskFailed
@@ -425,7 +470,7 @@ func (m *Manager) completeTask(task *Task, stdout, stderr string, execErr error,
 	)
 
 	eventType := TaskEventCompleted
-	if status == TaskFailed {
+	if status == TaskFailed || status == TaskUnknown {
 		eventType = TaskEventFailed
 	}
 	m.emitTaskEvent(task, eventType, "", "")
@@ -852,5 +897,22 @@ func detachedContextWithTimeout(parentCtx context.Context, timeout time.Duration
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	return context.WithTimeout(context.WithoutCancel(parentCtx), timeout)
+	deadline := time.Now().Add(timeout)
+	if parentDeadline, ok := parentCtx.Deadline(); ok && parentDeadline.Before(deadline) {
+		deadline = parentDeadline
+	}
+	return context.WithDeadline(context.WithoutCancel(parentCtx), deadline)
+}
+
+// RecordLiveness is distinct from output activity: a quiet process can be healthy.
+func (m *Manager) RecordLiveness(taskID string, at time.Time) {
+	task := m.Get(taskID)
+	if task == nil {
+		return
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	if task.Status == TaskRunning && at.After(task.lastLivenessAt) {
+		task.lastLivenessAt = at
+	}
 }

@@ -24,6 +24,10 @@ vi.mock('@felinic/ui', () => {
   return {
     Button: defineComponent({ setup(_, { attrs, slots }) { return () => h('button', attrs, slots.default?.()) } }),
     Input: field('input'), Textarea: field('textarea'),
+    NumberField: defineComponent({
+      props: { modelValue: { type: Number, default: 60 } }, emits: ['update:modelValue'],
+      setup(props, { emit, attrs }) { return () => h('input', { ...attrs, value: props.modelValue, onInput: (event: Event) => emit('update:modelValue', Number((event.target as HTMLInputElement).value)) }) },
+    }),
     DialogFooter: slot, SectionGroup: slot, Select: slot, SelectContent: slot, SelectItem: slot,
     SelectTrigger: slot, SelectValue: slot, SettingsRow: slot, SettingsSection: slot, Switch: slot, TimeInput: slot,
   }
@@ -64,12 +68,27 @@ it('marks empty required fields only after submit and allows an empty descriptio
   await fill('#sched-command', 'Summarize work')
   expect(root.querySelector('[aria-invalid="true"]')).toBeNull()
   await submit()
-  expect(postBotsByBotIdSchedule).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ description: '', name: 'Daily report' }) }))
+  await vi.waitFor(() => expect(postBotsByBotIdSchedule).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ description: '', name: 'Daily report', max_run_seconds: 3600 }) })))
 })
 it('validates the current advanced cron after clearing a previously valid value', async () => {
   await mount({ id: 'schedule', name: 'Report', command: 'Summarize', pattern: '@daily' })
   await fill('input[placeholder="0 9 * * *"]', '')
   await submit()
   expect(root.querySelector('input[placeholder="0 9 * * *"]')!.getAttribute('aria-invalid')).toBe('true')
+  expect(putBotsByBotIdScheduleById).not.toHaveBeenCalled()
+})
+
+it('hydrates the execution budget and sends it with updates', async () => {
+  await mount({ id: 'schedule', name: 'Report', command: 'Summarize', pattern: '0 9 * * *', max_run_seconds: 7200 })
+  expect(root.querySelector<HTMLInputElement>('#sched-max-run-minutes')!.value).toBe('120')
+  await fill('#sched-max-run-minutes', '90')
+  await submit()
+  await vi.waitFor(() => expect(putBotsByBotIdScheduleById).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ execution: expect.objectContaining({ max_run_seconds: 5400 }) }) })))
+})
+it('rejects an out-of-range execution budget', async () => {
+  await mount({ id: 'schedule', name: 'Report', command: 'Summarize', pattern: '0 9 * * *' })
+  await fill('#sched-max-run-minutes', '1441')
+  await submit()
+  await vi.waitFor(() => expect(root.textContent).toContain('bots.schedule.form.invalidMaxRunMinutes'))
   expect(putBotsByBotIdScheduleById).not.toHaveBeenCalled()
 })

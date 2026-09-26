@@ -10,8 +10,12 @@ import (
 
 // StartVideoTask registers an asynchronous video generation task and returns a
 // detached, cancelable context for the provider polling goroutine.
-func (m *Manager) StartVideoTask(parentCtx context.Context, botID, sessionID, description string) (string, context.Context, error) {
-	ctx, cancel := detachedContextWithTimeout(parentCtx, time.Duration(BackgroundExecTimeout)*time.Second)
+func (m *Manager) StartVideoTask(parentCtx context.Context, botID, sessionID, description string, budgets ...time.Duration) (string, context.Context, error) {
+	budget := 2 * time.Hour
+	if len(budgets) > 0 && budgets[0] > 0 {
+		budget = budgets[0]
+	}
+	ctx, cancel := detachedContextWithTimeout(parentCtx, budget)
 
 	m.mu.Lock()
 	taskID := m.newTaskIDLocked(botID)
@@ -93,7 +97,7 @@ func (m *Manager) CompleteVideoTask(taskID string, status TaskStatus, result map
 			status = TaskCompleted
 		}
 	}
-	if status != TaskCompleted && status != TaskFailed {
+	if status != TaskCompleted && status != TaskFailed && status != TaskUnknown {
 		status = TaskFailed
 	}
 
@@ -124,7 +128,7 @@ func (m *Manager) CompleteVideoTask(taskID string, status TaskStatus, result map
 	)
 
 	eventType := TaskEventCompleted
-	if status == TaskFailed {
+	if status == TaskFailed || status == TaskUnknown {
 		eventType = TaskEventFailed
 	}
 	m.emitTaskEvent(task, eventType, "", "")

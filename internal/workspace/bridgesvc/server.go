@@ -366,7 +366,19 @@ func walkDirBatched(ctx context.Context, root string, visit func(string, fs.DirE
 	return nil
 }
 
+type serializedExecStream struct {
+	pb.ContainerService_ExecServer
+	mu sync.Mutex
+}
+
+func (s *serializedExecStream) Send(output *pb.ExecOutput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ContainerService_ExecServer.Send(output)
+}
+
 func (s *Server) Exec(stream pb.ContainerService_ExecServer) error {
+	stream = &serializedExecStream{ContainerService_ExecServer: stream}
 	firstMsg, err := stream.Recv()
 	if err != nil {
 		return status.Error(codes.InvalidArgument, "failed to receive exec config")
@@ -582,6 +594,31 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 	if err := cmd.Start(); err != nil {
 		return status.Errorf(codes.Internal, "start: %v", err)
 	}
+	heartbeatDone := make(chan struct{})
+	var heartbeat sync.WaitGroup
+	if firstMsg.GetReportLiveness() {
+		heartbeat.Add(1)
+		go func() {
+			defer heartbeat.Done()
+			if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_HEARTBEAT}); err != nil {
+				return
+			}
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-heartbeatDone:
+					return
+				case <-stream.Context().Done():
+					return
+				case <-ticker.C:
+					if err := stream.Send(&pb.ExecOutput{Stream: pb.ExecOutput_HEARTBEAT}); err != nil {
+						return
+					}
+				}
+			}
+		}()
+	}
 	if data := firstMsg.GetStdinData(); len(data) > 0 {
 		_, _ = stdinPipe.Write(data)
 	}
@@ -620,6 +657,8 @@ func (s *Server) execPipe(stream pb.ContainerService_ExecServer, firstMsg *pb.Ex
 	<-done
 
 	exitCode := resolveExitCode(cmd.Wait())
+	close(heartbeatDone)
+	heartbeat.Wait()
 
 	_ = stream.Send(&pb.ExecOutput{
 		Stream:   pb.ExecOutput_EXIT,

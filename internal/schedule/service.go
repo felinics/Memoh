@@ -23,7 +23,6 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
-	"github.com/felinics/memoh/internal/runtimekind"
 	memtimezone "github.com/felinics/memoh/internal/timezone"
 	"github.com/felinics/memoh/internal/workdir"
 )
@@ -63,6 +62,8 @@ type WorkdirValidator interface {
 }
 
 type Service struct {
+	lifecycleCtx    context.Context
+	stop            context.CancelFunc
 	queries         dbstore.Queries
 	cron            *cron.Cron
 	parser          cron.Parser
@@ -98,7 +99,9 @@ func NewService(log *slog.Logger, queries dbstore.Queries, triggerer Triggerer, 
 	if workdirService != nil {
 		workdirs = workdirService
 	}
+	lifecycleCtx, stop := context.WithCancel(context.Background())
 	service := &Service{
+		lifecycleCtx: lifecycleCtx, stop: stop,
 		queries:         queries,
 		cron:            c,
 		parser:          parser,
@@ -176,6 +179,7 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 		AcpModelID:      optionalText(exec.ACPModelID),
 		ReasoningEffort: optionalText(exec.ReasoningEffort),
 		WorkdirID:       db.ParseUUIDOrEmpty(exec.WorkdirID),
+		MaxRunSeconds:   int32(exec.MaxRunSeconds), //nolint:gosec // G115: normalized to 300..86400, or read from an int32 column.
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -294,6 +298,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 		AcpModelID:      optionalText(exec.ACPModelID),
 		ReasoningEffort: optionalText(exec.ReasoningEffort),
 		WorkdirID:       db.ParseUUIDOrEmpty(exec.WorkdirID),
+		MaxRunSeconds:   int32(exec.MaxRunSeconds), //nolint:gosec // G115: normalized to 300..86400, or read from an int32 column.
 	})
 	if err != nil {
 		return Schedule{}, err
@@ -338,22 +343,12 @@ func (s *Service) Trigger(ctx context.Context, scheduleID string) error {
 
 const scheduleTokenTTL = 10 * time.Minute
 
-// scheduleRunTimeout caps how long a single schedule execution may take.
-// This prevents unbounded Generate() calls from hanging forever.
-const scheduleRunTimeout = 5 * time.Minute
-
-// scheduleAgentRunTimeout is the cap for External Agent runs and existing
-// sessions whose runtime is resolved only when the fire starts.
-const scheduleAgentRunTimeout = 30 * time.Minute
-
-// runTimeoutFor picks the execution cap for one fire. Existing-session
-// schedules get the generous cap because the pinned session may run an
-// External Agent.
+// Execution budgets are independent of the runtime selected by a schedule.
 func runTimeoutFor(sched Schedule) time.Duration {
-	if runtimekind.IsExternal(sched.RuntimeType) || sched.RunTarget == RunTargetExistingSession {
-		return scheduleAgentRunTimeout
+	if sched.MaxRunSeconds > 0 {
+		return time.Duration(sched.MaxRunSeconds) * time.Second
 	}
-	return scheduleRunTimeout
+	return time.Hour
 }
 
 func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
@@ -364,6 +359,15 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 	if err != nil {
 		return err
 	}
+	sched = toSchedule(updated)
+	deadline := time.Now().Add(runTimeoutFor(sched))
+	runCtx, cancelRun := context.WithDeadlineCause(ctx, deadline, ErrExecutionTimeout)
+	defer cancelRun()
+	if s.lifecycleCtx != nil {
+		stopShutdown := context.AfterFunc(s.lifecycleCtx, cancelRun) //nolint:contextcheck // Service shutdown must cancel fires independently of the triggering request.
+		defer stopShutdown()
+	}
+	ctx = runCtx
 	s.publishChanged(updated.BotID.String(), updated.ID.String())
 	if !updated.Enabled {
 		s.removeJob(sched.ID)
@@ -385,7 +389,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		SessionID:  db.ParseUUIDOrEmpty(sessionID),
 	})
 	if err != nil {
-		s.logger.ErrorContext(ctx, "create schedule log failed", slog.String("schedule_id", sched.ID), slog.Any("error", err))
+		return fmt.Errorf("create schedule fire log: %w", err)
 	}
 
 	if errors.Is(sessionErr, ErrTargetSessionGone) {
@@ -401,7 +405,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		return sessionErr
 	}
 
-	token, err := s.generateTriggerToken(ownerUserID)
+	token, err := s.generateTriggerToken(ownerUserID, time.Until(deadline)+5*time.Minute)
 	if err != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", err.Error(), nil, pgtype.UUID{})
 		return fmt.Errorf("generate trigger token: %w", err)
@@ -409,6 +413,7 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 
 	result, triggerErr := s.triggerer.TriggerSchedule(ctx, sched.BotID, TriggerPayload{
 		ID:              sched.ID,
+		FireID:          logRow.ID.String(),
 		Name:            sched.Name,
 		Description:     sched.Description,
 		Pattern:         sched.Pattern,
@@ -420,6 +425,9 @@ func (s *Service) runSchedule(ctx context.Context, sched Schedule) error {
 		RuntimeModelID:  sched.ACPModelID,
 		ReasoningEffort: sched.ReasoningEffort,
 	}, token)
+	if errors.Is(context.Cause(ctx), ErrExecutionTimeout) {
+		triggerErr = ErrExecutionTimeout
+	}
 	if triggerErr != nil {
 		s.completeLog(ctx, logRow.ID, "error", "", triggerErr.Error(), nil, pgtype.UUID{})
 		return triggerErr
@@ -507,6 +515,12 @@ func (s *Service) publishChanged(botID, scheduleID string) {
 }
 
 func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, resultText, errorMessage string, usageBytes []byte, modelID pgtype.UUID) {
+	if errors.Is(context.Cause(ctx), ErrExecutionTimeout) {
+		status = "error"
+		errorMessage = "This scheduled run reached its execution limit."
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	if !logID.Valid {
 		return
 	}
@@ -665,11 +679,15 @@ func (s *Service) resolveBotOwner(ctx context.Context, botID string) (string, er
 }
 
 // generateTriggerToken creates a short-lived JWT for schedule trigger callbacks.
-func (s *Service) generateTriggerToken(userID string) (string, error) {
+func (s *Service) generateTriggerToken(userID string, durations ...time.Duration) (string, error) {
 	if strings.TrimSpace(s.jwtSecret) == "" {
 		return "", errors.New("jwt secret not configured")
 	}
-	signed, _, err := auth.GenerateToken(userID, s.jwtSecret, scheduleTokenTTL)
+	ttl := scheduleTokenTTL
+	if len(durations) > 0 && durations[0] > ttl {
+		ttl = durations[0]
+	}
+	signed, _, err := auth.GenerateToken(userID, s.jwtSecret, ttl)
 	if err != nil {
 		return "", err
 	}
@@ -683,7 +701,7 @@ func (s *Service) scheduleJob(ctx context.Context, schedule sqlc.Schedule) error
 	}
 	job := func() {
 		item := toSchedule(schedule)
-		runCtx, runCancel := context.WithTimeout(context.WithoutCancel(ctx), runTimeoutFor(item))
+		runCtx, runCancel := context.WithCancel(context.WithoutCancel(ctx))
 		defer runCancel()
 		// The registering request's span rides along in those values too, so
 		// without this every firing for the life of the process would be
@@ -765,6 +783,7 @@ func toSchedule(row sqlc.Schedule) Schedule {
 
 func executionFromRow(row sqlc.Schedule) ExecutionConfig {
 	exec := ExecutionConfig{
+		MaxRunSeconds:   int(row.MaxRunSeconds),
 		RunTarget:       row.RunTarget,
 		RuntimeType:     row.RuntimeType.String,
 		ACPAgentID:      row.AcpAgentID.String,
@@ -863,4 +882,21 @@ func newLocationSchedule(inner cron.Schedule, loc *time.Location) cron.Schedule 
 
 func (s *locationSchedule) Next(t time.Time) time.Time {
 	return s.inner.Next(t.In(s.loc))
+}
+
+// Shutdown cancels owned fires before waiting for cron workers to unwind.
+func (s *Service) Shutdown(ctx context.Context) error {
+	if s.stop != nil {
+		s.stop()
+	}
+	if s.cron == nil {
+		return nil
+	}
+	stopped := s.cron.Stop()
+	select {
+	case <-stopped.Done():
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

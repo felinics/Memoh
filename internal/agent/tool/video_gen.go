@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/background"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/settings"
 	videopkg "github.com/felinics/memoh/internal/video"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -80,12 +82,13 @@ func (p *VideoGenProvider) Tools(ctx context.Context, session SessionContext) ([
 }
 
 type generateVideoArgs struct {
-	Prompt          string `json:"prompt" jsonschema:"Detailed description of the video to generate"`
-	DurationSeconds *int   `json:"duration_seconds,omitempty" jsonschema:"Optional duration in seconds"`
-	Resolution      string `json:"resolution,omitempty" jsonschema:"Optional resolution, e.g. 720p or 1080p"`
-	AspectRatio     string `json:"aspect_ratio,omitempty" jsonschema:"Optional aspect ratio, e.g. 16:9, 9:16, or 1:1"`
-	Size            string `json:"size,omitempty" jsonschema:"Optional provider-specific size, e.g. 1280x720"`
-	GenerateAudio   *bool  `json:"generate_audio,omitempty" jsonschema:"Whether the provider should generate audio when supported"`
+	Prompt             string `json:"prompt" jsonschema:"Detailed description of the video to generate"`
+	DurationSeconds    *int   `json:"duration_seconds,omitempty" jsonschema:"Optional duration in seconds"`
+	Resolution         string `json:"resolution,omitempty" jsonschema:"Optional resolution, e.g. 720p or 1080p"`
+	AspectRatio        string `json:"aspect_ratio,omitempty" jsonschema:"Optional aspect ratio, e.g. 16:9, 9:16, or 1:1"`
+	Size               string `json:"size,omitempty" jsonschema:"Optional provider-specific size, e.g. 1280x720"`
+	GenerateAudio      *bool  `json:"generate_audio,omitempty" jsonschema:"Whether the provider should generate audio when supported"`
+	MaxDurationSeconds *int   `json:"max_duration_seconds,omitempty" jsonschema:"How long to monitor this job (default two hours, max 24 hours). Expiry preserves the job identity and does not submit a duplicate job."`
 }
 
 func (p *VideoGenProvider) videoTools(session SessionContext) []toolexec.Tool {
@@ -95,6 +98,7 @@ func (p *VideoGenProvider) videoTools(session SessionContext) []toolexec.Tool {
 		func(execCtx *toolexec.ToolExecContext, args generateVideoArgs) (sdk.ToolOutput, error) {
 			return toolexec.OutputPair(p.execGenerateVideo(execCtx.Context, sess, args))
 		},
+		toolexec.Range("max_duration_seconds", 1, float64(background.MaxBackgroundExecTimeout)),
 	)}
 }
 
@@ -131,7 +135,11 @@ func (p *VideoGenProvider) execGenerateVideo(ctx context.Context, session Sessio
 		description = "generate video: " + truncateStr(prompt, 80)
 	}
 
-	taskID, taskCtx, err := p.bgManager.StartVideoTask(ctx, botID, session.SessionID, description)
+	budget, err := execBudget(args.MaxDurationSeconds, "", false)
+	if err != nil {
+		return nil, err
+	}
+	taskID, taskCtx, err := p.bgManager.StartVideoTask(ctx, botID, session.SessionID, description, budget)
 	if err != nil {
 		return nil, err
 	}
@@ -184,8 +192,22 @@ func (p *VideoGenProvider) runVideoTask(ctx context.Context, taskID, botID strin
 		p.bgManager.CompleteVideoTask(taskID, background.TaskFailed, result, msg)
 	}
 
+	receiptPath := ""
+	completeUnknown := func(err error) {
+		result := videoJobResult(model, job)
+		result["receipt_path"] = receiptPath
+		result["warning"] = "The provider job may still be running. Check this job before creating another video."
+		p.logger.WarnContext(ctx, "video job outcome unknown", slog.String("task_id", taskID), slog.Any("error", err))
+		public, _ := apperror.PublicFrom(apperror.New(apperror.CodeVideoJobOutcomeUnknown, nil), "")
+		result["error_code"] = string(public.Code)
+		p.bgManager.CompleteVideoTask(taskID, background.TaskUnknown, result, public.Detail)
+	}
 	job, err := sdk.CreateVideo(ctx, opts...)
 	if err != nil {
+		if ctx.Err() != nil {
+			completeUnknown(err)
+			return
+		}
 		completeFailed(map[string]any{"model_id": modelIDFromJob(model, nil)}, fmt.Errorf("video generation failed: %w", err))
 		return
 	}
@@ -193,6 +215,7 @@ func (p *VideoGenProvider) runVideoTask(ctx context.Context, taskID, botID strin
 		completeFailed(map[string]any{"model_id": modelIDFromJob(model, job)}, errors.New("video provider returned empty job id"))
 		return
 	}
+	receiptPath = p.persistVideoJobReceipt(ctx, botID, taskID, model, job)
 	lastStatus, lastProgress := "", ""
 	recordIfChanged := func(job *sdk.VideoJob, force bool) {
 		if job == nil {
@@ -216,15 +239,46 @@ func (p *VideoGenProvider) runVideoTask(ctx context.Context, taskID, botID strin
 	for job != nil && !job.Status.Terminal() {
 		select {
 		case <-ctx.Done():
-			p.cancelVideoJob(ctx, model, job.ID)
-			completeFailed(videoJobResult(model, job), ctx.Err())
-			return
-		case <-ticker.C:
-			job, err = sdk.GetVideo(ctx, model, job.ID)
-			if err != nil {
-				completeFailed(videoJobResult(model, job), err)
+			if errors.Is(ctx.Err(), context.Canceled) {
+				p.cancelVideoJob(ctx, model, job.ID)
+				completeFailed(videoJobResult(model, job), ctx.Err())
 				return
 			}
+			// A monitoring deadline says nothing about the provider's outcome.
+			// Check once on a fresh context, retaining the original job ID on failure.
+			checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			latest, checkErr := sdk.GetVideo(checkCtx, model, job.ID)
+			cancel()
+			if checkErr == nil && latest != nil {
+				job = latest
+				if job.Status == sdk.VideoJobSucceeded {
+					result := videoJobResult(model, job)
+					result["receipt_path"] = receiptPath
+					result["warning"] = "Video completed at the monitoring deadline; use the provider output to download it."
+					p.bgManager.CompleteVideoTask(taskID, background.TaskCompleted, result, "")
+					return
+				}
+				if job.Status.Terminal() {
+					completeFailed(videoJobResult(model, job), videoJobError(job))
+					return
+				}
+			}
+			completeUnknown(ctx.Err())
+			return
+		case <-ticker.C:
+			nextJob, pollErr := sdk.GetVideo(ctx, model, job.ID)
+			if pollErr != nil {
+				if ctx.Err() != nil {
+					continue
+				}
+				completeUnknown(pollErr)
+				return
+			}
+			if nextJob == nil {
+				completeUnknown(errors.New("video provider returned no job state"))
+				return
+			}
+			job = nextJob
 			recordIfChanged(job, false)
 		}
 	}
@@ -413,4 +467,36 @@ func videoOutputURLs(outputs []sdk.VideoOutput) []string {
 		}
 	}
 	return urls
+}
+
+// The receipt survives loss of the in-memory task manager. It contains only
+// provider identity, never credentials, and prevents operators from guessing
+// whether submitting another job would duplicate work.
+func (p *VideoGenProvider) persistVideoJobReceipt(ctx context.Context, botID, taskID string, model *sdk.VideoModel, job *sdk.VideoJob) string {
+	if p.containers == nil {
+		return ""
+	}
+	root := strings.TrimRight(p.dataMount, "/")
+	if root == "" {
+		root = "/data"
+	}
+	if resolver, ok := p.containers.(bridge.WorkspaceInfoProvider); ok {
+		if info, err := resolver.WorkspaceInfo(ctx, botID); err == nil && info.Backend == bridge.WorkspaceBackendRemote && info.DefaultWorkDir != "" {
+			root = strings.TrimRight(info.DefaultWorkDir, "/")
+		}
+	}
+	path := root + "/.memoh/video-jobs/" + taskID + ".json"
+	data, _ := json.Marshal(map[string]any{"task_id": taskID, "job_id": job.ID, "model_id": modelIDFromJob(model, job), "created_at": time.Now().UTC()})
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	client, err := p.containers.MCPClient(writeCtx, botID)
+	if err == nil {
+		err = client.WriteFile(writeCtx, path, data)
+	}
+	if err != nil {
+		p.logger.WarnContext(writeCtx, "video job receipt could not be saved", slog.String("task_id", taskID), slog.Any("error", err))
+		return ""
+	}
+	p.bgManager.RecordVideoTaskProgress(taskID, map[string]any{"receipt_path": path}, "")
+	return path
 }
