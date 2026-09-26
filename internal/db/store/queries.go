@@ -314,6 +314,7 @@ type Queries interface {
 	ListActiveMessagesSinceBySession(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceBySessionParams) ([]dbsqlc.ListActiveMessagesSinceBySessionRow, error)
 	ListActiveMessagesSinceWithinBytes(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceWithinBytesParams) ([]dbsqlc.ListActiveMessagesSinceWithinBytesRow, error)
 	ListActiveMessagesSinceBySessionWithinBytes(ctx context.Context, arg dbsqlc.ListActiveMessagesSinceBySessionWithinBytesParams) ([]dbsqlc.ListActiveMessagesSinceBySessionWithinBytesRow, error)
+	ListDiscussHistorySinceBySessionWithinBytes(ctx context.Context, arg dbsqlc.ListDiscussHistorySinceBySessionWithinBytesParams) ([]dbsqlc.ListDiscussHistorySinceBySessionWithinBytesRow, error)
 	MeasureActiveMessagesBySession(ctx context.Context, arg dbsqlc.MeasureActiveMessagesBySessionParams) (dbsqlc.MeasureActiveMessagesBySessionRow, error)
 	ListAutoStartContainers(ctx context.Context) ([]dbsqlc.Container, error)
 	ListBotACLRules(ctx context.Context, botID pgtype.UUID) ([]dbsqlc.ListBotACLRulesRow, error)

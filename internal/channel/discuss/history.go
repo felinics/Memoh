@@ -9,11 +9,18 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
+// HistoryReader is the lightweight history surface needed by Discuss. Keeping
+// it separate from the general message service prevents loading UI/audit data.
+type HistoryReader interface {
+	MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error)
+	ListDiscussHistorySinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error)
+}
+
 type discussHistoryReader struct {
-	messages messagepkg.Service
-	// maxBytes bounds every history load (CM-ADM-001): rows are admitted
-	// newest-first on the database side until the content byte budget is
-	// spent, so total history size never bounds process memory.
+	messages HistoryReader
+	// maxBytes selects the newest content window (CM-ADM-001). The query
+	// retains the crossing row and only projects the interrupted flag from
+	// metadata, so legacy lifecycle audits stay outside the loaded window.
 	maxBytes int64
 	logger   *slog.Logger
 }
@@ -42,7 +49,7 @@ func (r discussHistoryReader) Load(ctx context.Context, sessionID string) ([]tim
 	} else {
 		r.logger.WarnContext(ctx, "measure TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 	}
-	messages, err := r.messages.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, r.maxBytes)
+	messages, err := r.messages.ListDiscussHistorySinceBySessionWithinBytes(ctx, sessionID, since, r.maxBytes)
 	if err != nil {
 		r.logger.WarnContext(ctx, "load TRs failed", slog.String("session_id", sessionID), slog.Any("error", err))
 		return nil, measure

@@ -3249,6 +3249,78 @@ func (q *Queries) ListAllMessagesForBackup(ctx context.Context, botID pgtype.UUI
 	return items, nil
 }
 
+const listDiscussHistorySinceBySessionWithinBytes = `-- name: ListDiscussHistorySinceBySessionWithinBytes :many
+SELECT
+  ranked.id,
+  ranked.role,
+  ranked.content,
+  ranked.created_at,
+  ranked.interrupted
+FROM (
+  SELECT
+    m.id,
+    m.role,
+    m.content,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = $1
+    AND m.created_at >= $2
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+) ranked
+WHERE ranked.preceding_bytes < $3::BIGINT
+ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC
+`
+
+type ListDiscussHistorySinceBySessionWithinBytesParams struct {
+	SessionID pgtype.UUID        `json:"session_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	MaxBytes  int64              `json:"max_bytes"`
+}
+
+type ListDiscussHistorySinceBySessionWithinBytesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	Role        string             `json:"role"`
+	Content     []byte             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	Interrupted bool               `json:"interrupted"`
+}
+
+// Discuss only needs content and the interrupted-checkpoint flag. Never return
+// full metadata: legacy context_lifecycle snapshots can dwarf the content budget.
+// Preserve the active-history window, including its crossing row and turn order.
+func (q *Queries) ListDiscussHistorySinceBySessionWithinBytes(ctx context.Context, arg ListDiscussHistorySinceBySessionWithinBytesParams) ([]ListDiscussHistorySinceBySessionWithinBytesRow, error) {
+	rows, err := q.db.Query(ctx, listDiscussHistorySinceBySessionWithinBytes, arg.SessionID, arg.CreatedAt, arg.MaxBytes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDiscussHistorySinceBySessionWithinBytesRow
+	for rows.Next() {
+		var i ListDiscussHistorySinceBySessionWithinBytesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Content,
+			&i.CreatedAt,
+			&i.Interrupted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHistoryTurnsByBot = `-- name: ListHistoryTurnsByBot :many
 SELECT
   m.turn_id AS id,
