@@ -17,7 +17,7 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 		return req, err
 	}
 	admitted, admission := admitDiscussAgentContext(req.discussMessages, s.contextAbsoluteMaxTokens(), len(markdown), imageCount)
-	if admission.ProtectedOverflow {
+	if admission.ProtectedOverflow || admission.DroppedMessages > 0 || req.discussContextTokens > s.contextAbsoluteMaxTokens() {
 		if admission.RecoveryBudgetTokens > 0 && s.effectiveSyncCompactionMode() != syncCompactionModeOff && s.compactionService != nil && s.settingsService != nil {
 			result := s.runBudgetCompactionSync(ctx, req, max(req.discussContextTokens, admission.EstimatedTokens), admission.RecoveryBudgetTokens, "")
 			if err := ctx.Err(); err != nil {
@@ -27,6 +27,8 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 				return req, native.ErrContextRecompose
 			}
 		}
+	}
+	if admission.ProtectedOverflow {
 		return req, apperror.New(apperror.CodeContextProtectedOverflow, nil)
 	}
 	if admission.DroppedMessages > 0 && s.logger != nil {

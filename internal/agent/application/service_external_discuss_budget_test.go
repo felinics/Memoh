@@ -169,3 +169,13 @@ func TestExternalDiscussFinalAdmissionControlNeverReachesRuntimeOrHistory(t *tes
 		})
 	}
 }
+
+func TestExternalDiscussRecoversPretrimmedHistoryPressure(t *testing.T) {
+	service, runner := newControllerPolicyService(t, nil)
+	service.SetContextAbsoluteMaxTokens(1000)
+	req := ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussContextTokens: 20000, discussMessages: []turn.DiscussMessage{{Role: "user", Content: "current"}}}
+	_, err := service.prepareExternalDiscussContext(t.Context(), req, "runtime context", 0)
+	if !errors.Is(err, native.ErrContextRecompose) || len(runner.configs) != 1 {
+		t.Fatalf("lost pretrim pressure: err=%v calls=%d", err, len(runner.configs))
+	}
+}
