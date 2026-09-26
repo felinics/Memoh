@@ -1606,6 +1606,18 @@ func remapContextMessageIndex(messages []ModelMessage, index *int, stripTools bo
 }
 
 func latestModelUserMessageIndex(messages []ModelMessage) *int {
+	known := false
+	for i, message := range messages {
+		if message.ContextSource != nil {
+			known = true
+			if message.ContextSource.Current {
+				return intPointer(i)
+			}
+		}
+	}
+	if known {
+		return nil
+	}
 	for i := len(messages) - 1; i >= 0; i-- {
 		if strings.EqualFold(strings.TrimSpace(messages[i].Role), "user") {
 			return intPointer(i)

@@ -309,3 +309,19 @@ func TestBuildMessagesFromPipelineKeepsSummaryUnderBudget(t *testing.T) {
 		t.Fatalf("oversized tail should have been trimmed, got %d messages", len(messages))
 	}
 }
+
+func TestPipelineCurrentIdentitySurvivesLaterExternalAndSelfMessages(t *testing.T) {
+	pipeline := timeline.NewPipeline(timeline.RenderParams{})
+	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("old", 1000, strings.Repeat("h", 8000)))
+	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("current", 2000, "required input"))
+	pipeline.PushEvent(pipelineTestSessionID, pipelineTextEvent("later", 3000, "later input"))
+	echo := pipelineTextEvent("echo", 4000, "self echo")
+	echo.IsSelfSent = true
+	pipeline.PushEvent(pipelineTestSessionID, echo)
+	svc := &Service{pipeline: pipeline, logger: slog.New(slog.DiscardHandler)}
+	messages, _, _ := svc.buildMessagesFromPipeline(t.Context(), ChatRequest{ThreadID: pipelineTestSessionID, ExternalMessageID: "current"}, 500)
+	index := latestModelUserMessageIndex(messages)
+	if index == nil || !strings.Contains(messages[*index].TextContent(), "required input") {
+		t.Fatalf("wrong current source: index=%v messages=%s", index, messagesDebug(messages))
+	}
+}

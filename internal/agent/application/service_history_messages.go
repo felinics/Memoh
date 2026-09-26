@@ -44,6 +44,9 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 	pinned := make([]bool, 0, len(composed.Messages))
 	compactable, pressure := 0, 0
 	for _, m := range composed.Messages {
+		if m.Source != nil && req.ExternalMessageID != "" {
+			m.Source.Current = m.Source.Kind == "external" && m.Source.ID == req.ExternalMessageID
+		}
 		contentJSON := m.RawContent
 		if len(contentJSON) == 0 {
 			var err error
@@ -53,8 +56,9 @@ func (s *Service) buildMessagesFromPipeline(ctx context.Context, req ChatRequest
 			}
 		}
 		messages = append(messages, ModelMessage{
-			Role:    m.Role,
-			Content: contentJSON,
+			Role:          m.Role,
+			ContextSource: m.Source,
+			Content:       contentJSON,
 		})
 		isPinned := m.CompactionArtifactID != ""
 		pinned = append(pinned, isPinned)
@@ -99,7 +103,7 @@ func (s *Service) loadTimelineArtifacts(ctx context.Context, botID, sessionID st
 func trimPipelineMessagesByTokens(log *slog.Logger, messages []ModelMessage, pinned []bool, maxTokens int) []ModelMessage {
 	entries := make([]turn.AdmissionEntry, len(messages))
 	for i, message := range messages {
-		entries[i] = turn.AdmissionEntry{Cost: estimateMessageTokens(message), Pinned: i < len(pinned) && pinned[i], ToolResponse: strings.EqualFold(strings.TrimSpace(message.Role), "tool")}
+		entries[i] = turn.AdmissionEntry{Source: message.ContextSource, Cost: estimateMessageTokens(message), Pinned: i < len(pinned) && pinned[i], ToolResponse: strings.EqualFold(strings.TrimSpace(message.Role), "tool")}
 	}
 	decision := turn.AdmitContextEntries(entries, maxTokens)
 	if decision.ProtectedOverflow || decision.DroppedEntries == 0 {
