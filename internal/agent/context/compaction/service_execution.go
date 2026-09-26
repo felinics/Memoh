@@ -20,7 +20,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if err != nil {
 		return Result{}, err
 	}
-	if measure.CandidateCount == 0 {
+	if measure.CandidateCount == 0 && !cfg.AllowFrontierFusion {
 		return Result{Status: StatusNoop}, nil
 	}
 	readMaxBytes := compactionReadMaxBytes(cfg)
@@ -32,7 +32,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{}, err
 	}
 	rows := uncompactedRowsFromBounded(boundedRows)
-	if len(rows) == 0 {
+	if len(rows) == 0 && !cfg.AllowFrontierFusion {
 		s.logger.WarnContext(ctx, "compaction: no candidate fits the database read budget",
 			slog.String("session_id", cfg.SessionID),
 			slog.Int64("candidate_count", measure.CandidateCount),
@@ -45,17 +45,20 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	// the selection decision. The metadata-only measure above is observability
 	// and oversized-head handling; concurrent claims may legitimately change
 	// eligibility between the two statements.
-	candidateCount := boundedRows[0].CandidateCount
-	candidateBytes := boundedRows[0].CandidateBytes
-	truncatedRead := candidateCount > int64(len(rows))
-	s.logger.InfoContext(ctx, "compaction: bounded candidate read",
-		slog.String("session_id", cfg.SessionID),
-		slog.Int("loaded_messages", len(rows)),
-		slog.Int64("candidate_count", candidateCount),
-		slog.Int64("candidate_bytes", candidateBytes),
-		slog.Int64("loaded_bytes", boundedRows[len(boundedRows)-1].CumulativeBytes),
-		slog.Int64("read_max_bytes", readMaxBytes),
-		slog.Bool("truncated", truncatedRead))
+	truncatedRead := false
+	if len(boundedRows) > 0 {
+		candidateCount := boundedRows[0].CandidateCount
+		candidateBytes := boundedRows[0].CandidateBytes
+		truncatedRead = candidateCount > int64(len(rows))
+		s.logger.InfoContext(ctx, "compaction: bounded candidate read",
+			slog.String("session_id", cfg.SessionID),
+			slog.Int("loaded_messages", len(rows)),
+			slog.Int64("candidate_count", candidateCount),
+			slog.Int64("candidate_bytes", candidateBytes),
+			slog.Int64("loaded_bytes", boundedRows[len(boundedRows)-1].CumulativeBytes),
+			slog.Int64("read_max_bytes", readMaxBytes),
+			slog.Bool("truncated", truncatedRead))
+	}
 
 	messages, barrierCount := itemsFromRows(rows)
 	if barrierCount > 0 {
@@ -64,28 +67,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 			slog.String("session_id", cfg.SessionID),
 		)
 	}
-	if len(messages) == 0 {
-		return Result{Status: StatusNoop}, nil
-	}
-
-	var toCompact []CompactionCandidate
-	switch {
-	case truncatedRead:
-		// Rows are an oldest-first prefix. When more history exists outside the
-		// database admission boundary, compact the admitted prefix and let the
-		// existing prompt trim/closure rules choose the largest safe claim. Using
-		// splitByTarget here could noop forever because the unseen newest tail is
-		// precisely what should be kept.
-		toCompact = messages
-	case cfg.TargetTokens > 0:
-		// Sync compaction: compress enough messages to bring context
-		// down to TargetTokens. Calculate how many tokens to keep
-		// (newest messages) and compact everything older.
-		toCompact = splitByTarget(messages, cfg.TargetTokens)
-	default:
-		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
-	}
-	if len(toCompact) == 0 {
+	if len(messages) == 0 && !cfg.AllowFrontierFusion {
 		return Result{Status: StatusNoop}, nil
 	}
 
@@ -133,6 +115,31 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		if err != nil {
 			return Result{}, err
 		}
+	}
+
+	rawTarget := cfg.TargetTokens
+	if rawTarget > 0 && !fusing {
+		rawTarget = max(1, rawTarget-frontierSummaryTokens(frontier.Artifacts))
+	}
+	var toCompact []CompactionCandidate
+	switch {
+	case truncatedRead:
+		// Rows are an oldest-first prefix. When more history exists outside the
+		// database admission boundary, compact the admitted prefix and let the
+		// existing prompt trim/closure rules choose the largest safe claim. Using
+		// splitByTarget here could noop forever because the unseen newest tail is
+		// precisely what should be kept.
+		toCompact = messages
+	case cfg.TargetTokens > 0:
+		// Sync compaction: compress enough messages to bring context
+		// down to TargetTokens. Calculate how many tokens to keep
+		// (newest messages) and compact everything older.
+		toCompact = splitByTarget(messages, rawTarget)
+	default:
+		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
+	}
+	if len(toCompact) == 0 && !fusing {
+		return Result{Status: StatusNoop}, nil
 	}
 
 	var priorSummaries []string
@@ -186,7 +193,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	)
 
 	entries, compactedMessageIDs := buildEntriesAndIDs(toCompact)
-	if len(entries) == 0 || len(compactedMessageIDs) == 0 {
+	if (len(entries) == 0 || len(compactedMessageIDs) == 0) && !fusing {
 		// No complete group survived: every selected group had a row that rendered
 		// empty (a reasoning-only message, or a tool exchange whose result renders
 		// empty). buildEntriesAndIDs withholds such a group from both entries and
@@ -212,37 +219,54 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	// Claim the exact selected row versions before loading assets. Asset upserts
 	// lock the same message row, so either their mutation is visible below or
 	// they invalidate this attempt's epoch before it can complete.
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	var epoch int64
+	if len(rows) > 0 {
+		epoch = rows[0].CompactionEpoch
+	} else {
+		session, err := s.queries.GetSessionByID(ctx, sessionUUID)
+		if err != nil {
+			return Result{}, err
+		}
+		epoch = session.CompactionEpoch
+	}
 	persistCtx := context.WithoutCancel(ctx)
 	logRow, err := s.queries.CreateCompactionLog(persistCtx, sqlc.CreateCompactionLogParams{
 		BotID:         botUUID,
 		SessionID:     sessionUUID,
-		ExpectedEpoch: rows[0].CompactionEpoch,
+		ExpectedEpoch: epoch,
 	})
 	if err != nil {
 		return Result{}, err
 	}
 	logID := logRow.ID
-	marked, err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
-		CompactID:          logID,
-		MessageIds:         compactedMessageIDs,
-		ExpectedCompactIds: expectedCompactIDs,
-	})
-	if err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
-	}
-	if marked != int64(len(compactedMessageIDs)) {
-		err = fmt.Errorf("marked %d of %d compaction source rows", marked, len(compactedMessageIDs))
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
+	var assetRows []sqlc.ListMessageAssetsBatchRow
+	if len(compactedMessageIDs) > 0 {
+		marked, err := s.queries.MarkMessagesCompacted(persistCtx, sqlc.MarkMessagesCompactedParams{
+			CompactID:          logID,
+			MessageIds:         compactedMessageIDs,
+			ExpectedCompactIds: expectedCompactIDs,
+		})
+		if err != nil {
+			_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+			return Result{}, err
+		}
+		if marked != int64(len(compactedMessageIDs)) {
+			err = fmt.Errorf("marked %d of %d compaction source rows", marked, len(compactedMessageIDs))
+			_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+			return Result{}, err
+		}
+
+		assetRows, err = s.queries.ListMessageAssetsBatch(persistCtx, compactedMessageIDs)
+		if err != nil {
+			err = fmt.Errorf("load compaction message assets: %w", err)
+			_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+			return Result{}, err
+		}
 	}
 
-	assetRows, err := s.queries.ListMessageAssetsBatch(persistCtx, compactedMessageIDs)
-	if err != nil {
-		err = fmt.Errorf("load compaction message assets: %w", err)
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
-		return Result{}, err
-	}
 	toCompact, err = candidatesWithAssets(toCompact, rows, assetRows)
 	if err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
@@ -328,43 +352,6 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{}, err
 	}
 	return Result{Status: StatusOK, Summary: summary, MessageCount: len(compactedMessageIDs)}, nil
-}
-
-const (
-	minCompactionReadBytes = 512 << 10
-	maxCompactionReadBytes = 8 << 20
-)
-
-func compactionReadMaxBytes(cfg TriggerConfig) int64 {
-	tokens := cfg.MaxCompactTokens
-	if tokens <= 0 {
-		tokens = 30000
-	}
-	bytes := int64(tokens) * 8
-	if bytes < minCompactionReadBytes {
-		return minCompactionReadBytes
-	}
-	if bytes > maxCompactionReadBytes {
-		return maxCompactionReadBytes
-	}
-	return bytes
-}
-
-func uncompactedRowsFromBounded(rows []sqlc.ListUncompactedMessagesBySessionWithinBytesRow) []sqlc.ListUncompactedMessagesBySessionRow {
-	converted := make([]sqlc.ListUncompactedMessagesBySessionRow, len(rows))
-	for i, row := range rows {
-		converted[i] = sqlc.ListUncompactedMessagesBySessionRow{
-			ID: row.ID, BotID: row.BotID, SessionID: row.SessionID,
-			SenderChannelIdentityID: row.SenderChannelIdentityID, SenderUserID: row.SenderUserID,
-			ExternalMessageID: row.ExternalMessageID, SourceReplyToMessageID: row.SourceReplyToMessageID,
-			Role: row.Role, Content: row.Content, Metadata: row.Metadata, Usage: row.Usage,
-			EventID: row.EventID, DisplayText: row.DisplayText, CompactID: row.CompactID, CreatedAt: row.CreatedAt,
-			SenderDisplayName: row.SenderDisplayName, SenderAvatarUrl: row.SenderAvatarUrl,
-			Platform: row.Platform, CompactionEpoch: row.CompactionEpoch,
-			ConversationType: row.ConversationType, ConversationName: row.ConversationName, ReplyTarget: row.ReplyTarget,
-		}
-	}
-	return converted
 }
 
 func boundedCompactionInputTokens(cfg TriggerConfig, maxCompactTokens, maxOutputTokens int, prompt string) (int, error) {
