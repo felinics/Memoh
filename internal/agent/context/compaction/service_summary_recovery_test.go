@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -153,5 +154,28 @@ func TestSummaryRecoveryReservesRetainedRawReplay(t *testing.T) {
 				t.Fatalf("failed to reserve retained raw: result=%+v cap=%d", result, stub.maxTokens)
 			}
 		}
+	}
+}
+
+func TestSummaryRecoveryProtectsCurrentSourcesAndCountsThemOnce(t *testing.T) {
+	stub := &stubModel{summary: "short summary"}
+	cfg := machineryConfig(stub, 200)
+	cfg.HistoryBudgetTokens = 500
+	rows := qualityRows(t)
+	rows[2] = mkRow(t, "user", jsonStr(strings.Repeat("a", 2400)), 600)
+	rows[3] = mkRow(t, "user", jsonStr(strings.Repeat("b", 2400)), 600)
+	cfg.ProtectedSources = []turn.ContextMessageSource{{Kind: "history", ID: rows[2].ID.String(), Current: true}, {Kind: "history", ID: rows[3].ID.String(), Current: true}}
+	q := &fakeQueries{uncompacted: rows}
+	result, err := newMachineryService(q).RunCompactionSync(t.Context(), cfg)
+	if err != nil || result.Status != StatusOK {
+		t.Fatalf("current input counted twice: result=%+v err=%v", result, err)
+	}
+	for _, id := range q.markedIDs {
+		if id == rows[2].ID || id == rows[3].ID {
+			t.Fatal("compacted current input")
+		}
+	}
+	if len(q.markedIDs) != 2 {
+		t.Fatalf("old history failed to progress: claims=%v", q.markedIDs)
 	}
 }

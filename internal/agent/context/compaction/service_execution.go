@@ -61,6 +61,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 
 	messages, barrierCount := itemsFromRows(rows)
+	protectCurrentSources(messages, cfg.ProtectedSources)
 	if barrierCount > 0 {
 		s.logger.WarnContext(ctx, "compaction: kept unparseable history rows as span barriers",
 			slog.Int("barrier_count", barrierCount),
@@ -224,7 +225,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	replayBudget, retainedTokens := 0, 0
 	if cfg.HistoryBudgetTokens > 0 {
-		retainedTokens = retainedReplayTokens(messages, compactedMessageIDs, frontier.Artifacts, fusing)
+		retainedTokens = retainedReplayTokens(messages, compactedMessageIDs, frontier.Artifacts, fusing, cfg.ProtectedSources)
 		replayBudget = cfg.TargetTokens
 		if replayBudget <= 0 {
 			replayBudget = cfg.HistoryBudgetTokens

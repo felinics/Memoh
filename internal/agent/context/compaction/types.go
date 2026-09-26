@@ -1,6 +1,7 @@
 package compaction
 
 import (
+	"github.com/felinics/memoh/internal/agent/turn"
 	"net/http"
 	"time"
 )
@@ -64,6 +65,7 @@ type TriggerConfig struct {
 	SummaryWindowTokens int
 	// ContextWindowTokens is the chat model's context window. It is separate
 	// from SummaryWindowTokens, which belongs to the summarizer model.
+	ProtectedSources    []turn.ContextMessageSource
 	HistoryBudgetTokens int
 	ContextWindowTokens int
 	PromptCacheTTL      string
