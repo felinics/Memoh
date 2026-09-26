@@ -1,0 +1,2 @@
+-- 0157_reserved_cloud_alignment
+-- Intentionally empty; see the up migration.
