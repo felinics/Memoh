@@ -30,7 +30,12 @@ func discussMessageTokens(m turn.DiscussMessage) int {
 }
 
 func admitDiscussAgentMessages(messages []turn.DiscussMessage, budgetTokens int) ([]turn.DiscussMessage, discussAdmission) {
-	fixedBytes := len(discussAgentPromptPrefix) + len(discussAgentPromptSuffix)
+	return admitDiscussAgentContext(messages, budgetTokens, 0, 0)
+}
+
+func admitDiscussAgentContext(messages []turn.DiscussMessage, budgetTokens, contextBytes, imageCount int) ([]turn.DiscussMessage, discussAdmission) {
+	imageTokens := imageCount * contextfrag.EstimateImageTokens
+	fixedBytes := len(discussAgentPromptPrefix) + len(discussAgentPromptSuffix) + contextBytes
 	entries := make([]turn.AdmissionEntry, len(messages))
 	total := fixedBytes
 	for i, message := range messages {
@@ -45,8 +50,8 @@ func admitDiscussAgentMessages(messages []turn.DiscussMessage, budgetTokens int)
 		entries[i] = turn.AdmissionEntry{Cost: cost, Pinned: message.CompactionArtifactID != "", ToolResponse: strings.EqualFold(role, "tool")}
 		total += cost
 	}
-	admission := discussAdmission{BudgetTokens: budgetTokens, EstimatedTokens: turn.EstimateTokensFromBytes(total)}
-	available := int(turn.ContextBudgetBytes(budgetTokens)) - fixedBytes
+	admission := discussAdmission{BudgetTokens: budgetTokens, EstimatedTokens: turn.EstimateTokensFromBytes(total) + imageTokens}
+	available := int(turn.ContextBudgetBytes(budgetTokens-imageTokens)) - fixedBytes
 	if available <= 0 {
 		admission.ProtectedOverflow = true
 		return nil, admission
@@ -58,7 +63,7 @@ func admitDiscussAgentMessages(messages []turn.DiscussMessage, budgetTokens int)
 			admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(max(0, available-entry.Cost))
 		}
 	}
-	admission.SelectedTokens = turn.EstimateTokensFromBytes(fixedBytes + decision.SelectedTokens)
+	admission.SelectedTokens = turn.EstimateTokensFromBytes(fixedBytes+decision.SelectedTokens) + imageTokens
 	admission.DroppedMessages = decision.DroppedEntries
 	admission.ProtectedOverflow = decision.ProtectedOverflow
 	if decision.ProtectedOverflow {

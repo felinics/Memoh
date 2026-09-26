@@ -566,6 +566,8 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 		UserMessagePersisted:    true,
 		SkipMemoryExtraction:    true,
 		ForceFreshRuntime:       true,
+		discussMessages:         cmd.DiscussMessages,
+		discussContextTokens:    discussContextPressure(cmd),
 	})
 	for chunks != nil || errs != nil {
 		select {
@@ -573,6 +575,12 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 			if !ok {
 				chunks = nil
 				continue
+			}
+			if parseKind(chunk) == string(native.EventContextRecompose) {
+				if h.emit(turn.DiscussEventRecompose, nil) {
+					h.contentLightTerminal = true
+				}
+				return
 			}
 			if err := h.publishChunk(chunk); err != nil {
 				h.emitErr(err)
