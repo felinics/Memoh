@@ -1,8 +1,0 @@
-name: MiniMax Speech
-client_type: minimax-speech
-icon: minimax-color
-
-models:
-  - model_id: minimax-tts
-    name: MiniMax TTS
-    type: speech

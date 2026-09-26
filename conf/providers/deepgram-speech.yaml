@@ -1,8 +1,0 @@
-name: Deepgram Speech
-client_type: deepgram-speech
-icon: deepgram
-
-models:
-  - model_id: deepgram-tts
-    name: Deepgram TTS
-    type: speech

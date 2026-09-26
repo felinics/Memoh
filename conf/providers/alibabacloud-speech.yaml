@@ -1,8 +1,0 @@
-name: Alibaba Cloud Speech
-client_type: alibabacloud-speech
-icon: bailian-color
-
-models:
-  - model_id: cosyvoice-tts
-    name: CosyVoice TTS
-    type: speech

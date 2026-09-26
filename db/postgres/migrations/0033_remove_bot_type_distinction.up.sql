@@ -1,2 +1,0 @@
-ALTER TABLE bots DROP CONSTRAINT IF EXISTS bots_type_check;
-ALTER TABLE bots DROP COLUMN type;

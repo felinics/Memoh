@@ -1,6 +1,0 @@
-web/**
-agent/**
-bun/**
-!web/.gitignore
-!agent/.gitignore
-!bun/.gitignore

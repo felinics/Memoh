@@ -1,3 +1,0 @@
-[submodule "packages/ui"]
-	path = packages/ui
-	url = https://github.com/felinics/ui.git

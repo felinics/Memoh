@@ -1,9 +1,0 @@
-name: OpenAI Transcription
-client_type: openai-transcription
-icon: openai
-base_url: https://api.openai.com/v1
-
-models:
-  - model_id: gpt-4o-mini-transcribe
-    name: GPT-4o Mini Transcribe
-    type: transcription

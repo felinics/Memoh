@@ -1,9 +1,0 @@
-name: Google Transcription
-client_type: google-transcription
-icon: google-color
-base_url: https://generativelanguage.googleapis.com/v1beta
-
-models:
-  - model_id: gemini-2.5-flash
-    name: Gemini 2.5 Flash
-    type: transcription

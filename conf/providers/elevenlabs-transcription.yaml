@@ -1,9 +1,0 @@
-name: ElevenLabs Transcription
-client_type: elevenlabs-transcription
-icon: elevenlabs
-base_url: https://api.elevenlabs.io
-
-models:
-  - model_id: scribe_v2
-    name: Scribe v2
-    type: transcription

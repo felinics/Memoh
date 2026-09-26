@@ -1,3 +1,0 @@
--- 0105_repair_superseded_message_visibility (rollback)
--- Repair migration only. No-op because the previous message visibility and
--- incomplete-fork deleted state cannot be reconstructed safely.

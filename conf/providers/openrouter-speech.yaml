@@ -1,8 +1,0 @@
-name: OpenRouter Speech
-client_type: openrouter-speech
-icon: openrouter
-
-models:
-  - model_id: openrouter-tts
-    name: OpenRouter TTS
-    type: speech

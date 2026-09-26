@@ -1,8 +1,0 @@
-[task_config]
-dir = "{{cwd}}"
-
-[tasks.start]
-alias = "dev"
-description = "Start server"
-run = "go run cmd/agent"
-depends = ["//:go-install"]

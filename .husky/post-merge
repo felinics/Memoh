@@ -1,8 +1,0 @@
-#!/usr/bin/env sh
-
-if command -v node >/dev/null 2>&1; then
-  node scripts/ensure-submodules.mjs || {
-    echo "Warning: packages/ui still needs manual submodule initialization."
-    exit 0
-  }
-fi

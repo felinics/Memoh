@@ -1,8 +1,0 @@
-name: Edge
-client_type: edge-speech
-icon: microsoft
-
-models:
-  - model_id: edge-read-aloud
-    name: Edge Read Aloud
-    type: speech

@@ -1,3 +1,0 @@
--- 0025_repair_memory_providers (rollback)
--- This is a repair migration; rolling back is a no-op since the schema
--- should already match the expected state from 0020.

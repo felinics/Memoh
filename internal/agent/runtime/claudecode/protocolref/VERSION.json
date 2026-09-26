@@ -1,6 +1,0 @@
-{
-  "claudeAgentSDK": "0.3.269",
-  "claudeCodeCLI": "2.1.269",
-  "sourcePackage": "@anthropic-ai/claude-agent-sdk@0.3.269",
-  "notes": "When updating the baseline, compare the published SDK types, verify the consumed protocol against the matching CLI, recapture lifecycle.json, and run the Claude driver tests. Workspace CLI installation is managed separately."
-}

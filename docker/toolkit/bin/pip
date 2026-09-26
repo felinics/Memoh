@@ -1,2 +1,0 @@
-#!/bin/sh
-exec "${MEMOH_TOOLKIT_DIR:-/opt/memoh/toolkit}/bin/pip3" "$@"

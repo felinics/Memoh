@@ -1,8 +1,0 @@
-name: Volcengine Speech
-client_type: volcengine-speech
-icon: volcengine-color
-
-models:
-  - model_id: sami-tts
-    name: SAMI TTS
-    type: speech

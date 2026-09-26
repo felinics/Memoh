@@ -1,8 +1,0 @@
-name: Microsoft Speech
-client_type: microsoft-speech
-icon: azure-color
-
-models:
-  - model_id: microsoft-tts
-    name: Microsoft TTS
-    type: speech

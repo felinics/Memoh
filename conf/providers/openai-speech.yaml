@@ -1,8 +1,0 @@
-name: OpenAI Speech
-client_type: openai-speech
-icon: openai
-
-models:
-  - model_id: gpt-4o-mini-tts
-    name: GPT-4o Mini TTS
-    type: speech

@@ -1,3 +1,0 @@
-FROM node:25-alpine
-RUN npm install -g pnpm@10
-WORKDIR /workspace

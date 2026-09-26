@@ -1,9 +1,0 @@
-name: Deepgram Transcription
-client_type: deepgram-transcription
-icon: deepgram
-base_url: https://api.deepgram.com
-
-models:
-  - model_id: nova-3
-    name: Nova-3
-    type: transcription

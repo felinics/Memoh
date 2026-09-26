@@ -1,9 +1,0 @@
-bird.json and pointing-up.json are Google's Noto animated emoji (U+1F426 and
-U+261D), fetched from https://fonts.gstatic.com/s/e/notoemoji/latest/.
-
-They are licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
-
-They are here as real-world Lottie: hand-written fixtures use a layer or two,
-while these use the shape groups, masks and interpolation that actual stickers
-do — and they are the documents that first showed ThorVG reaching host imports
-beyond heap growth.

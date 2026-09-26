@@ -1,9 +1,0 @@
-name: OpenRouter Transcription
-client_type: openrouter-transcription
-icon: openrouter
-base_url: https://openrouter.ai/api/v1
-
-models:
-  - model_id: openai/gpt-4o-mini-transcribe
-    name: OpenRouter Transcription
-    type: transcription
