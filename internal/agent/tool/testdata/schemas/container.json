@@ -43,6 +43,14 @@
   },
   "exec": {
     "properties": {
+      "background_mode": {
+        "description": "task (default) uses the execution budget; service runs until explicitly stopped or the workspace closes. service requires run_in_background=true and no max_duration_seconds.",
+        "enum": [
+          "task",
+          "service"
+        ],
+        "type": "string"
+      },
       "command": {
         "description": "Command to run (e.g. ls -la, npm install, python script.py)",
         "type": "string"
@@ -50,6 +58,12 @@
       "description": {
         "description": "Clear, concise description of what this command does in active voice. For simple commands keep it brief (5-10 words): ls -la → \"List files with details\". For complex commands add enough context: curl -s url | jq '.data[]' → \"Fetch JSON and extract data array\".",
         "type": "string"
+      },
+      "max_duration_seconds": {
+        "description": "Total budget for a finite command, including time spent in foreground. Default 7200 seconds; max 86400. Backgrounding does not restart it.",
+        "maximum": 86400,
+        "minimum": 1,
+        "type": "integer"
       },
       "run_in_background": {
         "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '\u0026' at the end of the command.",

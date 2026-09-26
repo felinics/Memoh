@@ -1,0 +1,6 @@
+-- 0157_reserved_cloud_alignment
+-- Intentionally empty. Memoh-Cloud's copy of this stream numbers every
+-- migration from 0141 onward one higher than this repository, so its 0157 is
+-- this repository's 0156. Reserving 0157 here lets both streams share the same
+-- numbers from 0158 on; a Cloud sync keeps its own 0157 and drops this file.
+-- Never reuse this number: databases already past it would skip the migration.

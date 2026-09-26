@@ -73,15 +73,51 @@ Migration 0156 removes the obsolete `agent_session_states` and
 processes; it contains no conversation state. Downgrading restores the old table
 structure, not deleted snapshot data.
 
-## Inactivity watchdogs
 
-Model generation and tool execution use separate inactivity clocks. The model
-window defaults to five minutes and scales with reasoning effort up to fifteen
-minutes. Active tools have a fifteen-minute inactivity window. Waiting for an
-approval or user input pauses only that tool; parallel tools remain supervised.
-Completed tools do not accumulate extra timeout allowance for later model calls.
+## Execution timeouts and budgets
 
-Subagents use a ten-minute inactivity watchdog instead of a fixed ten-minute
-execution limit. Background agent tasks do not have the command task's fixed
-thirty-minute limit. Explicit ancestor deadlines are still inherited. Progress
-from a waiting parent does not reset the child's watchdog.
+Model silence, tool silence, human decisions, and total execution budgets have
+separate owners. Streaming chat, external runtimes, scheduled turns, and decision
+continuations use the same phase-aware application watchdog:
+
+- Model requests have a five-minute inactivity window. Reasoning effort can
+  extend that individual window, capped at fifteen minutes.
+- Active tools have a fifteen-minute inactivity window, with headroom for a
+  foreground command's ten-minute soft wait. A tool's own shorter operation
+  deadline still applies. Completed tools do not extend later model requests.
+- A pending approval or user-input request pauses only its own tool watchdog.
+  Its decision flow retains the ten-minute response window. Parallel tools
+  remain supervised; explicit cancellation and runtime ownership loss still win.
+- Managed subagents have a ten-minute progress watchdog, with no implicit total
+  duration. Detachment preserves an explicit ancestor execution deadline.
+
+Schedules expose `max_run_seconds` (default 3600, range 300–86400), independently
+of the selected runtime. Every fire uses its existing log UUID for turn admission,
+so repeated fires targeting the same session remain distinct. The execution
+context enforces the budget and passes it to descendants. Budget expiry uses
+`schedule.execution_timeout`, independently of model inactivity. This feature adds
+only the `schedule.max_run_seconds` column; schedule ownership, restart recovery,
+and the log schema are unchanged.
+
+The `exec` tool has separate soft waiting and process budgets:
+
+- `timeout` controls foreground waiting (default 30 seconds, maximum 600). When
+  that wait expires, the same process is adopted by the background manager.
+- `max_duration_seconds` controls a finite command's total runtime (default 7200,
+  maximum 86400). Adoption never restarts this budget.
+- `background_mode: "service"` requires `run_in_background: true` and omitting
+  `max_duration_seconds`. The process lives until explicitly stopped, its
+  workspace closes, or an explicit ancestor execution budget expires.
+- Stop cancels the underlying bridge stream. Opt-in bridge heartbeat frames
+  report process liveness separately from stdout/stderr. The receiver enables
+  missing-heartbeat detection only after a bridge advertises it by sending a
+  heartbeat, so older bridges remain compatible. Loss of supervision without
+  an EXIT frame is `unknown`, not proof of successful completion or safe retry.
+
+Video generation has its own configurable monitoring budget (default two hours,
+maximum 24 hours). A receipt under the bot workspace's `.memoh/video-jobs/` records
+its provider job identity when storage is available. Monitoring expiry checks the
+provider once more; unfinished or unobservable jobs retain their identity and an
+`unknown` outcome. They are not automatically canceled or resubmitted. An explicit
+user stop still requests provider cancellation. Receipts support operator recovery;
+they do not constitute automatic job adoption after a server restart.

@@ -174,3 +174,32 @@ func waitForProcessExit(pid int, timeout time.Duration) bool {
 	}
 	return syscall.Kill(pid, 0) == syscall.ESRCH
 }
+
+func TestExecLivenessDoesNotBecomeOutput(t *testing.T) {
+	raw := newCancelOnStdoutExecStream()
+	defer raw.cancel()
+	stream := &serializedExecStream{ContainerService_ExecServer: raw}
+	srv := New(Options{DefaultWorkDir: "/tmp", AllowHostAbsolute: true})
+	if err := srv.execPipe(stream, &pb.ExecInput{Command: "sleep 0.02", WorkDir: "/tmp", TimeoutSeconds: -1, ReportLiveness: true}); err != nil {
+		t.Fatal(err)
+	}
+	heartbeats := 0
+	for i, output := range raw.outputs {
+		switch output.GetStream() {
+		case pb.ExecOutput_HEARTBEAT:
+			heartbeats++
+			if len(output.Data) != 0 {
+				t.Fatal("heartbeat polluted output")
+			}
+		case pb.ExecOutput_EXIT:
+			if i != len(raw.outputs)-1 {
+				t.Fatal("heartbeat emitted after exit")
+			}
+		default:
+			t.Fatalf("unexpected output %v", output)
+		}
+	}
+	if heartbeats == 0 || raw.outputs[len(raw.outputs)-1].GetStream() != pb.ExecOutput_EXIT {
+		t.Fatal("missing liveness or terminal signal")
+	}
+}

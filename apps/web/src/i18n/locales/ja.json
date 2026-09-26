@@ -152,13 +152,13 @@
       "protected_overflow": "必須コンテキストがモデルのコンテキスト予算を超えています。/compact で古い履歴を要約するか、より大きなコンテキストウィンドウのモデルをお試しください。"
     },
     "agent": {
-      "tool_timeout": "ツールの進捗が途絶えました。保存済みの結果を確認してから再試行してください。",
       "response_timeout": "モデルから時間内に応答がありませんでした。もう一度お試しください。",
       "response_interrupted": "モデルの応答が中断されました。もう一度お試しください。",
       "provider_overloaded": "モデルプロバイダーが混雑しています。しばらくしてからお試しください。",
       "provider_rate_limited": "モデルプロバイダーのレート制限に達しました。少し待ってから送信してください。",
       "provider_quota_exhausted": "モデルプロバイダーのアカウントに残高またはクォータが残っていません。",
-      "provider_auth_failed": "モデルプロバイダーが認証情報を拒否しました。プロバイダーの API キーを確認してください。"
+      "provider_auth_failed": "モデルプロバイダーが認証情報を拒否しました。プロバイダーの API キーを確認してください。",
+      "tool_timeout": "ツールの進捗が途絶えました。保存済みの結果を確認してから再試行してください。"
     },
     "queue_request_invalid": "既存の会話で /steer または /queue の後に内容を入力してください。",
     "queue_no_active_run": "現在の応答は終了しています。内容を新しいメッセージとして送信してください。",
@@ -330,6 +330,12 @@
       "forbidden": "この会話へのアクセス権がありません。",
       "request_invalid": "リクエストが無効です。更新して再試行してください。",
       "cancelled": "操作は中止されました。"
+    },
+    "schedule": {
+      "execution_timeout": "定期実行が制限時間に達しました。進捗を確認するか、制限時間を延長してください。"
+    },
+    "video": {
+      "job_outcome_unknown": "動画ジョブの状態を確認できませんでした。再生成する前に保存済みのジョブを確認してください。"
     }
   },
   "auth": {
@@ -3507,7 +3513,10 @@
         "pattern": "スケジュール",
         "maxCalls": "実行制限",
         "enabled": "タスクを有効にする",
-        "invalidPattern": "無効なパターン"
+        "invalidPattern": "無効なパターン",
+        "maxRunMinutes": "1 回の実行制限（分）",
+        "maxRunMinutesHelp": "5 分から 24 時間まで設定できます。",
+        "invalidMaxRunMinutes": "5 から 1440 までの整数を入力してください。"
       },
       "mode": {
         "minutes": "N分ごと",

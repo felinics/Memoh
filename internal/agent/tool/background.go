@@ -190,6 +190,12 @@ func (p *BackgroundProvider) execWaitUntil(ctx context.Context, session SessionC
 		"stalled":    s.Stalled,
 		"started_at": session.FormatTime(s.StartedAt),
 	}
+	if !s.DeadlineAt.IsZero() {
+		result["deadline_at"] = session.FormatTime(s.DeadlineAt)
+	}
+	if !s.LastLivenessAt.IsZero() {
+		result["last_liveness_at"] = session.FormatTime(s.LastLivenessAt)
+	}
 	if s.OutputTail != "" {
 		result["output_tail"] = s.OutputTail
 	}
@@ -282,6 +288,12 @@ func backgroundStatusMap(session SessionContext, s background.TaskSnapshot) map[
 		"status":      statusString(s),
 		"started_at":  session.FormatTime(s.StartedAt),
 		"stalled":     s.Stalled,
+	}
+	if !s.DeadlineAt.IsZero() {
+		result["deadline_at"] = session.FormatTime(s.DeadlineAt)
+	}
+	if !s.LastLivenessAt.IsZero() {
+		result["last_liveness_at"] = session.FormatTime(s.LastLivenessAt)
 	}
 	if !s.CompletedAt.IsZero() {
 		result["completed_at"] = session.FormatTime(s.CompletedAt)

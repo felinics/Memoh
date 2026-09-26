@@ -131,7 +131,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]t
 		{
 			Name: ToolCreateSchedule().String(), Description: "Create a new cron-scheduled task. Fill `command` with a natural-language instruction; when the cron `pattern` fires, the task runs and you receive a message containing that `command`. Include explicit platform and target in delivery instructions when results should be sent to a person or channel. Set `max_calls` to null for unlimited runs. " +
 				"By default each fire runs in a fresh session with the bot's default model. Optional execution parameters: `session_id` runs every fire inside that existing session (its runtime and workdir are inherited; only model/effort overrides apply). For fresh sessions, `acp_agent_id` (from list_acp_agents) runs fires through an ACP agent — combine with `acp_model_id`; `model_id` (a model_uuid from list_models) picks a native model instead; `workdir_id` (from list_workdirs) pins the session's working directory. `reasoning_effort` overrides the effort in both modes.",
-			Parameters: toolexec.SchemaFor[createScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema("Optional max calls, null means unlimited"))),
+			Parameters: toolexec.SchemaFor[createScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema("Optional max calls, null means unlimited")), toolexec.Range("max_run_seconds", 300, 86400)),
 			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args createScheduleArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
@@ -159,7 +159,7 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]t
 		},
 		{
 			Name: ToolUpdateSchedule().String(), Description: "Update an existing schedule. To change execution parameters (session_id / model_id / acp_agent_id / acp_model_id / reasoning_effort / workdir_id), set `update_execution` to true and pass the FULL desired execution state — the whole block is replaced as one unit, and omitted execution fields reset to their defaults.",
-			Parameters: toolexec.SchemaFor[updateScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema(""))),
+			Parameters: toolexec.SchemaFor[updateScheduleArgs](toolexec.Replace("max_calls", nullableIntegerSchema("")), toolexec.Range("max_run_seconds", 300, 86400)),
 			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args updateScheduleArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
@@ -240,8 +240,9 @@ func (p *ScheduleProvider) Tools(_ context.Context, session SessionContext) ([]t
 // schedule service validates the combination.
 // scheduleExecutionConfig builds the execution block create and update share;
 // their argument structs spell their own descriptions and hand the values here.
-func scheduleExecutionConfig(sessionID, acpAgentID, modelID, acpModelID, reasoningEffort, workdirID string) sched.ExecutionConfig {
+func scheduleExecutionConfig(maxRunSeconds int, sessionID, acpAgentID, modelID, acpModelID, reasoningEffort, workdirID string) sched.ExecutionConfig {
 	exec := sched.ExecutionConfig{
+		MaxRunSeconds:   maxRunSeconds,
 		TargetSessionID: strings.TrimSpace(sessionID),
 		ACPAgentID:      strings.TrimSpace(acpAgentID),
 		ModelID:         strings.TrimSpace(modelID),
@@ -259,11 +260,11 @@ func scheduleExecutionConfig(sessionID, acpAgentID, modelID, acpModelID, reasoni
 }
 
 func (a createScheduleArgs) executionConfig() sched.ExecutionConfig {
-	return scheduleExecutionConfig(a.SessionID, a.ACPAgentID, a.ModelID, a.ACPModelID, a.ReasoningEffort, a.WorkdirID)
+	return scheduleExecutionConfig(a.MaxRunSeconds, a.SessionID, a.ACPAgentID, a.ModelID, a.ACPModelID, a.ReasoningEffort, a.WorkdirID)
 }
 
 func (a updateScheduleArgs) executionConfig() sched.ExecutionConfig {
-	return scheduleExecutionConfig(a.SessionID, a.ACPAgentID, a.ModelID, a.ACPModelID, a.ReasoningEffort, a.WorkdirID)
+	return scheduleExecutionConfig(a.MaxRunSeconds, a.SessionID, a.ACPAgentID, a.ModelID, a.ACPModelID, a.ReasoningEffort, a.WorkdirID)
 }
 
 // scheduleMaxCalls keeps the three states of max_calls apart: omitted (leave
@@ -318,6 +319,7 @@ type createScheduleArgs struct {
 	Description     string           `json:"description"`
 	Enabled         *bool            `json:"enabled,omitempty"`
 	MaxCalls        scheduleMaxCalls `json:"max_calls,omitempty" jsonschema:"Optional max calls, null means unlimited"`
+	MaxRunSeconds   int              `json:"max_run_seconds,omitempty" jsonschema:"Per-fire execution budget, default 3600 seconds. Overlapping fires are skipped."`
 	ModelID         string           `json:"model_id,omitempty" jsonschema:"Native model override: a model_uuid from list_models. Not valid together with acp_agent_id/acp_model_id."`
 	Name            string           `json:"name"`
 	Pattern         string           `json:"pattern"`
@@ -334,6 +336,7 @@ type updateScheduleArgs struct {
 	Enabled         *bool            `json:"enabled,omitempty"`
 	ID              string           `json:"id"`
 	MaxCalls        scheduleMaxCalls `json:"max_calls,omitempty"`
+	MaxRunSeconds   int              `json:"max_run_seconds,omitempty" jsonschema:"Per-fire execution budget, default 3600 seconds. Overlapping fires are skipped."`
 	ModelID         string           `json:"model_id,omitempty" jsonschema:"Native model override: a model_uuid from list_models."`
 	Name            string           `json:"name,omitempty"`
 	Pattern         string           `json:"pattern,omitempty"`

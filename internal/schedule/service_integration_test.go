@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -41,9 +42,9 @@ func setupScheduleIntegrationTest(t *testing.T) (*schedule.Service, dbstore.Quer
 	mock := &mockTriggerer{}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	cfg := &boot.RuntimeConfig{JwtSecret: "integration-test-jwt-secret"}
-	svc := schedule.NewService(logger, queries, mock, nil, nil, cfg)
+	svc := schedule.NewService(logger, queries, mock, scheduleSessionCreator{pool}, nil, cfg)
 
-	return svc, queries, pool, mock, func() { pool.Close() }
+	return svc, queries, pool, mock, func() { _ = svc.Shutdown(context.Background()); pool.Close() }
 }
 
 type mockTriggerer struct {
@@ -80,7 +81,7 @@ func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries dbstore
 	meta, _ := json.Marshal(map[string]any{"source": "schedule-integration-test"})
 	botRow, err := queries.CreateBot(ctx, sqlc.CreateBotParams{
 		OwnerUserID: pgOwnerID,
-		Name:        "schedule-test-bot",
+		Name:        "schedule-test-" + uuid.NewString(),
 		DisplayName: pgtype.Text{String: "schedule-test-bot", Valid: true},
 		AvatarUrl:   pgtype.Text{},
 		IsActive:    true,
@@ -98,6 +99,7 @@ func createUserBotAndSchedule(ctx context.Context, t *testing.T, queries dbstore
 	}
 	schedRow, err := queries.CreateSchedule(ctx, sqlc.CreateScheduleParams{
 		Name:        "integration-daily",
+		RunTarget:   schedule.RunTargetNewSession,
 		Description: "daily job for integration test",
 		Pattern:     "0 0 * * *",
 		MaxCalls:    pgtype.Int4{Valid: false},
@@ -155,5 +157,48 @@ func TestIntegrationTrigger_CallsTriggererWithCorrectPayload(t *testing.T) {
 	}
 	if !strings.HasPrefix(mock.token, "Bearer ") {
 		t.Errorf("token should have Bearer prefix, got: %s", mock.token)
+	}
+}
+
+type scheduleSessionCreator struct{ pool *pgxpool.Pool }
+
+func (s scheduleSessionCreator) CreateSession(ctx context.Context, botID, kind string) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, "INSERT INTO bot_sessions(bot_id,type,title) VALUES ($1,$2,'Schedule QA') RETURNING id", botID, kind).Scan(&id)
+	return id, err
+}
+
+func (s scheduleSessionCreator) CreateScheduleSession(ctx context.Context, spec schedule.SessionSpec) (string, error) {
+	return s.CreateSession(ctx, spec.BotID, "schedule")
+}
+
+func TestIntegrationScheduleFireIdentityAndBudget(t *testing.T) {
+	svc, q, pool, mock, cleanup := setupScheduleIntegrationTest(t)
+	defer cleanup()
+	ctx := t.Context()
+	owner, bot, id := createUserBotAndSchedule(ctx, t, q)
+	defer cleanupScheduleTestData(context.Background(), t, q, pool, owner, bot, id)
+	if err := svc.Trigger(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	first := mock.payload
+	if first.FireID == "" {
+		t.Fatal("missing persisted fire identity")
+	}
+	if _, err := pool.Exec(ctx, "UPDATE schedule SET run_target='existing_session',target_session_id=$2 WHERE id=$1", id, first.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Trigger(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if mock.payload.FireID == first.FireID || mock.payload.SessionID != first.SessionID {
+		t.Fatalf("fire identity reused: %+v", mock.payload)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE schedule SET max_run_seconds=7200 WHERE id=$1", id); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := svc.Get(ctx, id)
+	if err != nil || loaded.MaxRunSeconds != 7200 {
+		t.Fatalf("budget=%d err=%v", loaded.MaxRunSeconds, err)
 	}
 }
