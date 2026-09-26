@@ -59,7 +59,7 @@ func (f *Store) Admit(_ context.Context, params ledger.AdmitParams) (ledger.Run,
 	}
 	if params.ResumeRunID != "" {
 		source, ok := f.Runs[params.ResumeRunID]
-		if !ok || source.BotID != params.BotID || source.SessionID != params.SessionID || source.State != ledger.StateLost || source.ErrorCode != "session_runtime.interrupted" || !source.AbortRequestedAt.IsZero() {
+		if !ok || source.BotID != params.BotID || source.SessionID != params.SessionID || source.State != ledger.StateLost || source.ErrorCode != "session_runtime.interrupted" || !source.AbortRequestedAt.IsZero() || !ledger.HasResumeContext(source.Input) {
 			return ledger.Run{}, false, ledger.ErrResumeSuperseded
 		}
 		for _, run := range f.Runs {

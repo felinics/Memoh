@@ -149,6 +149,18 @@ further action. Native, direct-agent and subagent sessions use their existing
 runtime dispatch; this is session-level continuation, not process-memory restore.
 Recovered output is published into the session runtime and saved to history.
 
+The worker lists interrupted runs through the partial index
+`idx_session_runs_resume_pending`, which covers only lost runs with the
+interrupted code that still carry `input_json.resume`; it never walks a team's
+run history. An interrupted run stays `lost` permanently, so the worker retires
+its intent (removes the `resume` key) once it can no longer continue. At the
+start of every pass over a team it retires intents a later turn answered or
+whose session was deleted, and it retires an individual intent when its budget
+expired, its context version is unsupported, its credential scope was revoked,
+or admission reports it superseded or already continued. Retired intents leave
+the index and are not retried; transient failures such as an unready workspace
+keep the intent for the next pass.
+
 Uncommitted streaming tokens can be lost. Background command handles from the old
 process are not reattached; workspace output and external job receipts must be
 checked. Subagent sessions can continue, but old in-memory parent waiters are gone.

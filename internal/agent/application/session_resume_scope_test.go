@@ -73,6 +73,20 @@ func (q *tenantResumeQueries) ListInterruptedSessionRuns(ctx context.Context, af
 	return q.q.ListInterruptedSessionRuns(ctx, after)
 }
 
+func (q *tenantResumeQueries) RetireSupersededInterruptedSessionRuns(ctx context.Context) (int64, error) {
+	if scope, _ := ctx.Value(resumeScopeKey{}).(string); scope == "" {
+		return 0, errors.New("unbound tenant retirement")
+	}
+	return q.q.RetireSupersededInterruptedSessionRuns(ctx)
+}
+
+func (q *tenantResumeQueries) RetireInterruptedSessionRun(ctx context.Context, runID pgtype.UUID) (int64, error) {
+	if scope, _ := ctx.Value(resumeScopeKey{}).(string); scope == "" {
+		return 0, errors.New("unbound tenant retirement")
+	}
+	return q.q.RetireInterruptedSessionRun(ctx, runID)
+}
+
 func TestResumeScopeBindingFailsClosed(t *testing.T) {
 	ctx := t.Context()
 	if _, err := bindSessionResumeScope(ctx, testResumeScopes{broken: true}, uuid.NewString()); !errors.Is(err, errResumeScopeMismatch) {
@@ -144,7 +158,11 @@ func TestPostgresResumeScopesUseOrdinaryRoleAndPreserveTenantIntoExecution(t *te
 	if _, err := admin.Exec(ctx, "GRANT USAGE ON SCHEMA public TO "+roleSQL); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.Exec(ctx, "GRANT SELECT ON session_runs,bot_sessions,bots TO "+roleSQL); err != nil {
+	// The worker retires superseded intents with the same tenant-bound role.
+	if _, err := admin.Exec(ctx, "GRANT SELECT, UPDATE ON session_runs TO "+roleSQL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, "GRANT SELECT ON bot_sessions,bots TO "+roleSQL); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)

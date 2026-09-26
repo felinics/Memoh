@@ -129,3 +129,92 @@ func TestPostgresResumeRejectsCandidateSupersededAfterScan(t *testing.T) {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
 }
+
+// A resume intent leaves the pending set once it can no longer continue: a
+// later turn answered the session, or the worker retired it. Retired intents
+// are neither listed nor admitted, and the partial index the worker lists
+// through only covers intents still pending.
+func TestPostgresResumeIntentRetirementLeavesPendingSet(t *testing.T) {
+	ctx := t.Context()
+	pool := openLedgerResetPostgres(t, ctx)
+	q := dbsqlc.New(pool)
+	var valid bool
+	if err := pool.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+		WHERE c.relname = 'idx_session_runs_resume_pending'`).Scan(&valid); err != nil || !valid {
+		t.Fatalf("pending-resume index valid=%v err=%v", valid, err)
+	}
+	botID, sessionID := createLedgerResetFixture(t, ctx, pool)
+	runs := ledger.NewPostgres(q, pool)
+	interrupt := func(sessionID string) string {
+		runID, token := createClaimedLedgerRun(t, ctx, pool, botID, sessionID)
+		if _, err := pool.Exec(ctx, `UPDATE session_runs SET input_json = '{"resume":{"version":1,"chat_id":"chat"}}' WHERE run_id = $1`, runID); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := runs.Finalize(ctx, ledger.FinalizeParams{RunID: runID, FencingToken: token, State: ledger.StateLost, ErrorCode: sessionruntime.RunErrorInterrupted}); err != nil {
+			t.Fatal(err)
+		}
+		return runID
+	}
+	pending := func(runID string) bool {
+		t.Helper()
+		rows, err := q.ListInterruptedSessionRuns(ctx, pgtype.UUID{Valid: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			if row.RunID.String() == runID {
+				return true
+			}
+		}
+		return false
+	}
+	hasIntent := func(runID string) bool {
+		t.Helper()
+		var has bool
+		if err := pool.QueryRow(ctx, "SELECT input_json ? 'resume' FROM session_runs WHERE run_id = $1", runID).Scan(&has); err != nil {
+			t.Fatal(err)
+		}
+		return has
+	}
+
+	oldID := interrupt(sessionID)
+	if _, err := q.RetireSupersededInterruptedSessionRuns(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !pending(oldID) || !hasIntent(oldID) {
+		t.Fatal("an unanswered interrupted run was retired")
+	}
+	newerID, newerToken := createClaimedLedgerRun(t, ctx, pool, botID, sessionID)
+	if _, err := pool.Exec(ctx, "UPDATE session_runs SET turn_position = 2 WHERE run_id = $1", newerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runs.Finalize(ctx, ledger.FinalizeParams{RunID: newerID, FencingToken: newerToken, State: ledger.StateCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	if retired, err := q.RetireSupersededInterruptedSessionRuns(ctx); err != nil || retired < 1 {
+		t.Fatalf("superseded sweep retired=%d err=%v", retired, err)
+	}
+	if pending(oldID) || hasIntent(oldID) {
+		t.Fatal("superseded intent is still pending")
+	}
+
+	otherSession := createLedgerResetSession(t, ctx, pool, botID)
+	retiredID := interrupt(otherSession)
+	if n, err := q.RetireInterruptedSessionRun(ctx, db.ParseUUIDOrEmpty(retiredID)); err != nil || n != 1 {
+		t.Fatalf("retire=%d err=%v", n, err)
+	}
+	if n, err := q.RetireInterruptedSessionRun(ctx, db.ParseUUIDOrEmpty(retiredID)); err != nil || n != 0 {
+		t.Fatalf("second retire=%d err=%v, want a no-op", n, err)
+	}
+	if pending(retiredID) {
+		t.Fatal("retired intent is still listed")
+	}
+	_, created, err := runs.Admit(ctx, ledger.AdmitParams{RunID: uuid.NewString(), BotID: botID, SessionID: otherSession, InvocationID: "resume:" + retiredID, TurnID: uuid.NewString(), Input: []byte(`{}`), InputFingerprint: "resume", ResumeRunID: retiredID})
+	if created || !errors.Is(err, ledger.ErrResumeSuperseded) {
+		t.Fatalf("retired intent admitted: created=%v err=%v", created, err)
+	}
+	var state, code string
+	if err := pool.QueryRow(ctx, "SELECT state, error_code FROM session_runs WHERE run_id = $1", retiredID).Scan(&state, &code); err != nil || state != "lost" || code != sessionruntime.RunErrorInterrupted {
+		t.Fatalf("retirement changed the run outcome: %s %s %v", state, code, err)
+	}
+}

@@ -28,6 +28,8 @@ type HistoryTurn struct {
 type Queries interface {
 	SaveSessionRunResumeContext(context.Context, dbsqlc.SaveSessionRunResumeContextParams) (int64, error)
 	ListInterruptedSessionRuns(context.Context, pgtype.UUID) ([]dbsqlc.SessionRun, error)
+	RetireSupersededInterruptedSessionRuns(context.Context) (int64, error)
+	RetireInterruptedSessionRun(context.Context, pgtype.UUID) (int64, error)
 
 	DeleteAgentSessionPublicationsBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	CreateAgentAuthorization(context.Context, dbsqlc.CreateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
