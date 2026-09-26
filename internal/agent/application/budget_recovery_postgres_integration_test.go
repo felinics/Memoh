@@ -73,7 +73,8 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossRestart(t *testing.T) {
 	appendMessage("old-user", "user", strings.Repeat("old user ", 1000), false)
 	appendMessage("old-answer", "assistant", strings.Repeat("old answer ", 1000), true)
 	after = timeline.ConsumedDiscussCursor(rc)
-	for round := 0; round < 3; round++ {
+	const rounds = 32
+	for round := 0; round < rounds; round++ {
 		// Grow consumed history again so each round must make durable progress.
 		if round > 0 {
 			appendMessage(fmt.Sprintf("old-%d", round), "assistant", strings.Repeat("old history ", 1000), true)
@@ -153,8 +154,18 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossRestart(t *testing.T) {
 			t.Fatalf("round %d exhausted recovery without progress", round)
 		}
 	}
-	if summaries.Load() < 3 || summaries.Load() > 6 {
+	if summaries.Load() < rounds || summaries.Load() > rounds*2 {
 		t.Fatalf("unexpected bounded recovery count=%d", summaries.Load())
 	}
-	t.Logf("rounds=3 summary_calls=%d provider_calls=3 stored_replies=3 duplicate_current=0", summaries.Load())
+	var replies, pending int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM bot_history_messages WHERE session_id=$1 AND source_message_id LIKE 'reply-%'`, sessionID).Scan(&replies); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM bot_history_message_compacts WHERE session_id=$1 AND status='pending'`, sessionID).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if replies != rounds || pending != 0 {
+		t.Fatalf("replies=%d pending=%d", replies, pending)
+	}
+	t.Logf("rounds=%d summary_calls=%d provider_calls=%d stored_replies=%d pending=0 duplicate_current=0", rounds, summaries.Load(), rounds, replies)
 }
