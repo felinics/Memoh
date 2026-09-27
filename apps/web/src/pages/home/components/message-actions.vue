@@ -2,7 +2,9 @@
   <!-- One reserved row under every turn. The height is always present so the
        layout never jumps; only visibility toggles. While the turn is still
        streaming the row stays fully hidden (no hover reveal) — actions on an
-       in-flight answer are meaningless. The latest FINISHED turn keeps it
+       in-flight answer are meaningless. `invisible` (not just opacity) also
+       drops the buttons from the Tab order and accessibility tree, so keyboard
+       focus can't land on controls nobody can see. The latest FINISHED turn keeps it
        visible; every other turn reveals it on pointer/focus within the turn's
        hover scope (group/msg, set on the message content wrapper).
 
@@ -19,7 +21,7 @@
     :class="[
       align === 'end' ? 'justify-end' : 'justify-start -ml-1.5',
       streaming
-        ? 'opacity-0 pointer-events-none'
+        ? 'invisible opacity-0 pointer-events-none'
         : persistent
           ? 'opacity-100'
           : 'opacity-0 pointer-events-none group-hover/msg:opacity-100 group-hover/msg:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto',
