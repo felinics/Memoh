@@ -1,0 +1,357 @@
+package handlers
+
+// Characterization tests for what the local WebSocket channel reports when an
+// Agent run fails. They pin CURRENT behavior so the failure-classification
+// refactor can show exactly which outward values it changes. A value that looks
+// wrong is still asserted as it is today and marked "current behavior".
+//
+// Each case composes the handler's own pieces with a real session runtime
+// manager backed by the in-memory ledger: forwardWSStreamEvents publishes the
+// run's events and writes the initiating socket's error frame, finishWSRun
+// writes the terminal state, and sendWSErrorFromError is the frame a runner
+// error produces after the run has finished.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/felinics/memoh/internal/agent/application"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/testutil/sessionledger"
+)
+
+const (
+	failureCharBotID     = "11111111-1111-4111-8111-111111111111"
+	failureCharSessionID = "22222222-2222-4222-8222-222222222222"
+)
+
+type failureCharFence struct{}
+
+func (failureCharFence) Activate(context.Context, string, string, int64) error { return nil }
+
+type failureCharRun struct {
+	manager   *sessionruntime.Manager
+	runs      *sessionledger.Store
+	handler   *LocalChannelHandler
+	admission sessionruntime.Admission
+	writer    *wsWriter
+	ref       wsTurnRef
+}
+
+func newFailureCharRun(t *testing.T) failureCharRun {
+	t.Helper()
+	runs := sessionledger.New()
+	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+		OwnerID:       "owner-ws-failure",
+		OwnerLeaseTTL: time.Minute,
+		Ledger:        runs,
+		Fence:         failureCharFence{},
+	})
+	t.Cleanup(func() { _ = manager.Close() })
+	admission, err := manager.Admit(context.Background(), sessionruntime.AdmitInput{
+		BotID:        failureCharBotID,
+		SessionID:    failureCharSessionID,
+		InvocationID: "invocation-ws-failure",
+		Payload:      []byte(`{"text":"hi"}`),
+		Execution: sessionruntime.Execution{
+			Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+				return sessionruntime.RunAdmissionView{}, nil
+			},
+		},
+	})
+	if err != nil || !admission.Started {
+		t.Fatalf("admit = %+v, %v", admission, err)
+	}
+	return failureCharRun{
+		manager:   manager,
+		runs:      runs,
+		handler:   &LocalChannelHandler{logger: slog.New(slog.DiscardHandler), sessionRuntime: manager},
+		admission: admission,
+		writer:    &wsWriter{ch: make(chan []byte, 16), stop: make(chan struct{}), done: make(chan struct{})},
+		ref:       wsTurnRef{RunID: admission.RunID, SessionID: failureCharSessionID},
+	}
+}
+
+// forward runs the given native events through the handler exactly as the
+// runner's event channel would deliver them.
+func (r failureCharRun) forward(t *testing.T, events ...native.StreamEvent) {
+	t.Helper()
+	ch := make(chan application.WSStreamEvent, len(events))
+	for _, event := range events {
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Fatalf("marshal event: %v", err)
+		}
+		ch <- data
+	}
+	close(ch)
+	ctx := context.Background()
+	r.handler.forwardWSStreamEvents(ctx, ctx, r.writer, failureCharBotID, r.ref, r.admission.Handle, ch)
+}
+
+func (r failureCharRun) finish(runErr error) {
+	r.handler.finishWSRun(context.Background(), wsRunAdmission{RunID: r.admission.RunID, Handle: r.admission.Handle}, runErr)
+}
+
+// frames drains every frame written to the initiating socket.
+func (r failureCharRun) frames(t *testing.T) []map[string]any {
+	t.Helper()
+	var frames []map[string]any
+	for {
+		select {
+		case data := <-r.writer.ch:
+			var frame map[string]any
+			if err := json.Unmarshal(data, &frame); err != nil {
+				t.Fatalf("decode frame: %v", err)
+			}
+			frames = append(frames, frame)
+		default:
+			return frames
+		}
+	}
+}
+
+func (r failureCharRun) ledgerColumns(t *testing.T) [3]string {
+	t.Helper()
+	run, err := r.runs.Get(context.Background(), r.admission.RunID)
+	if err != nil {
+		t.Fatalf("load ledger run: %v", err)
+	}
+	return [3]string{string(run.State), run.ErrorCode, run.ErrorMessage}
+}
+
+func (r failureCharRun) runView(t *testing.T) [3]string {
+	t.Helper()
+	snapshot, err := r.manager.Snapshot(context.Background(), failureCharBotID, failureCharSessionID)
+	if err != nil || snapshot.CurrentRunView == nil {
+		t.Fatalf("snapshot = %+v, %v", snapshot, err)
+	}
+	view := snapshot.CurrentRunView
+	return [3]string{view.Status, view.ErrorCode, view.Error}
+}
+
+func assertFrames(t *testing.T, got []map[string]any, want []map[string]any) {
+	t.Helper()
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(want)
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("socket frames = %s\nwant %s", gotJSON, wantJSON)
+	}
+}
+
+const (
+	providerOverloadedDetail = "The model provider is overloaded right now. Please try again in a moment."
+	responseInterruptedCopy  = "The model response was interrupted. Please try again."
+)
+
+// Scenarios 2 and 3 on the WebSocket path: the application layer forwards the
+// public EventError (provider text already classified), the native runtime ends
+// with agent_abort, and the WS loop returns nil for a mid-stream failure, so
+// finishWSRun is called without an error.
+func TestCharacterizeWSMidStreamProviderFailure(t *testing.T) {
+	t.Parallel()
+	r := newFailureCharRun(t)
+	r.forward(t,
+		native.StreamEvent{Type: native.EventAgentStart},
+		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "api error 503"},
+		native.StreamEvent{Type: native.EventError, Code: "agent.provider_overloaded", Error: providerOverloadedDetail},
+		native.StreamEvent{Type: native.EventAgentAbort},
+	)
+	r.finish(nil)
+
+	assertFrames(t, r.frames(t), []map[string]any{{
+		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
+		"code": "agent.provider_overloaded", "message": providerOverloadedDetail,
+	}})
+	if got, want := r.ledgerColumns(t), [3]string{"failed", "agent.provider_overloaded", ""}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+	// Current behavior: the run view carries the public detail as its error text
+	// while session_runs.error_message stays empty.
+	if got, want := r.runView(t), [3]string{"errored", "agent.provider_overloaded", providerOverloadedDetail}; got != want {
+		t.Fatalf("run view = %q, want %q", got, want)
+	}
+}
+
+// Scenario 3: a failed attempt that recovers leaves no error anywhere.
+func TestCharacterizeWSRetryRecoveredRun(t *testing.T) {
+	t.Parallel()
+	r := newFailureCharRun(t)
+	r.forward(t,
+		native.StreamEvent{Type: native.EventAgentStart},
+		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "api error 503"},
+		native.StreamEvent{Type: native.EventTextDelta, Delta: "done"},
+		native.StreamEvent{Type: native.EventAgentEnd},
+	)
+	r.finish(nil)
+
+	assertFrames(t, r.frames(t), nil)
+	if got, want := r.ledgerColumns(t), [3]string{"completed", "", ""}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+	if got, want := r.runView(t), [3]string{"completed", "", ""}; got != want {
+		t.Fatalf("run view = %q, want %q", got, want)
+	}
+}
+
+// Scenario 1 and 10 on the WebSocket path: the runner fails before the agent
+// stream starts with an error that carries no apperror code.
+//
+// Current behavior: the socket frame has no code and carries the raw error text;
+// session_runs gets the generic runtime_run_failed code and no message.
+func TestCharacterizeWSPlainRunnerError_CurrentBehavior(t *testing.T) {
+	t.Parallel()
+	r := newFailureCharRun(t)
+	runErr := errors.New("resolve: model not found")
+	r.finish(runErr)
+	sendWSErrorFromError(r.writer, r.ref, runErr)
+
+	assertFrames(t, r.frames(t), []map[string]any{{
+		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
+		"message": "resolve: model not found",
+	}})
+	if got, want := r.ledgerColumns(t), [3]string{"failed", "runtime_run_failed", ""}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+	if got, want := r.runView(t), [3]string{"errored", "runtime_run_failed", ""}; got != want {
+		t.Fatalf("run view = %q, want %q", got, want)
+	}
+}
+
+// Scenario 1 and 10 with a catalogued runner error.
+//
+// Current behavior: the socket frame puts the code only in feedback.code, while
+// finishWSRun passes the code as the finish MESSAGE, so session_runs records
+// runtime_run_failed with the real code in error_message.
+func TestCharacterizeWSCodedRunnerError_CurrentBehavior(t *testing.T) {
+	t.Parallel()
+	r := newFailureCharRun(t)
+	runErr := apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("dial unix: no such file"), nil)
+	r.finish(runErr)
+	sendWSErrorFromError(r.writer, r.ref, runErr)
+
+	frames := r.frames(t)
+	if len(frames) != 1 {
+		t.Fatalf("frames = %#v, want one", frames)
+	}
+	frame := frames[0]
+	if _, hasCode := frame["code"]; hasCode {
+		t.Fatalf("frame = %#v, current behavior has no top-level code", frame)
+	}
+	feedback, _ := frame["feedback"].(map[string]any)
+	if frame["type"] != "error" || feedback["code"] != "workspace.unreachable" || frame["message"] != feedback["detail"] {
+		t.Fatalf("frame = %#v", frame)
+	}
+	if got, want := r.ledgerColumns(t), [3]string{"failed", "runtime_run_failed", "workspace.unreachable"}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+	if got, want := r.runView(t), [3]string{"errored", "runtime_run_failed", "workspace.unreachable"}; got != want {
+		t.Fatalf("run view = %q, want %q", got, want)
+	}
+}
+
+// Scenario 10: an uncoded native error text that reached the socket without
+// classification (the handler does not classify; the application layer does).
+//
+// Current behavior: the frame has no code and the raw text; session_runs falls
+// back to runtime_run_failed; the run view exposes the raw text.
+func TestCharacterizeWSUncodedStreamError_CurrentBehavior(t *testing.T) {
+	t.Parallel()
+	r := newFailureCharRun(t)
+	r.forward(t,
+		native.StreamEvent{Type: native.EventAgentStart},
+		native.StreamEvent{Type: native.EventError, Error: "runtime interrupted"},
+		native.StreamEvent{Type: native.EventAgentAbort},
+	)
+	r.finish(nil)
+
+	assertFrames(t, r.frames(t), []map[string]any{{
+		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
+		"message": "runtime interrupted",
+	}})
+	if got, want := r.ledgerColumns(t), [3]string{"failed", "runtime_run_failed", ""}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+	if got, want := r.runView(t), [3]string{"errored", "runtime_run_failed", "runtime interrupted"}; got != want {
+		t.Fatalf("run view = %q, want %q", got, want)
+	}
+}
+
+// Scenario 8 on the WebSocket path: the runner returns a bare cancellation,
+// which finishWSRun leaves unnamed; with an abort recorded on the live run the
+// outcome is aborted and nothing is sent to the socket.
+func TestCharacterizeWSCanceledRunnerAfterAbort(t *testing.T) {
+	t.Parallel()
+	r := newFailureCharRun(t)
+	r.forward(t,
+		native.StreamEvent{Type: native.EventAgentStart},
+		native.StreamEvent{Type: native.EventAgentAbort},
+	)
+	r.finish(context.Canceled)
+
+	assertFrames(t, r.frames(t), nil)
+	if got, want := r.ledgerColumns(t), [3]string{"aborted", "", ""}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+	if got, want := r.runView(t), [3]string{"aborted", "", ""}; got != want {
+		t.Fatalf("run view = %q, want %q", got, want)
+	}
+}
+
+// Scenario 5 on the WebSocket path: the admission sentinels become run_rejected
+// with a code and the sentinel text; no run is named.
+func TestCharacterizeWSAdmissionRejectionFrames(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err  error
+		want map[string]any
+	}{
+		{
+			err: sessionruntime.ErrSessionBusy,
+			want: map[string]any{
+				"type": "run_rejected", "invocation_id": "invocation-1", "session_id": failureCharSessionID,
+				"code": "session_runtime.session_busy", "message": sessionruntime.ErrSessionBusy.Error(),
+			},
+		},
+		{
+			// Current behavior: ownership loss during admission is not a
+			// rejection sentinel, so the client gets a plain error with the
+			// sentinel text and no code.
+			err: sessionruntime.ErrRunOwnershipLost,
+			want: map[string]any{
+				"type": "error", "invocation_id": "invocation-1", "session_id": failureCharSessionID,
+				"message": "runtime run ownership was lost",
+			},
+		},
+	} {
+		writer := &wsWriter{ch: make(chan []byte, 1), stop: make(chan struct{}), done: make(chan struct{})}
+		sendWSErrorFromError(writer, wsTurn("invocation-1", failureCharSessionID), tc.err)
+		var frame map[string]any
+		if err := json.Unmarshal(<-writer.ch, &frame); err != nil {
+			t.Fatalf("decode frame: %v", err)
+		}
+		assertFrames(t, []map[string]any{frame}, []map[string]any{tc.want})
+	}
+}
+
+// SSE exit: the local channel's SSE stream carries the IM processor's error
+// event (see the inbound characterization tests for its text).
+//
+// Current behavior: the SSE error event has only the text, no code.
+func TestCharacterizeSSEErrorEventHasNoCode_CurrentBehavior(t *testing.T) {
+	t.Parallel()
+	data, err := formatLocalStreamEvent(channel.StreamEvent{Type: channel.StreamEventError, Error: providerOverloadedDetail})
+	if err != nil {
+		t.Fatalf("format: %v", err)
+	}
+	if want := `{"type":"error","error":"` + providerOverloadedDetail + `"}`; string(data) != want {
+		t.Fatalf("sse event = %s, want %s", data, want)
+	}
+}

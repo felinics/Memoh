@@ -14,6 +14,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -177,7 +178,7 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 		resp, err = h.modelsService.ListByProviderIDAndType(c.Request().Context(), id, models.ModelType(modelType))
 	}
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid") {
+		if errors.Is(err, db.ErrInvalidUUID) || errors.Is(err, models.ErrInvalidModelType) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -315,7 +316,7 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid") {
+		if errors.Is(err, db.ErrInvalidUUID) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())

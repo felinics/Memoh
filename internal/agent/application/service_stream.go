@@ -351,6 +351,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 					case native.EventAgentEnd:
 						// A terminal success means an earlier retryable stream error recovered.
 						lifecycleCause = nil
+						agentStreamErr = nil
 					case native.EventAgentAbort:
 						if idleCancel.DidFire() {
 							lifecycleCause = context.Cause(idleCtx)

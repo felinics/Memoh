@@ -164,7 +164,7 @@ func (h *FetchProvidersHandler) Delete(c echo.Context) error {
 }
 
 func fetchProviderHTTPError(err error) error {
-	if errors.Is(err, fetchproviders.ErrManagedNativeProvider) || strings.Contains(err.Error(), "invalid provider") {
+	if errors.Is(err, fetchproviders.ErrManagedNativeProvider) || errors.Is(err, fetchproviders.ErrInvalidProvider) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

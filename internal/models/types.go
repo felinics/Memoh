@@ -219,7 +219,7 @@ func (m *Model) Validate() error {
 		return errors.New("provider ID must be a valid UUID")
 	}
 	if !IsValidModelType(m.Type) {
-		return errors.New("invalid model type")
+		return ErrInvalidModelType
 	}
 	if m.Type == ModelTypeEmbedding {
 		if m.Config.Dimensions == nil || *m.Config.Dimensions <= 0 {

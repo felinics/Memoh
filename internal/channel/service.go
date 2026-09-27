@@ -22,6 +22,10 @@ import (
 // ErrChannelConfigNotFound indicates the bot has no persisted config for the channel type.
 var ErrChannelConfigNotFound = errors.New("channel config not found")
 
+// ErrChannelIdentityConfigNotFound indicates the channel identity has no
+// binding for the channel type.
+var ErrChannelIdentityConfigNotFound = errors.New("channel user config not found")
+
 // ErrChannelDiscoveryFailed indicates that a platform-side self identity check failed.
 var ErrChannelDiscoveryFailed = errors.New("channel identity discovery failed")
 
@@ -460,7 +464,7 @@ func (s *Store) GetChannelIdentityConfig(ctx context.Context, channelIdentityID 
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ChannelIdentityBinding{}, errors.New("channel user config not found")
+			return ChannelIdentityBinding{}, ErrChannelIdentityConfigNotFound
 		}
 		return ChannelIdentityBinding{}, err
 	}

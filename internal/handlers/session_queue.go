@@ -196,29 +196,24 @@ func decodeQueueRequest(c echo.Context) (enqueueQueueRequest, error) {
 	return req, nil
 }
 
+// queueAdmissionCodes renders queue admission refusals in the HTTP
+// vocabulary. The values are published and do not follow the channel codes.
+var queueAdmissionCodes = map[application.QueueAdmissionFailure]apperror.Code{
+	application.QueueAdmissionSteerUnsupported:   apperror.CodeQueueSteerUnsupported,
+	application.QueueAdmissionNoActiveRun:        apperror.CodeQueueNoActiveRun,
+	application.QueueAdmissionInvocationConflict: apperror.CodeSessionInvocationConflict,
+	application.QueueAdmissionOverloaded:         apperror.CodeQueueAdmissionOverloaded,
+	application.QueueAdmissionCapacityExceeded:   apperror.CodeQueueCapacityExceeded,
+	application.QueueAdmissionInvalidReference:   apperror.CodeQueueRequestInvalid,
+	application.QueueAdmissionUnavailable:        apperror.CodeQueueAdmissionUnavailable,
+}
+
 func queueAdmissionError(err error) error {
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, sessionruntime.ErrQueueSteerUnsupported):
-		return apperror.New(apperror.CodeQueueSteerUnsupported, nil)
-	case errors.Is(err, sessionruntime.ErrQueueNoActiveRun):
-		return apperror.New(apperror.CodeQueueNoActiveRun, nil)
-	case errors.Is(err, sessionruntime.ErrQueueInvocationConflict):
-		return apperror.New(apperror.CodeSessionInvocationConflict, nil)
-	case errors.Is(err, sessionruntime.ErrQueueAdmissionOverloaded):
-		return apperror.New(apperror.CodeQueueAdmissionOverloaded, nil)
-	case errors.Is(err, sessionruntime.ErrQueueCapacityExceeded):
-		return apperror.New(apperror.CodeQueueCapacityExceeded, nil)
-	case errors.Is(err, sessionruntime.ErrQueueInvalidReference):
-		return apperror.New(apperror.CodeQueueRequestInvalid, nil)
-	case errors.Is(err, application.ErrQueueInputIncomplete):
-		// The session row has no team or the ingress passed none: a server
-		// wiring fault, reported as unavailable rather than as a bad request.
-		return apperror.New(apperror.CodeQueueAdmissionUnavailable, nil)
-	default:
+	code, ok := queueAdmissionCodes[application.QueueAdmissionFailureOf(err)]
+	if !ok {
 		return err
 	}
+	return apperror.New(code, nil)
 }
 
 func queueMutationError(err error) error {

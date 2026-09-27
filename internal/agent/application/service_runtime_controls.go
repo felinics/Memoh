@@ -263,11 +263,16 @@ func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlR
 			Cancel: func() { cancel(context.Canceled) }, OwnershipCancel: cancel,
 		},
 	})
+	// The session runtime is this adapter's port; callers outside it only see
+	// the turn sentinel.
+	if errors.Is(err, sessionruntime.ErrSessionBusy) {
+		return turn.ErrSessionBusy
+	}
 	if err != nil {
 		return err
 	}
 	if !admission.Started {
-		return sessionruntime.ErrSessionBusy
+		return turn.ErrSessionBusy
 	}
 	handle := admission.Handle
 	runCtx = runtimefence.WithContext(runCtx, runtimefence.Fence{BotID: handle.BotID, SessionID: handle.SessionID, Token: handle.FencingToken})
@@ -310,6 +315,9 @@ func (s *Service) runtimeControlContext(ctx context.Context, request RuntimeCont
 	return ctx, nil
 }
 
+// publicRuntimeControlError keeps agent feedback and the team routing
+// sentinel intact for their own transports; everything else goes through the
+// shared runtime control translation.
 func publicRuntimeControlError(err error) error {
 	if err == nil || apperror.CodeOf(err) != "" {
 		return err
@@ -318,26 +326,7 @@ func publicRuntimeControlError(err error) error {
 	if errors.As(err, &feedback) || errors.Is(err, turn.ErrTeamNotServed) {
 		return err
 	}
-	code := apperror.CodeRuntimeControlFailed
-	switch {
-	case errors.Is(err, context.Canceled):
-		code = apperror.CodeRuntimeControlCancelled
-	case errors.Is(err, approval.ErrForbidden):
-		code = apperror.CodeRuntimeControlForbidden
-	case errors.Is(err, sessionruntime.ErrSessionBusy):
-		code = apperror.CodeSessionBusy
-	case errors.Is(err, external.ErrControlUnsupported):
-		code = apperror.CodeRuntimeControlUnsupported
-	case errors.Is(err, external.ErrCommandUnavailable):
-		code = apperror.CodeRuntimeControlCommandUnavailable
-	case errors.Is(err, external.ErrModeUnavailable):
-		code = apperror.CodeRuntimeControlModeUnavailable
-	case errors.Is(err, external.ErrThreadUnavailable):
-		code = apperror.CodeRuntimeControlThreadUnavailable
-	case errors.Is(err, external.ErrAuthRequired):
-		code = apperror.CodeExternalRuntimeAuthRequired
-	}
-	return apperror.Wrap(code, err, nil)
+	return RuntimeControlError(err)
 }
 
 func (s *Service) ControlRuntimeGoal(ctx context.Context, request RuntimeControlRequest, action string) (err error) {

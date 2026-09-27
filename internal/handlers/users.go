@@ -1029,7 +1029,7 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 	}
 	resp, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, channelType)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, channel.ErrChannelConfigNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

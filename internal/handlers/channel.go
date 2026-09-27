@@ -1,9 +1,9 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"sort"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -50,7 +50,7 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	}
 	resp, err := h.store.GetChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, channel.ErrChannelIdentityConfigNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

@@ -227,6 +227,13 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 				streamErr = eventErr
 			}
 		}
+		if event.Type == native.EventAgentEnd && strings.TrimSpace(event.ApprovalID) == "" {
+			// A clean end means an earlier retryable stream error recovered.
+			// Only event errors can be recorded before the terminal event: a
+			// refused publish stops the loop, and persistence errors are
+			// recorded below, after this reset.
+			streamErr = nil
+		}
 		if event.IsTerminal() && event.Type == native.EventAgentAbort && strings.TrimSpace(event.ApprovalID) == "" {
 			// A stopped run is not a success: mirror the WS loop, which maps
 			// an abort terminal to agentAbortCause (a deferred approval is a

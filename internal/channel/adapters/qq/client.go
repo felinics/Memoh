@@ -17,6 +17,21 @@ import (
 	"github.com/felinics/memoh/internal/redact"
 )
 
+// statusError is a non-2xx response from the QQ token or API endpoint.
+type statusError struct {
+	StatusCode int
+	message    string
+}
+
+func (e *statusError) Error() string { return e.message }
+
+// isUnauthorized reports a 401 from either endpoint; the caller drops the
+// cached token and retries once.
+func isUnauthorized(err error) bool {
+	var statusErr *statusError
+	return errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusUnauthorized
+}
+
 type qqClient struct {
 	appID        string
 	clientSecret string
@@ -83,7 +98,10 @@ func (c *qqClient) accessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("qq token read: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("qq token request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return "", &statusError{
+			StatusCode: resp.StatusCode,
+			message:    fmt.Sprintf("qq token request failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw))),
+		}
 	}
 
 	var result map[string]json.RawMessage
@@ -177,7 +195,7 @@ func (c *qqClient) doJSONWithRetry(ctx context.Context, method, url string, payl
 		if lastErr == nil {
 			return nil
 		}
-		if !auth || !strings.Contains(lastErr.Error(), "status=401") {
+		if !auth || !isUnauthorized(lastErr) {
 			return lastErr
 		}
 		c.clearToken()
@@ -224,13 +242,16 @@ func (c *qqClient) doJSONOnce(ctx context.Context, method, requestURL string, pa
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf(
-			"qq api request failed: method=%s url=%s status=%d body=%s",
-			method,
-			requestURL,
-			resp.StatusCode,
-			strings.TrimSpace(string(raw)),
-		)
+		return &statusError{
+			StatusCode: resp.StatusCode,
+			message: fmt.Sprintf(
+				"qq api request failed: method=%s url=%s status=%d body=%s",
+				method,
+				requestURL,
+				resp.StatusCode,
+				strings.TrimSpace(string(raw)),
+			),
+		}
 	}
 	if out == nil || len(raw) == 0 {
 		return nil

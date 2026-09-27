@@ -79,7 +79,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
-		if isProviderNameConflict(err) {
+		if db.IsUniqueViolation(err) {
 			if provider, ok, activateErr := s.activateHiddenRegistryTemplate(ctx, req, clientType, icon, configJSON, metadataJSON); ok {
 				if activateErr != nil {
 					return GetResponse{}, activateErr
@@ -131,7 +131,7 @@ func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplate
 		Metadata:           metadataJSON,
 	})
 	if err != nil {
-		if isProviderNameConflict(err) {
+		if db.IsUniqueViolation(err) {
 			return GetResponse{}, apperror.Wrap(apperror.CodeProviderNameTaken, err, nil)
 		}
 		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, fmt.Errorf("create provider from template: %w", err), nil)
@@ -860,16 +860,6 @@ func (s *Service) activateHiddenRegistryTemplate(
 		return sqlc.Provider{}, true, fmt.Errorf("activate registry provider template: %w", err)
 	}
 	return updated, true, nil
-}
-
-func isProviderNameConflict(err error) bool {
-	if db.IsUniqueViolation(err) {
-		return true
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "unique") &&
-		strings.Contains(message, "providers") &&
-		strings.Contains(message, "name")
 }
 
 func isHiddenRegistryTemplate(provider sqlc.Provider) bool {

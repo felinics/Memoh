@@ -388,6 +388,45 @@ func TestConsumeTriggeredStreamSurfacesStreamErrorWithoutTerminal(t *testing.T) 
 	}
 }
 
+// A retried stream error that recovered does not fail the schedule run, even
+// when the clean terminal carries no snapshot to settle it.
+func TestConsumeTriggeredStreamRecoveredRetryIsNotAFailure(t *testing.T) {
+	t.Parallel()
+
+	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
+
+	events := make(chan native.StreamEvent, 3)
+	events <- native.StreamEvent{Type: native.EventError, Error: "api error 503: Service Unavailable"}
+	events <- native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 5, RetryError: "api error 503"}
+	events <- native.StreamEvent{Type: native.EventAgentEnd}
+	close(events)
+
+	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	if err != nil {
+		t.Fatalf("consumeTriggeredStream() error = %v, want nil after a recovered retry", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("result.Status = %q, want ok", result.Status)
+	}
+}
+
+// A stream error followed by an abort still fails the schedule run.
+func TestConsumeTriggeredStreamErrorThenAbortFails(t *testing.T) {
+	t.Parallel()
+
+	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
+
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventError, Error: "mid-stream retry: all 5 attempts failed (last: api error 503: Service Unavailable)"}
+	events <- native.StreamEvent{Type: native.EventAgentAbort}
+	close(events)
+
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "all 5 attempts failed") {
+		t.Fatalf("consumeTriggeredStream() error = %v, want the giving-up error", err)
+	}
+}
+
 func TestConsumeTriggeredStreamKeepsDiagnosticsInternalAndPublishesStableFailure(t *testing.T) {
 	t.Parallel()
 

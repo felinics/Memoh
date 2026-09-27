@@ -323,7 +323,7 @@ func startMCPStderrLogger(stderr io.ReadCloser, containerID string, logger *slog
 			logger.Warn("mcp stderr", slog.String("container_id", containerID), slog.String("message", line))
 		}
 		if err := scanner.Err(); err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || strings.Contains(err.Error(), "closed pipe") {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
 				return
 			}
 			logger.Error("mcp stderr read failed", slog.Any("error", err), slog.String("container_id", containerID))

@@ -144,3 +144,30 @@ func TestSessionQueueAuthorizeSeparatesAMissingSessionFromAFailedLookup(t *testi
 		})
 	}
 }
+
+func TestQueueAdmissionErrorKeepsPublishedCodes(t *testing.T) {
+	cases := []struct {
+		err  error
+		want apperror.Code
+	}{
+		{sessionruntime.ErrQueueSteerUnsupported, apperror.CodeQueueSteerUnsupported},
+		{sessionruntime.ErrQueueNoActiveRun, apperror.CodeQueueNoActiveRun},
+		{sessionruntime.ErrQueueInvocationConflict, apperror.CodeSessionInvocationConflict},
+		{sessionruntime.ErrQueueAdmissionOverloaded, apperror.CodeQueueAdmissionOverloaded},
+		{sessionruntime.ErrQueueCapacityExceeded, apperror.CodeQueueCapacityExceeded},
+		{sessionruntime.ErrQueueInvalidReference, apperror.CodeQueueRequestInvalid},
+		{application.ErrQueueInputIncomplete, apperror.CodeQueueAdmissionUnavailable},
+	}
+	for _, tc := range cases {
+		if got := apperror.CodeOf(queueAdmissionError(tc.err)); got != tc.want {
+			t.Errorf("queueAdmissionError(%v) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+	other := fmt.Errorf("store: %w", sessionruntime.ErrLiveQueueUnavailable)
+	if got := queueAdmissionError(other); !errors.Is(got, other) {
+		t.Fatalf("unclassified error was rewritten: %v", got)
+	}
+	if queueAdmissionError(nil) != nil {
+		t.Fatal("nil error was rewritten")
+	}
+}
