@@ -2,7 +2,8 @@
 
 ## Scope and environment
 
-The model was a deterministic local fixture (`scripts/qa/agent-lifecycle-model.py`).
+The model was a deterministic local OpenAI-compatible fixture kept outside this
+repository; the fixture source is not part of the PR.
 The application UI, tools, command processes, PostgreSQL ledger, Valkey leases,
 WebSocket traffic, and Server container replacement were real. No virtual clock
 was used for the long-task or rolling scenarios.
@@ -38,15 +39,15 @@ still supply its own scope catalog/binder and credential/runtime adapters.
 
 ## Real long task
 
-Run the fixture with `--long-seconds 660`, then send this through the UI:
+For this run, the fixture used a 660-second child command. The UI prompt was:
 
 ```text
 QA_LONG_PARENT: run the real 660-second child command, wait for it, and report the outcome.
 ```
 
-The fixture requests a synchronous subagent. That child starts a real finite
-workspace command, emits progress every 30 seconds, and waits through repeated
-`wait_until` calls. The command has a 900-second budget.
+The fixture requested a synchronous subagent. That child started a real finite
+workspace command, emitted progress every 30 seconds, and waited through repeated
+`wait_until` calls. The command had a 900-second budget.
 
 | Run | Result | Ledger duration |
 | --- | --- | --- |
@@ -60,14 +61,16 @@ subagent wall-clock limit on the pre-upgrade replica.
 
 ## Rolling replacement
 
-1. Keep the old replica serving traffic and start the new replica with the same
+The recorded rolling rehearsal followed these steps:
+
+1. Kept the old replica serving traffic and started the new replica with the same
    PostgreSQL and Valkey configuration (`backend="redis"`, `cluster=true`).
-2. Send `QA_ROLL:` through the UI. Its real command appends one marker to a file;
-   the following model step remains streaming.
-3. Confirm the new replica is ready. Change the proxy upstream, reload it, and
-   confirm `X-QA-Upstream` identifies the new replica before stopping the old one.
-4. Stop the old Server container with a 45-second grace period. Do not send another
-   user message. Inspect the ledger, UI, and marker file on the new replica.
+2. Sent `QA_ROLL:` through the UI. Its real command appended one marker to a file;
+   the following model step remained streaming.
+3. Confirmed the new replica was ready, changed the proxy upstream, reloaded it,
+   and confirmed `X-QA-Upstream` identified the new replica before stopping the old one.
+4. Stopped the old Server container with a 45-second grace period. Without sending
+   another user message, inspected the ledger, UI, and marker file on the new replica.
 
 The first A-to-B run resumed successfully, but exposed an HTTP drain problem:
 long-lived requests held shutdown until the 30-second deadline. An immediate proxy
