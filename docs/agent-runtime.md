@@ -198,3 +198,8 @@ remain separate integration responsibilities.
 HTTP shutdown cancels the server request base context after run interruption has
 been recorded. Long-lived SSE requests can then finish before the later event-hub
 cleanup hooks; they must not consume the entire graceful shutdown deadline.
+The old run loses write ownership after its terminal marker is durable. The Server
+then waits for active Web, Channel, schedule and subagent turns to finish their
+application-side cleanup before closing the PostgreSQL pool. This drain uses the
+remaining graceful shutdown deadline; a turn that ignores cancellation reports a
+shutdown error instead of being mistaken for a clean drain.

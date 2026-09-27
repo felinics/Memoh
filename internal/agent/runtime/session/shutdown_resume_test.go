@@ -20,7 +20,8 @@ func TestGracefulShutdownMarksBeforeCancelAndClosesAdmission(t *testing.T) {
 			}
 			var id string
 			canceled := false
-			admission, err := manager.Admit(t.Context(), AdmitInput{BotID: testBotID, SessionID: testSessionID, InvocationID: "shutdown", Payload: payload, Execution: Execution{Admission: func(context.Context, RunHandle) (RunAdmissionView, error) { return RunAdmissionView{}, nil }, Cancel: func() {
+			ownerCtx, ownerCancel := context.WithCancelCause(t.Context())
+			admission, err := manager.Admit(t.Context(), AdmitInput{BotID: testBotID, SessionID: testSessionID, InvocationID: "shutdown", Payload: payload, Execution: Execution{Admission: func(context.Context, RunHandle) (RunAdmissionView, error) { return RunAdmissionView{}, nil }, OwnershipCancel: ownerCancel, Cancel: func() {
 				run, getErr := runs.Get(context.Background(), id)
 				if getErr != nil {
 					t.Error(getErr)
@@ -61,6 +62,9 @@ func TestGracefulShutdownMarksBeforeCancelAndClosesAdmission(t *testing.T) {
 			}
 			if !canceled {
 				t.Fatal("producer was not canceled")
+			}
+			if !errors.Is(context.Cause(ownerCtx), ErrRunOwnershipLost) {
+				t.Fatalf("old owner retained write access: %v", context.Cause(ownerCtx))
 			}
 			_, err = manager.Admit(t.Context(), AdmitInput{BotID: testBotID, SessionID: "other", InvocationID: "late"})
 			if !errors.Is(err, ErrManagerClosed) {

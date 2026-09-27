@@ -199,6 +199,9 @@ func requestRunControlStop(ctrl *runControl) {
 	if ctrl == nil {
 		return
 	}
+	// The terminal decision was durable before this call. The old owner can no
+	// longer append to that run, including while its canceled stream unwinds.
+	ctrl.revokeOwnership(ErrRunOwnershipLost)
 	select {
 	case ctrl.abortCh <- struct{}{}:
 	default:

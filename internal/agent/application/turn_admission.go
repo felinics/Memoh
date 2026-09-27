@@ -389,7 +389,14 @@ func (s *Service) AdmitSubagentRun(
 	botID, threadID, invocationID string,
 	submission []byte,
 ) (context.Context, tools.SubagentAdmission, func(tools.SubagentTerminal), error) {
+	endActiveTurn, beginErr := s.activeTurns.begin()
+	if beginErr != nil {
+		return nil, tools.SubagentAdmission{}, nil, beginErr
+	}
 	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, threadID, invocationID, submission, nil)
+	if err != nil {
+		endActiveTurn()
+	}
 	switch {
 	case errors.Is(err, sessionruntime.ErrSessionBusy):
 		return nil, tools.SubagentAdmission{}, nil, fmt.Errorf("%w: thread %s", turn.ErrSessionBusy, threadID)
@@ -412,6 +419,7 @@ func (s *Service) AdmitSubagentRun(
 	var once sync.Once
 	terminal := func(result tools.SubagentTerminal) {
 		once.Do(func() {
+			defer endActiveTurn()
 			lifecycleCause := result.Cause
 			if lifecycleCause == nil && runCtx.Err() != nil &&
 				(!result.OutcomeResolved || result.Outcome != tools.SpawnAttemptCompleted) {

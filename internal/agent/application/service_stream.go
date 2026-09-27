@@ -180,7 +180,15 @@ func extractTerminalSnapshot(data []byte) (terminalSnapshot, bool) {
 func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan StreamChunk, <-chan error) {
 	chunkCh := make(chan StreamChunk)
 	errCh := make(chan error, 1)
+	endActiveTurn, err := s.activeTurns.begin()
+	if err != nil {
+		errCh <- err
+		close(chunkCh)
+		close(errCh)
+		return chunkCh, errCh
+	}
 	go func() {
+		defer endActiveTurn()
 		defer close(chunkCh)
 		defer close(errCh)
 		ctx, endTurn := startTurnSpan(ctx, req)
@@ -572,6 +580,11 @@ func (s *Service) streamChatWSResultWithHooks(
 	preflight func(context.Context) error,
 	postPersist func(context.Context, []messagepkg.Message) error,
 ) (_ []messagepkg.Message, turnErr error) {
+	endActiveTurn, err := s.activeTurns.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer endActiveTurn()
 	if err := s.recordRunResumeContext(ctx, req); err != nil {
 		return nil, err
 	}

@@ -105,6 +105,7 @@ type compactionRunner interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
+	activeTurns             activeTurnTracker
 	resumeSecret            string
 	resumeScopes            SessionResumeScopeProvider
 	resumeReady             func(context.Context, string, string) error

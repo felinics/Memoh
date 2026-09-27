@@ -179,7 +179,7 @@ func provideServer(params serverParams) *server.Server {
 	)
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, agentService *application.Service, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
@@ -210,10 +210,13 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
-			if err := srv.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return fmt.Errorf("server stop: %w", err)
+			stopErr := srv.Stop(ctx)
+			if errors.Is(stopErr, http.ErrServerClosed) {
+				stopErr = nil
+			} else if stopErr != nil {
+				stopErr = fmt.Errorf("server stop: %w", stopErr)
 			}
-			return nil
+			return errors.Join(stopErr, agentService.DrainActiveTurns(ctx))
 		},
 	})
 }

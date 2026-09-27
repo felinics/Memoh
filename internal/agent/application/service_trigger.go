@@ -24,6 +24,11 @@ func attachCurrentTurnPrompt(cfg native.RunConfig, prompt string) native.RunConf
 
 // TriggerSchedule executes a scheduled command via the internal agent.
 func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload schedule.TriggerPayload, token string) (triggerResult schedule.TriggerResult, err error) {
+	endActiveTurn, beginErr := s.activeTurns.begin()
+	if beginErr != nil {
+		return schedule.TriggerResult{}, beginErr
+	}
+	defer endActiveTurn()
 	if strings.TrimSpace(payload.FireID) == "" {
 		return schedule.TriggerResult{}, errors.New("schedule fire id is required")
 	}
