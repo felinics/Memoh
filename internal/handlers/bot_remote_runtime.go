@@ -12,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/userruntime"
 	"github.com/felinics/memoh/internal/workspace"
@@ -79,8 +80,8 @@ func (h *BotRemoteRuntimeHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} workspace.WorkspaceTargetsResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/workspace-targets [get].
 func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionWorkspaceRead)
@@ -89,7 +90,7 @@ func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 	}
 	targets, err := h.workspaces.ListWorkspaceTargets(c.Request().Context(), botID)
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, workspace.WorkspaceTargetsResponse{Targets: targets})
 }
@@ -101,9 +102,9 @@ func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param runtime_id path string true "Runtime ID"
 // @Success 200 {object} workspace.WorkspaceTarget
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/workspace-targets/remotes/{runtime_id} [put].
 func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -112,7 +113,7 @@ func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 	}
 	target, err := h.service.Mount(c.Request().Context(), botID, c.Param("runtime_id"))
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, target)
 }
@@ -124,9 +125,9 @@ func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param target_id path string true "Workspace target ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/workspace-targets/{target_id} [delete].
 func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -137,7 +138,7 @@ func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "native workspace target cannot be deleted")
 	}
 	if err := h.service.DeleteMount(c.Request().Context(), botID, c.Param("target_id")); err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -149,9 +150,9 @@ func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param request body workspace.SetPrimaryWorkspaceTargetRequest true "Primary target"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/workspace-targets/primary [put].
 func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -166,7 +167,7 @@ func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "target_id is required")
 	}
 	if err := h.service.SetPrimary(c.Request().Context(), botID, req.TargetID); err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -180,9 +181,9 @@ func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 // @Param target_id path string true "Workspace target ID"
 // @Param request body workspace.UpdateWorkspaceTargetToolApprovalRequest true "Target tool approval"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/workspace-targets/{target_id}/tool-approval [put].
 func (h *BotRemoteRuntimeHandler) UpdateToolApproval(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -196,18 +197,18 @@ func (h *BotRemoteRuntimeHandler) UpdateToolApproval(c echo.Context) error {
 	targetID := strings.TrimSpace(c.Param("target_id"))
 	config, err := h.resolveToolApprovalUpdate(c.Request().Context(), botID, targetID, req)
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	if targetID == workspace.WorkspaceTargetNative {
 		if h.settings == nil {
-			return workspaceTargetHTTPError(h.log, errors.New("settings service not configured"))
+			return workspaceTargetHTTPError(errors.New("settings service not configured"))
 		}
 		_, err = h.settings.UpsertBot(c.Request().Context(), botID, settings.UpsertRequest{ToolApprovalConfig: &config})
 	} else {
 		err = h.service.UpdateToolApprovalConfig(c.Request().Context(), botID, targetID, config)
 	}
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -267,7 +268,7 @@ func (h *BotRemoteRuntimeHandler) requirePermission(c echo.Context, permission s
 	return botID, nil
 }
 
-func workspaceTargetHTTPError(log *slog.Logger, err error) error {
+func workspaceTargetHTTPError(err error) error {
 	switch {
 	case errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode),
 		errors.Is(err, userruntime.ErrInvalidInput):
@@ -281,9 +282,6 @@ func workspaceTargetHTTPError(log *slog.Logger, err error) error {
 		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	default:
-		if log != nil {
-			log.Error("workspace target request failed", slog.Any("error", err))
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
+		return errs.Wrap(err, "workspace target request")
 	}
 }

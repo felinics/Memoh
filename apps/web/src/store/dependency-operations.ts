@@ -14,7 +14,7 @@ import {
 } from '@/composables/api/useWorkspaceDependencies'
 import { streamDependencyOperation } from '@/composables/api/useWorkspaceDependencyStream'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { apiErrorStatus, isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
+import { isApiErrorAnswered, isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   dependencyDisplayName,
   formatDependencyVersion,
@@ -291,7 +291,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
     } catch (error) {
       if (signal.aborted) return
       if (operation.status !== 'running') return
-      operation.status = isApiErrorCode(error, 'workspace_dependency_operation_unknown') || !apiErrorStatus(error) ? 'unknown' : 'error'
+      operation.status = isApiErrorCode(error, 'workspace_dependency_operation_unknown') || !isApiErrorAnswered(error) ? 'unknown' : 'error'
       operation.error = operation.status === 'unknown'
         ? t('bots.dependencies.progress.unknownHint')
         : resolveApiErrorMessage(error, t('bots.dependencies.progress.failedTitle'))

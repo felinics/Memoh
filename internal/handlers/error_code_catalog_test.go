@@ -16,8 +16,7 @@ import (
 // errorCodeWriters are the helpers that put a code into an error response or
 // an error stream event. Each takes a parameter named "code".
 var errorCodeWriters = map[string]struct{}{
-	"newI18nHTTPError": {},
-	"sendError":        {},
+	"sendError": {},
 }
 
 // Every string literal written as a public error code by this package must be

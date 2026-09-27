@@ -9,12 +9,34 @@ interface ResolveApiErrorMessageOptions {
 type ErrorRecord = Record<string, unknown>
 type Locale = 'en' | 'zh' | 'ja'
 
+/** Who the server attributes a failure to, as the Problem's `fault` member. */
+export type ApiErrorFault = 'client' | 'server' | 'dependency' | 'canceled'
+
 export interface MemohError {
   code: string
   args: Record<string, unknown>
   message?: string
   requestId?: string
+  traceId?: string
   status?: number
+  fault?: ApiErrorFault
+}
+
+const apiErrorFaults: readonly string[] = ['client', 'server', 'dependency', 'canceled']
+
+// The framework codes for client statuses, so an unrecognized code still gets
+// the generic copy of what the client got wrong.
+const clientStatusCodes: Record<number, string> = {
+  400: 'http.bad_request',
+  401: 'http.unauthorized',
+  403: 'http.forbidden',
+  404: 'http.not_found',
+  405: 'http.method_not_allowed',
+  409: 'http.conflict',
+  413: 'http.payload_too_large',
+  415: 'http.unsupported_media_type',
+  426: 'http.upgrade_required',
+  429: 'http.too_many_requests',
 }
 
 const messagesByLocale = {
@@ -101,6 +123,36 @@ function pickApiFeedbackMessage(error: unknown): string {
   return ''
 }
 
+function readFault(record: ErrorRecord): ApiErrorFault | undefined {
+  const fault = record.fault
+  return typeof fault === 'string' && apiErrorFaults.includes(fault) ? fault as ApiErrorFault : undefined
+}
+
+function readStatus(record: ErrorRecord): number | undefined {
+  if (typeof record.status === 'number') return record.status
+  if (typeof record.http_status === 'number') return record.http_status
+  return undefined
+}
+
+// A Problem whose code this client has no copy for is described by its fault:
+// what the client got wrong for a client fault, a retry for a server or
+// dependency fault, and nothing for a canceled request. The Problem's detail
+// is not shown. Returns undefined when the error is not a Problem with a fault.
+function pickFaultMessage(error: unknown): string | undefined {
+  for (const record of collectErrorRecords(error)) {
+    const fault = readFault(record)
+    if (!fault) continue
+    if (fault === 'canceled') return ''
+    if (fault === 'client') {
+      const status = readStatus(record)
+      const code = (status !== undefined && clientStatusCodes[status]) || 'http.bad_request'
+      return renderI18nMessage(`errors.${code}`)
+    }
+    return renderI18nMessage('errors.internal')
+  }
+  return undefined
+}
+
 function pickErrorDetail(error: unknown): string {
   if (typeof error === 'string' && error.trim()) {
     return error.trim()
@@ -129,19 +181,17 @@ export function parseMemohError(error: unknown): MemohError | null {
       || (typeof record.error_code === 'string' && record.error_code.trim())
     if (!code) continue
 
-    const status = typeof record.status === 'number'
-      ? record.status
-      : typeof record.http_status === 'number'
-        ? record.http_status
-        : undefined
     const requestId = record.request_id ?? record.requestId
+    const traceId = record.trace_id
 
     return {
       code,
       args: asRecord(record.args) ?? {},
       message: pickErrorDetail(record) || undefined,
       requestId: typeof requestId === 'string' && requestId.trim() ? requestId.trim() : undefined,
-      status,
+      traceId: typeof traceId === 'string' && traceId.trim() ? traceId.trim() : undefined,
+      status: readStatus(record),
+      fault: readFault(record),
     }
   }
   return null
@@ -161,12 +211,29 @@ export function apiErrorStatus(error: unknown): number | undefined {
   return undefined
 }
 
+/**
+ * Whether the server answered the request with an error, so the operation it
+ * asked for did not run. A request that got no answer, or whose handling the
+ * server abandoned because the request was canceled, has an unknown outcome.
+ */
+export function isApiErrorAnswered(error: unknown): boolean {
+  return apiErrorStatus(error) !== undefined && parseMemohError(error)?.fault !== 'canceled'
+}
+
+/**
+ * The message to show for error. It is empty for a canceled request, which is
+ * not shown.
+ */
 export function resolveApiErrorMessage(
   error: unknown,
   fallback: string,
   options: ResolveApiErrorMessageOptions = {},
 ): string {
-  const detail = pickApiFeedbackMessage(error)
+  const feedback = pickApiFeedbackMessage(error)
+  const faultMessage = feedback ? undefined : pickFaultMessage(error)
+  if (faultMessage === '') return ''
+  const detail = feedback
+    || faultMessage
     || pickNetworkErrorMessage(error)
     || pickErrorDetail(error)
   const documentStart = detail.replace(/^(?:<!--[\s\S]*?-->\s*)+/, '')

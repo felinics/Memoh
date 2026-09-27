@@ -86,3 +86,38 @@ describe('remove operation recovery after a lost stream', () => {
     expect(mocks.success).toHaveBeenCalledWith('apps.background.removed', expect.anything())
   })
 })
+
+describe('stream that fails before its first event', () => {
+  const failingStream = (error: unknown) => () => ({
+    [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(error) }),
+  })
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.useFakeTimers()
+    vi.clearAllMocks()
+  })
+  afterEach(() => {
+    useAppOperationsStore().reset()
+    vi.useRealTimers()
+  })
+
+  it('reports a request the server rejected as failed', async () => {
+    mocks.stream.mockImplementation(failingStream({ code: 'http.conflict', status: 409, fault: 'client' }))
+    const result = useAppOperationsStore().start(target)
+    if (result.kind !== 'started') throw new Error('operation did not start')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(result.operation.status).toBe('error')
+    expect(mocks.list).not.toHaveBeenCalled()
+  })
+
+  it('reconciles a request the server abandoned as canceled', async () => {
+    mocks.list.mockResolvedValue({ data: { items: [] } })
+    mocks.stream.mockImplementation(failingStream({ code: 'canceled', status: 499, fault: 'canceled' }))
+    const result = useAppOperationsStore().start(target)
+    if (result.kind !== 'started') throw new Error('operation did not start')
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(mocks.list).toHaveBeenCalled()
+    expect(result.operation).toMatchObject({ status: 'done', result: 'removed' })
+  })
+})

@@ -54,10 +54,10 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 // @Description List MCP connections for a bot
 // @Tags mcp
 // @Success 200 {object} mcp.ListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp [get].
 func (h *MCPHandler) List(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -84,10 +84,10 @@ func (h *MCPHandler) List(c echo.Context) error {
 // @Tags mcp
 // @Param payload body mcp.UpsertRequest true "MCP payload"
 // @Success 201 {object} mcp.Connection
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp [post].
 func (h *MCPHandler) Create(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -118,10 +118,10 @@ func (h *MCPHandler) Create(c echo.Context) error {
 // @Tags mcp
 // @Param id path string true "MCP ID"
 // @Success 200 {object} mcp.Connection
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id} [get].
 func (h *MCPHandler) Get(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -156,10 +156,10 @@ func (h *MCPHandler) Get(c echo.Context) error {
 // @Param id path string true "MCP ID"
 // @Param payload body mcp.UpsertRequest true "MCP payload"
 // @Success 200 {object} mcp.Connection
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id} [put].
 func (h *MCPHandler) Update(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -197,10 +197,10 @@ func (h *MCPHandler) Update(c echo.Context) error {
 // @Tags mcp
 // @Param id path string true "MCP ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id} [delete].
 func (h *MCPHandler) Delete(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -238,10 +238,10 @@ type ProbeResponse struct {
 // @Tags mcp
 // @Param id path string true "MCP connection ID"
 // @Success 200 {object} ProbeResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/probe [post].
 func (h *MCPHandler) Probe(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -310,9 +310,9 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 // @Tags mcp
 // @Param payload body mcp.ImportRequest true "mcpServers dict"
 // @Success 200 {object} mcp.ListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp-ops/import [put].
 func (h *MCPHandler) Import(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -348,9 +348,9 @@ type BatchDeleteRequest struct {
 // @Tags mcp
 // @Param payload body BatchDeleteRequest true "IDs to delete"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp-ops/batch-delete [post].
 func (h *MCPHandler) BatchDelete(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -382,9 +382,9 @@ func (h *MCPHandler) BatchDelete(c echo.Context) error {
 // @Description Export all MCP connections for a bot in standard mcpServers format.
 // @Tags mcp
 // @Success 200 {object} mcp.ExportResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp-ops/export [get].
 func (h *MCPHandler) Export(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)

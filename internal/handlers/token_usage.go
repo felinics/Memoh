@@ -17,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type TokenUsageHandler struct {
@@ -101,9 +102,9 @@ type TokenUsageRecordsResponse struct {
 // @Param model_id query string false "Optional model UUID to filter by"
 // @Param session_type query string false "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime."
 // @Success 200 {object} TokenUsageResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/token-usage [get].
 func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -159,14 +160,12 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 
 	chat, discuss, acpAgent, schedule, err := h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID, pgSessionType)
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "fetch token usage failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage")
+		return errs.Wrap(err, "fetch token usage")
 	}
 
 	byModel, err := h.fetchUsageByModel(ctx, pgBotID, fromTS, toTS, pgSessionType)
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "fetch token usage by model failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage by model")
+		return errs.Wrap(err, "fetch token usage by model")
 	}
 
 	resp := TokenUsageResponse{
@@ -270,9 +269,9 @@ const (
 // @Param limit query int false "Page size (default 20, max 100)"
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} TokenUsageRecordsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/token-usage/records [get].
 func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -352,8 +351,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		PageLimit:   limit,
 	})
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "list token usage records failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list token usage records")
+		return errs.Wrap(err, "list token usage records")
 	}
 
 	total, err := h.queries.CountTokenUsageRecords(ctx, sqlc.CountTokenUsageRecordsParams{
@@ -364,8 +362,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		SessionType: pgSessionType,
 	})
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "count token usage records failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to count token usage records")
+		return errs.Wrap(err, "count token usage records")
 	}
 
 	items := make([]TokenUsageRecord, 0, len(rows))

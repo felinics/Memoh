@@ -52,7 +52,7 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	e.Server.BaseContext = baseContext
 	e.TLSServer.BaseContext = baseContext
 	e.HideBanner = true
-	e.HTTPErrorHandler = newHTTPErrorHandler(log, e.DefaultHTTPErrorHandler)
+	e.HTTPErrorHandler = NewHTTPErrorHandler(log)
 	e.Use(middleware.RequestID())
 	// Directly after RequestID: everything below, and every handler, logs with
 	// a context that carries the id.
@@ -60,7 +60,9 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	// After RequestIDContext so the span can carry the id the client is given,
 	// and before everything else so the span covers the work they do.
 	e.Use(telemetry.EchoServer)
-	e.Use(middleware.Recover())
+	// Directly after the span: the result record is logged with it, and a
+	// panic or error anywhere below is answered and recorded here.
+	e.Use(AccessLog(log))
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
 		Limit: "1M",
 		Skipper: func(c echo.Context) bool {
@@ -74,27 +76,6 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 		ExposeHeaders: []string{echo.HeaderXRequestID},
 	}))
 	e.Use(recordUpgradeStatus)
-	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		HandleError: true,
-		LogStatus:   true,
-		LogURI:      true,
-		LogMethod:   true,
-		LogLatency:  true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			// InfoContext, not Info: the request's context is what carries the
-			// id and any trace identity, and request_id is no longer written
-			// by hand here — one source for it, on every record rather than
-			// just this one.
-			log.InfoContext(c.Request().Context(), "request",
-				slog.String("method", v.Method),
-				slog.String("uri", httpx.SafeRequestLogURI(c.Request().URL, v.URI)),
-				slog.Int("status", v.Status),
-				slog.Duration("latency", v.Latency),
-				slog.String("remote_ip", c.RealIP()),
-			)
-			return nil
-		},
-	}))
 	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
 		return shouldSkipJWT(c.Request().URL.Path)
 	}, validateSession))

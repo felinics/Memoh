@@ -15,7 +15,7 @@ func externalAgentFeedbackHTTPError(err error) error {
 	if feedback == nil {
 		return nil
 	}
-	return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+	return echo.NewHTTPError(feedback.HTTPStatus, feedback).WithInternal(err)
 }
 
 func externalAgentFeedbackError(err error) *agentfeedback.Error {

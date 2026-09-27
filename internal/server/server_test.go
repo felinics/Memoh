@@ -140,26 +140,6 @@ func TestServerLogsFinalProblemStatus(t *testing.T) {
 	}
 }
 
-func TestServerKeepsLegacyHTTPErrorBehavior(t *testing.T) {
-	server := NewServer(
-		slog.New(slog.DiscardHandler),
-		":0",
-		"test-secret",
-		errorTestHandler{err: echo.NewHTTPError(http.StatusBadRequest, "legacy message")},
-	)
-
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-	server.echo.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-	if rec.Body.String() != "{\"message\":\"legacy message\"}\n" {
-		t.Fatalf("legacy body changed: %s", rec.Body.String())
-	}
-}
-
 func TestShouldSkipJWTOnlyForRuntimeConnectEndpoint(t *testing.T) {
 	t.Parallel()
 	if !shouldSkipJWT("/runtimes/connect") {

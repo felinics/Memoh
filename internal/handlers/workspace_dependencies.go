@@ -311,9 +311,9 @@ type workspaceDependencyErrorEvent struct {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} WorkspaceDependencyListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Param refresh query bool false "Refresh definitions and workspace discovery"
@@ -343,9 +343,9 @@ func (h *ContainerdHandler) ListWorkspaceDependencies(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} WorkspaceDependencyListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/dependencies/check-updates [post].
@@ -372,8 +372,8 @@ func (h *ContainerdHandler) CheckWorkspaceDependencyUpdates(c echo.Context) erro
 // @Param payload body WorkspaceDependencyPreflightRequest true "Dependencies to check"
 // @Success 200 {object} WorkspaceDependencyPreflightResponse
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/dependencies/preflight [post].
@@ -426,7 +426,7 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -446,7 +446,7 @@ func (h *ContainerdHandler) InstallWorkspaceDependency(c echo.Context) error {
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to update to (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -466,7 +466,7 @@ func (h *ContainerdHandler) UpdateWorkspaceDependency(c echo.Context) error {
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -484,7 +484,7 @@ func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 // @Param dep_id path string true "Dependency ID"
 // @Success 200 {object} WorkspaceDependencyOperationResponse
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
@@ -525,7 +525,7 @@ func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 // @Param action query string false "Action" Enums(install, update, remove, reinstall, rollback) default(install)
 // @Success 200 {object} WorkspaceDependencyScriptResponse
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem

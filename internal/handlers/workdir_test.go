@@ -28,11 +28,19 @@ func TestWorkdirHTTPError(t *testing.T) {
 		"duplicate path":     {workdir.ErrDuplicatePath, http.StatusConflict},
 		"archived":           {workdir.ErrWorkdirArchived, http.StatusConflict},
 		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, http.StatusConflict},
-		"unexpected failure": {errors.New("boom"), http.StatusInternalServerError},
+		"unexpected failure": {errors.New("boom"), 0},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := workdirHTTPError(nil, tc.err)
+			err := workdirHTTPError(tc.err)
 			var httpErr *echo.HTTPError
+			if tc.code == 0 {
+				// An unexpected failure is returned with its cause for the
+				// boundary to answer as internal and record.
+				if errors.As(err, &httpErr) || !errors.Is(err, tc.err) {
+					t.Fatalf("error = %v, want the cause without an HTTP status", err)
+				}
+				return
+			}
 			if !errors.As(err, &httpErr) || httpErr.Code != tc.code {
 				t.Fatalf("error = %v, want HTTP %d", err, tc.code)
 			}

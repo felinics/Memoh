@@ -51,9 +51,9 @@ func (h *ChannelAccessHandler) Register(e *echo.Echo) {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} channelaccess.ListManagersResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/channel-managers [get].
 func (h *ChannelAccessHandler) ListManagers(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -74,9 +74,9 @@ func (h *ChannelAccessHandler) ListManagers(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body channelaccess.SetManagerRequest true "Override payload"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/channel-managers [post].
 func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
@@ -107,9 +107,9 @@ func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param channel_identity_id path string true "Channel Identity ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/channel-managers/{channel_identity_id} [delete].
 func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -132,8 +132,8 @@ func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 // @Tags users
 // @Param payload body channelaccess.IssueLinkCodeRequest false "Link code options"
 // @Success 201 {object} channelaccess.LinkCode
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/channel-links [post].
 func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -159,7 +159,7 @@ func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 // @Description List the IM channel identities bound to the current user's account
 // @Tags users
 // @Success 200 {object} channelaccess.ListBindingsResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/channel-identities [get].
 func (h *ChannelAccessHandler) ListBindings(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -179,8 +179,8 @@ func (h *ChannelAccessHandler) ListBindings(c echo.Context) error {
 // @Tags users
 // @Param channel_identity_id path string true "Channel Identity ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/channel-identities/{channel_identity_id} [delete].
 func (h *ChannelAccessHandler) Unbind(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)

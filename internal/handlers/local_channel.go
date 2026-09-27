@@ -218,9 +218,9 @@ type CommandActionError struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body QuickActionExecuteRequest true "Quick action payload"
 // @Success 200 {object} CommandEventResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/quick-actions/execute [post].
 func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -685,9 +685,9 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/web/stream [get].
 func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -770,9 +770,9 @@ type LocalChannelMessageRequest struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body LocalChannelMessageRequest true "Message payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/web/messages [post].
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1776,9 +1776,9 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 // @Tags local-channel
 // @Param bot_id path string true "Bot ID"
 // @Success 101 {string} string "Switching Protocols"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/web/ws [get].
 func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)

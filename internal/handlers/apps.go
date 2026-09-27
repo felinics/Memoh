@@ -243,9 +243,9 @@ type AppStreamEvent struct {
 // @Param bot_id path string true "Bot ID"
 // @Param refresh query bool false "Refresh workspace discovery"
 // @Success 200 {object} AppListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/apps [get].
@@ -268,7 +268,7 @@ func (h *AppsHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param installation_id path string true "App installation ID"
 // @Success 200 {object} AppItem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/apps/{installation_id} [get].
@@ -295,7 +295,7 @@ func (h *AppsHandler) Get(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} AppListResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/apps/check-updates [post].
@@ -318,7 +318,7 @@ func (h *AppsHandler) CheckUpdates(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param installation_id path string true "App installation ID"
 // @Success 200 {object} AppRemovalPreviewResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/apps/{installation_id}/removal-preview [get].
@@ -363,7 +363,7 @@ func (h *AppsHandler) RemovalPreview(c echo.Context) error {
 // @Param payload body AppInstallRequest true "App release to install"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/apps [post].
@@ -394,7 +394,7 @@ func (h *AppsHandler) Install(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param installation_id path string true "App installation ID"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/apps/{installation_id}/resume [post].
 func (h *AppsHandler) Resume(c echo.Context) error {
@@ -421,7 +421,7 @@ func (h *AppsHandler) Resume(c echo.Context) error {
 // @Param payload body AppUpdateRequest true "What to update"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
 // @Router /bots/{bot_id}/apps/update [post].
@@ -454,7 +454,7 @@ func (h *AppsHandler) UpdateSelection(c echo.Context) error {
 // @Param installation_id path string true "App installation ID"
 // @Param remove_unreferenced_required query bool false "Also remove auto-installed Apps that lose their last reference"
 // @Success 200 {object} AppStreamEvent "SSE stream of operation events"
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/apps/{installation_id} [delete].
 func (h *AppsHandler) Remove(c echo.Context) error {
@@ -484,7 +484,7 @@ func (h *AppsHandler) Remove(c echo.Context) error {
 // @Param payload body AppConnectorOAuthRequest true "OAuth request"
 // @Success 201 {object} connectsdk.OAuthAuthorization
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -521,7 +521,7 @@ func (h *AppsHandler) BeginConnectorOAuth(c echo.Context) error {
 // @Param payload body AppConnectorCredentialRequest true "Credential request"
 // @Success 201 {object} connectors.Connector
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -633,7 +633,7 @@ func newAppErrorEvent(err error, requestID string) AppStreamEvent {
 	}
 }
 
-func (h *AppsHandler) httpError(err error) error {
+func (*AppsHandler) httpError(err error) error {
 	var targetErr *supermarketclient.WorkspaceTargetError
 	var statusErr *supermarketclient.StatusError
 	switch {
@@ -642,7 +642,7 @@ func (h *AppsHandler) httpError(err error) error {
 	case apperror.CodeOf(err) != "":
 		return err
 	case errors.As(err, &targetErr):
-		return workspaceTargetHTTPError(h.logger, targetErr.Err)
+		return workspaceTargetHTTPError(targetErr.Err)
 	case errors.As(err, &statusErr):
 		return echo.NewHTTPError(statusErr.Status, statusErr.Error())
 	case errors.Is(err, apps.ErrNotInstalled):

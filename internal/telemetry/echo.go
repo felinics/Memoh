@@ -10,7 +10,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
@@ -93,28 +92,22 @@ func EchoServer(next echo.HandlerFunc) echo.HandlerFunc {
 
 		c.SetRequest(req.WithContext(ctx))
 		err := next(c)
-		if err != nil {
-			span.RecordError(err)
-			// Until the error handler has run, the response status is the
-			// default 200 for anything a handler returned rather than wrote,
-			// and only the handler knows what the error becomes: an
-			// apperror maps to its own status and anything else to 500.
-			// Running it here is what RequestLogger's HandleError does; the
-			// router's call on the way out then finds the response committed
-			// and does nothing.
-			if !c.Response().Committed {
-				c.Error(err)
-			}
+		// Until the error handler has run, the response status is the
+		// default 200 for anything a handler returned rather than wrote. The
+		// shell's access log answers errors below this middleware; this call
+		// covers a chain without it. The router's call on the way out then
+		// finds the response committed and does nothing.
+		if err != nil && !c.Response().Committed {
+			c.Error(err)
 		}
 
 		status := c.Response().Status
 		span.SetAttributes(semconv.HTTPResponseStatusCode(status))
-		// 4xx is the caller's problem, not this service failing, and marking
-		// it an error makes every backend's error rate track ordinary traffic
-		// like a bad password. Same rule as the WARN/ERROR split in the logs.
-		if status >= 500 {
-			span.SetStatus(codes.Error, "")
-		}
+		// The span status and error.type are set by errlog when the request's
+		// result is recorded, from the attribution of its error rather than
+		// the status: a 4xx is not this service failing, and neither is a
+		// 5xx a dependency reported. The error itself is not recorded on the
+		// span; its text and stack are in the result record.
 		streaming := isEventStream(c.Response().Header())
 		if streaming {
 			span.SetAttributes(httpResponseStreaming)

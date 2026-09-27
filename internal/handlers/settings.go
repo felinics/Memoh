@@ -45,8 +45,8 @@ func (h *SettingsHandler) Register(e *echo.Echo) {
 // @Tags settings
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} settings.Settings
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [get].
 func (h *SettingsHandler) Get(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -78,7 +78,7 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 // @Success 200 {object} settings.Settings
 // @Failure 400 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [put]
 // @Router /bots/{bot_id}/settings [post].
 func (h *SettingsHandler) Upsert(c echo.Context) error {
@@ -139,8 +139,8 @@ func settingsReasoningHTTPError(err error) error {
 // @Tags settings
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [delete].
 func (h *SettingsHandler) Delete(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)

@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type BotAgentsHandler struct {
@@ -52,7 +53,7 @@ func (h *BotAgentsHandler) Register(e *echo.Echo) {
 // @Param model_id query string false "Model whose effective defaults should be displayed"
 // @Param project_path query string false "Workspace project path for runtime model settings"
 // @Success 200 {object} external.ModelCatalog
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/agents/{id}/models [get].
@@ -79,7 +80,6 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}
-		h.logger.ErrorContext(c.Request().Context(), "bot Agent model catalog failed", slog.String("runtime", agent.Runtime), slog.Any("error", err))
 		return apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": agent.Runtime})
 	}
 	return c.JSON(http.StatusOK, catalog)
@@ -95,7 +95,7 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 // @Param payload body botagents.CreateRequest true "Agent payload"
 // @Success 201 {object} botagents.BotAgent
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
 // @Router /bots/{bot_id}/agents [post].
 func (h *BotAgentsHandler) Create(c echo.Context) error {
@@ -121,7 +121,7 @@ func (h *BotAgentsHandler) Create(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} botagents.ListResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Router /bots/{bot_id}/agents [get].
 func (h *BotAgentsHandler) List(c echo.Context) error {
 	botID, err := h.authorize(c, bots.PermissionChat)
@@ -143,7 +143,7 @@ func (h *BotAgentsHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Agent ID"
 // @Success 200 {object} botagents.BotAgent
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/agents/{id} [get].
 func (h *BotAgentsHandler) Get(c echo.Context) error {
@@ -169,7 +169,7 @@ func (h *BotAgentsHandler) Get(c echo.Context) error {
 // @Param payload body botagents.UpdateRequest true "Agent changes"
 // @Success 200 {object} botagents.BotAgent
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
 // @Router /bots/{bot_id}/agents/{id} [patch].
@@ -199,7 +199,7 @@ func (h *BotAgentsHandler) Update(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Agent ID"
 // @Success 204 "No Content"
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
 // @Router /bots/{bot_id}/agents/{id} [delete].
@@ -240,12 +240,11 @@ func (h *BotAgentsHandler) authorize(c echo.Context, permission string) (string,
 	return botID, nil
 }
 
-func (h *BotAgentsHandler) publicError(operation string, err error) error {
+func (*BotAgentsHandler) publicError(operation string, err error) error {
 	if publicErr := botAgentHTTPError(err); publicErr != nil {
 		return publicErr
 	}
-	h.logger.Error("bot Agent operation failed", slog.String("operation", operation), slog.Any("error", err))
-	return echo.NewHTTPError(http.StatusInternalServerError, "bot Agent operation failed")
+	return errs.Wrap(err, "bot Agent operation", slog.String("operation", operation))
 }
 
 func botAgentHTTPError(err error) error {

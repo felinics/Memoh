@@ -51,8 +51,8 @@ func (h *MemoryProvidersHandler) ListMeta(c echo.Context) error {
 // @Produce json
 // @Param request body adapters.ProviderCreateRequest true "Memory provider configuration"
 // @Success 201 {object} adapters.ProviderGetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers [post].
 func (h *MemoryProvidersHandler) Create(c echo.Context) error {
 	var req memprovider.ProviderCreateRequest
@@ -78,7 +78,7 @@ func (h *MemoryProvidersHandler) Create(c echo.Context) error {
 // @Tags memory-providers
 // @Produce json
 // @Success 200 {array} adapters.ProviderGetResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers [get].
 func (h *MemoryProvidersHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context())
@@ -95,8 +95,8 @@ func (h *MemoryProvidersHandler) List(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 200 {object} adapters.ProviderGetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /memory-providers/{id} [get].
 func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -117,9 +117,9 @@ func (h *MemoryProvidersHandler) Get(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 200 {object} adapters.ProviderStatusResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers/{id}/status [get].
 func (h *MemoryProvidersHandler) Status(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -142,8 +142,8 @@ func (h *MemoryProvidersHandler) Status(c echo.Context) error {
 // @Param id path string true "Provider ID"
 // @Param request body adapters.ProviderUpdateRequest true "Updated configuration"
 // @Success 200 {object} adapters.ProviderGetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers/{id} [put].
 func (h *MemoryProvidersHandler) Update(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -167,8 +167,8 @@ func (h *MemoryProvidersHandler) Update(c echo.Context) error {
 // @Tags memory-providers
 // @Param id path string true "Provider ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /memory-providers/{id} [delete].
 func (h *MemoryProvidersHandler) Delete(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))

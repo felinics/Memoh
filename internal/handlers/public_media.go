@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/channel/publicmedia"
 	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 )
@@ -123,14 +124,8 @@ func (h *PublicMediaHandler) ServePreview(c echo.Context) error {
 		if errors.Is(err, media.ErrAssetTooLarge) {
 			return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "media is too large")
 		}
-		if h.logger != nil {
-			h.logger.WarnContext(c.Request().Context(), "public media preview failed",
-				slog.String("bot_id", botID),
-				slog.String("content_hash", contentHash),
-				slog.Any("error", err),
-			)
-		}
-		return echo.NewHTTPError(http.StatusUnsupportedMediaType, "unsupported image preview")
+		return echo.NewHTTPError(http.StatusUnsupportedMediaType, "unsupported image preview").
+			WithInternal(errs.Wrap(err, "encode public media preview", slog.String("bot_id", botID), slog.String("content_hash", contentHash)))
 	}
 	setPublicMediaHeaders(c, "image/jpeg", int64(len(preview)))
 	return c.Blob(http.StatusOK, "image/jpeg", preview)

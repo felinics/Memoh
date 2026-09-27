@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   apiErrorStatus,
+  isApiErrorAnswered,
   isApiErrorCode,
   parseMemohError,
   resolveApiErrorMessage,
@@ -288,6 +289,46 @@ describe('resolveApiErrorMessage', () => {
 
     expect(parseMemohError(error)?.code).toBe('future.new_condition')
     expect(resolveApiErrorMessage(error, 'fallback')).toBe('A future error occurred.')
+  })
+
+  it.each([
+    ['client', 409, 'The request conflicts with the current state. Refresh and try again.'],
+    ['client', 422, 'The request is invalid.'],
+    ['server', 500, 'Something went wrong on the server. Please try again.'],
+    ['dependency', 502, 'Something went wrong on the server. Please try again.'],
+  ])('describes an unrecognized code with a %s fault and status %d by its fault', (fault, status, expected) => {
+    const problem = { code: 'future.new_condition', status, fault, args: {}, detail: 'raw server detail' }
+
+    expect(resolveApiErrorMessage(problem, 'fallback')).toBe(expected)
+    expect(resolveApiErrorMessage(problem, 'Save failed', { prefixFallback: true })).toBe(`Save failed: ${expected}`)
+  })
+
+  it('shows nothing for an unrecognized code of a canceled request', () => {
+    const problem = { code: 'future.new_condition', status: 499, fault: 'canceled', args: {}, detail: 'raw server detail' }
+
+    expect(resolveApiErrorMessage(problem, 'fallback', { prefixFallback: true })).toBe('')
+  })
+
+  it('prefers the copy of a recognized code over its fault', () => {
+    const problem = { code: 'bot.name_taken', status: 409, fault: 'client', args: {}, detail: 'raw server detail' }
+
+    expect(resolveApiErrorMessage(problem, 'fallback')).toBe('This name is already taken.')
+  })
+
+  it('reads the fault and trace of a Problem', () => {
+    expect(parseMemohError({ code: 'internal', status: 500, fault: 'server', trace_id: 'trace-1', request_id: 'req-1' })).toMatchObject({
+      code: 'internal', status: 500, fault: 'server', traceId: 'trace-1', requestId: 'req-1',
+    })
+    expect(parseMemohError({ code: 'internal', fault: 'unheard-of' })?.fault).toBeUndefined()
+  })
+
+  it.each([
+    ['a client rejection', { code: 'http.conflict', status: 409, fault: 'client' }, true],
+    ['a server failure', { code: 'internal', status: 500, fault: 'server' }, true],
+    ['a canceled request', { code: 'canceled', status: 499, fault: 'canceled' }, false],
+    ['a network failure', new TypeError('Failed to fetch'), false],
+  ])('tells whether the server answered %s', (_case, error, answered) => {
+    expect(isApiErrorAnswered(error)).toBe(answered)
   })
 
   it('reads legacy HTTP status without parsing a message', () => {

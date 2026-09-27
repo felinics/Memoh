@@ -69,7 +69,7 @@ type displayRuntimeProbe struct {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} displayInfoResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display [get].
 func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -130,8 +130,8 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body displayWebRTCOfferRequest true "WebRTC offer payload"
 // @Success 200 {object} displayWebRTCOfferResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 503 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display/webrtc/offer [post].
 func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -180,7 +180,7 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} displaySessionListResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display/sessions [get].
 func (h *ContainerdHandler) ListDisplaySessions(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -201,7 +201,7 @@ func (h *ContainerdHandler) ListDisplaySessions(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Display session ID"
 // @Success 204
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display/sessions/{session_id} [delete].
 func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -261,7 +261,7 @@ func newDisplayPrepareAppError(step string, err error, requestID string) display
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream of display preparation events"
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/display/prepare [post].
 func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
