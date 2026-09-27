@@ -60,9 +60,9 @@
         "type": "string"
       },
       "max_duration_seconds": {
-        "description": "Total budget for a finite command, including time spent in foreground. Default 7200 seconds; max 86400. Backgrounding does not restart it.",
+        "description": "Total budget for a finite command, including time spent in foreground. Minimum 30 seconds; default 7200; max 86400. Backgrounding does not restart it.",
         "maximum": 86400,
-        "minimum": 1,
+        "minimum": 30,
         "type": "integer"
       },
       "run_in_background": {
@@ -74,7 +74,7 @@
         "type": "string"
       },
       "timeout": {
-        "description": "Timeout in seconds (default: 30, max: 600). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.",
+        "description": "Maximum foreground wait in seconds (default: 30, max: 600). A command still running afterward moves to the background; handoff may happen earlier to preserve max_duration_seconds.",
         "maximum": 600,
         "minimum": 1,
         "type": "integer"

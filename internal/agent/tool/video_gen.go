@@ -135,7 +135,7 @@ func (p *VideoGenProvider) execGenerateVideo(ctx context.Context, session Sessio
 		description = "generate video: " + truncateStr(prompt, 80)
 	}
 
-	budget, err := execBudget(args.MaxDurationSeconds, "", false)
+	budget, err := videoMonitorBudget(args.MaxDurationSeconds)
 	if err != nil {
 		return nil, err
 	}

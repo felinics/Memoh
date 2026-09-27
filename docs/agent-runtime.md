@@ -103,8 +103,9 @@ The `exec` tool has separate soft waiting and process budgets:
 
 - `timeout` controls foreground waiting (default 30 seconds, maximum 600). When
   that wait expires, the same process is adopted by the background manager.
-- `max_duration_seconds` controls a finite command's total runtime (default 7200,
-  maximum 86400). Adoption never restarts this budget.
+- `max_duration_seconds` controls a finite command's total runtime (minimum 30,
+  default 7200, maximum 86400). Adoption never restarts this budget. Foreground
+  waiting ends before the execution budget when the two would otherwise coincide.
 - `background_mode: "service"` requires `run_in_background: true` and omitting
   `max_duration_seconds`. The process lives until explicitly stopped, its
   workspace closes, or an explicit ancestor execution budget expires.

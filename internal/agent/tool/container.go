@@ -32,6 +32,7 @@ var blockedSleepPattern = regexp.MustCompile(`^sleep\s+(\d+(?:\.\d+)?)(?:\s*[;&]
 const (
 	defaultContainerExecWorkDir  = "/data"
 	remoteBackgroundOutputLogDir = "/data/.memoh/background"
+	minCommandExecBudgetSeconds  = 30
 )
 
 // containerOpTimeout is the maximum time allowed for individual file
@@ -293,9 +294,9 @@ Delete a file:
 			toolexec.Describe("command", fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)),
 			toolexec.Describe("work_dir", fmt.Sprintf("Working directory (default: %s)", wd)),
 			toolexec.Describe("description", workspace.descriptionExamples),
-			toolexec.Describe("timeout", fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout)),
+			toolexec.Describe("timeout", fmt.Sprintf("Maximum foreground wait in seconds (default: %d, max: %d). A command still running afterward moves to the background; handoff may happen earlier to preserve max_duration_seconds.", background.DefaultExecTimeout, background.MaxExecTimeout)),
 			toolexec.Range("timeout", 1, float64(background.MaxExecTimeout)),
-			toolexec.Range("max_duration_seconds", 1, float64(background.MaxBackgroundExecTimeout)),
+			toolexec.Range("max_duration_seconds", minCommandExecBudgetSeconds, float64(background.MaxBackgroundExecTimeout)),
 			toolexec.EnumStrings("background_mode", []string{"task", "service"}),
 		),
 	}
@@ -370,7 +371,7 @@ type execArgs struct {
 	WorkDir            string `json:"work_dir,omitempty"`
 	Description        string `json:"description,omitempty"`
 	Timeout            *int   `json:"timeout,omitempty"`
-	MaxDurationSeconds *int   `json:"max_duration_seconds,omitempty" jsonschema:"Total budget for a finite command, including time spent in foreground. Default 7200 seconds; max 86400. Backgrounding does not restart it."`
+	MaxDurationSeconds *int   `json:"max_duration_seconds,omitempty" jsonschema:"Total budget for a finite command, including time spent in foreground. Minimum 30 seconds; default 7200; max 86400. Backgrounding does not restart it."`
 	BackgroundMode     string `json:"background_mode,omitempty" jsonschema:"task (default) uses the execution budget; service runs until explicitly stopped or the workspace closes. service requires run_in_background=true and no max_duration_seconds."`
 	RunInBackground    bool   `json:"run_in_background,omitempty" jsonschema:"If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."`
 }
@@ -1398,8 +1399,10 @@ func (p *ContainerProvider) execExecWithFlip(
 	reader.deadline, _ = streamCtx.Deadline()
 	reader.cancel = streamCancel
 
-	// Wait for either the result or soft timeout.
-	timer := time.NewTimer(time.Duration(softTimeout) * time.Second)
+	// Leave time to hand the stream to the background manager before its hard
+	// deadline. This also applies when an ancestor budget ends sooner.
+	foregroundWait := foregroundWaitBeforeBudget(streamCtx, softTimeout)
+	timer := time.NewTimer(foregroundWait)
 	defer timer.Stop()
 
 	select {
@@ -1413,10 +1416,10 @@ func (p *ContainerProvider) execExecWithFlip(
 		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": r.ExitCode}, nil
 
 	case <-timer.C:
-		// Soft timeout fired — flip the running stream to background.
+		// Foreground waiting ended, possibly early to preserve the hard budget.
 		// The container process is still alive; we hand off the stream reader
 		// goroutine to the background manager.
-		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, outputDir, softTimeout)
+		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, outputDir, foregroundWait)
 
 	case <-ctx.Done():
 		streamCancel()
@@ -1430,7 +1433,7 @@ func (p *ContainerProvider) flipToBackground(
 	ctx context.Context,
 	session SessionContext, client *bridge.Client,
 	reader *backgroundExecStreamReader,
-	command, workDir, description, outputDir string, softTimeout int32,
+	command, workDir, description, outputDir string, foregroundWait time.Duration,
 ) (any, error) {
 	writeFn := func(ctx context.Context, path string, data []byte) error {
 		return client.WriteFile(ctx, path, data)
@@ -1451,7 +1454,7 @@ func (p *ContainerProvider) flipToBackground(
 	p.logger.InfoContext(ctx, "foreground exec flipped to background",
 		slog.String("task_id", taskID),
 		slog.String("command", truncateStr(command, 120)),
-		slog.Int("soft_timeout_seconds", int(softTimeout)),
+		slog.Duration("foreground_wait", foregroundWait),
 	)
 
 	result := map[string]any{
@@ -1459,12 +1462,12 @@ func (p *ContainerProvider) flipToBackground(
 		"task_id":     taskID,
 		"output_file": outputFile,
 		"message": fmt.Sprintf(
-			"Command exceeded the foreground timeout (%ds) and has been moved to the background with task ID: %s. "+
+			"Command moved to the background after %s of foreground waiting with task ID: %s. "+
 				"The process is still running — no work was lost; output collected so far is in output_tail. "+
 				"Use wait_until(task_id) to keep observing: it returns when the task finishes, stalls, or goes quiet (reason 'idle') — for servers, a ready message in output_tail means it is up. "+
 				"The full log is written to %s after the task ends. "+
 				"For long-running commands, use run_in_background: true from the start to avoid this delay.",
-			softTimeout, taskID, outputFile,
+			foregroundWait.Round(time.Second), taskID, outputFile,
 		),
 	}
 	if task := p.bgManager.Get(taskID); task != nil {
@@ -1572,14 +1575,37 @@ func execBudget(maxDurationSeconds *int, backgroundMode string, backgroundRun bo
 		}
 		return 0, nil
 	}
+	return finiteTaskBudget(maxDurationSeconds, minCommandExecBudgetSeconds)
+}
+
+// Video monitoring has no foreground-to-background transition and retains its
+// existing one-second minimum.
+func videoMonitorBudget(maxDurationSeconds *int) (time.Duration, error) {
+	return finiteTaskBudget(maxDurationSeconds, 1)
+}
+
+func finiteTaskBudget(maxDurationSeconds *int, minimum int) (time.Duration, error) {
 	seconds := int(background.BackgroundExecTimeout)
 	if maxDurationSeconds != nil {
 		seconds = *maxDurationSeconds
 	}
-	if seconds < 1 || seconds > int(background.MaxBackgroundExecTimeout) {
-		return 0, errors.New("max_duration_seconds must be between 1 and 86400")
+	if seconds < minimum || seconds > int(background.MaxBackgroundExecTimeout) {
+		return 0, fmt.Errorf("max_duration_seconds must be between %d and 86400", minimum)
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+func foregroundWaitBeforeBudget(ctx context.Context, softTimeout int32) time.Duration {
+	wait := time.Duration(softTimeout) * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline) - time.Second; remaining < wait {
+			wait = remaining
+		}
+	}
+	if wait < 0 {
+		return 0
+	}
+	return wait
 }
 
 func execBudgetContext(parent context.Context, budgets []time.Duration) (context.Context, context.CancelFunc) {
