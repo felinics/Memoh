@@ -44,6 +44,11 @@ type ContainerdHandler struct {
 	displayService   *displaypkg.Service
 	browserSessions  *browserSessionStore
 	workspaceDeps    workspaceDependencyService
+	// wsHeartbeat and terminalIdleTimeout time the terminal socket. Zero
+	// values mean defaultWSHeartbeat and the terminalIdleTimeout constant;
+	// tests set shorter ones.
+	wsHeartbeat         wsHeartbeat
+	terminalIdleTimeout time.Duration
 }
 
 type ContainerGPURequest struct {

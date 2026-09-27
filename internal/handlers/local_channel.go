@@ -81,8 +81,8 @@ type LocalChannelHandler struct {
 	logger              *slog.Logger
 	jwtSecret           string
 	tokenTTL            time.Duration
-	// wsHeartbeat is the chat socket's ping and read-deadline timing. The
-	// zero value means chatWSHeartbeat; tests set shorter intervals.
+	// wsHeartbeat is the chat socket's ping, read and write timing. The
+	// zero value means defaultWSHeartbeat; tests set shorter intervals.
 	wsHeartbeat wsHeartbeat
 }
 
@@ -887,10 +887,6 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin: func(_ *http.Request) bool { return true },
-}
-
 // wsClientMessage carries the three identifiers a client is allowed to name,
 // and they are not interchangeable.
 //
@@ -1129,19 +1125,21 @@ func (h *LocalChannelHandler) enterWSMessageTurn(botID, sessionID, invocationID 
 // wsWriter serialises all WebSocket writes through a single goroutine to
 // avoid concurrent write panics with gorilla/websocket.
 type wsWriter struct {
-	conn      *websocket.Conn
-	ch        chan []byte
-	closeOnce sync.Once
-	stop      chan struct{}
-	done      chan struct{}
+	conn         *websocket.Conn
+	writeTimeout time.Duration
+	ch           chan []byte
+	closeOnce    sync.Once
+	stop         chan struct{}
+	done         chan struct{}
 }
 
-func newWSWriter(conn *websocket.Conn) *wsWriter {
+func newWSWriter(conn *websocket.Conn, writeTimeout time.Duration) *wsWriter {
 	w := &wsWriter{
-		conn: conn,
-		ch:   make(chan []byte, 128),
-		stop: make(chan struct{}),
-		done: make(chan struct{}),
+		conn:         conn,
+		writeTimeout: writeTimeout,
+		ch:           make(chan []byte, 128),
+		stop:         make(chan struct{}),
+		done:         make(chan struct{}),
 	}
 	go w.loop()
 	return w
@@ -1158,7 +1156,14 @@ func (w *wsWriter) loop() {
 
 		select {
 		case data := <-w.ch:
-			_ = w.conn.WriteMessage(websocket.TextMessage, data)
+			// A write that cannot finish in time means the peer has stopped
+			// reading. Closing the connection ends the handler's read loop;
+			// the writes after it fail at once, so Send keeps draining and
+			// Close does not wait on a stuck write.
+			_ = w.conn.SetWriteDeadline(time.Now().Add(w.writeTimeout))
+			if err := w.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+				_ = w.conn.Close()
+			}
 		case <-w.stop:
 			return
 		}
@@ -1191,17 +1196,6 @@ func (w *wsWriter) Close() {
 		close(w.stop)
 	})
 	<-w.done
-}
-
-// extractRawBearerToken returns the raw JWT token suitable for passing to the
-// gateway. The gateway WS handler receives the token directly (not as an HTTP
-// header), so we must strip the "Bearer " prefix if present.
-func extractRawBearerToken(c echo.Context) string {
-	auth := strings.TrimSpace(c.Request().Header.Get("Authorization"))
-	if auth != "" {
-		return strings.TrimPrefix(auth, "Bearer ")
-	}
-	return strings.TrimSpace(c.QueryParam("token"))
 }
 
 func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID, fallbackBearerToken string) string {
@@ -1826,19 +1820,15 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	// opened the connection it arrived on without joining that span.
 	connTrigger := telemetry.TriggerFrom(handshakeCtx)
 	defer func() { _ = conn.Close() }()
-	heartbeat := h.wsHeartbeat
-	if heartbeat == (wsHeartbeat{}) {
-		heartbeat = chatWSHeartbeat
-	}
+	heartbeat := h.wsHeartbeat.orDefault()
 	// Deferred after Close, so it runs first: the ping goroutine is gone
 	// before the connection it writes to is closed.
 	keepalive := heartbeat.start(conn)
 	defer keepalive.Stop()
 
-	rawToken := extractRawBearerToken(c)
-	bearerToken := "Bearer " + rawToken
+	bearerToken := "Bearer " + auth.RawTokenFromContext(c)
 
-	writer := newWSWriter(conn)
+	writer := newWSWriter(conn, heartbeat.writeTimeout)
 	defer writer.Close()
 
 	connCtx, connCancel := context.WithCancel(context.Background())

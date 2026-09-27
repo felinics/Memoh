@@ -13,7 +13,6 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/bots"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 	"github.com/felinics/memoh/internal/workspace/shellenv"
 )
@@ -21,10 +20,6 @@ import (
 // terminalIdleTimeout closes inactive terminal WebSocket sessions to
 // prevent leaked PTY processes. Reset on every inbound WebSocket message.
 const terminalIdleTimeout = 30 * time.Minute
-
-var terminalUpgrader = websocket.Upgrader{
-	CheckOrigin: func(_ *http.Request) bool { return true },
-}
 
 type terminalInfoResponse struct {
 	Available bool   `json:"available"`
@@ -60,10 +55,9 @@ func (h *ContainerdHandler) GetTerminalInfo(c echo.Context) error {
 		return c.JSON(http.StatusOK, terminalInfoResponse{Available: false})
 	}
 
-	shell := detectShell(ctx, client)
 	return c.JSON(http.StatusOK, terminalInfoResponse{
 		Available: true,
-		Shell:     shell,
+		Shell:     shellenv.TerminalCommand(),
 	})
 }
 
@@ -97,14 +91,13 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	cols := parseUint32Query(c, "cols", 80)
 	rows := parseUint32Query(c, "rows", 24)
 
-	conn, err := terminalUpgrader.Upgrade(c.Response(), c.Request(), nil)
+	conn, err := wsUpgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
 
-	shell := detectShell(ctx, client)
-	execStream, err := client.ExecStreamPTY(ctx, shell, "/data", cols, rows)
+	execStream, err := client.ExecStreamPTY(ctx, shellenv.TerminalCommand(), "/data", cols, rows)
 	if err != nil {
 		_ = conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "exec failed"))
@@ -112,12 +105,38 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	}
 	defer func() { _ = execStream.Close() }()
 
+	h.serveTerminal(ctx, conn, execStream, botID)
+	return nil
+}
+
+// terminalStream is the PTY exec stream a terminal socket drives.
+type terminalStream interface {
+	Recv() (*pb.ExecOutput, error)
+	SendStdin(data []byte) error
+	Resize(cols, rows uint32) error
+	Close() error
+}
+
+// serveTerminal relays between the socket and the PTY until either side ends.
+// The caller closes both.
+func (h *ContainerdHandler) serveTerminal(ctx context.Context, conn *websocket.Conn, execStream terminalStream, botID string) {
+	heartbeat := h.wsHeartbeat.orDefault()
+	idleTimeout := h.terminalIdleTimeout
+	if idleTimeout == 0 {
+		idleTimeout = terminalIdleTimeout
+	}
+	// The heartbeat keeps the path open and notices a vanished peer; it is not
+	// activity. Pongs extend the read deadline only, so a terminal left open
+	// in a background tab still reaches the idle timeout.
+	keepalive := heartbeat.start(conn)
+	defer keepalive.Stop()
+
 	done := make(chan struct{})
 
-	// Idle timer: closes the connection if no client activity for terminalIdleTimeout.
+	// Idle timer: closes the connection if no client activity for idleTimeout.
 	var idleMu sync.Mutex
-	idleTimer := time.AfterFunc(terminalIdleTimeout, func() {
-		h.logger.InfoContext(c.Request().Context(), "terminal idle timeout reached, closing", slog.String("bot_id", botID))
+	idleTimer := time.AfterFunc(idleTimeout, func() {
+		h.logger.InfoContext(ctx, "terminal idle timeout reached, closing", slog.String("bot_id", botID))
 		_ = conn.WriteControl(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseGoingAway, "idle timeout"),
 			time.Now().Add(5*time.Second))
@@ -126,7 +145,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	defer idleTimer.Stop()
 	resetIdle := func() {
 		idleMu.Lock()
-		idleTimer.Reset(terminalIdleTimeout)
+		idleTimer.Reset(idleTimeout)
 		idleMu.Unlock()
 	}
 
@@ -141,6 +160,10 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 			switch output.GetStream() {
 			case pb.ExecOutput_STDOUT, pb.ExecOutput_STDERR:
 				if data := output.GetData(); len(data) > 0 {
+					// Output can outpace a slow reader. Without a deadline
+					// the write waits on a peer that stopped reading, and the
+					// handler waits on the write.
+					_ = conn.SetWriteDeadline(time.Now().Add(heartbeat.writeTimeout))
 					if writeErr := conn.WriteMessage(websocket.BinaryMessage, data); writeErr != nil {
 						return
 					}
@@ -157,6 +180,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	// WebSocket -> gRPC stdin/resize
 	go func() {
 		for {
+			keepalive.extend()
 			msgType, data, readErr := conn.ReadMessage()
 			if readErr != nil {
 				_ = execStream.Close()
@@ -174,7 +198,7 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 				var ctrl terminalControlMessage
 				if json.Unmarshal(data, &ctrl) == nil && ctrl.Type == "resize" && ctrl.Cols > 0 && ctrl.Rows > 0 {
 					if resizeErr := execStream.Resize(ctrl.Cols, ctrl.Rows); resizeErr != nil {
-						h.logger.WarnContext(c.Request().Context(), "terminal resize failed",
+						h.logger.WarnContext(ctx, "terminal resize failed",
 							slog.String("bot_id", botID), slog.Any("error", resizeErr))
 					}
 				}
@@ -183,14 +207,6 @@ func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	}()
 
 	<-done
-	return nil
-}
-
-// detectShell returns the interactive shell launcher used for browser terminals.
-// It is shellenv's launch line so launchers that probe the user's shell PATH
-// read the same rc files this terminal does.
-func detectShell(_ context.Context, _ *bridge.Client) string {
-	return shellenv.TerminalCommand()
 }
 
 func parseUint32Query(c echo.Context, name string, fallback uint32) uint32 {

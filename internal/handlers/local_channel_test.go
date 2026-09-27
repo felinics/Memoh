@@ -248,7 +248,7 @@ func TestWSWriterIgnoresLateSendsAfterClose(t *testing.T) {
 			}
 		}()
 
-		writer := newWSWriter(conn)
+		writer := newWSWriter(conn, defaultWSHeartbeat.writeTimeout)
 		writer.Close()
 		writer.Send([]byte(`{"type":"late"}`))
 		writer.SendJSON(map[string]string{"type": "late"})

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -289,6 +290,46 @@ func TestHeartbeatStopsPingingABrokenConnection(t *testing.T) {
 	case <-keepalive.done:
 	case <-time.After(10 * testWSHeartbeat.pingInterval):
 		t.Fatal("the ping goroutine kept running on a closed connection")
+	}
+}
+
+// A peer that stops reading fills the socket buffer. The write that finds it
+// full has to give up and take the connection with it; otherwise the read
+// loop never ends and the handler's deferred writer.Close waits forever.
+func TestWSWriterGivesUpOnAPeerThatStoppedReading(t *testing.T) {
+	t.Parallel()
+	server, _ := wsPair(t) // the client never reads
+	readLoopDone := make(chan struct{})
+	go func() { // stands in for the handler's read loop
+		defer close(readLoopDone)
+		for {
+			if _, _, err := server.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+	writer := newWSWriter(server, testWSHeartbeat.writeTimeout)
+	chunk := bytes.Repeat([]byte("x"), 1<<20)
+	go func() {
+		for range 64 { // well past any loopback socket buffer
+			writer.Send(chunk)
+		}
+	}()
+
+	select {
+	case <-readLoopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection outlived a write the peer never read")
+	}
+	closed := make(chan struct{})
+	go func() {
+		writer.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close waited on a stalled write")
 	}
 }
 

@@ -123,7 +123,7 @@ func collectRuntimeContractWSEvents(t *testing.T, script []application.WSStreamE
 		}
 		defer func() { _ = conn.Close() }()
 
-		writer := newWSWriter(conn)
+		writer := newWSWriter(conn, defaultWSHeartbeat.writeTimeout)
 		eventCh := make(chan application.WSStreamEvent, len(script))
 		for _, event := range script {
 			eventCh <- event

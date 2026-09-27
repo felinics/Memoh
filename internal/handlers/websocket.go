@@ -3,12 +3,20 @@ package handlers
 import (
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// wsUpgrader accepts any origin. The sockets authenticate with a bearer token
+// in the Authorization header or the token query parameter, never a cookie,
+// so a page on another site cannot open one with the user's credentials.
+var wsUpgrader = websocket.Upgrader{
+	CheckOrigin: func(_ *http.Request) bool { return true },
+}
 
 // wsHeartbeat keeps an idle WebSocket open through proxies and notices a peer
 // that has gone away without closing.
@@ -21,6 +29,7 @@ import (
 // subscriptions with it.
 //
 // Browsers answer pings on their own, so nothing changes for the client.
+// The chat and terminal sockets both use it.
 type wsHeartbeat struct {
 	// pingInterval is how often a ping is sent. It has to be well under the
 	// shortest idle timeout on the path.
@@ -29,16 +38,25 @@ type wsHeartbeat struct {
 	// message before it is treated as dead. It covers more than one ping, so
 	// a single lost pong does not end the connection.
 	readTimeout time.Duration
-	// writeTimeout bounds a single ping. A peer that has stopped reading
-	// fills the socket buffer, and a ping without a deadline would wait on
-	// it forever.
+	// writeTimeout bounds a single write, pings and messages alike. A peer
+	// that has stopped reading fills the socket buffer, and a write without a
+	// deadline waits on it forever, holding the handler with it.
 	writeTimeout time.Duration
 }
 
-var chatWSHeartbeat = wsHeartbeat{
+var defaultWSHeartbeat = wsHeartbeat{
 	pingInterval: 20 * time.Second,
 	readTimeout:  60 * time.Second,
 	writeTimeout: 10 * time.Second,
+}
+
+// orDefault lets a handler's zero-valued field mean defaultWSHeartbeat, so
+// only tests have to set one.
+func (hb wsHeartbeat) orDefault() wsHeartbeat {
+	if hb == (wsHeartbeat{}) {
+		return defaultWSHeartbeat
+	}
+	return hb
 }
 
 // wsKeepalive is one connection's heartbeat.
