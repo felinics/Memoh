@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -429,44 +430,47 @@ func TestFollowUpSchedulingRaces(t *testing.T) {
 		{"next terminal before prior drain returns", 2, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service, admitter, backend, key := newFollowUpTestService(t, &fakeRunner{chunks: []string{`{"type":"done"}`}})
-			ctx := context.Background()
-			for _, id := range []string{"first", "second"}[:tc.pending] {
-				if _, err := service.EnqueueFollowUp(ctx, testQueueInput(key.BotID, key.SessionID, id, "queued")); err != nil {
-					t.Fatal(err)
+			synctest.Test(t, func(t *testing.T) {
+				service, admitter, backend, key := newFollowUpTestService(t, &fakeRunner{chunks: []string{`{"type":"done"}`}})
+				ctx := context.Background()
+				for _, id := range []string{"first", "second"}[:tc.pending] {
+					if _, err := service.EnqueueFollowUp(ctx, testQueueInput(key.BotID, key.SessionID, id, "queued")); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-			if tc.duringDrain {
-				service.sessionRuntime = &terminalNotifyingAdmitter{scriptedAdmitter: admitter, terminal: func(ctx context.Context, h sessionruntime.RunHandle) {
-					service.startFollowUp(ctx, sessionruntime.TerminalRun{RunID: h.RunID, BotID: key.BotID, SessionID: key.SessionID})
-				}}
-			}
-			markFollowUpTestRunTerminal(t, backend, key)
-			if tc.duringDrain {
-				service.startFollowUp(ctx, sessionruntime.TerminalRun{RunID: "original-run", BotID: key.BotID, SessionID: key.SessionID})
-			} else {
-				service.kickFollowUpIfIdle(ctx, key.BotID, key.SessionID, "original-run")
-			}
-			deadline := time.Now().Add(2 * time.Second)
-			for {
+				if tc.duringDrain {
+					service.sessionRuntime = &terminalNotifyingAdmitter{scriptedAdmitter: admitter, terminal: func(ctx context.Context, h sessionruntime.RunHandle) {
+						service.startFollowUp(ctx, sessionruntime.TerminalRun{RunID: h.RunID, BotID: key.BotID, SessionID: key.SessionID})
+					}}
+				}
+				markFollowUpTestRunTerminal(t, backend, key)
+				if tc.duringDrain {
+					service.startFollowUp(ctx, sessionruntime.TerminalRun{RunID: "original-run", BotID: key.BotID, SessionID: key.SessionID})
+				} else {
+					service.kickFollowUpIfIdle(ctx, key.BotID, key.SessionID, "original-run")
+				}
+				// PendingQueues hides claimed items before StartTurn admits them.
+				// Wait for the starter and drain goroutines, not an empty queue,
+				// before asserting the continuation's observable result.
+				synctest.Wait()
 				queues, err := service.ListSessionQueues(ctx, key.BotID, key.SessionID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(queues.FollowUp) == 0 {
-					break
-				}
-				if time.Now().After(deadline) {
+				if len(queues.FollowUp) != 0 {
 					t.Fatalf("trigger lost: %d pending follow-ups", len(queues.FollowUp))
 				}
-				time.Sleep(time.Millisecond)
-			}
-			admitter.mu.Lock()
-			started := len(admitter.inputs)
-			admitter.mu.Unlock()
-			if started != tc.pending {
-				t.Fatalf("admitted %d runs, want %d", started, tc.pending)
-			}
+				admitter.mu.Lock()
+				started := len(admitter.inputs)
+				finished := len(admitter.finishes)
+				admitter.mu.Unlock()
+				if started != tc.pending {
+					t.Fatalf("admitted %d runs, want %d", started, tc.pending)
+				}
+				if finished != tc.pending {
+					t.Fatalf("finished %d runs, want %d", finished, tc.pending)
+				}
+			})
 		})
 	}
 }
