@@ -287,7 +287,7 @@ func TestEchoServerRecordsDurationByRouteNotPath(t *testing.T) {
 	}
 	for key, value := range want {
 		if got[key].AsString() != value {
-			t.Errorf("%s = %q, want %q", key, got[key].Emit(), value)
+			t.Errorf("%s = %q, want %q", key, got[key].String(), value)
 		}
 	}
 	if code := got["http.response.status_code"].AsInt64(); code != http.StatusNoContent {
@@ -295,7 +295,7 @@ func TestEchoServerRecordsDurationByRouteNotPath(t *testing.T) {
 	}
 	for key := range got {
 		if _, expected := want[key]; !expected && key != "http.response.status_code" {
-			t.Errorf("unexpected metric attribute %s = %q", key, got[key].Emit())
+			t.Errorf("unexpected metric attribute %s = %q", key, got[key].String())
 		}
 	}
 }
@@ -394,11 +394,11 @@ func TestEchoServerLabelsEventStreams(t *testing.T) {
 
 			value, labeled := onlyPoint(t, reader)["http.response.streaming"]
 			if labeled != tc.want || (labeled && !value.AsBool()) {
-				t.Errorf("metric streaming = %v (present %v), want %v", value.Emit(), labeled, tc.want)
+				t.Errorf("metric streaming = %v (present %v), want %v", value.String(), labeled, tc.want)
 			}
 			value, labeled = attrs(recorder.Ended()[0])["http.response.streaming"]
 			if labeled != tc.want || (labeled && !value.AsBool()) {
-				t.Errorf("span streaming = %v (present %v), want %v", value.Emit(), labeled, tc.want)
+				t.Errorf("span streaming = %v (present %v), want %v", value.String(), labeled, tc.want)
 			}
 		})
 	}

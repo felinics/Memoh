@@ -166,9 +166,31 @@ exclude it.
 The path, the host, the port and the request id are not attributes. Each
 distinct value would be a separate series for the life of the process.
 
+The SDK keeps at most 2000 attribute combinations per instrument, its
+default. Past that, new combinations are added into one series carrying
+`otel.metric.overflow=true`; if that series appears, a route or status is
+missing from the rest.
+
 The buckets run from 5 ms to 300 s. The first fourteen are the ones the HTTP
 semantic conventions recommend and stop at 10 s; the rest are added so that a
 slow chat request still has a quantile.
+
+The Go runtime metrics of the semantic conventions are recorded alongside:
+`go.goroutine.count`, `go.memory.used`, `go.memory.limit`,
+`go.memory.allocated`, `go.memory.allocations`, `go.memory.gc.goal`,
+`go.processor.limit` and `go.config.gogc`. They are read from
+`runtime/metrics` when an export collects them and cost nothing in between.
+
+Every PostgreSQL pool, the main one and the optional pgvector one, reports
+its state as the `pgxpool.*` metrics of `otelpgx`: `pgxpool.acquired_connections`
+and `pgxpool.max_connections` for occupancy, `pgxpool.empty_acquire` and
+`pgxpool.empty_acquire_wait_time` for requests that had to wait for a
+connection, and the acquire, idle and lifetime counts. A request slowed by an
+exhausted pool looks like a slow query on its span; these metrics tell the two
+apart. The pools are told apart by `db.client.connection.pool.name`, written
+as `host:port/database`. Only the pool statistics come from `otelpgx`; query
+spans still come from `telemetry.PgxTracer`, which never records query
+arguments.
 
 Installing a meter provider also turns on the RPC metrics that `otelgrpc`
 records on every gRPC connection in the table above, and the HTTP client

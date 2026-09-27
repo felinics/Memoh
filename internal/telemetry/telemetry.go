@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -31,6 +32,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -145,6 +147,11 @@ func Setup(ctx context.Context, cfg config.TelemetryConfig, svc Service, log *sl
 		// OTEL_METRIC_EXPORT_INTERVAL itself.
 		meterProvider := newMeterProvider(sdkmetric.NewPeriodicReader(metricExporter), res)
 		otel.SetMeterProvider(meterProvider)
+		// A failure here is one missing group of gauges, not a reason to
+		// export nothing else.
+		if err := startRuntimeMetrics(meterProvider); err != nil {
+			otel.Handle(err)
+		}
 		shutdown = func(ctx context.Context) error {
 			return errors.Join(tracerProvider.Shutdown(ctx), meterProvider.Shutdown(ctx))
 		}
@@ -172,7 +179,7 @@ func newExporter(ctx context.Context, cfg config.TelemetryConfig) (*otlptrace.Ex
 	insecure := useInsecure(cfg)
 	switch protocolOf(cfg) {
 	case config.TelemetryProtocolHTTP:
-		opts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(withScheme(endpoint, insecure))}
+		opts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(signalURL(endpoint, insecure, "/v1/traces"))}
 		if insecure {
 			opts = append(opts, otlptracehttp.WithInsecure())
 		}
@@ -210,7 +217,7 @@ func newMetricExporter(ctx context.Context, cfg config.TelemetryConfig) (sdkmetr
 	insecure := useInsecure(cfg)
 	switch protocolOf(cfg) {
 	case config.TelemetryProtocolHTTP:
-		opts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(withScheme(endpoint, insecure))}
+		opts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(signalURL(endpoint, insecure, "/v1/metrics"))}
 		if insecure {
 			opts = append(opts, otlpmetrichttp.WithInsecure())
 		}
@@ -252,6 +259,18 @@ func newMeterProvider(reader sdkmetric.Reader, res *resource.Resource) *sdkmetri
 			sdkmetric.Stream{Aggregation: sdkmetric.AggregationExplicitBucketHistogram{Boundaries: httpServerDurationBounds}},
 		)),
 	)
+}
+
+// startRuntimeMetrics records the Go runtime metrics — go.goroutine.count,
+// go.memory.used, go.memory.gc.goal and the rest of the runtime semantic
+// conventions — on the given provider. They are read from runtime/metrics
+// when the reader collects, so between exports they cost nothing.
+//
+// The provider is passed explicitly and Start is called once per provider:
+// the instrumentation has no Stop, and a second Start on the same provider
+// would register its callback twice.
+func startRuntimeMetrics(provider metric.MeterProvider) error {
+	return otelruntime.Start(otelruntime.WithMeterProvider(provider))
 }
 
 // useInsecure decides transport security the way the OTLP specification does:
@@ -317,6 +336,22 @@ func hostPort(endpoint string) string {
 		return parsed.Host
 	}
 	return endpoint
+}
+
+// signalURL is the URL the http exporter posts one signal to. The endpoint
+// is the collector's base address, shared by traces and metrics, so when it
+// has no path the signal's standard one is appended. The exporters did that
+// themselves until v1.45.0; since then WithEndpointURL posts to exactly the
+// URL it is given, which for a bare base address is "/", and a collector
+// rejects that. A path that was written is used as it is.
+func signalURL(endpoint string, insecure bool, signalPath string) string {
+	raw := withScheme(endpoint, insecure)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Path != "" {
+		return raw
+	}
+	parsed.Path = signalPath
+	return parsed.String()
 }
 
 // withScheme supplies the scheme the http exporter needs to build a URL when

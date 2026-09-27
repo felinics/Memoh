@@ -23,3 +23,9 @@ func MeterProviderForTest(reader sdkmetric.Reader) *sdkmetric.MeterProvider {
 func ResourceForTest(svc Service) *resource.Resource {
 	return newResource(config.TelemetryConfig{}, svc)
 }
+
+// StartRuntimeMetricsForTest starts the runtime metrics Setup starts, on the
+// given provider.
+func StartRuntimeMetricsForTest(provider *sdkmetric.MeterProvider) error {
+	return startRuntimeMetrics(provider)
+}

@@ -64,8 +64,8 @@ func TestWrapToolTracingRecordsACallWithoutItsArguments(t *testing.T) {
 
 	span := findSpan(t, recorder, "agent.tool bash")
 	for _, kv := range span.Attributes() {
-		if strings.Contains(kv.Value.Emit(), "synthetic-secret") {
-			t.Errorf("attribute %s recorded the tool input: %s", kv.Key, kv.Value.Emit())
+		if strings.Contains(kv.Value.String(), "synthetic-secret") {
+			t.Errorf("attribute %s recorded the tool input: %s", kv.Key, kv.Value.String())
 		}
 	}
 	if span.SpanKind() != trace.SpanKindInternal {
