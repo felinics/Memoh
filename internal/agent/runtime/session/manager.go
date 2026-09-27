@@ -1401,7 +1401,7 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 			errorCode = strings.TrimSpace(snapshot.CurrentRunView.ErrorCode)
 		}
 		if errorCode == "" {
-			errorCode = "runtime_run_failed"
+			errorCode = runErrorRunFailed
 		}
 	}
 	prepared, err := m.prepareLedgerFinish(
@@ -1728,7 +1728,7 @@ func (m *Manager) prepareAgentTerminalEvent(
 	}
 	errorCode := strings.TrimSpace(run.ErrorCode)
 	if status == RunStatusErrored && errorCode == "" {
-		errorCode = "runtime_run_failed"
+		errorCode = runErrorRunFailed
 	}
 	prepared, err := m.prepareLedgerFinish(
 		ctx,

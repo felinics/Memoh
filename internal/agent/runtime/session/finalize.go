@@ -12,6 +12,11 @@ import (
 
 var errInvalidOwnerTerminalState = errors.New("session runtime: invalid owner terminal state")
 
+// runErrorRunFailed is the session_runs.error_code of a failed run whose owner
+// reported no code. Like the reaper's codes it is persisted, so it keeps its
+// value; it is registered in the apperror catalog under the same value.
+const runErrorRunFailed = "runtime_run_failed"
+
 // prepareLedgerFinish makes the proposed owner outcome durable while the run
 // remains active. The reaper may later pass StateLost to Finalize, but the
 // ledger resolves a prepared run to this proposal instead. That is the crash
@@ -88,7 +93,7 @@ func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, statu
 	state := terminalLedgerState(status, errorCode, message)
 	errorCode = strings.TrimSpace(errorCode)
 	if state == ledger.StateFailed && errorCode == "" {
-		errorCode = "runtime_run_failed"
+		errorCode = runErrorRunFailed
 	}
 	run, applied, err := m.runs.Finalize(ctx, ledger.FinalizeParams{
 		RunID:        handle.RunID,

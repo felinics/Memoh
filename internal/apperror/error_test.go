@@ -303,3 +303,22 @@ func TestChannelVerificationErrorCatalog(t *testing.T) {
 		t.Fatalf("detail = %q", definition.Detail)
 	}
 }
+
+func TestErrorCauseIsNotUnwrap(t *testing.T) {
+	cause := errors.New("private cause")
+	err := Wrap(CodeInternal, cause, nil)
+
+	if got := err.Cause(); got != cause { //nolint:errorlint // identity of the retained cause
+		t.Fatalf("Cause() = %v, want the wrapped cause", got)
+	}
+	if errors.Unwrap(err) != nil || errors.Is(err, cause) {
+		t.Fatal("the private cause must not be reachable through Unwrap")
+	}
+	if got := New(CodeInternal, nil).Cause(); got != nil {
+		t.Fatalf("Cause() without a cause = %v, want nil", got)
+	}
+	var nilErr *Error
+	if got := nilErr.Cause(); got != nil {
+		t.Fatalf("nil Error Cause() = %v, want nil", got)
+	}
+}

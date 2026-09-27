@@ -872,7 +872,7 @@ func (s *Service) persistRuntimeRound(
 		} else if code := strings.TrimSpace(string(apperror.CodeOf(promptErr))); code != "" {
 			meta["error_code"] = code
 		} else {
-			meta["error_code"] = "runtime_prompt_failed"
+			meta["error_code"] = string(apperror.CodeRuntimePromptFailed)
 		}
 	}
 	output := sdkMessagesToModelMessages(result.Output)
@@ -1052,7 +1052,7 @@ func isRuntimeConfigurationError(err error) bool {
 func runtimeFailureEvent(cause error) native.StreamEvent {
 	code := string(apperror.CodeOf(cause))
 	if strings.TrimSpace(code) == "" {
-		code = "runtime_prompt_failed"
+		code = string(apperror.CodeRuntimePromptFailed)
 	}
 	return native.StreamEvent{Type: native.EventError, Code: code, Error: code}
 }

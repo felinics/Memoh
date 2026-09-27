@@ -366,6 +366,11 @@ func (s *PostgresStore) ActiveRunsByBot(ctx context.Context, botID string) ([]Ru
 	return runsFromRows(rows), nil
 }
 
+// runErrorHistoryReset is the session_runs.error_code of a run aborted by a
+// history reset. It is persisted and registered in the apperror catalog under
+// the same value.
+const runErrorHistoryReset = "history_reset"
+
 func (s *PostgresStore) FenceAndFinalizeOrphan(ctx context.Context, reset ResetLease, run Run) (Run, bool, error) {
 	if err := s.ready(); err != nil {
 		return Run{}, false, err
@@ -460,7 +465,7 @@ func (s *PostgresStore) FenceAndFinalizeOrphan(ctx context.Context, reset ResetL
 	}
 	row, err := txq.FinalizeSessionRun(ctx, dbsqlc.FinalizeSessionRunParams{
 		RunID: runID, FencingToken: run.FencingToken, State: string(StateAborted),
-		ErrorCode: textOrNull("history_reset"), ErrorMessage: textOrNull("run canceled by history reset"),
+		ErrorCode: textOrNull(runErrorHistoryReset), ErrorMessage: textOrNull("run canceled by history reset"),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Run{}, false, nil

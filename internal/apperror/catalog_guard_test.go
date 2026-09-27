@@ -21,10 +21,14 @@ var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/codes.gol
 
 const goldenPath = "testdata/codes.golden"
 
+// localeFiles are the Web and IM copy; both carry errors.* for every code.
 var localeFiles = []string{
 	"../../apps/web/src/i18n/locales/en.json",
 	"../../apps/web/src/i18n/locales/zh.json",
 	"../../apps/web/src/i18n/locales/ja.json",
+	"../i18n/locales/en.json",
+	"../i18n/locales/zh.json",
+	"../i18n/locales/ja.json",
 }
 
 // declaredCodes parses error.go and returns every constant declared with type
