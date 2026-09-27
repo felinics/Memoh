@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -34,8 +35,8 @@ func Dial(target, secret string) (*grpc.ClientConn, error) {
 		// interceptor constructors, and only the handler sees streaming
 		// message events, which is most of what this connection carries.
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-		grpc.WithUnaryInterceptor(UnaryClientAuth(secret)),
-		grpc.WithStreamInterceptor(StreamClientAuth(secret)),
+		grpc.WithChainUnaryInterceptor(UnaryClientRequestID, UnaryClientAuth(secret)),
+		grpc.WithChainStreamInterceptor(StreamClientRequestID, StreamClientAuth(secret)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                keepaliveInterval,
 			Timeout:             keepaliveTimeout,
@@ -48,11 +49,17 @@ func Dial(target, secret string) (*grpc.ClientConn, error) {
 	)
 }
 
-func NewServer(secret string, opts ...grpc.ServerOption) *grpc.Server {
+// NewServer builds an internal RPC server. Every call, including one refused
+// by authentication, gets one result line on logger.
+func NewServer(logger *slog.Logger, secret string, opts ...grpc.ServerOption) *grpc.Server {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger = logger.With(slog.String("component", "internal_rpc"))
 	base := []grpc.ServerOption{
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-		grpc.ChainUnaryInterceptor(UnaryServerAuth(secret)),
-		grpc.ChainStreamInterceptor(StreamServerAuth(secret)),
+		grpc.ChainUnaryInterceptor(UnaryServerRequestID, UnaryServerResult(logger), UnaryServerAuth(secret)),
+		grpc.ChainStreamInterceptor(StreamServerRequestID, StreamServerResult(logger), StreamServerAuth(secret)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time:    keepaliveInterval,
 			Timeout: keepaliveTimeout,

@@ -572,9 +572,8 @@ func (a *FeishuAdapter) buildEventDispatcher(
 			)
 		}
 		go func() {
-			if err := handler(connCtx, cfg, msg); err != nil && a.logger != nil {
-				a.logger.ErrorContext(connCtx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(connCtx, cfg, msg)
 		}()
 		return nil
 	})

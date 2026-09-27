@@ -130,9 +130,9 @@ func provideServerRPC(log *slog.Logger, cfg config.Config, turnService turn.Serv
 	if err := cfg.ValidateServerRuntime(); err != nil {
 		return nil, err
 	}
-	server := intrpc.NewServer(cfg.InternalRPC.SharedSecret)
+	server := intrpc.NewServer(log, cfg.InternalRPC.SharedSecret)
 	turnpb.RegisterTurnServiceServer(server, turntransport.NewServer(log, turnService))
-	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(log, serverruntime.Handlers(commandHandler, queueHandler, skillHandler, audioService)))
+	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(serverruntime.Handlers(commandHandler, queueHandler, skillHandler, audioService)))
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(server, healthServer)

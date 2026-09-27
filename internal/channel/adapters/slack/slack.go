@@ -516,9 +516,8 @@ func (a *SlackAdapter) handleMessageEvent(
 	}
 
 	go func() {
-		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 	}()
 }
 
@@ -597,9 +596,8 @@ func (a *SlackAdapter) handleAppMentionEvent(
 	}
 
 	go func() {
-		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 	}()
 }
 

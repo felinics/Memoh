@@ -54,8 +54,8 @@ func provideChannelRPC(log *slog.Logger, cfg config.Config, channelRuntime chann
 	if err := cfg.ValidateChannelRuntime(); err != nil {
 		return nil, err
 	}
-	server := intrpc.NewServer(cfg.InternalRPC.SharedSecret)
-	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(log, channelruntime.Handlers(channelRuntime, tunnel)))
+	server := intrpc.NewServer(log, cfg.InternalRPC.SharedSecret)
+	runtimepb.RegisterRuntimeServiceServer(server, runtimeRpc.NewServer(channelruntime.Handlers(channelRuntime, tunnel)))
 	healthServer := health.NewServer()
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	grpc_health_v1.RegisterHealthServer(server, healthServer)

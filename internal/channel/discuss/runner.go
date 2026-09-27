@@ -3,11 +3,15 @@ package discuss
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
+	"time"
 
 	agentevent "github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/errlog"
 )
 
 const sessionRuntimeACPAgent = sessionpkg.RuntimeACPAgent
@@ -34,15 +38,26 @@ type discussRunOutcome struct {
 }
 
 // Run starts one Agent turn and reduces its ordered event stream to the
-// cursor-commit facts needed by the worker.
+// cursor-commit facts needed by the worker. It writes the one result line of
+// the turn.
 func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, command turn.StartTurnCommand, log *slog.Logger) (discussRunOutcome, bool) {
+	start := time.Now()
+	var (
+		outcome      discussRunOutcome
+		turnErr      error
+		streamErr    error
+		streamErrors int
+	)
+	defer func() {
+		logDiscussTurn(ctx, log, outcome, discussTurnCause(outcome, turnErr, streamErr), streamErrors, start)
+	}()
+
 	handle, err := service.StartTurn(ctx, command)
 	if err != nil {
-		log.ErrorContext(ctx, "discuss: start turn failed", slog.Any("error", err))
+		turnErr = fmt.Errorf("start turn: %w", err)
 		return discussRunOutcome{}, false
 	}
 
-	var outcome discussRunOutcome
 	events, errsCh := handle.Events(), handle.Errs()
 	for events != nil || errsCh != nil {
 		select {
@@ -66,12 +81,18 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 				if decodeErr := json.Unmarshal(event.Payload, &streamEvent); decodeErr != nil {
 					log.WarnContext(ctx, "discuss: decode stream event failed", slog.Any("error", decodeErr))
 					outcome.failed = true
+					if streamErr == nil {
+						streamErr = fmt.Errorf("decode stream event: %w", decodeErr)
+					}
 					continue
 				}
 				outcome.streamed = true
 				if streamEvent.Type == agentevent.Error {
 					outcome.failed = true
-					log.ErrorContext(ctx, "discuss stream error", slog.String("error", streamEvent.Error))
+					streamErrors++
+					if streamErr == nil {
+						streamErr = errors.New(streamEvent.Error)
+					}
 				}
 				if streamEvent.Type == agentevent.AgentEnd || streamEvent.Type == agentevent.AgentAbort {
 					outcome.terminal = true
@@ -81,20 +102,54 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 				}
 				r.projector.Broadcast(command.BotID, streamEvent)
 			}
-		case streamErr, ok := <-errsCh:
+		case err, ok := <-errsCh:
 			if !ok {
 				errsCh = nil
 				continue
 			}
-			if streamErr != nil {
-				log.ErrorContext(ctx, "discuss turn failed", slog.Any("error", streamErr))
+			if err != nil {
 				outcome.failed = true
+				if turnErr == nil {
+					turnErr = err
+				}
 			}
 		case <-ctx.Done():
-			log.WarnContext(ctx, "discuss turn cancelled", slog.Any("error", ctx.Err()))
 			outcome.cancelled = true
 			return outcome, true
 		}
 	}
 	return outcome, true
+}
+
+// discussTurnCause is the error that decides how the turn ended. A turn error
+// wins; a stream error event the runtime recovered from before a clean end
+// is not a failure of the turn.
+func discussTurnCause(outcome discussRunOutcome, turnErr, streamErr error) error {
+	switch {
+	case turnErr != nil:
+		return turnErr
+	case outcome.cancelled:
+		return nil
+	case streamErr != nil && !outcome.endedClean:
+		return streamErr
+	default:
+		return nil
+	}
+}
+
+func logDiscussTurn(ctx context.Context, log *slog.Logger, outcome discussRunOutcome, cause error, streamErrors int, start time.Time) {
+	if outcome.cancelled && cause == nil {
+		cause = context.Cause(ctx)
+	}
+	// No caller waits for a discuss turn, so a client fault is this
+	// process's fault.
+	result := errlog.Finish(ctx, "discuss.turn", cause, errlog.Options{Async: true})
+	attrs := []slog.Attr{
+		slog.String("runtime_type", outcome.runtimeType),
+		slog.Duration("latency", time.Since(start)),
+	}
+	if streamErrors > 0 {
+		attrs = append(attrs, slog.Int("stream_errors", streamErrors))
+	}
+	log.LogAttrs(ctx, result.Level, "discuss turn", append(attrs, result.Attrs()...)...)
 }

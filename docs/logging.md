@@ -74,6 +74,7 @@ Added by the handler, never by the call site:
 | Key | Source |
 | --- | --- |
 | `request_id` | The id echo's `RequestID` middleware assigns, put into the context by `httpx.RequestIDContext`. The same id the client receives, in the response header and in `apperror.Problem`. |
+| | Work that does not arrive over HTTP gets its own id from `httpx.NewRequestID`: each inbound IM message and each discuss trigger. The internal RPC carries the caller's id in `x-request-id` metadata, so the callee's records report it too. |
 | `trace_id`, `span_id` | The span context, when tracing is configured — see [observability.md](observability.md). |
 
 Absent identity means absent keys rather than empty ones: an empty `trace_id`

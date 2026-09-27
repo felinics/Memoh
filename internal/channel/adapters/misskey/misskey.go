@@ -367,9 +367,8 @@ func (a *MisskeyAdapter) handleChannelEvent(ctx context.Context, cfg channel.Cha
 		}
 		a.logInbound(cfg.ID, inbound)
 		go func() {
-			if err := handler(ctx, cfg, inbound); err != nil && a.logger != nil {
-				a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, inbound)
 		}()
 
 	case "notification":
@@ -393,9 +392,8 @@ func (a *MisskeyAdapter) handleChannelEvent(ctx context.Context, cfg channel.Cha
 		}
 		a.logInbound(cfg.ID, inbound)
 		go func() {
-			if err := handler(ctx, cfg, inbound); err != nil && a.logger != nil {
-				a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, inbound)
 		}()
 	}
 }

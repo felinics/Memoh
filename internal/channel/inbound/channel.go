@@ -1195,14 +1195,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			return nil
 		}
-		if p.logger != nil {
-			p.logger.ErrorContext(ctx,
-				"start turn failed",
-				slog.String("channel", msg.Channel.String()),
-				slog.String("channel_identity_id", identity.ChannelIdentityID),
-				slog.Any("error", startErr),
-			)
-		}
 		_ = stream.Push(ctx, channel.StreamEvent{
 			Type:  channel.StreamEventError,
 			Error: startErr.Error(),
@@ -1294,15 +1286,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	if streamErr != nil {
-		if p.logger != nil {
-			p.logger.ErrorContext(ctx,
-				"chat gateway stream failed",
-				slog.String("channel", msg.Channel.String()),
-				slog.String("channel_identity_id", identity.ChannelIdentityID),
-				slog.String("user_id", identity.UserID),
-				slog.Any("error", streamErr),
-			)
-		}
 		if feedback := externalAgentFeedbackFromError(streamErr); feedback != nil {
 			_ = stream.Push(ctx, channel.StreamEvent{
 				Type:  channel.StreamEventError,

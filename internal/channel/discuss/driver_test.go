@@ -530,6 +530,7 @@ type fakeTurnService struct {
 	startErr       error
 	streamErr      error
 	midStreamError bool // emit a recovered Error event before the clean AgentEnd
+	endWithError   bool // end the stream on an Error event without AgentEnd
 	onStart        func(turn.StartTurnCommand)
 	calls          int
 	lastCmd        turn.StartTurnCommand
@@ -574,6 +575,11 @@ func (f *fakeTurnService) StartTurn(_ context.Context, cmd turn.StartTurnCommand
 		}
 		if f.streamErr != nil {
 			h.errs <- f.streamErr
+			return
+		}
+		if f.endWithError {
+			failed, _ := json.Marshal(agentevent.StreamEvent{Type: agentevent.Error, Error: "provider rejected the request"})
+			emit(string(agentevent.Error), failed)
 			return
 		}
 		if f.midStreamError {

@@ -242,13 +242,8 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 
 			inbound.BotID = cfg.BotID
 
-			if err := handler(ctx, cfg, inbound); err != nil {
-				a.logger.ErrorContext(ctx, "weixin inbound handler error",
-					slog.String("config_id", cfg.ID),
-					slog.String("from", msg.FromUserID),
-					slog.Any("error", err),
-				)
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, inbound)
 		}
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/felinics/memoh/internal/logger"
 )
 
 type connectionEntry struct {
@@ -177,12 +179,20 @@ func (m *Manager) ensureConnection(ctx context.Context, cfg ChannelConfig) error
 			slog.String("config_id", cfg.ID),
 		)
 	}
-	handler := m.handleInbound
+	handler := m.handleConnectionInbound
 	for i := len(m.middlewares) - 1; i >= 0; i-- {
 		handler = m.middlewares[i](handler)
 	}
+	// The id is assigned outside the middlewares so that what they log for a
+	// message reports the same id as its result line.
+	chain := handler
+	handler = func(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error {
+		return chain(withInboundRequestID(ctx), cfg, msg)
+	}
 	// Decouple long-lived adapter connections from short-lived request contexts.
-	connectCtx := context.WithoutCancel(ctx)
+	// The connection also drops the request's id: what an adapter logs on it
+	// later is not part of the request that started it.
+	connectCtx := logger.ContextWithoutRequestID(context.WithoutCancel(ctx))
 	conn, err := receiver.Connect(connectCtx, cfg, handler)
 	if err != nil {
 		m.markConnectionStatus(cfg, false, err)

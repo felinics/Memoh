@@ -1,12 +1,15 @@
 package grpctransport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/logger"
 	intrpc "github.com/felinics/memoh/internal/rpc"
 )
 
@@ -219,9 +223,14 @@ func TestCancelUnblocksFullClientEventBuffer(t *testing.T) {
 
 func newTestClient(t *testing.T, service turn.Service, clientSecret string) (*Client, func()) {
 	t.Helper()
+	return newLoggedTestClient(t, nil, service, clientSecret)
+}
+
+func newLoggedTestClient(t *testing.T, log *slog.Logger, service turn.Service, clientSecret string) (*Client, func()) {
+	t.Helper()
 	lis := bufconn.Listen(1 << 20)
-	server := intrpc.NewServer("secret")
-	turnpb.RegisterTurnServiceServer(server, NewServer(nil, service))
+	server := intrpc.NewServer(log, "secret")
+	turnpb.RegisterTurnServiceServer(server, NewServer(log, service))
 	go func() { _ = server.Serve(lis) }()
 	conn, err := grpc.NewClient(
 		"passthrough:///bufnet",
@@ -525,5 +534,43 @@ func TestStopTurnSurvivesTransport(t *testing.T) {
 	}
 	if got := <-service.stopped; got != cmd {
 		t.Fatalf("command = %#v", got)
+	}
+}
+
+// An internal failure is recorded once, by the RPC result line, with the cause
+// the Internal status hides from the client.
+func TestInternalTurnErrorHasOneResultLine(t *testing.T) {
+	var logs bytes.Buffer
+	client, cleanup := newLoggedTestClient(t, logger.New(&logs, "debug", "json"),
+		&scriptedService{startErr: errors.New("private diagnostic")}, "secret")
+	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	if err == nil {
+		t.Fatal("start turn succeeded")
+	}
+	if strings.Contains(err.Error(), "private diagnostic") {
+		t.Fatalf("cause leaked to the client: %v", err)
+	}
+	cleanup()
+
+	var records []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		records = append(records, record)
+	}
+	if len(records) != 1 || records[0]["msg"] != "rpc request" {
+		t.Fatalf("records = %v, want one rpc request line", records)
+	}
+	record := records[0]
+	if record["level"] != "ERROR" || record["fault"] != "server" || record["grpc_code"] != "Internal" {
+		t.Fatalf("level/fault/grpc_code = %v/%v/%v: %v", record["level"], record["fault"], record["grpc_code"], record)
+	}
+	if record["error"] != "start turn: private diagnostic" {
+		t.Fatalf("error = %v", record["error"])
 	}
 }

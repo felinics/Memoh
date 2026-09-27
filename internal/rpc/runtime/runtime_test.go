@@ -16,7 +16,7 @@ import (
 
 func callWith(t *testing.T, handlerErr error) error {
 	t.Helper()
-	srv := NewServer(nil, map[string]Handler{
+	srv := NewServer(map[string]Handler{
 		"m": func(context.Context, json.RawMessage) (any, error) { return nil, handlerErr },
 	})
 	_, err := srv.Call(context.Background(), &runtimepb.CallRequest{Method: "m"})

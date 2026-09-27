@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"fmt"
 	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/felinics/memoh/internal/rpc"
 	"github.com/felinics/memoh/internal/rpc/runtimepb"
 )
 
@@ -56,15 +57,13 @@ type grpcStatusError interface {
 
 type Server struct {
 	runtimepb.UnimplementedRuntimeServiceServer
-	logger   *slog.Logger
 	handlers map[string]Handler
 }
 
-func NewServer(log *slog.Logger, handlers map[string]Handler) *Server {
-	if log == nil {
-		log = slog.Default()
-	}
-	return &Server{logger: log.With(slog.String("component", "runtime_rpc")), handlers: handlers}
+// NewServer serves handlers by method name. The RPC result line, written by
+// the server interceptor, records each call.
+func NewServer(handlers map[string]Handler) *Server {
+	return &Server{handlers: handlers}
 }
 
 func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtimepb.CallResponse, error) {
@@ -75,7 +74,7 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 	}
 	result, err := handler(ctx, json.RawMessage(req.GetPayload()))
 	if err != nil {
-		s.logger.ErrorContext(ctx, "runtime rpc call failed", slog.String("method", method), slog.Any("error", err))
+		rpc.RecordError(ctx, fmt.Errorf("runtime method %s: %w", method, err))
 		var public *publicError
 		if errors.As(err, &public) {
 			return nil, status.Error(codes.Unknown, public.Error())
@@ -90,7 +89,7 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "runtime rpc result encoding failed", slog.String("method", method), slog.Any("error", err))
+		rpc.RecordError(ctx, fmt.Errorf("encode runtime method %s result: %w", method, err))
 		return nil, status.Error(codes.Internal, "internal runtime result encoding failed")
 	}
 	return &runtimepb.CallResponse{Payload: data}, nil

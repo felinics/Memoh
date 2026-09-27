@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 
@@ -13,6 +14,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	"github.com/felinics/memoh/internal/rpc"
 )
 
 type Server struct {
@@ -51,7 +53,7 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 	}
 	handle, err := s.service.StartTurn(stream.Context(), cmd)
 	if err != nil {
-		return s.mapError("start turn", err)
+		return s.mapError(stream.Context(), "start turn", err)
 	}
 	defer handle.Cancel()
 	if err := stream.Send(&turnpb.RunResponse{Body: &turnpb.RunResponse_Started{Started: &turnpb.Started{RunId: handle.RunID()}}}); err != nil {
@@ -143,7 +145,7 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 		}
 	}
 	if runErr != nil {
-		return s.mapError("run turn", runErr)
+		return s.mapError(stream.Context(), "run turn", runErr)
 	}
 	return stream.Send(&turnpb.RunResponse{Body: &turnpb.RunResponse_Completed{Completed: &turnpb.Completed{}}})
 }
@@ -201,7 +203,7 @@ func (s *Server) streamContinuation(ctx context.Context, send func(*turnpb.Event
 		}
 	}
 	if runErr != nil {
-		return s.mapError("resume turn", runErr)
+		return s.mapError(ctx, "resume turn", runErr)
 	}
 	return nil
 }
@@ -224,7 +226,7 @@ func (s *Server) AdvancePlainTextUserInput(ctx context.Context, req *turnpb.Json
 	}
 	result, err := s.service.AdvancePlainTextUserInput(ctx, input)
 	if err != nil {
-		return nil, s.mapError("advance plain text user input", err)
+		return nil, s.mapError(ctx, "advance plain text user input", err)
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
@@ -233,7 +235,9 @@ func (s *Server) AdvancePlainTextUserInput(ctx context.Context, req *turnpb.Json
 	return &turnpb.JsonResponse{Json: data}, nil
 }
 
-func (s *Server) mapError(operation string, err error) error {
+// mapError maps a turn error to the status the client receives. A status that
+// does not carry the cause hands it to the RPC result line first.
+func (*Server) mapError(ctx context.Context, operation string, err error) error {
 	switch {
 	case errors.Is(err, turn.ErrSessionBusy):
 		return status.Error(codes.Aborted, "thread busy")
@@ -247,8 +251,10 @@ func (s *Server) mapError(operation string, err error) error {
 	case errors.Is(err, turn.ErrTeamNotServed):
 		return status.Error(codes.PermissionDenied, "team is not served")
 	case errors.Is(err, context.Canceled):
+		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, err))
 		return status.Error(codes.Canceled, "turn canceled")
 	case errors.Is(err, context.DeadlineExceeded):
+		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, err))
 		return status.Error(codes.DeadlineExceeded, "turn deadline exceeded")
 	default:
 		if feedback := feedbackFromError(err); feedback != nil {
@@ -256,7 +262,7 @@ func (s *Server) mapError(operation string, err error) error {
 				return status.Error(codes.FailedPrecondition, message)
 			}
 		}
-		s.logger.Error("internal turn rpc failed", slog.String("operation", operation), slog.Any("error", err))
+		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, err))
 		return status.Error(codes.Internal, "internal turn operation failed")
 	}
 }
@@ -279,11 +285,11 @@ func (s *Server) StopTurn(ctx context.Context, req *turnpb.JsonRequest) (*turnpb
 	}
 	stopped, err := stopper.StopTurn(ctx, cmd)
 	if err != nil {
-		return nil, s.mapError("stop turn", err)
+		return nil, s.mapError(ctx, "stop turn", err)
 	}
 	data, err := json.Marshal(stopped)
 	if err != nil {
-		return nil, s.mapError("encode stop turn", err)
+		return nil, s.mapError(ctx, "encode stop turn", err)
 	}
 	return &turnpb.JsonResponse{Json: data}, nil
 }
