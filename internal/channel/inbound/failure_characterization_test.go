@@ -50,17 +50,21 @@ type imFailureResult struct {
 	sent       []string
 }
 
-func runIMFailure(t *testing.T, gateway *scriptedFailureGateway) imFailureResult {
-	t.Helper()
+func newIMFailureProcessor(gateway turn.Service) (*ChannelInboundProcessor, *fakeReplySender, channel.ChannelConfig, channel.InboundMessage) {
 	routes := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "route-1"}}
 	processor := NewChannelInboundProcessor(slog.New(slog.DiscardHandler), nil, routes, routes, gateway,
 		&fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "identity-1"}}, &fakePolicyService{}, "", 0)
-	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
 		BotID: "bot-1", Channel: channel.ChannelType("feishu"), Message: channel.Message{Text: "hello"}, ReplyTarget: "target-id",
 		Sender: channel.Identity{SubjectID: "ext-1"}, Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
 	}
 	cfg := channel.ChannelConfig{TeamID: "team-test", ID: "cfg-1", BotID: "bot-1", ChannelType: msg.Channel}
+	return processor, &fakeReplySender{}, cfg, msg
+}
+
+func runIMFailure(t *testing.T, gateway *scriptedFailureGateway) imFailureResult {
+	t.Helper()
+	processor, sender, cfg, msg := newIMFailureProcessor(gateway)
 	result := imFailureResult{err: processor.HandleInbound(context.Background(), cfg, msg, sender)}
 	for _, event := range sender.events {
 		if event.Type == channel.StreamEventError {

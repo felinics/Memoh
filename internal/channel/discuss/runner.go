@@ -10,6 +10,7 @@ import (
 
 	agentevent "github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/errlog"
 )
@@ -47,16 +48,42 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 		turnErr      error
 		streamErr    error
 		streamErrors int
+		terminal     *turn.RunTerminal
 	)
 	defer func() {
-		logDiscussTurn(ctx, log, outcome, discussTurnCause(outcome, turnErr, streamErr), streamErrors, start)
+		cause := discussTurnCause(outcome, turnErr, runFailure(terminal, turnErr), streamErr)
+		logDiscussTurn(ctx, log, outcome, cause, streamErrors, start)
 	}()
 
 	handle, err := service.StartTurn(ctx, command)
 	if err != nil {
 		turnErr = fmt.Errorf("start turn: %w", err)
+		if isStartFailure(err) {
+			r.projector.BroadcastFailure(command.BotID, apperror.CodeOf(err), apperror.ArgsOf(err))
+		}
 		return discussRunOutcome{}, false
 	}
+
+	// A handle that ends its runs with run_terminal is answered from it: error
+	// events are held back and the run's failure is broadcast once, with the
+	// copy for its code.
+	reportsTerminal := turn.ReportsRunTerminal(handle)
+	var held []agentevent.StreamEvent
+	defer func() {
+		if outcome.cancelled {
+			return
+		}
+		switch failure := runFailure(terminal, turnErr); {
+		case failure != nil:
+			r.projector.BroadcastFailure(command.BotID, apperror.CodeOf(failure), apperror.ArgsOf(failure))
+		case terminal != nil && turnErr != nil:
+			r.projector.BroadcastFailure(command.BotID, apperror.CodeOf(turnErr), apperror.ArgsOf(turnErr))
+		case terminal == nil:
+			for _, event := range held {
+				r.projector.Broadcast(command.BotID, event)
+			}
+		}
+	}()
 
 	events, errsCh := handle.Events(), handle.Errs()
 	for events != nil || errsCh != nil {
@@ -64,6 +91,12 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 		case event, ok := <-events:
 			if !ok {
 				events = nil
+				continue
+			}
+			if runTerminal, ok := turn.RunTerminalFrom(event); ok {
+				if reportsTerminal {
+					terminal = &runTerminal
+				}
 				continue
 			}
 			switch event.Kind {
@@ -100,6 +133,10 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 				if streamEvent.Type == agentevent.AgentEnd {
 					outcome.endedClean = true
 				}
+				if reportsTerminal && streamEvent.Type == agentevent.Error {
+					held = append(held, streamEvent)
+					continue
+				}
 				r.projector.Broadcast(command.BotID, streamEvent)
 			}
 		case err, ok := <-errsCh:
@@ -121,15 +158,46 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 	return outcome, true
 }
 
+// isStartFailure reports whether a StartTurn error is a failure to report. A
+// busy thread, a duplicate, or a deferred turn is an admission answer: the
+// worker retries on the next trigger.
+func isStartFailure(err error) bool {
+	return !errors.Is(err, turn.ErrSessionBusy) &&
+		!errors.Is(err, turn.ErrDuplicateTurn) &&
+		!errors.Is(err, turn.ErrTurnDeferred) &&
+		!errors.Is(err, context.Canceled)
+}
+
+// runFailure is the error a run that ended with a failed run_terminal event
+// failed with: the turn error when it names the run's code, so its args and
+// origin are kept, and otherwise the run's code. It is nil without the event
+// or for a run that did not fail.
+func runFailure(terminal *turn.RunTerminal, turnErr error) error {
+	if terminal == nil || !terminal.Failed() {
+		return nil
+	}
+	code := apperror.Code(terminal.ErrorCode)
+	if code == "" {
+		code = apperror.CodeRuntimeRunFailed
+	}
+	if apperror.CodeOf(turnErr) == code {
+		return turnErr
+	}
+	return apperror.New(code, nil)
+}
+
 // discussTurnCause is the error that decides how the turn ended. A turn error
-// wins; a stream error event the runtime recovered from before a clean end
-// is not a failure of the turn.
-func discussTurnCause(outcome discussRunOutcome, turnErr, streamErr error) error {
+// wins, then the failure the run's terminal event names, then the first
+// stream error event. A stream error the runtime recovered from before a
+// clean end is not a failure of the turn.
+func discussTurnCause(outcome discussRunOutcome, turnErr, runErr, streamErr error) error {
 	switch {
 	case turnErr != nil:
 		return turnErr
 	case outcome.cancelled:
 		return nil
+	case runErr != nil:
+		return runErr
 	case streamErr != nil && !outcome.endedClean:
 		return streamErr
 	default:

@@ -1210,6 +1210,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	chunkCh, streamErrCh := handle.Events(), handle.Errs()
 
+	// A run that ends with run_terminal is answered from it: error events are
+	// held back and the one failure reply carries the copy for the run's code.
+	failures := runFailureReply{reportsTerminal: turn.ReportsRunTerminal(handle)}
 	var (
 		finalMessages []turn.ModelMessage
 		streamErr     error
@@ -1220,6 +1223,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		case turnEvent, ok := <-chunkCh:
 			if !ok {
 				chunkCh = nil
+				continue
+			}
+			if failures.observeTerminal(turnEvent) {
 				continue
 			}
 			events, messages, parseErr := mapStreamChunkToChannelEvents(turnEvent.Payload)
@@ -1252,6 +1258,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 					p.synthesizeAndPushVoice(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Speeches, stream, assets)
 					continue
 				}
+				if failures.hold(events[i]) {
+					continue
+				}
 				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
 					if streamErr == nil {
 						streamErr = pushErr
@@ -1282,30 +1291,53 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
+	loc := p.localizer(ctx, identity.BotID)
+	if !pushBroken {
+		for _, held := range failures.release() {
+			if pushErr := stream.Push(ctx, held); pushErr != nil {
+				if streamErr == nil {
+					streamErr = pushErr
+				}
+				break
+			}
+		}
+	}
+	failureReply, hasFailureReply := failures.reply(loc, streamErr)
 	if streamErr != nil {
 		if public := externalAgentError(streamErr); public != nil {
-			_ = stream.Push(ctx, channel.StreamEvent{
-				Type:  channel.StreamEventError,
-				Error: externalAgentErrorText(public, p.localizer(ctx, identity.BotID)),
-			})
+			if !hasFailureReply {
+				failureReply = channel.StreamEvent{
+					Type:      channel.StreamEventError,
+					Error:     externalAgentErrorText(public, loc),
+					ErrorCode: string(apperror.CodeOf(public)),
+				}
+			}
+			_ = stream.Push(ctx, failureReply)
 			if statusNotifier != nil {
 				if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
 					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 				}
 			}
-			_ = p.sendExternalAgentError(ctx, sender, msg, identity, public)
 			return streamErr
 		}
-		_ = stream.Push(ctx, channel.StreamEvent{
-			Type:  channel.StreamEventError,
-			Error: streamErr.Error(),
-		})
+		if !hasFailureReply {
+			failureReply = channel.StreamEvent{
+				Type:  channel.StreamEventError,
+				Error: streamErr.Error(),
+			}
+		}
+		_ = stream.Push(ctx, failureReply)
 		if statusNotifier != nil {
 			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
 				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 			}
 		}
 		return streamErr
+	}
+	if hasFailureReply {
+		if err := stream.Push(ctx, failureReply); err != nil {
+			return err
+		}
 	}
 
 	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)

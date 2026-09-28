@@ -53,7 +53,7 @@ func (s *Service) startDiscussTurn(runCtx context.Context, cmd turn.StartTurnCom
 	return h, nil
 }
 
-func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc, runID string, finishRun func(RunOutcome)) *discussHandle {
+func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc, runID string, finishRun func(RunOutcome) sessionruntime.TerminalRun) *discussHandle {
 	return &discussHandle{
 		runHandle: runHandle{
 			id:        runID,
@@ -121,8 +121,15 @@ func (h *discussHandle) emitErr(err error) bool {
 }
 
 func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
+	consumerGone := false
 	defer close(h.events)
 	defer close(h.errs)
+	defer func() {
+		// A consumer that canceled the run does not read tail events.
+		if !consumerGone {
+			h.sendTerminal(h.teamID, h.sessionID, h.seq+1)
+		}
+	}()
 	defer func() {
 		if h.contentLightTerminal && !h.failed.Load() && h.streamErr == nil && !s.usesDurableTerminalObserver() {
 			s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
@@ -134,6 +141,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		// stream; record it before cancel() masks the distinction.
 		if h.ctx.Err() != nil {
 			h.failed.Store(true)
+			consumerGone = true
 		}
 		h.cancel()
 	}()

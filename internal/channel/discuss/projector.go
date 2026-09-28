@@ -5,7 +5,9 @@ import (
 	"sync"
 
 	agentevent "github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/i18n"
 )
 
 type discussEventProjector struct {
@@ -34,6 +36,17 @@ func (p *discussEventProjector) Broadcast(botID string, event agentevent.StreamE
 	p.mu.RUnlock()
 	if broadcaster != nil {
 		broadcaster.PublishEvent(botID, streamEvent)
+	}
+}
+
+// BroadcastFailure publishes a run failure as one error event carrying the
+// copy for code.
+func (p *discussEventProjector) BroadcastFailure(botID string, code apperror.Code, args map[string]string) {
+	p.mu.RLock()
+	broadcaster := p.broadcaster
+	p.mu.RUnlock()
+	if broadcaster != nil {
+		broadcaster.PublishEvent(botID, channel.RunFailureEvent(i18n.New(""), code, args))
 	}
 }
 

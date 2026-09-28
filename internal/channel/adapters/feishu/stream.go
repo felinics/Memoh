@@ -147,7 +147,7 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		if err := s.ensureCard(ctx, feishuStreamThinkingText); err != nil {
 			return err
 		}
-		return s.patchCard(ctx, "Error: "+errText)
+		return s.patchCard(ctx, channel.ErrorReplyText(event.ErrorCode, errText))
 	default:
 		return nil
 	}

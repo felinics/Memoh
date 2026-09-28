@@ -180,7 +180,7 @@ func (s *qqOutboundStream) Push(ctx context.Context, event channel.PreparedStrea
 		}
 		return s.flush(ctx, channel.PreparedMessage{
 			Message: channel.Message{
-				Text: "Error: " + errText,
+				Text: channel.ErrorReplyText(event.ErrorCode, errText),
 			},
 		})
 	case channel.StreamEventFinal:

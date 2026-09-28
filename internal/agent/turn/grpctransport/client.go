@@ -71,7 +71,7 @@ func (c *Client) StartTurn(ctx context.Context, cmd turn.StartTurnCommand) (turn
 		return nil, errors.New("turn rpc: missing started frame")
 	}
 	h := &runHandle{
-		id: started.GetRunId(), stream: stream,
+		id: started.GetRunId(), reportsTerminal: started.GetReportsRunTerminal(), stream: stream,
 		events: make(chan turn.Event, 16), errs: make(chan error, 1),
 		ctx: runCtx, cancel: cancel, done: make(chan struct{}),
 		logger: c.logger,
@@ -140,21 +140,25 @@ func receiveContinuation(ctx context.Context, recv continuationReceiver, eventCh
 }
 
 type runHandle struct {
-	id     string
-	stream turnpb.TurnService_RunClient
-	events chan turn.Event
-	errs   chan error
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
-	logger *slog.Logger
-	mu     sync.Mutex
-	once   sync.Once
+	id string
+	// reportsTerminal is the server's answer in the started frame. A server
+	// that predates run_terminal leaves it false.
+	reportsTerminal bool
+	stream          turnpb.TurnService_RunClient
+	events          chan turn.Event
+	errs            chan error
+	ctx             context.Context
+	cancel          context.CancelFunc
+	done            chan struct{}
+	logger          *slog.Logger
+	mu              sync.Mutex
+	once            sync.Once
 }
 
 func (h *runHandle) RunID() string             { return h.id }
 func (h *runHandle) Events() <-chan turn.Event { return h.events }
 func (h *runHandle) Errs() <-chan error        { return h.errs }
+func (h *runHandle) ReportsRunTerminal() bool  { return h.reportsTerminal }
 
 func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	data, err := json.Marshal(injectPayload{

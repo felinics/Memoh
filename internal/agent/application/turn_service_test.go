@@ -47,6 +47,10 @@ type scriptedAdmitter struct {
 	// replay of a run owned elsewhere or already finished.
 	started bool
 
+	// terminal and finishErr are what FinishRunWithErrorCode returns.
+	terminal  sessionruntime.TerminalRun
+	finishErr error
+
 	inputs     []sessionruntime.AdmitInput
 	finishes   []recordedFinish
 	published  []native.StreamEvent
@@ -92,7 +96,7 @@ func (a *scriptedAdmitter) FinishRunWithErrorCode(_ context.Context, handle sess
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
-	return sessionruntime.TerminalRun{}, nil
+	return a.terminal, a.finishErr
 }
 
 func (*scriptedAdmitter) MarkInlineDecisionRun(string, string, string) {}

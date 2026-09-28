@@ -909,7 +909,7 @@ func (s *telegramOutboundStream) pushError(ctx context.Context, event channel.Pr
 	if errText == "" {
 		return nil
 	}
-	display := "Error: " + errText
+	display := channel.ErrorReplyText(event.ErrorCode, errText)
 	// Error messages are plain text; reset parseMode so HTML-mode
 	// left over from earlier deltas does not corrupt the output.
 	s.mu.Lock()

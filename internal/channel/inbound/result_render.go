@@ -171,19 +171,8 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 // its args, or the catalog detail when the channel has no copy for it.
 func externalAgentErrorText(err error, t *i18n.Localizer) string {
 	code := apperror.CodeOf(err)
-	key := "errors." + string(code)
-	if t != nil {
-		args := apperror.ArgsOf(err)
-		params := make(map[string]any, len(args))
-		for name, value := range args {
-			params[name] = value
-		}
-		if text := t.T(key, params); strings.TrimSpace(text) != "" && text != key {
-			return text
-		}
-	}
-	if definition, ok := apperror.Lookup(code); ok {
-		return definition.Detail
+	if text, ok := channel.ErrorCodeText(t, code, apperror.ArgsOf(err)); ok {
+		return text
 	}
 	return string(code)
 }

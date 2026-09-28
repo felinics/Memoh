@@ -75,7 +75,7 @@ func (s *outboundStream) Push(ctx context.Context, event channel.PreparedStreamE
 		return s.sendSnapshot(ctx, channel.PreparedMessage{
 			Message: channel.Message{
 				Format: channel.MessageFormatPlain,
-				Text:   "Error: " + errText,
+				Text:   channel.ErrorReplyText(event.ErrorCode, errText),
 			},
 		})
 	default:

@@ -172,12 +172,15 @@ const (
 )
 
 // StreamEvent represents a unified stream event routed through the channel layer.
+// ErrorCode names the catalog code Error was rendered from: with a code, Error
+// is complete user-facing copy; without one it is a bare error text.
 type StreamEvent struct {
 	Type        StreamEventType        `json:"type"`
 	Status      StreamStatus           `json:"status,omitempty"`
 	Delta       string                 `json:"delta,omitempty"`
 	Final       *StreamFinalizePayload `json:"final,omitempty"`
 	Error       string                 `json:"error,omitempty"`
+	ErrorCode   string                 `json:"error_code,omitempty"`
 	ToolCall    *StreamToolCall        `json:"tool_call,omitempty"`
 	Phase       StreamPhase            `json:"phase,omitempty"`
 	Attachments []Attachment           `json:"attachments,omitempty"`

@@ -95,7 +95,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		if errText == "" {
 			return nil
 		}
-		return s.finalizeMessage("Error: "+errText, nil, nil)
+		return s.finalizeMessage(channel.ErrorReplyText(event.ErrorCode, errText), nil, nil)
 
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {

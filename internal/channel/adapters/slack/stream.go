@@ -105,7 +105,7 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		if errText == "" {
 			return nil
 		}
-		return s.finalizeMessage(ctx, "Error: "+errText, nil)
+		return s.finalizeMessage(ctx, channel.ErrorReplyText(event.ErrorCode, errText), nil)
 
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {

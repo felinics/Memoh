@@ -186,7 +186,11 @@ const terminalWriteTimeout = 10 * time.Second
 //
 // Only the stable error code reaches the run's recorded state; the error itself
 // is a private diagnostic and stays in the log.
-func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.Admission) func(RunOutcome) {
+//
+// It returns the run's terminal record when this write ended the run. A run
+// that parked on a decision, whose owner lost it, or whose write failed returns
+// none.
+func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.Admission) func(RunOutcome) sessionruntime.TerminalRun {
 	if s.sessionRuntime == nil || admission.Handle.FencingToken <= 0 {
 		return nil
 	}
@@ -196,7 +200,7 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 	// so this detaches from its cancellation while keeping its values: the write
 	// still needs whatever scoping the caller's context carries.
 	writeCtx := context.WithoutCancel(ctx)
-	return func(outcome RunOutcome) {
+	return func(outcome RunOutcome) sessionruntime.TerminalRun {
 		lifecycleCause := outcome.Cause
 		switch {
 		case lifecycleCause == nil && outcome.Status == sessionruntime.RunStatusAborted:
@@ -216,7 +220,7 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 		)
 		ctx, cancel := context.WithTimeout(writeCtx, terminalWriteTimeout)
 		defer cancel()
-		_, err := s.sessionRuntime.FinishRunWithErrorCode(ctx, handle, outcome.Status, outcome.ErrorCode())
+		terminal, err := s.sessionRuntime.FinishRunWithErrorCode(ctx, handle, outcome.Status, outcome.ErrorCode())
 		switch {
 		case err == nil:
 			if !staged && (outcome.Status != "" || outcome.Cause != nil) {
@@ -228,9 +232,9 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 					lifecycleCause,
 				)
 			}
-			return
+			return terminal
 		case s.logger == nil:
-			return
+			return sessionruntime.TerminalRun{}
 		case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
 			// Expected, not a failure: this process was superseded mid-run, so the
 			// terminal write was refused and the reaper names the outcome instead.
@@ -242,6 +246,7 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 				slog.String("run_id", handle.RunID),
 				slog.String("status", outcome.Status))
 		}
+		return sessionruntime.TerminalRun{}
 	}
 }
 

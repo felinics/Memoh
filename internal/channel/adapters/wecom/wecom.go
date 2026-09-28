@@ -324,7 +324,7 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		}
 		s.mu.Lock()
 		s.final = &channel.PreparedMessage{
-			Message: channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text},
+			Message: channel.Message{Format: channel.MessageFormatPlain, Text: channel.ErrorReplyText(event.ErrorCode, text)},
 		}
 		s.mu.Unlock()
 		return s.flush(ctx)

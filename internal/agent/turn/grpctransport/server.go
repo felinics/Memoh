@@ -56,7 +56,8 @@ func (s *Server) Run(stream turnpb.TurnService_RunServer) error {
 		return s.mapError(stream.Context(), "start turn", err)
 	}
 	defer handle.Cancel()
-	if err := stream.Send(&turnpb.RunResponse{Body: &turnpb.RunResponse_Started{Started: &turnpb.Started{RunId: handle.RunID()}}}); err != nil {
+	started := &turnpb.Started{RunId: handle.RunID(), ReportsRunTerminal: turn.ReportsRunTerminal(handle)}
+	if err := stream.Send(&turnpb.RunResponse{Body: &turnpb.RunResponse_Started{Started: started}}); err != nil {
 		return err
 	}
 

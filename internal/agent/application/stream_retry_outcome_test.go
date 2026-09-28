@@ -430,7 +430,10 @@ func TestTurnFinishAfterDeliveredFailureKeepsItsCode(t *testing.T) {
 	var got RunOutcome
 	h := &runHandle{
 		streamErr: withDeliveredOutcome(errors.New("commit agent step: boom"), delivered),
-		finishRun: func(outcome RunOutcome) { got = outcome },
+		finishRun: func(outcome RunOutcome) sessionruntime.TerminalRun {
+			got = outcome
+			return sessionruntime.TerminalRun{}
+		},
 	}
 	h.finish()
 	if got.Status != sessionruntime.RunStatusErrored || got.ErrorCode() != string(apperror.CodeAgentProviderOverloaded) {

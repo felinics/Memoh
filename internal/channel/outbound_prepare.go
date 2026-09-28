@@ -67,6 +67,7 @@ func PrepareStreamEvent(
 		Status:    event.Status,
 		Delta:     event.Delta,
 		Error:     event.Error,
+		ErrorCode: event.ErrorCode,
 		ToolCall:  event.ToolCall,
 		Phase:     event.Phase,
 		Reactions: event.Reactions,

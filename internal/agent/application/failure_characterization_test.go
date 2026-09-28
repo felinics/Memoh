@@ -286,9 +286,9 @@ func assertStrings(t *testing.T, what string, got, want []string) {
 // Scenario 2 on the discuss path: the native runtime gives up after retries,
 // publishes its giving-up EventError and ends with agent_abort.
 //
-// Current behavior: the turn port reports no error (the IM discuss runner only
-// learns of the failure from the error event), and no history is written. The
-// terminal event carries the run's failure code.
+// Current behavior: the turn port reports no error, and no history is written.
+// The terminal event carries the run's failure code, and the stream ends with
+// run_terminal naming the recorded state and code.
 func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	got := runDiscussCharacterization(t,
@@ -303,6 +303,7 @@ func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 		`{"type":"retry","attempt":1,"maxAttempt":3,"retryError":"api error 503"}`,
 		`{"type":"error","code":"agent.provider_overloaded","error":"` + charOverloadedDetail + `"}`,
 		`{"type":"agent_abort","messages":[],"code":"agent.provider_overloaded"}`,
+		`{"type":"run_terminal","state":"failed","error_code":"agent.provider_overloaded"}`,
 	})
 	assertStrings(t, "turn errors", got.errs, nil)
 	if want := [3]string{"failed", "agent.provider_overloaded", ""}; got.ledger != want {
@@ -369,6 +370,7 @@ func TestCharacterizeDiscussFailureWithoutTerminalEvent(t *testing.T) {
 		`{"runtime_type":""}`,
 		`{"type":"agent_start"}`,
 		`{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
+		`{"type":"run_terminal","state":"failed","error_code":"agent.response_interrupted"}`,
 	})
 	assertStrings(t, "turn errors", got.errs, []string{"agent.response_interrupted"})
 	assertStrings(t, "turn error codes", got.errCode, []string{"agent.response_interrupted"})

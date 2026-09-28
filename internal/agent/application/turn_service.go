@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
@@ -139,14 +140,21 @@ type runHandle struct {
 	failed            atomic.Bool
 	streamErr         error
 	terminalPublished bool
-	finishRun         func(RunOutcome)
+	finishRun         func(RunOutcome) sessionruntime.TerminalRun
 	publishAgentEvent func(context.Context, native.StreamEvent) error
+	// terminal is the run's terminal record once finish wrote it. The pump
+	// goroutine writes and reads it.
+	terminal sessionruntime.TerminalRun
 }
 
 func (h *runHandle) RunID() string             { return h.id }
 func (h *runHandle) Events() <-chan turn.Event { return h.events }
 func (h *runHandle) Errs() <-chan error        { return h.errs }
 func (h *runHandle) Cancel()                   { h.cancel() }
+
+// ReportsRunTerminal reports that a run with a durable record ends its event
+// stream with turn.EventRunTerminal.
+func (h *runHandle) ReportsRunTerminal() bool { return h.finishRun != nil }
 
 func (h *runHandle) Inject(ctx context.Context, msg turn.InjectMessage) error {
 	h.injectMu.Lock()
@@ -199,26 +207,57 @@ func (h *runHandle) finish() {
 		return
 	}
 	if h.streamErr != nil {
-		h.finishRun(failedRunOutcome(h.streamErr))
+		h.terminal = h.finishRun(failedRunOutcome(h.streamErr))
 		return
 	}
 	// Once the terminal event is in the runtime projection, that projection is
 	// authoritative. A consumer disconnect while forwarding the same terminal
 	// event must not rewrite a completed, aborted, or parked run as aborted.
 	if h.terminalPublished {
-		h.finishRun(RunOutcome{})
+		h.terminal = h.finishRun(RunOutcome{})
 		return
 	}
 	// Canceled with nothing on the error channel means someone stopped this run
 	// — /stop, a routed abort, or a lost owner lease — rather than it breaking.
 	if h.failed.Load() {
-		h.finishRun(RunOutcome{Status: sessionruntime.RunStatusAborted})
+		h.terminal = h.finishRun(RunOutcome{Status: sessionruntime.RunStatusAborted})
 		return
 	}
 	// An unnamed clean end lets the runtime preserve waiting_decision or derive
 	// completed from its event projection. Naming completion here would collapse
 	// a deferred decision into a terminal run.
-	h.finishRun(RunOutcome{})
+	h.terminal = h.finishRun(RunOutcome{})
+}
+
+// terminalEventTimeout bounds the wait to hand run_terminal to a consumer.
+// The run has ended by then, so a consumer that stopped reading only loses
+// the event; it must not hold the pump goroutine open.
+const terminalEventTimeout = 5 * time.Second
+
+// sendTerminal delivers turn.EventRunTerminal for the terminal record finish
+// wrote. A run without one (parked on a decision, ownership lost, or a failed
+// terminal write) ends without the event, as it did before the event existed.
+func (h *runHandle) sendTerminal(teamID, threadID string, seq int64) {
+	if h.terminal.RunID == "" || h.terminal.State == "" {
+		return
+	}
+	payload, err := turn.NewRunTerminalEvent(h.terminal.State, h.terminal.ErrorCode)
+	if err != nil {
+		return
+	}
+	timer := time.NewTimer(terminalEventTimeout)
+	defer timer.Stop()
+	select {
+	case h.events <- turn.Event{
+		RunID:    h.id,
+		TeamID:   teamID,
+		ThreadID: threadID,
+		Seq:      seq,
+		Kind:     turn.EventRunTerminal,
+		Payload:  payload,
+	}:
+	case <-timer.C:
+	}
 }
 
 func (h *runHandle) recordStreamFailure(err error) bool {
@@ -312,9 +351,19 @@ func (h *runHandle) AddOutboundAssets(refs []turn.OutboundAssetRef) {
 // wrapping each chunk as a turn.Event with a monotonically increasing Seq.
 func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, errCh <-chan error) {
 	// Deferred order (LIFO): detect external cancellation, cancel, stop direct
-	// injects, finish the durable run, close inject, then close the channel pair.
+	// injects, finish the durable run, close inject, send run_terminal, then
+	// close the channel pair.
+	var seq int64
+	clientGone := false
 	defer close(h.events)
 	defer close(h.errs)
+	defer func() {
+		// A consumer that went away, or canceled the run, does not read tail
+		// events.
+		if !clientGone {
+			h.sendTerminal(cmd.TeamID, cmd.ThreadID, seq+1)
+		}
+	}()
 	defer h.closeInject()
 	defer h.finish()
 	defer h.stopInject()
@@ -324,12 +373,11 @@ func (h *runHandle) pump(cmd turn.StartTurnCommand, chunkCh <-chan StreamChunk, 
 		// Check before cancel() masks the distinction.
 		if h.ctx.Err() != nil {
 			h.failed.Store(true)
+			clientGone = true
 		}
 		h.cancel()
 	}()
 
-	var seq int64
-	clientGone := false
 	ctxDone := h.ctx.Done()
 	for chunkCh != nil || errCh != nil {
 		select {

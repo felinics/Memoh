@@ -90,7 +90,7 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		if errText == "" {
 			return nil
 		}
-		return s.upsertText(ctx, "Error: "+errText, channel.MessageFormatPlain, true)
+		return s.upsertText(ctx, channel.ErrorReplyText(event.ErrorCode, errText), channel.MessageFormatPlain, true)
 	case channel.StreamEventAttachment:
 		return s.pushAttachments(ctx, event.Attachments)
 	case channel.StreamEventFinal:
