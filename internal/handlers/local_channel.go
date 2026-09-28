@@ -42,6 +42,7 @@ import (
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimefence"
 	skillset "github.com/felinics/memoh/internal/skills"
@@ -1613,6 +1614,7 @@ func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAd
 		return
 	}
 	failed := outcome.Status == sessionruntime.RunStatusErrored
+	ctx = application.WithRunOutcome(ctx, admission.Handle.RunID, outcome)
 	switch _, err := h.sessionRuntime.FinishRunWithErrorCode(ctx, admission.Handle, outcome.Status, outcome.ErrorCode()); {
 	case err == nil:
 		if h.agentService != nil && failed {
@@ -1756,19 +1758,23 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 		// The terminal write outlives the connection: a client that disappears
 		// mid-turn must still free the session, and baseCtx is already gone by
 		// the time an aborted run returns.
-		h.finishWSRun(context.WithoutCancel(baseCtx), admission, wsRunOutcome(delivered, err))
+		outcome := wsRunOutcome(delivered, err)
+		h.finishWSRun(context.WithoutCancel(baseCtx), admission, outcome)
 		if err != nil && connCtx.Err() == nil {
-			privateErr := err
-			if cause := apperror.CauseOf(err); cause != nil {
-				privateErr = cause
+			// The run's result record reports how the run ended. An error
+			// returned after the run's failure was already delivered, such as
+			// a failure to persist the turn, is not that outcome, and this is
+			// its only record.
+			if outcome.Cause != nil && outcome.Cause != err { //nolint:errorlint // Identity: whether the outcome is this error, not whether it wraps it.
+				result := errlog.Event(connCtx, logLabel, err, errlog.Options{})
+				attrs := append([]slog.Attr{
+					slog.String("operation", logLabel),
+					slog.String("bot_id", botID),
+					slog.String("run_id", ref.RunID),
+					slog.String("session_id", ref.SessionID),
+				}, result.Attrs()...)
+				h.logger.LogAttrs(connCtx, result.Level, "ws run failed after its failure was delivered", attrs...)
 			}
-			h.logger.ErrorContext(connCtx, "ws stream error",
-				slog.String("operation", logLabel),
-				slog.String("error_code", string(apperror.CodeOf(err))),
-				slog.Any("error", privateErr),
-				slog.String("bot_id", botID),
-				slog.String("run_id", ref.RunID),
-				slog.String("session_id", ref.SessionID))
 			sendWSErrorFromError(writer, ref, err)
 		}
 	}()

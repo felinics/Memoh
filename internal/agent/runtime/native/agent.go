@@ -680,6 +680,7 @@ func (a *Agent) assembleTools(
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
+	//nolint:contextcheck // Each tool call reads its own context from its ToolExecContext, not from this assembly.
 	return wrapToolTracing(allTools), usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
 }
 

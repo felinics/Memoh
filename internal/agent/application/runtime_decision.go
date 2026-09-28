@@ -604,7 +604,8 @@ func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionrunti
 		cause,
 		contextLifecycleCandidateMinimal,
 	)
-	if _, err := s.decisionRuntime.FinishRunWithErrorCode(context.WithoutCancel(nonNilContext(ctx)), handle, outcome.Status, outcome.ErrorCode()); err == nil && !staged {
+	finishCtx := WithRunOutcome(context.WithoutCancel(nonNilContext(ctx)), handle.RunID, outcome)
+	if _, err := s.decisionRuntime.FinishRunWithErrorCode(finishCtx, handle, outcome.Status, outcome.ErrorCode()); err == nil && !staged {
 		s.EnsureTerminalContextLifecycle(
 			lifecycleCtx,
 			handle.RunID,

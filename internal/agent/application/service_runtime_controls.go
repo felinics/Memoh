@@ -283,7 +283,8 @@ func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlR
 		if errors.Is(resultErr, context.Canceled) || runCtx.Err() != nil {
 			status = sessionruntime.RunStatusAborted
 		}
-		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(runCtx), terminalWriteTimeout)
+		outcome := RunOutcome{Status: status, Cause: resultErr}
+		finishCtx, finishCancel := context.WithTimeout(WithRunOutcome(context.WithoutCancel(runCtx), handle.RunID, outcome), terminalWriteTimeout)
 		defer finishCancel()
 		if _, err := s.sessionRuntime.FinishRunWithErrorCode(finishCtx, handle, status, string(apperror.CodeOf(publicRuntimeControlError(resultErr)))); err != nil {
 			resultErr = errors.Join(resultErr, err)

@@ -434,12 +434,6 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	}
 
 	if err != nil {
-		s.logger.ErrorContext(ctx, "external runtime prompt failed",
-			slog.String("bot_id", req.BotID),
-			slog.String("session_id", req.ThreadID),
-			slog.String("runtime", runtimeType),
-			slog.Any("error", err),
-		)
 		cancelPending()
 		if streamCtx.Err() != nil {
 			// A user stop or client disconnect: keep the partial output

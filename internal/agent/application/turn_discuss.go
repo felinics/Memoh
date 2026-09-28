@@ -121,6 +121,11 @@ func (h *discussHandle) emitErr(err error) bool {
 }
 
 func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
+	// Registered first so it runs last: the span covers the run's terminal
+	// write and reports what the run finished with.
+	runCtx := ctx
+	ctx, endTurn := startSelfCanceledTurnSpan(ctx, ChatRequest{BotID: cmd.BotID, ThreadID: cmd.ThreadID})
+	defer func() { endTurn(discussTurnSpanCause(runCtx, h)) }()
 	consumerGone := false
 	defer close(h.events)
 	defer close(h.errs)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -17,6 +18,9 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/logger"
 	"github.com/felinics/memoh/internal/rpc"
 	rpcruntime "github.com/felinics/memoh/internal/rpc/runtime"
@@ -147,6 +151,16 @@ func TestRPCResultLine(t *testing.T) {
 			wantError: "channel.config_invalid",
 		},
 		{
+			name: "provider failure is a dependency failure",
+			handler: func(context.Context, json.RawMessage) (any, error) {
+				return nil, apperror.Wrap(apperror.CodeAgentProviderAuthFailed, errors.New("api error 401"), nil)
+			},
+			wantCode:  codes.Unauthenticated,
+			wantLevel: "ERROR",
+			wantFault: "dependency",
+			wantError: "api error 401",
+		},
+		{
 			name: "internal error keeps the cause the status hides",
 			handler: func(context.Context, json.RawMessage) (any, error) {
 				return nil, errors.New("database connection lost")
@@ -188,6 +202,25 @@ func TestRPCResultLine(t *testing.T) {
 				t.Fatalf("error = %q, want it to contain %q", got, tt.wantError)
 			}
 		})
+	}
+}
+
+// The client attributes a failure from the fault the server wrote into the
+// envelope. The server has recorded the provider failure, so the client's
+// record of it is a warning.
+func TestRPCClientReadsTheServerFault(t *testing.T) {
+	conn, _ := startResultServer(t, func(context.Context, json.RawMessage) (any, error) {
+		return nil, apperror.Wrap(apperror.CodeAgentProviderRateLimited, errors.New("api error 429"), nil)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	restored := rpc.DecodeAppError(callProbe(ctx, conn))
+	if got := apperror.CodeOf(restored); got != apperror.CodeAgentProviderRateLimited {
+		t.Fatalf("code = %q", got)
+	}
+	result := errlog.Finish(ctx, "runtime.call", restored, errlog.Options{})
+	if result.Level != slog.LevelWarn || result.Report.Fault != errs.FaultDependency || result.Report.RemoteFault != "dependency" {
+		t.Fatalf("client result = level %v report %+v; want WARN dependency with remote_fault dependency", result.Level, result.Report)
 	}
 }
 

@@ -70,6 +70,7 @@ func (s *Service) SetSessionRuntime(manager *sessionruntime.Manager) {
 	manager.SetCommandHandler(s.handleRuntimeDecisionCommand)
 	manager.SetDecisionFinalizer(s.finalizeRuntimeDecisions)
 	manager.SetTerminalObserver(func(ctx context.Context, terminal sessionruntime.TerminalRun) {
+		s.logRunResult(ctx, terminal)
 		s.reconcileTerminalContextLifecycle(ctx, terminal)
 		// Steers die with their run; follow-ups outlive it. Close the steer
 		// queue before the follow-up starter so a continuation run never sees
@@ -218,7 +219,7 @@ func (s *Service) turnRunFinisher(ctx context.Context, admission sessionruntime.
 			lifecycleCause,
 			contextLifecycleCandidateMinimal,
 		)
-		ctx, cancel := context.WithTimeout(writeCtx, terminalWriteTimeout)
+		ctx, cancel := context.WithTimeout(WithRunOutcome(writeCtx, handle.RunID, outcome), terminalWriteTimeout)
 		defer cancel()
 		terminal, err := s.sessionRuntime.FinishRunWithErrorCode(ctx, handle, outcome.Status, outcome.ErrorCode())
 		switch {

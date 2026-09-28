@@ -218,3 +218,52 @@ func TestCatalogGolden(t *testing.T) {
 		t.Errorf("new codes are not recorded in %s; append these lines (or run with -update-golden):\n%s", goldenPath, strings.Join(missing, "\n"))
 	}
 }
+
+// declaredFaults is every catalog entry that declares its fault, and the fault
+// it declares. A code whose status gives the wrong attribution is listed here;
+// the reasons are in the catalog comments and docs/errors.md.
+var declaredFaults = map[Code]Fault{
+	CodeAgentProviderAuthFailed:            FaultDependency,
+	CodeAgentProviderQuotaExhausted:        FaultDependency,
+	CodeAgentProviderRateLimited:           FaultDependency,
+	CodeAgentProviderOverloaded:            FaultDependency,
+	CodeAgentResponseInterrupted:           FaultDependency,
+	CodeAgentResponseTimeout:               FaultDependency,
+	CodeRuntimePromptFailed:                FaultDependency,
+	CodeExternalRuntimeSessionResumeFailed: FaultDependency,
+	CodeACPConfigUpdateFailed:              FaultDependency,
+}
+
+// providerCodePrefixes name the codes a model provider's answer produces. A
+// provider is a dependency whatever status it answers with, so a new code
+// under these prefixes must declare its fault rather than take the client
+// fault its 4xx status would give.
+var providerCodePrefixes = []string{"agent.provider_", "agent.response_"}
+
+func TestCatalogDeclaredFaults(t *testing.T) {
+	t.Parallel()
+	for code, definition := range catalog {
+		switch definition.Fault {
+		case "", FaultClient, FaultServer, FaultDependency:
+		default:
+			t.Errorf("catalog entry %q declares unknown fault %q", code, definition.Fault)
+		}
+		if want, listed := declaredFaults[code]; definition.Fault != want {
+			if listed {
+				t.Errorf("catalog entry %q declares fault %q, want %q", code, definition.Fault, want)
+			} else {
+				t.Errorf("catalog entry %q declares fault %q; add it to declaredFaults", code, definition.Fault)
+			}
+		}
+		for _, prefix := range providerCodePrefixes {
+			if strings.HasPrefix(string(code), prefix) && definition.Fault != FaultDependency {
+				t.Errorf("provider code %q declares fault %q, want %q", code, definition.Fault, FaultDependency)
+			}
+		}
+	}
+	for code := range declaredFaults {
+		if _, ok := catalog[code]; !ok {
+			t.Errorf("declaredFaults lists %q, which is not in the catalog", code)
+		}
+	}
+}

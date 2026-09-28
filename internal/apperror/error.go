@@ -281,12 +281,32 @@ const (
 	CodeWorkspaceRestoreFailed                  Code = "workspace_restore_failed"
 )
 
+// Fault is the attribution a catalog entry declares for its code: who is at
+// fault when this process answers with it. The values are the fault values of
+// the error contract.
+type Fault string
+
+const (
+	// FaultClient: the caller must change the request.
+	FaultClient Fault = "client"
+	// FaultServer: this process failed.
+	FaultServer Fault = "server"
+	// FaultDependency: a service outside this process failed or refused the
+	// call, such as an LLM provider or an external agent runtime.
+	FaultDependency Fault = "dependency"
+)
+
 // Definition is the single catalog entry for a public error contract.
 // Type URIs and frontend i18n keys are derived mechanically from Code.
 type Definition struct {
 	HTTPStatus  int
 	Detail      string
 	AllowedArgs []string
+	// Fault is the attribution of the code when the status alone would give
+	// the wrong one, as for a provider's 401 or 429. Empty leaves it to the
+	// error chain: a 4xx status is a client fault, and a 5xx status is this
+	// process's fault unless its cause is marked as a dependency's.
+	Fault Fault
 }
 
 // codesync(error-catalog): Detail strings double as the no-locale fallback for
@@ -638,6 +658,7 @@ var catalog = map[Code]Definition{
 	CodeExternalRuntimeSessionResumeFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The session could not be resumed. Try again or start a new conversation.",
+		Fault:      FaultDependency,
 	},
 	CodeACPModelSelectionUnsupported: {
 		HTTPStatus: http.StatusBadRequest,
@@ -678,6 +699,7 @@ var catalog = map[Code]Definition{
 	CodeACPConfigUpdateFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The external agent could not apply the selected settings. Please retry.",
+		Fault:      FaultDependency,
 	},
 	CodeCapabilityAccessDenied:     {HTTPStatus: http.StatusForbidden, Detail: "You need Manage permission on this bot to manage its capabilities."},
 	CodeCapabilityRequestInvalid:   {HTTPStatus: http.StatusBadRequest, Detail: "The capability request is invalid. Check the action and its parameters."},
@@ -784,29 +806,40 @@ var catalog = map[Code]Definition{
 	CodeAgentToolTimeout:         {HTTPStatus: http.StatusGatewayTimeout, Detail: "The tool stopped reporting progress. Review its saved result before retrying."},
 	CodeScheduleExecutionTimeout: {HTTPStatus: http.StatusGatewayTimeout, Detail: "This scheduled run reached its execution limit. Review its progress or increase the limit."},
 	CodeVideoJobOutcomeUnknown:   {HTTPStatus: http.StatusBadGateway, Detail: "The video job status could not be confirmed. Check the saved job before creating another video."},
+	// Model provider codes. The provider is outside Memoh whoever holds the
+	// credential, so each is a dependency fault regardless of its status: a
+	// rejected key or an exhausted quota is the provider's answer, not a
+	// request Memoh refused. A content moderation refusal would be the one
+	// client fault.
 	CodeAgentResponseTimeout: {
 		HTTPStatus: http.StatusGatewayTimeout,
 		Detail:     "The model did not respond in time. Please try again.",
+		Fault:      FaultDependency,
 	},
 	CodeAgentResponseInterrupted: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The model response was interrupted. Please try again.",
+		Fault:      FaultDependency,
 	},
 	CodeAgentProviderOverloaded: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The model provider is overloaded right now. Please try again in a moment.",
+		Fault:      FaultDependency,
 	},
 	CodeAgentProviderRateLimited: {
 		HTTPStatus: http.StatusTooManyRequests,
 		Detail:     "The model provider rate limit was reached. Please wait a moment before sending again.",
+		Fault:      FaultDependency,
 	},
 	CodeAgentProviderQuotaExhausted: {
 		HTTPStatus: http.StatusPaymentRequired,
 		Detail:     "The model provider account has no remaining balance or quota.",
+		Fault:      FaultDependency,
 	},
 	CodeAgentProviderAuthFailed: {
 		HTTPStatus: http.StatusUnauthorized,
 		Detail:     "The model provider rejected the credentials. Check the provider API key.",
+		Fault:      FaultDependency,
 	},
 	CodeQueueSteerUnsupported: {
 		HTTPStatus: http.StatusConflict,
@@ -916,7 +949,7 @@ var catalog = map[Code]Definition{
 	CodeExternalAgentAccountUnbound:             {HTTPStatus: http.StatusForbidden, Detail: "Your chat account is not linked to a Memoh account, so it cannot use this bot's workspace. Link it from Profile, Connected Accounts, then try again.", AllowedArgs: []string{"link"}},
 	CodeExternalAgentContainerWorkspaceRequired: {HTTPStatus: http.StatusConflict, Detail: "This agent runtime needs a container workspace. Switch the bot to its container workspace, then try again."},
 	CodeRuntimeRunFailed:                        {HTTPStatus: http.StatusInternalServerError, Detail: "The response could not be completed. Please try again."},
-	CodeRuntimePromptFailed:                     {HTTPStatus: http.StatusBadGateway, Detail: "The agent runtime could not complete this response. Please try again."},
+	CodeRuntimePromptFailed:                     {HTTPStatus: http.StatusBadGateway, Detail: "The agent runtime could not complete this response. Please try again.", Fault: FaultDependency},
 	// Reaper codes: the run was ended because its owner or live state disappeared.
 	CodeRuntimeOwnerLeaseExpired: {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server handling this response stopped responding, so the response was ended. Please try again."},
 	CodeRuntimeLiveBackendLost:   {HTTPStatus: http.StatusServiceUnavailable, Detail: "The live state of this response was lost, so the response was ended. Please try again."},

@@ -218,11 +218,6 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			idle.Observe(event)
 		}
 		if eventErr := agentStreamEventError(event); eventErr != nil {
-			s.logger.ErrorContext(ctx, "triggered run stream error",
-				slog.String("bot_id", req.BotID),
-				slog.String("session_id", req.ThreadID),
-				slog.Any("error", eventErr),
-			)
 			if streamErr == nil {
 				streamErr = eventErr
 			}

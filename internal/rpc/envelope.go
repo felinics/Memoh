@@ -16,7 +16,8 @@ import (
 // The error envelope of the internal RPCs is a gRPC status carrying one
 // google.rpc.ErrorInfo. The reason is a catalog code, or a reason an RPC
 // package registers for one of its sentinels; the metadata carries the
-// catalog args. The status message is fixed English and carries no detail.
+// catalog args and, for a catalog code, the server's attribution under
+// MetadataFault. The status message is fixed English and carries no detail.
 // Text an adapter produced that the caller needs, such as a channel
 // platform's rejection reason, travels redacted under MetadataAdapterMessage.
 //
@@ -29,6 +30,12 @@ const errorDomain = "memoh.internal"
 // MetadataAdapterMessage is the ErrorInfo metadata key for an adapter's own
 // error text.
 const MetadataAdapterMessage = "adapter_message"
+
+// MetadataFault is the ErrorInfo metadata key for the fault the server
+// attributes the failure to. The client's diagnostics read it as the remote
+// fault; a status without it, from a server that predates it, is attributed
+// as a dependency failure.
+const MetadataFault = "fault"
 
 // Reason registers one sentinel of an RPC package on the wire.
 type Reason struct {
@@ -82,20 +89,23 @@ func (t Reasons) Decode(err error) error {
 }
 
 // AppErrorStatus returns the envelope for an apperror whose code is in the
-// catalog: the code is the reason, the catalog detail is the message and the
-// args are the metadata. It returns nil for any other error.
+// catalog: the code is the reason, the catalog detail is the message, and the
+// metadata holds the args and the fault this process attributes err to. It
+// returns nil for any other error.
 func AppErrorStatus(err error) error {
 	code := apperror.CodeOf(err)
 	definition, ok := apperror.Lookup(code)
 	if code == "" || !ok {
 		return nil
 	}
-	return envelope(statusCodeForHTTP(definition.HTTPStatus), definition.Detail, string(code), apperror.ArgsOf(err))
+	metadata := apperror.ArgsOf(err)
+	metadata[MetadataFault] = string(errs.FaultOf(err))
+	return envelope(statusCodeForHTTP(definition.HTTPStatus), definition.Detail, string(code), metadata)
 }
 
 // DecodeAppError restores the apperror of a received envelope whose reason is
-// a catalog code, with the catalog args from its metadata. It returns nil
-// otherwise.
+// a catalog code, with the catalog args from its metadata. The fault stays on
+// the received status, where diagnostics read it. It returns nil otherwise.
 func DecodeAppError(err error) error {
 	info := errorInfoOf(err)
 	if info == nil {

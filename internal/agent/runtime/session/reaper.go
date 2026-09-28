@@ -408,27 +408,31 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 		}
 	}
 	if r.terminalObserver != nil {
-		r.terminalObserver(context.WithoutCancel(ctx), terminalRunFromLedger(run))
+		terminal := terminalRunFromLedger(run)
+		terminal.Applied = applied
+		r.terminalObserver(context.WithoutCancel(ctx), terminal)
 	}
 	if !applied {
 		return nil
 	}
+	// The run's result record comes from the terminal observer; these only
+	// say which reaper branch resolved it.
 	if run.State == ledger.StateAborted {
-		r.logger.InfoContext(ctx, "session run finalized after abort intent",
+		r.logger.DebugContext(ctx, "session run finalized after abort intent",
 			slog.String("run_id", run.RunID),
 			slog.String("session_id", run.SessionID),
 		)
 		return nil
 	}
 	if run.State != ledger.StateLost {
-		r.logger.InfoContext(ctx, "session run finalized from durable finish proposal",
+		r.logger.DebugContext(ctx, "session run finalized from durable finish proposal",
 			slog.String("run_id", run.RunID),
 			slog.String("session_id", run.SessionID),
 			slog.String("state", string(run.State)),
 		)
 		return nil
 	}
-	r.logger.InfoContext(ctx, "session run marked lost",
+	r.logger.DebugContext(ctx, "session run marked lost",
 		slog.String("run_id", run.RunID),
 		slog.String("session_id", run.SessionID),
 		slog.String("error_code", errorCode),

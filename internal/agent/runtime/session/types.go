@@ -192,6 +192,12 @@ type TerminalRun struct {
 	State        string
 	ErrorCode    string
 	ErrorMessage string
+	// Applied reports that this observation's own fenced write made the run
+	// terminal. It is false when a replay, a retry, or a stale owner observes
+	// a transition some other write already applied. Exactly one observation
+	// of a run is Applied, so a consumer that must act once per run (the
+	// run's result record) keys on it rather than on the callback firing.
+	Applied bool
 }
 
 func (h RunHandle) normalized() RunHandle {

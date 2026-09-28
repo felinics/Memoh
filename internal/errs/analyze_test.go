@@ -155,6 +155,30 @@ func TestAttributionCases(t *testing.T) {
 	}
 }
 
+// A catalog entry that declares its fault is attributed by the declaration,
+// not by its status: a provider's 401 and 429 are the provider's answer, and a
+// provider's 503 is not this process failing. The response still renders the
+// public error.
+func TestCatalogDeclaredFault(t *testing.T) {
+	for _, code := range []apperror.Code{
+		apperror.CodeAgentProviderAuthFailed,
+		apperror.CodeAgentProviderRateLimited,
+		apperror.CodeAgentProviderOverloaded,
+		apperror.CodeAgentResponseInterrupted,
+	} {
+		t.Run(string(code), func(t *testing.T) {
+			r := Analyze(context.Background(), Wrap(apperror.Wrap(code, stderrors.New("api error"), nil), "run turn"))
+			if r.Fault != FaultDependency || r.Reason != string(code) || r.Public == nil || r.Public.Fault != FaultDependency {
+				t.Fatalf("report = %+v; want fault=dependency reason=%s with the public error", r, code)
+			}
+		})
+	}
+	undeclared := Analyze(context.Background(), apperror.New(codeClientBare, nil))
+	if undeclared.Fault != FaultClient || undeclared.Public == nil || undeclared.Public.Fault != "" {
+		t.Fatalf("undeclared 4xx report = %+v; want client from the status", undeclared)
+	}
+}
+
 func TestJoinTraversal(t *testing.T) {
 	sentinel := stderrors.New("sentinel")
 	_, file, line, _ := runtime.Caller(0)
@@ -240,5 +264,33 @@ func TestCauseTraversal(t *testing.T) {
 	})
 	if visits != 1 {
 		t.Fatalf("source visited %d times, want 1", visits)
+	}
+}
+
+func TestCallerEndedOnlyForTheCallersOwnCancellation(t *testing.T) {
+	t.Parallel()
+	ended := func(cause error) context.Context {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		cancel(cause)
+		return ctx
+	}
+	live, stop := context.WithCancel(context.Background())
+	defer stop()
+	tests := []struct {
+		name string
+		ctx  context.Context
+		want bool
+	}{
+		{name: "nil", ctx: nil},
+		{name: "live", ctx: live},
+		{name: "canceled", ctx: ended(context.Canceled), want: true},
+		{name: "deadline", ctx: ended(context.DeadlineExceeded), want: true},
+		{name: "own cause wrapping a deadline", ctx: ended(fmt.Errorf("idle timeout: %w", context.DeadlineExceeded))},
+		{name: "own cause", ctx: ended(stderrors.New("run ownership lost"))},
+	}
+	for _, tt := range tests {
+		if got := CallerEnded(tt.ctx); got != tt.want {
+			t.Errorf("%s: CallerEnded = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }

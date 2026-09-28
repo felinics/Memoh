@@ -131,6 +131,7 @@ func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, statu
 		}
 	}
 	terminal := terminalRunFromLedger(run)
+	terminal.Applied = applied
 	if run.RunID != handle.RunID || run.BotID != handle.BotID || run.SessionID != handle.SessionID {
 		return TerminalRun{}, ErrRunOwnershipLost
 	}

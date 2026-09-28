@@ -31,7 +31,9 @@ sentence with values in it.
 Every public code is registered in `internal/apperror/error.go`. An entry
 declares the HTTP status, a fixed English detail and the argument names that
 may be sent to a client (`AllowedArgs`). Arguments with any other name are
-dropped when the error is constructed.
+dropped when the error is constructed. An entry may also declare its `Fault`
+when the status would attribute the code wrongly (see
+[Attribution of a code](#attribution-of-a-code)).
 
 - A code stands for one cause: two conditions get the same code only if the
   client does the same thing about them. The same cause reached from several
@@ -70,7 +72,7 @@ The transport renders a public error in its own envelope:
 | HTTP request | `internal/server/error_handler.go`, as described below |
 | SSE or WebSocket event after the stream is open | The handler that sends the event: code, args and fault, no error text |
 | IM channel reply | The renderer in `internal/channel/inbound`, which looks up the code's copy |
-| Cross-process RPC | The RPC server packages, as a gRPC status whose `google.rpc.ErrorInfo` reason is the code and whose metadata holds the args |
+| Cross-process RPC | The RPC server packages, as a gRPC status whose `google.rpc.ErrorInfo` reason is the code and whose metadata holds the args and the server's `fault` |
 
 Errors produced by the transport itself (an unknown route, a method that is
 not allowed, a body over the limit, an unparsable WebSocket frame) are
@@ -127,6 +129,45 @@ from the status:
 A client that has no copy for a code uses the fault: the copy for the status
 for `client`, a retry prompt for `server` and `dependency`, and nothing for
 `canceled`.
+
+## Attribution of a code
+
+A public error with a catalog code is attributed by its entry. When the entry
+declares a `Fault`, that is the fault. Otherwise a 4xx status is a `client`
+fault, and a 5xx status is a `server` fault unless the cause in the chain is
+marked with `errs.WrapDependency`. The HTTP Problem, the result record of
+every boundary and the RPC envelope all take the fault from this one rule.
+
+A model provider is outside Memoh, whoever holds the credential. Every code
+that reports a provider's answer declares `dependency`, including a rejected
+key (401), an exhausted quota (402) and a rate limit (429); a content
+moderation refusal would be the one `client` code. The codes an external
+agent runtime reports about its own failure declare `dependency` for the same
+reason. A code that some producers raise for this process's own failures,
+such as `external_runtime.unavailable`, declares nothing and is attributed by
+its chain. A guard test in `internal/apperror` lists every declaration and
+fails when a code under `agent.provider_` or `agent.response_` declares none.
+
+| Code | Fault |
+| --- | --- |
+| `agent.provider_auth_failed`, `agent.provider_quota_exhausted`, `agent.provider_rate_limited`, `agent.provider_overloaded` | `dependency` |
+| `agent.response_interrupted`, `agent.response_timeout` | `dependency` |
+| `runtime_prompt_failed`, `external_runtime.session_resume_failed`, `acp.config_update_failed` | `dependency` |
+
+## Attribution across an RPC
+
+An RPC server writes the fault it attributes the error to under the `fault`
+key of the `ErrorInfo` metadata. The client records the error as `remote`
+with that value as `remote_fault`, and attributes it on its side:
+
+| `remote_fault` | Fault in the client |
+| --- | --- |
+| `client` | `server`: this process sent a request the server refused. A caller that deliberately forwarded end-user input marks the error with `errs.Forwarded`, and the fault stays `client`. |
+| `server` or `dependency` | `dependency` |
+| Absent, from a server that predates the key | `dependency` |
+
+A client that predates the key ignores it: the key is not a catalog argument
+and is not restored as one.
 
 ## Result records
 

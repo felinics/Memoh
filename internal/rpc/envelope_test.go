@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -121,6 +122,75 @@ func TestEnvelopeRoundTripsCatalogCodeAndArgs(t *testing.T) {
 	if !report.Remote || report.Reason != string(apperror.CodeBotNameTaken) {
 		t.Fatalf("report = %+v", report)
 	}
+}
+
+// The envelope carries the fault the server attributes the error to: the
+// declared fault of a provider code, and the status class of an undeclared
+// one. A client reads it as the remote fault, so a provider failure the
+// server logged is a dependency failure on both sides.
+func TestEnvelopeCarriesTheServerFault(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		sent        error
+		wantFault   string
+		clientFault errs.Fault
+	}{
+		{"declared provider fault", apperror.Wrap(apperror.CodeAgentProviderAuthFailed, errors.New("api error 401"), nil), "dependency", errs.FaultDependency},
+		{"client status", apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"}), "client", errs.FaultServer},
+		{"server status", apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("dial"), nil), "server", errs.FaultDependency},
+		{"server status with a dependency cause", apperror.Wrap(apperror.CodeWorkspaceUnreachable, errs.WrapDependency(errors.New("dial"), "reach workspace"), nil), "dependency", errs.FaultDependency},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wire := overWire(t, rpc.AppErrorStatus(fmtWrap(tc.sent)))
+			if got := errorInfo(t, wire).GetMetadata()[rpc.MetadataFault]; got != tc.wantFault {
+				t.Fatalf("envelope fault = %q, want %q", got, tc.wantFault)
+			}
+			report := errs.Analyze(context.Background(), rpc.DecodeAppError(wire))
+			if !report.Remote || report.RemoteFault != tc.wantFault || report.Fault != tc.clientFault {
+				t.Fatalf("client report = %+v; want remote_fault=%s fault=%s", report, tc.wantFault, tc.clientFault)
+			}
+		})
+	}
+}
+
+// A server that predates the fault key sends the code and args alone. The
+// client decodes it as before and attributes it to the dependency.
+func TestEnvelopeWithoutFaultFromAnOlderServer(t *testing.T) {
+	st, err := status.New(codes.Unauthenticated, "old server").WithDetails(&errdetails.ErrorInfo{
+		Reason: string(apperror.CodeAgentProviderAuthFailed),
+		Domain: "memoh.internal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := rpc.DecodeAppError(overWire(t, st.Err()))
+	if got := apperror.CodeOf(restored); got != apperror.CodeAgentProviderAuthFailed {
+		t.Fatalf("code = %q", got)
+	}
+	report := errs.Analyze(context.Background(), restored)
+	if !report.Remote || report.RemoteFault != "" || report.Fault != errs.FaultDependency {
+		t.Fatalf("report = %+v; want remote dependency without remote_fault", report)
+	}
+}
+
+// A client that predates the fault key restores the code and the catalog
+// args only; the fault is never taken for an arg.
+func TestEnvelopeFaultIsNotAnArg(t *testing.T) {
+	restored := rpc.DecodeAppError(overWire(t, rpc.AppErrorStatus(apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"}))))
+	if got := apperror.ArgsOf(restored); len(got) != 1 || got["field"] != "name" {
+		t.Fatalf("args = %v, want the catalog args alone", got)
+	}
+}
+
+func errorInfo(t *testing.T, err error) *errdetails.ErrorInfo {
+	t.Helper()
+	for _, detail := range status.Convert(err).Details() {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok {
+			return info
+		}
+	}
+	t.Fatalf("%v carries no ErrorInfo", err)
+	return nil
 }
 
 func TestAppErrorStatusRejectsNonCatalogErrors(t *testing.T) {

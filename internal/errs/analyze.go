@@ -30,6 +30,10 @@ type Public struct {
 	// Message is the catalog detail, or the status message.
 	Message  string
 	Metadata map[string]string
+	// Fault is the attribution the catalog entry declares for the code. It
+	// is empty when the entry declares none and for a native gRPC status; the
+	// fault then follows from the status and the rest of the chain.
+	Fault Fault
 	// Err is the chain node recognized as the public error. A gRPC boundary
 	// rebuilds its status from this node so the details survive.
 	Err error
@@ -99,6 +103,27 @@ func single(err error) error {
 // Analyze attributes err, returned by a unit of work running under ctx. A nil
 // ctx means the unit has no caller that could have canceled it.
 func Analyze(ctx context.Context, err error) Report {
+	return analyze(err, CallerEnded(ctx))
+}
+
+// CallerEnded reports whether ctx has ended because its caller canceled it
+// or its deadline passed: its cause is exactly context.Canceled or
+// context.DeadlineExceeded. A context this process ended for its own reason,
+// such as an idle timeout or a lost run, did not end by its caller. A nil ctx
+// has no caller and never ends.
+func CallerEnded(ctx context.Context) bool {
+	return ctx != nil && ctx.Err() != nil && callerEnded(context.Cause(ctx))
+}
+
+// FaultOf is the fault Analyze attributes err to when no caller has canceled
+// the unit. An RPC server sends it to its client with the error.
+func FaultOf(err error) Fault {
+	return analyze(err, false).Fault
+}
+
+// analyze attributes err. ended reports that the unit's caller has
+// canceled it or its deadline has passed.
+func analyze(err error, ended bool) Report {
 	r := Report{Fault: FaultServer, Reason: reasonInternal, Text: Text(err)}
 	if err == nil {
 		return r
@@ -151,11 +176,13 @@ func Analyze(ctx context.Context, err error) Report {
 		}
 	}
 	switch {
-	case ctx != nil && ctx.Err() != nil && callerEnded(context.Cause(ctx)) && containsCanceled(nodes):
+	case ended && containsCanceled(nodes):
 		r.Fault = FaultCanceled
 		r.Reason = reasonCanceled
 	case r.Public != nil && r.Remote:
 		r.Fault = remoteFault(r.RemoteFault, publicForwarded)
+	case r.Public != nil && r.Public.Fault != "":
+		r.Fault = r.Public.Fault
 	case r.Public != nil && r.Public.Code < http.StatusInternalServerError:
 		r.Fault = FaultClient
 	case r.Remote:
@@ -184,9 +211,9 @@ func publicOf(n node) (*Public, bool) {
 	return grpcPublic(n)
 }
 
-// appPublic recognizes an apperror whose code is in the catalog. An
-// unregistered code is not a public error: the HTTP boundary cannot render it
-// as a Problem either, and responds internal.
+// appPublic recognizes an apperror whose code is in the catalog, with the
+// fault its entry declares. An unregistered code is not a public error: the
+// HTTP boundary cannot render it as a Problem either, and responds internal.
 func appPublic(err error) (*Public, bool) {
 	e, ok := err.(*apperror.Error)
 	if !ok {
@@ -197,7 +224,7 @@ func appPublic(err error) (*Public, bool) {
 	if !ok {
 		return nil, false
 	}
-	return &Public{Code: definition.HTTPStatus, Reason: string(code), Message: definition.Detail, Metadata: apperror.ArgsOf(e), Err: e}, true
+	return &Public{Code: definition.HTTPStatus, Reason: string(code), Message: definition.Detail, Metadata: apperror.ArgsOf(e), Fault: Fault(definition.Fault), Err: e}, true
 }
 
 // callerEnded reports whether the caller ended the context: its cause is

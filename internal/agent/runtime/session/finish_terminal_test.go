@@ -25,7 +25,7 @@ func TestFinishRunReturnsObservedTerminal(t *testing.T) {
 	want := TerminalRun{
 		RunID: admission.RunID, BotID: testBotID, SessionID: testSessionID,
 		FencingToken: admission.Handle.FencingToken, State: string(ledger.StateFailed),
-		ErrorCode: "agent.response_timeout",
+		ErrorCode: "agent.response_timeout", Applied: true,
 	}
 	if terminal != want {
 		t.Fatalf("FinishRunWithErrorCode() terminal = %+v, want %+v", terminal, want)

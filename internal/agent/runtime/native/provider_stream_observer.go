@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/telemetry"
 )
 
@@ -88,24 +89,39 @@ func (p providerCallObserver) startCallSpan(ctx context.Context, name string) (c
 
 // endCallSpan closes a call span, naming how the call ended.
 //
-// A cancelled call is not a failure: a user who pressed stop, and a steer that
-// replaced the in-flight answer, both cancel the context. Recording those as
-// errors would make the model error rate track how often people change their
-// mind, which is the same reasoning turn_tracing.go applies to the turn.
+// A call its caller cancelled is not a failure: a user who pressed stop, and a
+// steer that replaced the in-flight answer, both end the context. Recording
+// those as errors would make the model error rate track how often people
+// change their mind, which is the same reasoning turn_tracing.go applies to the
+// turn. A context this process ended for its own reason, such as the idle
+// timeout or a lost run, did end the call in failure, and is recorded as one.
 func endCallSpan(ctx context.Context, span trace.Span, err error) {
 	switch {
 	case errors.Is(context.Cause(ctx), errModelSteered):
 		span.SetAttributes(attribute.String("agent.model.outcome", "steered"))
-	case errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled):
+	case errs.CallerEnded(ctx):
 		span.SetAttributes(attribute.String("agent.model.outcome", "aborted"))
-	case err != nil:
+	case err != nil || ctx.Err() != nil:
 		span.SetAttributes(attribute.String("agent.model.outcome", "errored"))
-		span.RecordError(err)
+		span.RecordError(spanFailure(ctx, err))
 		span.SetStatus(codes.Error, "")
 	default:
 		span.SetAttributes(attribute.String("agent.model.outcome", "completed"))
 	}
 	span.End()
+}
+
+// spanFailure is the failure a span records for a call that ended with err
+// under ctx. A context error says only that the context ended; the cause says
+// why, so it is recorded instead.
+func spanFailure(ctx context.Context, err error) error {
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+	return err
 }
 
 //nolint:gocritic // hugeParam: DoGenerate implements the sdk.Provider seam, which passes Request by value.

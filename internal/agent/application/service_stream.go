@@ -259,11 +259,6 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		}
 		dispatch, err := s.resolveRuntimeDispatch(ctx, streamReq)
 		if err != nil {
-			s.logger.ErrorContext(ctx, "StreamChat: runtime dispatch failed",
-				slog.String("bot_id", streamReq.BotID),
-				slog.String("session_id", streamReq.ThreadID),
-				slog.Any("error", err),
-			)
 			fail(err)
 			return
 		}
@@ -288,22 +283,12 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		if !streamReq.UserMessagePersisted {
 			streamReq, err = s.applyUserMessageHook(streamCtx, streamReq)
 			if err != nil {
-				s.logger.ErrorContext(ctx, "agent stream user message hook failed",
-					slog.String("bot_id", streamReq.BotID),
-					slog.String("chat_id", streamReq.ChatID),
-					slog.Any("error", err),
-				)
 				fail(err)
 				return
 			}
 		}
 		rc, streamReq, err := s.resolve(streamCtx, streamReq)
 		if err != nil {
-			s.logger.ErrorContext(ctx, "agent stream resolve failed",
-				slog.String("bot_id", streamReq.BotID),
-				slog.String("chat_id", streamReq.ChatID),
-				slog.Any("error", err),
-			)
 			fail(err)
 			return
 		}
@@ -348,15 +333,9 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 				toolCallCount++
 			}
 
-			if eventErr := outcome.observe(event); eventErr != nil {
-				s.logger.ErrorContext(ctx, "agent stream error",
-					slog.String("bot_id", streamReq.BotID),
-					slog.String("chat_id", streamReq.ChatID),
-					slog.String("model_id", rc.model.ID),
-					slog.String("code", event.Code),
-					slog.String("error", event.Error),
-				)
-			}
+			// A failure event is recorded, not logged: the run's result
+			// record reports how the run ended, once.
+			_ = outcome.observe(event)
 			if hasVisibleAgentStreamOutput(event) {
 				hasVisibleOutput = true
 			}
@@ -559,7 +538,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	abortCh <-chan struct{},
 	preflight func(context.Context) error,
 	postPersist func(context.Context, []messagepkg.Message) error,
-) (_ []messagepkg.Message, _ RunOutcome, turnErr error) {
+) (_ []messagepkg.Message, runOutcome RunOutcome, turnErr error) {
 	endActiveTurn, err := s.activeTurns.begin()
 	if err != nil {
 		return nil, RunOutcome{}, err
@@ -572,8 +551,13 @@ func (s *Service) streamChatWSResultWithHooks(
 	// returns produced. Tracking it by hand would mean touching fifteen
 	// return statements and being wrong the first time someone adds a
 	// sixteenth.
+	//
+	// A failure the stream delivered is not returned as an error, so the span
+	// reads the run's lifecycle cause as well: the turn span and the run's
+	// result record reach the same conclusion.
+	var lifecycle *outcomeRecorder
 	ctx, endTurn := startTurnSpan(ctx, req)
-	defer func() { endTurn(turnErr) }()
+	defer func() { endTurn(turnSpanCause(turnErr, lifecycle, runOutcome)) }()
 
 	if err := rejectReservedSkillMetadataIfPresent(req); err != nil {
 		return nil, RunOutcome{}, err
@@ -583,11 +567,6 @@ func (s *Service) streamChatWSResultWithHooks(
 	}
 	dispatch, err := s.resolveRuntimeDispatch(ctx, req)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "StreamChatWS: runtime dispatch failed",
-			slog.String("bot_id", req.BotID),
-			slog.String("session_id", req.ThreadID),
-			slog.Any("error", err),
-		)
 		return nil, RunOutcome{}, err
 	}
 	if dispatch.kind == dispatchExternal {
@@ -621,19 +600,11 @@ func (s *Service) streamChatWSResultWithHooks(
 	if !req.UserMessagePersisted && !req.ReusePersistedUserMessage {
 		req, err = s.applyUserMessageHook(ctx, req)
 		if err != nil {
-			s.logger.ErrorContext(ctx, "StreamChatWS: user message hook failed",
-				slog.String("bot_id", req.BotID),
-				slog.Any("error", err),
-			)
 			return nil, RunOutcome{}, err
 		}
 	}
 	rc, req, err := s.resolve(ctx, req)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "StreamChatWS: resolve failed",
-			slog.String("bot_id", req.BotID),
-			slog.Any("error", err),
-		)
 		return nil, RunOutcome{}, fmt.Errorf("resolve: %w", err)
 	}
 	req.Query = rc.query
@@ -664,6 +635,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 	terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 	outcome := newOutcomeRecorder(streamCtx)
+	lifecycle = outcome
 	// A run that fails for a reason without a catalogued code, such as an
 	// abort nobody requested, is named when its terminal event is stamped, so
 	// the live frame, the run's recorded code and its history agree.
@@ -697,14 +669,9 @@ func (s *Service) streamChatWSResultWithHooks(
 			toolCallCount++
 		}
 
-		if eventErr := outcome.observe(event); eventErr != nil {
-			s.logger.ErrorContext(ctx, "agent stream error",
-				slog.String("bot_id", req.BotID),
-				slog.String("chat_id", req.ChatID),
-				slog.String("model_id", modelID),
-				slog.String("error", event.Error),
-			)
-		}
+		// A failure event is recorded, not logged: the run's result record
+		// reports how the run ended, once.
+		_ = outcome.observe(event)
 		if hasVisibleAgentStreamOutput(event) {
 			hasVisibleOutput = true
 		}
