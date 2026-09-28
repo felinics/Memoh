@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/time/rate"
 	tele "gopkg.in/telebot.v4"
 
 	"github.com/felinics/memoh/internal/channel"
@@ -575,26 +577,181 @@ func TestDraftMode_DeltaUsesSendDraft(t *testing.T) {
 	}
 }
 
-func TestDraftMode_PhaseEndTextIsNoOp(t *testing.T) {
-	t.Parallel()
+// draftModeRecorder stubs the Telegram calls a draft-mode stream makes and
+// records drafts and permanent messages in the order they are sent.
+type draftModeRecorder struct {
+	mu        sync.Mutex
+	drafts    []string
+	permanent []string
+}
 
+func (r *draftModeRecorder) snapshot() ([]string, []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.drafts...), append([]string(nil), r.permanent...)
+}
+
+func newDraftModeTestStream(t *testing.T) (*telegramOutboundStream, *draftModeRecorder) {
+	t.Helper()
 	adapter := NewTelegramAdapter(nil)
+	adapter.streamLimiter = rate.NewLimiter(rate.Inf, 1)
 	s := &telegramOutboundStream{
 		adapter:       adapter,
+		cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:        "123",
 		isPrivateChat: true,
 		draftID:       1,
 		streamChatID:  123,
 	}
-	s.buf.WriteString("some content")
-	ctx := context.Background()
-
-	err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{
-		Type:  channel.StreamEventPhaseEnd,
-		Phase: channel.StreamPhaseText,
-	}))
-	if err != nil {
-		t.Fatalf("PhaseEnd in draft mode should be no-op: %v", err)
+	rec := &draftModeRecorder{}
+	origGetBot, origDraft, origSendText := getOrCreateBotForTest, sendDraftForTest, sendTextForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
 	}
+	sendDraftForTest = func(_ *tele.Bot, _ int64, _ int, text string, _ string) error {
+		rec.mu.Lock()
+		rec.drafts = append(rec.drafts, text)
+		rec.mu.Unlock()
+		return nil
+	}
+	sendTextForTest = func(_ *tele.Bot, _ string, text string, _ int, _ string) (int64, int, error) {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		rec.permanent = append(rec.permanent, text)
+		return 123, len(rec.permanent), nil
+	}
+	t.Cleanup(func() {
+		_ = s.Close(context.Background())
+		getOrCreateBotForTest, sendDraftForTest, sendTextForTest = origGetBot, origDraft, origSendText
+	})
+	return s, rec
+}
+
+func pushTelegramEvents(t *testing.T, s *telegramOutboundStream, events ...channel.StreamEvent) {
+	t.Helper()
+	for _, event := range events {
+		if err := s.Push(context.Background(), mustPreparedTelegramEvent(t, event)); err != nil {
+			t.Fatalf("push %s: %v", event.Type, err)
+		}
+	}
+}
+
+func textDelta(delta string) channel.StreamEvent {
+	return channel.StreamEvent{Type: channel.StreamEventDelta, Phase: channel.StreamPhaseText, Delta: delta}
+}
+
+var textPhaseEnd = channel.StreamEvent{Type: channel.StreamEventPhaseEnd, Phase: channel.StreamPhaseText}
+
+// TestDraftMode_PhaseEndFlushesThrottledTail verifies that text_end shows the
+// whole phase even when the delta throttle held back its last deltas; with
+// hidden tool calls nothing else reaches the adapter until the tool finishes.
+func TestDraftMode_PhaseEndFlushesThrottledTail(t *testing.T) {
+	s, rec := newDraftModeTestStream(t)
+
+	pushTelegramEvents(t, s, textDelta("Let me check the file. "), textDelta("Reading it now."))
+	drafts, _ := rec.snapshot()
+	if len(drafts) != 1 || drafts[0] != "Let me check the file. " {
+		t.Fatalf("second delta should be throttled, drafts = %q", drafts)
+	}
+
+	pushTelegramEvents(t, s, textPhaseEnd)
+	drafts, permanent := rec.snapshot()
+	if got := drafts[len(drafts)-1]; got != "Let me check the file. Reading it now." {
+		t.Fatalf("text_end should flush the whole phase as a draft, got %q", got)
+	}
+	if len(permanent) != 0 {
+		t.Fatalf("text_end must not commit the phase yet, permanent = %q", permanent)
+	}
+}
+
+// TestDraftMode_NextTextPhaseCommitsClosedPhase covers a reply with a hidden
+// tool call: the phase before the tool becomes its own permanent message when
+// the next phase starts, and the last phase is delivered by the final event.
+func TestDraftMode_NextTextPhaseCommitsClosedPhase(t *testing.T) {
+	s, rec := newDraftModeTestStream(t)
+
+	pushTelegramEvents(t, s,
+		textDelta("Let me check the file. "), textDelta("Reading it now."), textPhaseEnd,
+		textDelta("Done: 42 lines."),
+	)
+	drafts, permanent := rec.snapshot()
+	if len(permanent) != 1 || permanent[0] != "Let me check the file. Reading it now." {
+		t.Fatalf("next phase should commit the closed phase, permanent = %q", permanent)
+	}
+	if got := drafts[len(drafts)-1]; got != "Done: 42 lines." {
+		t.Fatalf("draft should hold only the new phase, got %q", got)
+	}
+
+	pushTelegramEvents(t, s, textPhaseEnd, channel.StreamEvent{
+		Type:  channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "Done: 42 lines."}},
+	})
+	_, permanent = rec.snapshot()
+	want := []string{"Let me check the file. Reading it now.", "Done: 42 lines."}
+	if strings.Join(permanent, "|") != strings.Join(want, "|") {
+		t.Fatalf("permanent messages = %q, want %q", permanent, want)
+	}
+}
+
+// TestDraftMode_ClosedPhaseKeepAlive verifies that a closed phase is re-sent
+// while it waits (a Telegram draft expires after about 30 seconds) and that
+// the refresh stops before the message that replaces it is sent.
+func TestDraftMode_ClosedPhaseKeepAlive(t *testing.T) {
+	origInterval := telegramDraftKeepAliveInterval
+	telegramDraftKeepAliveInterval = 10 * time.Millisecond
+	t.Cleanup(func() { telegramDraftKeepAliveInterval = origInterval })
+	s, rec := newDraftModeTestStream(t)
+
+	pushTelegramEvents(t, s, textDelta("Running the tests."), textPhaseEnd)
+	waitForTelegramDrafts(t, rec, 4)
+	drafts, _ := rec.snapshot()
+	for _, draft := range drafts {
+		if draft != "Running the tests." {
+			t.Fatalf("keep-alive should resend the closed phase, got %q", drafts)
+		}
+	}
+
+	pushTelegramEvents(t, s, channel.StreamEvent{
+		Type:  channel.StreamEventFinal,
+		Final: &channel.StreamFinalizePayload{Message: channel.Message{Text: "Running the tests."}},
+	})
+	draftsAtFinal, permanent := rec.snapshot()
+	if len(permanent) != 1 || permanent[0] != "Running the tests." {
+		t.Fatalf("final should deliver the last phase once, permanent = %q", permanent)
+	}
+	time.Sleep(5 * telegramDraftKeepAliveInterval)
+	if drafts, _ := rec.snapshot(); len(drafts) != len(draftsAtFinal) {
+		t.Fatalf("keep-alive must stop at the final event: %d drafts before, %d after", len(draftsAtFinal), len(drafts))
+	}
+}
+
+// TestDraftMode_ErrorCommitsClosedPhase verifies that a run failing after a
+// phase ended keeps that phase in the chat ahead of the error message.
+func TestDraftMode_ErrorCommitsClosedPhase(t *testing.T) {
+	s, rec := newDraftModeTestStream(t)
+
+	pushTelegramEvents(t, s,
+		textDelta("Fetching the page."), textPhaseEnd,
+		channel.StreamEvent{Type: channel.StreamEventError, Error: "tool timed out"},
+	)
+	_, permanent := rec.snapshot()
+	want := []string{"Fetching the page.", "Error: tool timed out"}
+	if strings.Join(permanent, "|") != strings.Join(want, "|") {
+		t.Fatalf("permanent messages = %q, want %q", permanent, want)
+	}
+}
+
+func waitForTelegramDrafts(t *testing.T, rec *draftModeRecorder, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if drafts, _ := rec.snapshot(); len(drafts) >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	drafts, _ := rec.snapshot()
+	t.Fatalf("expected at least %d drafts, got %d", n, len(drafts))
 }
 
 // Render stripping is covered in ask_user_test.go (TestRenderAskUserChoiceShowsOnlyQuestion).

@@ -24,6 +24,11 @@ const (
 	telegramStreamPendingSuffix = "\n……"
 )
 
+// telegramDraftKeepAliveInterval re-sends a closed draft segment while it waits
+// to be committed. Telegram shows a draft for about 30 seconds, and a hidden
+// tool call can run for much longer than that.
+var telegramDraftKeepAliveInterval = 20 * time.Second
+
 var testEditFunc func(bot *tele.Bot, chatID int64, msgID int, text string, parseMode string) error
 
 type telegramOutboundStream struct {
@@ -47,7 +52,17 @@ type telegramOutboundStream struct {
 	// permanent message so empty-buffer final events can skip duplicates without
 	// dropping final-only responses.
 	draftPermanentSent bool
+	// draftSegmentClosed marks a draft-mode text phase that ended (text_end)
+	// but is not committed yet. The next text phase commits it; when it is the
+	// last phase, StreamEventFinal delivers it with the authoritative text.
+	draftSegmentClosed bool
+	draftKeepAlive     *telegramDraftKeepAlive
 	toolMessages       map[string]telegramToolCallMessage
+}
+
+type telegramDraftKeepAlive struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 // telegramToolCallMessage tracks the message posted for a tool call's
@@ -262,7 +277,21 @@ func (s *telegramOutboundStream) sendDraft(ctx context.Context, text string) err
 	if time.Since(lastEditedAt) < telegramDraftThrottle {
 		return nil
 	}
+	return s.sendDraftNow(ctx, text)
+}
+
+// sendDraftNow sends a partial message via sendMessageDraft without the delta
+// throttle. It still skips while a 429 backoff is pending.
+func (s *telegramOutboundStream) sendDraftNow(ctx context.Context, text string) error {
 	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	s.mu.Lock()
+	backoffUntil := s.lastEditedAt
+	chatID := s.streamChatID
+	parseMode := s.parseMode
+	s.mu.Unlock()
+	if time.Now().Before(backoffUntil) {
 		return nil
 	}
 
@@ -274,7 +303,7 @@ func (s *telegramOutboundStream) sendDraft(ctx context.Context, text string) err
 		return err
 	}
 
-	draftErr := sendTelegramDraft(bot, s.streamChatID, s.draftID, text, s.parseMode)
+	draftErr := sendTelegramDraft(bot, chatID, s.draftID, text, parseMode)
 	if draftErr != nil {
 		if isTelegramTooManyRequests(draftErr) {
 			d := getTelegramRetryAfter(draftErr)
@@ -340,7 +369,95 @@ func (s *telegramOutboundStream) resetStreamState() {
 	s.lastEdited = ""
 	s.lastEditedAt = time.Time{}
 	s.buf.Reset()
+	s.draftSegmentClosed = false
 	s.mu.Unlock()
+}
+
+// closeDraftSegment handles text_end in draft mode. The delta throttle may
+// have held back the end of the phase, and while hidden tool calls run nothing
+// else reaches the adapter, so the complete phase is shown now and kept on
+// screen until the next text phase commits it or the final event delivers it.
+func (s *telegramOutboundStream) closeDraftSegment(ctx context.Context) {
+	s.mu.Lock()
+	text := strings.TrimSpace(s.buf.String())
+	if text != "" {
+		s.draftSegmentClosed = true
+	}
+	s.mu.Unlock()
+	if text == "" {
+		return
+	}
+	text = s.formatStreamContent(text)
+	if err := s.sendDraftNow(ctx, text); err != nil && s.adapter.logger != nil {
+		s.adapter.logger.WarnContext(ctx, "telegram: draft segment flush failed", slog.Any("error", err))
+	}
+	s.startDraftKeepAlive(ctx, text)
+}
+
+// commitClosedDraftSegment sends a closed draft-mode text phase as a permanent
+// message once the next text phase starts. A draft is only a preview, so the
+// text streamed before a tool call would otherwise disappear from the chat.
+func (s *telegramOutboundStream) commitClosedDraftSegment(ctx context.Context) {
+	s.mu.Lock()
+	closed := s.draftSegmentClosed
+	text := strings.TrimSpace(s.buf.String())
+	s.mu.Unlock()
+	if !closed {
+		return
+	}
+	s.stopDraftKeepAlive()
+	if text != "" {
+		text = s.formatStreamContent(text)
+		if err := s.sendPermanentMessage(ctx, text, s.parseMode); err != nil && s.adapter.logger != nil {
+			s.adapter.logger.WarnContext(ctx, "telegram: draft segment commit failed", slog.Any("error", err))
+		}
+	}
+	s.resetStreamState()
+}
+
+func (s *telegramOutboundStream) startDraftKeepAlive(ctx context.Context, text string) {
+	s.stopDraftKeepAlive()
+	keepAliveCtx, cancel := context.WithCancel(ctx)
+	keepAlive := &telegramDraftKeepAlive{cancel: cancel, done: make(chan struct{})}
+	s.mu.Lock()
+	s.draftKeepAlive = keepAlive
+	s.mu.Unlock()
+	go func() {
+		defer close(keepAlive.done)
+		ticker := time.NewTicker(telegramDraftKeepAliveInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-keepAliveCtx.Done():
+				return
+			case <-ticker.C:
+			}
+			s.mu.Lock()
+			current := s.draftKeepAlive == keepAlive && s.draftSegmentClosed
+			s.mu.Unlock()
+			if !current {
+				return
+			}
+			if err := s.sendDraftNow(keepAliveCtx, text); err != nil && keepAliveCtx.Err() == nil && s.adapter.logger != nil {
+				s.adapter.logger.DebugContext(ctx, "telegram: draft keep-alive failed", slog.Any("error", err))
+			}
+		}
+	}()
+}
+
+// stopDraftKeepAlive stops the keep-alive and waits for an in-flight draft
+// send, so no stale draft can land after the message that replaces it.
+// Must be called without holding s.mu.
+func (s *telegramOutboundStream) stopDraftKeepAlive() {
+	s.mu.Lock()
+	keepAlive := s.draftKeepAlive
+	s.draftKeepAlive = nil
+	s.mu.Unlock()
+	if keepAlive == nil {
+		return
+	}
+	keepAlive.cancel()
+	<-keepAlive.done
 }
 
 // deliverFinalText sends or edits the final text depending on chat mode.
@@ -407,6 +524,7 @@ func (s *telegramOutboundStream) pushToolCallStart(ctx context.Context, tc *chan
 		bufText = s.formatStreamContent(bufText)
 	}
 	if s.isPrivateChat {
+		s.stopDraftKeepAlive()
 		// In draft mode, send buffered text as a permanent message before tool execution.
 		if bufText != "" {
 			if err := s.sendPermanentMessage(ctx, bufText, s.parseMode); err != nil {
@@ -638,9 +756,10 @@ func (s *telegramOutboundStream) pushPhaseEnd(ctx context.Context, event channel
 	if event.Phase != channel.StreamPhaseText {
 		return nil
 	}
-	// In draft mode, skip phase-end finalization; StreamEventFinal sends the
-	// permanent formatted message.
+	// In draft mode, a phase is not finalized here: the next text phase or
+	// StreamEventFinal sends it as a permanent message.
 	if s.isPrivateChat {
+		s.closeDraftSegment(ctx)
 		return nil
 	}
 	s.mu.Lock()
@@ -660,6 +779,9 @@ func (s *telegramOutboundStream) pushDelta(ctx context.Context, event channel.Pr
 	if event.Delta == "" || event.Phase == channel.StreamPhaseReasoning {
 		return nil
 	}
+	if s.isPrivateChat {
+		s.commitClosedDraftSegment(ctx)
+	}
 	s.mu.Lock()
 	s.buf.WriteString(event.Delta)
 	content := s.buf.String()
@@ -675,6 +797,9 @@ func (s *telegramOutboundStream) pushDelta(ctx context.Context, event channel.Pr
 }
 
 func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.PreparedStreamEvent) error {
+	if s.isPrivateChat {
+		s.stopDraftKeepAlive()
+	}
 	// In draft mode, read and reset buffer atomically to prevent duplicate
 	// permanent messages when multiple StreamEventFinal events fire
 	// (one per assistant output in multi-tool-call responses).
@@ -683,6 +808,7 @@ func (s *telegramOutboundStream) pushFinal(ctx context.Context, event channel.Pr
 	draftPermanentSent := s.draftPermanentSent
 	if s.isPrivateChat {
 		s.buf.Reset()
+		s.draftSegmentClosed = false
 	}
 	s.mu.Unlock()
 
@@ -910,6 +1036,9 @@ func (s *telegramOutboundStream) pushError(ctx context.Context, event channel.Pr
 		return nil
 	}
 	display := "Error: " + errText
+	if s.isPrivateChat {
+		s.commitClosedDraftSegment(ctx)
+	}
 	// Error messages are plain text; reset parseMode so HTML-mode
 	// left over from earlier deltas does not corrupt the output.
 	s.mu.Lock()
@@ -976,6 +1105,7 @@ func (s *telegramOutboundStream) Close(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	s.stopDraftKeepAlive()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
