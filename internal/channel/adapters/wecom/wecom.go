@@ -294,6 +294,12 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.textBuilder.WriteString(event.Delta)
 		s.mu.Unlock()
 		return s.pushPreview(ctx)
+	case channel.StreamEventReset:
+		// The next preview replaces the failed attempt's text on the same stream.
+		s.mu.Lock()
+		s.textBuilder.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
 			return nil

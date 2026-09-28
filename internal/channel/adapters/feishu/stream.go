@@ -73,6 +73,10 @@ func (s *feishuOutboundStream) Push(ctx context.Context, event channel.PreparedS
 			return nil
 		}
 		return s.patchCard(ctx, s.textBuffer.String())
+	case channel.StreamEventReset:
+		// Keep the card; the regenerated reply patches over the failed text.
+		s.textBuffer.Reset()
+		return nil
 	case channel.StreamEventToolCallStart:
 		bufText := strings.TrimSpace(s.textBuffer.String())
 		if s.cardMessageID != "" && bufText != "" {

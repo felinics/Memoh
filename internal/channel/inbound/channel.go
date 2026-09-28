@@ -2357,6 +2357,12 @@ func mapStreamChunkToChannelEvents(chunk json.RawMessage) ([]channel.StreamEvent
 				},
 			},
 		}, finalMessages, nil
+	case "retry":
+		// The agent discards the failed attempt and regenerates the reply;
+		// the terminal messages carry only the surviving attempt.
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventReset},
+		}, finalMessages, nil
 	case "processing_started":
 		return []channel.StreamEvent{
 			{Type: channel.StreamEventProcessingStarted},

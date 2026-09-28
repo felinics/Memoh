@@ -71,6 +71,13 @@ func (s *slackOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 
 		return s.updateMessage(ctx)
 
+	case channel.StreamEventReset:
+		// Keep the message; the regenerated reply edits over the failed text.
+		s.mu.Lock()
+		s.buffer.Reset()
+		s.mu.Unlock()
+		return nil
+
 	case channel.StreamEventFinal:
 		if event.Final == nil {
 			return errors.New("slack stream final payload is required")

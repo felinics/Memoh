@@ -263,6 +263,10 @@ func (s *outboundStream) Push(_ context.Context, event channel.PreparedStreamEve
 		s.mu.Lock()
 		s.textBuilder.WriteString(event.Delta)
 		s.mu.Unlock()
+	case channel.StreamEventReset:
+		s.mu.Lock()
+		s.textBuilder.Reset()
+		s.mu.Unlock()
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
 			return nil

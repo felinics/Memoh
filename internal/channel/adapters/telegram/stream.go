@@ -947,6 +947,13 @@ func (s *telegramOutboundStream) Push(ctx context.Context, event channel.Prepare
 		return s.pushPhaseEnd(ctx, event)
 	case channel.StreamEventDelta:
 		return s.pushDelta(ctx, event)
+	case channel.StreamEventReset:
+		// The preview message or draft stays; the regenerated reply's first
+		// delta overwrites the failed attempt's text in place.
+		s.mu.Lock()
+		s.buf.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventFinal:
 		return s.pushFinal(ctx, event)
 	case channel.StreamEventError:

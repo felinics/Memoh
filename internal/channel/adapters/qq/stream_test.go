@@ -531,3 +531,52 @@ func TestQQOutboundStreamFinalShardFailureRetiresStreamBeforeFallback(t *testing
 		t.Fatalf("fallback must still carry the complete text, got %+v", sent)
 	}
 }
+
+func TestQQOutboundStreamC2CResetRetiresStreamAndSendsRegeneratedReply(t *testing.T) {
+	t.Parallel()
+
+	var shards []qqStreamShardRequest
+	var sent []channel.OutboundMessage
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: 0,
+		now:            time.Now,
+		send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
+			sent = append(sent, msg.LogicalMessage())
+			return nil
+		},
+		streamSend: func(_ context.Context, req qqStreamShardRequest) (qqStreamShardResponse, error) {
+			shards = append(shards, req)
+			return qqStreamShardResponse{ID: "sm-1"}, nil
+		},
+	}
+
+	ctx := context.Background()
+	events := []channel.StreamEvent{
+		{Type: channel.StreamEventDelta, Delta: "失败的半截"},
+		{Type: channel.StreamEventReset},
+		{Type: channel.StreamEventDelta, Delta: "重试后的回复"},
+		{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{}},
+	}
+	for _, event := range events {
+		if err := stream.Push(ctx, preparedQQEvent(event)); err != nil {
+			t.Fatalf("push %s: %v", event.Type, err)
+		}
+	}
+	if err := stream.Close(ctx); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if len(shards) != 2 {
+		t.Fatalf("expected the failed attempt's shard plus its closing shard, got %d: %+v", len(shards), shards)
+	}
+	if closing := shards[1]; closing.InputState != qqStreamInputDone || closing.ContentRaw != "失败的半截" {
+		t.Fatalf("reset must retire the stream at its last content, got %+v", closing)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("expected one regular send for the regenerated reply, got %d", len(sent))
+	}
+	if got := sent[0].Message.PlainText(); got != "重试后的回复" {
+		t.Fatalf("regenerated reply = %q, want only the surviving attempt's text", got)
+	}
+}

@@ -50,6 +50,10 @@ func (s *outboundStream) Push(ctx context.Context, event channel.PreparedStreamE
 		}
 		s.mu.Unlock()
 		return nil
+	case channel.StreamEventReset:
+		s.textBuilder.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) > 0 {
 			s.attachments = append(s.attachments, event.Attachments...)

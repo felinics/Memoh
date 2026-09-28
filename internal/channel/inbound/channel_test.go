@@ -3626,6 +3626,11 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			wantType: channel.StreamEventAgentEnd,
 		},
 		{
+			name:     "retry",
+			chunk:    `{"type":"retry","attempt":1,"maxAttempt":3,"retryError":"stream cut"}`,
+			wantType: channel.StreamEventReset,
+		},
+		{
 			name:     "processing_started",
 			chunk:    `{"type":"processing_started"}`,
 			wantType: channel.StreamEventProcessingStarted,

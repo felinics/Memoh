@@ -74,6 +74,12 @@ func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.Prepare
 		s.mu.Unlock()
 		return nil
 
+	case channel.StreamEventReset:
+		s.mu.Lock()
+		s.textBuilder.Reset()
+		s.mu.Unlock()
+		return nil
+
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
 			return nil

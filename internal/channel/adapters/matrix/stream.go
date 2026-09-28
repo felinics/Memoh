@@ -80,6 +80,11 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		s.rawBuffer.WriteString(event.Delta)
 		s.mu.Unlock()
 		return nil
+	case channel.StreamEventReset:
+		s.mu.Lock()
+		s.rawBuffer.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventError:
 		errText := strings.TrimSpace(event.Error)
 		if errText == "" {

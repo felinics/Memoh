@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -572,6 +573,117 @@ func TestDraftMode_DeltaUsesSendDraft(t *testing.T) {
 	s.mu.Unlock()
 	if buf != "Hello " {
 		t.Fatalf("expected buffer to be 'Hello ', got %q", buf)
+	}
+}
+
+// TestDraftMode_ResetStartsDraftFromEmpty verifies that after a reset (the
+// agent retrying a failed attempt) the draft shows only the regenerated text.
+func TestDraftMode_ResetStartsDraftFromEmpty(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:       adapter,
+		cfg:           channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		isPrivateChat: true,
+		draftID:       1,
+		streamChatID:  123,
+	}
+	ctx := context.Background()
+
+	origGetBot := getOrCreateBotForTest
+	origDraft := sendDraftForTest
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return &tele.Bot{Token: "fake"}, nil
+	}
+	var drafts []string
+	sendDraftForTest = func(_ *tele.Bot, _ int64, _ int, text string, _ string) error {
+		drafts = append(drafts, text)
+		return nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+		sendDraftForTest = origDraft
+	}()
+
+	for _, event := range []channel.StreamEvent{
+		{Type: channel.StreamEventDelta, Delta: "Hello from the "},
+		{Type: channel.StreamEventReset},
+		{Type: channel.StreamEventDelta, Delta: "Hello "},
+	} {
+		// Let every delta through the draft throttle.
+		s.mu.Lock()
+		s.lastEditedAt = time.Time{}
+		s.mu.Unlock()
+		if err := s.Push(ctx, mustPreparedTelegramEvent(t, event)); err != nil {
+			t.Fatalf("push %s: %v", event.Type, err)
+		}
+	}
+
+	want := []string{"Hello from the ", "Hello "}
+	if !reflect.DeepEqual(drafts, want) {
+		t.Fatalf("drafts = %q, want %q", drafts, want)
+	}
+}
+
+// TestEditMode_ResetEditsSameMessageFromEmpty verifies that in group chats a
+// reset keeps the preview message and the regenerated text replaces the failed
+// attempt's text in it.
+func TestEditMode_ResetEditsSameMessageFromEmpty(t *testing.T) {
+	adapter := NewTelegramAdapter(nil)
+	s := &telegramOutboundStream{
+		adapter:      adapter,
+		cfg:          channel.ChannelConfig{ID: "test", Credentials: map[string]any{"bot_token": "fake"}},
+		target:       "123",
+		streamChatID: 42,
+		streamMsgID:  7,
+	}
+	s.buf.WriteString("Hello from the ")
+	ctx := context.Background()
+
+	// Answers the typing action the preview refresh sends.
+	bot := newTestTelegramBot(telegramRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+		}, nil
+	}))
+	origGetBot := getOrCreateBotForTest
+	origSendText := sendTextForTest
+	origEdit := testEditFunc
+	getOrCreateBotForTest = func(_ *TelegramAdapter, _, _ string) (*tele.Bot, error) {
+		return bot, nil
+	}
+	sends := 0
+	sendTextForTest = func(*tele.Bot, string, string, int, string) (int64, int, error) {
+		sends++
+		return 42, 8, nil
+	}
+	var editedIDs []int
+	var edits []string
+	testEditFunc = func(_ *tele.Bot, _ int64, msgID int, text string, _ string) error {
+		editedIDs = append(editedIDs, msgID)
+		edits = append(edits, text)
+		return nil
+	}
+	defer func() {
+		getOrCreateBotForTest = origGetBot
+		sendTextForTest = origSendText
+		testEditFunc = origEdit
+	}()
+
+	if err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventReset})); err != nil {
+		t.Fatalf("push reset: %v", err)
+	}
+	if err := s.Push(ctx, mustPreparedTelegramEvent(t, channel.StreamEvent{Type: channel.StreamEventDelta, Delta: "Hello "})); err != nil {
+		t.Fatalf("push delta: %v", err)
+	}
+	s.wg.Wait()
+
+	if sends != 0 {
+		t.Fatalf("reset must not open a new preview message, got %d sends", sends)
+	}
+	if len(edits) != 1 || editedIDs[0] != 7 || normalizeStreamComparableText(edits[0]) != "Hello" {
+		t.Fatalf("edits = %q on %v, want one edit of message 7 to %q", edits, editedIDs, "Hello")
 	}
 }
 
