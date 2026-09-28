@@ -3099,6 +3099,25 @@ export type HandlersOauthExchangeRequest = {
     state?: string;
 };
 
+export type HandlersSessionInvocationResponse = {
+    /**
+     * Found is false when the session has no run for this invocation, which
+     * is an ordinary answer (never admitted, or not yet) rather than an error.
+     */
+    found?: boolean;
+    invocation_id?: string;
+    run_id?: string;
+    session_id?: string;
+    /**
+     * State is the durable run state as the ledger records it, e.g.
+     * accepted, running, waiting_decision, finishing, completed, aborted,
+     * failed or lost.
+     */
+    state?: string;
+    turn_id?: string;
+    turn_position?: number;
+};
+
 export type HandlersSessionQueueResponse = {
     follow_up?: Array<HandlersFollowUpQueueItemResponse>;
     steer?: Array<HandlersSteerQueueItemResponse>;
@@ -11748,6 +11767,56 @@ export type PostBotsByBotIdSessionsBySessionIdForkResponses = {
 };
 
 export type PostBotsByBotIdSessionsBySessionIdForkResponse = PostBotsByBotIdSessionsBySessionIdForkResponses[keyof PostBotsByBotIdSessionsBySessionIdForkResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Client invocation ID
+         */
+        invocation_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/invocations/{invocation_id}';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdError = GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors[keyof GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSessionInvocationResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdResponse = GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdResponses[keyof GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdQueueData = {
     body?: never;

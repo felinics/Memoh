@@ -9437,6 +9437,70 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/sessions/{session_id}/invocations/{invocation_id}": {
+            "get": {
+                "description": "Read-only. Lets a client that lost the acknowledgement of a send learn whether the invocation was admitted and what state its run is in. An unknown invocation returns 200 with found=false.",
+                "tags": [
+                    "sessions"
+                ],
+                "summary": "Look up the run admitted for a client invocation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Client invocation ID",
+                        "name": "invocation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.sessionInvocationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/sessions/{session_id}/queue": {
             "get": {
                 "tags": [
@@ -24728,6 +24792,34 @@ const docTemplate = `{
                 },
                 "state": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.sessionInvocationResponse": {
+            "type": "object",
+            "properties": {
+                "found": {
+                    "description": "Found is false when the session has no run for this invocation, which\nis an ordinary answer (never admitted, or not yet) rather than an error.",
+                    "type": "boolean"
+                },
+                "invocation_id": {
+                    "type": "string"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "session_id": {
+                    "type": "string"
+                },
+                "state": {
+                    "description": "State is the durable run state as the ledger records it, e.g.\naccepted, running, waiting_decision, finishing, completed, aborted,\nfailed or lost.",
+                    "type": "string"
+                },
+                "turn_id": {
+                    "type": "string"
+                },
+                "turn_position": {
+                    "type": "integer"
                 }
             }
         },

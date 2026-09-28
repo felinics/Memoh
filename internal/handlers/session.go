@@ -40,6 +40,7 @@ type SessionHandler struct {
 	accountService  *accounts.Service
 	modelPrefs      modelPreferenceService
 	projectionCache sessionProjectionCache
+	invocations     sessionInvocationLookup
 	logger          *slog.Logger
 }
 
@@ -146,6 +147,7 @@ func (h *SessionHandler) Register(e *echo.Echo) {
 	g.GET("", h.ListSessions)
 	g.GET("/model-preference-seed", h.ModelPreferenceSeed)
 	g.GET("/:session_id", h.GetSession)
+	g.GET("/:session_id/invocations/:invocation_id", h.GetSessionInvocation)
 	g.GET("/:session_id/runtime-controls", h.GetRuntimeControls)
 	g.PATCH("/:session_id/runtime-controls/mode", h.SetRuntimeMode)
 	g.GET("/:session_id/runtime-controls/goal", h.GetRuntimeGoal)
