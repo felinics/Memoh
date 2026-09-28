@@ -3,14 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CalloutBanner, ConfirmPopover, InlineLoadingRow, MetricReadout, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { useQuery } from '@pinia/colada'
 import { Play, AlertCircle, ChevronRight } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
   getBotsByBotIdContainer,
   getBotsByBotIdContainerMetrics,
   getBotsByBotIdContainerSnapshots,
-  getBotsById,
   postBotsByBotIdContainerDataRestore,
   postBotsByBotIdContainerSnapshots,
   postBotsByBotIdContainerSnapshotsRollback,
@@ -23,6 +21,7 @@ import {
   type HandlersUpdateContainerMetricsRequest,
   type HandlersListSnapshotsResponse,
 } from '@memohai/sdk'
+import { useBotQuery } from '@/composables/api/useBot'
 import {
   postBotsByBotIdContainerStream,
   type ContainerCreateLayerStatus,
@@ -274,14 +273,7 @@ async function refreshContainerMetricsSilently() {
   }
 }
 
-const { data: bot, refetch: refetchBot } = useQuery({
-  key: () => ['bot', routeIdentifier.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!routeIdentifier.value,
-})
+const { data: bot, refetch: refetchBot } = useBotQuery(routeIdentifier)
 
 function rememberedWorkspaceImage(metadata: Record<string, unknown> | undefined): string {
   const workspace = metadata?.workspace

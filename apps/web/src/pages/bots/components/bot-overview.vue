@@ -280,7 +280,6 @@ import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
 import { Badge, Button, CalloutBanner, MetricReadout, PageShell, SettingsRow, SettingsSection, Skeleton } from '@felinic/ui'
 import {
-  getBotsById,
   getBotsByBotIdSettings,
   getBotsByBotIdMemoryStatus,
   getBotsByBotIdTokenUsage,
@@ -292,6 +291,7 @@ import {
   type ChannelChannelConfig,
   type HandlersDailyTokenUsage,
 } from '@memohai/sdk'
+import { useBotQuery } from '@/composables/api/useBot'
 import BotChecksPanel from './bot-checks-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
@@ -315,14 +315,7 @@ const { t } = useI18n()
 const routeIdentifier = computed(() => route.params.botName as string)
 const checksOpen = ref(false)
 
-const { data: bot } = useQuery({
-  key: () => ['bot', routeIdentifier.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!routeIdentifier.value,
-})
+const { data: bot } = useBotQuery(routeIdentifier)
 const botId = computed(() => bot.value?.id ?? '')
 
 const { hasIssue, issueTitle } = useBotStatusMeta(bot, t)

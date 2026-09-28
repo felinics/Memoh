@@ -224,13 +224,13 @@ import {
   deleteBotsByBotIdAgentsById,
   getAcpProfiles,
   getBotsByBotIdAgents,
-  getBotsById,
   patchBotsByBotIdAgentsById,
   putBotsById,
   type AcpprofilePublicProfile,
   type BotagentsBotAgent,
   type BotsUpdateBotRequest,
 } from '@memohai/sdk'
+import { useBotQuery } from '@/composables/api/useBot'
 import { getBotsQueryKey } from '@memohai/sdk/colada'
 import type { Ref } from 'vue'
 import SettingsAcpDetail from './settings-acp-detail.vue'
@@ -321,14 +321,7 @@ const { data: agentData, isLoading: agentsLoading } = useQuery({
 })
 const agents = computed<BotagentsBotAgent[]>(() => agentData.value?.items ?? [])
 
-const { data: bot } = useQuery({
-  key: () => ['bot', botIdRef.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: botIdRef.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
+const { data: bot } = useBotQuery(botIdRef)
 const botMetadata = computed(() => bot.value?.metadata as Record<string, unknown> | undefined)
 
 const selectedAgent = computed(() => agents.value.find(agent => agent.id === selectedID.value) ?? null)

@@ -135,7 +135,8 @@ import SettingsMultimediaCard from './settings-multimedia-card.vue'
 import SettingsDangerZone from './settings-danger-zone.vue'
 import BotBackupActions from './bot-backup-actions.vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
-import { getBotsById, putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
+import { putBotsById, getBotsByBotIdAgents, getBotsByBotIdSettings, putBotsByBotIdSettings, deleteBotsById, getModels, getProviders, getSearchProviders, getFetchProviders, getMemoryProviders, getSpeechProviders, getSpeechModels, getTranscriptionProviders, getTranscriptionModels, getVideoProviders, getVideoModels, getBotsNameAvailability, getAcpProfiles } from '@memohai/sdk'
+import { useBotQuery } from '@/composables/api/useBot'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, SettingsSettings, SettingsUpsertRequest } from '@memohai/sdk'
 import type { Ref } from 'vue'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
@@ -191,14 +192,7 @@ const { data: settings } = useQuery({
   enabled: () => !!botIdRef.value,
 })
 
-const { data: bot } = useQuery({
-  key: () => ['bot', botIdRef.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: botIdRef.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!botIdRef.value,
-})
+const { data: bot } = useBotQuery(botIdRef)
 
 const { data: modelData } = useQuery({
   key: ['models'],
