@@ -615,11 +615,12 @@ export function createTranscriptController({
     assistantTurn.messages.push({ id, type: 'error', code, content: text, args: stringRecord(args) })
   }
 
-  function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) {
+  // keepTurn: history keeps this turn, so an empty one shows its failure instead of being removed.
+  function finalizeStreamFailure(assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error, keepTurn = false) {
     const parsed = parseMemohError(error)
     if (!hasVisibleAssistantBlocks(assistantTurn)) {
-      if (parsed?.code) {
-        appendAssistantError(assistantTurn, error.message, parsed.code, parsed.args)
+      if (parsed?.code || keepTurn) {
+        appendAssistantError(assistantTurn, error.message, parsed?.code, parsed?.args)
         return
       }
       const turnId = assistantTurn.turnId?.trim()

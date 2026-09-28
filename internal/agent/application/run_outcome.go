@@ -202,11 +202,23 @@ func (r *outcomeRecorder) stampTerminal(event native.StreamEvent) native.StreamE
 // ownerOutcome is the outcome a stream that returned without an error reports
 // to its terminal write: the failure it already delivered in the stream, or an
 // unnamed outcome for the session runtime to resolve.
+//
+// The outcome's cause carries the failure code the terminal event was stamped
+// with, so a cause the recorder named with defaultCode reaches the terminal
+// write under that same code.
 func (r *outcomeRecorder) ownerOutcome() RunOutcome {
-	if r == nil || r.failureCode() == "" {
+	if r == nil {
 		return RunOutcome{}
 	}
-	return RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: r.cause}
+	code := r.failureCode()
+	if code == "" {
+		return RunOutcome{}
+	}
+	cause := r.cause
+	if publicFailureCode(cause) != code {
+		cause = apperror.Wrap(code, cause, nil)
+	}
+	return RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: cause}
 }
 
 // deliveredOutcome is the outcome of the failure the stream already delivered

@@ -17,6 +17,7 @@ import {
   clearComposerPairDraft,
   composerHasNoModel,
   composerPairDraftKey,
+  composerRestoreForSendResult,
   matchesChatPaneSendContext,
   pinnedSubagentModelId,
   readComposerPairDraft,
@@ -91,6 +92,29 @@ describe('chat pane send context', () => {
       errorCode: 'acp.model_unavailable',
     }, false)).toBe(false)
     expect(shouldRefreshACPComposerConfig({ ok: true }, true)).toBe(false)
+  })
+})
+
+describe('composer restore after a failed send', () => {
+  it('returns the draft and error when the send failed before acceptance', () => {
+    expect(composerRestoreForSendResult({
+      ok: false,
+      stage: 'startup',
+      error: 'session busy',
+      restoreInput: 'hello',
+    }, 'sent text', 'Send failed')).toEqual({ input: 'hello', error: 'session busy' })
+    expect(composerRestoreForSendResult({ ok: false, stage: 'startup' }, 'sent text', 'Send failed'))
+      .toEqual({ input: 'sent text', error: 'Send failed' })
+  })
+
+  it('leaves the composer cleared with no error once the server accepted the send', () => {
+    expect(composerRestoreForSendResult({
+      ok: false,
+      stage: 'stream',
+      error: 'context budget unsatisfied',
+      errorCode: 'context.budget_unsatisfied',
+    }, 'hello', 'Send failed')).toBeNull()
+    expect(composerRestoreForSendResult({ ok: true, messageSent: true }, 'hello', 'Send failed')).toBeNull()
   })
 })
 

@@ -54,6 +54,15 @@ export class StreamFailureError extends Error {
   }
 }
 
+// failureStage is how far a failed turn got. A new send the server accepted
+// (bindRunId stamped its run on the turn) is in the history with its failure,
+// so nothing returns to the composer. A retry or edit replaces a turn the
+// history already has and counts as streamed only once the caller saw output.
+export function failureStage(assistantTurn: ChatAssistantTurn, replacesTurn: boolean, replacementHasOutput: boolean): SendMessageStage {
+  if (replacesTurn) return replacementHasOutput ? 'stream' : 'startup'
+  return assistantTurn.runtimeRunId?.trim() ? 'stream' : 'startup'
+}
+
 export class CommandStreamError extends StreamFailureError {
   constructor(message: string) {
     super(message, 'startup')
@@ -65,6 +74,7 @@ interface TrackStreamInput {
   onModelPreferenceSettled?: () => void
   invocationId: string
   assistantTurn: ChatAssistantTurn
+  replacesTurn?: boolean
   botId: string
   sessionId: string
   composerScope?: string
@@ -128,6 +138,7 @@ export interface ChatSendDeps {
     botId: string,
     sessionId: string,
     error: Error,
+    keepTurn?: boolean,
   ) => void
   removeTurnFromSession: (
     botId: string,
@@ -360,7 +371,7 @@ export function createChatSend(deps: ChatSendDeps) {
       const errorCode = parseMemohError(error)?.code
       const stage: SendMessageStage = failure instanceof StreamFailureError
         ? failure.stage
-        : (assistantTurn && deps.hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+        : (assistantTurn ? failureStage(assistantTurn, false, false) : 'startup')
       const createdSessionId = sendInvocationId
         ? deps.createdSessionIdForInvocation(sendInvocationId)
         : ''
@@ -368,7 +379,7 @@ export function createChatSend(deps: ChatSendDeps) {
       const targetSessionId = sendSessionId || createdSessionId
 
       if (assistantTurn) {
-        deps.finalizeStreamFailure(assistantTurn, botId, targetSessionId, failure)
+        deps.finalizeStreamFailure(assistantTurn, botId, targetSessionId, failure, !isAbort && stage === 'stream')
       }
       if (!isAbort && stage === 'startup' && userTurn) {
         deps.removeTurnFromSession(botId, targetSessionId, userTurn)
@@ -488,6 +499,7 @@ export function createChatSend(deps: ChatSendDeps) {
         onModelPreferenceSettled: options.onModelPreferenceSettled,
         invocationId,
         assistantTurn,
+        replacesTurn: true,
         botId,
         sessionId: targetSessionId,
       })
@@ -510,7 +522,7 @@ export function createChatSend(deps: ChatSendDeps) {
       const errorCode = parseMemohError(error)?.code
       const stage: SendMessageStage = failure instanceof StreamFailureError
         ? failure.stage
-        : (deps.hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+        : failureStage(assistantTurn, true, deps.hasVisibleAssistantBlocks(assistantTurn))
       deps.discardAssistantStream(invocationId)
       if (stage === 'startup') {
         restoreForkAnchor?.()
@@ -577,6 +589,7 @@ export function createChatSend(deps: ChatSendDeps) {
         onModelPreferenceSettled: options.onModelPreferenceSettled,
         invocationId,
         assistantTurn,
+        replacesTurn: true,
         botId,
         sessionId: targetSessionId,
       })
@@ -600,7 +613,7 @@ export function createChatSend(deps: ChatSendDeps) {
       const errorCode = parseMemohError(error)?.code
       const stage: SendMessageStage = failure instanceof StreamFailureError
         ? failure.stage
-        : (deps.hasVisibleAssistantBlocks(assistantTurn) ? 'stream' : 'startup')
+        : failureStage(assistantTurn, true, deps.hasVisibleAssistantBlocks(assistantTurn))
       deps.discardAssistantStream(invocationId)
       if (stage === 'startup') {
         restoreForkAnchor?.()

@@ -119,10 +119,10 @@ export function reconcileRuntimeTurns(
 // A turn already on screen always stays: the frame is reconciling it, not
 // introducing it. So does a turn whose id the page already shows under another
 // role — the frame is completing that turn, not re-introducing a round. A run
-// that failed never persisted its error, so history returns the question alone
-// and the frame is the only place the failure reason exists; judging it by
-// position alone left a reopened failed session showing the question and no
-// reason for it.
+// that failed without persisting its error (a retry or edit, or a failure with
+// no code) leaves history with the question alone, and the frame is the only
+// place the failure reason exists; judging it by position alone left a
+// reopened failed session showing the question and no reason for it.
 //
 // Otherwise the loaded window decides. Positions come from one monotonic
 // per-session counter, so a turn numbered at or below the newest settled turn

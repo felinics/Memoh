@@ -343,3 +343,44 @@ func TestOutcomeRecorderDeliveredOnly(t *testing.T) {
 		t.Fatalf("delivered failure stamped code = %q, want the default", got)
 	}
 }
+
+// A failure whose cause has no catalogued code is named with the default code
+// once, and the stamped terminal and the owner outcome carry the same code. A
+// stop is still left unnamed.
+func TestOutcomeRecorderDefaultCodeNamesUncodedFailure(t *testing.T) {
+	t.Parallel()
+	abort := native.StreamEvent{Type: native.EventAgentAbort}
+	code := apperror.CodeAgentResponseInterrupted
+	idleCtx, idle := quietIdle()
+
+	aborted := newTestRecorder(context.Background(), idleCtx, idle)
+	aborted.defaultCode = code
+	_ = aborted.observe(abort)
+	aborted.observeSnapshot(terminalSnapshot{aborted: true})
+	if got := aborted.stampTerminal(abort).Code; got != string(code) {
+		t.Fatalf("uncoded abort stamped code = %q, want %q", got, code)
+	}
+	if got := aborted.ownerOutcome(); got.Status != "errored" || got.ErrorCode() != string(code) {
+		t.Fatalf("uncoded abort owner outcome = %q / %q, want errored with %q", got.Status, got.ErrorCode(), code)
+	}
+
+	unterminated := newTestRecorder(context.Background(), idleCtx, idle)
+	unterminated.defaultCode = code
+	unterminated.endStream()
+	if got := unterminated.ownerOutcome(); got.Status != "errored" || got.ErrorCode() != string(code) {
+		t.Fatalf("stream without a terminal owner outcome = %q / %q, want errored with %q", got.Status, got.ErrorCode(), code)
+	}
+
+	stopCtx, stop := context.WithCancel(context.Background())
+	stop()
+	stopped := newTestRecorder(stopCtx, idleCtx, idle)
+	stopped.defaultCode = code
+	_ = stopped.observe(abort)
+	stopped.observeSnapshot(terminalSnapshot{aborted: true})
+	if got := stopped.stampTerminal(abort).Code; got != "" {
+		t.Fatalf("stopped run stamped code = %q, want none", got)
+	}
+	if got := stopped.ownerOutcome(); got != (RunOutcome{}) {
+		t.Fatalf("stopped run owner outcome = %+v, want unnamed", got)
+	}
+}

@@ -1303,7 +1303,7 @@ import { enqueueSteerQueue, enqueueFollowUpQueue, fetchSafeSkillCatalog, fetchSe
 import { parseSessionQueueCommand, SessionQueueSubmissionGate } from './session-queue-submission'
 import { localizeRuntimeControls, localizeRuntimeCommandResult } from '@/utils/runtime-control-presentation'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
-import { captureChatPaneSendContext, clearComposerPairDraft, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft } from './chat-pane-send'
+import { captureChatPaneSendContext, clearComposerPairDraft, composerRestoreForSendResult, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
@@ -4190,19 +4190,19 @@ async function handleSend() {
   })
   pairSend.finish(result.messageSent === true || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
-  if (!result.ok && result.stage === 'startup') {
-    const restoreInput = result.restoreInput ?? text
+  const restore = composerRestoreForSendResult(result, text, t('chat.sendFailed'))
+  if (restore) {
     if (!matchesChatPaneSendContext(
       sentContext,
       paneTarget.value,
       inputDraftKey.value || 'chat',
     )) return
-    inputText.value = restoreInput
-    saveInputDraft(sentDraftKey, restoreInput)
+    inputText.value = restore.input
+    saveInputDraft(sentDraftKey, restore.input)
     pendingFiles.value = files
     requestedSkills.value = skills
     if (commandPanelEvent.value?.type !== 'command_error') {
-      composerError.value = result.error || t('chat.sendFailed')
+      composerError.value = restore.error
     }
     return
   }

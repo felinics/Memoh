@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia'
+import type { ChatAssistantTurn } from './chat/types'
 import type {
   BotSessionActivityEvent,
   RuntimeCurrentRunView,
@@ -78,14 +79,19 @@ function flushPromises() {
 }
 
 type RuntimeTestUpdate =
-  | { kind: 'run', status: RuntimeRunStatus, error?: string }
+  | { kind: 'run', status: RuntimeRunStatus, error?: string, errorCode?: string }
   | { kind: 'message', message: UIMessage }
   | { kind: 'user_turn', turn: UIUserTurn }
 
 const runtime = {
   started: { kind: 'run', status: 'running' } as RuntimeTestUpdate,
   completed: { kind: 'run', status: 'completed' } as RuntimeTestUpdate,
-  failed: (error: string): RuntimeTestUpdate => ({ kind: 'run', status: 'errored', error }),
+  failed: (error: string, errorCode?: string): RuntimeTestUpdate => ({
+    kind: 'run',
+    status: 'errored',
+    error,
+    errorCode,
+  }),
   message: (message: UIMessage): RuntimeTestUpdate => ({ kind: 'message', message }),
   userTurn: (turn: UIUserTurn): RuntimeTestUpdate => ({ kind: 'user_turn', turn }),
 }
@@ -116,6 +122,9 @@ const h = {
   streamHandler: null as UIStreamEventHandler | null,
   sessionsActivityHandler: null as ((event: BotSessionActivityEvent) => void) | null,
   sendUpdates: [] as RuntimeTestUpdate[],
+  // False makes the fake server answer nothing to a submission, so a test can
+  // play a failure from before the server accepted it.
+  acceptRuns: true,
   sentWSMessages: [] as Array<Record<string, unknown>>,
   runtimeUnsubscribes: [] as string[],
   wsRunIds: [] as string[],
@@ -187,6 +196,7 @@ function publishRuntimeUpdate(
   if (update.kind === 'run') {
     run.status = update.status
     run.error = update.error
+    run.error_code = update.errorCode
     run.updated_at = now
     delta = publishedRun
       ? {
@@ -194,6 +204,7 @@ function publishRuntimeUpdate(
             run_id: runId,
             status: update.status,
             error: update.error,
+            error_code: update.errorCode,
             updated_at: now,
           },
         }
@@ -274,6 +285,7 @@ beforeEach(() => {
     h.wsRunIds = []
     h.abortedWSRuns = []
     h.sendUpdates = [runtime.started, runtime.failed('model failed')]
+    h.acceptRuns = true
     vi.clearAllMocks()
 
     api.fetchBots.mockResolvedValue([
@@ -500,7 +512,7 @@ beforeEach(() => {
           // The server names the run and announces it before any turn output,
           // so every later event is addressed by run_id.
           const invocationId = message.invocation_id ?? ''
-          h.lastRunId = invocationId ? `run-${++h.wsRunSeq}` : ''
+          h.lastRunId = invocationId && h.acceptRuns ? `run-${++h.wsRunSeq}` : ''
           h.wsRunIds.push(h.lastRunId)
           if (h.lastRunId) {
             const runtime = testRuntime(h.lastSessionId)
@@ -753,7 +765,7 @@ describe('chat-list store', () => {
       await expect(sending).resolves.toMatchObject({ ok: true, messageSent: true })
     })
 
-  it('projects startup failures identically while returning them to the composer', async () => {
+  it('keeps an accepted send that fails without output in the transcript', async () => {
       const store = useChatStore()
       const onBeforeTurnAppend = vi.fn()
       const onBeforeMessageSend = vi.fn()
@@ -769,32 +781,116 @@ describe('chat-list store', () => {
 
       expect(result).toMatchObject({
         ok: false,
-        stage: 'startup',
+        stage: 'stream',
         error: 'model failed',
-        restoreInput: 'hello',
       })
+      expect(result.restoreInput).toBeUndefined()
       expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      expect(store.messages[0]).toMatchObject({ role: 'user', text: 'hello' })
       expect(store.messages[1]).toMatchObject({
         role: 'assistant',
         streaming: false,
         messages: [{ type: 'error', content: 'model failed' }],
       })
-      expect(store.startupSendFailure).toMatchObject({
-        botId: 'bot-1',
-        sessionId: 'session-1',
-        error: 'model failed',
-        restoreInput: 'hello',
-      })
+      expect(store.startupSendFailure).toBeNull()
       expect(onBeforeTurnAppend).toHaveBeenCalledWith(expect.objectContaining({
         botId: 'bot-1',
         sessionId: expect.any(String),
       }))
       expect(onBeforeMessageSend).toHaveBeenCalledOnce()
-      expect(onTurnAppendAborted).toHaveBeenCalledOnce()
+      expect(onTurnAppendAborted).not.toHaveBeenCalled()
       expect(h.sentWSMessages.at(-1)).toMatchObject({
         type: 'message',
         workspace_target_id: 'computer-b',
       })
+    })
+
+  // The server writes an accepted send and its failure to history, so the
+  // failure stays in the transcript as one error block whichever of the error
+  // frame and the errored projection arrives first.
+  it.each(['error frame first', 'projection first'])(
+    'keeps an accepted send that fails with a code and no output (%s)',
+    async (order) => {
+      h.sendUpdates = [runtime.started]
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      // What the server wrote to history for the failed turn.
+      const turnId = `turn-${wsRunId(0)}`
+      api.fetchMessagesUI.mockResolvedValue([
+        {
+          id: 'user-1',
+          turn_id: turnId,
+          role: 'user',
+          text: 'hello',
+          attachments: [],
+          timestamp: '2026-09-28T08:00:00.000Z',
+        },
+        {
+          id: 'assistant-1',
+          turn_id: turnId,
+          role: 'assistant',
+          messages: [{ id: 0, type: 'error', code: 'context.budget_unsatisfied', content: '' }],
+          timestamp: '2026-09-28T08:00:01.000Z',
+          streaming: false,
+        },
+      ])
+      const errorFrame = () => h.streamHandler?.({
+        type: 'error',
+        run_id: wsRunId(0),
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        code: 'context.budget_unsatisfied',
+        message: 'context budget unsatisfied',
+      })
+      const projection = () => emitRuntime(
+        runtime.failed('context budget unsatisfied', 'context.budget_unsatisfied'),
+      )
+      if (order === 'error frame first') {
+        errorFrame()
+        projection()
+      } else {
+        projection()
+        errorFrame()
+      }
+      const result = await sending
+      await flushPromises()
+
+      expect(result).toMatchObject({ ok: false, stage: 'stream' })
+      expect(result.restoreInput).toBeUndefined()
+      expect(store.startupSendFailure).toBeNull()
+      expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      expect(store.messages[0]).toMatchObject({ role: 'user', text: 'hello' })
+      const assistant = store.messages[1] as ChatAssistantTurn
+      expect(assistant.messages).toHaveLength(1)
+      expect(assistant.messages[0]).toMatchObject({
+        type: 'error',
+        code: 'context.budget_unsatisfied',
+      })
+    },
+  )
+
+  it('returns a send to the composer when the socket fails before the server accepts it', async () => {
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const socket = api.connectWebSocket.mock.results.at(-1)?.value as {
+        send: ReturnType<typeof vi.fn>
+      }
+      socket.send.mockImplementation((message: { type?: string }) => {
+        if (message.type === 'message') throw new Error('WebSocket is not connected')
+      })
+      const result = await store.sendMessage('hello')
+
+      expect(result).toMatchObject({
+        ok: false,
+        stage: 'startup',
+        restoreInput: 'hello',
+      })
+      expect(store.startupSendFailure).toMatchObject({ restoreInput: 'hello' })
+      expect(store.messages.some(turn => turn.role === 'user')).toBe(false)
     })
 
   it('uses structured API feedback for startup send failures', async () => {
@@ -3309,14 +3405,20 @@ describe('chat-list store', () => {
     })
 
   it('keeps direct skill slash websocket startup failures restorable', async () => {
-      h.sendUpdates = [
-        runtime.started,
-        runtime.failed('model failed'),
-      ]
+      h.sendUpdates = []
+      h.acceptRuns = false
       const store = useChatStore()
 
       await store.selectBot('bot-1')
-      const result = await store.sendMessage('/wat', undefined, { composerScope: 'bot-1:panel-a' })
+      const sending = store.sendMessage('/wat', undefined, { composerScope: 'bot-1:panel-a' })
+      await flushPromises()
+      h.streamHandler?.({
+        type: 'error',
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        message: 'model failed',
+      })
+      const result = await sending
 
       expect(result).toMatchObject({
         ok: false,
@@ -3600,6 +3702,7 @@ describe('chat-list store', () => {
 
   it('fails a rejected submission with the code the server refused it by', async () => {
       h.sendUpdates = []
+      h.acceptRuns = false
       const store = useChatStore()
 
       await store.selectBot('bot-1')
@@ -3623,6 +3726,7 @@ describe('chat-list store', () => {
         errorCode: 'session_runtime.session_busy',
         restoreInput: 'hello',
       })
+      expect(store.startupSendFailure).toMatchObject({ restoreInput: 'hello' })
       expect(store.streaming).toBe(false)
     })
 
@@ -3804,6 +3908,7 @@ describe('chat-list store', () => {
 
   it('keeps deferred draft websocket errors scoped away from the switched session', async () => {
       h.sendUpdates = []
+      h.acceptRuns = false
       api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
         id: sessionID,
         bot_id: 'bot-1',
@@ -3819,11 +3924,15 @@ describe('chat-list store', () => {
       })
       await flushPromises()
       const invocationId = wsInvocationId(0)
-      const runId = wsRunId(0)
 
       await store.selectSession('session-b')
       h.streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' })
-      h.streamHandler?.({ type: 'error', run_id: runId, session_id: 'created-session', message: 'model failed' })
+      h.streamHandler?.({
+        type: 'error',
+        invocation_id: invocationId,
+        session_id: 'created-session',
+        message: 'model failed',
+      })
       const result = await sendPromise
 
       expect(result).toMatchObject({ ok: false, stage: 'startup', composerScope: 'bot-1:draft-a' })

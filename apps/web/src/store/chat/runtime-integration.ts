@@ -10,12 +10,11 @@ import type { createChatRealtimeController } from './realtime'
 import type { RuntimeProjectionChange } from './runtime-client'
 import { isRuntimeRunActive } from './runtime-projection'
 import type { createSessionList } from './session-list'
-import { CommandStreamError, StreamFailureError } from './send'
+import { CommandStreamError, StreamFailureError, failureStage } from './send'
 import type {
   ChatAssistantTurn,
   ChatMessage,
   ChatViewTarget,
-  SendMessageStage,
 } from './types'
 import type { createChatViewRegistry } from './view-registry'
 
@@ -233,9 +232,11 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         event,
         event.message || deps.sendFailedMessage(),
       )
-      const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
+      const stage = failureStage(
         rejected.assistantTurn,
-      ) ? 'stream' : 'startup'
+        rejected.replacesTurn,
+        deps.hasVisibleAssistantBlocks(rejected.assistantTurn),
+      )
       if (!deps.hasVisibleAssistantBlocks(rejected.assistantTurn)) {
         deps.removeTurnFromSession(
           rejected.botId,
@@ -275,10 +276,16 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         event,
         event.message || deps.sendFailedMessage(),
       )
-      const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
+      const stage = failureStage(
         pending.assistantTurn,
-      ) ? 'stream' : 'startup'
-      if (!deps.hasVisibleAssistantBlocks(pending.assistantTurn) && !event.code) {
+        pending.replacesTurn,
+        deps.hasVisibleAssistantBlocks(pending.assistantTurn),
+      )
+      if (
+        stage === 'startup'
+        && !deps.hasVisibleAssistantBlocks(pending.assistantTurn)
+        && !event.code
+      ) {
         deps.removeTurnFromSession(
           pending.botId,
           pending.sessionId,
@@ -394,10 +401,12 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
           aborted.name = 'AbortError'
           deps.assistantStreams.rejectAssistantStream(invocationId, aborted)
         } else {
-          const stage: SendMessageStage = currentRun.messages.some(message => message.type !== 'status')
-            || Boolean(currentRun.error_code)
-            ? 'stream'
-            : 'startup'
+          const stage = failureStage(
+            pending.assistantTurn,
+            pending.replacesTurn,
+            currentRun.messages.some(message => message.type !== 'status')
+              || Boolean(currentRun.error_code),
+          )
           deps.assistantStreams.rejectAssistantStream(
             invocationId,
             new StreamFailureError(message, stage, currentRun),

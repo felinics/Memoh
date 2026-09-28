@@ -35,10 +35,11 @@ type terminalSnapshot struct {
 }
 
 // snapshotFailureCode is the code a failed turn's history marker records, or
-// empty when the turn leaves no marker. It reads the code the cause carries the
-// same way classifyRunFailure does, without that function's default: a turn
-// stopped by the user, or failed for a reason nothing named, is left unsent so
-// its draft can be restored. Only the listed codes are recorded.
+// empty when the turn leaves no marker, for every turn except a new Web chat
+// send (see wsFailureCode). It reads the code the cause carries the same way
+// classifyRunFailure does, without that function's default: a turn stopped by
+// the user, or failed for a reason nothing named, leaves no marker. Only the
+// codes historyFailureCode lists are recorded.
 func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
 	code := publicFailureCode(cause)
 	if code == "" {
@@ -47,6 +48,12 @@ func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
 		}
 		return ""
 	}
+	return historyFailureCode(code)
+}
+
+// historyFailureCode is code when a failed turn's history records it, and empty
+// otherwise, for the turns snapshotFailureCode and wsFailureCode leave to it.
+func historyFailureCode(code apperror.Code) apperror.Code {
 	switch code {
 	case apperror.CodeAgentResponseTimeout,
 		apperror.CodeAgentToolTimeout,
@@ -60,6 +67,21 @@ func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
 	default:
 		return ""
 	}
+}
+
+// wsFailureCode is the code a failed Web chat turn records in history, or empty
+// when it records none. A new send the server admitted is recorded whatever it
+// failed with, under the code its run ends with, so the history row and
+// session_runs name the same failure and the sent message is never left
+// outside the history. A stop is not a failure and records nothing. A retry or
+// edit replaces a turn the history already has, and keeps it unless the
+// failure is one historyFailureCode lists.
+func wsFailureCode(req ChatRequest, outcome *outcomeRecorder) apperror.Code {
+	code := outcome.failureCode()
+	if req.TurnReplacement != nil {
+		return historyFailureCode(code)
+	}
+	return code
 }
 
 func shouldForwardAfterIdleFailure(event native.StreamEvent, failureEventForwarded bool) bool {
@@ -642,6 +664,10 @@ func (s *Service) streamChatWSResultWithHooks(
 	cfg = s.prepareRunConfig(streamCtx, cfg)
 	terminal := s.contextLifecycleTerminal(streamCtx, cfg)
 	outcome := newOutcomeRecorder(streamCtx)
+	// A run that fails for a reason without a catalogued code, such as an
+	// abort nobody requested, is named when its terminal event is stamped, so
+	// the live frame, the run's recorded code and its history agree.
+	outcome.defaultCode = apperror.CodeAgentResponseInterrupted
 	defer outcome.finishLifecycle(terminal)
 
 	// Wrap with idle timeout: if no events arrive within the adaptive timeout, cancel the stream.
@@ -660,6 +686,9 @@ func (s *Service) streamChatWSResultWithHooks(
 	var persistedMessages []messagepkg.Message
 	postPersistApplied := false
 	failureEventForwarded := false
+	var uncommittedText uncommittedStepText
+	var failureRows []messagepkg.Message
+	failureRecorded := false
 	for event := range agentEventCh {
 		idleCancel.Observe(event)
 
@@ -679,6 +708,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		if hasVisibleAgentStreamOutput(event) {
 			hasVisibleOutput = true
 		}
+		uncommittedText.observe(event)
 		if event.Type == native.EventAgentAbort && idleCancel.DidFire() && !clientGone {
 			failureEvent := agentFailureStreamEvent(context.Cause(idleCtx))
 			if failureData, marshalErr := json.Marshal(failureEvent); marshalErr == nil {
@@ -696,13 +726,20 @@ func (s *Service) streamChatWSResultWithHooks(
 			continue
 		}
 
+		// Forwarding the terminal event proposes the run's end, after which no
+		// step can be written, so a failed run's history is written first.
+		if event.IsTerminal() && stepCommitter != nil && !stored && !failureRecorded && !runOwnershipLost(ctx) {
+			failureRows = s.recordStepRunFailure(ctx, stepCommitter, uncommittedText.String(), wsFailureCode(req, outcome))
+			failureRecorded = true
+		}
+
 		if event.IsTerminal() && len(event.Messages) > 0 {
 			if snap, ok := extractTerminalSnapshot(data); ok {
 				if stepCommitter == nil {
 					snap.reasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
 				}
 				snap.visibleOutput = hasVisibleOutput
-				snap.failureCode = snapshotFailureCode(idleCancel.DidFire(), outcome.cause)
+				snap.failureCode = wsFailureCode(req, outcome)
 				lastSnapshot = snap
 				hasSnapshot = true
 				outcome.observeSnapshot(snap)
@@ -711,7 +748,7 @@ func (s *Service) streamChatWSResultWithHooks(
 						outcome.recordCause(storeErr)
 						s.logger.ErrorContext(ctx, "ws step finalization failed", slog.Any("error", storeErr))
 					} else {
-						persistedMessages = stepCommitter.persistedMessages()
+						persistedMessages = append(stepCommitter.persistedMessages(), failureRows...)
 						stored = true
 					}
 				} else if !stored && !runOwnershipLost(ctx) {
@@ -745,13 +782,17 @@ func (s *Service) streamChatWSResultWithHooks(
 	}
 	outcome.endStream()
 
-	// Intermediate persistence on abort/error
+	// Intermediate persistence on abort/error. A stream that ended without a
+	// terminal event still writes its failure before its steps are finalized.
 	if !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
+		if !failureRecorded {
+			failureRows = s.recordStepRunFailure(ctx, stepCommitter, uncommittedText.String(), wsFailureCode(req, outcome))
+		}
 		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
 			outcome.recordCause(storeErr)
 			s.logger.ErrorContext(ctx, "ws step finalization failed", slog.Any("error", storeErr))
 		} else {
-			persistedMessages = stepCommitter.persistedMessages()
+			persistedMessages = append(stepCommitter.persistedMessages(), failureRows...)
 		}
 	} else if !stored {
 		switch {
@@ -763,15 +804,15 @@ func (s *Service) streamChatWSResultWithHooks(
 		case hasSnapshot:
 			persistedMessages = s.persistPartialResult(ctx, req, rc, lastSnapshot.sdkMessages, lastSnapshot.reasoningTiming, toolCallCount, idleCancel.DidFire(), hasVisibleOutput, lastSnapshot.failureCode, lastSnapshot.internalFeedbackIndexes)
 		default:
-			if code := snapshotFailureCode(idleCancel.DidFire(), outcome.cause); code != "" {
+			if code := wsFailureCode(req, outcome); code != "" {
 				persisted, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, code)
 				if storeErr != nil {
-					s.logger.ErrorContext(ctx, "ws timeout persist failed", slog.Any("error", storeErr))
+					s.logger.ErrorContext(ctx, "ws failure persist failed", slog.Any("error", storeErr))
 				} else {
 					persistedMessages = persisted
 				}
 			} else {
-				s.logger.InfoContext(ctx, "skip persisting failed startup ws stream",
+				s.logger.InfoContext(ctx, "skip persisting ws stream without a failure code",
 					slog.String("bot_id", req.BotID),
 					slog.String("chat_id", req.ChatID),
 				)
@@ -815,6 +856,24 @@ func (s *Service) streamChatWSResultWithHooks(
 	// A failure found in the stream was already delivered there, so it is not
 	// returned as an error; the outcome still names it for the terminal write.
 	return persistedMessages, outcome.ownerOutcome(), nil
+}
+
+// recordStepRunFailure writes the history of a run whose steps are committed as
+// they complete, when the run failed with code (see wsFailureCode). A write
+// failure is logged: the run has already failed, and its outcome stays that
+// failure.
+func (s *Service) recordStepRunFailure(ctx context.Context, committer *agentStepCommitter, partialText string, code apperror.Code) []messagepkg.Message {
+	if code == "" {
+		return nil
+	}
+	persisted, err := committer.recordFailure(ctx, partialText, code)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "ws step failure persist failed",
+			slog.String("code", string(code)),
+			slog.Any("error", err),
+		)
+	}
+	return persisted
 }
 
 // persistTerminalSnapshot stores the SDK messages produced by an agent run
