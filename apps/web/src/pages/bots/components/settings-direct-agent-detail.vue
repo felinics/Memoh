@@ -167,6 +167,12 @@
         </div>
       </SettingsRow>
 
+      <CodexUsageRows
+        v-if="credentialConnected && !deviceLogin"
+        :bot-id="botId"
+        :bot-agent-id="agent.id!"
+      />
+
       <div
         v-if="deviceLogin"
         class="mx-4 border-b border-border py-6 last:border-b-0"
@@ -221,6 +227,7 @@ import {
   type BotagentsBotAgent,
 } from '@memohai/sdk'
 import AgentCredentialInput from './agent-credential-input.vue'
+import CodexUsageRows from './codex-usage-rows.vue'
 import { localizeRuntimeControls } from '@/utils/runtime-control-presentation'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {

@@ -272,7 +272,9 @@
       "reauthorization_required": "请先重新连接这个 Agent 账号。",
       "encryption_unavailable": "此服务器尚未配置 Agent 账号存储。",
       "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
-      "materialization_failed": "Agent 账号准备失败，请重试。"
+      "materialization_failed": "Agent 账号准备失败，请重试。",
+      "usage_auth_expired": "账户登录已过期，下次对话后会自动续期；如果仍无法查看额度，请重新连接账户。",
+      "usage_unavailable": "暂时无法获取额度，请稍后再试。"
     },
     "session": {
       "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。"
@@ -1358,6 +1360,13 @@
     "compactNow": "立即压缩",
     "compactSuccess": "上下文压缩完成",
     "compactingContext": "正在压缩上下文…",
+    "codexUsage": {
+      "warning": "{window}已用 {percent}%，{time}重置",
+      "warningNoReset": "{window}已用 {percent}%",
+      "exhausted": "{window}已用完，{time}重置",
+      "exhaustedNoReset": "{window}已用完",
+      "dismiss": "关闭提示"
+    },
     "compactFailed": "上下文压缩失败",
     "sessionStreaming": "生成中",
     "slash": {
@@ -2499,6 +2508,18 @@
       "codexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码。Memoh 会自动完成授权。",
       "codexLoginSuccess": "Codex 已连接 ChatGPT 账号",
       "codexLoginFailed": "Codex 账号授权失败，请重试",
+      "usage": {
+        "window": {
+          "weekly": "每周额度",
+          "days": "{count} 天额度",
+          "hours": "{count} 小时额度",
+          "minutes": "{count} 分钟额度",
+          "unknown": "额度"
+        },
+        "resets": "{time}重置",
+        "exhausted": "已用完，{time}重置",
+        "exhaustedNoReset": "已用完"
+      },
       "modelsLoadFailed": "无法加载 Agent 模型。请检查 Agent 配置后重试。",
       "openSettings": "打开 Agent 设置",
       "dependencyChecking": "正在检查依赖…",
@@ -4109,6 +4130,7 @@
       },
       "empty": "暂无记录。",
       "unknown": "暂无数据",
+      "resets": "{time}重置",
       "details": "查看 JSON"
     }
   },

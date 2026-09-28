@@ -272,7 +272,9 @@
       "reauthorization_required": "Connect this Agent account again before using it.",
       "encryption_unavailable": "Agent account storage is not configured on this server.",
       "runtime_busy": "Wait for the current response to finish before switching Agent accounts.",
-      "materialization_failed": "The Agent account could not be prepared. Please retry."
+      "materialization_failed": "The Agent account could not be prepared. Please retry.",
+      "usage_auth_expired": "The account sign-in has expired. It renews after the next conversation; if usage still can't load, connect the account again.",
+      "usage_unavailable": "Couldn't load usage limits right now. Try again later."
     },
     "session": {
       "model_preference_conflict": "The model selection changed elsewhere. Refresh or send your message to apply your selection."
@@ -1346,6 +1348,13 @@
     "compactNow": "Compact Now",
     "compactSuccess": "Context compaction completed",
     "compactingContext": "Compacting context…",
+    "codexUsage": {
+      "warning": "{window}: {percent}% used · resets {time}",
+      "warningNoReset": "{window}: {percent}% used",
+      "exhausted": "{window} reached · resets {time}",
+      "exhaustedNoReset": "{window} reached",
+      "dismiss": "Dismiss"
+    },
     "compactFailed": "Context compaction failed",
     "sessionStreaming": "Generating",
     "slash": {
@@ -2499,6 +2508,18 @@
       "codexDeviceHint": "Open the verification page and enter this one-time code. Only enter it on the OpenAI verification address shown there. Memoh will finish authorization automatically.",
       "codexLoginSuccess": "Codex is connected to ChatGPT",
       "codexLoginFailed": "Codex account authorization failed. Try again.",
+      "usage": {
+        "window": {
+          "weekly": "Weekly limit",
+          "days": "{count}-day limit",
+          "hours": "{count}-hour limit",
+          "minutes": "{count}-minute limit",
+          "unknown": "Usage limit"
+        },
+        "resets": "Resets {time}",
+        "exhausted": "Used up · resets {time}",
+        "exhaustedNoReset": "Used up"
+      },
       "modelsLoadFailed": "Couldn’t load Agent models. Check the Agent setup and try again.",
       "openSettings": "Open Agent settings",
       "dependencyChecking": "Checking dependency…",
@@ -4109,6 +4130,7 @@
       },
       "empty": "No entries available.",
       "unknown": "Unavailable",
+      "resets": "resets {time}",
       "details": "View JSON"
     }
   },

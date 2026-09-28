@@ -1621,6 +1621,20 @@ export type ExternalagentCodexDeviceLoginPollResponse = {
     status: 'pending' | 'success' | 'error' | 'unknown';
 };
 
+export type ExternalagentCodexUsageResponse = {
+    limit_reached: boolean;
+    windows: Array<ExternalagentCodexUsageWindow>;
+};
+
+export type ExternalagentCodexUsageWindow = {
+    resets_at?: string;
+    used_percent: number;
+    /**
+     * WindowMinutes is 0 when the backend does not report the window length.
+     */
+    window_minutes: number;
+};
+
 export type FetchprovidersCreateRequest = {
     config?: {
         [key: string]: unknown;
@@ -5860,6 +5874,56 @@ export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses = {
 };
 
 export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponse = PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses[keyof PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses];
+
+export type GetBotsByBotIdAgentsByIdCodexUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/codex/usage';
+};
+
+export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
+    /**
+     * Forbidden
+     */
+    403: HandlersErrorResponse;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdCodexUsageError = GetBotsByBotIdAgentsByIdCodexUsageErrors[keyof GetBotsByBotIdAgentsByIdCodexUsageErrors];
+
+export type GetBotsByBotIdAgentsByIdCodexUsageResponses = {
+    /**
+     * OK
+     */
+    200: ExternalagentCodexUsageResponse;
+};
+
+export type GetBotsByBotIdAgentsByIdCodexUsageResponse = GetBotsByBotIdAgentsByIdCodexUsageResponses[keyof GetBotsByBotIdAgentsByIdCodexUsageResponses];
 
 export type DeleteBotsByBotIdAgentsByIdCredentialData = {
     body?: never;

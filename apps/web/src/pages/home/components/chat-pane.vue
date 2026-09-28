@@ -442,8 +442,10 @@
               :error-message="goalSubmissionBlocked ? goalExecutionBlockedReason : runtimeModeUnavailableReason || composerError"
               :pending-user-input="pendingUserInput"
               :compacting="isCompactingSession"
+              :usage-notice="composerUsageNotice"
               @select-command-item="selectCommandResultItem"
               @dismiss-command="clearCurrentCommandEvent"
+              @dismiss-usage="dismissCodexUsageNotice"
               @reveal-composer="handleDockRevealComposer"
             >
               <CodexGoalBar
@@ -1252,8 +1254,10 @@ import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
-import { useElementSize, useIntersectionObserver } from '@vueuse/core'
+import { useElementSize, useIntersectionObserver, useLocalStorage } from '@vueuse/core'
 import { useRuntimeControls } from '@/composables/useRuntimeControls'
+import { useCodexUsage } from '@/composables/useCodexUsage'
+import { codexUsageNotice, codexUsageNoticeKey, codexUsageResetTime, codexUsageWindowLabel } from '@/utils/codex-usage'
 import { useQuery } from '@pinia/colada'
 import { getAcpProfiles, getBotsByBotIdAgents, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
@@ -2123,6 +2127,46 @@ const runtimeControls = useRuntimeControls({
   visible: computed(() => isVisible.value && activeUsesExternalAgentComposer.value),
   draftAgentId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? activeBotAgentID.value : ''),
 })
+// Only a ChatGPT sign-in has usage windows; an API-key Codex Agent is billed per token.
+const codexUsageAgentId = computed(() => {
+  if (activeDirectRuntime.value !== BOT_AGENT_RUNTIME_CODEX) return ''
+  const agent = botAgents.value.find(item => item.id === activeBotAgentID.value)
+  return agent?.metadata?.auth === 'chatgpt' && agent.agent_credential_id ? agent.id ?? '' : ''
+})
+const codexUsage = useCodexUsage({
+  botId: computed(() => currentBotId.value ?? ''),
+  botAgentId: codexUsageAgentId,
+  enabled: () => isVisible.value,
+})
+watch(streaming, (now, was) => {
+  if (was && !now && codexUsageAgentId.value && isVisible.value) void codexUsage.refetch()
+})
+// Dismissal holds until the window resets: a new reset time is a new key.
+const dismissedCodexUsageNotices = useLocalStorage<Record<string, string>>('memoh:codex-usage-dismissed', {})
+const codexUsageNoticeState = computed(() => {
+  const notice = codexUsageNotice(codexUsage.data.value)
+  return notice ? { notice, key: codexUsageNoticeKey(codexUsageAgentId.value, notice) } : null
+})
+const composerUsageNotice = computed(() => {
+  const state = codexUsageNoticeState.value
+  if (!state) return null
+  const { exhausted, window } = state.notice
+  if (!exhausted && dismissedCodexUsageNotices.value[codexUsageAgentId.value] === state.key) return null
+  const params = {
+    window: codexUsageWindowLabel(window.window_minutes, t),
+    percent: window.used_percent,
+    time: window.resets_at ? codexUsageResetTime(window.resets_at, locale.value) : '',
+  }
+  const message = exhausted
+    ? t(window.resets_at ? 'chat.codexUsage.exhausted' : 'chat.codexUsage.exhaustedNoReset', params)
+    : t(window.resets_at ? 'chat.codexUsage.warning' : 'chat.codexUsage.warningNoReset', params)
+  return { exhausted, message }
+})
+function dismissCodexUsageNotice() {
+  const state = codexUsageNoticeState.value
+  if (!state || !codexUsageAgentId.value) return
+  dismissedCodexUsageNotices.value = { ...dismissedCodexUsageNotices.value, [codexUsageAgentId.value]: state.key }
+}
 const rawRuntimeControlSnapshot = computed(() => activeIsPendingExternalAgent.value && activeUsesACPRuntime.value ? pendingRuntimeControls.value : runtimeControls.controls.value)
 const runtimeControlSnapshot = computed(() => localizeRuntimeControls(rawRuntimeControlSnapshot.value, runtimeText))
 const composerRuntimeCommands = computed(() =>

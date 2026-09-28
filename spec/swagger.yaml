@@ -2906,6 +2906,32 @@ definitions:
     required:
     - status
     type: object
+  externalagent.CodexUsageResponse:
+    properties:
+      limit_reached:
+        type: boolean
+      windows:
+        items:
+          $ref: '#/definitions/externalagent.CodexUsageWindow'
+        type: array
+    required:
+    - limit_reached
+    - windows
+    type: object
+  externalagent.CodexUsageWindow:
+    properties:
+      resets_at:
+        type: string
+      used_percent:
+        type: integer
+      window_minutes:
+        description: WindowMinutes is 0 when the backend does not report the window
+          length.
+        type: integer
+    required:
+    - used_percent
+    - window_minutes
+    type: object
   fetchproviders.CreateRequest:
     properties:
       config:
@@ -8511,6 +8537,48 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: Poll a pending codex device-code login
+      tags:
+      - external-agents
+  /bots/{bot_id}/agents/{id}/codex/usage:
+    get:
+      description: Available to anyone who can chat with the Bot, so the composer
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/externalagent.CodexUsageResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get the Codex usage limits of the Agent's ChatGPT account
       tags:
       - external-agents
   /bots/{bot_id}/agents/{id}/credential:
