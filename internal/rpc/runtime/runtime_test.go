@@ -11,6 +11,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/rpc"
 	"github.com/felinics/memoh/internal/rpc/runtimepb"
 )
 
@@ -52,14 +54,34 @@ func TestCallPassesThroughDirectStatus(t *testing.T) {
 }
 
 // TestCallTransportsPublicErrors: Public marks operator-facing adapter
-// errors for verbatim transport.
+// errors for transport as the adapter message; the status message is fixed.
 func TestCallTransportsPublicErrors(t *testing.T) {
 	err := callWith(t, Public(errors.New("telegram: chat not found")))
 	if got := status.Code(err); got != codes.Unknown {
 		t.Fatalf("code = %v, want Unknown", got)
 	}
-	if got := status.Convert(err).Message(); got != "telegram: chat not found" {
-		t.Fatalf("message = %q", got)
+	if got := status.Convert(err).Message(); got != publicReason.Message {
+		t.Fatalf("message = %q, want the fixed message", got)
+	}
+	restored := reasons.Decode(err)
+	if restored == nil || restored.Error() != "telegram: chat not found" {
+		t.Fatalf("restored = %v, want the adapter message", restored)
+	}
+}
+
+// TestCallEncodesCatalogErrors: a catalog apperror crosses as its code and
+// args instead of an opaque internal error.
+func TestCallEncodesCatalogErrors(t *testing.T) {
+	err := callWith(t, fmt.Errorf("resolve: %w", apperror.Wrap(apperror.CodeBotNameTaken, errors.New("private detail"), map[string]string{"field": "name"})))
+	if got := status.Code(err); got != codes.Aborted {
+		t.Fatalf("code = %v, want Aborted", got)
+	}
+	if msg := status.Convert(err).Message(); strings.Contains(msg, "private") {
+		t.Fatalf("detail leaked: %q", msg)
+	}
+	restored := rpc.DecodeAppError(err)
+	if apperror.CodeOf(restored) != apperror.CodeBotNameTaken || apperror.ArgsOf(restored)["field"] != "name" {
+		t.Fatalf("restored = %v", restored)
 	}
 }
 

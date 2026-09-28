@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
 	codexruntime "github.com/felinics/memoh/internal/agent/runtime/codex"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
@@ -112,11 +113,8 @@ func (h *ExternalAgentCodexHandler) AuthorizeDevice(c echo.Context) error {
 	}
 	start, err := h.driver.StartChatGPTDeviceLogin(c.Request().Context(), botID, botAgentID)
 	if err != nil {
-		if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
-			return feedbackErr
-		}
-		if apperror.CodeOf(err) != "" {
-			return err
+		if translated := application.ExternalAgentError(err); apperror.CodeOf(translated) != "" {
+			return translated
 		}
 		return apperror.Wrap(
 			apperror.CodeExternalRuntimeUnavailable,

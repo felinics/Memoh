@@ -5,14 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"path"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
@@ -601,7 +598,7 @@ func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.La
 	if err != nil {
 		var missing *external.DependencyMissingError
 		if errors.As(err, &missing) {
-			return external.Launcher{}, dependencyMissingFeedback(missing)
+			return external.Launcher{}, dependencyMissing(missing)
 		}
 		return external.Launcher{}, fmt.Errorf("resolve codex launcher for bot %s: %w", botID, err)
 	}
@@ -611,25 +608,15 @@ func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.La
 	return launcher, nil
 }
 
-// dependencyMissingFeedback blocks a turn until the dependency is available.
-func dependencyMissingFeedback(missing *external.DependencyMissingError) *agentfeedback.Error {
-	message := "Codex is not installed in this workspace. Ask a bot administrator to install it from the bot's dependencies, then send the message again."
-	operationInProgress := missing.OperationInProgress || strings.TrimSpace(missing.TaskID) != ""
-	if operationInProgress {
-		message = "Codex is not installed in this workspace yet; a dependency operation is already in progress. Send the message again when it finishes."
+// dependencyMissing blocks a turn until the dependency is available. It
+// names this driver's dependency when the resolver did not, and counts a
+// started installation task as an operation in progress.
+func dependencyMissing(missing *external.DependencyMissingError) *external.DependencyMissingError {
+	return &external.DependencyMissingError{
+		DependencyID:        firstNonEmpty(missing.DependencyID, dependencyID),
+		TaskID:              strings.TrimSpace(missing.TaskID),
+		OperationInProgress: missing.OperationInProgress || strings.TrimSpace(missing.TaskID) != "",
 	}
-	return agentfeedback.New(
-		agentfeedback.CodeAgentDependencyMissing,
-		"dependency_missing",
-		http.StatusConflict,
-		"chat.externalAgent.dependencyMissing",
-		message,
-		map[string]string{
-			"dep_id":                firstNonEmpty(missing.DependencyID, dependencyID),
-			"install_task_id":       strings.TrimSpace(missing.TaskID),
-			"operation_in_progress": strconv.FormatBool(operationInProgress),
-		},
-	)
 }
 
 // observeLauncherVersion reports the handshake version to the resolver when
@@ -643,14 +630,13 @@ func (d *Driver) observeLauncherVersion(ctx context.Context, botID, version stri
 }
 
 // wrapServerError shapes an app-server acquisition failure for the caller.
-// Stable feedback (a missing workspace dependency) passes through untouched
-// so it reaches the user with its code, status, and args — apperror.Wrap
-// deliberately hides its cause, which would swallow the feedback. Anything
-// else is the generic runtime-unavailable failure.
+// A failure the user can act on (a missing workspace dependency, a workspace
+// that is not a container) passes through untouched so the application can
+// give it its own code and args; apperror.Wrap deliberately hides its cause.
+// Anything else is the generic runtime-unavailable failure.
 func wrapServerError(err error) error {
-	var feedbackErr *agentfeedback.Error
-	if errors.As(err, &feedbackErr) {
-		return feedbackErr
+	if errors.Is(err, external.ErrDependencyMissing) || errors.Is(err, external.ErrContainerWorkspaceRequired) || apperror.CodeOf(err) != "" {
+		return err
 	}
 	return apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
 }

@@ -18,7 +18,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/errs"
@@ -131,6 +130,7 @@ func TestBoundaryAnswersEveryErrorWithAProblem(t *testing.T) {
 		{name: "untranslated error", err: errors.New("dial tcp 10.0.0.9:5432: synthetic refusal"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: errs.FaultServer, level: "ERROR", errorText: "synthetic refusal"},
 		{name: "dependency error", err: errs.WrapDependency(errors.New("synthetic upstream reset"), "call upstream"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: errs.FaultDependency, level: "ERROR", errorText: "synthetic upstream reset"},
 		{name: "public error", err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("synthetic socket refused"), nil), path: "/probe", status: http.StatusServiceUnavailable, code: apperror.CodeWorkspaceUnreachable, fault: errs.FaultServer, level: "ERROR", errorText: "synthetic socket refused"},
+		{name: "external agent error", err: apperror.Wrap(apperror.CodeACPAgentNotEnabled, errors.New("synthetic agent codex disabled"), nil), path: "/probe", status: http.StatusForbidden, code: apperror.CodeACPAgentNotEnabled, fault: errs.FaultClient, level: "INFO", errorText: "synthetic agent codex disabled"},
 		{name: "panic", path: "/panic", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: errs.FaultServer, level: "ERROR", errorText: "panic"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,24 +265,6 @@ func TestBoundaryPutsTheTraceOnTheProblemAndTheSpan(t *testing.T) {
 				t.Errorf("span records the error as an event: %v", span.Events())
 			}
 		})
-	}
-}
-
-func TestBoundaryAnswersAgentFeedbackWithItsBody(t *testing.T) {
-	// Clients still read the feedback body's i18n_key until the feedback
-	// package is removed; the record attributes it like any client error.
-	feedback := agentfeedback.New(agentfeedback.CodeNoWorkspaceExec, "missing_workspace_exec", http.StatusForbidden, "chat.externalAgent.noWorkspaceExec", "synthetic feedback message", nil)
-	res := serveBoundary(t, echo.NewHTTPError(feedback.HTTPStatus, feedback), httptest.NewRequest(http.MethodGet, "/probe", nil))
-
-	if res.rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d", res.rec.Code)
-	}
-	var body agentfeedback.Error
-	if err := json.Unmarshal(res.rec.Body.Bytes(), &body); err != nil || body.I18nKey != "chat.externalAgent.noWorkspaceExec" {
-		t.Fatalf("feedback body = %s (%v)", res.rec.Body.String(), err)
-	}
-	if record := res.request(t); record["level"] != "INFO" || record["fault"] != string(errs.FaultClient) {
-		t.Fatalf("record = %v", record)
 	}
 }
 

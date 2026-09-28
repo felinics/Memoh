@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/application"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
@@ -259,13 +258,14 @@ func TestCharacterizeWSCodedRunnerError(t *testing.T) {
 }
 
 // Scenario 6: an External Agent configuration failure (X6). The runner returns
-// the driver's feedback error before any round ran.
+// the External Agent error the application translated the driver's error into
+// before any round ran.
 //
-// Current behavior: session_runs and the run view record the feedback code.
-func TestCharacterizeWSFeedbackRunnerError(t *testing.T) {
+// Current behavior: session_runs and the run view record its code.
+func TestCharacterizeWSExternalAgentRunnerError(t *testing.T) {
 	t.Parallel()
 	r := newFailureCharRun(t)
-	r.finish(agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "", 409, "", "The agent is not configured.", nil))
+	r.finish(apperror.New(apperror.CodeACPAgentNotConfigured, nil))
 
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "acp_agent_not_configured", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)

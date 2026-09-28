@@ -137,15 +137,15 @@ func restoreChannelError(err error) error {
 	return err
 }
 
-// safeChannelError encodes a channel sentinel as its stable reason token
-// followed by the full original error text, letting the peer restore both the
-// sentinel identity and the pre-split message.
+// safeChannelError encodes a channel sentinel as its reason, with the full
+// original error text as the adapter message, letting the peer restore both
+// the sentinel identity and the pre-split message.
 func safeChannelError(err error) error {
 	entry, ok := reasons.Lookup(err)
 	if !ok {
 		return err
 	}
-	return status.Error(entry.Code, entry.Reason+reasonDetailSep+err.Error())
+	return entry.Status(err.Error())
 }
 
 func Handlers(channelRuntime channel.Runtime, tunnel *webhooktunnel.Manager) map[string]runtimeRpc.Handler {

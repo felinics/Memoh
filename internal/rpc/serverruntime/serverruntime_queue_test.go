@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/channel/inbound"
+	intrpc "github.com/felinics/memoh/internal/rpc"
 )
 
 type queueHandlerStub struct {
@@ -55,8 +56,8 @@ func TestQueueRPCHandlerPublishesOnlyStableQueueCode(t *testing.T) {
 	payload := json.RawMessage(`{"bot_id":"bot-1","session_id":"session-1","invocation_id":"channel:42:queue:steer","text":"use bun"}`)
 
 	_, err := handlers[MethodQueueEnqueueSteer](context.Background(), payload)
-	if err == nil || err.Error() != inbound.QueueCommandCodeNoActiveRun {
-		t.Fatalf("handler error = %v, want stable queue code", err)
+	if reason, ok := intrpc.ReasonOf(err); !ok || reason != inbound.QueueCommandCodeNoActiveRun {
+		t.Fatalf("handler error = %v, want stable queue code as the reason", err)
 	}
 }
 

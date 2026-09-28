@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -44,9 +44,7 @@ func TestRuntimeControlErrorPassesThroughHTTPOutcomes(t *testing.T) {
 	if got := runtimeControlError(notFound); !errors.Is(got, notFound) {
 		t.Fatalf("client echo error was translated: %v", got)
 	}
-	feedback := agentfeedback.New("acp_agent_not_found", "", http.StatusNotFound, "", "", nil)
-	var httpErr *echo.HTTPError
-	if got := runtimeControlError(feedback); !errors.As(got, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("feedback was not rendered as HTTP error: %v", got)
+	if got := apperror.CodeOf(runtimeControlError(fmt.Errorf("start: %w", acpagent.ErrAgentNotFound))); got != apperror.CodeACPAgentNotFound {
+		t.Fatalf("unknown agent code = %q, want %s", got, apperror.CodeACPAgentNotFound)
 	}
 }

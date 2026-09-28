@@ -3,11 +3,9 @@ package codex
 import (
 	"context"
 	"errors"
-	"net/http"
 	"strings"
 	"testing"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/apperror"
@@ -118,7 +116,7 @@ func TestAppServerCommandQuotesUnsafePaths(t *testing.T) {
 	}
 }
 
-func TestResolveLauncherMissingDependencyIsStableFeedback(t *testing.T) {
+func TestResolveLauncherMissingDependencyKeepsItsFields(t *testing.T) {
 	resolver := &fakeLauncherResolver{err: &external.DependencyMissingError{
 		DependencyID: "codex",
 		TaskID:       "task-42",
@@ -128,54 +126,36 @@ func TestResolveLauncherMissingDependencyIsStableFeedback(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveLauncher returned no error for a missing dependency")
 	}
-	var feedback *agentfeedback.Error
-	if !errors.As(err, &feedback) {
-		t.Fatalf("error %T is not agent feedback: %v", err, err)
+	var missing *external.DependencyMissingError
+	if !errors.As(err, &missing) {
+		t.Fatalf("error %T is not a missing dependency: %v", err, err)
 	}
-	if feedback.Code != agentfeedback.CodeAgentDependencyMissing {
-		t.Fatalf("code = %q", feedback.Code)
-	}
-	if feedback.HTTPStatus != http.StatusConflict || feedback.I18nKey != "chat.externalAgent.dependencyMissing" || feedback.Reason != "dependency_missing" {
-		t.Fatalf("feedback shape = %+v", feedback)
-	}
-	want := map[string]string{
-		"dep_id":                "codex",
-		"install_task_id":       "task-42",
-		"operation_in_progress": "true",
-	}
-	for key, value := range want {
-		if feedback.Args[key] != value {
-			t.Errorf("args[%q] = %q, want %q", key, feedback.Args[key], value)
-		}
-	}
-	if len(feedback.Args) != len(want) {
-		t.Errorf("args = %v, want exactly %v", feedback.Args, want)
+	want := external.DependencyMissingError{DependencyID: "codex", TaskID: "task-42", OperationInProgress: true}
+	if *missing != want {
+		t.Fatalf("missing = %+v, want %+v", *missing, want)
 	}
 
 	// The turn path shapes acquisition failures before returning them; the
-	// feedback must come out intact, not buried under an apperror code.
+	// missing dependency must come out intact for the application to
+	// translate, not buried under runtime-unavailable.
 	shaped := wrapServerError(err)
-	var again *agentfeedback.Error
-	if !errors.As(shaped, &again) || again.Code != agentfeedback.CodeAgentDependencyMissing {
-		t.Fatalf("wrapServerError hid the feedback: %v", shaped)
+	if !errors.As(shaped, &missing) {
+		t.Fatalf("wrapServerError hid the missing dependency: %v", shaped)
 	}
 	if apperror.CodeOf(shaped) != "" {
-		t.Fatalf("wrapServerError wrapped feedback in apperror %q", apperror.CodeOf(shaped))
+		t.Fatalf("wrapServerError wrapped the missing dependency in apperror %q", apperror.CodeOf(shaped))
 	}
 }
 
-func TestResolveLauncherMissingWithoutInstallTaskKeepsArgs(t *testing.T) {
-	d := &Driver{launchers: &fakeLauncherResolver{err: &external.DependencyMissingError{DependencyID: "codex"}}}
+func TestResolveLauncherMissingWithoutIDNamesCodex(t *testing.T) {
+	d := &Driver{launchers: &fakeLauncherResolver{err: &external.DependencyMissingError{}}}
 	_, err := d.resolveLauncher(context.Background(), "bot-1")
-	var feedback *agentfeedback.Error
-	if !errors.As(err, &feedback) {
-		t.Fatalf("error %T is not agent feedback: %v", err, err)
+	var missing *external.DependencyMissingError
+	if !errors.As(err, &missing) {
+		t.Fatalf("error %T is not a missing dependency: %v", err, err)
 	}
-	if feedback.Args["dep_id"] != "codex" {
-		t.Fatalf("dep_id = %q, want codex", feedback.Args["dep_id"])
-	}
-	if _, ok := feedback.Args["install_task_id"]; !ok {
-		t.Fatal("install_task_id key missing when no task was started")
+	if missing.DependencyID != "codex" || missing.TaskID != "" || missing.OperationInProgress {
+		t.Fatalf("missing = %+v, want codex without a task", *missing)
 	}
 }
 
@@ -186,9 +166,8 @@ func TestResolveLauncherOtherErrorsAreWrapped(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Fatalf("cause lost: %v", err)
 	}
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) {
-		t.Fatal("a plain resolver failure must not become user feedback")
+	if errors.Is(err, external.ErrDependencyMissing) {
+		t.Fatal("a plain resolver failure must not become a missing dependency")
 	}
 	if code := apperror.CodeOf(wrapServerError(err)); code != apperror.CodeExternalRuntimeUnavailable {
 		t.Fatalf("wrapServerError code = %q", code)
@@ -246,17 +225,16 @@ func TestSetLauncherResolverInstallsResolver(t *testing.T) {
 
 func TestMissingDependencyReportsAdministrativeOperation(t *testing.T) {
 	missing := &external.DependencyMissingError{DependencyID: dependencyID, OperationInProgress: true}
-	feedback := dependencyMissingFeedback(missing)
-	if feedback.Args["operation_in_progress"] != "true" || !strings.Contains(feedback.Message, "already in progress") {
-		t.Fatalf("existing administrative operation was lost: %+v", feedback)
+	got := dependencyMissing(missing)
+	if !got.OperationInProgress {
+		t.Fatalf("existing administrative operation was lost: %+v", got)
 	}
-	if feedback.Args["install_task_id"] != "" {
+	if got.TaskID != "" {
 		t.Fatal("administrative operation invented a background task")
 	}
 	missing.OperationInProgress = false
-	feedback = dependencyMissingFeedback(missing)
-	if feedback.Args["operation_in_progress"] != "false" || !strings.Contains(feedback.Message, "administrator") {
-		t.Fatalf("missing dependency should ask an administrator to install it: %+v", feedback)
+	if got := dependencyMissing(missing); got.OperationInProgress {
+		t.Fatalf("missing dependency without an operation reported one: %+v", got)
 	}
 }
 
@@ -289,8 +267,7 @@ func TestAcquireServerRejectsRemoteBeforeReusingOrStartingProcess(t *testing.T) 
 	// be rejected before either can be touched, even with a resolvable CLI.
 	d := &Driver{bridges: remoteBridgeSource{}, launchers: &fakeLauncherResolver{launcher: external.Launcher{Path: "/home/alice/codex"}}}
 	_, _, err := d.acquireServer(t.Context(), "bot", "agent")
-	var feedback *agentfeedback.Error
-	if !errors.As(err, &feedback) || feedback.Reason != "remote_workspace_unsupported" {
+	if !errors.Is(err, external.ErrContainerWorkspaceRequired) {
 		t.Fatalf("remote process use was not blocked: %v", err)
 	}
 }

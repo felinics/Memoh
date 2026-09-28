@@ -239,9 +239,7 @@ func (s *Server) AdvancePlainTextUserInput(ctx context.Context, req *turnpb.Json
 // does not carry the cause hands it to the RPC result line first.
 func (*Server) mapError(ctx context.Context, operation string, err error) error {
 	if entry, ok := turnReasons.Lookup(err); ok {
-		// The legacy encoding: the client tells the sentinels apart by code,
-		// and a deferred turn by its message.
-		return status.Error(entry.Code, entry.Message)
+		return entry.Status("")
 	}
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -251,12 +249,10 @@ func (*Server) mapError(ctx context.Context, operation string, err error) error 
 		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, err))
 		return status.Error(codes.DeadlineExceeded, "turn deadline exceeded")
 	default:
-		if feedback := feedbackFromError(err); feedback != nil {
-			if message, ok := encodeFeedback(feedback); ok {
-				return status.Error(codes.FailedPrecondition, message)
-			}
-		}
 		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, err))
+		if encoded := rpc.AppErrorStatus(threadError(err)); encoded != nil {
+			return encoded
+		}
 		return status.Error(codes.Internal, "internal turn operation failed")
 	}
 }

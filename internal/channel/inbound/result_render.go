@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/i18n"
@@ -147,9 +147,6 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 		return channel.Message{}
 	}
 	t := rc.localizerFor(result)
-	if result.FeedbackError != nil {
-		return applyMessageFormat(channel.Message{Text: renderACPFeedbackText(result.FeedbackError, t)}, rc.Caps)
-	}
 	var msg channel.Message
 	if result.Interactive == nil || !rc.Caps.Buttons {
 		msg = channel.Message{Text: appendFallbackTrailer(result.Text, result.Interactive, rc.Caps, t)}
@@ -170,25 +167,25 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 	return applyMessageFormat(msg, rc.Caps)
 }
 
-func renderACPFeedbackText(feedback *agentfeedback.Error, t *i18n.Localizer) string {
-	if feedback == nil {
-		return ""
-	}
-	text := strings.TrimSpace(feedback.Message)
-	if key := strings.TrimSpace(feedback.I18nKey); key != "" && t != nil {
-		params := make(map[string]any, len(feedback.Args))
-		for name, value := range feedback.Args {
+// externalAgentErrorText is the channel copy for the code err carries, with
+// its args, or the catalog detail when the channel has no copy for it.
+func externalAgentErrorText(err error, t *i18n.Localizer) string {
+	code := apperror.CodeOf(err)
+	key := "errors." + string(code)
+	if t != nil {
+		args := apperror.ArgsOf(err)
+		params := make(map[string]any, len(args))
+		for name, value := range args {
 			params[name] = value
 		}
-		localized := t.T(key, params)
-		if strings.TrimSpace(localized) != "" && localized != key {
-			text = localized
+		if text := t.T(key, params); strings.TrimSpace(text) != "" && text != key {
+			return text
 		}
 	}
-	if text == "" {
-		text = strings.TrimSpace(feedback.Code)
+	if definition, ok := apperror.Lookup(code); ok {
+		return definition.Detail
 	}
-	return text
+	return string(code)
 }
 
 // appendFallbackTrailer adds a typeable-command guide derived from Interactive

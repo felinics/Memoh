@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -315,15 +314,11 @@ func (s *Service) runtimeControlContext(ctx context.Context, request RuntimeCont
 	return ctx, nil
 }
 
-// publicRuntimeControlError keeps agent feedback and the team routing
-// sentinel intact for their own transports; everything else goes through the
-// shared runtime control translation.
+// publicRuntimeControlError keeps the team routing sentinel intact for its
+// own transports; everything else goes through the shared runtime control
+// translation.
 func publicRuntimeControlError(err error) error {
-	if err == nil || apperror.CodeOf(err) != "" {
-		return err
-	}
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) || errors.Is(err, turn.ErrTeamNotServed) {
+	if errors.Is(err, turn.ErrTeamNotServed) {
 		return err
 	}
 	return RuntimeControlError(err)

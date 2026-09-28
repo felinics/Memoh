@@ -1358,19 +1358,11 @@ func sendWSErrorFromError(writer *wsWriter, ref wsTurnRef, err error) {
 		sendWSRunRejected(writer, ref.withRun(""), code, err.Error())
 		return
 	}
-	if event, ok := newWSAppErrorEvent(ref, err); ok {
+	if event, ok := newWSAppErrorEvent(ref, application.ExternalAgentError(err)); ok {
 		writer.SendJSON(event)
 		return
 	}
-	feedback := externalAgentFeedbackError(err)
-	if feedback == nil {
-		sendWSError(writer, ref, wsErrorMessage(err))
-		return
-	}
-	event := ref.event("error")
-	event.Message = strings.TrimSpace(feedback.Message)
-	event.Feedback = feedback
-	writer.SendJSON(event)
+	sendWSError(writer, ref, wsErrorMessage(err))
 }
 
 // forwardWSStreamEvents publishes the run's events to the session runtime,
@@ -2725,14 +2717,12 @@ func (h *LocalChannelHandler) authorizeWSRuntimeExecution(ctx context.Context, c
 		return info, err
 	}
 	if strings.TrimSpace(info.RuntimeOwnerAccountID) == "" {
-		feedback := externalAgentRuntimeOwnerMissingFeedback()
-		return info, echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return info, apperror.New(apperror.CodeACPRuntimeOwnerMissing, nil)
 	}
 	bot, err := AuthorizeBotAccessWithPermission(ctx, h.botService, h.accountService, channelIdentityID, botID, bots.PermissionWorkspaceExec)
 	if err != nil {
 		if isHTTPStatus(err, http.StatusForbidden) {
-			feedback := externalAgentNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
-			return info, echo.NewHTTPError(feedback.HTTPStatus, feedback)
+			return info, apperror.New(apperror.CodeNoWorkspaceExec, nil)
 		}
 		return info, err
 	}

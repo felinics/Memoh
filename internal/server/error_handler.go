@@ -10,7 +10,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/trace"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
@@ -32,10 +31,6 @@ func NewHTTPErrorHandler(log *slog.Logger) echo.HTTPErrorHandler {
 		ctx := c.Request().Context()
 		answer := answerFor(ctx, err)
 		c.Set(resultErrorKey, answer.err)
-		if answer.legacy != nil {
-			writeLegacy(ctx, log, c, answer.legacy)
-			return
-		}
 		problem, _ := apperror.ProblemFrom(answer.public, httpx.RequestID(c))
 		problem.Fault = string(answer.fault)
 		problem.TraceID = traceID(ctx)
@@ -52,10 +47,6 @@ type answer struct {
 	// public is the catalog error the Problem is rendered from.
 	public *apperror.Error
 	fault  errs.Fault
-	// legacy is a structured agent feedback body, answered as it is until
-	// the agentfeedback package is removed and clients read its code from a
-	// Problem.
-	legacy *echo.HTTPError
 }
 
 // answerFor chooses the public error for err: a cancellation by the caller
@@ -70,11 +61,7 @@ func answerFor(ctx context.Context, err error) answer {
 	var httpErr *echo.HTTPError
 	if errors.As(err, &httpErr) {
 		public := apperror.Wrap(frameworkCode(httpErr.Code), err, nil)
-		a := answer{err: public, public: public, fault: errs.Analyze(ctx, public).Fault}
-		if _, ok := httpErr.Message.(*agentfeedback.Error); ok {
-			a.legacy = httpErr
-		}
-		return a
+		return answer{err: public, public: public, fault: errs.Analyze(ctx, public).Fault}
 	}
 	var public *apperror.Error
 	if report.Public != nil && errors.As(report.Public.Err, &public) {
@@ -134,18 +121,6 @@ func writeProblem(ctx context.Context, log *slog.Logger, c echo.Context, problem
 		return
 	}
 	if err := json.NewEncoder(response).Encode(problem); err != nil {
-		logWriteFailure(ctx, log, err)
-	}
-}
-
-func writeLegacy(ctx context.Context, log *slog.Logger, c echo.Context, httpErr *echo.HTTPError) {
-	var err error
-	if c.Request().Method == http.MethodHead {
-		err = c.NoContent(httpErr.Code)
-	} else {
-		err = c.JSON(httpErr.Code, httpErr.Message)
-	}
-	if err != nil {
 		logWriteFailure(ctx, log, err)
 	}
 }

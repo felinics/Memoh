@@ -19,7 +19,6 @@ import (
 	"unicode"
 
 	"github.com/felinics/memoh/internal/acl"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
@@ -757,7 +756,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
 				}
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, specErr)
+				return p.sendExternalAgentError(ctx, sender, msg, identity, specErr)
 			}
 			defaultSpec = spec
 			defaultSpecShouldCreate = shouldCreate
@@ -810,7 +809,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
 				}
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, specErr)
+				return p.sendExternalAgentError(ctx, sender, msg, identity, specErr)
 			}
 		}
 		if shouldCreate {
@@ -822,7 +821,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.WarnContext(ctx, "auto-create session failed", slog.Any("error", createErr))
 				}
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, createErr)
+				return p.sendExternalAgentError(ctx, sender, msg, identity, createErr)
 			}
 			sessionID = sess.ID
 			sessionType = sess.Type
@@ -841,12 +840,12 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			err = p.requireWorkspaceExecForPrincipal(ctx, identity.BotID, ownerPrincipal)
 		}
 		if err == nil && sessionRequiresExternalRuntimeActor(runtimeSession) && (shouldTrigger || isDirectedAtBot(msg)) {
-			err = p.requireExternalRuntimeActor(ctx, identity, ownerPrincipal)
+			err = requireExternalRuntimeActor(identity, ownerPrincipal)
 		}
 		if err != nil {
 			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 			if shouldTrigger || isDirectedAtBot(msg) {
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, err)
+				return p.sendExternalAgentError(ctx, sender, msg, identity, err)
 			}
 			return nil
 		}
@@ -1284,17 +1283,17 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 
 	if streamErr != nil {
-		if feedback := externalAgentFeedbackFromError(streamErr); feedback != nil {
+		if public := externalAgentError(streamErr); public != nil {
 			_ = stream.Push(ctx, channel.StreamEvent{
 				Type:  channel.StreamEventError,
-				Error: strings.TrimSpace(feedback.Message),
+				Error: externalAgentErrorText(public, p.localizer(ctx, identity.BotID)),
 			})
 			if statusNotifier != nil {
 				if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
 					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 				}
 			}
-			_ = p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+			_ = p.sendExternalAgentError(ctx, sender, msg, identity, public)
 			return streamErr
 		}
 		_ = stream.Push(ctx, channel.StreamEvent{
@@ -4110,7 +4109,7 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 		mode = sessionpkg.TypeChat
 		agentID = firstNewSessionAgentArg(args)
 		if agentID != "" && isGroupConversation(msg) {
-			return NewSessionSpec{}, groupChatExternalAgentUnsupportedFeedback()
+			return NewSessionSpec{}, apperror.New(apperror.CodeGroupChatACPUnsupported, nil)
 		}
 	case "discuss":
 		if isLocalChannelType(msg.Channel) {
@@ -4174,14 +4173,7 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 	}
 	profile := resolveACPProfile(profiles, agentID)
 	if !profile.Known {
-		return NewSessionSpec{}, agentfeedback.New(
-			agentfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotFound",
-			fmt.Sprintf("Unknown ACP agent %q.", agentID),
-			map[string]string{"agent_id": agentID},
-		)
+		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
 	}
 	agentID = profile.ID
 	spec.Runtime = sessionpkg.RuntimeACPAgent
@@ -4251,8 +4243,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	parsed := invocation.Parsed
 	spec, err := resolveNewSessionSpecParsed(parsed, msg, p.acpProfiles)
 	if err != nil {
-		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+		if public := externalAgentError(err); public != nil {
+			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -4261,23 +4253,23 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	spec, err = p.applyDefaultChatRuntimeToNewSessionSpec(ctx, identity, msg, spec)
 	if err != nil {
-		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+		if public := externalAgentError(err); public != nil {
+			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 		}
 		return err
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent {
 		if err := p.validateACPNewSessionSpec(ctx, identity, spec); err != nil {
-			if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+			if public := externalAgentError(err); public != nil {
+				return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 			}
 			return err
 		}
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
 		if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
-			if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+			if public := externalAgentError(err); public != nil {
+				return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 			}
 			return err
 		}
@@ -4342,8 +4334,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		if p.logger != nil {
 			p.logger.WarnContext(ctx, "create new session via /new command failed", slog.Any("error", err))
 		}
-		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+		if public := externalAgentError(err); public != nil {
+			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -4501,17 +4493,10 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 		agentID = defaultRuntime
 	}
 	if agentID == "" {
-		return NewSessionSpec{}, agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_agent_id",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			"External agent is selected as the default chat runtime, but no agent is configured.",
-			nil,
-		)
+		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	if p.permissionChecker == nil {
-		return NewSessionSpec{}, p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
+		return NewSessionSpec{}, externalAgentExecDenied("permission_checker_unavailable")
 	}
 	if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
 		return NewSessionSpec{}, err
@@ -4536,14 +4521,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 
 	profile := resolveACPProfile(p.acpProfiles, agentID)
 	if !profile.Known {
-		return NewSessionSpec{}, agentfeedback.New(
-			agentfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotFound",
-			"Configured ACP agent was not found.",
-			map[string]string{"agent_id": agentID},
-		)
+		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
 	}
 	agentID = profile.ID
 	projectMode := strings.TrimSpace(defaults.ProjectMode)
@@ -4620,39 +4598,18 @@ func metadataString(metadata map[string]any, key string) string {
 func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) error {
 	agentID := acpNewSessionAgentID(spec)
 	if agentID == "" {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_agent_id",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			"ACP agent id is required for external-agent sessions.",
-			nil,
-		)
+		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	profile := resolveACPProfile(p.acpProfiles, agentID)
 	if !profile.Known {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotFound",
-			"Configured ACP agent was not found.",
-			map[string]string{"agent_id": agentID},
-		)
+		return apperror.New(apperror.CodeACPAgentNotFound, nil)
 	}
 	projectPath := strings.TrimSpace(metadataString(spec.Metadata, "project_path"))
 	if projectPath == "" {
 		projectPath = sessionpkg.DefaultACPProjectPath
 	}
 	if !strings.HasPrefix(projectPath, "/") {
-		return agentfeedback.New(
-			agentfeedback.CodeProjectPathInvalid,
-			"project_path_must_be_absolute",
-			http.StatusBadRequest,
-			"chat.externalAgent.projectPathInvalid",
-			"ACP project path must be absolute.",
-			map[string]string{"agent_id": agentID},
-		)
+		return apperror.New(apperror.CodeACPProjectPathInvalid, nil)
 	}
 	projectMode := strings.TrimSpace(metadataString(spec.Metadata, "acp_project_mode"))
 	if projectMode == "" {
@@ -4661,23 +4618,9 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	switch projectMode {
 	case sessionpkg.DefaultACPProjectMode:
 	case "none":
-		return agentfeedback.New(
-			agentfeedback.CodeProjectModeInvalid,
-			"none_not_supported_for_new_session",
-			http.StatusBadRequest,
-			"chat.externalAgent.projectModeInvalid",
-			"acp_project_mode=none is not supported for channel-created ACP sessions.",
-			map[string]string{"agent_id": agentID, "project_mode": projectMode},
-		)
+		return apperror.New(apperror.CodeACPProjectModeInvalid, nil)
 	default:
-		return agentfeedback.New(
-			agentfeedback.CodeProjectModeInvalid,
-			"unknown_project_mode",
-			http.StatusBadRequest,
-			"chat.externalAgent.projectModeInvalid",
-			"Unknown ACP project mode.",
-			map[string]string{"agent_id": agentID, "project_mode": projectMode},
-		)
+		return apperror.New(apperror.CodeACPProjectModeInvalid, nil)
 	}
 	if p == nil || p.acpAgentSetup == nil {
 		return nil
@@ -4688,24 +4631,10 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	}
 	setup := p.acpProfiles.ResolveACPSetupPreflight(profile.ID, metadata)
 	if strings.TrimSpace(spec.BotAgentID) == "" && !setup.Enabled {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotEnabled,
-			"agent_not_enabled",
-			http.StatusForbidden,
-			"chat.externalAgent.agentNotEnabled",
-			"ACP agent is not enabled for this bot.",
-			map[string]string{"agent_id": agentID},
-		)
+		return apperror.New(apperror.CodeACPAgentNotEnabled, nil)
 	}
 	if field := setup.MissingManagedField; field != nil {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_managed_field",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			"ACP agent setup is incomplete.",
-			map[string]string{"agent_id": agentID, "field_id": field.ID, "field_label": field.Label},
-		)
+		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	return nil
 }
@@ -4716,35 +4645,35 @@ func (p *ChannelInboundProcessor) requireWorkspaceExecForExternalAgent(ctx conte
 
 func (p *ChannelInboundProcessor) requireWorkspaceExecForPrincipal(ctx context.Context, botID, accountUserID string) error {
 	if p.permissionChecker == nil {
-		return p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
+		return externalAgentExecDenied("permission_checker_unavailable")
 	}
 	accountUserID = strings.TrimSpace(accountUserID)
 	if accountUserID == "" {
-		return p.missingWorkspaceExecFeedback("account_user_unbound", "Current identity is not linked to an account with workspace execution permission.")
+		return externalAgentExecDenied("account_user_unbound")
 	}
 	allowed, err := p.permissionChecker.HasBotPermission(ctx, strings.TrimSpace(botID), accountUserID, bots.PermissionWorkspaceExec)
 	if err != nil {
 		return err
 	}
 	if !allowed {
-		return p.missingWorkspaceExecFeedback("missing_workspace_exec", "Current identity does not have workspace execution permission, so it cannot use an external agent as the chat runtime.")
+		return externalAgentExecDenied("missing_workspace_exec")
 	}
 	return nil
 }
 
-func (p *ChannelInboundProcessor) requireExternalRuntimeActor(_ context.Context, identity InboundIdentity, runtimeOwnerAccountID string) error {
+func requireExternalRuntimeActor(identity InboundIdentity, runtimeOwnerAccountID string) error {
 	actorUserID := strings.TrimSpace(identity.UserID)
 	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
 		return sessionpkg.ErrACPRuntimeOwnerMissing
 	}
 	if actorUserID == "" {
-		return p.missingWorkspaceExecFeedback("account_user_unbound", "Current identity is not linked to an account with workspace execution permission.")
+		return externalAgentExecDenied("account_user_unbound")
 	}
 	if actorUserID == runtimeOwnerAccountID {
 		return nil
 	}
-	return p.missingWorkspaceExecFeedback("runtime_owner_mismatch", "This ACP runtime belongs to another user.")
+	return externalAgentExecDenied("runtime_owner_mismatch")
 }
 
 // sessionUsesExternalRuntime reports a session that runs on an agent runtime with
@@ -4785,39 +4714,25 @@ func isGroupConversation(msg channel.InboundMessage) bool {
 	return !isLocalChannelType(msg.Channel) && !channel.IsPrivateConversationType(msg.Conversation.Type)
 }
 
-func groupChatExternalAgentUnsupportedFeedback() *agentfeedback.Error {
-	return agentfeedback.New(
-		agentfeedback.CodeGroupChatUnsupported,
-		"group_chat_acp_unsupported",
-		http.StatusBadRequest,
-		"chat.externalAgent.groupChatUnsupported",
-		"Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex to create a discuss external-agent session.",
-		nil,
-	)
-}
-
-func (*ChannelInboundProcessor) missingWorkspaceExecFeedback(reason, message string) *agentfeedback.Error {
-	key := "chat.externalAgent.noWorkspaceExec"
-	var args map[string]string
+// externalAgentExecDenied is the error for a caller that may not run an
+// External Agent in the bot's workspace. reason stays in the cause for the
+// logs; an identity that is not linked to an account is pointed at /link.
+func externalAgentExecDenied(reason string) error {
+	cause := errors.New("workspace execution denied: " + reason)
 	if reason == "account_user_unbound" {
 		// The bot owner's IM identity is usually just not linked yet; a bare
 		// "no permission" leaves them nothing to act on, so point at /link.
-		key = "chat.externalAgent.accountUnbound"
-		args = map[string]string{"link": command.CmdRef("link")}
+		return apperror.Wrap(apperror.CodeExternalAgentAccountUnbound, cause, map[string]string{"link": command.CmdRef("link")})
 	}
-	return agentfeedback.New(
-		agentfeedback.CodeNoWorkspaceExec,
-		reason,
-		http.StatusForbidden,
-		key,
-		message,
-		args,
-	)
+	return apperror.Wrap(apperror.CodeNoWorkspaceExec, cause, nil)
 }
 
-func (p *ChannelInboundProcessor) sendExternalAgentFeedbackError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
-	feedback := externalAgentFeedbackFromError(err)
-	if feedback == nil {
+// sendExternalAgentError replies with the External Agent error err carries,
+// rendered from the channel copy for its code. Any other error is returned
+// unchanged.
+func (p *ChannelInboundProcessor) sendExternalAgentError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
+	public := externalAgentError(err)
+	if public == nil {
 		return err
 	}
 	target := strings.TrimSpace(msg.ReplyTarget)
@@ -4825,36 +4740,38 @@ func (p *ChannelInboundProcessor) sendExternalAgentFeedbackError(ctx context.Con
 		return err
 	}
 	loc := p.localizer(ctx, identity.BotID)
-	out := renderResult(&command.Result{
-		Text:          strings.TrimSpace(feedback.Message),
-		Locale:        loc.Locale(),
-		FeedbackError: feedback,
-	}, RenderContext{Caps: p.channelCaps(msg.Channel), T: loc})
+	out := applyMessageFormat(channel.Message{Text: externalAgentErrorText(public, loc)}, p.channelCaps(msg.Channel))
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
-func externalAgentFeedbackFromError(err error) *agentfeedback.Error {
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) {
-		return feedback
+// externalAgentError returns err as an External Agent error, translating the
+// thread errors a session create or lookup ends with, or nil when err is not
+// one.
+func externalAgentError(err error) error {
+	if code := apperror.CodeOf(err); code != "" {
+		if apperror.IsExternalAgentCode(code) {
+			return err
+		}
+		return nil
 	}
+	var code apperror.Code
 	switch {
-	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired):
-		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "missing_agent_id", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
+	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired),
+		errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
+		code = apperror.CodeACPAgentNotConfigured
 	case errors.Is(err, sessionpkg.ErrACPUnknownAgent):
-		return agentfeedback.New(agentfeedback.CodeAgentNotFound, "unknown_agent", http.StatusBadRequest, "chat.externalAgent.agentNotFound", err.Error(), nil)
+		code = apperror.CodeACPAgentNotFound
 	case errors.Is(err, sessionpkg.ErrACPAgentNotEnabled):
-		return agentfeedback.New(agentfeedback.CodeAgentNotEnabled, "agent_not_enabled", http.StatusForbidden, "chat.externalAgent.agentNotEnabled", err.Error(), nil)
-	case errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
-		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "agent_not_configured", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
+		code = apperror.CodeACPAgentNotEnabled
 	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
-		return agentfeedback.New(agentfeedback.CodeRuntimeOwnerMissing, "missing_runtime_owner", http.StatusForbidden, "chat.externalAgent.runtimeOwnerMissing", err.Error(), nil)
+		code = apperror.CodeACPRuntimeOwnerMissing
 	default:
 		return nil
 	}
+	return apperror.Wrap(code, err, nil)
 }
 
 func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec, profiles turn.ACPProfileResolver) command.CurrentContext {

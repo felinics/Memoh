@@ -25,7 +25,7 @@ func (s *Server) RuntimeCommands(ctx context.Context, req *turnpb.JsonRequest) (
 	}
 	out, err := service.RuntimeCommands(ctx, input)
 	if err != nil {
-		return nil, s.runtimeControlError(ctx, err)
+		return nil, s.mapError(ctx, "runtime control", err)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
@@ -59,7 +59,7 @@ func (s *Server) RuntimeControls(ctx context.Context, req *turnpb.JsonRequest) (
 	}
 	out, err := service.RuntimeControls(ctx, input)
 	if err != nil {
-		return nil, s.runtimeControlError(ctx, err)
+		return nil, s.mapError(ctx, "runtime control", err)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *Server) SetRuntimeMode(ctx context.Context, req *turnpb.JsonRequest) (*
 	}
 	out, err := service.SetRuntimeMode(ctx, input)
 	if err != nil {
-		return nil, s.runtimeControlError(ctx, err)
+		return nil, s.mapError(ctx, "runtime control", err)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
@@ -127,7 +127,7 @@ func (s *Server) ExecuteRuntimeCommand(ctx context.Context, req *turnpb.JsonRequ
 	}
 	out, err := service.ExecuteRuntimeCommand(ctx, input)
 	if err != nil {
-		return nil, s.runtimeControlError(ctx, err)
+		return nil, s.mapError(ctx, "runtime control", err)
 	}
 	data, err := json.Marshal(out)
 	if err != nil {
@@ -151,16 +151,6 @@ func (c *Client) ExecuteRuntimeCommand(ctx context.Context, input turn.RuntimeCo
 }
 
 const runtimeControlErrorPrefix = "memoh-runtime-control:"
-
-func (s *Server) runtimeControlError(ctx context.Context, err error) error {
-	if code := apperror.CodeOf(err); code != "" {
-		// The status carries only the code; the result line attributes the
-		// apperror itself.
-		rpc.RecordError(ctx, err)
-		return status.Error(codes.FailedPrecondition, runtimeControlErrorPrefix+string(code))
-	}
-	return s.mapError(ctx, "runtime control", err)
-}
 
 // runtimeControlClientError restores the apperror a runtime control failure
 // carries in the legacy prefix. mapClientError reads the error envelope.

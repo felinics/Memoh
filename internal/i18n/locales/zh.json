@@ -41,30 +41,6 @@
     "contextUnit": "tokens",
     "tip": "提示：随时用 {model} 或 {reasoning} 调整。"
   },
-  "chat": {
-    "externalAgent": {
-      "agentNotConfigured": "该 Bot 的外部 Agent 配置尚未完成。",
-      "agentNotFound": "选中的外部 Agent 不可用。",
-      "agentNotEnabled": "该 Bot 已停用选中的外部 Agent。",
-      "codexOAuthIncomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
-      "codexAuthTokenMissing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
-      "agentAuthInvalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
-      "noWorkspaceExec": "你没有执行该 Bot 工作区命令的权限。",
-      "accountUnbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
-      "runtimeOwnerMissing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
-      "discussUnsupported": "这个外部 Agent 无法在讨论模式中运行。",
-      "groupChatUnsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
-      "projectModeInvalid": "外部 Agent 的项目模式无效。",
-      "projectPathInvalid": "外部 Agent 的项目路径必须是绝对路径。",
-      "displayArgsInvalid": "外部 Agent 的显示参数无效。",
-      "runtimeStartFailed": "外部 Agent 运行时启动失败。",
-      "runtimeBusy": "外部 Agent 正在处理该会话的上一轮请求。",
-      "attachmentInvalid": "附件无效，请重新添加。",
-      "attachmentUnavailable": "无法让外部 Agent 访问该附件，请重新添加。",
-      "imageInputUnsupported": "这个外部 Agent 无法读取所附图片。",
-      "invalidChatRuntime": "选择的对话运行时无效。"
-    }
-  },
   "ops": {
     "template": "⚠️ 暂时无法{verb}，请稍后再试。",
     "verb": {
@@ -686,7 +662,8 @@
     },
     "external_agent": {
       "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。",
-      "account_unbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。"
+      "account_unbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
+      "container_workspace_required": "该 Agent 运行时需要容器工作区。请先把 Bot 切换到容器工作区，再重试。"
     },
     "agent_credential": {
       "not_found": "这个 Agent 账号已不可用，请选择其他账号。",

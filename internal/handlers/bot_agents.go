@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
@@ -71,14 +72,12 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 		ModelID: strings.TrimSpace(c.QueryParam("model_id")), ResolveDefaults: true,
 	})
 	if err != nil {
-		// Stable runtime feedback (agent_dependency_missing and friends) keeps
-		// its own status and args; wrapping it as runtime-unavailable would
-		// lose both and hide the install task from the web.
-		if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
-			return feedbackErr
-		}
-		if apperror.CodeOf(err) != "" {
-			return err
+		// An External Agent error the user can act on (agent_dependency_missing
+		// and friends) keeps its own code and args; wrapping it as
+		// runtime-unavailable would lose both and hide the install task from
+		// the web.
+		if translated := application.ExternalAgentError(err); apperror.CodeOf(translated) != "" {
+			return translated
 		}
 		return apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": agent.Runtime})
 	}

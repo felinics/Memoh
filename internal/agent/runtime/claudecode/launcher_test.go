@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net/http"
 	"strings"
 	"sync"
 	"testing"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/apperror"
@@ -110,32 +108,26 @@ func TestResolveLauncherManagedPathEntersCommandQuoted(t *testing.T) {
 	}
 }
 
-func TestResolveLauncherMissingYieldsDependencyFeedback(t *testing.T) {
+func TestResolveLauncherMissingKeepsTheDependency(t *testing.T) {
 	resolver := &fakeLauncherResolver{err: &external.DependencyMissingError{
 		DependencyID: "claude-code", TaskID: "task-42",
 	}}
 	_, err := launcherDriver(resolver).resolveLauncher(t.Context(), "bot-1")
-	var feedback *agentfeedback.Error
-	if !errors.As(err, &feedback) {
-		t.Fatalf("err = %T %v, want *agentfeedback.Error", err, err)
+	var missing *external.DependencyMissingError
+	if !errors.As(err, &missing) {
+		t.Fatalf("err = %T %v, want *external.DependencyMissingError", err, err)
 	}
-	if feedback.Code != agentfeedback.CodeAgentDependencyMissing || feedback.HTTPStatus != http.StatusConflict ||
-		feedback.I18nKey != "chat.externalAgent.dependencyMissing" || strings.TrimSpace(feedback.Message) == "" {
-		t.Fatalf("feedback = %+v", *feedback)
+	want := external.DependencyMissingError{DependencyID: "claude-code", TaskID: "task-42", OperationInProgress: true}
+	if *missing != want {
+		t.Fatalf("missing = %+v, want %+v", *missing, want)
 	}
-	want := map[string]string{"dep_id": "claude-code", "install_task_id": "task-42", "operation_in_progress": "true"}
-	if len(feedback.Args) != len(want) {
-		t.Fatalf("args = %v, want %v", feedback.Args, want)
+	if apperror.CodeOf(err) != "" {
+		t.Fatalf("missing dependency wrapped in apperror %q", apperror.CodeOf(err))
 	}
-	for key, value := range want {
-		if feedback.Args[key] != value {
-			t.Fatalf("args[%s] = %q, want %q (all: %v)", key, feedback.Args[key], value, feedback.Args)
-		}
-	}
-	// A wrapped sentinel still resolves to the feedback shape.
+	// A wrapped sentinel still resolves to the missing dependency.
 	resolver.err = errors.Join(errors.New("probe"), &external.DependencyMissingError{DependencyID: "claude-code"})
 	_, err = launcherDriver(resolver).resolveLauncher(t.Context(), "bot-1")
-	if !errors.As(err, &feedback) || feedback.Args["dep_id"] != "claude-code" || feedback.Args["install_task_id"] != "" {
+	if !errors.As(err, &missing) || missing.DependencyID != "claude-code" || missing.TaskID != "" {
 		t.Fatalf("wrapped missing: err = %v", err)
 	}
 }
@@ -145,9 +137,8 @@ func TestResolveLauncherOtherErrorsAreRuntimeUnavailable(t *testing.T) {
 	if apperror.CodeOf(err) != apperror.CodeExternalRuntimeUnavailable {
 		t.Fatalf("err = %v, want %s", err, apperror.CodeExternalRuntimeUnavailable)
 	}
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) {
-		t.Fatalf("generic resolver error must not become dependency feedback: %v", err)
+	if errors.Is(err, external.ErrDependencyMissing) {
+		t.Fatalf("generic resolver error must not become a missing dependency: %v", err)
 	}
 	_, err = launcherDriver(&fakeLauncherResolver{launcher: external.Launcher{Path: "  "}}).resolveLauncher(t.Context(), "bot-1")
 	if apperror.CodeOf(err) != apperror.CodeExternalRuntimeUnavailable {
@@ -181,16 +172,15 @@ func TestHandshakeVersionFeedsResolver(t *testing.T) {
 
 func TestMissingDependencyReportsAdministrativeOperation(t *testing.T) {
 	missing := &external.DependencyMissingError{DependencyID: dependencyID, OperationInProgress: true}
-	feedback := dependencyMissingFeedback(missing)
-	if feedback.Args["operation_in_progress"] != "true" || !strings.Contains(feedback.Message, "already in progress") {
-		t.Fatalf("existing administrative operation was lost: %+v", feedback)
+	got := dependencyMissing(missing)
+	if !got.OperationInProgress {
+		t.Fatalf("existing administrative operation was lost: %+v", got)
 	}
-	if feedback.Args["install_task_id"] != "" {
+	if got.TaskID != "" {
 		t.Fatal("administrative operation invented a background task")
 	}
 	missing.OperationInProgress = false
-	feedback = dependencyMissingFeedback(missing)
-	if feedback.Args["operation_in_progress"] != "false" || !strings.Contains(feedback.Message, "administrator") {
-		t.Fatalf("missing dependency should ask an administrator to install it: %+v", feedback)
+	if got := dependencyMissing(missing); got.OperationInProgress {
+		t.Fatalf("missing dependency without an operation reported one: %+v", got)
 	}
 }

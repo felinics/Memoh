@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/acl"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db"
@@ -47,6 +46,16 @@ var (
 	ErrModelIDAmbiguous            = errors.New("model_id is ambiguous across providers")
 	ErrInvalidModelRef             = errors.New("invalid model reference")
 	ErrReasoningOptionsUnavailable = errors.New("reasoning options unavailable")
+
+	// Chat runtime settings a bot cannot be saved with. Invalid chat_runtime
+	// is checked for every bot; the rest apply when the default chat runtime
+	// is an External Agent.
+	ErrInvalidChatRuntime    = errors.New("invalid chat_runtime")
+	ErrACPProjectModeInvalid = errors.New("invalid chat_acp_project_mode")
+	ErrACPProjectPathInvalid = errors.New("chat_acp_project_path must be absolute")
+	ErrACPUnknownAgent       = errors.New("unknown ACP agent")
+	ErrACPAgentNotEnabled    = errors.New("ACP agent is not enabled for this bot")
+	ErrACPAgentNotConfigured = errors.New("ACP agent is not configured for this bot")
 )
 
 type InvalidReasoningEffortError struct {
@@ -194,14 +203,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.ChatRuntime != nil {
 		current.ChatRuntime = normalizeChatRuntime(*req.ChatRuntime)
 		if current.ChatRuntime == "" {
-			return Settings{}, agentfeedback.New(
-				agentfeedback.CodeInvalidChatRuntime,
-				"invalid_chat_runtime",
-				400,
-				"chat.externalAgent.invalidChatRuntime",
-				"invalid chat_runtime",
-				nil,
-			)
+			return Settings{}, ErrInvalidChatRuntime
 		}
 	}
 	if req.ChatACPAgentID != nil {
@@ -213,14 +215,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 	if req.ChatACPProjectMode != nil {
 		current.ChatACPProjectMode = normalizeACPProjectMode(*req.ChatACPProjectMode)
 		if current.ChatACPProjectMode == "" {
-			return Settings{}, agentfeedback.New(
-				agentfeedback.CodeProjectModeInvalid,
-				"invalid_project_mode",
-				400,
-				"chat.externalAgent.projectModeInvalid",
-				"invalid chat_acp_project_mode",
-				map[string]string{"project_mode": strings.TrimSpace(*req.ChatACPProjectMode)},
-			)
+			return Settings{}, fmt.Errorf("%w: %q", ErrACPProjectModeInvalid, strings.TrimSpace(*req.ChatACPProjectMode))
 		}
 	}
 	defaultBotAgentIDSet := req.DefaultBotAgentID != nil
@@ -917,67 +912,25 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
 	}
 	agentID := acpprofile.NormalizeAgentID(current.ChatACPAgentID)
 	if agentID == "" {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_agent_id",
-			400,
-			"chat.externalAgent.agentNotConfigured",
-			"chat_acp_agent_id is required when chat_runtime is acp_agent",
-			nil,
-		)
+		return fmt.Errorf("%w: chat_acp_agent_id is required when chat_runtime is acp_agent", ErrACPAgentNotConfigured)
 	}
 	if current.ChatACPProjectMode == "none" {
-		return agentfeedback.New(
-			agentfeedback.CodeProjectModeInvalid,
-			"none_not_supported_for_default_chat",
-			400,
-			"chat.externalAgent.projectModeInvalid",
-			"chat_acp_project_mode=none is not supported for default chat runtime",
-			map[string]string{"agent_id": agentID, "project_mode": current.ChatACPProjectMode},
-		)
+		return fmt.Errorf("%w: none is not supported for the default chat runtime", ErrACPProjectModeInvalid)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(current.ChatACPProjectPath), "/") {
-		return agentfeedback.New(
-			agentfeedback.CodeProjectPathInvalid,
-			"project_path_must_be_absolute",
-			400,
-			"chat.externalAgent.projectPathInvalid",
-			"chat_acp_project_path must be absolute",
-			map[string]string{"agent_id": agentID},
-		)
+		return ErrACPProjectPathInvalid
 	}
 	profile, ok := acpprofile.Lookup(agentID)
 	if !ok {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			400,
-			"chat.externalAgent.agentNotFound",
-			fmt.Sprintf("unknown ACP agent %q", agentID),
-			map[string]string{"agent_id": agentID, "agent_name": agentID},
-		)
+		return fmt.Errorf("%w: %q", ErrACPUnknownAgent, agentID)
 	}
 	metadata := normalizeJSONObject(botMetadata)
 	setup := acpprofile.ParseAgentSetup(metadata, agentID)
 	if !setup.Enabled {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotEnabled,
-			"agent_disabled",
-			400,
-			"chat.externalAgent.agentNotEnabled",
-			fmt.Sprintf("ACP agent %q is not enabled for this bot", agentID),
-			map[string]string{"agent_id": agentID, "agent_name": profile.DisplayName},
-		)
+		return fmt.Errorf("%w: %q", ErrACPAgentNotEnabled, agentID)
 	}
 	if field, missing := acpprofile.MissingRequiredManagedFieldForPreflight(profile, setup); missing {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_"+acpprofile.NormalizeAgentID(field.ID),
-			400,
-			"chat.externalAgent.agentNotConfigured",
-			fmt.Sprintf("ACP agent %q is missing required field %q", agentID, field.ID),
-			map[string]string{"agent_id": agentID, "agent_name": profile.DisplayName, "field_id": field.ID, "field_label": field.Label},
-		)
+		return fmt.Errorf("%w: ACP agent %q is missing required field %q", ErrACPAgentNotConfigured, agentID, field.ID)
 	}
 	return nil
 }

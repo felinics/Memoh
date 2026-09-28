@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
@@ -31,19 +30,11 @@ func classifyRuntimeFailure(cause error) apperror.Code {
 	return apperror.CodeRuntimePromptFailed
 }
 
-// publicFailureCode is the catalogued code a cause carries: its application
-// error code, or the code of the External Agent feedback it wraps. It is empty
-// when the cause carries neither.
+// publicFailureCode is the catalogued code a cause carries, or the code
+// ExternalAgentError gives it. It is empty when the cause has neither.
 func publicFailureCode(cause error) apperror.Code {
-	if public, ok := apperror.PublicFrom(cause, ""); ok {
+	if public, ok := apperror.PublicFrom(ExternalAgentError(cause), ""); ok {
 		return public.Code
-	}
-	var feedbackErr *agentfeedback.Error
-	if errors.As(cause, &feedbackErr) {
-		code := apperror.Code(strings.TrimSpace(feedbackErr.Code))
-		if _, ok := apperror.Lookup(code); ok {
-			return code
-		}
 	}
 	return ""
 }

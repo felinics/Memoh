@@ -279,7 +279,7 @@ func queueHandlerFunc(decode func(json.RawMessage, any) error, handler func(cont
 		}
 		err := handler(ctx, input)
 		if code := inbound.QueueCommandErrorCode(err); code != "" {
-			return nil, runtimeRpc.Public(inbound.NewQueueCommandError(code))
+			return nil, queueStatus(code)
 		}
 		return nil, err
 	}

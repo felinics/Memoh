@@ -16,10 +16,14 @@ import (
 // paths that reach a driver without the service apply it themselves.
 //
 // An error that already carries a catalog code is returned unchanged, so a
-// second translation never masks the first one.
+// second translation never masks the first one. An External Agent failure
+// keeps the code ExternalAgentError gives it.
 func RuntimeControlError(err error) error {
-	if err == nil || apperror.CodeOf(err) != "" {
-		return err
+	if err == nil {
+		return nil
+	}
+	if translated := ExternalAgentError(err); apperror.CodeOf(translated) != "" {
+		return translated
 	}
 	return apperror.Wrap(runtimeControlCode(err), err, nil)
 }

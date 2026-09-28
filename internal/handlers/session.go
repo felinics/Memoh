@@ -438,8 +438,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 		// Forking an agent-runtime session creates a new workspace execution
 		// surface; read access to the source is not enough.
 		if !bots.HasPermission(perms, bots.PermissionWorkspaceExec) {
-			feedback := externalAgentNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
-			return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+			return apperror.New(apperror.CodeNoWorkspaceExec, nil)
 		}
 	}
 	if session.IsDirectRuntime(source) {
@@ -1243,16 +1242,14 @@ func authorizeExternalAgentSessionAccess(actorUserID string, perms []string, run
 	actorUserID = strings.TrimSpace(actorUserID)
 	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
-		feedback := externalAgentRuntimeOwnerMissingFeedback()
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return apperror.New(apperror.CodeACPRuntimeOwnerMissing, nil)
 	}
 	// The runtime owner has no standing beyond their live grants: owner and
 	// members alike must hold workspace_exec, so a revoked owner loses
 	// runtime access at decision time (same model as the application-layer
 	// External Agent decision authorizers).
 	if actorUserID == "" || !bots.HasPermission(perms, bots.PermissionWorkspaceExec) {
-		feedback := externalAgentNoWorkspaceExecFeedback("missing_workspace_exec", "You do not have permission to run workspace commands for this bot.")
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return apperror.New(apperror.CodeNoWorkspaceExec, nil)
 	}
 	return nil
 }
@@ -1300,7 +1297,7 @@ func validateACPCreate(bot bots.Bot, metadata map[string]any) error {
 	if sessionMetadataString(metadata, "project_path") == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, session.ErrACPProjectPathMissing.Error())
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, agentID); err != nil {
+	if err := acpAgentSetupError(bot.Metadata, agentID); err != nil {
 		return err
 	}
 	return nil
@@ -1310,23 +1307,17 @@ func sessionServiceError(err error) error {
 	switch {
 	case errors.Is(err, session.ErrACPAgentIDRequired),
 		errors.Is(err, session.ErrACPProjectPathMissing):
-		feedback := acpAgentNotConfiguredFeedback(err.Error())
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return apperror.Wrap(apperror.CodeACPAgentNotConfigured, err, nil)
 	case errors.Is(err, session.ErrACPUnknownAgent):
-		feedback := acpAgentNotFoundFeedback(err.Error())
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return apperror.Wrap(apperror.CodeACPAgentNotFound, err, nil)
 	case errors.Is(err, session.ErrACPRuntimeOwnerMissing):
-		feedback := externalAgentRuntimeOwnerMissingFeedback()
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return apperror.New(apperror.CodeACPRuntimeOwnerMissing, nil)
 	case errors.Is(err, session.ErrACPAgentNotConfigured):
-		feedback := acpAgentNotConfiguredFeedback(err.Error())
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return apperror.Wrap(apperror.CodeACPAgentNotConfigured, err, nil)
 	case errors.Is(err, session.ErrACPAgentNotEnabled):
-		feedback := acpAgentNotEnabledFeedback(err.Error())
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return apperror.Wrap(apperror.CodeACPAgentNotEnabled, err, nil)
 	case errors.Is(err, session.ErrACPProjectModeInvalid):
-		feedback := acpProjectModeInvalidFeedback(err.Error())
-		return echo.NewHTTPError(feedback.HTTPStatus, feedback)
+		return apperror.Wrap(apperror.CodeACPProjectModeInvalid, err, nil)
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

@@ -178,6 +178,7 @@ canceled	499
 codex_auth_token_missing	409
 codex_oauth_incomplete	409
 external_agent.account_unbound	403
+external_agent.container_workspace_required	409
 group_chat_acp_unsupported	400
 history_reset	409
 http.bad_gateway	502

@@ -21,7 +21,6 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
-	"github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
@@ -69,6 +68,17 @@ var (
 	// ErrRuntimeConfigUpdateFailed reports a transport or protocol failure
 	// while applying the model/reasoning values requested for a turn.
 	ErrRuntimeConfigUpdateFailed = errors.New("ACP runtime configuration update failed")
+	// ErrAgentNotFound reports an agent id with no ACP profile.
+	ErrAgentNotFound = errors.New("unknown ACP agent")
+	// ErrAgentNotEnabled reports an agent the bot has not enabled.
+	ErrAgentNotEnabled = errors.New("ACP agent is not enabled for this bot")
+	// ErrAgentNotConfigured reports a bot setup the agent cannot run with:
+	// an unsupported setup mode or workspace backend, or a missing managed
+	// field.
+	ErrAgentNotConfigured = errors.New("ACP agent is not configured for this bot")
+	// ErrRuntimeOwnerMissing reports a runtime request without the account
+	// that owns the runtime.
+	ErrRuntimeOwnerMissing = errors.New("ACP runtime owner is missing")
 )
 
 const (
@@ -409,7 +419,7 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 	projectPath := strings.TrimSpace(input.ProjectPath)
 	runtimeOwnerAccountID := strings.TrimSpace(input.RuntimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
-		return RuntimeStatus{}, runtimeOwnerMissingError()
+		return RuntimeStatus{}, ErrRuntimeOwnerMissing
 	}
 
 	p.reapIdle(time.Now()) //nolint:contextcheck // reaper uses each handle's owner context.
@@ -1260,7 +1270,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 			runtimeOwnerAccountID = strings.TrimSpace(input.ChannelIdentityID)
 		}
 		if runtimeOwnerAccountID == "" {
-			err = runtimeOwnerMissingError()
+			err = ErrRuntimeOwnerMissing
 		}
 		return
 	}
@@ -2257,14 +2267,7 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 	agentID = acpprofile.NormalizeAgentID(agentID)
 	profile, ok := acpprofile.Lookup(agentID)
 	if !ok {
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-			feedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotFound",
-			fmt.Sprintf("Unknown ACP agent %q", agentID),
-			map[string]string{"agent_id": agentID},
-		)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 	}
 	bot, err := p.bots.Get(ctx, botID)
 	if err != nil {
@@ -2275,14 +2278,7 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 	}
 	setup := acpprofile.ParseAgentSetup(bot.Metadata, agentID)
 	if !setup.Enabled {
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-			feedback.CodeAgentNotEnabled,
-			"agent_not_enabled",
-			http.StatusForbidden,
-			"chat.externalAgent.agentNotEnabled",
-			fmt.Sprintf("ACP agent %q is not enabled for this bot", agentID),
-			map[string]string{"agent_id": agentID},
-		)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %q", ErrAgentNotEnabled, agentID)
 	}
 	workspaceInfo, err := p.runner.WorkspaceInfo(ctx, botID)
 	if err != nil {
@@ -2295,37 +2291,14 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 		mode = client.SetupModeAPIKey
 	}
 	if !profileSupportsSetupMode(profile, mode) {
-		reason := fmt.Sprintf("does not support setup mode %q", mode)
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-			feedback.CodeAgentNotConfigured,
-			reason,
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			fmt.Sprintf("%s %s", profile.DisplayName, reason),
-			map[string]string{"agent_id": agentID, "setup_mode": string(mode)},
-		)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %s does not support setup mode %q", ErrAgentNotConfigured, profile.DisplayName, mode)
 	}
 	if !profileSupportsBackend(profile, workspaceInfo.Backend) {
-		reason := fmt.Sprintf("does not support workspace backend %q", workspaceInfo.Backend)
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-			feedback.CodeAgentNotConfigured,
-			reason,
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			fmt.Sprintf("%s %s", profile.DisplayName, reason),
-			map[string]string{"agent_id": agentID, "workspace_backend": workspaceInfo.Backend},
-		)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %s does not support workspace backend %q", ErrAgentNotConfigured, profile.DisplayName, workspaceInfo.Backend)
 	}
 	if mode != client.SetupModeSelf {
 		if err := validateManagedFields(profile, setup.Managed, mode); err != nil {
-			return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-				feedback.CodeAgentNotConfigured,
-				"missing_managed_field",
-				http.StatusBadRequest,
-				"chat.externalAgent.agentNotConfigured",
-				err.Error(),
-				map[string]string{"agent_id": agentID},
-			)
+			return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %w", ErrAgentNotConfigured, err)
 		}
 	}
 	return bot, profile, setup, mode, workspaceInfo, nil
@@ -2525,17 +2498,6 @@ func (p *SessionPool) runtimeSyncGuard(botID string, expectedBotEpoch int64) cli
 	return func(ctx context.Context, fn func(context.Context) error) error {
 		return p.stateStore.GuardRuntimeSync(ctx, botID, expectedBotEpoch, fn)
 	}
-}
-
-func runtimeOwnerMissingError() *feedback.Error {
-	return feedback.New(
-		feedback.CodeRuntimeOwnerMissing,
-		"missing_runtime_owner",
-		http.StatusConflict,
-		"chat.externalAgent.runtimeOwnerMissing",
-		"External Agent runtime owner is missing; start a new External Agent session",
-		nil,
-	)
 }
 
 type promptToolEventSink struct {

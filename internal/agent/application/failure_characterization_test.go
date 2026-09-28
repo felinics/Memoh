@@ -20,7 +20,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
@@ -385,7 +384,7 @@ func TestCharacterizeDiscussFailureWithoutTerminalEvent(t *testing.T) {
 // code reaches the runtime.
 //
 // Current behavior: a cause without a code finishes as runtime_run_failed; an
-// External Agent feedback cause finishes with the feedback code.
+// External Agent cause finishes with its code.
 func TestCharacterizeTurnRunFinisherCodes_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -396,7 +395,7 @@ func TestCharacterizeTurnRunFinisherCodes_CurrentBehavior(t *testing.T) {
 	}{
 		{"plain cause", sessionruntime.RunStatusErrored, errors.New("SECRET adapter crashed"), [3]string{"failed", "runtime_run_failed", ""}},
 		{"coded cause", sessionruntime.RunStatusErrored, apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("dial"), nil), [3]string{"failed", "workspace.unreachable", ""}},
-		{"feedback cause", sessionruntime.RunStatusErrored, agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "", 409, "", "not configured", nil), [3]string{"failed", "acp_agent_not_configured", ""}},
+		{"external agent cause", sessionruntime.RunStatusErrored, apperror.New(apperror.CodeACPAgentNotConfigured, nil), [3]string{"failed", "acp_agent_not_configured", ""}},
 		{"errored without cause", sessionruntime.RunStatusErrored, nil, [3]string{"failed", "runtime_run_failed", ""}},
 		{"aborted", sessionruntime.RunStatusAborted, context.Canceled, [3]string{"aborted", "", ""}},
 	} {

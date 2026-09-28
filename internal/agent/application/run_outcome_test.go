@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"testing"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 )
@@ -25,8 +24,7 @@ func TestClassifyRunFailure(t *testing.T) {
 		{name: "plain error", cause: errors.New("connection reset"), want: apperror.CodeAgentResponseInterrupted},
 		{name: "cancellation", cause: context.Canceled, want: apperror.CodeAgentResponseInterrupted},
 		{name: "nil", cause: nil, want: apperror.CodeAgentResponseInterrupted},
-		{name: "agent feedback", cause: fmt.Errorf("prompt: %w", agentfeedback.New(agentfeedback.CodeRuntimeBusy, "", 409, "", "busy", nil)), want: apperror.CodeACPRuntimeBusy},
-		{name: "agent feedback outside the catalog", cause: agentfeedback.New("not_catalogued", "", 500, "", "", nil), want: apperror.CodeAgentResponseInterrupted},
+		{name: "external agent code", cause: fmt.Errorf("prompt: %w", apperror.New(apperror.CodeACPRuntimeBusy, nil)), want: apperror.CodeACPRuntimeBusy},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,7 +45,7 @@ func TestClassifyRuntimeFailure(t *testing.T) {
 		want  apperror.Code
 	}{
 		{name: "catalogued code", cause: apperror.New(apperror.CodeAgentResponseTimeout, nil), want: apperror.CodeAgentResponseTimeout},
-		{name: "agent feedback", cause: agentfeedback.New(agentfeedback.CodeAgentAuthInvalid, "", 401, "", "", nil), want: apperror.CodeACPAgentAuthInvalid},
+		{name: "external agent code", cause: apperror.New(apperror.CodeACPAgentAuthInvalid, nil), want: apperror.CodeACPAgentAuthInvalid},
 		{name: "plain error", cause: errors.New("driver exited"), want: apperror.CodeRuntimePromptFailed},
 	}
 	for _, tc := range cases {

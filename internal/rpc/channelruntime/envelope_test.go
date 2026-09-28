@@ -32,7 +32,8 @@ func TestChannelSentinelsSurviveBothEncodings(t *testing.T) {
 			{"envelope", entry.Status(""), entry.Err.Error()},
 			{"envelope with adapter message", entry.Status(cause), cause},
 			{"legacy bare reason", status.Error(entry.Code, entry.Reason), entry.Err.Error()},
-			{"legacy with cause", safeChannelError(errors.Join(entry.Err, errors.New(cause))), entry.Err.Error() + "\n" + cause},
+			{"legacy with cause", status.Error(entry.Code, entry.Reason+reasonDetailSep+cause), cause},
+			{"server encoding", safeChannelError(errors.Join(entry.Err, errors.New(cause))), entry.Err.Error() + "\n" + cause},
 		}
 		for _, encoding := range encodings {
 			t.Run(entry.Reason+"/"+encoding.name, func(t *testing.T) {

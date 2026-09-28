@@ -18,7 +18,6 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/partmeta"
@@ -640,9 +639,8 @@ func TestStreamACPAgentWSRechecksRuntimeOwnerWorkspaceExecBeforePrompt(t *testin
 		make(chan WSStreamEvent, 8),
 		make(chan struct{}),
 	)
-	var feedback *agentfeedback.Error
-	if !errors.As(err, &feedback) || feedback.Code != agentfeedback.CodeNoWorkspaceExec || feedback.HTTPStatus != 403 {
-		t.Fatalf("streamACPAgentWS() error = %v, want no_workspace_exec feedback", err)
+	if apperror.CodeOf(err) != apperror.CodeNoWorkspaceExec {
+		t.Fatalf("streamACPAgentWS() error = %v, want %s", err, apperror.CodeNoWorkspaceExec)
 	}
 	if pool.calls != 0 {
 		t.Fatalf("ACP pool calls = %d, want 0 when runtime owner lost workspace_exec", pool.calls)
@@ -1771,19 +1769,11 @@ func TestStreamACPAgentWSStopRacingCompletionPersistsAsAbort(t *testing.T) {
 	}
 }
 
-func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
+func TestStreamACPAgentWSExternalAgentErrorSkipsPersistence(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
-	feedback := agentfeedback.New(
-		agentfeedback.CodeAgentNotConfigured,
-		"agent_not_configured",
-		400,
-		"chat.externalAgent.agentNotConfigured",
-		"External agent setup is incomplete for this bot.",
-		nil,
-	)
-	pool := &recordingACPPrompter{err: feedback}
+	pool := &recordingACPPrompter{err: fmt.Errorf("start: %w", acpagent.ErrAgentNotConfigured)}
 	lifecycles := &recordingContextLifecycleStore{}
 	resolver := newACPLifecycleService(t, pool, messages, lifecycles)
 
@@ -1799,8 +1789,8 @@ func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
 		eventCh,
 		make(chan struct{}),
 	)
-	if !errors.Is(err, feedback) {
-		t.Fatalf("streamACPAgentWS() error = %v, want feedback error", err)
+	if apperror.CodeOf(err) != apperror.CodeACPAgentNotConfigured {
+		t.Fatalf("streamACPAgentWS() error = %v, want %s", err, apperror.CodeACPAgentNotConfigured)
 	}
 	if len(messages.persisted) != 1 || messages.persisted[0].Role != "user" {
 		t.Fatalf("staged messages = %#v, want only the user turn", messages.persisted)
@@ -1811,11 +1801,11 @@ func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
 	requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusFailedProvider)
 	events := drainAgentEvents(t, eventCh)
 	if !containsStreamEvent(events, native.EventStart) || containsStreamEvent(events, native.EventAbort) {
-		t.Fatalf("events = %#v, want only startup event before feedback return", events)
+		t.Fatalf("events = %#v, want only startup event before the error return", events)
 	}
 }
 
-func TestStreamACPAgentWSImageCapabilityErrorUsesStructuredFeedback(t *testing.T) {
+func TestStreamACPAgentWSImageCapabilityErrorCarriesItsCode(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
@@ -1857,9 +1847,8 @@ func TestStreamACPAgentWSImageCapabilityErrorUsesStructuredFeedback(t *testing.T
 		make(chan WSStreamEvent, 8),
 		make(chan struct{}),
 	)
-	var feedback *agentfeedback.Error
-	if !errors.As(err, &feedback) || feedback.Code != agentfeedback.CodeImageInputUnsupported || feedback.I18nKey != "chat.externalAgent.imageInputUnsupported" {
-		t.Fatalf("streamACPAgentWS() error = %#v, want image capability feedback", err)
+	if apperror.CodeOf(err) != apperror.CodeACPImageInputUnsupported {
+		t.Fatalf("streamACPAgentWS() error = %#v, want %s", err, apperror.CodeACPImageInputUnsupported)
 	}
 	if len(messages.persisted) != 1 || messages.persisted[0].Role != "user" {
 		t.Fatalf("staged messages = %#v, want only the user turn", messages.persisted)
@@ -1974,11 +1963,11 @@ func TestRuntimeFailureResultSanitizesGenericErrors(t *testing.T) {
 	}
 	_ = got
 
-	// Driver-normalized feedback keeps its curated user-facing message.
-	feedbackErr := agentfeedback.New(agentfeedback.CodeImageInputUnsupported, "image_input_unsupported", 400, "chat.externalAgent.imageInputUnsupported", "This external agent cannot read the attached image.", nil)
-	_, feedbackDelta := runtimeFailureResult(acpagent.DriverPromptResult(acpclient.PromptResult{}, "codex"), feedbackErr)
-	if !strings.Contains(feedbackDelta, "cannot read the attached image") {
-		t.Fatalf("feedback failure delta = %q, want curated message", feedbackDelta)
+	// A coded failure names its code, not its cause.
+	coded := apperror.Wrap(apperror.CodeACPImageInputUnsupported, errors.New("SECRET adapter detail"), nil)
+	_, codedDelta := runtimeFailureResult(acpagent.DriverPromptResult(acpclient.PromptResult{}, "codex"), coded)
+	if !strings.Contains(codedDelta, "("+string(apperror.CodeACPImageInputUnsupported)+")") || strings.Contains(codedDelta, "SECRET") {
+		t.Fatalf("coded failure delta = %q, want the code without the cause", codedDelta)
 	}
 }
 

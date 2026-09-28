@@ -202,8 +202,8 @@ const (
 
 	CodeSessionNotFound Code = "session.not_found"
 
-	// External Agent feedback codes, registered under the values the feedback
-	// protocol already publishes (internal/agent/decision/feedback).
+	// External Agent codes. They keep the values the removed agent feedback
+	// protocol published and history rows still store.
 	CodeACPAgentNotFound            Code = "acp_agent_not_found"
 	CodeACPAgentNotEnabled          Code = "acp_agent_not_enabled"
 	CodeACPAgentNotConfigured       Code = "acp_agent_not_configured"
@@ -226,6 +226,9 @@ const (
 	CodeInvalidChatRuntime          Code = "invalid_chat_runtime"
 	CodeAgentDependencyMissing      Code = "agent_dependency_missing"
 	CodeExternalAgentAccountUnbound Code = "external_agent.account_unbound"
+	// A direct runtime (Codex, Claude Code) was asked to start in a workspace
+	// that is not a container.
+	CodeExternalAgentContainerWorkspaceRequired Code = "external_agent.container_workspace_required"
 
 	// Run error codes persisted in session_runs.error_code and history
 	// metadata. The writers keep their own constants; these register the same
@@ -910,9 +913,10 @@ var catalog = map[Code]Definition{
 	CodeInvalidChatRuntime:       {HTTPStatus: http.StatusBadRequest, Detail: "The selected chat runtime is invalid."},
 	CodeAgentDependencyMissing:   {HTTPStatus: http.StatusConflict, Detail: "A dependency the agent needs is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.", AllowedArgs: []string{"dep_id", "install_task_id", "operation_in_progress"}},
 	// The IM identity is not linked to a Memoh account; link carries the /link command reference.
-	CodeExternalAgentAccountUnbound: {HTTPStatus: http.StatusForbidden, Detail: "Your chat account is not linked to a Memoh account, so it cannot use this bot's workspace. Link it from Profile, Connected Accounts, then try again.", AllowedArgs: []string{"link"}},
-	CodeRuntimeRunFailed:            {HTTPStatus: http.StatusInternalServerError, Detail: "The response could not be completed. Please try again."},
-	CodeRuntimePromptFailed:         {HTTPStatus: http.StatusBadGateway, Detail: "The agent runtime could not complete this response. Please try again."},
+	CodeExternalAgentAccountUnbound:             {HTTPStatus: http.StatusForbidden, Detail: "Your chat account is not linked to a Memoh account, so it cannot use this bot's workspace. Link it from Profile, Connected Accounts, then try again.", AllowedArgs: []string{"link"}},
+	CodeExternalAgentContainerWorkspaceRequired: {HTTPStatus: http.StatusConflict, Detail: "This agent runtime needs a container workspace. Switch the bot to its container workspace, then try again."},
+	CodeRuntimeRunFailed:                        {HTTPStatus: http.StatusInternalServerError, Detail: "The response could not be completed. Please try again."},
+	CodeRuntimePromptFailed:                     {HTTPStatus: http.StatusBadGateway, Detail: "The agent runtime could not complete this response. Please try again."},
 	// Reaper codes: the run was ended because its owner or live state disappeared.
 	CodeRuntimeOwnerLeaseExpired: {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server handling this response stopped responding, so the response was ended. Please try again."},
 	CodeRuntimeLiveBackendLost:   {HTTPStatus: http.StatusServiceUnavailable, Detail: "The live state of this response was lost, so the response was ended. Please try again."},
@@ -1032,6 +1036,40 @@ func Lookup(code Code) (Definition, bool) {
 	definition, ok := catalog[code]
 	definition.AllowedArgs = append([]string(nil), definition.AllowedArgs...)
 	return definition, ok
+}
+
+// externalAgentCodes are the External Agent codes: an agent that is unknown,
+// disabled or not set up, a workspace the caller cannot run in, a runtime
+// without its owner, or input the agent cannot take.
+var externalAgentCodes = map[Code]bool{
+	CodeACPAgentNotFound:                        true,
+	CodeACPAgentNotEnabled:                      true,
+	CodeACPAgentNotConfigured:                   true,
+	CodeCodexOAuthIncomplete:                    true,
+	CodeCodexAuthTokenMissing:                   true,
+	CodeACPAgentAuthInvalid:                     true,
+	CodeNoWorkspaceExec:                         true,
+	CodeACPRuntimeOwnerMissing:                  true,
+	CodeACPDiscussUnsupported:                   true,
+	CodeGroupChatACPUnsupported:                 true,
+	CodeACPProjectModeInvalid:                   true,
+	CodeACPProjectPathInvalid:                   true,
+	CodeACPDisplayArgsInvalid:                   true,
+	CodeACPRuntimeStartFailed:                   true,
+	CodeACPRuntimeBusy:                          true,
+	CodeACPAttachmentInvalid:                    true,
+	CodeACPAttachmentUnavailable:                true,
+	CodeRuntimeAgentCommandStale:                true,
+	CodeACPImageInputUnsupported:                true,
+	CodeInvalidChatRuntime:                      true,
+	CodeAgentDependencyMissing:                  true,
+	CodeExternalAgentAccountUnbound:             true,
+	CodeExternalAgentContainerWorkspaceRequired: true,
+}
+
+// IsExternalAgentCode reports whether code is an External Agent code.
+func IsExternalAgentCode(code Code) bool {
+	return externalAgentCodes[code]
 }
 
 func TypeURI(code Code) string {

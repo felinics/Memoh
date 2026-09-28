@@ -153,8 +153,8 @@ func (p *ChannelInboundProcessor) sendRuntimeControlText(ctx context.Context, se
 }
 
 func (p *ChannelInboundProcessor) sendRuntimeControlError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
-	if externalAgentFeedbackFromError(err) != nil {
-		return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, err)
+	if externalAgentError(err) != nil {
+		return p.sendExternalAgentError(ctx, sender, msg, identity, err)
 	}
 	code := apperror.CodeOf(err)
 	if code == "" {

@@ -23,7 +23,6 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
-	"github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/partmeta"
@@ -1418,8 +1417,7 @@ func TestSessionPoolSetupModeResolution(t *testing.T) {
 		Prompt:                "run",
 		RuntimeOwnerAccountID: "user-1",
 	})
-	var feedbackErr *feedback.Error
-	if !errors.As(err, &feedbackErr) || feedbackErr.Code != feedback.CodeAgentNotConfigured || !strings.Contains(feedbackErr.Message, "command required") {
+	if !errors.Is(err, ErrAgentNotConfigured) || !strings.Contains(err.Error(), "command required") {
 		t.Fatalf("missing command error = %v", err)
 	}
 

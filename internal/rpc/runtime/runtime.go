@@ -86,14 +86,7 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 	result, err := handler(ctx, json.RawMessage(req.GetPayload()))
 	if err != nil {
 		rpc.RecordError(ctx, fmt.Errorf("runtime method %s: %w", method, err))
-		var public *publicError
-		if errors.As(err, &public) {
-			return nil, status.Error(codes.Unknown, public.Error())
-		}
-		if _, direct := err.(grpcStatusError); direct { //nolint:errorlint // deliberate direct assertion: only a status built by this layer is wire vocabulary; a wrapped one is a downstream leak
-			return nil, err
-		}
-		return nil, status.Error(codes.Internal, "internal runtime operation failed")
+		return nil, encodeError(err)
 	}
 	if result == nil {
 		return &runtimepb.CallResponse{}, nil
@@ -104,6 +97,24 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 		return nil, status.Error(codes.Internal, "internal runtime result encoding failed")
 	}
 	return &runtimepb.CallResponse{Payload: data}, nil
+}
+
+// encodeError maps a handler error to the status the client receives. A
+// Public error travels as its adapter message, a status built by the handler
+// group as it is, and a catalog apperror as its code and args. Anything else
+// is an opaque internal error.
+func encodeError(err error) error {
+	var public *publicError
+	if errors.As(err, &public) {
+		return publicReason.Status(public.Error())
+	}
+	if _, direct := err.(grpcStatusError); direct { //nolint:errorlint // deliberate direct assertion: only a status built by this layer is wire vocabulary; a wrapped one is a downstream leak
+		return err
+	}
+	if encoded := rpc.AppErrorStatus(err); encoded != nil {
+		return encoded
+	}
+	return status.Error(codes.Internal, "internal runtime operation failed")
 }
 
 type Client struct {

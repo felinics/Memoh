@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/felinics/memoh/internal/channel/inbound"
@@ -51,9 +52,11 @@ func newQueueClient(t *testing.T, handlers map[string]runtimeRpc.Handler) *Clien
 func TestQueueCodesSurviveBothEncodings(t *testing.T) {
 	for _, code := range queueCodes {
 		envelope := func(context.Context, json.RawMessage) (any, error) { return nil, queueStatus(code) }
+		legacy := func(context.Context, json.RawMessage) (any, error) { return nil, status.Error(codes.Unknown, code) }
 		encodings := map[string]map[string]runtimeRpc.Handler{
 			"envelope": {MethodQueueEnqueueSteer: envelope},
-			"legacy":   Handlers(nil, &queueHandlerStub{err: inbound.NewQueueCommandError(code)}, nil, nil),
+			"legacy":   {MethodQueueEnqueueSteer: legacy},
+			"server":   Handlers(nil, &queueHandlerStub{err: inbound.NewQueueCommandError(code)}, nil, nil),
 		}
 		for name, handlers := range encodings {
 			t.Run(code+"/"+name, func(t *testing.T) {

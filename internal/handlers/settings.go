@@ -105,8 +105,8 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 		if reasoningErr := settingsReasoningHTTPError(err); reasoningErr != nil {
 			return reasoningErr
 		}
-		if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
-			return feedbackErr
+		if runtimeErr := settingsRuntimeHTTPError(err); runtimeErr != nil {
+			return runtimeErr
 		}
 		if errors.Is(err, settings.ErrInvalidModelRef) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -131,6 +131,29 @@ func settingsReasoningHTTPError(err error) error {
 		return apperror.Wrap(apperror.CodeSettingsReasoningUnavailable, err, nil)
 	}
 	return nil
+}
+
+// settingsRuntimeHTTPError answers a chat runtime the bot cannot be saved
+// with.
+func settingsRuntimeHTTPError(err error) error {
+	var code apperror.Code
+	switch {
+	case errors.Is(err, settings.ErrInvalidChatRuntime):
+		code = apperror.CodeInvalidChatRuntime
+	case errors.Is(err, settings.ErrACPProjectModeInvalid):
+		code = apperror.CodeACPProjectModeInvalid
+	case errors.Is(err, settings.ErrACPProjectPathInvalid):
+		code = apperror.CodeACPProjectPathInvalid
+	case errors.Is(err, settings.ErrACPUnknownAgent):
+		code = apperror.CodeACPAgentNotFound
+	case errors.Is(err, settings.ErrACPAgentNotEnabled):
+		code = apperror.CodeACPAgentNotEnabled
+	case errors.Is(err, settings.ErrACPAgentNotConfigured):
+		code = apperror.CodeACPAgentNotConfigured
+	default:
+		return nil
+	}
+	return apperror.Wrap(code, err, nil)
 }
 
 // Delete godoc

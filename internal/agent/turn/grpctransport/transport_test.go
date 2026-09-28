@@ -14,13 +14,15 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	"github.com/felinics/memoh/internal/apperror"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/logger"
 	intrpc "github.com/felinics/memoh/internal/rpc"
@@ -426,44 +428,42 @@ func TestInjectFailureKeepsStreamAlive(t *testing.T) {
 	}
 }
 
-// TestFeedbackErrorSurvivesTransport pins the agentfeedback envelope: typed
-// ACP feedback must cross the wire so the channel process can render its
-// localized guidance instead of a bare internal error.
-func TestFeedbackErrorSurvivesTransport(t *testing.T) {
-	events := make(chan turn.Event)
-	close(events)
-	errs := make(chan error, 1)
-	errs <- fmt.Errorf("resolve runtime: %w", sessionpkg.ErrACPAgentNotConfigured)
-	close(errs)
-
-	client, cleanup := newTestClient(t, &scriptedService{handle: &scriptedHandle{events: events, errs: errs}}, "secret")
-	defer cleanup()
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
-	if err != nil {
-		t.Fatalf("start turn: %v", err)
-	}
-	for range handle.Events() {
-	}
-	var runErr error
-	for err := range handle.Errs() {
-		runErr = err
-	}
-	var feedback *agentfeedback.Error
-	if !errors.As(runErr, &feedback) {
-		t.Fatalf("run error lost feedback identity: %v", runErr)
-	}
-	if feedback.Code != agentfeedback.CodeAgentNotConfigured {
-		t.Fatalf("feedback code = %q", feedback.Code)
+// TestExternalAgentErrorSurvivesTransport pins the External Agent codes on
+// the wire: a thread sentinel crosses with its catalog code, and so does an
+// External Agent apperror, so the channel process can render its localized
+// guidance instead of a bare internal error.
+func TestExternalAgentErrorSurvivesTransport(t *testing.T) {
+	runErr := runErrorOverTransport(t, fmt.Errorf("resolve runtime: %w", sessionpkg.ErrACPAgentNotConfigured))
+	if code := apperror.CodeOf(runErr); code != apperror.CodeACPAgentNotConfigured {
+		t.Fatalf("run error code = %q (%v)", code, runErr)
 	}
 
-	// Start-path errors carry the envelope too.
-	direct := agentfeedback.New(agentfeedback.CodeAgentNotEnabled, "agent_not_enabled", 403, "chat.externalAgent.agentNotEnabled", "disabled", nil)
-	client2, cleanup2 := newTestClient(t, &scriptedService{startErr: direct}, "secret")
-	defer cleanup2()
-	_, err = client2.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
-	var startFeedback *agentfeedback.Error
-	if !errors.As(err, &startFeedback) || startFeedback.Code != agentfeedback.CodeAgentNotEnabled {
-		t.Fatalf("start error lost feedback identity: %v", err)
+	direct := apperror.New(apperror.CodeAgentDependencyMissing, map[string]string{"dep_id": "codex", "operation_in_progress": "true"})
+	startErr := startErrorOverTransport(t, direct)
+	if code := apperror.CodeOf(startErr); code != apperror.CodeAgentDependencyMissing {
+		t.Fatalf("start error code = %q (%v)", code, startErr)
+	}
+	if args := apperror.ArgsOf(startErr); args["dep_id"] != "codex" || args["operation_in_progress"] != "true" {
+		t.Fatalf("start error args = %v", args)
+	}
+}
+
+// TestLegacyFeedbackStatusStillDecodes pins the client side of the old
+// feedback prefix: a status from a server that still sends it restores the
+// catalog code and its args.
+func TestLegacyFeedbackStatusStillDecodes(t *testing.T) {
+	received := status.Error(codes.FailedPrecondition, `memoh-acp-feedback:{"code":"agent_dependency_missing","reason":"dependency_missing","http_status":409,"i18n_key":"chat.externalAgent.dependencyMissing","args":{"dep_id":"codex","install_task_id":"task-1"},"message":"Codex is not installed"}`)
+	restored := mapClientError(received)
+	if code := apperror.CodeOf(restored); code != apperror.CodeAgentDependencyMissing {
+		t.Fatalf("code = %q (%v)", code, restored)
+	}
+	if args := apperror.ArgsOf(restored); args["dep_id"] != "codex" || args["install_task_id"] != "task-1" {
+		t.Fatalf("args = %v", args)
+	}
+
+	unknown := status.Error(codes.FailedPrecondition, `memoh-acp-feedback:{"code":"not_a_catalog_code"}`)
+	if got := mapClientError(unknown); apperror.CodeOf(got) != "" || status.Code(got) != codes.FailedPrecondition {
+		t.Fatalf("unknown legacy code = %v", got)
 	}
 }
 

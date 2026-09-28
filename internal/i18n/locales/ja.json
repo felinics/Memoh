@@ -41,30 +41,6 @@
     "contextUnit": "Token",
     "tip": "ヒント: {model} または {reasoning} でいつでも調整できます。"
   },
-  "chat": {
-    "externalAgent": {
-      "agentNotConfigured": "このBotの外部Agent設定が完了していません。",
-      "agentNotFound": "選択された外部Agentは利用できません。",
-      "agentNotEnabled": "選択された外部AgentはこのBotで無効になっています。",
-      "codexOAuthIncomplete": "このBotワークスペースではCodexのChatGPTサインインが完了していません。",
-      "codexAuthTokenMissing": "このBotワークスペースのCodex認証が不足しているか不完全です。",
-      "agentAuthInvalid": "外部Agentの認証が無効です。Agent設定を更新してからもう一度お試しください。",
-      "noWorkspaceExec": "このBotのWorkspaceコマンドを実行する権限がありません。",
-      "accountUnbound": "この IM アカウントはまだ Memoh アカウントと連携されていないため、この Bot のワークスペースを利用できません。あなたが所有者の場合は、Memoh の Web 画面で「プロフィール → 連携済みアカウント」からリンクコードを取得し、ここで {link} <コード> を送信してください。",
-      "runtimeOwnerMissing": "この外部Agent Sessionには実行所有者がありません。新しいSessionを開始してください。",
-      "discussUnsupported": "この外部Agentはディスカッションモードでは実行できません。",
-      "groupChatUnsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new codex または /new discuss codex を使用してください。",
-      "projectModeInvalid": "外部Agentのプロジェクトモードが無効です。",
-      "projectPathInvalid": "外部Agentのプロジェクトパスは絶対パスである必要があります。",
-      "displayArgsInvalid": "外部Agentの表示引数が無効です。",
-      "runtimeStartFailed": "外部Agent runtimeの起動に失敗しました。",
-      "runtimeBusy": "外部Agent runtimeはこのSessionの前のターンを処理中です。",
-      "attachmentInvalid": "添付ファイルは無効です。もう一度添付してください。",
-      "attachmentUnavailable": "外部Agentが添付ファイルにアクセスできません。もう一度添付してください。",
-      "imageInputUnsupported": "この外部Agentは添付画像を読み取れません。",
-      "invalidChatRuntime": "選択されたチャットruntimeが無効です。"
-    }
-  },
   "ops": {
     "template": "⚠️ 現在 {verb} できませんでした。しばらくしてからもう一度試してください。",
     "verb": {
@@ -686,7 +662,8 @@
     },
     "external_agent": {
       "turn_replacement_unsupported": "外部 Agent のセッションでは再試行とメッセージの編集は利用できません。代わりに新しいメッセージを送信してください。",
-      "account_unbound": "この IM アカウントはまだ Memoh アカウントと連携されていないため、この Bot のワークスペースを利用できません。あなたが所有者の場合は、Memoh の Web 画面で「プロフィール → 連携済みアカウント」からリンクコードを取得し、ここで {link} <コード> を送信してください。"
+      "account_unbound": "この IM アカウントはまだ Memoh アカウントと連携されていないため、この Bot のワークスペースを利用できません。あなたが所有者の場合は、Memoh の Web 画面で「プロフィール → 連携済みアカウント」からリンクコードを取得し、ここで {link} <コード> を送信してください。",
+      "container_workspace_required": "この Agent ランタイムにはコンテナワークスペースが必要です。Bot をコンテナワークスペースに切り替えてから、もう一度お試しください。"
     },
     "agent_credential": {
       "not_found": "この Agent アカウントは利用できません。別のアカウントを選択してください。",

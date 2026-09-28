@@ -1,13 +1,13 @@
 package grpctransport
 
 // Characterization tests for what a channel process receives across the turn
-// gRPC transport when an Agent run fails (scenario 9: a plain error versus the
-// original feedback error). They pin CURRENT behavior; values that look wrong
-// are asserted as they are today and marked "current behavior".
+// gRPC transport when an Agent run fails (scenario 9: a plain error versus a
+// catalog error). They pin the encoding each error class gets.
 
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -47,16 +47,17 @@ func startErrorOverTransport(t *testing.T, startErr error) error {
 	return err
 }
 
-// Current behavior: any error that is neither a transport sentinel nor an
-// agentfeedback error reaches the channel as codes.Internal with a fixed text.
-// The raw cause does not leak, and an apperror code does not survive either.
-func TestCharacterizeTransportFlattensNonFeedbackErrors_CurrentBehavior(t *testing.T) {
+// A plain error reaches the channel as codes.Internal with a fixed text. A
+// catalog apperror crosses with its code; in both cases the raw cause text
+// stays on the server.
+func TestTransportEncodesPlainAndCatalogErrors(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		err  error
+		name     string
+		err      error
+		wantCode apperror.Code
 	}{
-		{"plain", errors.New("SECRET provider exploded")},
-		{"coded", apperror.Wrap(apperror.CodeAgentProviderOverloaded, errors.New("SECRET 503"), nil)},
+		{"plain", errors.New("SECRET provider exploded"), ""},
+		{"coded", apperror.Wrap(apperror.CodeAgentProviderOverloaded, errors.New("SECRET 503"), nil), apperror.CodeAgentProviderOverloaded},
 	} {
 		for path, deliver := range map[string]func(*testing.T, error) error{
 			"start": startErrorOverTransport,
@@ -64,12 +65,18 @@ func TestCharacterizeTransportFlattensNonFeedbackErrors_CurrentBehavior(t *testi
 		} {
 			t.Run(tc.name+"/"+path, func(t *testing.T) {
 				got := deliver(t, tc.err)
+				if strings.Contains(got.Error(), "SECRET") {
+					t.Fatalf("cause text leaked: %v", got)
+				}
+				if code := apperror.CodeOf(got); code != tc.wantCode {
+					t.Fatalf("apperror code over transport = %q, want %q", code, tc.wantCode)
+				}
+				if tc.wantCode != "" {
+					return
+				}
 				st, ok := status.FromError(got)
 				if !ok || st.Code() != codes.Internal || st.Message() != "internal turn operation failed" {
 					t.Fatalf("error = %v, want Internal \"internal turn operation failed\"", got)
-				}
-				if code := apperror.CodeOf(got); code != "" {
-					t.Fatalf("apperror code over transport = %q, current behavior has none", code)
 				}
 			})
 		}

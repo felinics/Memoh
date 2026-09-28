@@ -22,6 +22,12 @@ import (
 // callOverWire runs handlerErr through a real server and client.
 func callOverWire(t *testing.T, handlerErr error) error {
 	t.Helper()
+	return NewClient(dialOverWire(t, handlerErr)).Call(context.Background(), "m", nil, nil)
+}
+
+// dialOverWire serves handlerErr from method "m" of a real server.
+func dialOverWire(t *testing.T, handlerErr error) *grpc.ClientConn {
+	t.Helper()
 	lis := bufconn.Listen(1 << 20)
 	server := grpc.NewServer()
 	runtimepb.RegisterRuntimeServiceServer(server, NewServer(map[string]Handler{
@@ -37,14 +43,15 @@ func callOverWire(t *testing.T, handlerErr error) error {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close(); server.Stop(); _ = lis.Close() })
-	return NewClient(conn).Call(context.Background(), "m", nil, nil)
+	return conn
 }
 
 func TestPublicErrorSurvivesBothEncodings(t *testing.T) {
 	const text = "telegram: chat not found"
 	for name, handlerErr := range map[string]error{
 		"envelope": publicReason.Status(text),
-		"legacy":   Public(errors.New(text)),
+		"legacy":   status.Error(codes.Unknown, text),
+		"server":   Public(errors.New(text)),
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := callOverWire(t, handlerErr)

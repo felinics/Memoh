@@ -12,7 +12,6 @@ import (
 	"time"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
@@ -395,6 +394,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		CanRequestUserInput: s.canDeliverUserInputWS(eventCh),
 		Sink:                external.EventSinkFunc(emit),
 	})
+	err = ExternalAgentError(err)
 	notices.apply(&result)
 	outcome.setCause(err)
 	if idleCancel.DidFire() {
@@ -675,6 +675,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 			reasoningTiming.observe(ev)
 		}),
 	})
+	promptErr = ExternalAgentError(promptErr)
 	notices.apply(&result)
 	if idleCancel.DidFire() {
 		promptErr = context.Cause(idleCtx)
@@ -871,11 +872,6 @@ func (s *Service) persistRuntimeRound(
 		meta["agent_turn_outcome"] = "failed"
 		meta["error"] = runtimeUserFacingFailureMessage(promptErr)
 		meta["error_code"] = string(classifyRuntimeFailure(promptErr))
-		var feedbackErr *agentfeedback.Error
-		if errors.As(promptErr, &feedbackErr) {
-			meta["error_reason"] = feedbackErr.Reason
-			meta["i18n_key"] = feedbackErr.I18nKey
-		}
 	}
 	output := sdkMessagesToModelMessages(result.Output)
 	if len(output) == 0 {
@@ -1008,12 +1004,6 @@ func runtimeUserFacingFailureMessage(err error) string {
 	if err == nil {
 		return ""
 	}
-	var feedbackErr *agentfeedback.Error
-	if errors.As(err, &feedbackErr) {
-		if message := strings.TrimSpace(feedbackErr.Message); message != "" {
-			return message
-		}
-	}
 	if code := strings.TrimSpace(string(apperror.CodeOf(err))); code != "" {
 		return "The external agent could not complete this turn (" + code + ")."
 	}
@@ -1030,14 +1020,14 @@ func runtimeTurnRan(result external.PromptResult) bool {
 
 // isRuntimeConfigurationError reports failures where nothing ran:
 // the turn must not persist a round, and the caller surfaces the error
-// directly. Drivers normalize their configuration-class errors into stable
-// feedback or apperror shapes before returning them.
+// directly. Drivers normalize their configuration-class errors into apperror
+// codes or the package errors ExternalAgentError translates.
 func isRuntimeConfigurationError(err error) bool {
-	var feedbackErr *agentfeedback.Error
-	if errors.As(err, &feedbackErr) {
+	code := apperror.CodeOf(ExternalAgentError(err))
+	if apperror.IsExternalAgentCode(code) {
 		return true
 	}
-	switch apperror.CodeOf(err) {
+	switch code {
 	case apperror.CodeExternalRuntimeAuthRequired, apperror.CodeExternalRuntimeUnavailable,
 		apperror.CodeRuntimeControlGoalRequiresDefaultMode,
 		apperror.CodeExternalRuntimeSessionResumeFailed,

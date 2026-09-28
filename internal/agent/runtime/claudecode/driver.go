@@ -140,7 +140,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	if err := external.RequireContainerWorkspace(workspaceInfo, RuntimeType); err != nil {
 		return external.ModelCatalog{}, err
 	}
-	// A missing dependency returns as agent_dependency_missing feedback; it
+	// A missing dependency returns as external.DependencyMissingError; it
 	// must not be re-wrapped into a generic runtime error.
 	launcher, err := d.resolveLauncher(ctx, botID)
 	if err != nil {
@@ -303,8 +303,8 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return external.PromptResult{}, err
 	}
 	// Resolve the CLI copy before any session or tool work: a missing
-	// dependency ends the turn here with agent_dependency_missing feedback,
-	// already in its final user-facing shape.
+	// dependency ends the turn here with external.DependencyMissingError,
+	// which the application translates.
 	launcher, err := d.resolveLauncher(ctx, input.BotID)
 	if err != nil {
 		return external.PromptResult{}, err

@@ -123,15 +123,11 @@ func (h *SessionHandler) ExecuteRuntimeCommand(c echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
-// runtimeControlError keeps the HTTP-only passthroughs (agent feedback and
-// client-side Echo errors) and otherwise defers to the shared runtime control
+// runtimeControlError keeps client-side Echo errors and otherwise defers to the shared runtime control
 // translation, which also covers driver calls that bypass the service.
 func runtimeControlError(err error) error {
 	if apperror.CodeOf(err) != "" {
 		return err
-	}
-	if feedback := externalAgentFeedbackHTTPError(err); feedback != nil {
-		return feedback
 	}
 	var httpErr *echo.HTTPError
 	if errors.As(err, &httpErr) && httpErr.Code < 500 {

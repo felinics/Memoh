@@ -9,25 +9,23 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 )
 
 // A failed External Agent round records the code classifyRuntimeFailure gives
-// its cause; feedback keeps its reason and i18n key beside the code.
+// its cause, and nothing beside it.
 func TestPersistRuntimeRoundFailureCode(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name       string
-		cause      error
-		wantCode   string
-		wantReason any
+		name     string
+		cause    error
+		wantCode string
 	}{
 		{name: "catalogued code", cause: apperror.Wrap(apperror.CodeAgentResponseTimeout, errors.New("SECRET"), nil), wantCode: "agent.response_timeout"},
-		{name: "agent feedback", cause: fmt.Errorf("prompt: %w", agentfeedback.New(agentfeedback.CodeRuntimeBusy, "warm_process", 409, "acp.busy", "busy", nil)), wantCode: "acp_runtime_busy", wantReason: "warm_process"},
+		{name: "external agent code", cause: fmt.Errorf("prompt: %w", apperror.New(apperror.CodeACPRuntimeBusy, nil)), wantCode: "acp_runtime_busy"},
 		{name: "plain error", cause: errors.New("SECRET driver exit"), wantCode: "runtime_prompt_failed"},
 	}
 	for _, tc := range cases {
@@ -55,22 +53,24 @@ func TestPersistRuntimeRoundFailureCode(t *testing.T) {
 			if got, _ := meta["error_code"].(string); got != tc.wantCode {
 				t.Fatalf("error_code = %q, want %q", got, tc.wantCode)
 			}
-			if got := meta["error_reason"]; got != tc.wantReason {
-				t.Fatalf("error_reason = %#v, want %#v", got, tc.wantReason)
+			for _, key := range []string{"error_reason", "i18n_key"} {
+				if got, found := meta[key]; found {
+					t.Fatalf("%s = %#v, want it absent", key, got)
+				}
 			}
 		})
 	}
 }
 
-// X5: an External Agent turn that ran and then failed with feedback. The live
-// failure event, the terminal event and the history marker all carry the
-// feedback code, and the outcome names it for the run's terminal write.
-func TestStreamRuntimeFeedbackFailureCarriesOneCode(t *testing.T) {
+// X5: an External Agent turn that ran and then failed with an External Agent
+// code. The live failure event, the terminal event and the history marker all
+// carry that code, and the outcome names it for the run's terminal write.
+func TestStreamRuntimeExternalAgentFailureCarriesOneCode(t *testing.T) {
 	messages := &recordingMessageService{}
 	service := newACPLifecycleService(t, &recordingACPPrompter{}, messages, &recordingContextLifecycleStore{})
 	driver := noticeTestDriver{kind: "codex", prompt: func(context.Context, external.PromptInput) (external.PromptResult, error) {
 		return external.PromptResult{Output: []sdk.Message{sdk.AssistantMessage("partial")}},
-			agentfeedback.New(agentfeedback.CodeRuntimeBusy, "", 409, "", "busy", nil)
+			apperror.New(apperror.CodeACPRuntimeBusy, nil)
 	}}
 	ch := make(chan WSStreamEvent, 64)
 	outcome, err := service.streamRuntimeWS(context.Background(), driver, ChatRequest{

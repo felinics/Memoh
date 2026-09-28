@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -535,22 +534,14 @@ func TestValidateChatRuntimeSettings(t *testing.T) {
 	}
 
 	disabled := valid
-	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":false}}}}`), disabled); feedbackCode(err) != agentfeedback.CodeAgentNotEnabled {
-		t.Fatalf("validateChatRuntimeSettings disabled agent code = %q, want %q", feedbackCode(err), agentfeedback.CodeAgentNotEnabled)
+	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":false}}}}`), disabled); !errors.Is(err, ErrACPAgentNotEnabled) {
+		t.Fatalf("validateChatRuntimeSettings disabled agent error = %v, want ErrACPAgentNotEnabled", err)
 	}
 
 	missingKey := valid
-	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":true,"setup_mode":"api_key","managed":{}}}}}`), missingKey); feedbackCode(err) != agentfeedback.CodeAgentNotConfigured {
-		t.Fatalf("validateChatRuntimeSettings missing api key code = %q, want %q", feedbackCode(err), agentfeedback.CodeAgentNotConfigured)
+	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":true,"setup_mode":"api_key","managed":{}}}}}`), missingKey); !errors.Is(err, ErrACPAgentNotConfigured) {
+		t.Fatalf("validateChatRuntimeSettings missing api key error = %v, want ErrACPAgentNotConfigured", err)
 	}
-}
-
-func feedbackCode(err error) string {
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) {
-		return feedback.Code
-	}
-	return ""
 }
 
 func TestUpsertRequestShowToolCallsInIM_PointerSemantics(t *testing.T) {

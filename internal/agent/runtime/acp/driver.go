@@ -10,10 +10,8 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"net/http"
 	"strings"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/apperror"
@@ -145,43 +143,14 @@ func DriverPromptResult(result client.PromptResult, agentID string) external.Pro
 }
 
 // normalizePromptError translates pool errors into the port's stable error
-// shapes: user-facing feedback for input-class failures, apperror codes for
-// configuration-class failures, and the raw error otherwise.
+// shapes: apperror codes for configuration-class failures, and the raw error
+// otherwise. Input-class failures (a stale command, an image the agent cannot
+// read) stay package errors for the application to translate.
 func normalizePromptError(err error) error {
 	var commandNotFound *client.CommandNotFoundError
 	switch {
 	case errors.As(err, &commandNotFound):
 		return apperror.Wrap(apperror.CodeACPCommandNotFound, err, map[string]string{"command": commandNotFound.Command})
-	case errors.Is(err, ErrAgentCommandUnavailable):
-		// The runtime that admission matched was replaced (or updated its
-		// command set) before the prompt; the turn fails closed exactly like
-		// admission would have.
-		return agentfeedback.New(
-			agentfeedback.CodeAgentCommandStale,
-			"agent_command_stale",
-			http.StatusConflict,
-			"chat.externalAgent.agentCommandStale",
-			"The agent no longer offers this command. Reopen the command picker and try again.",
-			nil,
-		)
-	case errors.Is(err, client.ErrImagePromptUnsupported):
-		return agentfeedback.New(
-			agentfeedback.CodeImageInputUnsupported,
-			"image_input_unsupported",
-			http.StatusBadRequest,
-			"chat.externalAgent.imageInputUnsupported",
-			"This external agent cannot read the attached image.",
-			nil,
-		)
-	case errors.Is(err, client.ErrInvalidPromptImage):
-		return agentfeedback.New(
-			agentfeedback.CodeAttachmentInvalid,
-			"invalid_image_data",
-			http.StatusBadRequest,
-			"chat.externalAgent.attachmentInvalid",
-			"The attachment is invalid. Please attach it again.",
-			nil,
-		)
 	case errors.Is(err, client.ErrModelSelectionUnsupported):
 		return apperror.New(apperror.CodeACPModelSelectionUnsupported, nil)
 	case errors.Is(err, client.ErrModelIDRequired):

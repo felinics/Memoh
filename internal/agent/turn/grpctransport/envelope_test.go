@@ -56,7 +56,8 @@ func TestTurnSentinelsSurviveBothEncodings(t *testing.T) {
 	for _, entry := range turnReasons {
 		encodings := map[string]error{
 			"envelope": entry.Status(""),
-			"legacy":   (*Server)(nil).mapError(context.Background(), "test", entry.Err),
+			"legacy":   status.Error(entry.Code, entry.Message),
+			"server":   (*Server)(nil).mapError(context.Background(), "test", entry.Err),
 		}
 		for name, wire := range encodings {
 			t.Run(entry.Reason+"/"+name, func(t *testing.T) {
@@ -98,7 +99,7 @@ func TestTurnCatalogCodeSurvivesEnvelope(t *testing.T) {
 }
 
 func TestRuntimeControlLegacyCodeStillDecodes(t *testing.T) {
-	legacy := (*Server)(nil).runtimeControlError(context.Background(), apperror.New(apperror.CodeBotNameTaken, nil))
+	legacy := status.Error(codes.FailedPrecondition, runtimeControlErrorPrefix+string(apperror.CodeBotNameTaken))
 	_, err := newStatusClient(t, legacy).RuntimeCommands(context.Background(), turn.RuntimeControlRequest{TeamID: "team-1"})
 	if apperror.CodeOf(err) != apperror.CodeBotNameTaken {
 		t.Fatalf("got %v, want the catalog code", err)

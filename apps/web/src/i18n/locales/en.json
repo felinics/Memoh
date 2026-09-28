@@ -263,7 +263,8 @@
     },
     "external_agent": {
       "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead.",
-      "account_unbound": "Your IM account isn't linked to a Memoh account yet, so you can't use this bot's workspace. If you're its owner, open Profile → Connected Accounts in Memoh on the web, get a link code, and send {link} <code> here."
+      "account_unbound": "Your IM account isn't linked to a Memoh account yet, so you can't use this bot's workspace. If you're its owner, open Profile → Connected Accounts in Memoh on the web, get a link code, and send {link} <code> here.",
+      "container_workspace_required": "This agent runtime needs a container workspace. Switch the bot to its container workspace, then try again."
     },
     "agent_credential": {
       "not_found": "This Agent account is no longer available. Choose another account.",

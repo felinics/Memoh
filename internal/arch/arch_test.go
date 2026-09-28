@@ -376,6 +376,7 @@ func TestRetiredDomainPackagesStayRemoved(t *testing.T) {
 		"internal/acpclient",
 		"internal/acpfeedback",
 		"internal/agentfeedback",
+		"internal/agent/decision/feedback",
 		"internal/acpprofile",
 		"internal/agentpayload",
 		"internal/conversation",

@@ -41,30 +41,6 @@
     "contextUnit": "tokens",
     "tip": "Tip: adjust anytime with {model} or {reasoning}."
   },
-  "chat": {
-    "externalAgent": {
-      "agentNotConfigured": "External agent setup is incomplete for this bot.",
-      "agentNotFound": "The selected external agent is unavailable.",
-      "agentNotEnabled": "The selected external agent is disabled for this bot.",
-      "codexOAuthIncomplete": "Codex ChatGPT sign-in is not complete for this bot workspace.",
-      "codexAuthTokenMissing": "Codex authentication is missing or incomplete for this bot workspace.",
-      "agentAuthInvalid": "External agent authentication is invalid. Update the agent setup and try again.",
-      "noWorkspaceExec": "You do not have permission to run workspace commands for this bot.",
-      "accountUnbound": "Your IM account isn't linked to a Memoh account yet, so you can't use this bot's workspace. If you're its owner, open Profile → Connected Accounts in Memoh on the web, get a link code, and send {link} <code> here.",
-      "runtimeOwnerMissing": "This external-agent session has no runtime owner. Start a new session to continue.",
-      "discussUnsupported": "This external agent cannot run in discuss mode.",
-      "groupChatUnsupported": "Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex.",
-      "projectModeInvalid": "The external agent project mode is invalid.",
-      "projectPathInvalid": "The external agent project path must be absolute.",
-      "displayArgsInvalid": "The external agent display arguments are invalid.",
-      "runtimeStartFailed": "External agent runtime failed to start.",
-      "runtimeBusy": "External agent runtime is already processing a turn for this session.",
-      "attachmentInvalid": "The attachment is invalid. Please attach it again.",
-      "attachmentUnavailable": "The attachment could not be made available to the external agent. Please attach it again.",
-      "imageInputUnsupported": "This external agent cannot read the attached image.",
-      "invalidChatRuntime": "The selected chat runtime is invalid."
-    }
-  },
   "ops": {
     "template": "⚠️ Couldn't {verb} right now. Try again in a moment.",
     "verb": {
@@ -686,7 +662,8 @@
     },
     "external_agent": {
       "turn_replacement_unsupported": "Retry and edit are unavailable for external agent sessions. Send a new message instead.",
-      "account_unbound": "Your IM account isn't linked to a Memoh account yet, so you can't use this bot's workspace. If you're its owner, open Profile → Connected Accounts in Memoh on the web, get a link code, and send {link} <code> here."
+      "account_unbound": "Your IM account isn't linked to a Memoh account yet, so you can't use this bot's workspace. If you're its owner, open Profile → Connected Accounts in Memoh on the web, get a link code, and send {link} <code> here.",
+      "container_workspace_required": "This agent runtime needs a container workspace. Switch the bot to its container workspace, then try again."
     },
     "agent_credential": {
       "not_found": "This Agent account is no longer available. Choose another account.",

@@ -268,8 +268,8 @@ func mapClientError(err error) error {
 	case codes.DeadlineExceeded:
 		return context.DeadlineExceeded
 	case codes.FailedPrecondition:
-		if feedback := decodeFeedback(status.Convert(err).Message()); feedback != nil {
-			return feedback
+		if restored := decodeLegacyFeedback(err, status.Convert(err).Message()); restored != nil {
+			return restored
 		}
 		return err
 	default:

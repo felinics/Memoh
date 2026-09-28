@@ -70,7 +70,7 @@ The transport renders a public error in its own envelope:
 | HTTP request | `internal/server/error_handler.go`, as described below |
 | SSE or WebSocket event after the stream is open | The handler that sends the event: code, args and fault, no error text |
 | IM channel reply | The renderer in `internal/channel/inbound`, which looks up the code's copy |
-| Cross-process RPC | The RPC server packages, with the code as the status reason |
+| Cross-process RPC | The RPC server packages, as a gRPC status whose `google.rpc.ErrorInfo` reason is the code and whose metadata holds the args |
 
 Errors produced by the transport itself (an unknown route, a method that is
 not allowed, a body over the limit, an unparsable WebSocket frame) are
@@ -113,8 +113,6 @@ The code is chosen from the chain of the returned error:
 
 The message of an `*echo.HTTPError` is not sent. A handler that has a cause
 for one attaches it with `WithInternal(err)`, so the result record carries it.
-Structured External Agent feedback bodies are still sent as they are, until
-clients read that code from a Problem.
 
 `fault` is who the process attributes the failure to, not something derived
 from the status:

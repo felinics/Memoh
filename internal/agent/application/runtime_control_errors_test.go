@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
+	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
@@ -57,10 +56,10 @@ func TestRuntimeControlErrorKeepsExistingCode(t *testing.T) {
 	}
 }
 
-func TestPublicRuntimeControlErrorKeepsFeedbackAndTeamRouting(t *testing.T) {
-	feedback := agentfeedback.New("acp_agent_not_found", "", http.StatusNotFound, "", "", nil)
-	if got := publicRuntimeControlError(feedback); !errors.Is(got, feedback) {
-		t.Fatalf("feedback was translated: %v", got)
+func TestPublicRuntimeControlErrorKeepsExternalAgentCodesAndTeamRouting(t *testing.T) {
+	missing := fmt.Errorf("resolve: %w", acpagent.ErrAgentNotFound)
+	if got := publicRuntimeControlError(missing); apperror.CodeOf(got) != apperror.CodeACPAgentNotFound {
+		t.Fatalf("unknown agent = %v (code %q), want %q", got, apperror.CodeOf(got), apperror.CodeACPAgentNotFound)
 	}
 	if got := publicRuntimeControlError(turn.ErrTeamNotServed); !errors.Is(got, turn.ErrTeamNotServed) {
 		t.Fatalf("team routing sentinel was translated: %v", got)
