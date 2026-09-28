@@ -22,7 +22,6 @@ import (
 
 	attachmentpkg "github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/textutil"
 )
@@ -739,7 +738,6 @@ func (a *MatrixAdapter) handleEvent(ctx context.Context, cfg channel.ChannelConf
 			slog.String("room_id", evt.RoomID),
 			slog.String("sender", evt.Sender),
 			slog.Bool("is_mentioned", isMentioned),
-			slog.String("text", common.SummarizeText(body)),
 		)
 	}
 	return true, handler(ctx, cfg, msg)

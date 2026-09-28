@@ -701,6 +701,38 @@ func (f *fakeChatService) Persist(_ context.Context, input messagepkg.PersistInp
 	return msg, nil
 }
 
+func TestHandleInboundLogsDoNotIncludeMessageText(t *testing.T) {
+	const messageText = "private inbound message 82f0c"
+	for _, conversationType := range []string{channel.ConversationTypePrivate, channel.ConversationTypeGroup} {
+		t.Run(conversationType, func(t *testing.T) {
+			var logs bytes.Buffer
+			log := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			identitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "identity-1"}}
+			chatSvc := &fakeChatService{resolveResult: route.ResolveConversationResult{BotID: "chat-1", RouteID: "route-1"}}
+			processor := NewChannelInboundProcessor(log, nil, chatSvc, chatSvc, &fakeChatGateway{}, identitySvc, &fakePolicyService{}, "", 0)
+			msg := channel.InboundMessage{
+				BotID: "bot-1", Channel: channel.ChannelType("telegram"),
+				Message:     channel.Message{ID: "msg-1", Text: messageText},
+				ReplyTarget: "chat-1", Sender: channel.Identity{SubjectID: "user-1"},
+				Conversation: channel.Conversation{ID: "chat-1", Type: conversationType},
+			}
+			cfg := channel.ChannelConfig{TeamID: "team-test", BotID: "bot-1", ChannelType: msg.Channel}
+			if err := processor.HandleInbound(context.Background(), cfg, msg, &fakeReplySender{}); err != nil {
+				t.Fatalf("HandleInbound() error = %v", err)
+			}
+			if !strings.Contains(logs.String(), `"msg":"inbound handle start"`) || !strings.Contains(logs.String(), `"message_id":"msg-1"`) {
+				t.Fatal("inbound start record or identifier missing")
+			}
+			if conversationType == channel.ConversationTypeGroup && !strings.Contains(logs.String(), `"msg":"inbound not triggering assistant (group trigger condition not met)"`) {
+				t.Fatal("passive inbound record missing")
+			}
+			if strings.Contains(logs.String(), messageText) || strings.Contains(logs.String(), `"query":`) {
+				t.Fatal("inbound log exposed message text or query field")
+			}
+		})
+	}
+}
+
 func TestChannelInboundProcessorWithIdentity(t *testing.T) {
 	channelIdentitySvc := &fakeChannelIdentityService{channelIdentity: identities.ChannelIdentity{ID: "channelIdentity-1"}}
 	policySvc := &fakePolicyService{}

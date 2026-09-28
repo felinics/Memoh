@@ -15,7 +15,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/redact"
 )
@@ -287,7 +286,6 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 				slog.String("chat_type", chatType),
 				slog.String("user_id", m.Author.ID),
 				slog.String("username", m.Author.Username),
-				slog.String("text", common.SummarizeText(text)),
 			)
 		}
 

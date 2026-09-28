@@ -434,7 +434,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		p.logger.DebugContext(ctx, "inbound handle start",
 			slog.String("channel", msg.Channel.String()),
 			slog.String("message_id", strings.TrimSpace(msg.Message.ID)),
-			slog.String("query", strings.TrimSpace(text)),
 			slog.Int("attachments", len(msg.Message.Attachments)),
 			slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
 			slog.String("conversation_id", strings.TrimSpace(msg.Conversation.ID)),
@@ -937,7 +936,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.Bool("is_mentioned", metadataBool(msg.Metadata, "is_mentioned")),
 				slog.Bool("is_reply_to_bot", metadataBool(msg.Metadata, "is_reply_to_bot")),
 				slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
-				slog.String("query", strings.TrimSpace(text)),
 				slog.Int("attachments", len(attachments)),
 			)
 		}

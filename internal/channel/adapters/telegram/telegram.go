@@ -1215,7 +1215,6 @@ func (a *TelegramAdapter) logTelegramInbound(ctx context.Context, configID strin
 		slog.String("chat_id", msg.Conversation.ID),
 		slog.String("user_id", msg.Sender.Attribute("user_id")),
 		slog.String("username", msg.Sender.Attribute("username")),
-		slog.String("text", common.SummarizeText(msg.Message.Text)),
 		slog.Int("attachments", len(msg.Message.Attachments)),
 	)
 }

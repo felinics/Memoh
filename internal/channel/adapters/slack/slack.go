@@ -17,7 +17,6 @@ import (
 	"github.com/slack-go/slack/socketmode"
 
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -511,7 +510,6 @@ func (a *SlackAdapter) handleMessageEvent(
 			slog.String("config_id", cfg.ID),
 			slog.String("chat_type", chatType),
 			slog.String("user_id", ev.User),
-			slog.String("text", common.SummarizeText(text)),
 		)
 	}
 
@@ -592,7 +590,6 @@ func (a *SlackAdapter) handleAppMentionEvent(
 		a.logger.InfoContext(ctx, "app mention received",
 			slog.String("config_id", cfg.ID),
 			slog.String("user_id", ev.User),
-			slog.String("text", common.SummarizeText(text)),
 		)
 	}
 

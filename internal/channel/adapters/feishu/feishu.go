@@ -19,7 +19,6 @@ import (
 
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/feishu/wsclient"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -516,7 +515,6 @@ func (a *FeishuAdapter) buildEventDispatcher(
 		text := msg.Message.PlainText()
 		rawMessageID := ""
 		rawMessageType := ""
-		rawContent := ""
 		if event != nil && event.Event != nil && event.Event.Message != nil {
 			if event.Event.Message.MessageId != nil {
 				rawMessageID = strings.TrimSpace(*event.Event.Message.MessageId)
@@ -524,18 +522,13 @@ func (a *FeishuAdapter) buildEventDispatcher(
 			if event.Event.Message.MessageType != nil {
 				rawMessageType = strings.TrimSpace(*event.Event.Message.MessageType)
 			}
-			if event.Event.Message.Content != nil {
-				rawContent = common.SummarizeText(*event.Event.Message.Content)
-			}
 		}
 		if a.logger != nil {
 			a.logger.DebugContext(connCtx, "feishu inbound extracted",
 				slog.String("config_id", cfg.ID),
 				slog.String("message_id", rawMessageID),
 				slog.String("message_type", rawMessageType),
-				slog.String("text", common.SummarizeText(text)),
 				slog.Int("attachments", len(msg.Message.Attachments)),
-				slog.String("raw_content_prefix", rawContent),
 			)
 		}
 		if text == "" && len(msg.Message.Attachments) == 0 {
@@ -568,7 +561,6 @@ func (a *FeishuAdapter) buildEventDispatcher(
 				slog.String("route_key", msg.RoutingKey()),
 				slog.String("chat_type", msg.Conversation.Type),
 				slog.Bool("is_mentioned", isMentioned),
-				slog.String("text", common.SummarizeText(text)),
 			)
 		}
 		go func() {

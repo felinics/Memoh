@@ -13,7 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/redact"
 	"github.com/felinics/memoh/internal/textutil"
 )
@@ -546,7 +545,6 @@ func (a *MisskeyAdapter) logInbound(configID string, msg channel.InboundMessage)
 		slog.String("config_id", configID),
 		slog.String("user_id", msg.Sender.Attribute("user_id")),
 		slog.String("username", msg.Sender.Attribute("username")),
-		slog.String("text", common.SummarizeText(msg.Message.Text)),
 	)
 }
 
