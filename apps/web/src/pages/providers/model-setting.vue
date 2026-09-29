@@ -148,7 +148,10 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
     if (!curProviderId.value) return
     await deleteProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
   },
-  onSettled: invalidateProviderQueries,
+  onSettled: () => {
+    invalidateProviderQueries()
+    queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
+  },
 })
 
 // mutateAsync (not mutate) because the form's autosave queue must await each
