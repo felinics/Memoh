@@ -328,10 +328,14 @@ async function addModel() {
 
   if (!type || !model_id) return
 
+  // A cleared number input holds '' rather than undefined. Treat it as empty so
+  // the server detects dimensions instead of rejecting a string for an int.
+  const dimensions = typeof form.values.dimensions === 'number' ? form.values.dimensions : undefined
+
   const config = buildModelConfig({
     type,
     description: form.values.description,
-    dimensions: form.values.dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
+    dimensions: dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
     contextWindow: form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined),
     compatibilities: selectedCompat.value,
     existing: isEdit ? fallback!.config : undefined,
