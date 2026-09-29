@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // Each half is reached by asserting the one injected session runtime, and a
@@ -266,7 +270,7 @@ func (r *runtimeSubscriptions) handle(ctx context.Context, botID string, msg run
 		r.subscribe(ctx, botID, msg, authorize)
 		return true
 	case runtimeUnsubscribeMessageType:
-		r.unsubscribe(msg.SessionID)
+		r.unsubscribe(ctx, botID, msg.SessionID)
 		return true
 	default:
 		return false
@@ -287,16 +291,16 @@ func (r *runtimeSubscriptions) handle(ctx context.Context, botID string, msg run
 func (r *runtimeSubscriptions) subscribe(ctx context.Context, botID string, msg runtimeClientMessage, authorize runtimeSubscribeAuthorizer) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	if sessionID == "" {
-		sendWSError(r.writer, wsTurn("", ""), "session_id is required")
+		failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", ""), "ws."+runtimeSubscribeMessageType, echo.NewHTTPError(http.StatusBadRequest, "session_id is required"))
 		return
 	}
 	if r.source == nil {
-		sendWSError(r.writer, wsTurn("", sessionID), "session runtime is not configured")
+		failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", sessionID), "ws."+runtimeSubscribeMessageType, errs.New("session runtime is not configured"))
 		return
 	}
 	if authorize != nil {
 		if err := authorize(ctx, sessionID); err != nil {
-			sendWSError(r.writer, wsTurn("", sessionID), wsErrorMessage(err))
+			failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", sessionID), "ws."+runtimeSubscribeMessageType, err)
 			return
 		}
 	}
@@ -305,7 +309,7 @@ func (r *runtimeSubscriptions) subscribe(ctx context.Context, botID string, msg 
 	subscription, err := r.source.Subscribe(subCtx, botID, sessionID)
 	if err != nil {
 		cancel()
-		sendWSError(r.writer, wsTurn("", sessionID), wsErrorMessage(err))
+		failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", sessionID), "ws."+runtimeSubscribeMessageType, err)
 		return
 	}
 
@@ -337,10 +341,10 @@ func (r *runtimeSubscriptions) subscribe(ctx context.Context, botID string, msg 
 	go r.forward(entry, subscription)
 }
 
-func (r *runtimeSubscriptions) unsubscribe(sessionID string) {
+func (r *runtimeSubscriptions) unsubscribe(ctx context.Context, botID, sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		sendWSError(r.writer, wsTurn("", ""), "session_id is required")
+		failWSRequest(ctx, r.logger, r.writer, botID, wsTurn("", ""), "ws."+runtimeUnsubscribeMessageType, echo.NewHTTPError(http.StatusBadRequest, "session_id is required"))
 		return
 	}
 	r.mu.Lock()

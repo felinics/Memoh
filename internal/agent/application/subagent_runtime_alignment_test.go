@@ -148,7 +148,7 @@ func TestSpawnAbortAlignsManagerLedgerAndLifecycle(t *testing.T) {
 		t.Fatalf("runtime snapshot: %v", err)
 	}
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != sessionruntime.RunStatusErrored ||
-		snapshot.CurrentRunView.Error != "agent run aborted" {
+		snapshot.CurrentRunView.ErrorCode != "runtime_run_failed" {
 		t.Fatalf("live run = %#v, want generic errored terminal", snapshot.CurrentRunView)
 	}
 	durable, err := runs.Get(context.Background(), admission.RunID)
@@ -226,7 +226,7 @@ func TestSpawnWatchdogRetryKeepsManagerRunActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime snapshot after retry: %v", err)
 	}
-	if active.CurrentRunView == nil || active.CurrentRunView.Status != sessionruntime.RunStatusRunning || active.CurrentRunView.Error != "" {
+	if active.CurrentRunView == nil || active.CurrentRunView.Status != sessionruntime.RunStatusRunning || active.CurrentRunView.ErrorCode != "" {
 		t.Fatalf("live run after retry = %#v, want clean running state", active.CurrentRunView)
 	}
 	intermediate, err := runs.Get(context.Background(), admission.RunID)

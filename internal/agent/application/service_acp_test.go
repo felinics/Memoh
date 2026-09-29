@@ -1624,8 +1624,8 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	if got := persistedText(t, messages.persisted[1].Content); got != "The external agent could not complete this turn." {
 		t.Fatalf("assistant failure text = %q, want sanitized user-facing error", got)
 	}
-	if got, _ := messages.persisted[1].Metadata["error"].(string); got != "The external agent could not complete this turn." {
-		t.Fatalf("assistant error metadata = %#v, want sanitized message", messages.persisted[1].Metadata)
+	if _, exists := messages.persisted[1].Metadata["error"]; exists {
+		t.Fatalf("assistant metadata = %#v, want the failure recorded by its code alone", messages.persisted[1].Metadata)
 	}
 	if got, _ := messages.persisted[1].Metadata["error_code"].(string); got != "runtime_prompt_failed" {
 		t.Fatalf("assistant error code metadata = %#v", messages.persisted[1].Metadata)

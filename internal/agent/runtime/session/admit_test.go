@@ -92,7 +92,7 @@ func (f admitFixture) input(invocationID, payload string) AdmitInput {
 
 func (f admitFixture) finish(t *testing.T, admission Admission) {
 	t.Helper()
-	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	if _, _, err := f.runs.Finalize(context.Background(), ledger.FinalizeParams{
@@ -485,7 +485,7 @@ func TestAdmittedRunParksAndResumesOnUserInputDecision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish deferred stream end: %v", err)
 	}
-	if _, err := fixture.manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("finish deferred stream: %v", err)
 	}
 	snapshot, err := fixture.manager.Snapshot(context.Background(), testBotID, testSessionID)
@@ -509,7 +509,7 @@ func TestAdmittedRunParksAndResumesOnUserInputDecision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish resumed stream end: %v", err)
 	}
-	if _, err := fixture.manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("finish resumed run: %v", err)
 	}
 	if got := fixture.runs.State(admission.RunID); got != ledger.StateCompleted {

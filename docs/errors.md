@@ -79,7 +79,16 @@ not allowed, a body over the limit, an unparsable WebSocket frame) are
 translated by that transport.
 
 The text of an internal error is never sent to a client, in a response body,
-an event, a frame or a reply. It goes to the result record.
+an event, a frame or a reply. It goes to the result record. Nor is it stored:
+an agent run records its failure in `session_runs.error_code` and in the
+`error_code` of history metadata, and the live run view carries the code
+alone. An error without a public error is answered with the generic code for
+its fault: `internal` on the WebSocket and in IM, or `http.bad_request` in IM
+for a client fault. A stream error without a code is `runtime_run_failed`,
+the code its run records.
+
+A warning attached to a result, such as an item a backup import skipped, says
+only what was skipped. Its cause is recorded as an event.
 
 ## HTTP responses
 
@@ -189,6 +198,14 @@ written as usual.
 result := errlog.Finish(ctx, operation, err, errlog.Options{})
 logger.LogAttrs(ctx, result.Level, "request", attrs...)
 ```
+
+A WebSocket message that fails before a run takes it over ends with a
+`ws request` record, chosen and leveled by the same rule as an HTTP request. A
+message that starts a run is recorded by the run's `agent run` record, which
+the session runtime's terminal observer writes once per run. It carries the
+cause the run's owner held, or the session runtime's own cause when the
+runtime ended the run itself, such as an admission it could not complete or a
+shutdown.
 
 `errlog.Finish` also sets the span status to error for a `server` or
 `dependency` fault and sets `error.type` on the span to the reason. The error

@@ -52,10 +52,10 @@
 
 <script setup lang="ts">
 // Chat-side rendering of `agent_dependency_missing`. The text is
-// rebuilt from the block's args through the same i18n key the Server names, so
-// it follows the viewer's locale; the Server's content is the fallback when
-// args are absent. The one action opens the bot's Dependencies tab — the
-// install requires a manager to review and confirm it there.
+// rebuilt from the block's args, so it follows the viewer's locale; without
+// args it is the copy for the code. The one action opens the bot's
+// Dependencies tab — the install requires a manager to review and confirm it
+// there.
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -66,7 +66,7 @@ import type { ErrorBlock } from '@/store/chat-list'
 import { isBackgroundTaskActive, normalizeBackgroundStatus } from '@/store/chat/background-tasks'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import BgTaskLiveStatus from './bg-task-live-status.vue'
-import { dependencyInstallationInProgress, dependencyMissingArgs } from './dependency-missing'
+import { dependencyMissingArgs, dependencyMissingText } from './dependency-missing'
 
 const props = defineProps<{
   block: ErrorBlock
@@ -76,7 +76,7 @@ const props = defineProps<{
   botName?: string
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const router = useRouter()
 const chatStore = useChatStore()
 
@@ -87,15 +87,7 @@ const canManage = computed(() => hasBotPermission(
   'manage',
 ))
 
-const text = computed(() => {
-  const values = args.value
-  if (values.dep_id) {
-    return t(dependencyInstallationInProgress(values)
-      ? 'chat.externalAgent.dependencyMissingInstalling'
-      : 'chat.externalAgent.dependencyMissing', values)
-  }
-  return props.block.content
-})
+const text = computed(() => dependencyMissingText(props.block, t, te))
 
 const task = computed(() => {
   const taskId = args.value.install_task_id ?? ''

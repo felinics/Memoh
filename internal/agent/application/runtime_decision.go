@@ -501,7 +501,7 @@ func (s *Service) continueRuntimeDecision(
 		return
 	}
 	if lifecycleDeferred {
-		_, _ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
+		_, _ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "")
 		return
 	}
 	s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)

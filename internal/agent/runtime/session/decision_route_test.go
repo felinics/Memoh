@@ -278,7 +278,7 @@ func runDistributedDecisionRouteContract(t *testing.T, suite distributedRuntimeB
 	if executions.Load() != 1 {
 		t.Fatalf("duplicate executions=%d", executions.Load())
 	}
-	if _, err := owner.FinishRun(ctx, admission.Handle, RunStatusAborted, ""); err != nil {
+	if _, err := owner.FinishRun(ctx, admission.Handle, RunStatusAborted); err != nil {
 		t.Fatal(err)
 	}
 	if result, err := remote.RouteDecisionResponse(ctx, response); err != nil || !result.Replayed || !result.Applied {

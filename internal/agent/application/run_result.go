@@ -63,7 +63,11 @@ func (s *Service) logRunResult(ctx context.Context, terminal sessionruntime.Term
 	if s.logger == nil || !terminal.Applied {
 		return
 	}
-	failure := runResultError(terminal, runOutcomeFrom(ctx, terminal.RunID).Cause)
+	cause := runOutcomeFrom(ctx, terminal.RunID).Cause
+	if cause == nil {
+		cause = terminal.Cause
+	}
+	failure := runResultError(terminal, cause)
 	result := errlog.Finish(ctx, runResultOperation, failure, errlog.Options{})
 	attrs := append([]slog.Attr{
 		slog.String("operation", runResultOperation),
@@ -77,8 +81,9 @@ func (s *Service) logRunResult(ctx context.Context, terminal sessionruntime.Term
 }
 
 // runResultError is the failure a run's result record reports: none for a run
-// that completed or was stopped, and otherwise the owner's cause under the
-// code the run recorded. A run that ended without its owner, such as one the
+// that completed or was stopped, and otherwise the cause under the code the
+// run recorded. The cause is the owner's, or the session runtime's when it
+// ended the run itself. A run that ended without either, such as one the
 // reaper found, has no cause, and its failure is the recorded code alone.
 func runResultError(terminal sessionruntime.TerminalRun, cause error) error {
 	switch ledger.State(terminal.State) {
@@ -93,11 +98,7 @@ func runResultError(terminal sessionruntime.TerminalRun, cause error) error {
 		return apperror.Wrap(code, cause, nil)
 	}
 	if code == "" {
-		message := terminal.ErrorMessage
-		if message == "" {
-			message = "agent run ended without a recorded cause"
-		}
-		return errs.NewWithDepth(1, message)
+		return errs.NewWithDepth(1, "agent run ended without a recorded cause")
 	}
 	return errs.WrapWithDepth(1, apperror.New(code, nil), "agent run ended without its owner's cause")
 }

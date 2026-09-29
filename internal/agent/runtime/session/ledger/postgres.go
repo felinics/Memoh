@@ -465,7 +465,7 @@ func (s *PostgresStore) FenceAndFinalizeOrphan(ctx context.Context, reset ResetL
 	}
 	row, err := txq.FinalizeSessionRun(ctx, dbsqlc.FinalizeSessionRunParams{
 		RunID: runID, FencingToken: run.FencingToken, State: string(StateAborted),
-		ErrorCode: textOrNull(runErrorHistoryReset), ErrorMessage: textOrNull("run canceled by history reset"),
+		ErrorCode: textOrNull(runErrorHistoryReset),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Run{}, false, nil
@@ -710,7 +710,6 @@ func (s *PostgresStore) PrepareFinish(ctx context.Context, params PrepareFinishP
 		FencingToken:          params.FencingToken,
 		ProposedTerminalState: string(params.State),
 		ProposedErrorCode:     textOrNull(params.ErrorCode),
-		ProposedErrorMessage:  textOrNull(params.ErrorMessage),
 		AllowWaitingDecision:  params.AllowWaitingDecision,
 	})
 	return applyResult("prepare run finish", row, err)
@@ -732,7 +731,6 @@ func (s *PostgresStore) Finalize(ctx context.Context, params FinalizeParams) (Ru
 		FencingToken: params.FencingToken,
 		State:        string(params.State),
 		ErrorCode:    textOrNull(params.ErrorCode),
-		ErrorMessage: textOrNull(params.ErrorMessage),
 	})
 	return applyResult("finalize run", row, err)
 }

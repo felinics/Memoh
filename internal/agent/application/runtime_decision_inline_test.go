@@ -91,7 +91,7 @@ func TestInlineRuntimeDecisionClosesOutputWithoutFinishingProducer(t *testing.T)
 				if err != nil || snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != sessionruntime.RunStatusRunning || len(snapshot.CurrentRunView.Messages) == 0 {
 					t.Fatalf("original producer stopped after answer: %+v, %v", snapshot.CurrentRunView, err)
 				}
-				if _, err := manager.FinishRun(ctx, handle, sessionruntime.RunStatusCompleted, ""); err != nil {
+				if _, err := manager.FinishRun(ctx, handle, sessionruntime.RunStatusCompleted); err != nil {
 					t.Fatal(err)
 				}
 				if logs.Len() != 0 {

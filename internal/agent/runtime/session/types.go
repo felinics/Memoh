@@ -191,7 +191,11 @@ type TerminalRun struct {
 	FencingToken int64
 	State        string
 	ErrorCode    string
-	ErrorMessage string
+	// Cause is why this process ended the run when the session runtime, not
+	// the run's owner, ended it: an admission it could not complete, or a
+	// shutdown. It is a diagnostic for the run's result record and is never
+	// persisted, so an observation of a run another process ended has none.
+	Cause error
 	// Applied reports that this observation's own fenced write made the run
 	// terminal. It is false when a replay, a retry, or a stale owner observes
 	// a transition some other write already applied. Exactly one observation
@@ -300,9 +304,10 @@ type CurrentRunView struct {
 	// SteerTurns locates live queue inputs inside the run's assistant message
 	// stream. Claimed entries are provisional runtime state; applied entries
 	// point at the history turn written by the application.
-	SteerTurns             []SteerTurnView   `json:"steer_turns,omitempty"`
+	SteerTurns []SteerTurnView `json:"steer_turns,omitempty"`
+	// ErrorCode is the catalog code of the run's failure. The view carries no
+	// error text: a subscriber renders the copy for the code.
 	ErrorCode              string            `json:"error_code,omitempty"`
-	Error                  string            `json:"error,omitempty"`
 	ProposedTerminalStatus string            `json:"proposed_terminal_status,omitempty"`
 	FinishProposedAt       *time.Time        `json:"finish_proposed_at,omitempty"`
 	Operation              *RunOperationView `json:"operation,omitempty"`
@@ -368,7 +373,6 @@ type CurrentRunPatch struct {
 	RunID               string     `json:"run_id"`
 	Status              *string    `json:"status,omitempty"`
 	ErrorCode           *string    `json:"error_code,omitempty"`
-	Error               *string    `json:"error,omitempty"`
 	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
 	OwnerLeaseExpiresAt *time.Time `json:"owner_lease_expires_at,omitempty"`
 }

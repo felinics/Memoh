@@ -371,14 +371,14 @@ func (m *Manager) claimAndStart(ctx context.Context, in AdmitInput, admission Ad
 // fenced by the same token the claim used, so it cannot disturb a successor, and
 // it is idempotent, so a caller that crashes here leaves the run to the reaper
 // with the same outcome. cause is returned unchanged: the reason the run could
-// not start is more useful to the caller than the bookkeeping that followed.
+// not start is more useful to the caller than the bookkeeping that followed, and
+// the caller's result record is where it is reported. The run keeps only code.
 func (m *Manager) abandonClaim(ctx context.Context, runID string, token int64, code string, cause error) error {
 	_, _, err := m.runs.Finalize(context.WithoutCancel(ctx), ledger.FinalizeParams{
 		RunID:        runID,
 		FencingToken: token,
 		State:        ledger.StateFailed,
 		ErrorCode:    code,
-		ErrorMessage: cause.Error(),
 	})
 	if err != nil {
 		m.logger.ErrorContext(ctx, "release unstartable runtime run failed; the reaper will finish it",

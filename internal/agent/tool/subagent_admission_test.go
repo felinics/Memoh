@@ -480,3 +480,36 @@ func TestQueuedAgentMessageIsAdmittedAfterTheRunningOneReleasesTheThread(t *test
 		t.Errorf("queued message ran on a different thread: %#v", admissions)
 	}
 }
+
+// An agent task that cannot start for a reason other than a busy or duplicate
+// agent records the cause: the run its admission may have claimed records
+// only a code. A busy agent is ordinary traffic and records nothing.
+func TestAgentAdmissionFailureRecordsItsCause(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		reject     error
+		wantRecord bool
+	}{
+		{name: "failure", reject: errors.New("SECRET fence is stale"), wantRecord: true},
+		{name: "busy", reject: fmt.Errorf("%w: thread child_1", turn.ErrSessionBusy)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs strings.Builder
+			p, _, _, _ := newAgentControlProviderWithAdmitter(t, &fakeSpawnAgent{}, &fakeSubagentAdmitter{reject: tc.reject})
+			p.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+
+			_ = mustExecuteAgentTool(t, p, SessionContext{BotID: "bot1", SessionID: "parent1"}, "spawn_agent", map[string]any{
+				"id":   "worker",
+				"task": "audit the ledger",
+			})
+
+			recorded := strings.Contains(logs.String(), `"msg":"agent task admission failed"`)
+			if recorded != tc.wantRecord {
+				t.Fatalf("records = %s, want recorded=%v", logs.String(), tc.wantRecord)
+			}
+			if tc.wantRecord && !strings.Contains(logs.String(), "SECRET fence is stale") {
+				t.Fatalf("records = %s, want the cause", logs.String())
+			}
+		})
+	}
+}

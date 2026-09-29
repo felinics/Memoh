@@ -169,8 +169,9 @@ func TestIMHeldErrorsReleasedWithoutRunTerminal(t *testing.T) {
 	}
 }
 
-// A handle that does not report run_terminal keeps today's replies even when
-// the event appears.
+// A handle that does not report run_terminal keeps replying to each error
+// event even when run_terminal appears. An event without a code is answered
+// with the failed run copy, not its text.
 func TestIMLegacyHandleIgnoresRunTerminal(t *testing.T) {
 	t.Parallel()
 	got, _ := runIMTerminal(t, &terminalFailureGateway{legacy: true, scriptedFailureGateway: scriptedFailureGateway{payloads: []string{
@@ -178,5 +179,5 @@ func TestIMLegacyHandleIgnoresRunTerminal(t *testing.T) {
 		`{"type":"agent_abort","messages":[]}`,
 		`{"type":"run_terminal","state":"failed","error_code":"agent.provider_overloaded"}`,
 	}}})
-	assertIMFailure(t, got, "", false, "SECRET raw")
+	assertIMFailure(t, got, "", false, "The response could not be completed. Please try again.")
 }

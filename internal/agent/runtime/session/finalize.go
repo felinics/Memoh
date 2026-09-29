@@ -37,10 +37,10 @@ func ledgerFailureCode(state ledger.State, errorCode string) string {
 func (m *Manager) prepareLedgerFinish(
 	ctx context.Context,
 	handle RunHandle,
-	status, errorCode, message string,
+	status, errorCode string,
 	allowWaitingDecision bool,
 ) (ledger.Run, error) {
-	state := terminalLedgerState(status, errorCode, message)
+	state := terminalLedgerState(status, errorCode)
 	// Lost is a reaper-only conclusion: an owner cannot authoritatively claim
 	// that it disappeared. Reject it at the persistence boundary so a future
 	// caller cannot turn a deterministic misuse into an endless durable retry.
@@ -50,10 +50,9 @@ func (m *Manager) prepareLedgerFinish(
 	errorCode = ledgerFailureCode(state, errorCode)
 	if m.runs == nil || handle.FencingToken <= 0 {
 		return ledger.Run{
-			State:                ledger.StateFinishing,
-			ProposedState:        state,
-			ProposedErrorCode:    errorCode,
-			ProposedErrorMessage: strings.TrimSpace(message),
+			State:             ledger.StateFinishing,
+			ProposedState:     state,
+			ProposedErrorCode: errorCode,
 		}, nil
 	}
 	run, applied, err := m.runs.PrepareFinish(ctx, ledger.PrepareFinishParams{
@@ -61,7 +60,6 @@ func (m *Manager) prepareLedgerFinish(
 		FencingToken:         handle.FencingToken,
 		State:                state,
 		ErrorCode:            errorCode,
-		ErrorMessage:         message,
 		AllowWaitingDecision: allowWaitingDecision,
 	})
 	if err != nil {
@@ -99,18 +97,17 @@ func (m *Manager) prepareLedgerFinish(
 //
 // Backend-only reservation tests use zero fencing tokens and have no durable
 // row to transition. Production admission always supplies a positive token.
-func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, errorCode, message string) (TerminalRun, error) {
+func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, errorCode string) (TerminalRun, error) {
 	if m.runs == nil || handle.FencingToken <= 0 {
 		return TerminalRun{}, nil
 	}
-	state := terminalLedgerState(status, errorCode, message)
+	state := terminalLedgerState(status, errorCode)
 	errorCode = ledgerFailureCode(state, errorCode)
 	run, applied, err := m.runs.Finalize(ctx, ledger.FinalizeParams{
 		RunID:        handle.RunID,
 		FencingToken: handle.FencingToken,
 		State:        state,
 		ErrorCode:    errorCode,
-		ErrorMessage: message,
 	})
 	if err != nil {
 		return TerminalRun{}, fmt.Errorf("finalize runtime run: %w", err)
@@ -149,7 +146,6 @@ func terminalRunFromLedger(run ledger.Run) TerminalRun {
 		FencingToken: run.FencingToken,
 		State:        string(run.State),
 		ErrorCode:    run.ErrorCode,
-		ErrorMessage: run.ErrorMessage,
 	}
 }
 
@@ -157,7 +153,7 @@ func terminalRunFromLedger(run ledger.Run) TerminalRun {
 // live vocabulary is larger than the durable one on purpose — `admitting` and
 // `aborting` are transitions an owner passes through, not ways a run can end —
 // so this collapses rather than translates.
-func terminalLedgerState(status, errorCode, message string) ledger.State {
+func terminalLedgerState(status, errorCode string) ledger.State {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case RunStatusAborted, RunStatusAborting:
 		return ledger.StateAborted
@@ -168,9 +164,9 @@ func terminalLedgerState(status, errorCode, message string) ledger.State {
 	case RunStatusLost:
 		return ledger.StateLost
 	}
-	// An empty status means the caller left the outcome to be derived. A finish
-	// message is only set when something went wrong, so it is the signal.
-	if strings.TrimSpace(errorCode) != "" || strings.TrimSpace(message) != "" {
+	// An empty status means the caller left the outcome to be derived. A code
+	// is only set when something went wrong, so it is the signal.
+	if strings.TrimSpace(errorCode) != "" {
 		return ledger.StateFailed
 	}
 	return ledger.StateCompleted

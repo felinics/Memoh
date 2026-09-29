@@ -863,8 +863,9 @@ func (s *Service) persistRuntimeRound(
 		meta[key] = value
 	}
 	if promptErr != nil {
+		// The failure is recorded by its code, which the history view renders.
+		// The cause's text stays out of history.
 		meta["agent_turn_outcome"] = "failed"
-		meta["error"] = runtimeUserFacingFailureMessage(promptErr)
 		meta["error_code"] = string(classifyRuntimeFailure(promptErr))
 	}
 	output := sdkMessagesToModelMessages(result.Output)

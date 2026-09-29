@@ -94,13 +94,13 @@ func assertIMFailure(t *testing.T, got imFailureResult, wantErrCode string, want
 
 // Scenario 1 and 10: a start failure is shown to the IM user.
 //
-// Current behavior: a plain cause keeps its raw text, which the adapter labels
-// and redacts; a coded cause shows its code's copy.
+// A plain cause is shown with the generic copy for its fault, never its text;
+// a coded cause shows its code's copy.
 func TestCharacterizeIMStartFailureText_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
 		fakeChatGateway: fakeChatGateway{startErr: errors.New("SECRET resolve failed")},
-	}), "", true, "SECRET resolve failed")
+	}), "", true, "Something went wrong on the server. Please try again.")
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
 		fakeChatGateway: fakeChatGateway{startErr: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("SECRET dial"), nil)},
 	}), "workspace.unreachable", true, "The workspace could not be reached.")
@@ -108,13 +108,13 @@ func TestCharacterizeIMStartFailureText_CurrentBehavior(t *testing.T) {
 
 // Scenario 1 and 10 after output started: a turn-port error is shown the same way.
 //
-// Current behavior: raw text for a plain cause, the code's copy for a coded one.
+// Generic copy for a plain cause, the code's copy for a coded one.
 func TestCharacterizeIMTurnErrorText_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
 		payloads: []string{`{"type":"text_delta","delta":"partial"}`},
 		tailErr:  errors.New("SECRET provider exploded"),
-	}), "", true, "SECRET provider exploded")
+	}), "", true, "Something went wrong on the server. Please try again.")
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
 		tailErr: apperror.Wrap(apperror.CodeAgentResponseInterrupted, errors.New("SECRET cause"), nil),
 	}), "agent.response_interrupted", true, "The model response was interrupted. Please try again.")
@@ -133,11 +133,11 @@ func TestCharacterizeIMErrorEventText_CurrentBehavior(t *testing.T) {
 		`{"type":"error","code":"agent.provider_overloaded","error":"The model provider is overloaded right now. Please try again in a moment."}`,
 		`{"type":"agent_abort","messages":[]}`,
 	}}), "", false, "The model provider is overloaded right now. Please try again in a moment.")
-	// An event without a code is passed through verbatim.
+	// An event without a code is shown with the failed run copy, not its text.
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{payloads: []string{
 		`{"type":"error","error":"SECRET raw"}`,
 		`{"type":"agent_abort","messages":[]}`,
-	}}), "", false, "SECRET raw")
+	}}), "", false, "The response could not be completed. Please try again.")
 }
 
 // Scenario 4, decision not accepted: the continuation fails before the runtime

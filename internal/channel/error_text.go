@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/i18n"
 )
 
@@ -43,8 +44,11 @@ func RunFailureEvent(t *i18n.Localizer, code apperror.Code, args map[string]stri
 }
 
 // ErrorEvent is the stream error a channel shows for err. An error whose code
-// has copy is shown with that copy and carries the code; any other error keeps
-// its own text, which the adapter labels and redacts.
+// has copy is shown with that copy and carries the code. Any other error is
+// shown with the generic copy for its fault, as a Web client shows a Problem
+// whose code it does not know: the copy for a bad request for a client fault,
+// and the copy for internal otherwise. The error's own text is never shown;
+// the unit's result record reports it.
 func ErrorEvent(t *i18n.Localizer, err error) StreamEvent {
 	if err == nil {
 		return StreamEvent{Type: StreamEventError}
@@ -53,5 +57,10 @@ func ErrorEvent(t *i18n.Localizer, err error) StreamEvent {
 	if text, ok := ErrorCodeText(t, code, apperror.ArgsOf(err)); ok {
 		return StreamEvent{Type: StreamEventError, Error: text, ErrorCode: string(code)}
 	}
-	return StreamEvent{Type: StreamEventError, Error: err.Error()}
+	code = apperror.CodeInternal
+	if errs.FaultOf(err) == errs.FaultClient {
+		code = apperror.CodeHTTPBadRequest
+	}
+	text, _ := ErrorCodeText(t, code, nil)
+	return StreamEvent{Type: StreamEventError, Error: text, ErrorCode: string(code)}
 }

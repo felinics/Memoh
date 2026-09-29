@@ -487,8 +487,9 @@ export interface RuntimeCurrentRunView {
   // boundary. Claimed entries are provisional; applied entries reference the
   // settled history turn that replaces them.
   steer_turns?: RuntimeSteerTurnView[]
+  // The catalog code of the run's failure. The run view carries no error text;
+  // the client shows the copy for the code.
   error_code?: string
-  error?: string
   proposed_terminal_status?: RuntimeRunStatus
   finish_proposed_at?: string
   operation?: RuntimeRunOperation
@@ -520,7 +521,6 @@ export interface RuntimeCurrentRunPatch {
   run_id: string
   status?: RuntimeRunStatus
   error_code?: string
-  error?: string
   updated_at?: string
   owner_lease_expires_at?: string
 }

@@ -13,7 +13,9 @@ package sessionruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,11 +47,11 @@ func assertColumns(t *testing.T, got, want terminalColumns) {
 }
 
 // liveRunView is the error part of the run view that snapshots and runtime
-// deltas deliver to HTTP and WebSocket subscribers.
+// deltas deliver to HTTP and WebSocket subscribers. The view carries a code and
+// no error text.
 type liveRunView struct {
 	Status    string
 	ErrorCode string
-	Error     string
 }
 
 func currentRunView(t *testing.T, manager *Manager) liveRunView {
@@ -62,7 +64,7 @@ func currentRunView(t *testing.T, manager *Manager) liveRunView {
 		t.Fatal("snapshot has no current run view")
 	}
 	run := snapshot.CurrentRunView
-	return liveRunView{Status: run.Status, ErrorCode: run.ErrorCode, Error: run.Error}
+	return liveRunView{Status: run.Status, ErrorCode: run.ErrorCode}
 }
 
 func admitRunning(t *testing.T, f admitFixture, invocationID string) Admission {
@@ -87,10 +89,11 @@ func handleEvent(t *testing.T, manager *Manager, handle RunHandle, event native.
 // Scenario 1 (failure before the stream starts): the admission builder fails
 // after the live reservation exists.
 //
-// Current behavior: the manager finishes the run itself with FinishRun(errored,
-// err.Error()), so the row carries the generic runtime_run_failed code and the
-// raw cause text. The runtime_reservation_failed write that abandonClaim issues
-// afterwards does not apply because the row is already terminal.
+// Current behavior: the manager finishes the run itself as errored, so the row
+// carries the generic runtime_run_failed code and no message. The cause is
+// returned to the caller. The runtime_reservation_failed write that
+// abandonClaim issues afterwards does not apply because the row is already
+// terminal.
 func TestCharacterizeAdmissionBuilderFailureColumns_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	f := newAdmitFixture(t)
@@ -108,11 +111,10 @@ func TestCharacterizeAdmissionBuilderFailureColumns_CurrentBehavior(t *testing.T
 		t.Fatalf("load run: %v", getErr)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, run.RunID), terminalColumns{
-		State:        ledger.StateFailed,
-		ErrorCode:    "runtime_run_failed",
-		ErrorMessage: "persist user turn failed",
+		State:     ledger.StateFailed,
+		ErrorCode: "runtime_run_failed",
 	})
-	if view := currentRunView(t, f.manager); view != (liveRunView{Status: "errored", ErrorCode: "runtime_run_failed", Error: "persist user turn failed"}) {
+	if view := currentRunView(t, f.manager); view != (liveRunView{Status: "errored", ErrorCode: "runtime_run_failed"}) {
 		t.Fatalf("run view = %+v", view)
 	}
 }
@@ -142,11 +144,9 @@ func TestCharacterizeReservationFailedColumns(t *testing.T) {
 	if getErr != nil {
 		t.Fatalf("load run: %v", getErr)
 	}
-	// Current behavior: error_message stores the raw reservation cause.
 	assertColumns(t, ledgerColumns(t, f.runs, run.RunID), terminalColumns{
-		State:        ledger.StateFailed,
-		ErrorCode:    "runtime_reservation_failed",
-		ErrorMessage: cause,
+		State:     ledger.StateFailed,
+		ErrorCode: "runtime_reservation_failed",
 	})
 }
 
@@ -163,8 +163,8 @@ func (decliningBackend) StartRunIfNoHistoryReset(context.Context, Key, SnapshotU
 
 // Scenario 5 (reservation declined): the live backend declines without an error.
 //
-// Current behavior: error_message is the text of ErrRunOwnershipLost and the
-// caller receives ErrRunOwnershipLost itself.
+// The caller receives ErrRunOwnershipLost itself; the row records the code
+// and no message.
 func TestCharacterizeReservationDeclinedColumns_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	runs := newFakeLedger()
@@ -187,15 +187,13 @@ func TestCharacterizeReservationDeclinedColumns_CurrentBehavior(t *testing.T) {
 		t.Fatalf("load run: %v", getErr)
 	}
 	assertColumns(t, ledgerColumns(t, runs, run.RunID), terminalColumns{
-		State:        ledger.StateFailed,
-		ErrorCode:    "runtime_reservation_declined",
-		ErrorMessage: "runtime run ownership was lost",
+		State:     ledger.StateFailed,
+		ErrorCode: "runtime_reservation_declined",
 	})
 }
 
 // Scenario 5 (fence activation): the persistence fence cannot be activated.
-//
-// Current behavior: error_message is the wrapped fence error text.
+// The caller receives the wrapped fence error; the row records only the code.
 func TestCharacterizeFenceActivationFailedColumns_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	f := newAdmitFixture(t)
@@ -211,43 +209,19 @@ func TestCharacterizeFenceActivationFailedColumns_CurrentBehavior(t *testing.T) 
 		t.Fatalf("load run: %v", getErr)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, run.RunID), terminalColumns{
-		State:        ledger.StateFailed,
-		ErrorCode:    "runtime_fence_activation_failed",
-		ErrorMessage: cause,
+		State:     ledger.StateFailed,
+		ErrorCode: "runtime_fence_activation_failed",
 	})
-}
-
-// Scenario 10 / WS path: finishWSRun passes the public code as the finish
-// MESSAGE (FinishRun(errored, code)), never as the error code.
-//
-// Current behavior: with no error recorded on the live run, error_code falls
-// back to runtime_run_failed and error_message holds the public code string.
-func TestCharacterizeFinishRunWithCodeAsMessage_CurrentBehavior(t *testing.T) {
-	t.Parallel()
-	f := newAdmitFixture(t)
-	admission := admitRunning(t, f, "inv-ws-code-as-message")
-
-	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, "agent.response_interrupted"); err != nil {
-		t.Fatalf("finish run: %v", err)
-	}
-	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{
-		State:        ledger.StateFailed,
-		ErrorCode:    "runtime_run_failed",
-		ErrorMessage: "agent.response_interrupted",
-	})
-	if view := currentRunView(t, f.manager); view != (liveRunView{Status: "errored", ErrorCode: "runtime_run_failed", Error: "agent.response_interrupted"}) {
-		t.Fatalf("run view = %+v", view)
-	}
 }
 
 // Scenario 10 / WS path with a non-apperror cause: apperror.CodeOf returns "",
-// so finishWSRun calls FinishRun(errored, "").
+// so the run is finished errored without a code.
 func TestCharacterizeFinishRunErroredWithoutCodeOrMessage(t *testing.T) {
 	t.Parallel()
 	f := newAdmitFixture(t)
 	admission := admitRunning(t, f, "inv-ws-plain")
 
-	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, ""); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{
@@ -279,19 +253,7 @@ func TestCharacterizeFinishCodeComesFromCaller(t *testing.T) {
 				return err
 			},
 			want: terminalColumns{State: ledger.StateFailed, ErrorCode: "runtime_run_failed"},
-			// Current behavior: the live view keeps the event's public detail as
-			// its error text while the ledger row has no message.
-			view: liveRunView{Status: "errored", ErrorCode: "runtime_run_failed", Error: "The model provider is overloaded."},
-		},
-		{
-			// finishWSRun shape: FinishRun(errored, CodeOf(cause)).
-			name: "finish with code as message",
-			finish: func(m *Manager, h RunHandle) error {
-				_, err := m.FinishRun(context.Background(), h, RunStatusErrored, "agent.provider_overloaded")
-				return err
-			},
-			want: terminalColumns{State: ledger.StateFailed, ErrorCode: "runtime_run_failed", ErrorMessage: "agent.provider_overloaded"},
-			view: liveRunView{Status: "errored", ErrorCode: "runtime_run_failed", Error: "agent.provider_overloaded"},
+			view: liveRunView{Status: "errored", ErrorCode: "runtime_run_failed"},
 		},
 		{
 			// A different explicit code wins over the live one.
@@ -301,7 +263,7 @@ func TestCharacterizeFinishCodeComesFromCaller(t *testing.T) {
 				return err
 			},
 			want: terminalColumns{State: ledger.StateFailed, ErrorCode: "agent.response_interrupted"},
-			view: liveRunView{Status: "errored", ErrorCode: "agent.response_interrupted", Error: "The model provider is overloaded."},
+			view: liveRunView{Status: "errored", ErrorCode: "agent.response_interrupted"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -339,21 +301,22 @@ func TestCharacterizeAgentEndAfterEventErrorColumns(t *testing.T) {
 			name:  "coded event error",
 			event: native.StreamEvent{Type: native.EventError, Code: "agent.provider_rate_limited", Error: "rate limited"},
 			want:  terminalColumns{State: ledger.StateFailed, ErrorCode: "agent.provider_rate_limited"},
-			view:  liveRunView{Status: "errored", ErrorCode: "agent.provider_rate_limited", Error: "rate limited"},
+			view:  liveRunView{Status: "errored", ErrorCode: "agent.provider_rate_limited"},
 		},
 		{
-			// Current behavior: an uncoded native error text (for example a raw
-			// provider message) stays in the live run view.
+			// An uncoded native error text (for example a raw provider message)
+			// does not reach the live run view; the view names it
+			// runtime_run_failed.
 			name:  "uncoded event error",
 			event: native.StreamEvent{Type: native.EventError, Error: "api error 503: upstream"},
 			want:  terminalColumns{State: ledger.StateFailed, ErrorCode: "runtime_run_failed"},
-			view:  liveRunView{Status: "errored", ErrorCode: "runtime_run_failed", Error: "api error 503: upstream"},
+			view:  liveRunView{Status: "errored", ErrorCode: "runtime_run_failed"},
 		},
 		{
 			name:  "empty event error",
 			event: native.StreamEvent{Type: native.EventError},
 			want:  terminalColumns{State: ledger.StateFailed, ErrorCode: "runtime_run_failed"},
-			view:  liveRunView{Status: "errored", ErrorCode: "runtime_run_failed", Error: "stream error"},
+			view:  liveRunView{Status: "errored", ErrorCode: "runtime_run_failed"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -373,7 +336,7 @@ func TestCharacterizeAgentEndAfterEventErrorColumns(t *testing.T) {
 					run.State, run.ProposedState, run.ProposedErrorCode, run.ProposedErrorMessage, tc.want)
 			}
 			// The owner's clean return (FinishRun with nothing) finalizes the proposal.
-			if _, err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+			if _, err := f.manager.FinishRun(context.Background(), admission.Handle, ""); err != nil {
 				t.Fatalf("finish run: %v", err)
 			}
 			assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), tc.want)
@@ -392,11 +355,11 @@ func TestCharacterizeRetryClearsLiveErrorBeforeCompletion(t *testing.T) {
 	admission := admitRunning(t, f, "inv-retry")
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventError, Error: "api error 503"})
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventRetry})
-	if view := currentRunView(t, f.manager); view.ErrorCode != "" || view.Error != "" {
+	if view := currentRunView(t, f.manager); view.ErrorCode != "" {
 		t.Fatalf("run view after retry = %+v, want no error", view)
 	}
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventAgentEnd})
-	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, ""); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{State: ledger.StateCompleted})
@@ -500,7 +463,7 @@ func TestCharacterizeAbortingRunFinishesAborted(t *testing.T) {
 	f := newAdmitFixture(t)
 	admission := admitRunning(t, f, "inv-aborting")
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventAgentAbort})
-	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, ""); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{State: ledger.StateAborted})
@@ -548,14 +511,14 @@ func TestCharacterizeReaperLostColumns(t *testing.T) {
 }
 
 // Scenario 7 (owner lost after a proposal): the proposal wins over the reaper's
-// code, message included.
+// code.
 func TestCharacterizeReaperKeepsFailedProposalColumns(t *testing.T) {
 	t.Parallel()
 	runs := newFakeLedger()
 	runs.InsertClaimed("run-proposed", "session-proposed", 5, "generation-1")
 	if _, applied, err := runs.PrepareFinish(context.Background(), ledger.PrepareFinishParams{
 		RunID: "run-proposed", FencingToken: 5, State: ledger.StateFailed,
-		ErrorCode: "agent.provider_overloaded", ErrorMessage: "agent.provider_overloaded",
+		ErrorCode: "agent.provider_overloaded",
 	}); err != nil || !applied {
 		t.Fatalf("prepare finish = applied:%v err:%v", applied, err)
 	}
@@ -566,7 +529,7 @@ func TestCharacterizeReaperKeepsFailedProposalColumns(t *testing.T) {
 	})
 	newTestReaper(t, runs, live).tick(context.Background())
 	assertColumns(t, ledgerColumns(t, runs, "run-proposed"), terminalColumns{
-		State: ledger.StateFailed, ErrorCode: "agent.provider_overloaded", ErrorMessage: "agent.provider_overloaded",
+		State: ledger.StateFailed, ErrorCode: "agent.provider_overloaded",
 	})
 }
 
@@ -590,10 +553,10 @@ func TestCharacterizeOwnerFinishAfterOwnershipLossWritesNothing(t *testing.T) {
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{State: ledger.StateRunning})
 }
 
-// Run view hydrated from the ledger (no live snapshot) exposes error_message as
-// the run view's error text. Current behavior: whatever the row holds, including
-// the raw admission cause, is delivered to subscribers.
-func TestCharacterizeLedgerHydratedRunViewExposesErrorMessage_CurrentBehavior(t *testing.T) {
+// Run view hydrated from the ledger (no live snapshot) carries the row's code
+// and no error text, including for a row an earlier release wrote a message
+// into: subscribers are not sent the raw admission cause.
+func TestCharacterizeLedgerHydratedRunViewCarriesOnlyTheCode(t *testing.T) {
 	t.Parallel()
 	runs := newFakeLedger()
 	manager := NewManager(NewMemoryBackend(), Options{
@@ -608,13 +571,29 @@ func TestCharacterizeLedgerHydratedRunViewExposesErrorMessage_CurrentBehavior(t 
 	if _, err := manager.Admit(context.Background(), f.input("inv-hydrate", `{"text":"a"}`)); err == nil {
 		t.Fatal("admit should fail")
 	}
-	view := currentRunView(t, manager)
-	want := liveRunView{
-		Status:    "errored",
-		ErrorCode: "runtime_fence_activation_failed",
-		Error:     "activate runtime persistence fence: fence is stale",
+	run, err := runs.GetByInvocation(context.Background(), testSessionID, "inv-hydrate")
+	if err != nil {
+		t.Fatalf("load run: %v", err)
 	}
+	const oldText = "activate runtime persistence fence: fence is stale"
+	runs.Mu.Lock()
+	runs.Runs[run.RunID].ErrorMessage = oldText
+	runs.Mu.Unlock()
+
+	view := currentRunView(t, manager)
+	want := liveRunView{Status: "errored", ErrorCode: "runtime_fence_activation_failed"}
 	if view != want {
 		t.Fatalf("hydrated run view = %+v, want %+v", view, want)
+	}
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	if strings.Contains(string(data), `"error"`) || strings.Contains(string(data), oldText) {
+		t.Fatalf("hydrated snapshot carries error text: %s", data)
 	}
 }

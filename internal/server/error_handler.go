@@ -38,6 +38,15 @@ func NewHTTPErrorHandler(log *slog.Logger) echo.HTTPErrorHandler {
 	}
 }
 
+// PublicError is the public error a transport answers err with, and the error
+// its result record attributes, chosen by the rule the HTTP error handler
+// applies. A WebSocket handler renders its error frames from it, so a request
+// is answered with the same code whichever transport carried it.
+func PublicError(ctx context.Context, err error) (public *apperror.Error, recorded error) {
+	answer := answerFor(ctx, err)
+	return answer.public, answer.err
+}
+
 // answer is what the boundary makes of the error a request ended with.
 type answer struct {
 	// err is the error the result record attributes. It differs from the

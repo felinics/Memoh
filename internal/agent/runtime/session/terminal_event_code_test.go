@@ -17,7 +17,7 @@ func TestTerminalEventCodeWinsOverLiveError(t *testing.T) {
 	admission := admitRunning(t, f, "inv-event-code")
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventError, Code: "agent.provider_overloaded", Error: "overloaded"})
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventAgentAbort, Code: "agent.provider_rate_limited"})
-	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, ""); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{

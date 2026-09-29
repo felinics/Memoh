@@ -2,13 +2,14 @@ import { ref, type Ref } from 'vue'
 import type { UIStreamEvent } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isGuiToolName } from '@/utils/gui-tools'
-import { createInvocationId } from '../chat-list.normalize'
+import { createInvocationId, stringRecord } from '../chat-list.normalize'
 import { provisionalSessionTitle } from '../chat-list.utils'
 import type { createAssistantStreamRegistry } from './assistant-streams'
 import type { createChatDecisions } from './decisions'
 import type { createChatRealtimeController } from './realtime'
 import type { RuntimeProjectionChange } from './runtime-client'
 import { isRuntimeRunActive } from './runtime-projection'
+import { fillRunErrorDetails } from './runtime-transcript-merge'
 import type { createSessionList } from './session-list'
 import { commandActionErrorMessage } from './messages'
 import { CommandStreamError, StreamFailureError, failureStage } from './send'
@@ -277,11 +278,21 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     if (event.type === 'error') {
       const invocationId = deps.assistantStreams.invocationIdForEvent(event)
       const pending = deps.assistantStreams.getAssistantStream(invocationId)
-      if (!pending) return
       const message = resolveApiErrorMessage(
         event,
         event.message || deps.sendFailedMessage(),
       )
+      if (!pending) {
+        const sessionId = event.session_id?.trim() ?? ''
+        if (!sourceBotId || !sessionId) return
+        const view = deps.chatViews.getSession(sourceBotId, sessionId)
+        if (view) fillRunErrorDetails(view.transcript.messages, event.run_id ?? '', {
+          code: wsFrameErrorCode(event) || undefined,
+          content: message,
+          args: stringRecord(event.args),
+        })
+        return
+      }
       const stage = failureStage(
         pending.assistantTurn,
         pending.replacesTurn,
@@ -403,10 +414,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (currentRun.status === 'completed') {
         deps.assistantStreams.resolveAssistantStream(invocationId)
       } else {
-        const message = resolveApiErrorMessage(
-          currentRun,
-          currentRun.error || deps.sendFailedMessage(),
-        )
+        const message = resolveApiErrorMessage(currentRun, deps.sendFailedMessage())
         if (currentRun.status === 'aborted') {
           const aborted = new Error(message)
           aborted.name = 'AbortError'

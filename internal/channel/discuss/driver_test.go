@@ -496,14 +496,16 @@ func TestAgentEventToChannelEventMapsErrors(t *testing.T) {
 			wantCode: "agent.provider_overloaded",
 		},
 		{
-			name:     "unknown code keeps text",
+			name:     "unknown code gets the failed run copy",
 			event:    agentevent.StreamEvent{Type: agentevent.Error, Code: "not.in_catalog", Error: "raw provider text"},
-			wantText: "raw provider text",
+			wantText: "The response could not be completed. Please try again.",
+			wantCode: "runtime_run_failed",
 		},
 		{
-			name:     "uncoded keeps text",
+			name:     "uncoded gets the failed run copy",
 			event:    agentevent.StreamEvent{Type: agentevent.Error, Error: "raw provider text"},
-			wantText: "raw provider text",
+			wantText: "The response could not be completed. Please try again.",
+			wantCode: "runtime_run_failed",
 		},
 	}
 	for _, tt := range tests {

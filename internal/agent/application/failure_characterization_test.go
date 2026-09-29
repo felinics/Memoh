@@ -212,7 +212,7 @@ type discussCharRun struct {
 	events  []string
 	errs    []string
 	errCode []string
-	view    [3]string
+	view    [2]string
 	ledger  [3]string
 	stores  int
 }
@@ -266,7 +266,7 @@ func runDiscussCharacterization(t *testing.T, events ...native.StreamEvent) disc
 			t.Fatalf("load ledger run: %v", err)
 		}
 		if run.State.Terminal() || time.Now().After(deadline) {
-			out.view = [3]string{view.Status, view.ErrorCode, view.Error}
+			out.view = [2]string{view.Status, view.ErrorCode}
 			out.ledger = [3]string{string(run.State), run.ErrorCode, run.ErrorMessage}
 			return out
 		}
@@ -309,7 +309,7 @@ func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 	if want := [3]string{"failed", "agent.provider_overloaded", ""}; got.ledger != want {
 		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
 	}
-	if want := [3]string{"errored", "agent.provider_overloaded", charOverloadedDetail}; got.view != want {
+	if want := [2]string{"errored", "agent.provider_overloaded"}; got.view != want {
 		t.Fatalf("run view = %q, want %q", got.view, want)
 	}
 	if got.stores != 0 {
@@ -332,7 +332,7 @@ func TestCharacterizeDiscussMixedFailureClassesRecordFirst(t *testing.T) {
 	if want := [3]string{"failed", "agent.provider_rate_limited", ""}; got.ledger != want {
 		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
 	}
-	if want := [3]string{"errored", "agent.provider_rate_limited", charOverloadedDetail}; got.view != want {
+	if want := [2]string{"errored", "agent.provider_rate_limited"}; got.view != want {
 		t.Fatalf("run view = %q, want %q", got.view, want)
 	}
 }
@@ -349,7 +349,7 @@ func TestCharacterizeDiscussRetryRecovered(t *testing.T) {
 	if want := [3]string{"completed", "", ""}; got.ledger != want {
 		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
 	}
-	if want := [3]string{"completed", "", ""}; got.view != want {
+	if want := [2]string{"completed", ""}; got.view != want {
 		t.Fatalf("run view = %q, want %q", got.view, want)
 	}
 	if got.stores != 1 {
@@ -377,7 +377,7 @@ func TestCharacterizeDiscussFailureWithoutTerminalEvent(t *testing.T) {
 	if want := [3]string{"failed", "agent.response_interrupted", ""}; got.ledger != want {
 		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
 	}
-	if want := [3]string{"errored", "agent.response_interrupted", charInterruptedDetail}; got.view != want {
+	if want := [2]string{"errored", "agent.response_interrupted"}; got.view != want {
 		t.Fatalf("run view = %q, want %q", got.view, want)
 	}
 }

@@ -457,7 +457,7 @@ func TestRuntimeUserInputCommandCommitsAndResumesSameRun(t *testing.T) {
 		t.Fatal("continuation started before the deferred producer finished persistence")
 	case <-time.After(25 * time.Millisecond):
 	}
-	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("park deferred producer: %v", err)
 	}
 	select {

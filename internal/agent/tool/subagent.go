@@ -782,6 +782,7 @@ func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *ag
 		// Nothing was started and nothing was persisted, but the task record has
 		// to close anyway: a caller waiting on it would otherwise wait on a run
 		// that will never exist.
+		p.recordAdmissionFailure(ctx, req, admitErr)
 		return p.completeAgentRequest(ctx, key, req, rejectedAgentRun(req, admitErr))
 	}
 	requestMessageID, persisted := p.persistUserMessage(context.WithoutCancel(runCtx), req)

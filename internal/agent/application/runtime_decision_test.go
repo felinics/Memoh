@@ -74,7 +74,7 @@ func newWaitingDecisionRuntime(t *testing.T, backends ...sessionruntime.Backend)
 	}); err != nil {
 		t.Fatalf("park runtime decision: %v", err)
 	}
-	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("mark deferred producer ready: %v", err)
 	}
 	return manager, handle
@@ -193,7 +193,7 @@ func TestContinueRuntimeDecisionDoesNotParkProviderCancellation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("park runtime decision: %v", err)
 	}
-	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("mark deferred producer ready: %v", err)
 	}
 
@@ -255,7 +255,7 @@ func TestContinueRuntimeDecisionCancelsContinuationAfterPublicationFailure(t *te
 	}); err != nil {
 		t.Fatalf("park runtime decision: %v", err)
 	}
-	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatalf("mark deferred producer ready: %v", err)
 	}
 
@@ -309,8 +309,8 @@ func TestContinueRuntimeDecisionCancelsContinuationAfterPublicationFailure(t *te
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != sessionruntime.RunStatusErrored {
 		t.Fatalf("terminal run = %#v, want errored", snapshot.CurrentRunView)
 	}
-	if snapshot.CurrentRunView.Error != "" {
-		t.Fatalf("terminal run error = %q, want no private publication detail", snapshot.CurrentRunView.Error)
+	if snapshot.CurrentRunView.ErrorCode != "runtime_run_failed" {
+		t.Fatalf("terminal run error code = %q, want runtime_run_failed", snapshot.CurrentRunView.ErrorCode)
 	}
 }
 

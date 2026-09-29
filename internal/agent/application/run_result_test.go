@@ -183,6 +183,30 @@ func TestRunResultSkipsObservationsThatDidNotEndTheRun(t *testing.T) {
 	}
 }
 
+// A run the session runtime ended itself, such as one whose admission failed
+// or one released at shutdown, reports the cause the runtime held. The run's
+// record in session_runs carries only the code, so this record is where that
+// cause is found.
+func TestRunResultReportsTheSessionRuntimeCause(t *testing.T) {
+	t.Parallel()
+	logger, logs := captureLogs()
+	service := &Service{logger: logger}
+
+	service.logRunResult(context.Background(), sessionruntime.TerminalRun{
+		RunID: "run-1", BotID: "bot-1", SessionID: "session-1",
+		State: string(ledger.StateFailed), ErrorCode: string(apperror.CodeRuntimeRunFailed),
+		Cause: errors.New("persist user turn failed"), Applied: true,
+	})
+
+	records := logs.runResults()
+	if len(records) != 1 {
+		t.Fatalf("result records = %d, want 1", len(records))
+	}
+	if got := recordAttrs(records[0])["error"]; !strings.Contains(got, "persist user turn failed") {
+		t.Fatalf("result record error = %q, want the session runtime's cause", got)
+	}
+}
+
 // A follow-up run starts from the finished run's context; it must not report
 // the finished run's cause as its own.
 func TestRunResultIgnoresAnotherRunsCause(t *testing.T) {

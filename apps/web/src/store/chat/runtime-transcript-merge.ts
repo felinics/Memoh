@@ -1,4 +1,4 @@
-import { isRuntimeSteerTurnId, type ChatAssistantTurn, type ChatMessage, type ChatUserTurn } from './types'
+import { isRuntimeSteerTurnId, type ChatAssistantTurn, type ChatMessage, type ChatUserTurn, type ContentBlock, type ErrorBlock } from './types'
 import { isRuntimeRunActive, type RuntimeTranscriptSlice } from './runtime-projection'
 
 type RuntimeChatTurn = ChatUserTurn | ChatAssistantTurn
@@ -71,6 +71,52 @@ export function markRuntimeTurn(
   return turn
 }
 
+// The run view names a failure by its code alone; the args and copy of the
+// same failure arrive only on the error frame. Fills them into block from
+// source when both name the same code, so neither arrival order loses them.
+// Copy rendered without args is replaced together with the missing args.
+function fillErrorBlockDetails(block: ErrorBlock, source: Pick<ErrorBlock, 'code' | 'content' | 'args'>): void {
+  if (!block.code || block.code !== source.code) return
+  if (!block.args && source.args) {
+    block.args = source.args
+    if (source.content) block.content = source.content
+    return
+  }
+  if (!block.content) block.content = source.content
+}
+
+// Carries the error details current already holds onto next, the same turn
+// arriving again from a run view or a history page.
+export function inheritErrorDetails(next: ChatAssistantTurn, current: ChatAssistantTurn): void {
+  const known = current.messages.filter(isErrorBlock)
+  if (known.length === 0) return
+  for (const block of next.messages.filter(isErrorBlock)) {
+    const source = known.find(other => other.code === block.code)
+    if (source) fillErrorBlockDetails(block, source)
+  }
+}
+
+// Fills every error block of turn from source; reports whether turn has one.
+export function fillTurnErrorDetails(turn: ChatAssistantTurn, source: Pick<ErrorBlock, 'code' | 'content' | 'args'>): boolean {
+  const blocks = turn.messages.filter(isErrorBlock)
+  for (const block of blocks) fillErrorBlockDetails(block, source)
+  return blocks.length > 0
+}
+
+// An error frame that arrives after its run already settled the stream
+// still carries the args and copy the run view lacks.
+export function fillRunErrorDetails(messages: ChatMessage[], runId: string, source: Pick<ErrorBlock, 'code' | 'content' | 'args'>): void {
+  const run = runId.trim()
+  if (!run) return
+  const turn = messages.find((message): message is ChatAssistantTurn =>
+    message.role === 'assistant' && message.runtimeRunId === run)
+  if (turn) fillTurnErrorDetails(turn, source)
+}
+
+function isErrorBlock(block: ContentBlock): block is ErrorBlock {
+  return block.type === 'error'
+}
+
 // Reconciles one authoritative runtime frame without changing render
 // identities already owned by optimistic or settled turns.
 export function reconcileRuntimeTurns(
@@ -86,6 +132,7 @@ export function reconcileRuntimeTurns(
     )
     if (!current) return next
     used.add(current)
+    if (current.role === 'assistant' && next.role === 'assistant') inheritErrorDetails(next, current)
     const renderId = current.id
     const settledPosition = current.turnPosition ?? next.turnPosition
     Object.assign(current, next, { id: renderId, turnPosition: settledPosition })

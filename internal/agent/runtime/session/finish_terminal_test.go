@@ -38,7 +38,7 @@ func TestFinishRunReturnsObservedTerminal(t *testing.T) {
 func TestFinishRunWithoutRuntimeReturnsNoTerminal(t *testing.T) {
 	t.Parallel()
 	var manager *Manager
-	terminal, err := manager.FinishRun(context.Background(), RunHandle{}, RunStatusCompleted, "")
+	terminal, err := manager.FinishRun(context.Background(), RunHandle{}, RunStatusCompleted)
 	if err != nil || terminal != (TerminalRun{}) {
 		t.Fatalf("FinishRun() = %+v, %v; want no terminal and no error", terminal, err)
 	}

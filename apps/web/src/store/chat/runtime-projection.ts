@@ -220,14 +220,14 @@ function transcriptForRun(run: RuntimeCurrentRunView | null): RuntimeTranscriptS
   const projectsAssistantContent = active
     || assistantMessages.length > 0
     || Boolean(run.error_code)
-    || Boolean(run.error)
   if (projectsAssistantContent) {
-    if ((run.error_code || run.error) && !assistantMessages.some(message => message.type === 'error')) {
+    // The block is rendered from the code; the run carries no error text.
+    if (run.error_code && !assistantMessages.some(message => message.type === 'error')) {
       assistantMessages.push({
         id: nextMessageId(run.messages),
         type: 'error',
         code: run.error_code,
-        content: run.error ?? '',
+        content: '',
       })
     }
     let segmentStart = 0
@@ -352,7 +352,6 @@ function applyRunPatch(
       ...next,
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.error_code !== undefined ? { error_code: patch.error_code } : {}),
-      ...(patch.error !== undefined ? { error: patch.error } : {}),
       ...(patch.updated_at !== undefined ? { updated_at: patch.updated_at } : {}),
       ...(patch.owner_lease_expires_at !== undefined
         ? { owner_lease_expires_at: patch.owner_lease_expires_at }

@@ -98,8 +98,6 @@ func runtimeRunPatch(snapshot Snapshot, status, runError, lease bool) RuntimeDel
 	if runError {
 		code := run.ErrorCode
 		patch.ErrorCode = &code
-		value := run.Error
-		patch.Error = &value
 	}
 	if lease {
 		value := time.Time{}
@@ -150,7 +148,12 @@ func (m *Manager) markLostIfExpired(snapshot *Snapshot, now time.Time) bool {
 	snapshot.Seq++
 	snapshot.UpdatedAt = now
 	run.Status = RunStatusLost
-	run.Error = "runtime owner lease expired"
+	// Until the reaper records the run, the view names the failure by the
+	// code the reaper records for an expired lease. A code the run already
+	// failed with is kept: a proposal that holds it wins in the ledger too.
+	if run.ErrorCode == "" {
+		run.ErrorCode = runErrorOwnerLeaseExpired
+	}
 	run.UpdatedAt = now
 	run.OwnerLeaseExpiresAt = nil
 	return true

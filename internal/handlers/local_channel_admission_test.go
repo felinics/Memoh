@@ -159,7 +159,7 @@ func admitWSTestTurn(t *testing.T, handler *LocalChannelHandler, ref wsTurnRef, 
 	if len(builders) > 0 {
 		builder = builders[0]
 	}
-	admission, ok := handler.admitWSTurn(ctx, writer, wsAdmissionBotID, ref, submission, builder, make(chan struct{}, 1), cancel, cancelCause)
+	admission, ok := handler.admitWSTurn(ctx, writer, wsAdmissionBotID, ref, "ws.message", submission, builder, make(chan struct{}, 1), cancel, cancelCause)
 
 	events := make([]map[string]any, 0, len(writer.ch))
 	for len(writer.ch) > 0 {

@@ -229,7 +229,8 @@ func TestDiscussHeldErrorsReleasedWithoutRunTerminal(t *testing.T) {
 }
 
 // A handle without run_terminal keeps broadcasting error events as they
-// arrive, even when a run_terminal event appears.
+// arrive, even when a run_terminal event appears. An event without a code is
+// broadcast with the failed run copy, not its text.
 func TestDiscussLegacyHandleBroadcastsStreamErrors(t *testing.T) {
 	_, b := runScriptedDiscuss(t, scriptedDiscussService{
 		fakeTurnService: &fakeTurnService{},
@@ -239,7 +240,7 @@ func TestDiscussLegacyHandleBroadcastsStreamErrors(t *testing.T) {
 			turn.RunTerminal{State: turn.RunStateFailed, ErrorCode: "agent.provider_overloaded"},
 		),
 	})
-	assertOneFailure(t, b, "", "provider rejected the request")
+	assertOneFailure(t, b, "runtime_run_failed", discussRunFailedCopy)
 }
 
 // A start failure is broadcast once by its code; an uncoded one gets the

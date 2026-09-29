@@ -10,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func (m *Manager) localControl(runID string) *runControl {
@@ -135,8 +136,6 @@ func (m *Manager) stopAllLocalControls(ctx context.Context) error {
 	return stopErr
 }
 
-const runtimeOwnerShutdownError = "runtime owner shut down"
-
 func (m *Manager) releaseAllLocalRuns(ctx context.Context) error {
 	if m == nil || (m.distributed == nil && m.runs == nil) {
 		return nil
@@ -184,14 +183,17 @@ func (m *Manager) releaseLocalRunOnShutdown(ctx context.Context, ctrl *runContro
 		if run.State == ledger.StateRunning && run.AbortRequestedAt.IsZero() && ledger.HasResumeContext(run.Input) {
 			code = RunErrorInterrupted
 		}
-		terminal, err := m.finalizeLedgerRun(ctx, handle, RunStatusLost, code, runtimeOwnerShutdownError)
+		terminal, err := m.finalizeLedgerRun(ctx, handle, RunStatusLost, code)
 		if terminal.RunID != "" {
+			// The ledger records only the code, so the shutdown is named to the
+			// run's result record here.
+			terminal.Cause = errs.New("runtime owner shut down")
 			requestRunControlStop(ctrl)
 			m.reconcileAndObserveTerminalRun(ctx, terminal)
 		}
 		return err
 	}
-	_, err := m.finishRunState(ctx, handle, RunStatusLost, "", runtimeOwnerShutdownError)
+	_, err := m.finishRunState(ctx, handle, RunStatusLost, "")
 	return err
 }
 

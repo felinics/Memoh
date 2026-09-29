@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/background"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/errlog"
 )
 
 // SubagentTerminal is the terminal audit data returned to the application
@@ -157,6 +159,20 @@ func rejectedAgentRun(req *agentRequest, cause error) agentRunResult {
 		Message:   req.message,
 		Error:     subagentAdmissionMessage(cause),
 	}
+}
+
+// recordAdmissionFailure records why an agent task could not start. A busy or
+// duplicate agent is an answer the parent model acts on; any other failure is
+// this process's, and the run the admission may have claimed records only its
+// code, so the cause is recorded here.
+func (p *SpawnProvider) recordAdmissionFailure(ctx context.Context, req *agentRequest, cause error) {
+	if p.logger == nil || errors.Is(cause, turn.ErrSessionBusy) || errors.Is(cause, turn.ErrDuplicateTurn) {
+		return
+	}
+	result := errlog.Event(ctx, "subagent.admit", cause, errlog.Options{})
+	p.logger.LogAttrs(ctx, result.Level, "agent task admission failed", append([]slog.Attr{
+		slog.String("task_id", req.taskID), slog.String("session_id", req.agentSessionID),
+	}, result.Attrs()...)...)
 }
 
 // subagentAdmissionMessage turns a refusal into something the parent model can

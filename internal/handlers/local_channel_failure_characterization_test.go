@@ -8,8 +8,8 @@ package handlers
 // Each case composes the handler's own pieces with a real session runtime
 // manager backed by the in-memory ledger: forwardWSStreamEvents publishes the
 // run's events and writes the initiating socket's error frame, finishWSRun
-// writes the terminal state, and sendWSErrorFromError is the frame a runner
-// error produces after the run has finished.
+// writes the terminal state, and sendWSRunFailure is the frame a runner error
+// produces after the run has finished.
 
 import (
 	"context"
@@ -100,6 +100,14 @@ func (r failureCharRun) finish(runErr error) {
 	r.handler.finishWSRun(context.Background(), wsRunAdmission{RunID: r.admission.RunID, Handle: r.admission.Handle}, wsRunOutcome(application.RunOutcome{}, runErr))
 }
 
+// sendRunFailure finishes the run with the error its runner returned and
+// sends the frame startWSStream sends for it.
+func (r failureCharRun) sendRunFailure(runErr error) {
+	outcome := wsRunOutcome(application.RunOutcome{}, runErr)
+	runCode := r.handler.finishWSRun(context.Background(), wsRunAdmission{RunID: r.admission.RunID, Handle: r.admission.Handle}, outcome)
+	sendWSRunFailure(context.Background(), r.writer, r.ref, runErr, outcome, runCode)
+}
+
 // frames drains every frame written to the initiating socket.
 func (r failureCharRun) frames(t *testing.T) []map[string]any {
 	t.Helper()
@@ -127,14 +135,14 @@ func (r failureCharRun) ledgerColumns(t *testing.T) [3]string {
 	return [3]string{string(run.State), run.ErrorCode, run.ErrorMessage}
 }
 
-func (r failureCharRun) runView(t *testing.T) [3]string {
+func (r failureCharRun) runView(t *testing.T) [2]string {
 	t.Helper()
 	snapshot, err := r.manager.Snapshot(context.Background(), failureCharBotID, failureCharSessionID)
 	if err != nil || snapshot.CurrentRunView == nil {
 		t.Fatalf("snapshot = %+v, %v", snapshot, err)
 	}
 	view := snapshot.CurrentRunView
-	return [3]string{view.Status, view.ErrorCode, view.Error}
+	return [2]string{view.Status, view.ErrorCode}
 }
 
 func assertFrames(t *testing.T, got []map[string]any, want []map[string]any) {
@@ -149,6 +157,7 @@ func assertFrames(t *testing.T, got []map[string]any, want []map[string]any) {
 const (
 	providerOverloadedDetail = "The model provider is overloaded right now. Please try again in a moment."
 	responseInterruptedCopy  = "The model response was interrupted. Please try again."
+	runFailedDetail          = "The response could not be completed. Please try again."
 )
 
 // Scenarios 2 and 3 on the WebSocket path: the application layer forwards the
@@ -173,9 +182,7 @@ func TestCharacterizeWSMidStreamProviderFailure(t *testing.T) {
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "agent.provider_overloaded", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	// Current behavior: the run view carries the public detail as its error text
-	// while session_runs.error_message stays empty.
-	if got, want := r.runView(t), [3]string{"errored", "agent.provider_overloaded", providerOverloadedDetail}; got != want {
+	if got, want := r.runView(t), [2]string{"errored", "agent.provider_overloaded"}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }
@@ -196,7 +203,7 @@ func TestCharacterizeWSRetryRecoveredRun(t *testing.T) {
 	if got, want := r.ledgerColumns(t), [3]string{"completed", "", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	if got, want := r.runView(t), [3]string{"completed", "", ""}; got != want {
+	if got, want := r.runView(t), [2]string{"completed", ""}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }
@@ -204,23 +211,22 @@ func TestCharacterizeWSRetryRecoveredRun(t *testing.T) {
 // Scenario 1 and 10 on the WebSocket path: the runner fails before the agent
 // stream starts with an error that carries no apperror code.
 //
-// Current behavior: the socket frame has no code and carries the raw error text;
-// session_runs gets the generic runtime_run_failed code and no message.
+// The socket frame carries runtime_run_failed, the code session_runs records,
+// with its catalog detail instead of the error text.
 func TestCharacterizeWSPlainRunnerError_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	r := newFailureCharRun(t)
 	runErr := errors.New("resolve: model not found")
-	r.finish(runErr)
-	sendWSErrorFromError(r.writer, r.ref, runErr)
+	r.sendRunFailure(runErr)
 
 	assertFrames(t, r.frames(t), []map[string]any{{
 		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
-		"message": "resolve: model not found",
+		"code": "runtime_run_failed", "message": runFailedDetail,
 	}})
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "runtime_run_failed", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	if got, want := r.runView(t), [3]string{"errored", "runtime_run_failed", ""}; got != want {
+	if got, want := r.runView(t), [2]string{"errored", "runtime_run_failed"}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }
@@ -234,8 +240,7 @@ func TestCharacterizeWSCodedRunnerError(t *testing.T) {
 	t.Parallel()
 	r := newFailureCharRun(t)
 	runErr := apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("dial unix: no such file"), nil)
-	r.finish(runErr)
-	sendWSErrorFromError(r.writer, r.ref, runErr)
+	r.sendRunFailure(runErr)
 
 	assertFrames(t, r.frames(t), []map[string]any{{
 		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
@@ -244,7 +249,7 @@ func TestCharacterizeWSCodedRunnerError(t *testing.T) {
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "workspace.unreachable", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	if got, want := r.runView(t), [3]string{"errored", "workspace.unreachable", ""}; got != want {
+	if got, want := r.runView(t), [2]string{"errored", "workspace.unreachable"}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }
@@ -262,7 +267,7 @@ func TestCharacterizeWSExternalAgentRunnerError(t *testing.T) {
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "acp_agent_not_configured", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	if got, want := r.runView(t), [3]string{"errored", "acp_agent_not_configured", ""}; got != want {
+	if got, want := r.runView(t), [2]string{"errored", "acp_agent_not_configured"}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }
@@ -270,8 +275,8 @@ func TestCharacterizeWSExternalAgentRunnerError(t *testing.T) {
 // Scenario 10: an uncoded native error text that reached the socket without
 // classification (the handler does not classify; the application layer does).
 //
-// Current behavior: the frame has no code and the raw text; session_runs falls
-// back to runtime_run_failed; the run view exposes the raw text.
+// The frame, session_runs and the run view all name it runtime_run_failed, and
+// the text goes nowhere.
 func TestCharacterizeWSUncodedStreamError_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	r := newFailureCharRun(t)
@@ -284,12 +289,12 @@ func TestCharacterizeWSUncodedStreamError_CurrentBehavior(t *testing.T) {
 
 	assertFrames(t, r.frames(t), []map[string]any{{
 		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
-		"message": "runtime interrupted",
+		"code": "runtime_run_failed", "message": runFailedDetail,
 	}})
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "runtime_run_failed", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	if got, want := r.runView(t), [3]string{"errored", "runtime_run_failed", "runtime interrupted"}; got != want {
+	if got, want := r.runView(t), [2]string{"errored", "runtime_run_failed"}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }
@@ -310,13 +315,14 @@ func TestCharacterizeWSCanceledRunnerAfterAbort(t *testing.T) {
 	if got, want := r.ledgerColumns(t), [3]string{"aborted", "", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	if got, want := r.runView(t), [3]string{"aborted", "", ""}; got != want {
+	if got, want := r.runView(t), [2]string{"aborted", ""}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }
 
 // Scenario 5 on the WebSocket path: the admission sentinels become run_rejected
-// with a code and the sentinel text; no run is named.
+// with a code and its catalog detail; no run is named. Any other admission
+// failure is an error frame with the code for its fault.
 func TestCharacterizeWSAdmissionRejectionFrames(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -327,22 +333,21 @@ func TestCharacterizeWSAdmissionRejectionFrames(t *testing.T) {
 			err: sessionruntime.ErrSessionBusy,
 			want: map[string]any{
 				"type": "run_rejected", "invocation_id": "invocation-1", "session_id": failureCharSessionID,
-				"code": "session_runtime.session_busy", "message": sessionruntime.ErrSessionBusy.Error(),
+				"code": "session_runtime.session_busy", "message": "This conversation is still working on the previous message. Please try again shortly.",
 			},
 		},
 		{
-			// Current behavior: ownership loss during admission is not a
-			// rejection sentinel, so the client gets a plain error with the
-			// sentinel text and no code.
+			// Ownership loss during admission is not a rejection sentinel. It is
+			// this process's failure, so the client gets internal.
 			err: sessionruntime.ErrRunOwnershipLost,
 			want: map[string]any{
 				"type": "error", "invocation_id": "invocation-1", "session_id": failureCharSessionID,
-				"message": "runtime run ownership was lost",
+				"code": "internal", "message": "Something went wrong on the server. Please try again.",
 			},
 		},
 	} {
 		writer := &wsWriter{ch: make(chan []byte, 1), stop: make(chan struct{}), done: make(chan struct{})}
-		sendWSErrorFromError(writer, wsTurn("invocation-1", failureCharSessionID), tc.err)
+		_ = sendWSErrorFromError(context.Background(), writer, wsTurn("invocation-1", failureCharSessionID), tc.err)
 		var frame map[string]any
 		if err := json.Unmarshal(<-writer.ch, &frame); err != nil {
 			t.Fatalf("decode frame: %v", err)
@@ -421,7 +426,7 @@ func TestCharacterizeWSPersistFailureAfterDeliveredFailure(t *testing.T) {
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "agent.provider_overloaded", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	if got, want := r.runView(t), [3]string{"errored", "agent.provider_overloaded", providerOverloadedDetail}; got != want {
+	if got, want := r.runView(t), [2]string{"errored", "agent.provider_overloaded"}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }

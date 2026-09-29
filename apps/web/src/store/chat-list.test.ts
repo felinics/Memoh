@@ -79,17 +79,17 @@ function flushPromises() {
 }
 
 type RuntimeTestUpdate =
-  | { kind: 'run', status: RuntimeRunStatus, error?: string, errorCode?: string }
+  | { kind: 'run', status: RuntimeRunStatus, errorCode?: string }
   | { kind: 'message', message: UIMessage }
   | { kind: 'user_turn', turn: UIUserTurn }
 
 const runtime = {
   started: { kind: 'run', status: 'running' } as RuntimeTestUpdate,
   completed: { kind: 'run', status: 'completed' } as RuntimeTestUpdate,
-  failed: (error: string, errorCode?: string): RuntimeTestUpdate => ({
+  // The run view has no error text; a failed run is described by its code.
+  failed: (errorCode?: string): RuntimeTestUpdate => ({
     kind: 'run',
     status: 'errored',
-    error,
     errorCode,
   }),
   message: (message: UIMessage): RuntimeTestUpdate => ({ kind: 'message', message }),
@@ -195,7 +195,6 @@ function publishRuntimeUpdate(
   let delta: RuntimeDelta
   if (update.kind === 'run') {
     run.status = update.status
-    run.error = update.error
     run.error_code = update.errorCode
     run.updated_at = now
     delta = publishedRun
@@ -203,7 +202,6 @@ function publishRuntimeUpdate(
           run: {
             run_id: runId,
             status: update.status,
-            error: update.error,
             error_code: update.errorCode,
             updated_at: now,
           },
@@ -284,7 +282,7 @@ beforeEach(() => {
     h.runtimeUnsubscribes = []
     h.wsRunIds = []
     h.abortedWSRuns = []
-    h.sendUpdates = [runtime.started, runtime.failed('model failed')]
+    h.sendUpdates = [runtime.started, runtime.failed('runtime_run_failed')]
     h.acceptRuns = true
     vi.clearAllMocks()
 
@@ -568,7 +566,9 @@ beforeEach(() => {
                 type: 'error',
                 run_id: h.lastRunId,
                 invocation_id: invocationId,
-                message: update.error ?? 'model failed',
+                // The frame carries a code and its copy, never the run's text.
+                code: update.errorCode,
+                message: '',
               })
               continue
             }
@@ -658,7 +658,7 @@ function interruptedRunStoreScript(): RuntimeTestUpdate[] {
   return [
     runtime.started,
     runtime.message({ id: 0, type: 'text', content: 'partial output' }),
-    runtime.failed('runtime interrupted'),
+    runtime.failed('runtime_run_failed'),
   ]
 }
 
@@ -782,7 +782,7 @@ describe('chat-list store', () => {
       expect(result).toMatchObject({
         ok: false,
         stage: 'stream',
-        error: 'model failed',
+        error: 'The response could not be completed. Please try again.',
       })
       expect(result.restoreInput).toBeUndefined()
       expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
@@ -790,7 +790,7 @@ describe('chat-list store', () => {
       expect(store.messages[1]).toMatchObject({
         role: 'assistant',
         streaming: false,
-        messages: [{ type: 'error', content: 'model failed' }],
+        messages: [{ type: 'error', code: 'runtime_run_failed', content: '' }],
       })
       expect(store.startupSendFailure).toBeNull()
       expect(onBeforeTurnAppend).toHaveBeenCalledWith(expect.objectContaining({
@@ -846,7 +846,7 @@ describe('chat-list store', () => {
         message: 'context budget unsatisfied',
       })
       const projection = () => emitRuntime(
-        runtime.failed('context budget unsatisfied', 'context.budget_unsatisfied'),
+        runtime.failed('context.budget_unsatisfied'),
       )
       if (order === 'error frame first') {
         errorFrame()
@@ -869,6 +869,68 @@ describe('chat-list store', () => {
         type: 'error',
         code: 'context.budget_unsatisfied',
       })
+    },
+  )
+
+  // The run view carries the failure's code alone; its args come only on the
+  // error frame. The one error block keeps them whichever arrives first, and
+  // without a frame it has the code and no args.
+  it.each(['error frame first', 'projection first', 'projection only'])(
+    'keeps the args of a coded failure on its error block (%s)',
+    async (order) => {
+      h.sendUpdates = [runtime.started]
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      // History, read again once the run settles, keeps the code alone.
+      const turnId = `turn-${wsRunId(0)}`
+      api.fetchMessagesUI.mockResolvedValue([
+        { id: 'user-1', turn_id: turnId, role: 'user', text: 'hello', attachments: [], timestamp: '2026-09-28T08:00:00.000Z' },
+        {
+          id: 'assistant-1',
+          turn_id: turnId,
+          role: 'assistant',
+          messages: [{ id: 0, type: 'error', code: 'agent_dependency_missing', content: '' }],
+          timestamp: '2026-09-28T08:00:01.000Z',
+          streaming: false,
+        },
+      ])
+      const errorFrame = () => h.streamHandler?.({
+        type: 'error',
+        run_id: wsRunId(0),
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        code: 'agent_dependency_missing',
+        args: { dep_id: 'codex' },
+        message: '',
+      })
+      const projection = () => emitRuntime(runtime.failed('agent_dependency_missing'))
+      if (order === 'error frame first') {
+        errorFrame()
+        projection()
+      } else if (order === 'projection first') {
+        projection()
+        errorFrame()
+      } else {
+        projection()
+      }
+      if (order !== 'projection only') await sending
+      await flushPromises()
+
+      const assistant = store.messages[1] as ChatAssistantTurn
+      const errors = assistant.messages.filter(block => block.type === 'error')
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toMatchObject({ type: 'error', code: 'agent_dependency_missing' })
+      if (order === 'projection only') {
+        expect(errors[0]).not.toHaveProperty('args.dep_id')
+      } else {
+        expect(errors[0]).toMatchObject({
+          args: { dep_id: 'codex' },
+          content: 'codex is not installed in this workspace. Install it from the bot\'s dependencies, or wait for the running installation to finish, then send the message again.',
+        })
+      }
     },
   )
 
@@ -922,7 +984,7 @@ describe('chat-list store', () => {
       const errorFrame = () => h.streamHandler?.(
         position === 'top-level code' ? { ...frame, code: runCode }
         : { ...frame, code: 'agent.provider_auth_failed' })
-      const projection = () => emitRuntime(runtime.failed('stream reset', runCode))
+      const projection = () => emitRuntime(runtime.failed(runCode))
       if (order === 'error frame first') {
         errorFrame()
         projection()
@@ -1196,7 +1258,7 @@ describe('chat-list store', () => {
               can_approve: true,
             },
         }),
-        runtime.failed('stop after visible output'),
+        runtime.failed(),
       ]
       const store = useChatStore()
 
@@ -2246,21 +2308,21 @@ describe('chat-list store', () => {
       h.sendUpdates = [
         runtime.started,
         runtime.message({ id: 0, type: 'text', content: 'partial response' }),
-        runtime.failed('model failed'),
+        runtime.failed('runtime_run_failed'),
       ]
       const store = useChatStore()
 
       await store.selectBot('bot-1')
       const result = await store.sendMessage('hello')
 
-      expect(result).toMatchObject({ ok: false, stage: 'stream', error: 'model failed' })
+      expect(result).toMatchObject({ ok: false, stage: 'stream', error: 'The response could not be completed. Please try again.' })
       expect(store.messages).toHaveLength(2)
       expect(store.messages[0]).toMatchObject({ role: 'user', text: 'hello' })
       expect(store.messages[1]).toMatchObject({
         role: 'assistant',
         messages: [
           { type: 'text', content: 'partial response' },
-          { type: 'error', content: 'model failed' },
+          { type: 'error', code: 'runtime_run_failed', content: '' },
         ],
         streaming: false,
       })
@@ -2630,7 +2692,7 @@ describe('chat-list store', () => {
     })
 
   it('restores the old assistant when retry fails before streaming starts', async () => {
-      h.sendUpdates = [runtime.failed('model failed')]
+      h.sendUpdates = [runtime.failed()]
       api.fetchSessions.mockResolvedValueOnce({
         items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
         nextCursor: null,
@@ -2659,7 +2721,7 @@ describe('chat-list store', () => {
       await flushPromises()
       const result = await store.retryLatestAssistant('turn-fx-4-1')
 
-      expect(result).toMatchObject({ ok: false, stage: 'startup', error: 'model failed' })
+      expect(result).toMatchObject({ ok: false, stage: 'startup', error: 'Message failed to send' })
       expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
     })
 
@@ -2948,7 +3010,7 @@ describe('chat-list store', () => {
     })
 
   it('restores the old latest turn tail when edit fails before streaming starts', async () => {
-      h.sendUpdates = [runtime.failed('model failed')]
+      h.sendUpdates = [runtime.failed()]
       api.fetchSessions.mockResolvedValueOnce({
         items: [{ id: 'session-1', bot_id: 'bot-1', title: 'Chat', type: 'chat' }],
         nextCursor: null,
@@ -2980,7 +3042,7 @@ describe('chat-list store', () => {
       expect(result).toMatchObject({
         ok: false,
         stage: 'startup',
-        error: 'model failed',
+        error: 'Message failed to send',
         restoreInput: 'new prompt',
       })
       expect(store.messages.map(message => message.id)).toEqual(['user-1', 'assistant-old'])
@@ -5629,13 +5691,13 @@ describe('chat-list store', () => {
       expect(result).toMatchObject({
         ok: false,
         stage: 'stream',
-        error: 'runtime interrupted',
+        error: 'The response could not be completed. Please try again.',
       })
       const assistant = store.messages.find(turn => turn.role === 'assistant')
       expect(assistant?.role).toBe('assistant')
       if (assistant?.role !== 'assistant') throw new Error('missing assistant turn')
       expect(assistant.messages.some(block => block.type === 'text' && block.content === 'partial output')).toBe(true)
-      expect(assistant.messages.some(block => block.type === 'error' && block.content === 'runtime interrupted')).toBe(true)
+      expect(assistant.messages.some(block => block.type === 'error' && block.code === 'runtime_run_failed')).toBe(true)
     })
 
   it('does not let stale active-run events for another session pollute the visible transcript', async () => {

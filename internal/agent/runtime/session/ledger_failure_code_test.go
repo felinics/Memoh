@@ -15,7 +15,7 @@ func TestFailedProposalWithoutCodeCarriesRunFailed(t *testing.T) {
 	f := newAdmitFixture(t)
 	admission := admitRunning(t, f, "inv-null-code-proposal")
 
-	prepared, err := f.manager.prepareLedgerFinish(context.Background(), admission.Handle, RunStatusErrored, "", "", true)
+	prepared, err := f.manager.prepareLedgerFinish(context.Background(), admission.Handle, RunStatusErrored, "", true)
 	if err != nil {
 		t.Fatalf("prepare finish: %v", err)
 	}

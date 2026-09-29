@@ -100,7 +100,7 @@ func TestSendWSRunLifecycleEventsCarryStableCodes(t *testing.T) {
 	}
 
 	rejected := decodeWSTestEvent(t, func(writer *wsWriter) {
-		sendWSRunRejected(writer, ref, apperror.CodeSessionBusy, "session already has an active run")
+		sendWSRunRejected(writer, ref, apperror.CodeSessionBusy)
 	})
 	if rejected["type"] != "run_rejected" || rejected["invocation_id"] != "invocation-1" {
 		t.Fatalf("run_rejected = %#v", rejected)
@@ -111,6 +111,9 @@ func TestSendWSRunLifecycleEventsCarryStableCodes(t *testing.T) {
 	}
 	if rejected["code"] != string(apperror.CodeSessionBusy) {
 		t.Fatalf("run_rejected code = %#v, want %s", rejected["code"], apperror.CodeSessionBusy)
+	}
+	if rejected["message"] != "This conversation is still working on the previous message. Please try again shortly." {
+		t.Fatalf("run_rejected message = %#v, want the catalog detail", rejected["message"])
 	}
 }
 
@@ -127,31 +130,46 @@ func TestSendWSErrorFromErrorRejectsAdmissionSentinels(t *testing.T) {
 		{name: "busy", err: sessionruntime.ErrSessionBusy, want: apperror.CodeSessionBusy},
 		{name: "conflict", err: sessionruntime.ErrInvocationConflict, want: apperror.CodeSessionInvocationConflict},
 	} {
+		var recorded error
 		event := decodeWSTestEvent(t, func(writer *wsWriter) {
-			sendWSErrorFromError(writer, wsTurn("invocation-1", "session-1").withRun("run-1"), fmt.Errorf("admit: %w", tc.err))
+			recorded = sendWSErrorFromError(context.Background(), writer, wsTurn("invocation-1", "session-1").withRun("run-1"), fmt.Errorf("admit: %w", tc.err))
 		})
 		if event["type"] != "run_rejected" || event["code"] != string(tc.want) {
 			t.Fatalf("%s: event = %#v, want run_rejected %s", tc.name, event, tc.want)
 		}
+		// The result record attributes the refusal under the code the client saw.
+		if apperror.CodeOf(recorded) != tc.want || !errors.Is(apperror.CauseOf(recorded), tc.err) {
+			t.Fatalf("%s: recorded = %v, want %s over the sentinel", tc.name, recorded, tc.want)
+		}
 	}
 
+	cause := errors.New("model failed")
+	var recorded error
 	stream := decodeWSTestEvent(t, func(writer *wsWriter) {
-		sendWSErrorFromError(writer, wsTurn("invocation-1", "session-1").withRun("run-1"), errors.New("model failed"))
+		recorded = sendWSErrorFromError(context.Background(), writer, wsTurn("invocation-1", "session-1").withRun("run-1"), cause)
 	})
+	// As at the HTTP boundary, the record attributes the error itself; the
+	// frame carries internal.
+	if !errors.Is(recorded, cause) || stream["code"] != string(apperror.CodeInternal) {
+		t.Fatalf("recorded = %v, frame = %#v, want the cause recorded and internal sent", recorded, stream)
+	}
 	if stream["type"] != "error" || stream["run_id"] != "run-1" {
 		t.Fatalf("stream failure = %#v, want an error naming the run", stream)
 	}
 }
 
-// Uncoded error text leaves the socket redacted; a catalogued code carries its
-// catalog detail instead of the text it came with.
+// Error frames carry a code and its catalog detail, never the text of the
+// error they came from.
 func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 	redact.ResetForTest()
 	t.Cleanup(redact.ResetForTest)
 	const secret = "ws-secret-value-123456"
 	redact.SetSecrets("ws-error-test", secret)
-	masked := strings.Repeat("*", len(secret))
 	ref := wsTurn("invocation-1", "session-1").withRun("run-1")
+	const (
+		internalDetail  = "Something went wrong on the server. Please try again."
+		runFailedDetail = "The response could not be completed. Please try again."
+	)
 
 	cases := []struct {
 		name        string
@@ -160,16 +178,20 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name:        "uncoded error",
-			send:        func(w *wsWriter) { sendWSErrorFromError(w, ref, errors.New("dial failed: "+secret)) },
-			wantMessage: "dial failed: " + masked,
+			name: "uncoded error",
+			send: func(w *wsWriter) {
+				_ = sendWSErrorFromError(context.Background(), w, ref, errors.New("dial failed: "+secret))
+			},
+			wantCode:    "internal",
+			wantMessage: internalDetail,
 		},
 		{
 			name: "uncoded stream error",
 			send: func(w *wsWriter) {
 				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Error: "provider said " + secret})
 			},
-			wantMessage: "provider said " + masked,
+			wantCode:    "runtime_run_failed",
+			wantMessage: runFailedDetail,
 		},
 		{
 			name: "uncatalogued stream code",
@@ -177,7 +199,7 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Error: "provider said " + secret})
 			},
 			wantCode:    "not.in_catalog",
-			wantMessage: "provider said " + masked,
+			wantMessage: runFailedDetail,
 		},
 		{
 			name: "catalogued stream code",
@@ -190,7 +212,8 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 		{
 			name:        "blank stream error",
 			send:        func(w *wsWriter) { sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Error: "  "}) },
-			wantMessage: "stream error",
+			wantCode:    "runtime_run_failed",
+			wantMessage: runFailedDetail,
 		},
 	}
 	for _, tc := range cases {
@@ -905,8 +928,8 @@ func TestLocalChannelWSMessageAuthorizesSessionBeforeSlashCommand(t *testing.T) 
 		if got := event["type"]; got != "error" {
 			t.Fatalf("event type = %#v, want error; event=%#v", got, event)
 		}
-		if got := event["message"]; got != "session not found" {
-			t.Fatalf("event message = %#v, want session not found; event=%#v", got, event)
+		if event["code"] != "http.not_found" || event["message"] != "The requested resource was not found." {
+			t.Fatalf("event = %#v, want http.not_found for the unauthorized session", event)
 		}
 		if _, ok := event["result"]; ok {
 			t.Fatalf("unexpected command result before session authorization: %#v", event)
@@ -1151,31 +1174,35 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 			},
 		},
 	}
+	var logs lockedBuffer
 	handler := &LocalChannelHandler{
 		channelType:    channel.ChannelTypeLocal,
 		botService:     bots.NewService(nil, queries),
 		accountService: accounts.NewService(nil, testAdminAccountStore{role: "user"}),
 		sessionService: sessionpkg.NewService(nil, queries, nil),
 		agentService:   &application.Service{},
-		logger:         slog.Default(),
+		logger:         slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 
 	client := openLocalChannelTestWS(t, handler, botID, currentUser)
 
 	for _, tc := range []struct {
-		name    string
-		message map[string]any
-		want    string
+		name       string
+		message    map[string]any
+		wantCode   string
+		wantDetail string
 	}{
 		{
-			name:    "message with a legacy stream id and no invocation",
-			message: map[string]any{"type": "message", "stream_id": "legacy-stream", "session_id": sessionID, "text": "hello"},
-			want:    "invocation_id is required",
+			name:       "message with a legacy stream id and no invocation",
+			message:    map[string]any{"type": "message", "stream_id": "legacy-stream", "session_id": sessionID, "text": "hello"},
+			wantCode:   "http.bad_request",
+			wantDetail: "The request is invalid.",
 		},
 		{
-			name:    "abort naming a stream instead of a run",
-			message: map[string]any{"type": "abort", "stream_id": "legacy-stream", "session_id": sessionID},
-			want:    "run_id is required",
+			name:       "abort naming a stream instead of a run",
+			message:    map[string]any{"type": "abort", "stream_id": "legacy-stream", "session_id": sessionID},
+			wantCode:   "http.bad_request",
+			wantDetail: "The request is invalid.",
 		},
 	} {
 		if err := client.WriteJSON(tc.message); err != nil {
@@ -1185,13 +1212,46 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 		if err := client.ReadJSON(&event); err != nil {
 			t.Fatalf("%s: read ws event: %v", tc.name, err)
 		}
-		if event["type"] != "error" || event["message"] != tc.want {
-			t.Fatalf("%s: event = %#v, want error %q", tc.name, event, tc.want)
+		if event["type"] != "error" || event["code"] != tc.wantCode || event["message"] != tc.wantDetail {
+			t.Fatalf("%s: event = %#v, want code %q detail %q", tc.name, event, tc.wantCode, tc.wantDetail)
+		}
+		data, _ := json.Marshal(event)
+		literal := map[string]string{
+			"message with a legacy stream id and no invocation": "invocation_id is required",
+			"abort naming a stream instead of a run":            "run_id is required",
+		}[tc.name]
+		if strings.Contains(string(data), literal) {
+			t.Fatalf("%s: event leaked validation text: %#v", tc.name, event)
 		}
 		if _, present := event["stream_id"]; present {
 			t.Fatalf("%s: response echoed stream_id: %#v", tc.name, event)
 		}
 	}
+
+	if err := client.WriteJSON(map[string]any{
+		"type":          "client_invented_type",
+		"invocation_id": "invocation-unknown",
+		"session_id":    sessionID,
+	}); err != nil {
+		t.Fatalf("unknown message: write ws message: %v", err)
+	}
+	var unknownEvent map[string]any
+	if err := client.ReadJSON(&unknownEvent); err != nil {
+		t.Fatalf("unknown message: read ws event: %v", err)
+	}
+	if unknownEvent["type"] != "error" || unknownEvent["code"] != "http.bad_request" || unknownEvent["message"] != "The request is invalid." {
+		t.Fatalf("unknown event = %#v, want http.bad_request with catalog detail", unknownEvent)
+	}
+	encoded, _ := json.Marshal(unknownEvent)
+	if strings.Contains(string(encoded), "unknown message type: client_invented_type") {
+		t.Fatalf("unknown event leaked cause: %s", encoded)
+	}
+	waitFor(t, "unknown-message ws request record", func() bool {
+		logsText := logs.String()
+		return strings.Contains(logsText, `"operation":"ws.unknown_message"`) &&
+			!strings.Contains(logsText, `"operation":"ws.client_invented_type"`) &&
+			strings.Contains(logsText, `unknown message type: client_invented_type`)
+	})
 }
 
 func TestResolveWebRequestedSkillContextsRejectsBlankName(t *testing.T) {

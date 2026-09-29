@@ -6,9 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/i18n"
 )
+
+const zhInternalCopy = "服务器出错了，请重试。"
 
 // Copy rendered from a code is shown without the Error: label; a bare error
 // text keeps it.
@@ -78,16 +83,32 @@ func TestErrorEvent(t *testing.T) {
 			wantCode: string(apperror.CodeRuntimeRunFailed),
 		},
 		{
-			name:     "uncoded error keeps its own text",
+			name:     "uncoded error gets the internal copy",
 			locale:   "en",
 			err:      errors.New("resolve: model not found"),
-			wantText: "resolve: model not found",
+			wantText: "Something went wrong on the server. Please try again.",
+			wantCode: string(apperror.CodeInternal),
 		},
 		{
-			name:     "code without copy keeps the error text and no code",
+			name:     "uncoded error follows the localizer",
+			locale:   "zh",
+			err:      errors.New("resolve: model not found"),
+			wantText: zhInternalCopy,
+			wantCode: string(apperror.CodeInternal),
+		},
+		{
+			name:     "code without copy gets the internal copy",
 			locale:   "en",
 			err:      apperror.New("not.in_catalog", nil),
-			wantText: apperror.New("not.in_catalog", nil).Error(),
+			wantText: "Something went wrong on the server. Please try again.",
+			wantCode: string(apperror.CodeInternal),
+		},
+		{
+			name:     "uncoded client refusal gets the bad request copy",
+			locale:   "en",
+			err:      fmt.Errorf("start turn: %w", status.Error(codes.InvalidArgument, "SECRET field")),
+			wantText: "The request is invalid.",
+			wantCode: string(apperror.CodeHTTPBadRequest),
 		},
 	}
 	for _, tt := range tests {

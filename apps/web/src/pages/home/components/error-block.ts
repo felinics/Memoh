@@ -1,7 +1,7 @@
 import type { ErrorBlock } from '@/store/chat/types'
 
-type Translate = (key: string, args?: Record<string, string>) => string
-type HasTranslation = (key: string) => boolean
+export type Translate = (key: string, args?: Record<string, string>) => string
+export type HasTranslation = (key: string) => boolean
 
 /**
  * The text of an error block, the same for a live turn and for one loaded from

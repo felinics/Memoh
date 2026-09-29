@@ -30,7 +30,7 @@ func TestFinishRunStopsInjectSendsWithoutClosingBorrowedChannel(t *testing.T) {
 			close(steerDone)
 		}()
 		close(start)
-		if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, sessionID, runID), RunStatusCompleted, ""); err != nil {
+		if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, sessionID, runID), RunStatusCompleted); err != nil {
 			t.Fatalf("finish run %d: %v", i, err)
 		}
 		receiveTestResult(t, "concurrent steer", steerDone)
@@ -50,7 +50,7 @@ func TestFinishRunAcceptsExecutionClosedInjectChannel(t *testing.T) {
 		t.Fatal("run has no local control")
 	}
 	closeExecutionInjectChannel(t, injectCh)
-	if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, "session-inject-closed", "stream-inject-closed"), RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, "session-inject-closed", "stream-inject-closed"), RunStatusCompleted); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	requireInjectStopped(t, ctrl)

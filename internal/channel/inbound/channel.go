@@ -2413,19 +2413,9 @@ func mapStreamChunkToChannelEvents(chunk json.RawMessage, t *i18n.Localizer) ([]
 				},
 			}, finalMessages, nil
 		}
-		streamError := strings.TrimSpace(envelope.Error)
-		if streamError == "" {
-			streamError = strings.TrimSpace(envelope.Message)
-		}
-		if streamError == "" {
-			streamError = "stream error"
-		}
-		return []channel.StreamEvent{
-			{
-				Type:  channel.StreamEventError,
-				Error: streamError,
-			},
-		}, finalMessages, nil
+		// Without a catalogued code the event is a failed run; its own text is
+		// never shown.
+		return []channel.StreamEvent{channel.RunFailureEvent(t, apperror.CodeRuntimeRunFailed, nil)}, finalMessages, nil
 	default:
 		return nil, finalMessages, nil
 	}

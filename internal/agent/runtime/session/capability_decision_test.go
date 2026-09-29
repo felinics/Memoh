@@ -44,7 +44,7 @@ func TestNativeInlineApprovalCompletesWithoutReentry(t *testing.T) {
 				emit(native.StreamEvent{Type: native.EventAgentStart})
 			}
 			emit(native.StreamEvent{Type: native.EventAgentEnd})
-			if _, err := f.manager.FinishRun(ctx, admitted.Handle, "", ""); err != nil {
+			if _, err := f.manager.FinishRun(ctx, admitted.Handle, ""); err != nil {
 				t.Fatal(err)
 			}
 			if got := f.runs.State(admitted.RunID); got != ledger.StateCompleted {
