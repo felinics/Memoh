@@ -69,7 +69,7 @@ func (h *ProvidersHandler) CreateFromTemplate(c echo.Context) error {
 	}
 	resp, err := h.service.CreateFromTemplate(c.Request().Context(), req)
 	if err != nil {
-		return err
+		return providerTemplateError(err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -98,6 +98,9 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
+		if translated := providerError(err); apperror.CodeOf(translated) != "" {
+			return translated
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -242,6 +245,9 @@ func (h *ProvidersHandler) Update(c echo.Context) error {
 
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
+		if translated := providerError(err); apperror.CodeOf(translated) != "" {
+			return translated
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 

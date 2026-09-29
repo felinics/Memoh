@@ -119,26 +119,23 @@ type createContainerErrorEvent struct {
 	RequestID string            `json:"request_id,omitempty"`
 }
 
-func newWorkspaceSetupAppError(setupErr error, requestID string) (createContainerErrorEvent, bool) {
-	var code apperror.Code
-	switch {
-	case errors.Is(setupErr, workspace.ErrWorkspaceTemplateBootstrapFailed):
-		code = apperror.CodeWorkspaceTemplateBootstrapFailed
-	default:
-		return createContainerErrorEvent{}, false
-	}
-	public, ok := apperror.PublicFrom(apperror.Wrap(code, setupErr, nil), requestID)
-	if !ok {
-		return createContainerErrorEvent{}, false
-	}
-	return createContainerErrorEvent{
+// sendWorkspaceStreamFailure ends a workspace stream with the error event for
+// the catalog code code and returns the error the handler returns. The event
+// carries the code's detail and none of the text of cause; the request's
+// result record carries cause. The response is already committed, so the
+// access log records the returned error without answering it again.
+func sendWorkspaceStreamFailure(send func(payload any) bool, code apperror.Code, cause error, requestID string) error {
+	recorded := apperror.Wrap(code, cause, nil)
+	public, _ := apperror.PublicFrom(recorded, requestID)
+	_ = send(createContainerErrorEvent{
 		Type:      "error",
 		Code:      string(public.Code),
 		Args:      public.Args,
 		Detail:    public.Detail,
 		Message:   public.Detail,
 		RequestID: public.RequestID,
-	}, true
+	})
+	return recorded
 }
 
 type GetContainerResponse struct {
@@ -425,16 +422,6 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		}
 		return writeSSEData(writer, flusher, string(data)) == nil
 	}
-	sendError := func(code, message string) {
-		send(createContainerErrorEvent{
-			Type:      "error",
-			Code:      code,
-			Args:      map[string]string{},
-			Message:   message,
-			RequestID: httpx.RequestID(c),
-		})
-	}
-
 	events, unsubscribe := h.workspaces.Subscribe(botID)
 	defer unsubscribe()
 
@@ -442,18 +429,19 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	intent, err := h.workspaces.EnsurePresent(intentCtx, botID, imageOverride)
 	cancelIntent()
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed", slog.String("bot_id", botID), slog.Any("error", err))
-		sendError("workspace_create_failed", "workspace creation could not be scheduled")
-		return nil
+		return sendWorkspaceStreamFailure(send, apperror.CodeWorkspaceCreateFailed, err, httpx.RequestID(c))
 	}
 
 	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceStreamBudget)
 	defer cancel()
 	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
 		return h.workspaces.Await(ctx, botID, intent.DesiredGeneration)
-	}, httpx.RequestID(c), sendError)
-	if outcome.Failed || outcome.Disconnected {
+	}, httpx.RequestID(c))
+	if outcome.Disconnected {
 		return nil
+	}
+	if outcome.Err != nil {
+		return outcome.Err
 	}
 
 	// The archive is imported after the workspace settled so the single
@@ -462,9 +450,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if req.RestoreData && h.manager.HasPreservedData(botID) {
 		send(createContainerRestoringEvent{Type: "restoring"})
 		if err := h.manager.RestorePreservedData(streamCtx, botID); err != nil {
-			h.logger.ErrorContext(c.Request().Context(), "restore preserved data failed", slog.String("bot_id", botID), slog.Any("error", err))
-			sendError("workspace_restore_failed", "restore preserved data failed: "+err.Error())
-			return nil
+			return sendWorkspaceStreamFailure(send, apperror.CodeWorkspaceRestoreFailed, err, httpx.RequestID(c))
 		}
 		dataRestored = true
 	}

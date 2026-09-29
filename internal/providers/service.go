@@ -13,10 +13,10 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/providertemplates"
 	"github.com/felinics/memoh/internal/registry"
@@ -86,8 +86,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 				}
 				return s.toGetResponse(provider), nil
 			}
+			return GetResponse{}, fmt.Errorf("create provider: %w: %w", ErrNameTaken, err)
 		}
-		return GetResponse{}, fmt.Errorf("create provider: %w", err)
+		return GetResponse{}, errs.Wrap(err, "create provider")
 	}
 
 	return s.toGetResponse(provider), nil
@@ -96,7 +97,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplateRequest) (GetResponse, error) {
 	expectedDomain := providertemplates.Domain(strings.TrimSpace(req.Domain))
 	if expectedDomain != "" && !providertemplates.IsValidDomain(expectedDomain) {
-		return GetResponse{}, apperror.New(apperror.CodeProviderTemplateDomainInvalid, nil)
+		return GetResponse{}, fmt.Errorf("%w: %s", providertemplates.ErrDomainInvalid, expectedDomain)
 	}
 	template, err := providertemplates.Resolve(ctx, s.queries, req.TemplateID, expectedDomain)
 	if err != nil {
@@ -105,7 +106,7 @@ func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplate
 	switch providertemplates.Domain(template.Domain) {
 	case providertemplates.DomainLLM, providertemplates.DomainSpeech, providertemplates.DomainTranscription, providertemplates.DomainVideo:
 	default:
-		return GetResponse{}, apperror.New(apperror.CodeProviderTemplateDomainMismatch, nil)
+		return GetResponse{}, fmt.Errorf("%w: %s", providertemplates.ErrDomainMismatch, template.Domain)
 	}
 
 	name := strings.TrimSpace(req.Name)
@@ -115,11 +116,11 @@ func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplate
 	config := providertemplates.MergeConfig(providertemplates.DecodeConfig(template.DefaultConfig), req.Config)
 	configJSON, err := providertemplates.Marshal(normalizeProviderConfig(template.Driver, config))
 	if err != nil {
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, err, nil)
+		return GetResponse{}, err
 	}
 	metadataJSON, err := providertemplates.Marshal(providertemplates.MergeMetadata(template, req.Metadata))
 	if err != nil {
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, err, nil)
+		return GetResponse{}, err
 	}
 	provider, err := s.queries.CreateProviderFromTemplate(ctx, sqlc.CreateProviderFromTemplateParams{
 		ProviderTemplateID: template.ID,
@@ -132,9 +133,9 @@ func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplate
 	})
 	if err != nil {
 		if db.IsUniqueViolation(err) {
-			return GetResponse{}, apperror.Wrap(apperror.CodeProviderNameTaken, err, nil)
+			return GetResponse{}, fmt.Errorf("create provider from template: %w: %w", ErrNameTaken, err)
 		}
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, fmt.Errorf("create provider from template: %w", err), nil)
+		return GetResponse{}, errs.Wrap(err, "create provider from template")
 	}
 	return s.toGetResponse(provider), nil
 }
@@ -148,7 +149,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 
 	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get provider: %w", err)
+		return GetResponse{}, errs.Wrap(err, "get provider")
 	}
 
 	return s.toGetResponse(provider), nil
@@ -158,7 +159,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, error) {
 	provider, err := s.queries.GetProviderByName(ctx, name)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get provider by name: %w", err)
+		return GetResponse{}, errs.Wrap(err, "get provider by name")
 	}
 
 	return s.toGetResponse(provider), nil
@@ -168,7 +169,7 @@ func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, erro
 func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	providers, err := s.queries.ListProviders(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list providers: %w", err)
+		return nil, errs.Wrap(err, "list providers")
 	}
 
 	results := make([]GetResponse, 0, len(providers))
@@ -187,7 +188,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	existing, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get provider: %w", err)
+		return GetResponse{}, errs.Wrap(err, "get provider")
 	}
 
 	name := existing.Name
@@ -244,7 +245,10 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("update provider: %w", err)
+		if db.IsUniqueViolation(err) {
+			return GetResponse{}, fmt.Errorf("update provider: %w: %w", ErrNameTaken, err)
+		}
+		return GetResponse{}, errs.Wrap(err, "update provider")
 	}
 
 	return s.toGetResponse(updated), nil
@@ -258,7 +262,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	}
 
 	if err := s.queries.DeleteProvider(ctx, providerID); err != nil {
-		return fmt.Errorf("delete provider: %w", err)
+		return errs.Wrap(err, "delete provider")
 	}
 	return nil
 }
@@ -302,7 +306,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
-		return TestResponse{}, fmt.Errorf("get provider: %w", err)
+		return TestResponse{}, errs.Wrap(err, "get provider")
 	}
 
 	cfg := providerConfig(provider.Config)
@@ -394,7 +398,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 
 	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
-		return nil, fmt.Errorf("get provider: %w", err)
+		return nil, errs.Wrap(err, "get provider")
 	}
 
 	clientType := models.ClientType(provider.ClientType)
@@ -522,7 +526,7 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 
 	sdkModels, err := sdkProvider.ListModels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list models: %w", err)
+		return nil, errs.WrapDependency(err, "list models")
 	}
 
 	// Best-effort capability lookup: template/catalog entries keyed by model ID
@@ -857,7 +861,7 @@ func (s *Service) activateHiddenRegistryTemplate(
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
-		return sqlc.Provider{}, true, fmt.Errorf("activate registry provider template: %w", err)
+		return sqlc.Provider{}, true, errs.Wrap(err, "activate registry provider template")
 	}
 	return updated, true, nil
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/reasoning"
 )
@@ -80,7 +81,7 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 	}
 	resp, err := httpClient.Do(req) //nolint:gosec // Provider base URLs are explicitly user-configurable throughout model discovery.
 	if err != nil {
-		return nil, fmt.Errorf("request Codex models: %w", err)
+		return nil, errs.WrapDependency(err, "request Codex models")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -89,13 +90,13 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 		if detail == "" {
 			detail = http.StatusText(resp.StatusCode)
 		}
-		return nil, fmt.Errorf("codex models request failed (%d): %s", resp.StatusCode, detail)
+		return nil, errs.NewDependency(fmt.Sprintf("codex models request failed (%d): %s", resp.StatusCode, detail))
 	}
 
 	var catalog codexModelsResponse
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, codexModelsResponseLimit))
 	if err := decoder.Decode(&catalog); err != nil {
-		return nil, fmt.Errorf("decode Codex models response: %w", err)
+		return nil, errs.WrapDependency(err, "decode Codex models response")
 	}
 
 	remoteModels := make([]RemoteModel, 0, len(catalog.Models))

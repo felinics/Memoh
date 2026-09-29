@@ -64,9 +64,10 @@ var publicSentinels = []error{
 	workspacedeps.ErrCatalogUnavailable, workspacedeps.ErrDefinitionInvalid, workspacedeps.ErrDefinitionUnavailable,
 }
 
-// publicCause classifies an error from another package: catalog errors keep
-// their public detail, sentinels their message and upstream HTTP failures
-// their status. Anything else is reported generically and belongs in the log.
+// publicCause classifies an error from another package: catalog and
+// registry errors keep their public detail, sentinels their message and
+// upstream HTTP failures their status. Anything else is reported
+// generically and belongs in the log.
 func publicCause(err error) string {
 	if err == nil {
 		return ""
@@ -75,7 +76,7 @@ func publicCause(err error) string {
 	if errors.As(err, &nested) {
 		return nested.Public()
 	}
-	if public, ok := apperror.PublicFrom(err, ""); ok {
+	if public, ok := apperror.PublicFrom(RegistryError(err), ""); ok {
 		return public.Detail
 	}
 	for _, sentinel := range publicSentinels {

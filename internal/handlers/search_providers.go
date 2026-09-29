@@ -67,8 +67,8 @@ func (h *SearchProvidersHandler) Create(c echo.Context) error {
 	}
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
-		if apperror.CodeOf(err) != "" {
-			return err
+		if translated := searchProviderError(err); apperror.CodeOf(translated) != "" {
+			return translated
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -139,8 +139,8 @@ func (h *SearchProvidersHandler) Update(c echo.Context) error {
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
-		if apperror.CodeOf(err) != "" {
-			return err
+		if translated := searchProviderError(err); apperror.CodeOf(translated) != "" {
+			return translated
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

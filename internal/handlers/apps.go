@@ -634,6 +634,7 @@ func newAppErrorEvent(err error, requestID string) AppStreamEvent {
 }
 
 func (*AppsHandler) httpError(err error) error {
+	err = apps.RegistryError(err)
 	var targetErr *supermarketclient.WorkspaceTargetError
 	var statusErr *supermarketclient.StatusError
 	switch {

@@ -65,6 +65,11 @@ services and domain packages return package errors and do not construct
 `apperror` values. The same package error may translate to different codes in
 different use cases when the client's action differs.
 
+The packages that return package errors are listed in the `depguard` rule
+`package-errors` in `.golangci.yml`, which fails lint when one of them imports
+`internal/apperror`. A package is added to the rule when its errors move to
+package errors.
+
 The transport renders a public error in its own envelope:
 
 | Entry point | Rendered by |

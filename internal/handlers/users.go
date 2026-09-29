@@ -576,16 +576,6 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		}
 		return true
 	}
-	sendError := func(code, message string) {
-		_ = send(createContainerErrorEvent{
-			Type:      "error",
-			Code:      code,
-			Args:      map[string]string{},
-			Message:   message,
-			RequestID: httpx.RequestID(c),
-		})
-	}
-
 	send(createBotStreamBotEvent{Type: "bot_created", Bot: scrubBotForResponse(bot)})
 
 	events, unsubscribe := h.workspaceSetup.Subscribe(bot.ID)
@@ -596,9 +586,12 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 	defer cancel()
 	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
 		return h.workspaceSetup.Await(ctx, bot.ID, 0)
-	}, httpx.RequestID(c), sendError)
-	if outcome.Failed || outcome.Disconnected {
+	}, httpx.RequestID(c))
+	if outcome.Disconnected {
 		return nil
+	}
+	if outcome.Err != nil {
+		return outcome.Err
 	}
 	if complete, ok := workspaceCompleteEvent(streamCtx, h.logger, h.workspaceStatus, bot.ID, outcome); ok {
 		if !send(complete) {
@@ -608,12 +601,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 
 	readyBot, err := h.botService.Get(streamCtx, bot.ID)
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "load bot after workspace provisioning failed",
-			slog.String("bot_id", bot.ID),
-			slog.Any("error", err),
-		)
-		sendError("bot_ready_update_failed", "bot could not be loaded after workspace setup")
-		return nil
+		return sendWorkspaceStreamFailure(send, apperror.CodeBotReadyUpdateFailed, err, httpx.RequestID(c))
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil

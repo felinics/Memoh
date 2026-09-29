@@ -23,6 +23,7 @@ import (
 	memohcopilot "github.com/felinics/memoh/internal/copilot"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -324,7 +325,7 @@ func (s *Service) StartOAuthAuthorization(ctx context.Context, providerID string
 func (*Service) StartOpenAICodexACPAuthorization(_ context.Context, redirectURI, state string) (*OAuthAuthorizeResponse, string, error) {
 	state = strings.TrimSpace(state)
 	if state == "" {
-		return nil, "", errors.New("oauth state is required")
+		return nil, "", errs.New("oauth state is required")
 	}
 	cfg := openAICodexACPOAuthConfig(redirectURI)
 	codeVerifier, err := generateCodeVerifier()
@@ -359,10 +360,10 @@ func (s *Service) ExchangeOpenAICodexACPCode(ctx context.Context, redirectURI, c
 	code = strings.TrimSpace(code)
 	codeVerifier = strings.TrimSpace(codeVerifier)
 	if code == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("oauth code is required")
+		return OpenAICodexOAuthCredentials{}, errs.New("oauth code is required")
 	}
 	if codeVerifier == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("oauth code verifier is required")
+		return OpenAICodexOAuthCredentials{}, errs.New("oauth code verifier is required")
 	}
 
 	cfg := openAICodexACPOAuthConfig(redirectURI)
@@ -374,13 +375,13 @@ func (s *Service) ExchangeOpenAICodexACPCode(ctx context.Context, redirectURI, c
 	idToken := strings.TrimSpace(resp.IDToken)
 	refreshToken := strings.TrimSpace(resp.RefreshToken)
 	if accessToken == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing access token")
+		return OpenAICodexOAuthCredentials{}, errs.NewDependency("oauth response missing access token")
 	}
 	if idToken == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing id token")
+		return OpenAICodexOAuthCredentials{}, errs.NewDependency("oauth response missing id token")
 	}
 	if refreshToken == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing refresh token")
+		return OpenAICodexOAuthCredentials{}, errs.NewDependency("oauth response missing refresh token")
 	}
 	return OpenAICodexOAuthCredentials{
 		AccessToken:  accessToken,
@@ -418,19 +419,19 @@ func (s *Service) StartOpenAICodexACPDeviceAuthorization(ctx context.Context) (O
 	}
 	resp, err := client.Do(req) //nolint:gosec // URL is validated by validateOpenAICodexACPAuthURLFunc before request execution.
 	if err != nil {
-		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("execute codex device user code request: %w", err)
+		return OpenAICodexACPDeviceAuthorization{}, errs.WrapDependency(err, "execute codex device user code request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("read codex device user code response: %w", err)
+		return OpenAICodexACPDeviceAuthorization{}, errs.WrapDependency(err, "read codex device user code response")
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		if resp.StatusCode == http.StatusNotFound {
-			return OpenAICodexACPDeviceAuthorization{}, errors.New("device code login is not enabled for this Codex server; use browser login or verify the server URL")
+			return OpenAICodexACPDeviceAuthorization{}, errs.NewDependency("device code login is not enabled for this Codex server; use browser login or verify the server URL")
 		}
-		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("codex device user code request failed with status %d", resp.StatusCode)
+		return OpenAICodexACPDeviceAuthorization{}, errs.NewDependency(fmt.Sprintf("codex device user code request failed with status %d", resp.StatusCode))
 	}
 
 	var decoded struct {
@@ -440,12 +441,12 @@ func (s *Service) StartOpenAICodexACPDeviceAuthorization(ctx context.Context) (O
 		Interval     openAICodexACPDeviceInterval `json:"interval"`
 	}
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return OpenAICodexACPDeviceAuthorization{}, fmt.Errorf("decode codex device user code response: %w", err)
+		return OpenAICodexACPDeviceAuthorization{}, errs.WrapDependency(err, "decode codex device user code response")
 	}
 	userCode := strings.TrimSpace(firstNonEmpty(decoded.UserCode, decoded.UserCodeAlt))
 	deviceAuthID := strings.TrimSpace(decoded.DeviceAuthID)
 	if deviceAuthID == "" || userCode == "" {
-		return OpenAICodexACPDeviceAuthorization{}, errors.New("codex device user code response was incomplete")
+		return OpenAICodexACPDeviceAuthorization{}, errs.NewDependency("codex device user code response was incomplete")
 	}
 	interval := int64(decoded.Interval)
 	if interval <= 0 {
@@ -463,10 +464,10 @@ func (s *Service) PollOpenAICodexACPDeviceAuthorization(ctx context.Context, dev
 	deviceAuthID = strings.TrimSpace(deviceAuthID)
 	userCode = strings.TrimSpace(userCode)
 	if deviceAuthID == "" {
-		return OpenAICodexACPDevicePollResult{}, errors.New("device_auth_id is required")
+		return OpenAICodexACPDevicePollResult{}, errs.New("device_auth_id is required")
 	}
 	if userCode == "" {
-		return OpenAICodexACPDevicePollResult{}, errors.New("user_code is required")
+		return OpenAICodexACPDevicePollResult{}, errs.New("user_code is required")
 	}
 
 	issuer := openAICodexACPAuthIssuerBase()
@@ -494,19 +495,19 @@ func (s *Service) PollOpenAICodexACPDeviceAuthorization(ctx context.Context, dev
 	}
 	resp, err := client.Do(req) //nolint:gosec // URL is validated by validateOpenAICodexACPAuthURLFunc before request execution.
 	if err != nil {
-		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("execute codex device poll request: %w", err)
+		return OpenAICodexACPDevicePollResult{}, errs.WrapDependency(err, "execute codex device poll request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("read codex device poll response: %w", err)
+		return OpenAICodexACPDevicePollResult{}, errs.WrapDependency(err, "read codex device poll response")
 	}
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
 		return OpenAICodexACPDevicePollResult{Pending: true}, nil
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("codex device auth failed with status %d", resp.StatusCode)
+		return OpenAICodexACPDevicePollResult{}, errs.NewDependency(fmt.Sprintf("codex device auth failed with status %d", resp.StatusCode))
 	}
 
 	var decoded struct {
@@ -515,7 +516,7 @@ func (s *Service) PollOpenAICodexACPDeviceAuthorization(ctx context.Context, dev
 		CodeVerifier      string `json:"code_verifier"`
 	}
 	if err := json.Unmarshal(body, &decoded); err != nil {
-		return OpenAICodexACPDevicePollResult{}, fmt.Errorf("decode codex device poll response: %w", err)
+		return OpenAICodexACPDevicePollResult{}, errs.WrapDependency(err, "decode codex device poll response")
 	}
 	out := OpenAICodexACPDevicePollResult{
 		AuthorizationCode: strings.TrimSpace(decoded.AuthorizationCode),
@@ -523,7 +524,7 @@ func (s *Service) PollOpenAICodexACPDeviceAuthorization(ctx context.Context, dev
 		CodeVerifier:      strings.TrimSpace(decoded.CodeVerifier),
 	}
 	if out.AuthorizationCode == "" || out.CodeChallenge == "" || out.CodeVerifier == "" {
-		return OpenAICodexACPDevicePollResult{}, errors.New("codex device poll response was incomplete")
+		return OpenAICodexACPDevicePollResult{}, errs.NewDependency("codex device poll response was incomplete")
 	}
 	return out, nil
 }
@@ -532,10 +533,10 @@ func (s *Service) ExchangeOpenAICodexACPDeviceCode(ctx context.Context, authoriz
 	authorizationCode = strings.TrimSpace(authorizationCode)
 	codeVerifier = strings.TrimSpace(codeVerifier)
 	if authorizationCode == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("authorization code is required")
+		return OpenAICodexOAuthCredentials{}, errs.New("authorization code is required")
 	}
 	if codeVerifier == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("code verifier is required")
+		return OpenAICodexOAuthCredentials{}, errs.New("code verifier is required")
 	}
 
 	issuer := openAICodexACPAuthIssuerBase()
@@ -549,13 +550,13 @@ func (s *Service) ExchangeOpenAICodexACPDeviceCode(ctx context.Context, authoriz
 	idToken := strings.TrimSpace(resp.IDToken)
 	refreshToken := strings.TrimSpace(resp.RefreshToken)
 	if accessToken == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing access token")
+		return OpenAICodexOAuthCredentials{}, errs.NewDependency("oauth response missing access token")
 	}
 	if idToken == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing id token")
+		return OpenAICodexOAuthCredentials{}, errs.NewDependency("oauth response missing id token")
 	}
 	if refreshToken == "" {
-		return OpenAICodexOAuthCredentials{}, errors.New("oauth response missing refresh token")
+		return OpenAICodexOAuthCredentials{}, errs.NewDependency("oauth response missing refresh token")
 	}
 	return OpenAICodexOAuthCredentials{
 		AccessToken:  accessToken,
@@ -578,10 +579,10 @@ func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (
 	}
 	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
 	if err != nil {
-		return "", fmt.Errorf("get provider: %w", err)
+		return "", errs.Wrap(err, "get provider")
 	}
 	if !supportsOAuth(provider) {
-		return "", errors.New("provider does not support oauth")
+		return "", errs.New("provider does not support oauth")
 	}
 
 	cfg := s.oauthConfigForProvider(provider)
@@ -712,7 +713,7 @@ func (s *Service) PollOAuthAuthorization(ctx context.Context, providerID string)
 	case models.ClientTypeGitHubCopilot:
 		return s.pollGitHubCopilotProviderAuthorization(ctx, provider)
 	default:
-		return nil, errors.New("provider does not support device authorization")
+		return nil, errs.New("provider does not support device authorization")
 	}
 }
 
@@ -759,7 +760,7 @@ func (s *Service) pollGitHubCopilotProviderAuthorization(ctx context.Context, pr
 			}
 			return s.GetOAuthStatus(ctx, providerID)
 		default:
-			return nil, fmt.Errorf("oauth device token request failed: %s", firstNonEmpty(resp.Description, resp.Error))
+			return nil, errs.NewDependency(fmt.Sprintf("oauth device token request failed: %s", firstNonEmpty(resp.Description, resp.Error)))
 		}
 	}
 
@@ -836,10 +837,10 @@ func (s *Service) RevokeOAuthToken(ctx context.Context, providerID string) error
 		return err
 	}
 	if !supportsOAuth(provider) {
-		return errors.New("provider does not support oauth")
+		return errs.New("provider does not support oauth")
 	}
 
-	return s.queries.DeleteProviderOAuthToken(ctx, provider.ID)
+	return errs.Wrap(s.queries.DeleteProviderOAuthToken(ctx, provider.ID), "")
 }
 
 func (s *Service) GetValidAccessToken(ctx context.Context, providerID string) (string, error) {
@@ -858,13 +859,13 @@ func (s *Service) GetValidAccessToken(ctx context.Context, providerID string) (s
 
 func (s *Service) resolveValidProviderOAuthToken(ctx context.Context, cfg oauthConfig, token *oauthTokenRecord) (string, error) {
 	if strings.TrimSpace(token.AccessToken) == "" {
-		return "", errors.New("oauth token is missing access token")
+		return "", errs.New("oauth token is missing access token")
 	}
 	if token.ExpiresAt.IsZero() || time.Now().Add(oauthExpirySkew).Before(token.ExpiresAt) {
 		return token.AccessToken, nil
 	}
 	if strings.TrimSpace(token.RefreshToken) == "" {
-		return "", errors.New("oauth token expired and no refresh token is available")
+		return "", errs.New("oauth token expired and no refresh token is available")
 	}
 
 	refreshed, err := s.refreshAccessToken(ctx, cfg, token.RefreshToken)
@@ -895,10 +896,10 @@ func (s *Service) loadOAuthProvider(ctx context.Context, providerID string) (sql
 	}
 	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
 	if err != nil {
-		return sqlc.Provider{}, fmt.Errorf("get provider: %w", err)
+		return sqlc.Provider{}, errs.Wrap(err, "get provider")
 	}
 	if !supportsOAuth(provider) {
-		return sqlc.Provider{}, errors.New("provider does not support oauth")
+		return sqlc.Provider{}, errs.New("provider does not support oauth")
 	}
 	return provider, nil
 }
@@ -910,7 +911,7 @@ func (s *Service) getOAuthToken(ctx context.Context, providerID string) (*oauthT
 	}
 	row, err := s.queries.GetProviderOAuthTokenByProvider(ctx, providerUUID)
 	if err != nil {
-		return nil, err
+		return nil, errs.Wrap(err, "")
 	}
 	return toProviderOAuthToken(row), nil
 }
@@ -918,7 +919,7 @@ func (s *Service) getOAuthToken(ctx context.Context, providerID string) (*oauthT
 func (s *Service) getOAuthTokenByState(ctx context.Context, state string) (*oauthTokenRecord, error) {
 	row, err := s.queries.GetProviderOAuthTokenByState(ctx, state)
 	if err != nil {
-		return nil, err
+		return nil, errs.Wrap(err, "")
 	}
 	return toProviderOAuthToken(row), nil
 }
@@ -928,12 +929,13 @@ func (s *Service) updateOAuthState(ctx context.Context, providerID, state, codeV
 	if err != nil {
 		return err
 	}
-	return s.queries.UpdateProviderOAuthState(ctx, sqlc.UpdateProviderOAuthStateParams{
+	err = s.queries.UpdateProviderOAuthState(ctx, sqlc.UpdateProviderOAuthStateParams{
 		ProviderID:       providerUUID,
 		State:            state,
 		PkceCodeVerifier: codeVerifier,
 		Metadata:         metadataJSON(metadata),
 	})
+	return errs.Wrap(err, "")
 }
 
 func (s *Service) saveOAuthToken(ctx context.Context, providerID string, token oauthTokenRecord) error {
@@ -956,7 +958,7 @@ func (s *Service) saveOAuthToken(ctx context.Context, providerID string, token o
 		PkceCodeVerifier: token.PKCECodeVerifier,
 		Metadata:         metadataJSON(token.Metadata),
 	})
-	return err
+	return errs.Wrap(err, "")
 }
 
 func toProviderOAuthToken(row sqlc.ProviderOauthToken) *oauthTokenRecord {
@@ -1146,16 +1148,16 @@ func (s *Service) fetchGitHubOAuthAccount(ctx context.Context, accessToken strin
 
 	resp, err := s.httpClient.Do(req) //nolint:gosec // Request targets a fixed GitHub API endpoint.
 	if err != nil {
-		return oauthAccountMetadata{}, fmt.Errorf("execute github oauth account request: %w", err)
+		return oauthAccountMetadata{}, errs.WrapDependency(err, "execute github oauth account request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return oauthAccountMetadata{}, fmt.Errorf("read github oauth account response: %w", err)
+		return oauthAccountMetadata{}, errs.WrapDependency(err, "read github oauth account response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return oauthAccountMetadata{}, fmt.Errorf("github oauth account request failed: %s", strings.TrimSpace(string(payload)))
+		return oauthAccountMetadata{}, errs.NewDependency(fmt.Sprintf("github oauth account request failed: %s", strings.TrimSpace(string(payload))))
 	}
 
 	var profile struct {
@@ -1166,7 +1168,7 @@ func (s *Service) fetchGitHubOAuthAccount(ctx context.Context, accessToken strin
 		HTMLURL   string `json:"html_url"`
 	}
 	if err := json.Unmarshal(payload, &profile); err != nil {
-		return oauthAccountMetadata{}, fmt.Errorf("decode github oauth account response: %w", err)
+		return oauthAccountMetadata{}, errs.WrapDependency(err, "decode github oauth account response")
 	}
 
 	account := oauthAccountMetadata{
@@ -1186,7 +1188,7 @@ func (s *Service) fetchGitHubOAuthAccount(ctx context.Context, accessToken strin
 	}
 	account.Label = firstNonEmpty(account.Email, account.Name, account.Login)
 	if account.Label == "" {
-		return oauthAccountMetadata{}, errors.New("github oauth account response did not include a usable account label")
+		return oauthAccountMetadata{}, errs.NewDependency("github oauth account response did not include a usable account label")
 	}
 	return account, nil
 }
@@ -1202,16 +1204,16 @@ func (s *Service) fetchGitHubPrimaryEmail(ctx context.Context, accessToken strin
 
 	resp, err := s.httpClient.Do(req) //nolint:gosec // Request targets a fixed GitHub API endpoint.
 	if err != nil {
-		return "", fmt.Errorf("execute github oauth emails request: %w", err)
+		return "", errs.WrapDependency(err, "execute github oauth emails request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read github oauth emails response: %w", err)
+		return "", errs.WrapDependency(err, "read github oauth emails response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("github oauth emails request failed: %s", strings.TrimSpace(string(payload)))
+		return "", errs.NewDependency(fmt.Sprintf("github oauth emails request failed: %s", strings.TrimSpace(string(payload))))
 	}
 
 	var emails []struct {
@@ -1220,7 +1222,7 @@ func (s *Service) fetchGitHubPrimaryEmail(ctx context.Context, accessToken strin
 		Verified bool   `json:"verified"`
 	}
 	if err := json.Unmarshal(payload, &emails); err != nil {
-		return "", fmt.Errorf("decode github oauth emails response: %w", err)
+		return "", errs.WrapDependency(err, "decode github oauth emails response")
 	}
 
 	for _, candidate := range emails {
@@ -1242,7 +1244,7 @@ func (s *Service) fetchGitHubPrimaryEmail(ctx context.Context, accessToken strin
 		}
 	}
 
-	return "", errors.New("github oauth emails response did not include a usable email")
+	return "", errs.NewDependency("github oauth emails response did not include a usable email")
 }
 
 func (s *Service) requestDeviceAuthorization(ctx context.Context, cfg oauthConfig) (*deviceAuthorizationResponse, error) {
@@ -1266,27 +1268,27 @@ func (s *Service) requestDeviceAuthorization(ctx context.Context, cfg oauthConfi
 
 	resp, err := s.httpClient.Do(req) //nolint:gosec // URL is validated by validateOAuthTokenURL before request execution.
 	if err != nil {
-		return nil, fmt.Errorf("execute oauth device request: %w", err)
+		return nil, errs.WrapDependency(err, "execute oauth device request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read oauth device response: %w", err)
+		return nil, errs.WrapDependency(err, "read oauth device response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("oauth device request failed: %s", strings.TrimSpace(string(payload)))
+		return nil, errs.NewDependency(fmt.Sprintf("oauth device request failed: %s", strings.TrimSpace(string(payload))))
 	}
 
 	var deviceResp deviceAuthorizationResponse
 	if err := json.Unmarshal(payload, &deviceResp); err != nil {
-		return nil, fmt.Errorf("decode oauth device response: %w", err)
+		return nil, errs.WrapDependency(err, "decode oauth device response")
 	}
 	if deviceResp.Error != "" {
-		return nil, fmt.Errorf("oauth device request failed: %s", firstNonEmpty(deviceResp.Description, deviceResp.Error))
+		return nil, errs.NewDependency(fmt.Sprintf("oauth device request failed: %s", firstNonEmpty(deviceResp.Description, deviceResp.Error)))
 	}
 	if strings.TrimSpace(deviceResp.DeviceCode) == "" || strings.TrimSpace(deviceResp.UserCode) == "" || strings.TrimSpace(deviceResp.VerificationURI) == "" {
-		return nil, errors.New("oauth device request returned incomplete device authorization data")
+		return nil, errs.NewDependency("oauth device request returned incomplete device authorization data")
 	}
 	if deviceResp.Interval <= 0 {
 		deviceResp.Interval = 5
@@ -1314,18 +1316,18 @@ func (s *Service) exchangeDeviceCode(ctx context.Context, cfg oauthConfig, devic
 
 	resp, err := s.httpClient.Do(req) //nolint:gosec // URL is validated by validateOAuthTokenURL before request execution.
 	if err != nil {
-		return nil, fmt.Errorf("execute oauth device token request: %w", err)
+		return nil, errs.WrapDependency(err, "execute oauth device token request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read oauth device token response: %w", err)
+		return nil, errs.WrapDependency(err, "read oauth device token response")
 	}
 
 	var tokenResp oauthTokenResponse
 	if err := json.Unmarshal(payload, &tokenResp); err != nil {
-		return nil, fmt.Errorf("decode oauth device token response: %w", err)
+		return nil, errs.WrapDependency(err, "decode oauth device token response")
 	}
 	if tokenResp.Interval <= 0 {
 		tokenResp.Interval = 5
@@ -1334,7 +1336,7 @@ func (s *Service) exchangeDeviceCode(ctx context.Context, cfg oauthConfig, devic
 		if tokenResp.Error != "" {
 			return &tokenResp, nil
 		}
-		return nil, fmt.Errorf("oauth device token request failed: %s", strings.TrimSpace(string(payload)))
+		return nil, errs.NewDependency(fmt.Sprintf("oauth device token request failed: %s", strings.TrimSpace(string(payload))))
 	}
 	return &tokenResp, nil
 }
@@ -1380,24 +1382,24 @@ func (s *Service) postTokenRequest(ctx context.Context, cfg oauthConfig, body ur
 
 	resp, err := s.httpClient.Do(req) //nolint:gosec // URL is validated by validateOAuthTokenURL before request execution.
 	if err != nil {
-		return nil, fmt.Errorf("execute oauth request: %w", err)
+		return nil, errs.WrapDependency(err, "execute oauth request")
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read oauth response: %w", err)
+		return nil, errs.WrapDependency(err, "read oauth response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("oauth token request failed: %s", strings.TrimSpace(string(payload)))
+		return nil, errs.NewDependency(fmt.Sprintf("oauth token request failed: %s", strings.TrimSpace(string(payload))))
 	}
 
 	var tokenResp oauthTokenResponse
 	if err := json.Unmarshal(payload, &tokenResp); err != nil {
-		return nil, fmt.Errorf("decode oauth response: %w", err)
+		return nil, errs.WrapDependency(err, "decode oauth response")
 	}
 	if tokenResp.Error != "" {
-		return nil, fmt.Errorf("oauth token request failed: %s", firstNonEmpty(tokenResp.Description, tokenResp.Error))
+		return nil, errs.NewDependency(fmt.Sprintf("oauth token request failed: %s", firstNonEmpty(tokenResp.Description, tokenResp.Error)))
 	}
 	return &tokenResp, nil
 }
@@ -1408,20 +1410,20 @@ func validateOAuthTokenURL(clientType models.ClientType, raw string) error {
 		return fmt.Errorf("invalid oauth token url: %w", err)
 	}
 	if !strings.EqualFold(parsed.Scheme, "https") {
-		return errors.New("oauth token url must use https")
+		return errs.New("oauth token url must use https")
 	}
 
 	switch clientType {
 	case models.ClientTypeOpenAICodex:
 		if !strings.EqualFold(parsed.Hostname(), "auth.openai.com") {
-			return errors.New("oauth token url host must be auth.openai.com")
+			return errs.New("oauth token url host must be auth.openai.com")
 		}
 	case models.ClientTypeGitHubCopilot:
 		if !strings.EqualFold(parsed.Hostname(), "github.com") {
-			return errors.New("oauth token url host must be github.com")
+			return errs.New("oauth token url host must be github.com")
 		}
 	default:
-		return errors.New("unsupported oauth client type")
+		return errs.New("unsupported oauth client type")
 	}
 
 	return nil

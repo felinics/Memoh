@@ -484,7 +484,7 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 	// files representable, this lets the server create its temporary file before
 	// any payload chunks arrive.
 	if err := stream.Send(&pb.WriteRawChunk{Path: path}); err != nil {
-		return 0, err
+		return 0, writeRawSendError(stream, err)
 	}
 
 	buf := make([]byte, 64*1024)
@@ -493,7 +493,7 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 		if n > 0 {
 			chunk := &pb.WriteRawChunk{Data: buf[:n]}
 			if sendErr := stream.Send(chunk); sendErr != nil {
-				return 0, sendErr
+				return 0, writeRawSendError(stream, sendErr)
 			}
 		}
 		if readErr == io.EOF {
@@ -511,9 +511,21 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
-		return 0, err
+		return 0, mapError(err)
 	}
 	return resp.GetBytesWritten(), nil
+}
+
+// writeRawSendError returns the status of a WriteRaw stream that Send failed
+// on. Send reports io.EOF when the stream has already ended, and the status is
+// left for CloseAndRecv.
+func writeRawSendError(stream pb.ContainerService_WriteRawClient, err error) error {
+	if errors.Is(err, io.EOF) {
+		if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
+			err = recvErr
+		}
+	}
+	return mapError(err)
 }
 
 func (c *Client) DeleteFile(ctx context.Context, path string, recursive bool) error {

@@ -256,7 +256,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 			return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
 		}
 		if conn.Action == RemovalActionDisconnect {
-			if err := s.connectors.Delete(ctx, botID, conn.ConnectionID); err != nil && !isNotFound(err) && !errors.Is(err, errConnectorGone) {
+			if err := s.connectors.Delete(ctx, botID, conn.ConnectionID); err != nil {
 				cause := fail("disconnect "+conn.Type, err)
 				record(StepResult{Kind: KindConnector, ID: conn.Type, Status: StepFailed, Error: publicMessage(cause)})
 				return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
@@ -298,8 +298,3 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	sink.Send(Event{Type: EventDone, Kind: KindApp, ID: inst.AppID, Status: "removed"})
 	return result, nil
 }
-
-// errConnectorGone matches a connection Connect-It no longer knows; the
-// connectors service already treats a 404 as deleted, so this only guards
-// wrapped sentinel errors from fakes.
-var errConnectorGone = errors.New("connector connection is gone")

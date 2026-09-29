@@ -7,6 +7,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -90,15 +91,16 @@ func TestDisplayPrepareStreamBreakUsesPrepareFailedCode(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSetupAppErrorKeepsBootstrapDiagnosticPrivate(t *testing.T) {
-	cause := errors.Join(
-		workspace.ErrWorkspaceTemplateBootstrapFailed,
-		errors.New("write /data/AGENTS.md: permission denied"),
-	)
-	event, ok := newWorkspaceSetupAppError(cause, "req-bootstrap")
-	if !ok {
-		t.Fatal("newWorkspaceSetupAppError() did not recognize bootstrap error")
-	}
+func TestWorkspaceSetupFailureKeepsBootstrapDiagnosticPrivate(t *testing.T) {
+	var event createContainerErrorEvent
+	recorded := sendWorkspaceFailure(func(payload any) bool {
+		event, _ = payload.(createContainerErrorEvent)
+		return true
+	}, botworkspace.Workspace{
+		Observed:       botworkspace.ObservedFailed,
+		LastErrorPhase: botworkspace.PhaseBootstrap,
+		LastError:      "write /data/AGENTS.md: permission denied",
+	}, "req-bootstrap")
 	if event.Code != string(apperror.CodeWorkspaceTemplateBootstrapFailed) {
 		t.Fatalf("code = %q", event.Code)
 	}
@@ -113,5 +115,8 @@ func TestWorkspaceSetupAppErrorKeepsBootstrapDiagnosticPrivate(t *testing.T) {
 	}
 	if event.RequestID != "req-bootstrap" {
 		t.Fatalf("request_id = %q", event.RequestID)
+	}
+	if apperror.CodeOf(recorded) != apperror.CodeWorkspaceTemplateBootstrapFailed || !strings.Contains(apperror.CauseOf(recorded).Error(), "/data/AGENTS.md") {
+		t.Fatalf("recorded = %v, want %s carrying the backend's text", recorded, apperror.CodeWorkspaceTemplateBootstrapFailed)
 	}
 }

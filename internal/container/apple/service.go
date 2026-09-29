@@ -2,6 +2,7 @@ package apple
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -147,7 +148,7 @@ func (s *Service) PullImage(ctx context.Context, ref string, _ *PullImageOptions
 	}
 	img, err := s.client.Pull(ctx, ref)
 	if err != nil {
-		return ImageInfo{}, err
+		return ImageInfo{}, mapAcgoErr(err)
 	}
 	return toAcgoImageInfo(img), nil
 }
@@ -161,7 +162,7 @@ func (s *Service) GetImage(ctx context.Context, ref string) (ImageInfo, error) {
 	}
 	img, err := s.client.GetImage(ctx, ref)
 	if err != nil {
-		return ImageInfo{}, err
+		return ImageInfo{}, mapAcgoErr(err)
 	}
 	return toAcgoImageInfo(img), nil
 }
@@ -172,7 +173,7 @@ func (s *Service) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	}
 	imgs, err := s.client.ListImages(ctx)
 	if err != nil {
-		return nil, err
+		return nil, mapAcgoErr(err)
 	}
 	out := make([]ImageInfo, len(imgs))
 	for i, img := range imgs {
@@ -192,7 +193,7 @@ func (s *Service) DeleteImage(ctx context.Context, ref string, _ *DeleteImageOpt
 	if err := s.ensureHealthy(ctx); err != nil {
 		return err
 	}
-	return s.client.DeleteImage(ctx, ref)
+	return mapAcgoErr(s.client.DeleteImage(ctx, ref))
 }
 
 // ---------------------------------------------------------------------------
@@ -216,12 +217,12 @@ func (s *Service) CreateContainer(ctx context.Context, req CreateContainerReques
 	if _, err := s.client.GetImage(ctx, req.ImageRef); err != nil {
 		s.logger.InfoContext(ctx, "image not found locally, pulling", slog.String("image", req.ImageRef))
 		if _, pullErr := s.client.Pull(ctx, req.ImageRef); pullErr != nil {
-			return ContainerInfo{}, fmt.Errorf("pull image %s: %w", req.ImageRef, pullErr)
+			return ContainerInfo{}, fmt.Errorf("pull image %s: %w", req.ImageRef, mapAcgoErr(pullErr))
 		}
 	}
 	ctr, err := s.client.NewContainer(ctx, req.ID, specToCreateOpts(req)...)
 	if err != nil {
-		return ContainerInfo{}, err
+		return ContainerInfo{}, mapAcgoErr(err)
 	}
 	return acgoContainerToInfo(ctx, ctr)
 }
@@ -235,7 +236,7 @@ func (s *Service) GetContainer(ctx context.Context, id string) (ContainerInfo, e
 	}
 	ctr, err := s.client.LoadContainer(ctx, id)
 	if err != nil {
-		return ContainerInfo{}, err
+		return ContainerInfo{}, mapAcgoErr(err)
 	}
 	return acgoContainerToInfo(ctx, ctr)
 }
@@ -246,7 +247,7 @@ func (s *Service) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 	}
 	ctrs, err := s.client.Containers(ctx, acgo.WithListAll())
 	if err != nil {
-		return nil, err
+		return nil, mapAcgoErr(err)
 	}
 	out := make([]ContainerInfo, 0, len(ctrs))
 	for _, c := range ctrs {
@@ -268,14 +269,14 @@ func (s *Service) DeleteContainer(ctx context.Context, id string, opts *DeleteCo
 	}
 	ctr, err := s.client.LoadContainer(ctx, id)
 	if err != nil {
-		return err
+		return mapAcgoErr(err)
 	}
 	var deleteOpts []acgo.DeleteOpt
 	if opts != nil && opts.CleanupSnapshot {
 		deleteOpts = append(deleteOpts, acgo.WithRemoveVolumes())
 	}
 	deleteOpts = append(deleteOpts, acgo.WithForceDelete())
-	return ctr.Delete(ctx, deleteOpts...)
+	return mapAcgoErr(ctr.Delete(ctx, deleteOpts...))
 }
 
 func (s *Service) ListContainersByLabel(ctx context.Context, key, value string) ([]ContainerInfo, error) {
@@ -288,7 +289,7 @@ func (s *Service) ListContainersByLabel(ctx context.Context, key, value string) 
 	filtersJSON := fmt.Sprintf(`{"label":["%s=%s"]}`, key, value)
 	ctrs, err := s.client.Containers(ctx, acgo.WithListAll(), acgo.WithListFilters(filtersJSON))
 	if err != nil {
-		return nil, err
+		return nil, mapAcgoErr(err)
 	}
 	var out []ContainerInfo
 	for _, c := range ctrs {
@@ -316,9 +317,9 @@ func (s *Service) StartContainer(ctx context.Context, containerID string, _ *Sta
 	}
 	ctr, err := s.client.LoadContainer(ctx, containerID)
 	if err != nil {
-		return err
+		return mapAcgoErr(err)
 	}
-	return ctr.Start(ctx)
+	return mapAcgoErr(ctr.Start(ctx))
 }
 
 func (s *Service) StopContainer(ctx context.Context, containerID string, opts *StopTaskOptions) error {
@@ -330,7 +331,7 @@ func (s *Service) StopContainer(ctx context.Context, containerID string, opts *S
 	}
 	ctr, err := s.client.LoadContainer(ctx, containerID)
 	if err != nil {
-		return err
+		return mapAcgoErr(err)
 	}
 	timeout := 10
 	if opts != nil && opts.Timeout > 0 {
@@ -342,7 +343,7 @@ func (s *Service) StopContainer(ctx context.Context, containerID string, opts *S
 		stopOpts = append(stopOpts, acgo.WithStopSignal(opts.Signal.String()))
 	}
 	if err := ctr.Stop(ctx, stopOpts...); err != nil && opts != nil && opts.Force {
-		return ctr.Kill(ctx)
+		return mapAcgoErr(ctr.Kill(ctx))
 	}
 	return nil
 }
@@ -360,11 +361,11 @@ func (s *Service) GetTaskInfo(ctx context.Context, containerID string) (TaskInfo
 	}
 	ctr, err := s.client.LoadContainer(ctx, containerID)
 	if err != nil {
-		return TaskInfo{}, err
+		return TaskInfo{}, mapAcgoErr(err)
 	}
 	info, err := ctr.Info(ctx)
 	if err != nil {
-		return TaskInfo{}, err
+		return TaskInfo{}, mapAcgoErr(err)
 	}
 	return TaskInfo{
 		ContainerID: containerID,
@@ -383,7 +384,7 @@ func (s *Service) ListTasks(ctx context.Context, opts *ListTasksOptions) ([]Task
 	}
 	ctrs, err := s.client.Containers(ctx, acgo.WithListAll())
 	if err != nil {
-		return nil, err
+		return nil, mapAcgoErr(err)
 	}
 	var out []TaskInfo
 	for _, c := range ctrs {
@@ -472,6 +473,15 @@ func specToCreateOpts(req CreateContainerRequest) []acgo.CreateOpt {
 	return opts
 }
 
+// mapAcgoErr reports a missing resource as containerapi.ErrNotFound, as the
+// other backends do, and keeps the acgo error in the chain.
+func mapAcgoErr(err error) error {
+	if acgo.IsNotFound(err) {
+		return errors.Join(containerapi.ErrNotFound, err)
+	}
+	return err
+}
+
 func toAcgoImageInfo(img acgo.Image) ImageInfo {
 	return ImageInfo{Name: img.Name(), ID: img.ID(), Tags: img.RepoTags()}
 }
@@ -479,7 +489,7 @@ func toAcgoImageInfo(img acgo.Image) ImageInfo {
 func acgoContainerToInfo(ctx context.Context, c acgo.Container) (ContainerInfo, error) {
 	info, err := c.Info(ctx)
 	if err != nil {
-		return ContainerInfo{}, err
+		return ContainerInfo{}, mapAcgoErr(err)
 	}
 	return ContainerInfo{
 		ID:     info.ID,

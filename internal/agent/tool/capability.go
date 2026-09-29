@@ -138,7 +138,7 @@ func (p *CapabilityProvider) Tools(_ context.Context, session SessionContext) ([
 			// Causes remain server-side. Even transport errors can include URLs or
 			// credential-bearing request data, so never echo them into tool history.
 			code := apperror.CodeCapabilityOperationFailed
-			if public, ok := apperror.PublicFrom(err, ""); ok {
+			if public, ok := apperror.PublicFrom(apps.RegistryError(err), ""); ok {
 				return toolexec.OutputFromValue(map[string]any{"ok": false, "code": public.Code, "detail": public.Detail, "message": public.Detail}), nil
 			}
 			switch {

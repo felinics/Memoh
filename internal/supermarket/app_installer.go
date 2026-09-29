@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -106,7 +106,7 @@ func (i *Installer) FetchRelease(ctx context.Context, registryID, appID, revisio
 		return AppDescriptor{}, err
 	}
 	if pkg.Revision != revision {
-		return AppDescriptor{}, invalidApp(errors.New("registry App revision does not match the request"))
+		return AppDescriptor{}, invalidApp(errs.NewDependency("registry App revision does not match the request"))
 	}
 	if err := validateApp(pkg, registryID, appID); err != nil {
 		return AppDescriptor{}, invalidApp(err)
@@ -125,7 +125,7 @@ func (i *Installer) FetchCurrentApp(ctx context.Context, registryID, appID strin
 		return AppDescriptor{}, err
 	}
 	if i == nil || i.client == nil {
-		return AppDescriptor{}, errors.New("supermarket installer is not configured")
+		return AppDescriptor{}, errs.New("supermarket installer is not configured")
 	}
 	pkg, err := i.client.FetchCurrentApp(ctx, registryID, appID)
 	if err != nil {
@@ -144,7 +144,7 @@ func (i *Installer) FetchCurrentApp(ctx context.Context, registryID, appID strin
 // installation, or rolls back.
 func (i *Installer) PublishSkills(ctx context.Context, botID string, pkg AppDescriptor, expectedRevision string) (*SkillPublication, error) {
 	if i == nil || i.workspaces == nil {
-		return nil, apperror.Wrap(apperror.CodeRegistryAppInstallFailed, errors.New("skill App installer is not configured"), nil)
+		return nil, installFailed(errs.New("skill App installer is not configured"))
 	}
 	targetCtx := workspace.WithWorkspaceTarget(ctx, workspace.WorkspaceTargetNative)
 	target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, workspace.WorkspaceTargetNative)
@@ -152,7 +152,7 @@ func (i *Installer) PublishSkills(ctx context.Context, botID string, pkg AppDesc
 		return nil, &WorkspaceTargetError{Err: err}
 	}
 	if target.Client == nil {
-		return nil, apperror.Wrap(apperror.CodeRegistryAppInstallFailed, errors.New("workspace is not reachable"), nil)
+		return nil, installFailed(errs.New("workspace is not reachable"))
 	}
 	release, err := i.acquirePreparation(targetCtx)
 	if err != nil {
@@ -161,7 +161,7 @@ func (i *Installer) PublishSkills(ctx context.Context, botID string, pkg AppDesc
 	defer release()
 	consistent, err := skillset.ReconcileApp(targetCtx, target.Client, pkg.RegistryID, pkg.AppID, expectedRevision)
 	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeRegistryAppInstallFailed, fmt.Errorf("recover Registry App state: %w", err), nil)
+		return nil, installFailed(fmt.Errorf("recover Registry App state: %w", err))
 	}
 	if !consistent && i.logger != nil {
 		i.logger.WarnContext(ctx, "Skill App files did not match the recorded revision; replacing them",
@@ -171,7 +171,7 @@ func (i *Installer) PublishSkills(ctx context.Context, botID string, pkg AppDesc
 	if len(pkg.Skills) == 0 {
 		removal, err := skillset.PrepareAppRemoval(targetCtx, target.Client, pkg.RegistryID, pkg.AppID)
 		if err != nil {
-			return nil, apperror.Wrap(apperror.CodeRegistryAppInstallFailed, fmt.Errorf("clear previous Registry App Skills: %w", err), nil)
+			return nil, installFailed(fmt.Errorf("clear previous Registry App Skills: %w", err))
 		}
 		return &SkillPublication{removal: removal, Skills: []InstallSkillResponse{}}, nil
 	}
@@ -189,7 +189,7 @@ func (i *Installer) PublishSkills(ctx context.Context, botID string, pkg AppDesc
 // RemoveSkills stages the removal of an App's Skills from the workspace.
 func (i *Installer) RemoveSkills(ctx context.Context, botID, registryID, appID, revision string) (*SkillRemoval, error) {
 	if i == nil || i.workspaces == nil {
-		return nil, errors.New("skill App installer is not configured")
+		return nil, errs.New("skill App installer is not configured")
 	}
 	targetCtx := workspace.WithWorkspaceTarget(ctx, workspace.WorkspaceTargetNative)
 	target, err := i.workspaces.ResolveWorkspaceTarget(targetCtx, botID, workspace.WorkspaceTargetNative)
@@ -197,7 +197,7 @@ func (i *Installer) RemoveSkills(ctx context.Context, botID, registryID, appID, 
 		return nil, &WorkspaceTargetError{Err: err}
 	}
 	if target.Client == nil {
-		return nil, apperror.Wrap(apperror.CodeRegistryAppInstallFailed, errors.New("workspace is not reachable"), nil)
+		return nil, installFailed(errs.New("workspace is not reachable"))
 	}
 	consistent, err := skillset.ReconcileApp(targetCtx, target.Client, registryID, appID, revision)
 	if err != nil {
@@ -230,7 +230,7 @@ func validateAppIdentity(registryID, appID string) (string, string, error) {
 
 func (i *Installer) fetchAppRelease(ctx context.Context, registryID, appID, revision string) (AppDescriptor, error) {
 	if i == nil || i.client == nil {
-		return AppDescriptor{}, errors.New("supermarket installer is not configured")
+		return AppDescriptor{}, errs.New("supermarket installer is not configured")
 	}
 	pkg, err := i.client.FetchAppRelease(ctx, registryID, appID, revision)
 	if err == nil {
@@ -242,9 +242,9 @@ func (i *Installer) fetchAppRelease(ctx context.Context, registryID, appID, revi
 func registryFetchError(err error) error {
 	switch ErrorKindOf(err) {
 	case ErrorNotFound:
-		return apperror.New(apperror.CodeRegistryAppNotFound, nil)
+		return ErrAppNotFound
 	case ErrorUnavailable:
-		return apperror.Wrap(apperror.CodeRegistryUnavailable, fmt.Errorf("fetch Registry App: %w", err), nil)
+		return fmt.Errorf("fetch Registry App: %w: %w", ErrRegistryUnavailable, err)
 	default:
 		return invalidApp(fmt.Errorf("invalid Registry App: %w", err))
 	}
@@ -266,25 +266,25 @@ func (i *Installer) prepareSkill(ctx context.Context, skill CatalogSkill) (prepa
 	artifact := skill.Artifact
 	content, err := i.client.DownloadArtifact(ctx, ArtifactDownloadDescriptor{Digest: artifact.Digest, Size: artifact.Size, DownloadURL: artifact.DownloadURL})
 	if err != nil {
-		code := apperror.CodeRegistryAppInvalid
+		kind := ErrAppInvalid
 		if ErrorKindOf(err) == ErrorUnavailable {
-			code = apperror.CodeRegistryUnavailable
+			kind = ErrRegistryUnavailable
 		}
-		return preparedSkill{}, apperror.Wrap(code, fmt.Errorf("download Registry Skill Artifact: %w", err), nil)
+		return preparedSkill{}, fmt.Errorf("download Registry Skill Artifact: %w: %w", kind, err)
 	}
 	archive, err := skillset.ReadArchiveWithLimits(content, artifact.UncompressedSize, artifact.ArchiveSize, artifact.FileCount)
 	if err != nil {
 		return preparedSkill{}, invalidApp(err)
 	}
 	if archive.UncompressedSize() != artifact.UncompressedSize || archive.ArchiveSize() != artifact.ArchiveSize || archive.FileCount() != artifact.FileCount {
-		return preparedSkill{}, invalidApp(errors.New("registry Skill Artifact contents do not match its descriptor"))
+		return preparedSkill{}, invalidApp(errs.NewDependency("registry Skill Artifact contents do not match its descriptor"))
 	}
 	return preparedSkill{skill: skill, archive: archive}, nil
 }
 
 func publishApp(ctx context.Context, client *bridge.Client, prepared preparedApp) (*skillset.AppPublication, []InstallSkillResponse, error) {
 	if client == nil {
-		return nil, nil, apperror.Wrap(apperror.CodeRegistryAppInstallFailed, errors.New("workspace is not reachable"), nil)
+		return nil, nil, installFailed(errs.New("workspace is not reachable"))
 	}
 	members := make([]skillset.AppArchive, 0, len(prepared.skills))
 	for _, item := range prepared.skills {
@@ -300,7 +300,7 @@ func publishApp(ctx context.Context, client *bridge.Client, prepared preparedApp
 		members,
 	)
 	if err != nil {
-		return nil, nil, apperror.Wrap(apperror.CodeRegistryAppInstallFailed, fmt.Errorf("publish Registry App: %w", err), nil)
+		return nil, nil, installFailed(fmt.Errorf("publish Registry App: %w", err))
 	}
 	installed := make([]InstallSkillResponse, 0, len(prepared.skills))
 	for _, item := range prepared.skills {
@@ -311,15 +311,15 @@ func publishApp(ctx context.Context, client *bridge.Client, prepared preparedApp
 
 func validateApp(pkg AppDescriptor, registryID, appID string) error {
 	if pkg.SchemaVersion != "2" || pkg.RegistryID != registryID || pkg.AppID != appID || !isCanonicalSHA256(pkg.Revision) || len(pkg.Skills) > maxAppSkills || pkg.SkillCount != len(pkg.Skills) {
-		return errors.New("registry App release is invalid")
+		return errs.NewDependency("registry App release is invalid")
 	}
 	if len(pkg.Skills) == 0 && len(pkg.Dependencies) == 0 && len(pkg.Connectors) == 0 {
-		return errors.New("registry App release is empty")
+		return errs.NewDependency("registry App release is empty")
 	}
 	seen := make(map[string]struct{}, len(pkg.Skills))
 	for _, skill := range pkg.Skills {
 		if _, exists := seen[skill.SkillID]; exists {
-			return errors.New("registry App contains duplicate Skills")
+			return errs.NewDependency("registry App contains duplicate Skills")
 		}
 		seen[skill.SkillID] = struct{}{}
 		if err := validateSkill(skill, registryID, appID, skill.SkillID); err != nil {
@@ -329,20 +329,20 @@ func validateApp(pkg AppDescriptor, registryID, appID string) error {
 	seenDependencies := make(map[string]struct{}, len(pkg.Dependencies))
 	for _, dependency := range pkg.Dependencies {
 		if strings.TrimSpace(dependency) == "" {
-			return errors.New("registry App dependency reference is invalid")
+			return errs.NewDependency("registry App dependency reference is invalid")
 		}
 		if _, exists := seenDependencies[dependency]; exists {
-			return errors.New("registry App contains duplicate dependency references")
+			return errs.NewDependency("registry App contains duplicate dependency references")
 		}
 		seenDependencies[dependency] = struct{}{}
 	}
 	seenConnectors := make(map[string]struct{}, len(pkg.Connectors))
 	for _, connector := range pkg.Connectors {
 		if strings.TrimSpace(connector.Type) == "" {
-			return errors.New("registry App connector reference is invalid")
+			return errs.NewDependency("registry App connector reference is invalid")
 		}
 		if _, exists := seenConnectors[connector.Type]; exists {
-			return errors.New("registry App contains duplicate connector references")
+			return errs.NewDependency("registry App contains duplicate connector references")
 		}
 		seenConnectors[connector.Type] = struct{}{}
 	}
@@ -352,10 +352,10 @@ func validateApp(pkg AppDescriptor, registryID, appID string) error {
 func validateSkill(skill CatalogSkill, registryID, appID, skillID string) error {
 	artifact := skill.Artifact
 	if skill.RegistryID != registryID || skill.AppID != appID || skill.SkillID != skillID || skill.InstallID != strings.Join([]string{registryID, appID, skillID}, "+") || !skillset.IsValidName(skill.InstallID) {
-		return errors.New("registry Skill identity is invalid")
+		return errs.NewDependency("registry Skill identity is invalid")
 	}
 	if artifact.Format != "memoh_skill_v1" || artifact.ContentType != "application/gzip" || !isCanonicalSHA256(artifact.Digest) || artifact.Size < 1 || artifact.Size > maxSkillArtifactCompressedBytes || artifact.UncompressedSize < 1 || artifact.UncompressedSize > maxSkillArtifactUncompressedBytes || artifact.ArchiveSize < 1 || artifact.ArchiveSize > maxSkillArtifactArchiveBytes || artifact.FileCount < 1 || artifact.FileCount > maxSkillArtifactFiles || strings.TrimSpace(artifact.DownloadURL) == "" {
-		return errors.New("registry Skill Artifact descriptor is invalid")
+		return errs.NewDependency("registry Skill Artifact descriptor is invalid")
 	}
 	return nil
 }
@@ -366,7 +366,7 @@ func validateAppBudget(skills []CatalogSkill) error {
 	for _, skill := range skills {
 		artifact := skill.Artifact
 		if artifact.Size > maxAppArtifactsCompressed-compressed || artifact.UncompressedSize > maxAppArtifactsUncompressed-uncompressed || artifact.ArchiveSize > maxAppArtifactsArchive-archive || artifact.FileCount > maxAppArtifactFiles-files {
-			return errors.New("registry App exceeds the aggregate Artifact limits")
+			return errs.NewDependency("registry App exceeds the aggregate Artifact limits")
 		}
 		compressed += artifact.Size
 		uncompressed += artifact.UncompressedSize
@@ -374,8 +374,4 @@ func validateAppBudget(skills []CatalogSkill) error {
 		files += artifact.FileCount
 	}
 	return nil
-}
-
-func invalidApp(err error) error {
-	return apperror.Wrap(apperror.CodeRegistryAppInvalid, err, nil)
 }

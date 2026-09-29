@@ -37,6 +37,7 @@ import (
 	"github.com/felinics/memoh/internal/schedule"
 	searchpkg "github.com/felinics/memoh/internal/searchproviders"
 	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type importState struct {
@@ -715,7 +716,7 @@ func (s *Service) restoreWorkspaceData(ctx context.Context, botID string, raw []
 			return nil
 		}
 		lastErr = err
-		if !isWorkspaceRestoreRetryable(err) || time.Now().After(deadline) {
+		if !workspace.IsNotReady(err) || time.Now().After(deadline) {
 			return lastErr
 		}
 		timer := time.NewTimer(workspaceRestoreRetryInterval)
@@ -726,25 +727,6 @@ func (s *Service) restoreWorkspaceData(ctx context.Context, botID string, raw []
 		case <-timer.C:
 		}
 	}
-}
-
-func isWorkspaceRestoreRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	retryable := []string{
-		"not found",
-		"no such container",
-		"workspace is not reachable",
-		"connection refused",
-	}
-	for _, item := range retryable {
-		if strings.Contains(msg, item) {
-			return true
-		}
-	}
-	return false
 }
 
 type dependencyMap struct {
