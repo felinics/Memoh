@@ -492,7 +492,7 @@ func TestAgentEventToChannelEventMapsErrors(t *testing.T) {
 		{
 			name:     "catalogued code gets channel copy",
 			event:    agentevent.StreamEvent{Type: agentevent.Error, Code: " agent.provider_overloaded ", Error: "raw provider text"},
-			wantText: "The model provider is overloaded right now. Please try again in a moment.",
+			wantText: "The model provider is unavailable or overloaded right now. Please try again in a moment.",
 			wantCode: "agent.provider_overloaded",
 		},
 		{

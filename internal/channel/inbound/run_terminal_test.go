@@ -68,7 +68,7 @@ func runIMTerminal(t *testing.T, gateway *terminalFailureGateway) (imFailureResu
 }
 
 const (
-	overloadedCopy  = "The model provider is overloaded right now. Please try again in a moment."
+	overloadedCopy  = "The model provider is unavailable or overloaded right now. Please try again in a moment."
 	runFailedCopy   = "The response could not be completed. Please try again."
 	interruptedCopy = "The model response was interrupted. Please try again."
 )
@@ -80,7 +80,7 @@ func TestIMFailureReplyComesFromRunTerminal(t *testing.T) {
 	got, failures := runIMTerminal(t, &terminalFailureGateway{scriptedFailureGateway: scriptedFailureGateway{payloads: []string{
 		`{"type":"agent_start"}`,
 		`{"type":"error","code":"agent.provider_rate_limited","error":"The model provider rate limit was reached. Please wait a moment before sending again."}`,
-		`{"type":"retry","attempt":1,"maxAttempt":3,"retryError":"api error 503"}`,
+		`{"type":"retry","attempt":1,"maxAttempt":3}`,
 		`{"type":"error","code":"agent.provider_overloaded","error":"SECRET upstream text"}`,
 		`{"type":"agent_abort","messages":[]}`,
 		`{"type":"run_terminal","state":"failed","error_code":"agent.provider_overloaded"}`,

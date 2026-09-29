@@ -240,3 +240,7 @@ workspace_snapshotter_mismatch	400
 workspace_start_failed	500
 workspace_stop_failed	500
 search_provider.invalid_provider	400
+agent.provider_permission_denied	502
+agent.provider_request_rejected	502
+agent.provider_unreachable	502
+external_runtime.usage_limited	429

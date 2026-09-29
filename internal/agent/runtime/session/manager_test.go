@@ -1273,7 +1273,7 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 	})
 	t.Run("clears a retried error when the recovered stream ends", func(t *testing.T) {
 		t.Parallel()
-		runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t, suite)
+		runRuntimeManagerRetryDiscardsAttemptOutputContract(t, suite)
 	})
 	t.Run("fences delayed owner mutations after stream id reuse", func(t *testing.T) {
 		t.Parallel()
@@ -3999,7 +3999,7 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterEndContract(t *testing.T, su
 	}
 }
 
-func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite runtimeBackendContractSuite) {
+func runRuntimeManagerRetryDiscardsAttemptOutputContract(t *testing.T, suite runtimeBackendContractSuite) {
 	t.Helper()
 
 	manager := testRuntimeManager(t, suite.newBackend(t), "owner-retry-recovered")
@@ -4007,21 +4007,31 @@ func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite r
 		t.Fatalf("start run: %v", err)
 	}
 	handle := requireRunHandle(t, manager, testBotID, testSessionID, testRunID)
-	// The native stream publishes the mid-stream failure before it retries, so
-	// a run that recovers must not stay errored once it reaches a clean end.
+	// The failed attempt streamed some text before the native stream retried
+	// it. The retry discards that output; the recovered attempt then ends
+	// cleanly and the run completes.
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
-		Type:  native.EventError,
-		Error: "provider hung up",
+		Type:  native.EventTextDelta,
+		Delta: "partial answer",
 	}); err != nil {
-		t.Fatalf("handle error event: %v", err)
+		t.Fatalf("handle text event: %v", err)
+	}
+	if streamed, err := manager.Snapshot(context.Background(), testBotID, testSessionID); err != nil || streamed.CurrentRunView == nil || len(streamed.CurrentRunView.Messages) == 0 {
+		t.Fatalf("run before retry = %#v, %v; want the attempt's partial output", streamed.CurrentRunView, err)
 	}
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type:       native.EventRetry,
 		Attempt:    1,
 		MaxAttempt: 3,
-		RetryError: "provider hung up",
 	}); err != nil {
 		t.Fatalf("handle retry event: %v", err)
+	}
+	retried, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("retried snapshot: %v", err)
+	}
+	if retried.CurrentRunView == nil || len(retried.CurrentRunView.Messages) != 0 || retried.CurrentRunView.ErrorCode != "" {
+		t.Fatalf("run after retry = %#v, want the attempt's output discarded and no error", retried.CurrentRunView)
 	}
 	if _, err := manager.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type: native.EventAgentEnd,
@@ -4048,7 +4058,7 @@ func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite r
 		t.Fatalf("current run = %#v, want completed", snapshot.CurrentRunView)
 	}
 	if snapshot.CurrentRunView.ErrorCode != "" {
-		t.Fatalf("error code = %q, want the retried failure cleared", snapshot.CurrentRunView.ErrorCode)
+		t.Fatalf("error code = %q, want none for a recovered run", snapshot.CurrentRunView.ErrorCode)
 	}
 }
 

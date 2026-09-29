@@ -353,7 +353,7 @@ onMounted(() => {
               </p>
               <p
                 v-if="errorDetail"
-                class="mt-1 text-xs text-muted-foreground/70 font-mono"
+                class="mt-1 text-xs text-muted-foreground/70"
               >
                 {{ errorDetail }}
               </p>

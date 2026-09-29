@@ -6001,10 +6001,13 @@ definitions:
     - ModelTypeVideo
   models.TestResponse:
     properties:
+      code:
+        description: |-
+          Code is the error catalog code for why the test did not pass. It is
+          empty on success and when no catalog code describes the failure.
+        type: string
       latency_ms:
         type: integer
-      message:
-        type: string
       reachable:
         type: boolean
       status:
@@ -6180,10 +6183,13 @@ definitions:
     type: object
   providers.TestResponse:
     properties:
+      code:
+        description: |-
+          Code is the error catalog code for why the test did not pass. It is
+          empty on success and when no catalog code describes the failure.
+        type: string
       latency_ms:
         type: integer
-      message:
-        type: string
       reachable:
         type: boolean
       status:

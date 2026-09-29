@@ -129,10 +129,10 @@ func TestCharacterizeIMErrorEventText_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{payloads: []string{
 		`{"type":"agent_start"}`,
-		`{"type":"retry","attempt":1,"maxAttempt":3,"retryError":"api error 503"}`,
-		`{"type":"error","code":"agent.provider_overloaded","error":"The model provider is overloaded right now. Please try again in a moment."}`,
+		`{"type":"retry","attempt":1,"maxAttempt":3}`,
+		`{"type":"error","code":"agent.provider_overloaded","error":"The model provider is unavailable or overloaded right now. Please try again in a moment."}`,
 		`{"type":"agent_abort","messages":[]}`,
-	}}), "", false, "The model provider is overloaded right now. Please try again in a moment.")
+	}}), "", false, "The model provider is unavailable or overloaded right now. Please try again in a moment.")
 	// An event without a code is shown with the failed run copy, not its text.
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{payloads: []string{
 		`{"type":"error","error":"SECRET raw"}`,

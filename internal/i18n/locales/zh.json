@@ -560,10 +560,13 @@
     "agent": {
       "response_timeout": "模型未能及时响应，请重试。",
       "response_interrupted": "模型响应意外中断，请重试。",
-      "provider_overloaded": "模型服务当前过载，请稍后重试。",
+      "provider_overloaded": "模型服务暂时不可用或过载，请稍后重试。",
       "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送。",
       "provider_quota_exhausted": "模型服务账户的余额或配额已用尽。",
       "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。",
+      "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。",
+      "provider_request_rejected": "模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。",
+      "provider_unreachable": "无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。",
       "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。"
     },
     "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
@@ -711,7 +714,8 @@
     "external_runtime": {
       "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
-      "session_resume_failed": "会话无法恢复，请重试或新开会话。"
+      "session_resume_failed": "会话无法恢复，请重试或新开会话。",
+      "usage_limited": "外部 Agent 的额度已用完，请稍后再试。"
     },
     "app": {
       "not_found": "未找到该应用安装记录。",

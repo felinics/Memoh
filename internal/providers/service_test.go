@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -1239,7 +1243,7 @@ func TestTestSkipsModelProbeAfterSuccessfulModelsList(t *testing.T) {
 		t.Fatalf("Test() error = %v", err)
 	}
 	if resp.Status != TestStatusOK {
-		t.Fatalf("status = %q, want %q (message: %s)", resp.Status, TestStatusOK, resp.Message)
+		t.Fatalf("status = %q, want %q (cause: %v)", resp.Status, TestStatusOK, resp.Cause)
 	}
 	if !resp.Reachable {
 		t.Fatal("reachable = false, want true")
@@ -1285,10 +1289,56 @@ func TestTestModelsListOutcomeMapping(t *testing.T) {
 				t.Fatalf("Test() error = %v", err)
 			}
 			if resp.Status != tc.wantStatus {
-				t.Fatalf("status = %q, want %q (message: %s)", resp.Status, tc.wantStatus, resp.Message)
+				t.Fatalf("status = %q, want %q (cause: %v)", resp.Status, tc.wantStatus, resp.Cause)
 			}
 			if !resp.Reachable {
 				t.Fatal("reachable = false, want true")
+			}
+		})
+	}
+}
+
+// Locks the outcome rules on Service.Test against the three shapes
+// sdk.Provider.Test returns: nil, an *sdk.APIError, and any other error.
+func TestProviderTestOutcome(t *testing.T) {
+	t.Parallel()
+
+	refused := &url.Error{Op: "Get", URL: "http://127.0.0.1:1/models", Err: errors.New("connect: connection refused")}
+	cases := []struct {
+		name          string
+		err           error
+		wantStatus    TestStatus
+		wantReachable bool
+	}{
+		{"passed", nil, TestStatusOK, true},
+		{"401", &sdk.APIError{StatusCode: http.StatusUnauthorized, Kind: sdk.KindAuthentication}, TestStatusAuthError, true},
+		{"403", &sdk.APIError{StatusCode: http.StatusForbidden, Kind: sdk.KindPermissionDenied}, TestStatusAuthError, true},
+		{"404", &sdk.APIError{StatusCode: http.StatusNotFound, Kind: sdk.KindUnknown}, TestStatusUnverified, true},
+		{"429", &sdk.APIError{StatusCode: http.StatusTooManyRequests, Kind: sdk.KindRateLimited}, TestStatusUnverified, true},
+		{"503", &sdk.APIError{StatusCode: http.StatusServiceUnavailable, Kind: sdk.KindServerError}, TestStatusUnverified, true},
+		{"wrapped 401", fmt.Errorf("openai: test request failed: %w", &sdk.APIError{StatusCode: http.StatusUnauthorized, Kind: sdk.KindAuthentication}), TestStatusAuthError, true},
+		{"connection refused", fmt.Errorf("request failed: %w", refused), TestStatusError, false},
+		{"context ended", context.DeadlineExceeded, TestStatusError, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			resp := providerTestOutcome(tc.err)
+			if resp.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", resp.Status, tc.wantStatus)
+			}
+			if resp.Reachable != tc.wantReachable {
+				t.Fatalf("reachable = %v, want %v", resp.Reachable, tc.wantReachable)
+			}
+			if tc.err == nil {
+				if resp.Cause != nil {
+					t.Fatalf("cause = %v, want nil", resp.Cause)
+				}
+				return
+			}
+			if !errors.Is(resp.Cause, tc.err) {
+				t.Fatalf("cause = %v, want it to wrap %v", resp.Cause, tc.err)
 			}
 		})
 	}
@@ -1314,5 +1364,9 @@ func TestTestUnreachableStaysHardError(t *testing.T) {
 	}
 	if resp.Reachable {
 		t.Fatal("reachable = true, want false")
+	}
+	var urlErr *url.Error
+	if !errors.As(resp.Cause, &urlErr) {
+		t.Fatalf("cause = %v, want a *url.Error in the chain", resp.Cause)
 	}
 }

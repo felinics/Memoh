@@ -243,7 +243,7 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	var allText strings.Builder
 	var finalMessages []sdk.Message
 	var totalUsage sdk.Usage
-	var lastError string
+	var lastErr error
 	completed := false
 	var abortEvent *StreamEvent
 	var endEvent *StreamEvent
@@ -254,14 +254,12 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		touchFn()
 		switch evt.Type {
 		case EventError:
-			// Error is attempt-local until the caller resolves the following abort:
-			// a retry clears it, while owning cancellation must not be mislabeled as
-			// a provider failure merely because the two raced.
+			// The stream reports only the failure it ends with; a failure it
+			// retries appears as EventRetry alone. The error is still held
+			// until the caller resolves the following abort: owning
+			// cancellation must not be mislabeled as a provider failure merely
+			// because the two raced.
 			pendingErrors = append(pendingErrors, evt)
-		case EventRetry:
-			observeSpawnEvents(observe, pendingErrors)
-			pendingErrors = nil
-			observeSpawnEvent(observe, evt)
 		case EventAgentAbort:
 			// The spawn provider owns the outer retry loop, so it decides below
 			// whether this is a terminal abort or only the end of one attempt.
@@ -279,13 +277,7 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		case EventTextDelta:
 			allText.WriteString(evt.Delta)
 		case EventError:
-			lastError = evt.Error
-		case EventRetry:
-			// The stream is retrying what it just reported, so the error is no
-			// longer this run's outcome. Holding it would turn a later abort
-			// into a failure report naming a provider error the run recovered
-			// from; a retry that gives up publishes its own final error.
-			lastError = ""
+			lastErr = evt.Cause
 		case EventAgentEnd, EventAgentAbort:
 			completed = evt.Type == EventAgentEnd
 			if completed {
@@ -314,20 +306,18 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		}
 	}
 	// A stream that errored without reaching a clean end is a failed attempt,
-	// not a short answer. Surfacing the provider's own error text is what lets
-	// the caller's retry patterns (429 / 5xx / connection reset) match; the
-	// pre-fix behavior swallowed these into an empty success. An error that
-	// the run recovered from (mid-stream retry reached EventAgentEnd) stays
-	// invisible here, exactly like the main chat path.
+	// not a short answer: the error it ended with is the attempt's error, with
+	// the runtime's whole chain, so the caller sees the provider's own failure.
+	// A failure the run recovered from never reaches here; the stream retried
+	// it without reporting it.
 	if runErr == nil && !completed {
-		if lastError != "" {
-			runErr = errors.New(lastError)
-		} else {
+		runErr = lastErr
+		if runErr == nil {
 			runErr = errSpawnAgentAborted
 		}
 	}
 	if runErr != nil {
-		outcome := observeSpawnAttemptFailure(ctx, observe, cfg, abortEvent, pendingErrors, lastError, runErr)
+		outcome := observeSpawnAttemptFailure(ctx, observe, cfg, abortEvent, pendingErrors, runErr)
 		if cfg.ReconcileTerminal != nil {
 			cfg.ReconcileTerminal(outcome)
 		}
@@ -362,7 +352,7 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	if disposition != tools.SpawnAttemptCompleted {
 		terminal.Type = EventAgentAbort
 		if disposition != tools.SpawnAttemptAbort {
-			observeSpawnEvent(observe, StreamEvent{Type: EventError, Error: errSpawnAgentAborted.Error()})
+			observeSpawnEvent(observe, StreamEvent{Type: EventError, Cause: errSpawnAgentAborted})
 		}
 	}
 	observation := observeSpawnEvent(observe, terminal)
@@ -393,7 +383,6 @@ func observeSpawnAttemptFailure(
 	cfg tools.SpawnRunConfig,
 	abortEvent *StreamEvent,
 	pendingErrors []StreamEvent,
-	lastError string,
 	runErr error,
 ) tools.SpawnAttemptDisposition {
 	disposition := tools.SpawnAttemptFailure
@@ -413,12 +402,9 @@ func observeSpawnAttemptFailure(
 	}
 	switch disposition {
 	case tools.SpawnAttemptRetry:
-		observeSpawnEvents(observe, pendingErrors)
-		retryError := strings.TrimSpace(lastError)
-		if retryError == "" {
-			retryError = errSpawnAgentAborted.Error()
-			observeSpawnEvent(observe, StreamEvent{Type: EventError, Error: retryError})
-		}
+		// The attempt is run again, so its failure is not the run's: the
+		// session sees the retry and nothing else, exactly as for a model call
+		// the stream retried.
 		attempt := cfg.Attempt
 		if attempt <= 0 {
 			attempt = 1
@@ -431,7 +417,6 @@ func observeSpawnAttemptFailure(
 			Type:       EventRetry,
 			Attempt:    attempt,
 			MaxAttempt: maxAttempts,
-			RetryError: retryError,
 		})
 		return disposition
 	case tools.SpawnAttemptAbort:
@@ -442,7 +427,7 @@ func observeSpawnAttemptFailure(
 	default:
 		observeSpawnEvents(observe, pendingErrors)
 		if len(pendingErrors) == 0 {
-			observeSpawnEvent(observe, StreamEvent{Type: EventError, Error: errSpawnAgentAborted.Error()})
+			observeSpawnEvent(observe, StreamEvent{Type: EventError, Cause: errSpawnAgentAborted})
 		}
 		if abortEvent != nil {
 			return reconcile(observeSpawnEvent(observe, *abortEvent))

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -42,7 +43,7 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 			provider := agentStreamTestProvider(func(ctx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 				call := int(calls.Add(1))
 				if mode == "retry" && call == 1 {
-					return closedAgentTestStream(&sdk.ErrorPart{Error: errors.New("unexpected EOF")}), nil
+					return closedAgentTestStream(&sdk.ErrorPart{Error: io.ErrUnexpectedEOF}), nil
 				}
 				call -= retryAttempts
 				if call > interruptions {
@@ -113,6 +114,9 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 					}
 					if strings.Contains(e.Error, "SECRET") || (e.Type == EventError && mode != "checkpoint_failure" && mode != "retry") {
 						t.Fatalf("unexpected public error: %+v", e)
+					}
+					if mode == "checkpoint_failure" && e.Type == EventError && e.Code != "runtime_run_failed" {
+						t.Fatalf("checkpoint failure code = %q, want runtime_run_failed", e.Code)
 					}
 					if e.IsTerminal() {
 						terminals++

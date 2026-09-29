@@ -3622,7 +3622,7 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			name:          "error with a catalogued code shows its copy",
 			chunk:         `{"type":"error","code":"agent.provider_overloaded","error":"upstream 529 overloaded_error"}`,
 			wantType:      channel.StreamEventError,
-			wantError:     "The model provider is overloaded right now. Please try again in a moment.",
+			wantError:     "The model provider is unavailable or overloaded right now. Please try again in a moment.",
 			wantErrorCode: "agent.provider_overloaded",
 		},
 		{

@@ -85,8 +85,8 @@ func (*envelopeProbeProvider) Name() string { return "mock" }
 
 func (*envelopeProbeProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
 
-func (*envelopeProbeProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*envelopeProbeProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*envelopeProbeProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {

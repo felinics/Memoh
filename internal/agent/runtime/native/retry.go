@@ -3,11 +3,12 @@ package native
 import (
 	"context"
 	"errors"
+	"io"
 	"math/rand/v2"
 	"net"
-	"regexp"
-	"strings"
 	"time"
+
+	sdk "github.com/felinics/twilight/sdk"
 )
 
 // RetryConfig controls retry behavior for stream failures.
@@ -16,30 +17,6 @@ type RetryConfig struct {
 	FastAttempts int           // first N attempts with no delay
 	BaseDelay    time.Duration // backoff base for non-fast attempts
 	MaxDelay     time.Duration // backoff cap
-}
-
-// err429Pattern matches HTTP 429 status codes in error strings.
-// Requires a non-digit boundary to avoid matching "429" inside larger numbers.
-var err429Pattern = regexp.MustCompile(`(^|[^0-9])429($|[^0-9])`)
-
-// errEOFPattern matches EOF or connection-level resets.
-var errEOFPattern = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
-
-// serverErrPattern matches "api error 5XX" where XX is any two digits.
-var serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
-
-type stepCommitError struct {
-	cause error
-}
-
-func (e stepCommitError) Error() string { return e.cause.Error() }
-func (e stepCommitError) Unwrap() error { return e.cause }
-
-func tagStepCommitError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return stepCommitError{cause: err}
 }
 
 // DefaultRetryConfig returns the default retry strategy: 5 attempts total.
@@ -56,41 +33,38 @@ func DefaultRetryConfig() RetryConfig {
 	}
 }
 
-// isRetryableStreamError returns true for errors worth retrying.
-func isRetryableStreamError(err error) bool {
+// retryableProviderFailure reports whether a failed model call is worth
+// making again. Only the failure of the provider call itself is asked about:
+// a failure of the loop's own work (the provider-attempt handoff, a commit, a
+// capability refresh, a tool batch) ends the run, since a retry would redo it.
+// The order of the checks is part of the answer.
+func retryableProviderFailure(err error) bool {
 	if err == nil {
 		return false
 	}
-	var commitErr stepCommitError
-	if errors.As(err, &commitErr) {
-		return false
-	}
-	// Context cancelled/expired — do NOT retry (check first since
-	// context.DeadlineExceeded also satisfies net.Error)
+	// A cancellation or an expired deadline is never retried. It is checked
+	// first because context.DeadlineExceeded also satisfies net.Error.
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	// Network-level errors (connection refused, timeout, DNS)
+	// The provider answered: its Kind says whether waiting helps. Any other
+	// Kind, including one a later SDK adds, is final.
+	var apiErr *sdk.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.Kind {
+		case sdk.KindRateLimited, sdk.KindServerError:
+			return true
+		default:
+			return false
+		}
+	}
+	// The response was cut off, cleanly or not, or never arrived. The failed
+	// step never committed, so calling again replays nothing.
+	if errors.Is(err, sdk.ErrStreamIncomplete) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	// HTTP status errors: retry on 429 and 5xx
-	errStr := err.Error()
-	if err429Pattern.MatchString(errStr) {
-		return true
-	}
-	if strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "rate_limit") {
-		return true
-	}
-	if serverErrPattern.MatchString(errStr) {
-		return true
-	}
-	// Connection reset / EOF
-	if errEOFPattern.MatchString(errStr) {
-		return true
-	}
-	return false
+	return errors.As(err, &netErr)
 }
 
 // retryDelay returns the delay before the next retry attempt.

@@ -10,6 +10,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -62,7 +63,10 @@ func historyFailureCode(code apperror.Code) apperror.Code {
 		apperror.CodeAgentProviderOverloaded,
 		apperror.CodeAgentProviderRateLimited,
 		apperror.CodeAgentProviderQuotaExhausted,
-		apperror.CodeAgentProviderAuthFailed:
+		apperror.CodeAgentProviderAuthFailed,
+		apperror.CodeAgentProviderPermissionDenied,
+		apperror.CodeAgentProviderRequestRejected,
+		apperror.CodeAgentProviderUnreachable:
 		return code
 	default:
 		return ""
@@ -112,49 +116,67 @@ func hasVisibleAgentStreamOutput(event native.StreamEvent) bool {
 	}
 }
 
-func agentStreamEventError(event native.StreamEvent) error {
+// agentStreamFailure translates the failure an error event reports into the
+// run's public error, keeping the event's cause, and returns nil for any other
+// event. Every consumer of agent events uses it, so the run's terminal write,
+// the history marker, the session's live view and the published event name a
+// failure alike.
+//
+// An event that already carries a catalogued code keeps it and its args: the
+// application and the External Agent runtimes name their failures themselves. A native
+// failure is named from its cause by nativeFailureCode.
+func agentStreamFailure(event native.StreamEvent) error {
 	if event.Type != native.EventError {
 		return nil
 	}
 	if code := apperror.Code(strings.TrimSpace(event.Code)); code != "" {
 		if _, ok := apperror.Lookup(code); ok {
-			return apperror.New(code, nil)
+			return apperror.Wrap(code, event.Cause, event.Args)
 		}
 	}
-	detail := strings.TrimSpace(event.Error)
-	if detail == "" {
-		detail = "agent stream failed"
-	}
-	return errors.New(detail)
+	return apperror.Wrap(nativeFailureCode(event.Cause), event.Cause, nil)
 }
 
-func agentStreamLifecycleError(event native.StreamEvent) error {
-	err := agentStreamEventError(event)
-	if err == nil || apperror.CodeOf(err) != "" {
-		return err
+// nativeFailureCode names the failure a native run ended with. A context the
+// budget cannot fit is named before anything else, since only compacting or
+// another model helps. A provider that named why it refused the request is
+// reported with that reason: an exhausted balance and a rejected key both need
+// the user to go change something, and "the model response was interrupted,
+// please try again" sends them back into a call that cannot succeed. A model
+// call that got no response reports the provider unreachable. Anything else
+// is an interrupted response; the runtime names its own failures itself.
+func nativeFailureCode(cause error) apperror.Code {
+	switch {
+	case errors.Is(cause, contextfrag.ErrProtectedContextOverflow):
+		return apperror.CodeContextProtectedOverflow
+	case errors.Is(cause, contextfrag.ErrBudgetUnsatisfied):
+		return apperror.CodeContextBudgetUnsatisfied
 	}
-	// A provider that names why it refused the request is reported with that
-	// reason: an exhausted balance and a rejected key both need the user to go
-	// change something, and "the model response was interrupted, please try
-	// again" sends them back into a call that cannot succeed.
-	if code := providerFailureCode(event.Error); code != "" {
-		return apperror.Wrap(code, err, nil)
+	if code := providerFailureCode(cause, native.IsModelCallFailure(cause)); code != "" {
+		return code
 	}
-	return apperror.Wrap(apperror.CodeAgentResponseInterrupted, err, nil)
+	return apperror.CodeAgentResponseInterrupted
 }
 
 func agentFailureStreamEvent(cause error) native.StreamEvent {
 	code := classifyRunFailure(cause)
 	definition, _ := apperror.Lookup(code)
-	return native.StreamEvent{
+	event := native.StreamEvent{
 		Type:  native.EventError,
 		Code:  string(code),
 		Error: definition.Detail,
 	}
+	if public, ok := apperror.PublicFrom(cause, ""); ok && public.Code == code && len(public.Args) > 0 {
+		event.Args = public.Args
+	}
+	return event
 }
 
+// publicAgentStreamEvent is event as it leaves the application: an error
+// event is replaced by its code and the catalog detail, so its cause never
+// reaches a subscriber.
 func publicAgentStreamEvent(event native.StreamEvent) native.StreamEvent {
-	if cause := agentStreamLifecycleError(event); cause != nil {
+	if cause := agentStreamFailure(event); cause != nil {
 		return agentFailureStreamEvent(cause)
 	}
 	return event
@@ -364,9 +386,9 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			// run. Non-terminal events retain their low-latency publication path.
 			if streamReq.PublishRuntimeEvents && s.publishTurnEvent != nil {
 				if event.IsTerminal() && stepCommitter != nil {
-					terminal := outcome.stampTerminal(event)
+					terminal := published
 					deferredRuntimeTerminal = &terminal
-				} else if publishErr := s.publishTurnEvent(streamCtx, streamReq.RunHandle, outcome.stampTerminal(event)); publishErr != nil {
+				} else if publishErr := s.publishTurnEvent(streamCtx, streamReq.RunHandle, published); publishErr != nil {
 					s.logger.WarnContext(ctx, "continuation runtime event publish failed", slog.String("run_id", streamReq.RunID), slog.Any("error", publishErr))
 				}
 			}

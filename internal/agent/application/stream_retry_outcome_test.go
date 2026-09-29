@@ -28,8 +28,8 @@ import (
 // the scripted HTTP statuses and passes every later request to the real test
 // provider. A 503 is retryable in the native runtime and a 400 is not, so the
 // event order comes from production code: a single 503 gives
-// EventError -> EventRetry -> AgentEnd, and 503 then 400 gives
-// EventError -> EventRetry -> EventError -> AgentAbort.
+// EventRetry -> AgentEnd, and 503 then 400 gives
+// EventRetry -> EventError -> AgentAbort.
 type scriptedFailureTransport struct {
 	base     http.RoundTripper
 	statuses []int
@@ -183,8 +183,9 @@ func runNativeTurnWith(t *testing.T, fixture directLifecycleFixture, runs *propo
 }
 
 // X4, turn RPC (IM) native path: a stream error that the runtime retried and
-// recovered from is not reported. The caller's Errs() stays empty, both
-// finish proposals say completed, and session_runs ends completed.
+// recovered from is not reported. The stream carries the retry and no error,
+// the caller's Errs() stays empty, both finish proposals say completed, and
+// session_runs ends completed.
 func TestStreamChatRetrySuccessReportsNoError(t *testing.T) {
 	fixture, transport := newScriptedFailureFixture(t, http.StatusServiceUnavailable)
 	got := runNativeTurn(t, fixture)
@@ -192,7 +193,8 @@ func TestStreamChatRetrySuccessReportsNoError(t *testing.T) {
 	if calls := transport.calls.Load(); calls < 2 {
 		t.Fatalf("model requests = %d, want the failed attempt and its retry", calls)
 	}
-	assertOrdered(t, got.types, "error", "retry", "agent_end")
+	assertOrdered(t, got.types, "retry", "agent_end")
+	assertCount(t, got.types, "error", 0)
 	if len(fixture.messages.persisted) == 0 {
 		t.Fatal("the recovered answer was not stored")
 	}
@@ -218,12 +220,10 @@ func TestStreamChatRetryFailureReportsError(t *testing.T) {
 	if calls := transport.calls.Load(); calls != 2 {
 		t.Fatalf("model requests = %d, want the retried attempt and the final one", calls)
 	}
-	assertOrdered(t, got.types, "error", "retry", "error", "agent_abort")
-	if len(got.errCodes) != 1 || got.errCodes[0] == "" {
-		t.Fatalf("turn error codes = %q, want exactly one coded error", got.errCodes)
-	}
-	// X3: the run records the same first failure the turn port reports, not
-	// the last stream error.
+	assertOrdered(t, got.types, "retry", "error", "agent_abort")
+	assertCount(t, got.types, "error", 1)
+	// The 400 the provider answered last names the run's failure.
+	assertStrings(t, "turn error codes", got.errCodes, []string{string(apperror.CodeAgentProviderRequestRejected)})
 	if want := [3]string{"failed", got.errCodes[0], ""}; got.ledger != want {
 		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
 	}
@@ -231,7 +231,7 @@ func TestStreamChatRetryFailureReportsError(t *testing.T) {
 
 // A WebSocket stream whose retry does not recover delivers the failure in the
 // stream and returns no error; its outcome still names the failure for the
-// terminal write, with the code of the first error.
+// terminal write, with the code of the one error the stream delivered.
 func TestStreamChatWSRetryFailureReportsOutcome(t *testing.T) {
 	fixture, _ := newScriptedFailureFixture(t, http.StatusServiceUnavailable, http.StatusBadRequest)
 	eventCh := make(chan WSStreamEvent)
@@ -256,7 +256,8 @@ func TestStreamChatWSRetryFailureReportsOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WS turn error = %v, want the failure delivered in the stream", err)
 	}
-	assertOrdered(t, eventTypes(t, payloads), "error", "retry", "error", "agent_abort")
+	assertOrdered(t, eventTypes(t, payloads), "retry", "error", "agent_abort")
+	assertCount(t, eventTypes(t, payloads), "error", 1)
 	var first, terminal struct{ Type, Code string }
 	for _, payload := range payloads {
 		var event struct{ Type, Code string }
@@ -268,16 +269,20 @@ func TestStreamChatWSRetryFailureReportsOutcome(t *testing.T) {
 			terminal = event
 		}
 	}
-	if outcome.Status != sessionruntime.RunStatusErrored || outcome.ErrorCode() != first.Code || first.Code == "" {
-		t.Fatalf("outcome = %q / %q, want errored with the first error's code %q", outcome.Status, outcome.ErrorCode(), first.Code)
+	if first.Code != string(apperror.CodeAgentProviderRequestRejected) {
+		t.Fatalf("error code = %q, want the rejected request's", first.Code)
+	}
+	if outcome.Status != sessionruntime.RunStatusErrored || outcome.ErrorCode() != first.Code {
+		t.Fatalf("outcome = %q / %q, want errored with the error's code %q", outcome.Status, outcome.ErrorCode(), first.Code)
 	}
 	if terminal.Code != first.Code {
 		t.Fatalf("agent_abort code = %q, want %q", terminal.Code, first.Code)
 	}
 }
 
-// X4, WebSocket path: the same error -> retry -> AgentEnd sequence. AgentEnd
-// clears lifecycleCause and the function returns nil.
+// X4, WebSocket path: the same retry -> AgentEnd sequence. The socket gets no
+// error frame, the retry frame carries its counters and nothing about the
+// failure, and the function returns nil.
 func TestStreamChatWSRetrySuccessReportsNoError_X4(t *testing.T) {
 	fixture, transport := newScriptedFailureFixture(t, http.StatusServiceUnavailable)
 	eventCh := make(chan WSStreamEvent)
@@ -302,12 +307,42 @@ func TestStreamChatWSRetrySuccessReportsNoError_X4(t *testing.T) {
 	if got := transport.calls.Load(); got < 2 {
 		t.Fatalf("model requests = %d, want the failed attempt and its retry", got)
 	}
-	assertOrdered(t, eventTypes(t, payloads), "error", "retry", "agent_end")
+	types := eventTypes(t, payloads)
+	assertOrdered(t, types, "retry", "agent_end")
+	assertCount(t, types, "error", 0)
+	for _, payload := range payloads {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(payload, &fields); err != nil {
+			t.Fatalf("decode event %s: %v", payload, err)
+		}
+		if string(fields["type"]) != `"retry"` {
+			continue
+		}
+		for key := range fields {
+			if key != "type" && key != "attempt" && key != "maxAttempt" {
+				t.Fatalf("retry frame = %s, want only its counters", payload)
+			}
+		}
+	}
 	if err != nil {
 		t.Fatalf("WS turn error = %v, want nil after a recovered retry", err)
 	}
 	if len(fixture.messages.persisted) == 0 {
 		t.Fatal("the recovered answer was not stored")
+	}
+}
+
+// assertCount checks that value appears in got exactly want times.
+func assertCount(t *testing.T, got []string, value string, want int) {
+	t.Helper()
+	count := 0
+	for _, item := range got {
+		if item == value {
+			count++
+		}
+	}
+	if count != want {
+		t.Fatalf("event types = %q, want %d %q", got, want, value)
 	}
 }
 
@@ -468,7 +503,8 @@ func TestStreamChatWSPersistFailureAfterRecoveredRetryHasNoOutcome(t *testing.T)
 	close(eventCh)
 	<-drained
 
-	assertOrdered(t, eventTypes(t, payloads), "error", "retry")
+	assertOrdered(t, eventTypes(t, payloads), "retry")
+	assertCount(t, eventTypes(t, payloads), "error", 0)
 	if !errors.Is(err, persistErr) {
 		t.Fatalf("WS turn error = %v, want the persistence failure", err)
 	}
@@ -485,7 +521,7 @@ func TestStreamChatDeferredProposalFinishKeepsDeliveredCode(t *testing.T) {
 	runs := &proposalRecordingLedger{Store: sessionledger.New(), failFirst: true}
 	got := runNativeTurnWith(t, fixture, runs)
 
-	assertOrdered(t, got.types, "error", "retry", "error", "agent_abort")
+	assertOrdered(t, got.types, "retry", "error", "agent_abort")
 	if len(got.errCodes) != 1 || got.errCodes[0] == "" {
 		t.Fatalf("turn error codes = %q, want exactly one coded error", got.errCodes)
 	}

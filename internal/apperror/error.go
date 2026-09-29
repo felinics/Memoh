@@ -110,6 +110,7 @@ const (
 	CodeExternalRuntimeAuthRequired              Code = "external_runtime.auth_required"
 	CodeExternalRuntimeUnavailable               Code = "external_runtime.unavailable"
 	CodeExternalRuntimeSessionResumeFailed       Code = "external_runtime.session_resume_failed"
+	CodeExternalRuntimeUsageLimited              Code = "external_runtime.usage_limited"
 	CodeToolApprovalForbidden                    Code = "tool_approval.forbidden"
 	CodeToolApprovalNotFound                     Code = "tool_approval.not_found"
 	CodeToolApprovalExpired                      Code = "tool_approval.expired"
@@ -140,6 +141,9 @@ const (
 	CodeAgentProviderRateLimited                 Code = "agent.provider_rate_limited"
 	CodeAgentProviderQuotaExhausted              Code = "agent.provider_quota_exhausted"
 	CodeAgentProviderAuthFailed                  Code = "agent.provider_auth_failed"
+	CodeAgentProviderPermissionDenied            Code = "agent.provider_permission_denied"
+	CodeAgentProviderRequestRejected             Code = "agent.provider_request_rejected"
+	CodeAgentProviderUnreachable                 Code = "agent.provider_unreachable"
 	CodeQueueNoActiveRun                         Code = "queue_no_active_run"
 	CodeQueueAdmissionOverloaded                 Code = "queue_admission_overloaded"
 	CodeQueueAdmissionUnavailable                Code = "queue_admission_unavailable"
@@ -303,7 +307,7 @@ type Definition struct {
 	Detail      string
 	AllowedArgs []string
 	// Fault is the attribution of the code when the status alone would give
-	// the wrong one, as for a provider's 401 or 429. Empty leaves it to the
+	// the wrong one, as for a provider's 429 or 502. Empty leaves it to the
 	// error chain: a 4xx status is a client fault, and a 5xx status is this
 	// process's fault unless its cause is marked as a dependency's.
 	Fault Fault
@@ -660,6 +664,14 @@ var catalog = map[Code]Definition{
 		Detail:     "The session could not be resumed. Try again or start a new conversation.",
 		Fault:      FaultDependency,
 	},
+	// The external agent's own account (a Codex plan) has used up its usage
+	// allowance. The user waits for it to reset, so the status asks the client
+	// to back off.
+	CodeExternalRuntimeUsageLimited: {
+		HTTPStatus: http.StatusTooManyRequests,
+		Detail:     "The external agent's usage limit has been reached. Please try again later.",
+		Fault:      FaultDependency,
+	},
 	CodeACPModelSelectionUnsupported: {
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "This external agent does not support model selection.",
@@ -823,7 +835,7 @@ var catalog = map[Code]Definition{
 	},
 	CodeAgentProviderOverloaded: {
 		HTTPStatus: http.StatusServiceUnavailable,
-		Detail:     "The model provider is overloaded right now. Please try again in a moment.",
+		Detail:     "The model provider is unavailable or overloaded right now. Please try again in a moment.",
 		Fault:      FaultDependency,
 	},
 	CodeAgentProviderRateLimited: {
@@ -831,14 +843,31 @@ var catalog = map[Code]Definition{
 		Detail:     "The model provider rate limit was reached. Please wait a moment before sending again.",
 		Fault:      FaultDependency,
 	},
+	// A provider's rejected key or exhausted quota answers 502: a 401 would
+	// sign the Web client out, and RFC 9110 reserves 402.
 	CodeAgentProviderQuotaExhausted: {
-		HTTPStatus: http.StatusPaymentRequired,
+		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The model provider account has no remaining balance or quota.",
 		Fault:      FaultDependency,
 	},
 	CodeAgentProviderAuthFailed: {
-		HTTPStatus: http.StatusUnauthorized,
+		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The model provider rejected the credentials. Check the provider API key.",
+		Fault:      FaultDependency,
+	},
+	CodeAgentProviderPermissionDenied: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The model provider denied access to this model or resource. Check that the provider account can use this model.",
+		Fault:      FaultDependency,
+	},
+	CodeAgentProviderRequestRejected: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The model provider rejected the request. Check the model settings, or try another model.",
+		Fault:      FaultDependency,
+	},
+	CodeAgentProviderUnreachable: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "Memoh could not reach the model provider. Check the provider address and that the service is running.",
 		Fault:      FaultDependency,
 	},
 	CodeQueueSteerUnsupported: {

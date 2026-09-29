@@ -20,12 +20,15 @@ import (
 	memohcopilot "github.com/felinics/memoh/internal/copilot"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const probeTimeout = DefaultProviderProbeTimeout
 
 // Test probes a model's provider endpoint using the Twilight AI SDK
 // to verify connectivity, authentication, and model availability.
+// Every outcome other than ok and model_not_supported carries the SDK error
+// as Cause.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	modelID, err := db.ParseUUID(id)
 	if err != nil {
@@ -56,59 +59,49 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	sdkProvider := NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
 	start := time.Now()
+	resp := probeChatModel(ctx, sdkProvider, model.ModelID)
+	resp.LatencyMs = time.Since(start).Milliseconds()
+	return resp, nil
+}
 
-	providerResult := sdkProvider.Test(ctx)
-	switch providerResult.Status {
-	case sdk.ProviderStatusUnreachable:
-		return TestResponse{
-			Status:    TestStatusError,
-			Reachable: false,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   providerResult.Message,
-		}, nil
-	case sdk.ProviderStatusUnhealthy:
-		// Only an auth failure justifies an early verdict. Any other
-		// unhealthy result (e.g. 404 because the provider does not implement
-		// the models list at all) must not be reported as "Invalid API key" —
-		// fall through to the real-model generation probe, which is the only
-		// check that can give a definitive answer for such providers (#1087).
-		if strings.Contains(providerResult.Message, "authentication failed") {
-			return TestResponse{
-				Status:    TestStatusAuthError,
-				Reachable: true,
-				LatencyMs: time.Since(start).Milliseconds(),
-				Message:   providerResult.Message,
-			}, nil
+// probeChatModel checks the provider first and then the model.
+//
+// The provider check gives an early verdict only when it is conclusive: an
+// auth failure (the models list carries no model parameter, so a 401 or 403
+// there is about the credentials), or no answer at all. Any other rejection,
+// e.g. 404 because the provider does not implement the models list, falls
+// through to the model check, the only check that can give a definitive
+// answer for such providers (#1087).
+//
+// A failed model check is error whatever its kind (#1042): some
+// OpenAI-compatible gateways validate the model before auth and answer 401
+// for an unknown model, so a 401 there does not prove the key is wrong.
+func probeChatModel(ctx context.Context, provider sdk.Provider, modelID string) TestResponse {
+	if err := provider.Test(ctx); err != nil {
+		if kind := sdk.KindOf(err); kind == sdk.KindAuthentication || kind == sdk.KindPermissionDenied {
+			return TestResponse{Status: TestStatusAuthError, Reachable: true, Cause: errs.WrapDependency(err, "test provider")}
+		}
+		if !answered(err) {
+			return TestResponse{Status: TestStatusError, Cause: errs.WrapDependency(err, "test provider")}
 		}
 	}
 
-	modelResult, err := sdkProvider.TestModel(ctx, model.ModelID)
-	latency := time.Since(start).Milliseconds()
-
+	result, err := provider.TestModel(ctx, modelID)
 	if err != nil {
-		return TestResponse{
-			Status:    TestStatusError,
-			Reachable: true,
-			LatencyMs: latency,
-			Message:   err.Error(),
-		}, nil
+		return TestResponse{Status: TestStatusError, Reachable: answered(err), Cause: errs.WrapDependency(err, "test model")}
 	}
-
-	if !modelResult.Supported {
-		return TestResponse{
-			Status:    TestStatusModelNotSupported,
-			Reachable: true,
-			LatencyMs: latency,
-			Message:   modelResult.Message,
-		}, nil
+	if !result.Supported {
+		return TestResponse{Status: TestStatusModelNotSupported, Reachable: true}
 	}
+	return TestResponse{Status: TestStatusOK, Reachable: true}
+}
 
-	return TestResponse{
-		Status:    TestStatusOK,
-		Reachable: true,
-		LatencyMs: latency,
-		Message:   modelResult.Message,
-	}, nil
+// answered reports whether the provider answered the request that failed
+// with err. The SDK returns an *sdk.APIError for every response it rejects
+// and some other error when no response arrived.
+func answered(err error) bool {
+	var apiErr *sdk.APIError
+	return errors.As(err, &apiErr)
 }
 
 // testEmbeddingModel probes an embedding model by performing a minimal
@@ -125,9 +118,9 @@ func (*Service) testEmbeddingModel(ctx context.Context, clientType, baseURL, api
 	if err != nil {
 		return TestResponse{
 			Status:    TestStatusError,
-			Reachable: false,
+			Reachable: answered(err) || errors.Is(err, ErrEmptyEmbeddingVector),
 			LatencyMs: latency,
-			Message:   err.Error(),
+			Cause:     errs.WrapDependency(err, "test embedding model"),
 		}, nil
 	}
 
@@ -135,7 +128,6 @@ func (*Service) testEmbeddingModel(ctx context.Context, clientType, baseURL, api
 		Status:    TestStatusOK,
 		Reachable: true,
 		LatencyMs: latency,
-		Message:   "embedding model is operational",
 	}, nil
 }
 

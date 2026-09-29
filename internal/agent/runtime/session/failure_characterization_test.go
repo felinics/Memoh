@@ -347,14 +347,14 @@ func TestCharacterizeAgentEndAfterEventErrorColumns(t *testing.T) {
 	}
 }
 
-// Scenario 3: a retry clears the failed attempt's error from the live run, so a
-// recovered stream completes cleanly.
-func TestCharacterizeRetryClearsLiveErrorBeforeCompletion(t *testing.T) {
+// Scenario 3: a stream that retries publishes the retry alone. The live run
+// discards the failed attempt's output and still has no error, so a recovered
+// stream completes cleanly.
+func TestCharacterizeRetryRecoveredRunCompletes(t *testing.T) {
 	t.Parallel()
 	f := newAdmitFixture(t)
 	admission := admitRunning(t, f, "inv-retry")
-	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventError, Error: "api error 503"})
-	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventRetry})
+	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3})
 	if view := currentRunView(t, f.manager); view.ErrorCode != "" {
 		t.Fatalf("run view after retry = %+v, want no error", view)
 	}
@@ -372,8 +372,7 @@ func TestCharacterizeRetryThenTerminalEventErrorColumns(t *testing.T) {
 	t.Parallel()
 	f := newAdmitFixture(t)
 	admission := admitRunning(t, f, "inv-retry-exhausted")
-	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventError, Error: "api error 503"})
-	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventRetry})
+	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3})
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{
 		Type: native.EventError, Code: "agent.provider_overloaded", Error: "The model provider is overloaded.",
 	})

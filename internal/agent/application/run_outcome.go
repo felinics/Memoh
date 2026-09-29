@@ -87,7 +87,7 @@ func (r *outcomeRecorder) watchIdle(idleCtx context.Context, idle *idleCancel) {
 // observe records one agent event and returns the stream failure it reports,
 // if any.
 func (r *outcomeRecorder) observe(event native.StreamEvent) error {
-	eventErr := agentStreamLifecycleError(event)
+	eventErr := agentStreamFailure(event)
 	if eventErr != nil {
 		r.recordCause(eventErr)
 		if r.reported == nil {

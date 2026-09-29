@@ -198,10 +198,11 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, reco
 // publish to — no runtime configured, or a context without an admitted handle.
 //
 // The returned function mirrors forwardWSStreamEvents' publishing discipline:
-// events are published on a context that survives the run's cancellation
-// (an aborted run's final events are exactly the ones a subscriber must see),
-// and a lost ownership stops publishing outright because every later event
-// would fail identically.
+// events leave as publicAgentStreamEvent makes them, so a failed spawned run
+// is named like any other native run; they are published on a context that
+// survives the run's cancellation (an aborted run's final events are exactly
+// the ones a subscriber must see); and a lost ownership stops publishing
+// outright because every later event would fail identically.
 func (s *Service) SubagentRunObserver(ctx context.Context) native.SpawnRunObserver {
 	if s == nil || s.decisionRuntime == nil {
 		return nil
@@ -216,7 +217,7 @@ func (s *Service) SubagentRunObserver(ctx context.Context) native.SpawnRunObserv
 		if lost.Load() {
 			return native.SpawnRunObservation{}
 		}
-		_, status, err := s.decisionRuntime.HandleAgentEventWithStatus(publishCtx, handle, event)
+		_, status, err := s.decisionRuntime.HandleAgentEventWithStatus(publishCtx, handle, publicAgentStreamEvent(event))
 		if err != nil {
 			if errors.Is(err, sessionruntime.ErrRunOwnershipLost) {
 				lost.Store(true)

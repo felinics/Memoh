@@ -127,7 +127,7 @@ func assertOneFailure(t *testing.T, b *recordingBroadcaster, wantCode, wantText 
 }
 
 const (
-	discussOverloadedCopy = "The model provider is overloaded right now. Please try again in a moment."
+	discussOverloadedCopy = "The model provider is unavailable or overloaded right now. Please try again in a moment."
 	discussRunFailedCopy  = "The response could not be completed. Please try again."
 )
 

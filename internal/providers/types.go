@@ -77,7 +77,12 @@ type TestResponse struct {
 	Status    TestStatus `json:"status"`
 	Reachable bool       `json:"reachable"`
 	LatencyMs int64      `json:"latency_ms,omitempty"`
-	Message   string     `json:"message,omitempty"`
+	// Code is the error catalog code for why the test did not pass. It is
+	// empty on success and when no catalog code describes the failure.
+	Code string `json:"code,omitempty"`
+	// Cause is why the test did not pass. It never leaves the process; the
+	// handler records it and derives Code from it.
+	Cause error `json:"-"`
 }
 
 // OAuthStatus is returned by GET /providers/:id/oauth/status.

@@ -154,10 +154,13 @@
     "agent": {
       "response_timeout": "モデルから時間内に応答がありませんでした。もう一度お試しください。",
       "response_interrupted": "モデルの応答が中断されました。もう一度お試しください。",
-      "provider_overloaded": "モデルプロバイダーが混雑しています。しばらくしてからお試しください。",
+      "provider_overloaded": "モデルプロバイダーは現在利用できないか、過負荷の状態です。しばらくしてからもう一度お試しください。",
       "provider_rate_limited": "モデルプロバイダーのレート制限に達しました。少し待ってから送信してください。",
       "provider_quota_exhausted": "モデルプロバイダーのアカウントに残高またはクォータが残っていません。",
       "provider_auth_failed": "モデルプロバイダーが認証情報を拒否しました。プロバイダーの API キーを確認してください。",
+      "provider_permission_denied": "モデルプロバイダーがこのモデルまたはリソースへのアクセスを拒否しました。プロバイダーのアカウントがこのモデルを利用できるか確認してください。",
+      "provider_request_rejected": "モデルプロバイダーがリクエストを拒否しました。モデル設定を確認するか、別のモデルをお試しください。",
+      "provider_unreachable": "Memoh からモデルプロバイダーに接続できませんでした。プロバイダーのアドレスとサービスが稼働中か確認してください。",
       "tool_timeout": "ツールの進捗が途絶えました。保存済みの結果を確認してから再試行してください。"
     },
     "queue_request_invalid": "既存の会話で /steer または /queue の後に内容を入力してください。",
@@ -305,7 +308,8 @@
     "external_runtime": {
       "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。",
-      "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。"
+      "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。",
+      "usage_limited": "外部 Agent の利用上限に達しました。しばらくしてからもう一度お試しください。"
     },
     "app": {
       "not_found": "このアプリのインストールは見つかりませんでした。",
@@ -1693,6 +1697,7 @@
     "testAuthError": "認証エラー",
     "testError": "エラー",
     "testFailed": "テストが失敗しました",
+    "testModelNotSupported": "プロバイダーがこのモデルを認識できません。モデル ID を確認してください。",
     "importModels": "モデルをインポート",
     "importSuccess": "{created}件のモデルをインポートしました。{skipped}件はスキップされました",
     "importFailed": "モデルのインポートに失敗しました",

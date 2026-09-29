@@ -259,7 +259,7 @@ func TestRunResultOneErrorForARunWithSeveralFailureEvents(t *testing.T) {
 
 	got := runNativeTurn(t, fixture)
 
-	assertOrdered(t, got.types, "error", "retry", "error", "agent_abort")
+	assertOrdered(t, got.types, "retry", "error", "agent_abort")
 	records := waitRunResults(t, logs, 1)
 	attrs := recordAttrs(records[0])
 	if attrs["state"] != "failed" || attrs["error_code"] != got.ledger[1] || attrs["fault"] == "" {

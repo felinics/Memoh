@@ -155,7 +155,7 @@ func TestRPCResultLine(t *testing.T) {
 			handler: func(context.Context, json.RawMessage) (any, error) {
 				return nil, apperror.Wrap(apperror.CodeAgentProviderAuthFailed, errors.New("api error 401"), nil)
 			},
-			wantCode:  codes.Unauthenticated,
+			wantCode:  codes.Internal,
 			wantLevel: "ERROR",
 			wantFault: "dependency",
 			wantError: "api error 401",

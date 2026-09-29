@@ -25707,11 +25707,12 @@ const docTemplate = `{
         "models.TestResponse": {
             "type": "object",
             "properties": {
+                "code": {
+                    "description": "Code is the error catalog code for why the test did not pass. It is\nempty on success and when no catalog code describes the failure.",
+                    "type": "string"
+                },
                 "latency_ms": {
                     "type": "integer"
-                },
-                "message": {
-                    "type": "string"
                 },
                 "reachable": {
                     "type": "boolean"
@@ -25975,11 +25976,12 @@ const docTemplate = `{
         "providers.TestResponse": {
             "type": "object",
             "properties": {
+                "code": {
+                    "description": "Code is the error catalog code for why the test did not pass. It is\nempty on success and when no catalog code describes the failure.",
+                    "type": "string"
+                },
                 "latency_ms": {
                     "type": "integer"
-                },
-                "message": {
-                    "type": "string"
                 },
                 "reachable": {
                     "type": "boolean"

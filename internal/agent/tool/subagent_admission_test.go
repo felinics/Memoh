@@ -158,7 +158,7 @@ func (a *retryingIdentitySpawnAgent) GenerateWithWatchdog(_ context.Context, cfg
 	defer a.mu.Unlock()
 	a.calls = append(a.calls, cfg)
 	if len(a.calls) == 1 {
-		return &SpawnResult{ContextLifecycle: a.first}, errors.New("provider returned 429")
+		return &SpawnResult{ContextLifecycle: a.first}, ErrWatchdogTimedOut
 	}
 	return &SpawnResult{
 		Text: "done",

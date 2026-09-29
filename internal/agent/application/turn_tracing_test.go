@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -275,7 +276,7 @@ func TestTurnSpanCoversTheDiscussPath(t *testing.T) {
 			name: "failed",
 			events: []native.StreamEvent{
 				{Type: native.EventAgentStart},
-				{Type: native.EventError, Error: charExhaustedText},
+				{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))},
 				{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)},
 			},
 			wantState: "failed", wantOutcome: "errored", wantStatus: codes.Error,

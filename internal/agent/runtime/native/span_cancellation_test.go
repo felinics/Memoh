@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/otel/codes"
 
 	"github.com/felinics/memoh/internal/agent/toolexec"
-	"github.com/felinics/memoh/internal/apperror"
 )
 
 // callEndings are the ways a model or tool call's context ends. Only the
@@ -28,7 +27,7 @@ func callEndings() []struct {
 	}{
 		{name: "stopped", cause: context.Canceled},
 		{name: "caller deadline", cause: context.DeadlineExceeded},
-		{name: "idle timeout", cause: apperror.Wrap(apperror.CodeAgentResponseTimeout, context.DeadlineExceeded, nil), wantFailed: true},
+		{name: "idle timeout", cause: errors.New("agent response idle timeout"), wantFailed: true},
 		{name: "run lost", cause: errors.New("run ownership lost"), wantFailed: true},
 	}
 }

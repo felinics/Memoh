@@ -17,7 +17,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/models"
 )
@@ -93,8 +94,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 		var err error
 		sdkTools, toolUsage, toolUsageFrags, toolDefs, err = a.assembleTools(streamCtx, cfg, streamEmitter, cfg.LiveToolStream)
 		if err != nil {
-			turnError = fmt.Sprintf("assemble tools: %v", err)
-			sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+			failure := localFailureEvent(fmt.Errorf("assemble tools: %w", err))
+			turnError = turnHookError(failure)
+			sendEvent(ctx, ch, failure)
 			return
 		}
 		cfg.ContextToolDefs = toolDefs
@@ -111,10 +113,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	var contextViewErr error
 	cfg, contextViewErr = a.applyContextView(streamCtx, cfg)
 	if contextViewErr != nil {
-		publicError := contextViewStreamError(contextViewErr)
-		turnError = publicError.Error
-		a.logger.WarnContext(ctx, "context view preflight failed", slog.Any("error", contextViewErr))
-		sendEvent(ctx, ch, publicError)
+		failure := contextViewStreamError(contextViewErr)
+		turnError = turnHookError(failure)
+		sendEvent(ctx, ch, failure)
 		return
 	}
 	cfg = captureProviderAttemptPrefix(cfg)
@@ -151,34 +152,38 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	var err error
 	cfg, err = a.applyBeforeModelCallHook(streamCtx, cfg, 0)
 	if err != nil {
-		turnError = err.Error()
-		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+		failure := localFailureEvent(err)
+		turnError = turnHookError(failure)
+		sendEvent(ctx, ch, failure)
 		return
 	}
 	installContextStepFailureHandler(&cfg, cancel)
 	dispatch, dispatchErr := a.buildGenerateDispatch(streamCtx, cfg, sdkTools, approvalTools, prepareStep)
 	if dispatchErr != nil {
-		turnError = fmt.Sprintf("stream start: %v", dispatchErr)
-		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+		failure := localFailureEvent(fmt.Errorf("stream start: %w", dispatchErr))
+		turnError = turnHookError(failure)
+		sendEvent(ctx, ch, failure)
 		return
 	}
 	if stepErr := contextStepBudgetError(streamCtx); stepErr != nil {
-		publicError := contextViewStreamError(stepErr)
-		turnError = publicError.Error
+		failure := contextViewStreamError(stepErr)
+		turnError = turnHookError(failure)
 		aborted = true
-		sendEvent(ctx, ch, publicError)
+		sendEvent(ctx, ch, failure)
 		return
 	}
 	// The SDK's StreamText validated these before starting; the loop keeps the
 	// same "stream start" error surface for the same failures.
 	if cfg.Model == nil {
-		turnError = fmt.Sprintf("stream start: %v", errors.New("twilightai: model is required (use WithModel)"))
-		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+		failure := localFailureEvent(errors.New("stream start: twilightai: model is required (use WithModel)"))
+		turnError = turnHookError(failure)
+		sendEvent(ctx, ch, failure)
 		return
 	}
 	if cfg.Model.Provider == nil {
-		turnError = fmt.Sprintf("stream start: %v", fmt.Errorf("twilightai: model %q has no provider", cfg.Model.ID))
-		sendEvent(ctx, ch, StreamEvent{Type: EventError, Error: turnError})
+		failure := localFailureEvent(fmt.Errorf("stream start: twilightai: model %q has no provider", cfg.Model.ID))
+		turnError = turnHookError(failure)
+		sendEvent(ctx, ch, failure)
 		return
 	}
 
@@ -292,9 +297,9 @@ func (a *Agent) runStream(ctx context.Context, cfg RunConfig, ch chan<- StreamEv
 	if budgetErr != nil {
 		// Published after the backlog so the consumer sees the events the
 		// engine produced before the boundary refused the next call.
-		publicError := contextViewStreamError(budgetErr)
-		turnError = publicError.Error
-		sendEvent(ctx, ch, publicError)
+		failure := contextViewStreamError(budgetErr)
+		turnError = turnHookError(failure)
+		sendEvent(ctx, ch, failure)
 	}
 	// The engine goroutine having returned is what makes the reads below
 	// safe: no further complete step can commit after this checkpoint, and
@@ -593,13 +598,12 @@ func (e *streamEngine) run() {
 			return
 		}
 
-		var retryMsg string
-		retryableFailure := false
+		var failure error
 		if err := e.dispatch.handoff.publish(stepParams); err != nil {
-			retryMsg, retryableFailure = e.streamFailure(fmt.Errorf("twilightai: stream step %d: %w", attemptStep, err))
+			e.localFailure(errs.Wrap(err, "publish provider attempt", slog.Int("step", attemptStep)))
 		} else {
 			var stepDone bool
-			retryMsg, retryableFailure, stepDone = e.callModel(attemptStep, &stepParams, &convo, &attemptSteps)
+			stepDone, failure = e.callModel(attemptStep, &stepParams, &convo, &attemptSteps)
 			if stepDone {
 				return
 			}
@@ -607,7 +611,7 @@ func (e *streamEngine) run() {
 		if e.aborted {
 			return
 		}
-		if !retryableFailure {
+		if failure == nil {
 			attemptStep++
 			continue
 		}
@@ -616,13 +620,10 @@ func (e *streamEngine) run() {
 		// dispatch regenerates it from the last committed boundary and the
 		// loop continues with the same durable step counting.
 		if retryAttempts >= retryCfg.MaxAttempts {
-			// Publish the giving-up error: every EventRetry retracts the
-			// failure it retried, so without this last event a consumer would
-			// see the run end with nothing to explain why it stopped.
-			finalErr := fmt.Sprintf("mid-stream retry: all %d attempts failed (last: %s)", retryCfg.MaxAttempts, retryMsg)
-			e.turnError = finalErr
-			e.emit(StreamEvent{Type: EventError, Error: finalErr})
-			e.aborted = true
+			// The giving-up error is the only failure the run publishes: an
+			// EventRetry carries none, so without it a consumer would see the
+			// run end with nothing to explain why it stopped.
+			e.endWithFailure(StreamEvent{Type: EventError, Cause: errs.Wrap(failure, "model call retries exhausted", slog.Int("attempts", retryAttempts))})
 			return
 		}
 		input, ok := e.baseCfg.providerAttemptState.retryInput(attemptSteps)
@@ -640,17 +641,19 @@ func (e *streamEngine) run() {
 		if e.resetTextLoopGuard != nil {
 			e.resetTextLoopGuard()
 		}
-		e.agent.logger.WarnContext(e.streamCtx, "mid-stream error, retrying",
-			slog.Int("step", e.stepNumber),
+		// The failed attempt is recorded here and only here: the stream tells
+		// its consumers that it retries, not why.
+		result := errlog.Event(e.streamCtx, "agent.model_call", failure, errlog.Options{})
+		e.agent.logger.LogAttrs(e.streamCtx, result.Level, "model call failed, retrying", append([]slog.Attr{
+			slog.String("run_id", e.cfg.RunID),
 			slog.Int("attempt", retryAttempts+1),
 			slog.Int("max_attempts", retryCfg.MaxAttempts),
-			slog.String("error", retryMsg),
-		)
+			slog.Int("step", e.stepNumber),
+		}, result.Attrs()...)...)
 		if !e.emit(StreamEvent{
 			Type:       EventRetry,
 			Attempt:    retryAttempts + 1,
 			MaxAttempt: retryCfg.MaxAttempts,
-			RetryError: retryMsg,
 		}) {
 			e.aborted = true
 			return
@@ -664,16 +667,14 @@ func (e *streamEngine) run() {
 		retryAttempts++
 		// Re-invoke from the failed attempt's exact provider input plus its
 		// committed output, then run the same preflight as every other call.
-		next := prepareMidStreamRetryConfigWithMessages(e.baseCfg, input.messages, input.dynamicRefs, len(e.outMessages), retryMsg)
+		next := prepareMidStreamRetryConfigWithMessages(e.baseCfg, input.messages, input.dynamicRefs, len(e.outMessages), failure.Error())
 		if e.agent == nil || e.agent.contextViewApplier == nil {
 			next = next.RefreshContextFrag()
 		}
 		e.cfg = next
 		dispatch, buildErr := e.agent.buildGenerateDispatch(e.streamCtx, next, e.sdkTools, e.approvalTools, e.prepareStep)
 		if buildErr != nil {
-			e.turnError = buildErr.Error()
-			e.emit(StreamEvent{Type: EventError, Error: e.turnError})
-			e.aborted = true
+			e.endWithFailure(localFailureEvent(buildErr))
 			return
 		}
 		e.dispatch = dispatch
@@ -681,7 +682,6 @@ func (e *streamEngine) run() {
 			e.aborted = true
 			return
 		}
-		e.turnError = ""
 		params = e.dispatch.params
 		convo = append([]sdk.Message(nil), params.Messages...)
 		attemptSteps = nil
@@ -695,12 +695,16 @@ func (e *streamEngine) run() {
 // segment context. Provider.DoStream is the single-call seam and hands out
 // exactly the part channel the loop consumes: every live event, loop probe,
 // and durable step record is derived here, so the step stays owned by Memoh.
+//
+// done reports a terminal step (final answer, deferred approval, silent
+// ask_user poison) that ends the engine; retry is a failed provider call worth
+// making again, for the caller's retry transition to fold.
 func (e *streamEngine) callModel(
 	attemptStep int,
 	stepParams *sdk.Request,
 	convo *[]sdk.Message,
 	attemptSteps *[]step.Record,
-) (retryMsg string, retryable bool, done bool) {
+) (done bool, retry error) {
 	e.modelCtx = e.streamCtx
 	if e.steer != nil {
 		modelCtx, cancelModel := context.WithCancelCause(e.streamCtx)
@@ -719,13 +723,11 @@ func (e *streamEngine) callModel(
 		// The run was cancelled while the request was in flight; the
 		// provider's report of it is the abort, not a failure to retry.
 		e.aborted = true
-		return "", false, true
+		return true, nil
 	case err != nil:
-		msg, retriable := e.streamFailure(fmt.Errorf("twilightai: stream step %d: %w", attemptStep, err))
-		return msg, retriable, false
+		return false, e.providerFailure(errs.WrapDependency(err, "model stream", slog.Int("step", attemptStep)))
 	case provParts == nil:
-		msg, retriable := e.streamFailure(fmt.Errorf("twilightai: stream step %d ended before finish-step", attemptStep))
-		return msg, retriable, false
+		return false, e.providerFailure(errs.NewDependency("model stream ended before finish-step", slog.Int("step", attemptStep)))
 	}
 	return e.consumeStep(attemptStep, provParts, convo, attemptSteps)
 }
@@ -747,7 +749,7 @@ func (e *streamEngine) checkpointSteeredStep(
 	attemptStep int,
 	convo *[]sdk.Message,
 	attemptSteps *[]step.Record,
-) (retryMsg string, retryable bool, done bool) {
+) (done bool, retry error) {
 	stepIndex := e.baseCfg.StepIndexOffset + len(e.steps)
 	snapshot := e.interruptedStep.snapshot(stepIndex)
 	if snapshot == nil {
@@ -760,25 +762,15 @@ func (e *streamEngine) checkpointSteeredStep(
 	// anchors the claimed steer to it.
 	if !e.emit(StreamEvent{Type: EventStepEnd, StepNumber: stepIndex}) {
 		e.aborted = true
-		return "", false, true
+		return true, nil
 	}
 	decorated := decorateCommittedStep(e.dynamic.stepAdditions(stepIndex), snapshot, e.toolExecutionMetadata)
 	dir, err := e.baseCfg.OnSteer(e.dynamic.withMessageOrigins(e.streamCtx, stepIndex), stepIndex, decorated)
 	if err != nil {
 		// A failed checkpoint cannot resume: the claimed input is not durable
-		// and the attempt's output is lost. Report the stable public
-		// interruption error and keep the diagnostic in the log.
-		e.agent.logger.ErrorContext(e.streamCtx, "checkpoint steered model invocation failed",
-			slog.Int("step", attemptStep), slog.Any("error", err))
-		e.aborted = true
-		event := StreamEvent{Type: EventError, Error: publicResponseInterruptedError}
-		if public, ok := apperror.PublicFrom(apperror.New(apperror.CodeAgentResponseInterrupted, nil), ""); ok {
-			event.Code = string(public.Code)
-			event.Error = public.Detail
-		}
-		e.turnError = event.Error
-		e.emit(event)
-		return "", false, true
+		// and the attempt's output is lost.
+		e.endWithFailure(localFailureEvent(errs.Wrap(err, "checkpoint steered model call", slog.Int("step", attemptStep))))
+		return true, nil
 	}
 	// The published step slice carries step output only: terminal read-media
 	// merging and the injected recorder position their own records around it,
@@ -796,28 +788,24 @@ func (e *streamEngine) checkpointSteeredStep(
 	// count starts over.
 	e.refused = 0
 	*convo = append(*convo, steerCheckpointMessages(snapshot.Messages)...)
-	return "", false, false
+	return false, nil
 }
 
 // consumeStep drains one provider stream, forwards its parts as events, and —
-// when the step finished cleanly — executes its tool batch and commits it.
-// retryMsg/retryable report a retryable failure the caller folds into the
-// retry transition; done reports a terminal step (final answer, deferred
-// approval, silent ask_user poison) that ends the engine.
+// when the step finished cleanly — executes its tool batch and commits it. It
+// reports like callModel.
 func (e *streamEngine) consumeStep(
 	attemptStep int,
 	provParts <-chan sdk.StreamPart,
 	convo *[]sdk.Message,
 	attemptSteps *[]step.Record,
-) (retryMsg string, retryable bool, done bool) {
+) (done bool, retry error) {
 	var (
 		stepText            string
 		stepTextMeta        sdk.ProviderMetadata
 		stepReasoning       reasoningBlockCapture
 		stepToolCalls       []sdk.ToolCall
 		stepErrored         bool
-		retryableFailure    bool
-		failureMsg          string
 		stepUsage           sdk.Usage
 		stepResponse        sdk.ResponseMetadata
 		stepFinishReason    sdk.FinishReason
@@ -976,7 +964,7 @@ partLoop:
 				e.aborted = true
 				break
 			}
-			failureMsg, retryableFailure = e.streamFailure(p.Error)
+			retry = e.providerFailure(errs.WrapDependency(p.Error, "model stream", slog.Int("step", attemptStep)))
 			stepErrored = true
 
 		case *sdk.FinishPart:
@@ -984,7 +972,7 @@ partLoop:
 			// consumers see is FinishStepPart.
 		}
 
-		if e.aborted || retryableFailure {
+		if e.aborted || retry != nil {
 			break
 		}
 	}
@@ -995,32 +983,32 @@ partLoop:
 		// Preserve the final snapshot when it arrives promptly, then stop
 		// waiting so the segment owner can finalize the run as aborted.
 		drainStreamUntilClosed(provParts, streamCancelDrainGrace, e.interruptedStep.observe)
-		return "", false, true
+		return true, nil
 	}
-	if retryableFailure {
+	if retry != nil {
 		// Drain the failed stream before folding: the retry input must not
 		// race the provider goroutine still flushing its buffer.
 		for part := range provParts {
 			e.interruptedStep.observe(part)
 		}
-		return failureMsg, true, false
+		return false, retry
 	}
 	if stepErrored {
 		// A provider error that is neither retryable nor a cancellation:
-		// streamFailure published it and marked the run aborted; the steps
+		// providerFailure published it and marked the run aborted; the steps
 		// committed so far stand.
-		return "", false, true
+		return true, nil
 	}
 	if !sawFinishStep {
 		if e.streamCtx.Err() != nil {
 			e.aborted = true
-			return "", false, true
+			return true, nil
 		}
 		if e.steeredAttempt() {
 			return e.checkpointSteeredStep(attemptStep, convo, attemptSteps)
 		}
-		msg, retriable := e.streamFailure(fmt.Errorf("twilightai: stream step %d ended before finish-step", attemptStep))
-		return msg, retriable, e.aborted
+		retry = e.providerFailure(errs.NewDependency("model stream ended before finish-step", slog.Int("step", attemptStep)))
+		return e.aborted, retry
 	}
 
 	// stepResult assembles this step's model result from the parts the loop
@@ -1049,8 +1037,8 @@ partLoop:
 		sr := step.Record{Result: stepResult(), Messages: stepMsgs}
 		dir, err := e.commitStep(attemptStep, &sr)
 		if err != nil {
-			msg, retriable := e.streamFailure(err)
-			return msg, retriable, e.aborted
+			e.localFailure(err)
+			return true, nil
 		}
 		e.steps = append(e.steps, sr)
 		e.outMessages = append(e.outMessages, stepMsgs...)
@@ -1062,9 +1050,9 @@ partLoop:
 		// on the same thread; the step is committed either way.
 		if len(e.pendingDirectiveInputs) > 0 || e.pendingRefresh != nil {
 			*convo = append(*convo, stepMsgs...)
-			return "", false, false
+			return false, nil
 		}
-		return "", false, true
+		return true, nil
 	}
 
 	// Execute the tool batch through the single-batch primitive; its OnPart
@@ -1076,8 +1064,8 @@ partLoop:
 		OnPart:  e.bridgeToolPart,
 	})
 	if err != nil {
-		msg, retriable := e.streamFailure(err)
-		return msg, retriable, e.aborted
+		e.localFailure(err)
+		return true, nil
 	}
 	if outcome.Deferred != nil {
 		// A deferred batch executes nothing: outcome.Results is empty and every
@@ -1092,23 +1080,23 @@ partLoop:
 			Messages:    stepMsgs,
 		}
 		if _, err := e.commitStep(attemptStep, &sr); err != nil {
-			msg, retriable := e.streamFailure(err)
-			return msg, retriable, e.aborted
+			e.localFailure(err)
+			return true, nil
 		}
 		e.steps = append(e.steps, sr)
 		e.outMessages = append(e.outMessages, stepMsgs...)
 		*attemptSteps = append(*attemptSteps, sr)
 		e.deferred = outcome.Deferred
 		e.afterStep(attemptStep, &sr)
-		return "", false, true
+		return true, nil
 	}
 
 	stepMsgs := toolexec.BuildStepMessages(stepText, stepTextMeta, stepReasoning.parts, stepToolCalls, outcome.Results, &stepUsage)
 	sr := step.Record{Result: stepResult(), ToolResults: toolexec.ToolCallResults(stepToolCalls, outcome.Results), Messages: stepMsgs}
 	dir, err := e.commitStep(attemptStep, &sr)
 	if err != nil {
-		msg, retriable := e.streamFailure(err)
-		return msg, retriable, e.aborted
+		e.localFailure(err)
+		return true, nil
 	}
 	e.steps = append(e.steps, sr)
 	e.outMessages = append(e.outMessages, stepMsgs...)
@@ -1119,7 +1107,7 @@ partLoop:
 	// committed, matching the legacy flow where the guard fenced only the
 	// next provider call.
 	if e.aborted {
-		return "", false, true
+		return true, nil
 	}
 	if e.refused.note(batchRefused(outcome.Refused, len(stepToolCalls))) {
 		if len(e.pendingDirectiveInputs) > 0 || e.pendingRefresh != nil {
@@ -1133,30 +1121,49 @@ partLoop:
 			// steps committed.
 			e.cancel(ErrToolLoopDetected)
 			e.aborted = true
-			return "", false, true
+			return true, nil
 		}
 	}
 	*convo = append(*convo, stepMsgs...)
-	return "", false, false
+	return false, nil
 }
 
-// streamFailure emits one raw EventError for a provider-reported failure and
-// reports whether the run should retry it mid-stream. A failure observed after
-// a context-budget cancellation stays off the wire: the segment owner emits
-// the stable public error instead. Non-retryable failures abort the engine.
-func (e *streamEngine) streamFailure(err error) (string, bool) {
+// providerFailure handles a failed model call and marks it as one for
+// IsModelCallFailure. A failure worth another call is returned for the retry
+// transition, which publishes nothing until it gives up; any other failure
+// ends the run. A failure observed after a
+// context-budget cancellation stays off the wire: the segment owner emits the
+// stable public error instead.
+func (e *streamEngine) providerFailure(err error) (retry error) {
+	err = &modelCallFailure{err: err}
 	if contextStepBudgetError(e.streamCtx) != nil {
 		e.aborted = true
-		return "", false
+		return nil
 	}
-	msg := err.Error()
-	e.turnError = msg
-	e.emit(StreamEvent{Type: EventError, Error: msg})
-	if isRetryableStreamError(err) {
-		return msg, true
+	if retryableProviderFailure(err) {
+		return err
 	}
+	e.endWithFailure(StreamEvent{Type: EventError, Cause: err})
+	return nil
+}
+
+// localFailure ends the run on a failure of the loop's own work: the
+// provider-attempt handoff, the commit barrier, a capability refresh or the
+// tool batch. It is never retried, since the step's tools may already have
+// run. The context-budget fence applies as in providerFailure.
+func (e *streamEngine) localFailure(err error) {
+	if contextStepBudgetError(e.streamCtx) != nil {
+		e.aborted = true
+		return
+	}
+	e.endWithFailure(localFailureEvent(err))
+}
+
+// endWithFailure publishes failure as the run's failure and ends the engine.
+func (e *streamEngine) endWithFailure(failure StreamEvent) {
+	e.turnError = turnHookError(failure)
+	e.emit(failure)
 	e.aborted = true
-	return "", false
 }
 
 // commitStep runs the synchronous durability barrier for one completed step.
@@ -1170,16 +1177,14 @@ func (e *streamEngine) commitStep(attemptStep int, sr *step.Record) (StepDirecti
 		var err error
 		dir, err = e.baseCfg.OnStepCommitted(e.dynamic.withMessageOrigins(e.streamCtx, stepIndex), stepIndex, decorated)
 		if err != nil {
-			// The step's tools ran; a retry would run them again. The tag keeps
-			// the failure out of the mid-stream retry path.
-			return StepDirective{}, tagStepCommitError(fmt.Errorf("twilightai: commit step %d: %w", attemptStep, err))
+			return StepDirective{}, fmt.Errorf("twilightai: commit step %d: %w", attemptStep, err)
 		}
 	}
 	e.nextDurableStep = stepIndex + 1
 	if e.baseCfg.capabilityChanges != nil && e.baseCfg.capabilityChanges.Swap(false) && sr.Deferred == nil && e.refreshTools != nil {
 		refreshed, err := e.refreshTools()
 		if err != nil {
-			return StepDirective{}, tagStepCommitError(fmt.Errorf("twilightai: refresh capabilities after step %d: %w", attemptStep, err))
+			return StepDirective{}, fmt.Errorf("twilightai: refresh capabilities after step %d: %w", attemptStep, err)
 		}
 		e.pendingRefresh = &refreshed
 	}

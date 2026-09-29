@@ -291,13 +291,20 @@ const (
 // misclassified as "Invalid API key" even after the key had authenticated.
 // Per-model availability is covered by models.Service.Test instead.
 //
-// Outcome semantics (#1087) — the models list is only a partial falsifier:
-//   - reachable + 200: verified (ok);
-//   - reachable + 401/403: auth failed (auth_error) — the request carries no
-//     model parameter, so this cannot be confused with "model not found";
-//   - reachable + anything else (404/5xx): unverified, NOT a failure — the
-//     base URL may be wrong, or the provider may not implement model listing;
-//   - unreachable (DNS/TCP): error, the only hard failure kept at this layer.
+// Outcome semantics (#1087): the models list is only a partial falsifier,
+// so the outcome follows what sdk.Provider.Test returned:
+//   - nil: verified (ok), except for OpenCode Go, whose models list is
+//     public and answers without valid credentials (unverified);
+//   - an *sdk.APIError of kind authentication or permission_denied: auth
+//     failed (auth_error). The request carries no model parameter, so this
+//     cannot be confused with "model not found";
+//   - any other *sdk.APIError (404, 429, 5xx, ...): unverified, NOT a
+//     failure. The endpoint answered, but the base URL may be wrong or the
+//     provider may not implement model listing;
+//   - no *sdk.APIError in the chain (DNS, TCP, TLS, an ended context): error,
+//     the only hard failure kept at this layer.
+//
+// Every outcome other than ok carries the SDK error as Cause.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -321,72 +328,31 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
 	start := time.Now()
-	result := sdkProvider.Test(ctx)
-	message := providerTestMessage(result)
-	if clientType == models.ClientTypeOpenCodeGo && result.Status == sdk.ProviderStatusOK {
+	resp := providerTestOutcome(sdkProvider.Test(ctx))
+	if clientType == models.ClientTypeOpenCodeGo && resp.Status == TestStatusOK {
 		// Go's public catalog succeeds without valid credentials. Keep the UI
 		// verdict unverified until the user runs a real model generation probe.
-		return TestResponse{
-			Status: TestStatusUnverified, Reachable: true,
-			LatencyMs: time.Since(start).Milliseconds(), Message: message,
-		}, nil
+		resp.Status = TestStatusUnverified
 	}
-
-	switch result.Status {
-	case sdk.ProviderStatusUnreachable:
-		return TestResponse{
-			Status:    TestStatusError,
-			Reachable: false,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   message,
-		}, nil
-	case sdk.ProviderStatusUnhealthy:
-		if strings.Contains(result.Message, "authentication failed") {
-			return TestResponse{
-				Status:    TestStatusAuthError,
-				Reachable: true,
-				LatencyMs: time.Since(start).Milliseconds(),
-				Message:   message,
-			}, nil
-		}
-		return TestResponse{
-			Status:    TestStatusUnverified,
-			Reachable: true,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   message,
-		}, nil
-	default:
-		return TestResponse{
-			Status:    TestStatusOK,
-			Reachable: true,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   result.Message,
-		}, nil
-	}
+	resp.LatencyMs = time.Since(start).Milliseconds()
+	return resp, nil
 }
 
-// errorDetailer is implemented by transport errors that can expand into a
-// fuller diagnostic, including the raw upstream response body. The probe path
-// only fills a short summary (e.g. "service error (404):"), so we reach for
-// this richer detail when the upstream replies with an opaque, non-JSON body.
-type errorDetailer interface {
-	Detail() string
-}
-
-// providerTestMessage returns the most informative message for a probe result,
-// preferring the upstream response detail over the short summary so that
-// opaque statuses still surface the provider's actual response body.
-func providerTestMessage(result *sdk.ProviderTestResult) string {
-	if result == nil {
-		return ""
+// providerTestOutcome maps the result of sdk.Provider.Test to a TestResponse
+// by the rules documented on Service.Test.
+func providerTestOutcome(err error) TestResponse {
+	if err == nil {
+		return TestResponse{Status: TestStatusOK, Reachable: true}
 	}
-	var detailer errorDetailer
-	if errors.As(result.Error, &detailer) {
-		if detail := strings.TrimSpace(detailer.Detail()); detail != "" {
-			return detail
-		}
+	cause := errs.WrapDependency(err, "test provider")
+	if kind := sdk.KindOf(err); kind == sdk.KindAuthentication || kind == sdk.KindPermissionDenied {
+		return TestResponse{Status: TestStatusAuthError, Reachable: true, Cause: cause}
 	}
-	return result.Message
+	var apiErr *sdk.APIError
+	if errors.As(err, &apiErr) {
+		return TestResponse{Status: TestStatusUnverified, Reachable: true, Cause: cause}
+	}
+	return TestResponse{Status: TestStatusError, Cause: cause}
 }
 
 // FetchRemoteModels fetches available models from the provider using the Twilight AI SDK.

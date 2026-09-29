@@ -2,7 +2,7 @@ package native
 
 import (
 	"context"
-	"errors"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -32,7 +32,7 @@ func TestMidStreamRetryResetsTextLoopGuard(t *testing.T) {
 			ch <- &sdk.StartStepPart{}
 			ch <- &sdk.TextStartPart{ID: "t"}
 			ch <- &sdk.TextDeltaPart{ID: "t", Text: repeated}
-			ch <- &sdk.ErrorPart{Error: errors.New("unexpected EOF")}
+			ch <- &sdk.ErrorPart{Error: io.ErrUnexpectedEOF}
 		},
 		scriptText(repeated),
 	)

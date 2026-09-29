@@ -14,30 +14,83 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/testutil/sessionledger"
 )
 
 const (
-	charOverloadedDetail  = "The model provider is overloaded right now. Please try again in a moment."
+	charOverloadedDetail  = "The model provider is unavailable or overloaded right now. Please try again in a moment."
 	charInterruptedDetail = "The model response was interrupted. Please try again."
-	charExhaustedText     = "mid-stream retry: all 3 attempts failed (last: api error 503: Service Unavailable)"
+	charRejectedDetail    = "The model provider rejected the request. Check the model settings, or try another model."
+	charUnreachableDetail = "Memoh could not reach the model provider. Check the provider address and that the service is running."
 )
+
+// charProviderErr is a provider's answer as the SDK reports it; its message
+// and request id stay in the process.
+func charProviderErr(status int, kind sdk.ErrorKind) error {
+	return &sdk.APIError{Provider: "openai-completions", StatusCode: status, Kind: kind, Message: "SECRET provider message", RequestID: "req_SECRET"}
+}
+
+// charExhausted is the cause the native runtime ends a run with when every
+// retry of a model call failed.
+func charExhausted(last error) error {
+	return errs.Wrap(errs.WrapDependency(last, "model stream"), "model call retries exhausted")
+}
+
+// charFailingProvider fails every model call with err.
+type charFailingProvider struct {
+	abortAlignmentProvider
+	err error
+}
+
+func (p charFailingProvider) DoStream(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
+	return nil, p.err
+}
+
+// charModelCallFailure is the cause a native run ends with when its model call
+// fails with err, retried once when err is worth another call.
+func charModelCallFailure(t *testing.T, err error) error {
+	t.Helper()
+	var cause error
+	for event := range native.New(native.Deps{}).Stream(context.Background(), native.RunConfig{
+		Model:            &sdk.Model{ID: "char-model", Provider: charFailingProvider{err: err}},
+		Messages:         []sdk.Message{sdk.UserMessage("hello")},
+		Identity:         native.SessionContext{BotID: "char-bot"},
+		ContextMutations: contextfrag.NewMutationLedger(),
+		Retry:            native.RetryConfig{MaxAttempts: 1, FastAttempts: 1},
+	}) {
+		if event.Type == native.EventError {
+			cause = event.Cause
+		}
+	}
+	if cause == nil {
+		t.Fatalf("native run with a model call failing on %v reported no error", err)
+	}
+	return cause
+}
 
 // The classification every native exit shares: an EventError from the runtime
 // becomes a lifecycle cause (its code feeds the run's terminal write and the
 // history marker) and a public event (what WS, SSE and discuss subscribers see).
 func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 	t.Parallel()
+	refused := &url.Error{Op: "Post", URL: "http://127.0.0.1:1/v1/chat/completions", Err: &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}}
 	for _, tc := range []struct {
 		name        string
 		event       native.StreamEvent
@@ -47,55 +100,101 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 	}{
 		{
 			name:        "retries exhausted on 503",
-			event:       native.StreamEvent{Type: native.EventError, Error: charExhaustedText},
+			event:       native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))},
 			code:        "agent.provider_overloaded",
 			historyCode: "agent.provider_overloaded",
 			public:      `{"type":"error","code":"agent.provider_overloaded","error":"` + charOverloadedDetail + `"}`,
 		},
 		{
-			name:        "rate limited",
-			event:       native.StreamEvent{Type: native.EventError, Error: "api error 429: Too Many Requests"},
+			name:        "retries exhausted on a rate limit",
+			event:       native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(429, sdk.KindRateLimited))},
 			code:        "agent.provider_rate_limited",
 			historyCode: "agent.provider_rate_limited",
 		},
 		{
+			name:        "request the provider rejected",
+			event:       native.StreamEvent{Type: native.EventError, Cause: errs.WrapDependency(charProviderErr(400, sdk.KindUnknown), "model stream")},
+			code:        "agent.provider_request_rejected",
+			historyCode: "agent.provider_request_rejected",
+			public:      `{"type":"error","code":"agent.provider_request_rejected","error":"` + charRejectedDetail + `"}`,
+		},
+		{
+			name:        "key without access to the model",
+			event:       native.StreamEvent{Type: native.EventError, Cause: errs.WrapDependency(charProviderErr(403, sdk.KindPermissionDenied), "model stream")},
+			code:        "agent.provider_permission_denied",
+			historyCode: "agent.provider_permission_denied",
+		},
+		{
+			name:        "provider not listening",
+			event:       native.StreamEvent{Type: native.EventError, Cause: charModelCallFailure(t, refused)},
+			code:        "agent.provider_unreachable",
+			historyCode: "agent.provider_unreachable",
+			public:      `{"type":"error","code":"agent.provider_unreachable","error":"` + charUnreachableDetail + `"}`,
+		},
+		{
+			// The request may have gone anywhere, so it names no provider.
+			name:        "refused connection in the runtime's own work",
+			event:       native.StreamEvent{Type: native.EventError, Cause: errs.Wrap(refused, "approval handler")},
+			code:        "agent.response_interrupted",
+			historyCode: "agent.response_interrupted",
+			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
+		},
+		{
 			name:        "stream start failure",
-			event:       native.StreamEvent{Type: native.EventError, Error: "stream start: dial tcp: connection refused"},
+			event:       native.StreamEvent{Type: native.EventError, Cause: errors.New("stream start: SECRET dispatch failure")},
 			code:        "agent.response_interrupted",
 			historyCode: "agent.response_interrupted",
 			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
 		},
 		{
-			name:        "unrecognized text",
-			event:       native.StreamEvent{Type: native.EventError, Error: "boom"},
+			name:        "status text without an APIError",
+			event:       native.StreamEvent{Type: native.EventError, Cause: errors.New("api error 429: Too Many Requests")},
 			code:        "agent.response_interrupted",
 			historyCode: "agent.response_interrupted",
-			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
 		},
 		{
-			name:        "empty text",
+			name:        "no cause",
 			event:       native.StreamEvent{Type: native.EventError},
 			code:        "agent.response_interrupted",
 			historyCode: "agent.response_interrupted",
 		},
 		{
-			// A catalogued code on the event wins over its text.
-			name:        "coded event",
-			event:       native.StreamEvent{Type: native.EventError, Code: "context.budget_unsatisfied", Error: "api error 503"},
+			name:        "context the budget cannot fit",
+			event:       native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("prepare context view: %w: SECRET math", contextfrag.ErrBudgetUnsatisfied)},
 			code:        "context.budget_unsatisfied",
 			historyCode: "",
 		},
 		{
-			// Current behavior: an unknown code is ignored and the text decides.
+			name:        "protected context overflow",
+			event:       native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("prepare context view: %w: SECRET cost", contextfrag.ErrProtectedContextOverflow)},
+			code:        "context.protected_overflow",
+			historyCode: "",
+		},
+		{
+			name:        "failed steer checkpoint",
+			event:       native.StreamEvent{Type: native.EventError, Cause: errs.Wrap(errors.New("SECRET ledger"), "checkpoint steered model call")},
+			code:        "agent.response_interrupted",
+			historyCode: "agent.response_interrupted",
+			public:      `{"type":"error","code":"agent.response_interrupted","error":"` + charInterruptedDetail + `"}`,
+		},
+		{
+			// A catalogued code on the event wins over its cause.
+			name:        "coded event",
+			event:       native.StreamEvent{Type: native.EventError, Code: "context.budget_unsatisfied", Cause: charProviderErr(503, sdk.KindServerError)},
+			code:        "context.budget_unsatisfied",
+			historyCode: "",
+		},
+		{
+			// An unknown code is ignored and the cause decides.
 			name:        "uncatalogued code",
-			event:       native.StreamEvent{Type: native.EventError, Code: "not.a.code", Error: "overloaded"},
+			event:       native.StreamEvent{Type: native.EventError, Code: "not.a.code", Cause: charProviderErr(529, sdk.KindServerError)},
 			code:        "agent.provider_overloaded",
 			historyCode: "agent.provider_overloaded",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cause := agentStreamLifecycleError(tc.event)
+			cause := agentStreamFailure(tc.event)
 			if got := string(apperror.CodeOf(cause)); got != tc.code {
 				t.Fatalf("lifecycle code = %q, want %q", got, tc.code)
 			}
@@ -106,14 +205,15 @@ func TestCharacterizeNativeStreamErrorClassification(t *testing.T) {
 			if public.Code != tc.code {
 				t.Fatalf("public event code = %q, want %q", public.Code, tc.code)
 			}
-			if tc.public != "" {
-				data, err := json.Marshal(public)
-				if err != nil {
-					t.Fatalf("marshal public event: %v", err)
-				}
-				if string(data) != tc.public {
-					t.Fatalf("public event = %s, want %s", data, tc.public)
-				}
+			data, err := json.Marshal(public)
+			if err != nil {
+				t.Fatalf("marshal public event: %v", err)
+			}
+			if tc.public != "" && string(data) != tc.public {
+				t.Fatalf("public event = %s, want %s", data, tc.public)
+			}
+			if strings.Contains(string(data), "SECRET") {
+				t.Fatalf("public event leaked the cause: %s", data)
 			}
 		})
 	}
@@ -287,20 +387,21 @@ func assertStrings(t *testing.T, what string, got, want []string) {
 // publishes its giving-up EventError and ends with agent_abort.
 //
 // Current behavior: the turn port reports no error, and no history is written.
-// The terminal event carries the run's failure code, and the stream ends with
-// run_terminal naming the recorded state and code.
+// The retry reaches subscribers with its counters alone. The terminal event
+// carries the run's failure code, and the stream ends with run_terminal naming
+// the recorded state and code.
 func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	got := runDiscussCharacterization(t,
 		native.StreamEvent{Type: native.EventAgentStart},
-		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "api error 503"},
-		native.StreamEvent{Type: native.EventError, Error: charExhaustedText},
+		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3},
+		native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))},
 		native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)},
 	)
 	assertStrings(t, "turn events", got.events, []string{
 		`{"runtime_type":""}`,
 		`{"type":"agent_start"}`,
-		`{"type":"retry","attempt":1,"maxAttempt":3,"retryError":"api error 503"}`,
+		`{"type":"retry","attempt":1,"maxAttempt":3}`,
 		`{"type":"error","code":"agent.provider_overloaded","error":"` + charOverloadedDetail + `"}`,
 		`{"type":"agent_abort","messages":[],"code":"agent.provider_overloaded"}`,
 		`{"type":"run_terminal","state":"failed","error_code":"agent.provider_overloaded"}`,
@@ -318,21 +419,20 @@ func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 }
 
 // X3 on the discuss path: the attempts fail with different classes. The run
-// records the first failure, the same one the lifecycle and history record,
-// not the last stream error the live view saw.
-func TestCharacterizeDiscussMixedFailureClassesRecordFirst(t *testing.T) {
+// records the class of the last attempt, the one the giving-up error carries:
+// the retried attempts publish no error of their own.
+func TestCharacterizeDiscussMixedFailureClassesRecordLast(t *testing.T) {
 	t.Parallel()
 	got := runDiscussCharacterization(t,
 		native.StreamEvent{Type: native.EventAgentStart},
-		native.StreamEvent{Type: native.EventError, Error: "api error 429: rate limited"},
-		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "api error 429"},
-		native.StreamEvent{Type: native.EventError, Error: charExhaustedText},
+		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3},
+		native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))},
 		native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)},
 	)
-	if want := [3]string{"failed", "agent.provider_rate_limited", ""}; got.ledger != want {
+	if want := [3]string{"failed", "agent.provider_overloaded", ""}; got.ledger != want {
 		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
 	}
-	if want := [2]string{"errored", "agent.provider_rate_limited"}; got.view != want {
+	if want := [2]string{"errored", "agent.provider_overloaded"}; got.view != want {
 		t.Fatalf("run view = %q, want %q", got.view, want)
 	}
 }
@@ -342,7 +442,7 @@ func TestCharacterizeDiscussRetryRecovered(t *testing.T) {
 	t.Parallel()
 	got := runDiscussCharacterization(t,
 		native.StreamEvent{Type: native.EventAgentStart},
-		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "api error 503"},
+		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3},
 		native.StreamEvent{Type: native.EventAgentEnd, Messages: json.RawMessage(`[{"role":"assistant","content":"done"}]`)},
 	)
 	assertStrings(t, "turn errors", got.errs, nil)
@@ -364,7 +464,7 @@ func TestCharacterizeDiscussFailureWithoutTerminalEvent(t *testing.T) {
 	t.Parallel()
 	got := runDiscussCharacterization(t,
 		native.StreamEvent{Type: native.EventAgentStart},
-		native.StreamEvent{Type: native.EventError, Error: "stream start: dial tcp: connection refused"},
+		native.StreamEvent{Type: native.EventError, Cause: errors.New("stream start: SECRET dispatch failure")},
 	)
 	assertStrings(t, "turn events", got.events, []string{
 		`{"runtime_type":""}`,

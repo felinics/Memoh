@@ -155,21 +155,21 @@ func assertFrames(t *testing.T, got []map[string]any, want []map[string]any) {
 }
 
 const (
-	providerOverloadedDetail = "The model provider is overloaded right now. Please try again in a moment."
+	providerOverloadedDetail = "The model provider is unavailable or overloaded right now. Please try again in a moment."
 	responseInterruptedCopy  = "The model response was interrupted. Please try again."
 	runFailedDetail          = "The response could not be completed. Please try again."
 )
 
 // Scenarios 2 and 3 on the WebSocket path: the application layer forwards the
-// public EventError (provider text already classified), the native runtime ends
-// with agent_abort, and the WS loop returns nil for a mid-stream failure, so
-// finishWSRun is called without an error.
+// public EventError (the failure already translated to its code), the native
+// runtime ends with agent_abort, and the WS loop returns nil for a mid-stream
+// failure, so finishWSRun is called without an error.
 func TestCharacterizeWSMidStreamProviderFailure(t *testing.T) {
 	t.Parallel()
 	r := newFailureCharRun(t)
 	r.forward(t,
 		native.StreamEvent{Type: native.EventAgentStart},
-		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "api error 503"},
+		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3},
 		native.StreamEvent{Type: native.EventError, Code: "agent.provider_overloaded", Error: providerOverloadedDetail},
 		native.StreamEvent{Type: native.EventAgentAbort},
 	)
@@ -193,7 +193,7 @@ func TestCharacterizeWSRetryRecoveredRun(t *testing.T) {
 	r := newFailureCharRun(t)
 	r.forward(t,
 		native.StreamEvent{Type: native.EventAgentStart},
-		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "api error 503"},
+		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3},
 		native.StreamEvent{Type: native.EventTextDelta, Delta: "done"},
 		native.StreamEvent{Type: native.EventAgentEnd},
 	)

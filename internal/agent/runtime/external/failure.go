@@ -28,6 +28,9 @@ const (
 	// FailureCredentialBusy: the credential cannot change while a turn runs
 	// on it.
 	FailureCredentialBusy
+	// FailureUsageLimited: the runtime's account has used up its usage
+	// allowance; a later turn may run once it resets.
+	FailureUsageLimited
 )
 
 var failureText = map[FailureKind]string{ //nolint:gosec // G101 matches the credential kinds; these are failure texts.
@@ -39,6 +42,7 @@ var failureText = map[FailureKind]string{ //nolint:gosec // G101 matches the cre
 	FailureControlFailed:           "runtime control failed",
 	FailureCredential:              "agent credential is unusable",
 	FailureCredentialBusy:          "agent credential is in use by a running turn",
+	FailureUsageLimited:            "external agent usage limit reached",
 }
 
 // Failure is a runtime failure the user can act on. Like a public error it

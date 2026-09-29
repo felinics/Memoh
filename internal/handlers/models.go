@@ -10,8 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -377,9 +379,22 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
 		if errors.Is(err, db.ErrInvalidUUID) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid model id").WithInternal(err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "model not found").WithInternal(err)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to test model").WithInternal(err)
+	}
+	if resp.Cause != nil {
+		// The response carries only the code; this event is where the cause
+		// is kept.
+		failure := probeError(resp.Cause, resp.Status == models.TestStatusAuthError)
+		result := errlog.Event(ctx, "model.test", failure, errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "model test failed", append([]slog.Attr{
+			slog.String("model_id", id), slog.String("status", string(resp.Status)),
+		}, result.Attrs()...)...)
+		resp.Code = string(apperror.CodeOf(failure))
 	}
 
 	return c.JSON(http.StatusOK, resp)

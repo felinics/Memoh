@@ -18,7 +18,7 @@ const zhInternalCopy = "服务器出错了，请重试。"
 // Copy rendered from a code is shown without the Error: label; a bare error
 // text keeps it.
 func TestErrorReplyTextPrefix(t *testing.T) {
-	const copyText = "The model provider is overloaded right now. Please try again in a moment."
+	const copyText = "The model provider is unavailable or overloaded right now. Please try again in a moment."
 	if got := ErrorReplyText("agent.provider_overloaded", copyText); got != copyText {
 		t.Fatalf("coded reply = %q", got)
 	}
@@ -37,7 +37,7 @@ func TestErrorCodeText(t *testing.T) {
 		t.Fatalf("args copy = %q, %v", withArgs, ok)
 	}
 	detail, ok := ErrorCodeText(nil, apperror.CodeAgentProviderOverloaded, nil)
-	if !ok || detail != "The model provider is overloaded right now. Please try again in a moment." {
+	if !ok || detail != "The model provider is unavailable or overloaded right now. Please try again in a moment." {
 		t.Fatalf("catalog detail = %q, %v", detail, ok)
 	}
 	if text, ok := ErrorCodeText(i18n.New("en"), "not.in_catalog", nil); ok {

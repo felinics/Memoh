@@ -18,25 +18,73 @@ import (
 	sessiontest "github.com/felinics/memoh/internal/testutil/sessionruntime"
 )
 
-func TestRuntimeDecisionContinuationLogsPrivateCause(t *testing.T) {
-	var logs bytes.Buffer
-	service := &Service{logger: slog.New(slog.NewTextHandler(&logs, nil))}
-	privateCause := errors.New("private provider rejection")
-	service.logRuntimeDecisionContinuationFailure(sessionruntime.Command{
-		RunID: "run-log", TargetID: "decision-log", Type: sessionruntime.CommandUserInputResponse,
-	}, apperror.Wrap(apperror.CodeAgentResponseInterrupted, privateCause, nil))
+// A continuation that reports its failure as an event and then returns it
+// fails once: one failure event in the decision output, a close at the next
+// sequence, and one result record that carries the private cause.
+func TestRuntimeDecisionContinuationFailureIsReportedOnce(t *testing.T) {
+	backend := &decisionOutputBackend{MemoryBackend: sessionruntime.NewMemoryBackend()}
+	manager, handle := newWaitingDecisionRuntime(t, backend)
+	logger, logs := captureLogs()
+	service := &Service{decisionRuntime: manager, logger: logger}
+	manager.SetTerminalObserver(service.logRunResult)
+	failure := apperror.Wrap(apperror.CodeAgentResponseTimeout, errors.New("private idle timeout detail"), nil)
+	service.continueRuntimeDecision(context.Background(), sessionruntime.Command{
+		StreamOutput: true, ID: "answer-timeout", TargetID: "decision-timeout", Type: sessionruntime.CommandUserInputResponse,
+		BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID, Generation: handle.Generation,
+	}, func(_ context.Context, _ *continuationLifecycleResult, ch chan<- WSStreamEvent) error {
+		ch <- runtimeDecisionEvent(t, agentFailureStreamEvent(failure))
+		return failure
+	})
 
-	got := logs.String()
-	for _, want := range []string{
-		"runtime decision continuation failed",
-		"private provider rejection",
-		"run_id=run-log",
-		"decision_id=decision-log",
-		"command_type=user_input_response",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("continuation failure log %q does not contain %q", got, want)
+	failures := 0
+	for _, entry := range backend.output {
+		var event native.StreamEvent
+		if entry.Output != nil && json.Unmarshal(entry.Output, &event) == nil && event.Type == native.EventError {
+			failures++
 		}
+	}
+	if failures != 1 {
+		t.Fatalf("decision output failure events = %d, want 1", failures)
+	}
+	if n := len(backend.output); n == 0 || backend.output[n-1].Type != "decision_output_end" {
+		t.Fatal("decision output did not close")
+	}
+	records := waitRunResults(t, logs, 1)
+	if got := recordAttrs(records[0])["error"]; !strings.Contains(got, "private idle timeout detail") {
+		t.Fatalf("result record error = %q, want the private cause", got)
+	}
+	for _, record := range logs.atLevel(slog.LevelError) {
+		if record.Message != "agent run" {
+			t.Fatalf("unexpected error record %q besides the run result", record.Message)
+		}
+	}
+}
+
+type failFirstDecisionOutputBackend struct {
+	*decisionOutputBackend
+	failed atomic.Bool
+}
+
+func (b *failFirstDecisionOutputBackend) AppendDecisionOutput(ctx context.Context, ref sessionruntime.DecisionOutputRef, seq int64, payload json.RawMessage, limits sessionruntime.DecisionOutputLimits) (sessionruntime.DecisionOutputState, error) {
+	if payload != nil && b.failed.CompareAndSwap(false, true) {
+		return sessionruntime.DecisionOutputState{}, errors.New("decision output write unavailable")
+	}
+	return b.decisionOutputBackend.AppendDecisionOutput(ctx, ref, seq, payload, limits)
+}
+
+// A failure event that cannot be appended does not take a sequence number, so
+// the close still lands at the next one.
+func TestRuntimeDecisionUnappendedFailureKeepsOutputSequence(t *testing.T) {
+	backend := &failFirstDecisionOutputBackend{decisionOutputBackend: &decisionOutputBackend{MemoryBackend: sessionruntime.NewMemoryBackend()}}
+	manager, handle := newWaitingDecisionRuntime(t, backend)
+	service := &Service{decisionRuntime: manager}
+	service.continueRuntimeDecision(context.Background(), sessionruntime.Command{
+		StreamOutput: true, ID: "answer-unappended", BotID: handle.BotID, SessionID: handle.SessionID, RunID: handle.RunID, Generation: handle.Generation,
+	}, func(context.Context, *continuationLifecycleResult, chan<- WSStreamEvent) error {
+		return apperror.New(apperror.CodeAgentResponseTimeout, nil)
+	})
+	if len(backend.output) != 1 || backend.output[0].Type != "decision_output_end" {
+		t.Fatalf("decision output = %+v, want only its close", backend.output)
 	}
 }
 

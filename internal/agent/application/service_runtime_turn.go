@@ -998,10 +998,15 @@ func runtimeTurnRan(result external.PromptResult) bool {
 }
 
 // runtimeFailureEvent is the public stream event for a failed External Agent
-// turn. It carries only the code classifyRuntimeFailure gives the cause.
+// turn. It carries only the code classifyRuntimeFailure gives the cause and
+// the catalog args of that public error.
 func runtimeFailureEvent(cause error) native.StreamEvent {
 	code := string(classifyRuntimeFailure(cause))
-	return native.StreamEvent{Type: native.EventError, Code: code, Error: code}
+	event := native.StreamEvent{Type: native.EventError, Code: code, Error: code}
+	if public, ok := apperror.PublicFrom(ExternalAgentError(cause), ""); ok && len(public.Args) > 0 {
+		event.Args = public.Args
+	}
+	return event
 }
 
 func runtimeTerminalStreamEvent(eventType native.StreamEventType, result external.PromptResult) native.StreamEvent {

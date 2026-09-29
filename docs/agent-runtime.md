@@ -123,6 +123,41 @@ provider once more; unfinished or unobservable jobs retain their identity and an
 user stop still requests provider cancellation. Receipts support operator recovery;
 they do not constitute automatic job adoption after a server restart.
 
+## Model call failures
+
+The native runtime retries a failed model call from the last committed step,
+by default up to five times with a backoff capped at eight seconds. Only the failure
+of the provider call itself is considered: an error returned by `DoStream`, an
+`ErrorPart` in the stream, or a stream that ends before its finish-step part.
+A failure of the loop's own work (the provider-attempt handoff, a step commit,
+a capability refresh, the tool batch) ends the run, since its tools may already
+have run.
+
+A provider call is retried when the SDK classifies its `*sdk.APIError` as
+`rate_limited` or `server_error`, when the stream was cut off
+(`sdk.ErrStreamIncomplete`, `io.ErrUnexpectedEOF`), or when the chain holds a
+`net.Error`. Cancellation and expired deadlines are never retried, and every
+other `Kind` is final. Error text is never read.
+
+A retried attempt is recorded once, as a WARN event for `agent.model_call`, and
+the stream reports it as a `retry` event carrying only the attempt counters. The
+stream publishes an `error` event only for the failure that ends the run, with
+the failure as its `Cause`; after the last retry that is the last attempt's
+failure, wrapped. A subagent attempt is run again only when its watchdog ended
+it.
+
+The application names the failure in one translation function shared by the
+WebSocket, IM, discuss, scheduled, decision-continuation and subagent paths. A
+context the budget cannot fit is `context.protected_overflow` or
+`context.budget_unsatisfied`. A provider's answer is named by its `Kind`:
+`agent.provider_auth_failed`, `agent.provider_permission_denied`,
+`agent.provider_quota_exhausted`, `agent.provider_rate_limited` or
+`agent.provider_overloaded`, and `agent.provider_request_rejected` for any other
+`Kind` with an HTTP status. A request that got no response (a `*url.Error` in
+the chain) is `agent.provider_unreachable`. Anything else is
+`agent.response_interrupted`. Published events carry the code and its catalog
+detail; the cause stays in the run's result record.
+
 ## Graceful shutdown and session resume
 
 Server shutdown closes admission and records `session_runtime.interrupted` on

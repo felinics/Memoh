@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/models"
 )
@@ -41,7 +43,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 		errMsg := ""
 		if retErr != nil {
 			event = hooks.EventTurnError
-			errMsg = retErr.Error()
+			errMsg = turnHookError(StreamEvent{Type: EventError, Cause: retErr})
 		}
 		a.runTurnHook(context.WithoutCancel(ctx), cfg, event, errMsg)
 	}()
@@ -141,7 +143,7 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 			var err error
 			dir, err = cfg.OnStepCommitted(dynamic.withMessageOrigins(genCtx, stepIndex), stepIndex, decorated)
 			if err != nil {
-				return StepDirective{}, fmt.Errorf("generate: %w", tagStepCommitError(fmt.Errorf("twilightai: commit step %d: %w", sdkStep, err)))
+				return StepDirective{}, fmt.Errorf("generate: twilightai: commit step %d: %w", sdkStep, err)
 			}
 		}
 		if cfg.capabilityChanges.Swap(false) && sr.Deferred == nil {
@@ -243,7 +245,9 @@ func (a *Agent) runGenerate(ctx context.Context, cfg RunConfig) (_ *GenerateResu
 			if loopErr := detectGenerateLoopAbort(genCtx, err); loopErr != nil {
 				return nil, loopErr
 			}
-			return nil, fmt.Errorf("generate: %w", err)
+			// Marked as the streaming loop marks its model calls, so the
+			// failure is translated the same way.
+			return nil, &modelCallFailure{err: errs.WrapDependency(err, "generate", slog.Int("step", sdkStep))}
 		}
 		lastResult = result
 

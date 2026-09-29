@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"regexp"
 	"sort"
 	"strconv"
@@ -163,9 +162,6 @@ const (
 var ErrWatchdogTimedOut = errors.New("subagent watchdog: no activity within timeout")
 
 var (
-	err429Pattern    = regexp.MustCompile(`(^|[^0-9])429($|[^0-9])`)
-	errEOFPattern    = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
-	serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
 	agentIDPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 	errAgentNotFound = errors.New("agent not found")
 )
@@ -1162,8 +1158,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			res.Error = fmt.Sprintf("%v (progress from this attempt is saved; send a follow-up message to continue)", err)
 			return res
 		}
-		if (errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err)) &&
-			attempt == subagentMaxRetries {
+		if errors.Is(err, ErrWatchdogTimedOut) && attempt == subagentMaxRetries {
 			break
 		}
 		res.Error = err.Error()
@@ -1175,6 +1170,11 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	return res
 }
 
+// subagentAttemptDisposition restarts an attempt only when the subagent
+// watchdog ended it. The native runtime inside the attempt already retries
+// provider failures, so any other error reaching this point is final: retrying
+// it here would multiply calls to a failing provider, or replay local work such
+// as a tool batch or a commit.
 func subagentAttemptDisposition(
 	ctx context.Context,
 	err error,
@@ -1187,8 +1187,7 @@ func subagentAttemptDisposition(
 	if ctx != nil && ctx.Err() != nil {
 		return SpawnAttemptFailure
 	}
-	if err != nil && !stepPersisted && attemptsRemain &&
-		(errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err)) {
+	if !stepPersisted && attemptsRemain && errors.Is(err, ErrWatchdogTimedOut) {
 		return SpawnAttemptRetry
 	}
 	return SpawnAttemptFailure
@@ -1536,27 +1535,6 @@ func runSpawnProgress(ctx context.Context, emitter StreamEmitter, ticks <-chan t
 			emitter(ToolStreamEvent{Type: StreamEventSpawnProgress})
 		}
 	}
-}
-
-func isRetryableSubagentError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	if strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "rate_limit") {
-		return true
-	}
-	if err429Pattern.MatchString(errStr) || serverErrPattern.MatchString(errStr) {
-		return true
-	}
-	if errEOFPattern.MatchString(errStr) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (p *SpawnProvider) persistMessages(

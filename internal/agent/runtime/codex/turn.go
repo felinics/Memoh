@@ -703,7 +703,11 @@ func (t *turnState) result() (external.PromptResult, error) {
 		if turnErr != nil && strings.TrimSpace(turnErr.Message) != "" {
 			message = turnErr.Message
 		}
-		return out, errs.NewDependency(message)
+		err := errs.NewDependency(message)
+		if turnErr != nil && turnErr.CodexErrorInfo != nil && turnErr.CodexErrorInfo.Unit == protocol.CodexErrorInfoUnitUsageLimitExceeded {
+			return out, external.Fail(external.FailureUsageLimited, err)
+		}
+		return out, err
 	}
 }
 

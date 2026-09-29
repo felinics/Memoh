@@ -19,7 +19,6 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
@@ -410,11 +409,15 @@ func (s *Service) continueRuntimeDecision(
 	}
 	var outputSeq int64
 	var outputCause error
+	// failurePublished records that the continuation's own failure event
+	// reached the output, so the run's failure is not appended a second time.
+	var failurePublished bool
 	defer func() {
-		if outputCause != nil {
+		if outputCause != nil && !failurePublished {
 			raw, _ := json.Marshal(agentFailureStreamEvent(outputCause))
-			outputSeq++
-			_ = s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq, raw)
+			if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, raw); err == nil {
+				outputSeq++
+			}
 		}
 		if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, nil); err != nil {
 			if s.logger != nil {
@@ -428,7 +431,6 @@ func (s *Service) continueRuntimeDecision(
 
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
 		outputCause = err
-		s.logRuntimeDecisionContinuationFailure(command, err)
 		s.recoverContextLifecycleFromAssistantMetadata(ctx, command.RunID, command.BotID, command.SessionID, err)
 		s.finishRuntimeDecision(ctx, handle, err)
 		return
@@ -458,7 +460,8 @@ func (s *Service) continueRuntimeDecision(
 		if err := json.Unmarshal(raw, &event); err != nil {
 			continue
 		}
-		if eventErr := agentStreamLifecycleError(event); eventErr != nil && eventCause == nil {
+		eventErr := agentStreamFailure(event)
+		if eventErr != nil && eventCause == nil {
 			eventCause = eventErr
 		}
 		if event.IsTerminal() {
@@ -479,11 +482,13 @@ func (s *Service) continueRuntimeDecision(
 			cancel()
 			continue
 		}
-		outputSeq++
-		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq, raw); err != nil {
+		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq+1, raw); err != nil {
 			publishErr = err
 			cancel()
+			continue
 		}
+		outputSeq++
+		failurePublished = failurePublished || eventErr != nil
 	}
 	runErr := <-runDone
 	lifecycleDeferred = lifecycleDeferred || lifecycle.deferred
@@ -495,7 +500,6 @@ func (s *Service) continueRuntimeDecision(
 	}
 	if runErr != nil {
 		outputCause = runErr
-		s.logRuntimeDecisionContinuationFailure(command, lifecycleCause)
 		s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
 		s.finishRuntimeDecision(ctx, handle, runErr)
 		return
@@ -505,35 +509,13 @@ func (s *Service) continueRuntimeDecision(
 		return
 	}
 	s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
-	s.logRuntimeDecisionContinuationFailure(command, lifecycleCause)
 	s.finishRuntimeDecision(ctx, handle, lifecycleCause)
 }
 
-// logRuntimeDecisionContinuationFailure records the private provider,
-// persistence, or ownership cause after a durably answered decision resumes a
-// run. The websocket and session ledger deliberately retain only the stable
-// public error code; without this log an operator cannot distinguish those
-// failure classes from the generic agent.response_interrupted response.
-func (s *Service) logRuntimeDecisionContinuationFailure(command sessionruntime.Command, cause error) {
-	if s == nil || s.logger == nil || cause == nil {
-		return
-	}
-	privateCause := apperror.CauseOf(cause)
-	if privateCause == nil {
-		privateCause = cause
-	}
-	s.logger.Error("runtime decision continuation failed",
-		slog.Any("error", privateCause),
-		slog.String("run_id", command.RunID),
-		slog.String("decision_id", command.TargetID),
-		slog.String("command_type", command.Type),
-	)
-}
-
-// logContinuationStreamError records the private detail of a native error
-// event observed while a decision continuation streams. publicAgentStreamEvent
-// replaces that detail with a stable code before the event leaves the
-// application, so this is the only place the original text is retained.
+// logContinuationStreamError records the cause of a native error event
+// observed while a decision continuation streams. publicAgentStreamEvent
+// replaces the event with its code before it leaves the application, so this
+// is the only place the cause is retained.
 func (s *Service) logContinuationStreamError(runID string, event native.StreamEvent) {
 	if s == nil || s.logger == nil {
 		return
@@ -542,7 +524,7 @@ func (s *Service) logContinuationStreamError(runID string, event native.StreamEv
 		slog.String("run_id", strings.TrimSpace(runID)),
 		slog.String("event_type", string(event.Type)),
 		slog.String("code", strings.TrimSpace(event.Code)),
-		slog.String("error", strings.TrimSpace(event.Error)),
+		slog.Any("error", event.Cause),
 	)
 }
 

@@ -115,6 +115,8 @@ func runtimeFailureCode(failure *external.Failure) (apperror.Code, map[string]st
 		return apperror.CodeAgentCredentialRuntimeBusy, nil
 	case external.FailureCredential:
 		return agentCredentialCode(failure.Err), nil
+	case external.FailureUsageLimited:
+		return apperror.CodeExternalRuntimeUsageLimited, nil
 	default:
 		return "", nil
 	}

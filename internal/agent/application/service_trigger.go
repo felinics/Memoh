@@ -217,7 +217,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		if idle != nil {
 			idle.Observe(event)
 		}
-		if eventErr := agentStreamEventError(event); eventErr != nil {
+		if eventErr := agentStreamFailure(event); eventErr != nil {
 			if streamErr == nil {
 				streamErr = eventErr
 			}

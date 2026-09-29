@@ -29,8 +29,8 @@ func (*recordingReasoningProvider) ListModels(context.Context) ([]sdk.Model, err
 	return nil, nil
 }
 
-func (*recordingReasoningProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*recordingReasoningProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*recordingReasoningProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
@@ -88,8 +88,8 @@ func (*recordingPromptCacheProvider) ListModels(context.Context) ([]sdk.Model, e
 	return nil, nil
 }
 
-func (*recordingPromptCacheProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*recordingPromptCacheProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*recordingPromptCacheProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {

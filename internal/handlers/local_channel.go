@@ -1266,7 +1266,8 @@ func wsWorkspaceTargetError(err error) error {
 // sendWSAgentError sends a stream error with its code and the code's catalog
 // detail. An error without a code is sent as runtime_run_failed, the code the
 // run records for it, and a code without a catalog entry carries the detail of
-// runtime_run_failed. The event's own text is never sent.
+// runtime_run_failed. The event's own text is never sent. A catalogued code
+// keeps the event's args that its catalog entry allows.
 func sendWSAgentError(writer *wsWriter, ref wsTurnRef, streamEvent native.StreamEvent) {
 	event := ref.event("error")
 	event.Code = strings.TrimSpace(streamEvent.Code)
@@ -1276,6 +1277,8 @@ func sendWSAgentError(writer *wsWriter, ref wsTurnRef, streamEvent native.Stream
 	definition, ok := apperror.Lookup(apperror.Code(event.Code))
 	if !ok {
 		definition, _ = apperror.Lookup(apperror.CodeRuntimeRunFailed)
+	} else if public, _ := apperror.PublicFrom(apperror.New(apperror.Code(event.Code), streamEvent.Args), ""); len(public.Args) > 0 {
+		event.Args = public.Args
 	}
 	event.Message = definition.Detail
 	writer.SendJSON(event)

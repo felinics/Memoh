@@ -1887,13 +1887,6 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		run.UpdatedAt = now
 		if event.Type == native.EventRetry {
 			run.Messages = []chatview.UIMessage{}
-			// A retry discards the failed attempt whole, error included: the
-			// native stream publishes EventError before retrying, so keeping
-			// that code would park the run in errored the moment the recovered
-			// attempt reaches its clean end — and nothing after a terminal
-			// event can clear it. A retry that runs out of attempts publishes
-			// its own final EventError, so the failure is not lost either.
-			run.ErrorCode = ""
 		}
 		for _, msg := range messages {
 			run.Messages = upsertUIMessage(run.Messages, msg)

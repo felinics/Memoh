@@ -93,13 +93,20 @@ type StreamEvent struct {
 	Error          string           `json:"error,omitempty"`
 	Attempt        int              `json:"attempt,omitempty"`
 	MaxAttempt     int              `json:"maxAttempt,omitempty"`
-	RetryError     string           `json:"retryError,omitempty"`
 	StepNumber     int              `json:"stepNumber,omitempty"`
 	TotalSteps     int              `json:"totalSteps,omitempty"`
 	ProgressStatus string           `json:"progressStatus,omitempty"`
 	// NoticeKind is set by the runtime on a RuntimeNotice. It never reaches
 	// the wire: the application replaces it with Code.
 	NoticeKind NoticeKind `json:"-"`
+	// Cause is the failure an Error event from the native runtime reports. It
+	// never reaches the wire: the application translates it into Code and
+	// the catalog detail.
+	Cause error `json:"-"`
+
+	// Args are the catalog args of the public error an Error event reports
+	// under Code.
+	Args map[string]string `json:"args,omitempty"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

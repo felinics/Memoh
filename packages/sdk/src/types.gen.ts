@@ -3434,8 +3434,12 @@ export type ModelsModelConfig = {
 export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription' | 'video';
 
 export type ModelsTestResponse = {
+    /**
+     * Code is the error catalog code for why the test did not pass. It is
+     * empty on success and when no catalog code describes the failure.
+     */
+    code?: string;
     latency_ms?: number;
-    message?: string;
     reachable?: boolean;
     status?: ModelsTestStatus;
 };
@@ -3542,8 +3546,12 @@ export type ProvidersOAuthStatus = {
 };
 
 export type ProvidersTestResponse = {
+    /**
+     * Code is the error catalog code for why the test did not pass. It is
+     * empty on success and when no catalog code describes the failure.
+     */
+    code?: string;
     latency_ms?: number;
-    message?: string;
     reachable?: boolean;
     status?: ProvidersTestStatus;
 };

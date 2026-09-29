@@ -207,7 +207,7 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: " agent.provider_overloaded ", Error: "provider said " + secret})
 			},
 			wantCode:    "agent.provider_overloaded",
-			wantMessage: "The model provider is overloaded right now. Please try again in a moment.",
+			wantMessage: "The model provider is unavailable or overloaded right now. Please try again in a moment.",
 		},
 		{
 			name:        "blank stream error",
@@ -224,6 +224,26 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 				t.Fatalf("event = %#v, want code %q message %q", event, tc.wantCode, tc.wantMessage)
 			}
 		})
+	}
+}
+
+func TestSendWSAgentErrorCarriesCatalogArgs(t *testing.T) {
+	ref := wsTurn("invocation-1", "session-1").withRun("run-1")
+	event := decodeWSTestEvent(t, func(w *wsWriter) {
+		sendWSAgentError(w, ref, native.StreamEvent{
+			Type: native.EventError, Code: string(apperror.CodeAgentDependencyMissing),
+			Args: map[string]string{"dep_id": "python", "secret": "token"},
+		})
+	})
+	args, _ := event["args"].(map[string]any)
+	if event["code"] != string(apperror.CodeAgentDependencyMissing) || len(args) != 1 || args["dep_id"] != "python" {
+		t.Fatalf("event = %#v, want dep_id as its only arg", event)
+	}
+	uncatalogued := decodeWSTestEvent(t, func(w *wsWriter) {
+		sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Args: map[string]string{"dep_id": "python"}})
+	})
+	if _, ok := uncatalogued["args"]; ok {
+		t.Fatalf("uncatalogued event = %#v, want no args", uncatalogued)
 	}
 }
 

@@ -46,6 +46,14 @@ when the status would attribute the code wrongly (see
   (`session_runs.error_code`, the `error_code` of history metadata) is
   registered under the value that was written. New codes are lowercase and
   dotted.
+- The status tells the client what to do about its own request. 401 is only
+  for a missing or invalid Memoh session, because the Web app signs out on a
+  401. A code for a dependency's failure answers 5xx, or 429 when the client
+  should back off.
+- `internal/apperror/testdata/codes.golden` records the status each code was
+  published with and only grows. A published status is changed only when no
+  client depends on it, and the change is listed in `restatedStatuses` in the
+  guard test.
 - `internal` (500) is the answer when no public error applies, `canceled`
   (499) when the caller canceled the request, and `http.*` when the transport
   itself refused the request.
@@ -154,7 +162,7 @@ every boundary and the RPC envelope all take the fault from this one rule.
 
 A model provider is outside Memoh, whoever holds the credential. Every code
 that reports a provider's answer declares `dependency`, including a rejected
-key (401), an exhausted quota (402) and a rate limit (429); a content
+key, an exhausted quota and a rate limit (429); a content
 moderation refusal would be the one `client` code. The codes an external
 agent runtime reports about its own failure declare `dependency` for the same
 reason. A code that some producers raise for this process's own failures,
@@ -164,9 +172,9 @@ fails when a code under `agent.provider_` or `agent.response_` declares none.
 
 | Code | Fault |
 | --- | --- |
-| `agent.provider_auth_failed`, `agent.provider_quota_exhausted`, `agent.provider_rate_limited`, `agent.provider_overloaded` | `dependency` |
+| `agent.provider_auth_failed`, `agent.provider_permission_denied`, `agent.provider_quota_exhausted`, `agent.provider_rate_limited`, `agent.provider_overloaded`, `agent.provider_request_rejected`, `agent.provider_unreachable` | `dependency` |
 | `agent.response_interrupted`, `agent.response_timeout` | `dependency` |
-| `runtime_prompt_failed`, `external_runtime.session_resume_failed`, `acp.config_update_failed` | `dependency` |
+| `runtime_prompt_failed`, `external_runtime.session_resume_failed`, `external_runtime.usage_limited`, `acp.config_update_failed` | `dependency` |
 
 ## Attribution across an RPC
 

@@ -15,7 +15,6 @@ import (
 	"github.com/felinics/memoh/internal/agent/step"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
-	"github.com/felinics/memoh/internal/apperror"
 )
 
 type staticToolProvider struct {
@@ -40,8 +39,8 @@ func (*atomicMockProvider) ListModels(context.Context) ([]sdk.Model, error) {
 	return nil, nil
 }
 
-func (*atomicMockProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+func (*atomicMockProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*atomicMockProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
@@ -640,8 +639,8 @@ func TestAgentStreamFailsClosedOnProtectedStepOverflow(t *testing.T) {
 	if len(errorEvents) != 1 {
 		t.Fatalf("error events = %#v, want exactly one", errorEvents)
 	}
-	if errorEvents[0].Code != string(apperror.CodeContextProtectedOverflow) {
-		t.Fatalf("error code = %q, want %q", errorEvents[0].Code, apperror.CodeContextProtectedOverflow)
+	if !errors.Is(errorEvents[0].Cause, contextfrag.ErrProtectedContextOverflow) || errorEvents[0].Code != "" || errorEvents[0].Error != "" {
+		t.Fatalf("error event = %#v, want only the protected-context sentinel as its cause", errorEvents[0])
 	}
 }
 
