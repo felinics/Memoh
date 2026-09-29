@@ -114,6 +114,9 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
+		if errors.Is(err, models.ErrValidation) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusCreated, resp)
@@ -239,6 +242,9 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
+		if errors.Is(err, models.ErrValidation) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
@@ -275,6 +281,9 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 	if err != nil {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
+		}
+		if errors.Is(err, models.ErrValidation) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		if errors.Is(err, models.ErrModelIDAmbiguous) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")

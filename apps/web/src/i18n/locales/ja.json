@@ -1576,7 +1576,7 @@
     "description": "モデルの説明",
     "descriptionPlaceholder": "モデルの用途や特徴を簡潔に入力",
     "dimensions": "寸法",
-    "dimensionsPlaceholder": "例: 1536",
+    "dimensionsPlaceholder": "空欄にすると自動検出します",
     "dimensionsMin": "次元数は 0 より大きい値にしてください",
     "compatibilities": "互換性",
     "compatibility": {

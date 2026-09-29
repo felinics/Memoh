@@ -1607,7 +1607,7 @@
     "description": "Description",
     "descriptionPlaceholder": "Briefly describe the model's purpose or strengths",
     "dimensions": "Dimensions",
-    "dimensionsPlaceholder": "e.g. 1536",
+    "dimensionsPlaceholder": "Leave empty to detect automatically",
     "dimensionsMin": "Dimensions must be greater than 0",
     "compatibilities": "Compatibilities",
     "compatibility": {

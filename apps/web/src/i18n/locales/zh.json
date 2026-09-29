@@ -1607,7 +1607,7 @@
     "description": "模型说明",
     "descriptionPlaceholder": "简要说明模型的用途或特点",
     "dimensions": "向量维度",
-    "dimensionsPlaceholder": "例如 1536",
+    "dimensionsPlaceholder": "留空将自动检测",
     "dimensionsMin": "向量维度需大于 0",
     "compatibilities": "兼容性",
     "compatibility": {
