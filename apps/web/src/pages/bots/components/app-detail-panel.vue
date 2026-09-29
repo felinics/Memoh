@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { resolveApiErrorMessage } from '@/utils/api-error'
 // The page of one App on the bot, laid out like the Supermarket detail
 // page: the icon box and title with the actions beside them, the
 // description, then its components. The back row belongs to DetailPane. Skills are read-only; dependency rows reuse
@@ -110,8 +111,10 @@ watch(() => [appKey(props.item), props.item.installation_id, props.item.status, 
 })
 
 /** Copy the persisted diagnostic verbatim, using the shared clipboard feedback. */
+const errorText = computed(() => props.item.last_error_code ? resolveApiErrorMessage({ code: props.item.last_error_code }, props.item.last_error ?? '') : props.item.last_error ?? '')
+
 async function copyError() {
-  const ok = await copyText(props.item.last_error ?? '')
+  const ok = await copyText(errorText.value)
   if (ok) toast.success(t('common.copied'))
   else toast.error(t('common.copyFailed'))
 }
@@ -255,7 +258,7 @@ function dependencyName(dep: AppDependencyItem): string {
                 tabindex="0"
                 class="max-h-64 min-w-0 overflow-auto"
               >
-                <pre class="whitespace-pre-wrap break-all font-mono text-caption text-foreground">{{ item.last_error }}</pre>
+                <pre class="whitespace-pre-wrap break-all font-mono text-caption text-foreground">{{ errorText }}</pre>
               </div>
               <TextButton @click="copyError">
                 {{ t('apps.diagnostics.copyError') }}

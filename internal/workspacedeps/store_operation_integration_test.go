@@ -159,7 +159,7 @@ func TestPostgresOperationFinishCannotCrossTeam(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	role := pgx.Identifier{"operation_scope_" + strings.ReplaceAll(key.BotID, "-", "")[:8]}.Sanitize()
-	for _, sql := range []string{"CREATE ROLE " + role + " NOLOGIN", "GRANT USAGE ON SCHEMA public TO " + role, "GRANT SELECT,UPDATE,DELETE ON bot_dependency_installations TO " + role, "SET LOCAL ROLE " + role, "SELECT set_config('memoh.team_id','ffffffff-ffff-4fff-8fff-ffffffffffff',true)"} {
+	for _, sql := range []string{"CREATE ROLE " + role + " NOLOGIN", "GRANT USAGE ON SCHEMA public TO " + role, "GRANT SELECT,INSERT,UPDATE,DELETE ON bot_dependency_installations, bot_dependency_graphs TO " + role, "SET LOCAL ROLE " + role, "SELECT set_config('memoh.team_id','ffffffff-ffff-4fff-8fff-ffffffffffff',true)"} {
 		if _, err := tx.Exec(ctx, sql); err != nil {
 			t.Fatal(err)
 		}

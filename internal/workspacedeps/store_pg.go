@@ -2,6 +2,7 @@ package workspacedeps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -107,7 +108,7 @@ func (s *postgresStore) ClaimOperation(ctx context.Context, in UpsertInstallatio
 		BotID: botID, DependencyID: in.DependencyID,
 		Source: in.Source, Status: string(in.Status), InstalledVersion: in.InstalledVersion,
 		ManifestDigest: in.ManifestDigest, SourceUrl: in.SourceURL, RegistryID: in.RegistryID,
-		DefinitionRevision: in.DefinitionRevision, OperationID: operationID,
+		DefinitionRevision: in.DefinitionRevision, OperationID: operationID, GraphOwner: in.GraphOwner,
 	})
 	return operationResult(row, err)
 }
@@ -126,16 +127,20 @@ func (s *postgresStore) FinishOperation(ctx context.Context, key InstallationKey
 		row, err := s.q.DeleteBotDependencyOperation(ctx, dbsqlc.DeleteBotDependencyOperationParams{
 			BotID: botID, DependencyID: key.DependencyID, OperationID: operationID,
 		})
-		return operationResult(row, err)
+		return operationResult(dbsqlc.BotDependencyInstallation(row), err)
+	}
+	requires, err := json.Marshal(append([]string{}, terminal.Requires...))
+	if err != nil {
+		return Installation{}, err
 	}
 	row, err := s.q.FinishBotDependencyOperation(ctx, dbsqlc.FinishBotDependencyOperationParams{
 		BotID: botID, DependencyID: key.DependencyID, OperationID: operationID,
 		Source: terminal.Source, Status: string(terminal.Status), InstalledVersion: terminal.InstalledVersion,
 		LatestVersion: terminal.LatestVersion, LastCheckedAt: nullableTimestamptz(terminal.LastCheckedAt), LastError: terminal.LastError,
 		ManifestDigest: terminal.ManifestDigest, SourceUrl: terminal.SourceURL, RegistryID: terminal.RegistryID,
-		DefinitionRevision: terminal.DefinitionRevision,
+		DefinitionRevision: terminal.DefinitionRevision, Requires: requires, RelationshipsKnown: terminal.RelationshipsKnown, PlanID: terminal.PlanID,
 	})
-	return operationResult(row, err)
+	return operationResult(dbsqlc.BotDependencyInstallation(row), err)
 }
 
 func operationResult(row dbsqlc.BotDependencyInstallation, err error) (Installation, error) {

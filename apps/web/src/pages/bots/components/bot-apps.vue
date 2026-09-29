@@ -178,6 +178,16 @@
     />
 
     <AppUpdateDialog
+      :bot-id="botId"
+      :open="!!resumeTarget"
+      :item="resumeTarget"
+      resume
+      @update:open="(value) => { if (!value) resumeTarget = null }"
+      @confirm="onResumeConfirmed"
+    />
+
+    <AppUpdateDialog
+      :bot-id="botId"
       :open="!!updateTarget"
       :item="updateTarget"
       @update:open="(value) => { if (!value) updateTarget = null }"
@@ -207,6 +217,7 @@
     />
 
     <DependencyConfirmDialog
+      :bot-id="botId"
       :open="confirm.open"
       :mode="confirm.mode"
       :item="confirm.item"
@@ -240,6 +251,7 @@
     />
 
     <DependencyRollbackDialog
+      :bot-id="botId"
       :open="!!rollbackTarget"
       :item="rollbackTarget"
       :loading="rollingBack"
@@ -437,7 +449,7 @@ const {
   running,
   ownsStream: ownsAppStream,
   start: startApp,
-  retry: retryApp,
+  retry: retryAppCurrent,
   viewProgress: viewAppProgress,
   setProgressOpen: setAppProgressOpen,
 } = useAppOperation(botIdRef, 'bot-apps')
@@ -460,13 +472,7 @@ function onAppAction(item: AppItem, action: AppRowAction) {
     case 'resume':
     case 'retry':
       if (!item.installation_id) return
-      startApp({
-        registryId: item.registry_id ?? '',
-        appId: item.app_id ?? '',
-        installationId: item.installation_id,
-        name: appDisplayName(item, locale.value),
-        action: 'resume',
-      })
+      resumeTarget.value = item
       return
     case 'update':
       updateTarget.value = item
@@ -481,6 +487,24 @@ function onAppAction(item: AppItem, action: AppRowAction) {
 
 // ---- Update -----------------------------------------------------------------
 
+function retryApp() {
+ const operation=activeApp.value
+ if (!operation?.needsReview) return retryAppCurrent()
+ setAppProgressOpen(false)
+ const item=items.value.find(item=>item.registry_id===operation.registryId && item.app_id===operation.appId)
+ if (!item) return false
+ if (operation.action==='remove') void openRemove(item)
+ else if (operation.action==='update') updateTarget.value=item
+ else resumeTarget.value=item
+ return true
+}
+const resumeTarget = ref<AppItem | null>(null)
+function onResumeConfirmed(choice: AppUpdateChoice) {
+ const item = resumeTarget.value
+ if (!item?.installation_id) return
+ resumeTarget.value = null
+ startApp({ registryId: item.registry_id ?? '', appId: item.app_id ?? '', installationId: item.installation_id, name: appDisplayName(item, locale.value), action: 'resume', planId: choice.planId, revision: choice.revision })
+}
 const updateTarget = ref<AppItem | null>(null)
 
 function onUpdateConfirmed(choice: AppUpdateChoice) {
@@ -493,6 +517,7 @@ function onUpdateConfirmed(choice: AppUpdateChoice) {
     installationId: item.installation_id ?? undefined,
     name: appDisplayName(item, locale.value),
     action: 'update',
+    planId: choice.planId,
     update: { ...choice },
   })
 }
@@ -529,6 +554,7 @@ function onRemoveConfirmed(options: { removeUnreferencedRequired: boolean }) {
     installationId: item.installation_id,
     name: appDisplayName(item, locale.value),
     action: 'remove',
+    removal: { revision: removePreview.value?.revision ?? '', dependency_revisions: removePreview.value?.dependency_revisions ?? {}, required_app_revisions: Object.fromEntries((removePreview.value?.required_apps ?? []).map(app => [app.installation_id ?? '', app.revision ?? ''])) },
     removeUnreferencedRequired: options.removeUnreferencedRequired,
   })
 }
@@ -643,7 +669,7 @@ const {
   running: dependencyRunning,
   ownsStream: dependencyOwnsStream,
   start: startDependency,
-  retry: retryDependency,
+  retry: retryDependencyCurrent,
   viewProgress: viewDependencyProgress,
   setProgressOpen: setDependencyProgressOpen,
 } = useDependencyOperation(botIdRef)
@@ -664,10 +690,18 @@ function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operatio
   confirm.open = true
 }
 
-function onDependencyConfirmed(version: string) {
+function retryDependency() {
+ const operation = activeDependency.value
+ if (operation?.needsReview) {
+  setDependencyProgressOpen(false)
+  openConfirm(operation.item, operation.action === 'remove' ? 'remove' : operation.action === 'reinstall' ? 'reinstall' : operation.action === 'update' ? 'update' : 'install', operation.action)
+ } else retryDependencyCurrent()
+}
+
+function onDependencyConfirmed(version: string, planId: string) {
   const item = confirm.item
   confirm.open = false
-  if (item) startDependency(item, confirm.operation, { version, definitionRevision: confirm.definitionRevision })
+  if (item) startDependency(item, confirm.operation, { version, planId, definitionRevision: confirm.definitionRevision })
 }
 
 function onDependencyPrimary(item: DependencyItem, action: DependencyPrimaryAction) {
@@ -691,6 +725,9 @@ const rollingBack = ref(false)
 
 function onDependencyMenu(item: DependencyItem, action: DependencyMenuAction) {
   switch (action.kind) {
+    case 'remove':
+      openConfirm(item, 'remove', 'remove')
+      return
     case 'reinstall':
       openConfirm(item, 'reinstall', 'reinstall')
       return
@@ -705,13 +742,13 @@ function onDependencyMenu(item: DependencyItem, action: DependencyMenuAction) {
   }
 }
 
-async function onRollbackConfirmed() {
+async function onRollbackConfirmed(planId: string) {
   const item = rollbackTarget.value
   if (!item?.id || rollingBack.value) return
   const to = formatDependencyVersion(item.previous_version)
   rollingBack.value = true
   try {
-    await runMutation(() => rollbackDependency(props.botId, item.id ?? ''), {
+    await runMutation(() => rollbackDependency(props.botId, item.id ?? '', planId), {
       fallbackMessage: t('bots.dependencies.rollback.failed'),
       onSuccess: async () => {
         rollbackTarget.value = null

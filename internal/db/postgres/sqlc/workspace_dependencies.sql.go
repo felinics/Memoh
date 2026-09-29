@@ -12,11 +12,18 @@ import (
 )
 
 const claimBotDependencyOperation = `-- name: ClaimBotDependencyOperation :one
+WITH admission AS MATERIALIZED (
+ SELECT owner FROM bot_dependency_graphs
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND lease_until > now()
+ FOR UPDATE
+)
 INSERT INTO bot_dependency_installations (
   bot_id, dependency_id, source, status,
   installed_version, manifest_digest, source_url, registry_id, definition_revision, operation_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+WHERE ($11::text = '' AND NOT EXISTS (SELECT 1 FROM admission WHERE owner <> ''))
+ OR EXISTS (SELECT 1 FROM admission WHERE owner = $11 AND owner <> '')
 ON CONFLICT (team_id, bot_id, dependency_id)
 DO UPDATE SET status = EXCLUDED.status,
               last_error = '',
@@ -39,6 +46,7 @@ type ClaimBotDependencyOperationParams struct {
 	RegistryID         string      `json:"registry_id"`
 	DefinitionRevision string      `json:"definition_revision"`
 	OperationID        string      `json:"operation_id"`
+	GraphOwner         string      `json:"graph_owner"`
 }
 
 func (q *Queries) ClaimBotDependencyOperation(ctx context.Context, arg ClaimBotDependencyOperationParams) (BotDependencyInstallation, error) {
@@ -53,6 +61,7 @@ func (q *Queries) ClaimBotDependencyOperation(ctx context.Context, arg ClaimBotD
 		arg.RegistryID,
 		arg.DefinitionRevision,
 		arg.OperationID,
+		arg.GraphOwner,
 	)
 	var i BotDependencyInstallation
 	err := row.Scan(
@@ -99,14 +108,21 @@ func (q *Queries) DeleteBotDependencyInstallation(ctx context.Context, arg Delet
 }
 
 const deleteBotDependencyOperation = `-- name: DeleteBotDependencyOperation :one
+WITH removed AS (
 DELETE FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $1
-  AND dependency_id = $2
+  AND bot_dependency_installations.bot_id = $1
+  AND bot_dependency_installations.dependency_id = $2
   AND operation_id = $3 AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+), relationships AS (
+ UPDATE bot_dependency_graphs SET graph = graph - $2::text
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
+ AND EXISTS (SELECT 1 FROM removed)
+)
+SELECT id, team_id, bot_id, dependency_id, source, status, installed_version, latest_version, last_checked_at, last_error, manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at FROM removed
 `
 
 type DeleteBotDependencyOperationParams struct {
@@ -115,9 +131,29 @@ type DeleteBotDependencyOperationParams struct {
 	OperationID  string      `json:"operation_id"`
 }
 
-func (q *Queries) DeleteBotDependencyOperation(ctx context.Context, arg DeleteBotDependencyOperationParams) (BotDependencyInstallation, error) {
+type DeleteBotDependencyOperationRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TeamID             pgtype.UUID        `json:"team_id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	DependencyID       string             `json:"dependency_id"`
+	Source             string             `json:"source"`
+	Status             string             `json:"status"`
+	InstalledVersion   string             `json:"installed_version"`
+	LatestVersion      string             `json:"latest_version"`
+	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
+	LastError          string             `json:"last_error"`
+	ManifestDigest     string             `json:"manifest_digest"`
+	SourceUrl          string             `json:"source_url"`
+	RegistryID         string             `json:"registry_id"`
+	DefinitionRevision string             `json:"definition_revision"`
+	OperationID        string             `json:"operation_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) DeleteBotDependencyOperation(ctx context.Context, arg DeleteBotDependencyOperationParams) (DeleteBotDependencyOperationRow, error) {
 	row := q.db.QueryRow(ctx, deleteBotDependencyOperation, arg.BotID, arg.DependencyID, arg.OperationID)
-	var i BotDependencyInstallation
+	var i DeleteBotDependencyOperationRow
 	err := row.Scan(
 		&i.ID,
 		&i.TeamID,
@@ -141,6 +177,7 @@ func (q *Queries) DeleteBotDependencyOperation(ctx context.Context, arg DeleteBo
 }
 
 const finishBotDependencyOperation = `-- name: FinishBotDependencyOperation :one
+WITH finished AS (
 UPDATE bot_dependency_installations
 SET source = $1,
     status = $2,
@@ -155,12 +192,24 @@ SET source = $1,
     operation_id = '',
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $11
-  AND dependency_id = $12
+  AND bot_dependency_installations.bot_id = $11
+  AND bot_dependency_installations.dependency_id = $12
   AND operation_id = $13 AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+), relationships AS (
+ INSERT INTO bot_dependency_graphs (bot_id, graph)
+ SELECT bot_id, jsonb_build_object(dependency_id, jsonb_build_object(
+  'revision', definition_revision, 'digest', manifest_digest,
+  'requires', $14::jsonb, 'pending', '[]'::jsonb, 'known', true, 'plan_id', $15::text, 'version', installed_version))
+ FROM finished WHERE status = 'installed' AND $16::boolean
+ ON CONFLICT (team_id, bot_id) DO UPDATE SET graph = jsonb_set(
+  bot_dependency_graphs.graph, ARRAY[$12::text],
+  COALESCE(bot_dependency_graphs.graph -> $12::text, '{}'::jsonb)
+   || (EXCLUDED.graph -> $12::text))
+)
+SELECT id, team_id, bot_id, dependency_id, source, status, installed_version, latest_version, last_checked_at, last_error, manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at FROM finished
 `
 
 type FinishBotDependencyOperationParams struct {
@@ -177,9 +226,32 @@ type FinishBotDependencyOperationParams struct {
 	BotID              pgtype.UUID        `json:"bot_id"`
 	DependencyID       string             `json:"dependency_id"`
 	OperationID        string             `json:"operation_id"`
+	Requires           []byte             `json:"requires"`
+	PlanID             string             `json:"plan_id"`
+	RelationshipsKnown bool               `json:"relationships_known"`
 }
 
-func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBotDependencyOperationParams) (BotDependencyInstallation, error) {
+type FinishBotDependencyOperationRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TeamID             pgtype.UUID        `json:"team_id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	DependencyID       string             `json:"dependency_id"`
+	Source             string             `json:"source"`
+	Status             string             `json:"status"`
+	InstalledVersion   string             `json:"installed_version"`
+	LatestVersion      string             `json:"latest_version"`
+	LastCheckedAt      pgtype.Timestamptz `json:"last_checked_at"`
+	LastError          string             `json:"last_error"`
+	ManifestDigest     string             `json:"manifest_digest"`
+	SourceUrl          string             `json:"source_url"`
+	RegistryID         string             `json:"registry_id"`
+	DefinitionRevision string             `json:"definition_revision"`
+	OperationID        string             `json:"operation_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBotDependencyOperationParams) (FinishBotDependencyOperationRow, error) {
 	row := q.db.QueryRow(ctx, finishBotDependencyOperation,
 		arg.Source,
 		arg.Status,
@@ -194,8 +266,11 @@ func (q *Queries) FinishBotDependencyOperation(ctx context.Context, arg FinishBo
 		arg.BotID,
 		arg.DependencyID,
 		arg.OperationID,
+		arg.Requires,
+		arg.PlanID,
+		arg.RelationshipsKnown,
 	)
-	var i BotDependencyInstallation
+	var i FinishBotDependencyOperationRow
 	err := row.Scan(
 		&i.ID,
 		&i.TeamID,

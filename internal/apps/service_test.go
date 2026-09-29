@@ -315,6 +315,7 @@ func (f *fakePublisher) RemoveSkills(_ context.Context, _, _, appID, _ string) (
 }
 
 type fakeDeps struct {
+	plans      map[string]workspacedeps.Plan
 	present    map[string]workspacedeps.Entry
 	installErr map[string]error
 	installed  []string
@@ -559,7 +560,7 @@ func TestInstallIsPartialWhenADependencyFailsAndResumeCompletesIt(t *testing.T) 
 	h.publish(pkg)
 
 	result, rec := h.install(t, pkg)
-	if result.Installation.Status != StatusPartial || !strings.Contains(result.Installation.LastError, "npm exploded") {
+	if result.Installation.Status != StatusPartial || !strings.Contains(result.Installation.LastError, "codex") || strings.Contains(result.Installation.LastError, "npm exploded") {
 		t.Fatalf("installation = %+v", result.Installation)
 	}
 	if !strings.Contains(rec.types(), "step_done:dependency:codex=failed") || !strings.HasSuffix(rec.types(), "done=partial") {
@@ -774,14 +775,14 @@ func TestCheckUpdatesRecordsNewerRevisionAndUpdatePrunesDroppedReferences(t *tes
 	if updated.Installation.Revision != v2.Revision || updated.Installation.Version != "1.1.0" || updated.Installation.Status != StatusInstalled {
 		t.Fatalf("updated = %+v", updated.Installation)
 	}
-	if strings.Join(h.deps.removed, ",") != "node" {
-		t.Fatalf("dropped dependency must be removed: %v", h.deps.removed)
+	if len(h.deps.removed) != 0 {
+		t.Fatalf("dropped dependency must be retained until explicit removal: %v", h.deps.removed)
 	}
 	refs, _ := h.store.ListDependencyRefs(context.Background(), result.Installation.ID)
 	if len(refs) != 1 || refs[0].DependencyID != "uv" {
 		t.Fatalf("refs after update = %v", refs)
 	}
-	if !strings.Contains(rec.types(), "step_done:dependency:node=removed") {
+	if !strings.Contains(rec.types(), "step_done:dependency:node=kept") {
 		t.Fatalf("events = %s", rec.types())
 	}
 	// A second update is a no-op.

@@ -72,9 +72,10 @@ func (s Source) valid() bool {
 // Action is one of the scripted operations a dependency may support.
 type Action string
 
-// Scripted actions. Rollback is intentionally absent: it is a pure data
-// operation performed by the runner and never backed by a script.
+// Dependency actions. Rollback is a built-in state switch; it is never
+// configured as a manifest script.
 const (
+	ActionRollback    Action = "rollback"
 	ActionInstall     Action = "install"
 	ActionUpdate      Action = "update"
 	ActionRemove      Action = "remove"

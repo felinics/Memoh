@@ -36,6 +36,13 @@ func (s *Service) RunAuthorizedOperation(ctx context.Context, botID, depID, sess
 	if revision, _ := ctx.Value(revisionContextKey{}).(string); strings.TrimSpace(revision) == "" {
 		return OperationResult{}, errors.New("dependency operation requires a confirmed definition revision")
 	}
+	// Keep one lock order for foreground, background and App operations:
+	// persistent workspace admission, then the process-local node reservation.
+	ctx, releaseGraph, err := s.AcquireGraph(ctx, botID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	defer releaseGraph()
 	key := InstallationKey{BotID: botID, DependencyID: strings.TrimSpace(depID)}
 	reserved, release, err := s.reserveOperation(ctx, key)
 	if err != nil {

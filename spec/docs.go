@@ -2479,6 +2479,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/apps/prepare": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "apps"
+                ],
+                "summary": "Preview the complete dependency plan for an App operation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "App operation",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/apps.PrepareRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/apps.PreparedOperation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/apps/update": {
             "post": {
                 "description": "Updates the selected dependencies to their latest version and, when release is set, moves the installation to the registry's current release, streaming progress. A discovered App may update its own dependency. Events: started, step, log, step_done, done, error.",
@@ -2598,6 +2656,9 @@ const docTemplate = `{
             },
             "delete": {
                 "description": "Removes the Skills, the dependencies no other App references and the connections no other App references, streaming progress. Events: started, step, log, step_done, done, error.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "text/event-stream"
                 ],
@@ -2606,6 +2667,15 @@ const docTemplate = `{
                 ],
                 "summary": "Remove an App from a bot workspace",
                 "parameters": [
+                    {
+                        "description": "Reviewed removal publications",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AppRemoveRequest"
+                        }
+                    },
                     {
                         "type": "string",
                         "description": "Bot ID",
@@ -2875,6 +2945,9 @@ const docTemplate = `{
         "/bots/{bot_id}/apps/{installation_id}/resume": {
             "post": {
                 "description": "Installs dependencies that are still missing, reconciles the Skills and links connectors that were authorized since. Events: started, step, log, step_done, done, error.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "text/event-stream"
                 ],
@@ -2883,6 +2956,15 @@ const docTemplate = `{
                 ],
                 "summary": "Continue a partial App installation",
                 "parameters": [
+                    {
+                        "description": "Confirmed dependency plan",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AppResumeRequest"
+                        }
+                    },
                     {
                         "type": "string",
                         "description": "Bot ID",
@@ -5495,6 +5577,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/dependencies/plan": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Prepare an immutable workspace dependency plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Requested operations",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyPlanRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/workspacedeps.Plan"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/dependencies/preflight": {
             "post": {
                 "description": "Reports for each requested dependency whether a copy is installed, whatever its version. Never starts the workspace: when it is not running, items is empty and workspace_state says why.",
@@ -5720,9 +5860,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/dependencies/{dep_id}/remove": {
+            "post": {
+                "description": "Requires a confirmed plan and refuses App, dependency, pending or unresolved references. Image baselines and user files are preserved.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "containerd"
+                ],
+                "summary": "Remove an unreferenced managed workspace dependency",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Dependency ID",
+                        "name": "dep_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Confirmed removal plan",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyStreamEvent"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/dependencies/{dep_id}/rollback": {
             "post": {
                 "description": "Switches the dependency back to the previous version kept in the workspace. A pure data operation: nothing is downloaded and no log is streamed.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -5731,6 +5928,15 @@ const docTemplate = `{
                 ],
                 "summary": "Roll a workspace dependency back to its previous version",
                 "parameters": [
+                    {
+                        "description": "Confirmed plan",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.WorkspaceDependencyInstallRequest"
+                        }
+                    },
                     {
                         "type": "string",
                         "description": "Bot ID",
@@ -18031,6 +18237,46 @@ const docTemplate = `{
                 }
             }
         },
+        "apps.PrepareRequest": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "app_id": {
+                    "type": "string"
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "installation_id": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "release": {
+                    "type": "boolean"
+                },
+                "revision": {
+                    "type": "string"
+                }
+            }
+        },
+        "apps.PreparedOperation": {
+            "type": "object",
+            "properties": {
+                "plan": {
+                    "$ref": "#/definitions/workspacedeps.Plan"
+                },
+                "revision": {
+                    "type": "string"
+                }
+            }
+        },
         "audio.ConfigSchema": {
             "type": "object",
             "properties": {
@@ -18993,6 +19239,27 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "catalog.Action": {
+            "type": "string",
+            "enum": [
+                "rollback",
+                "install",
+                "update",
+                "remove",
+                "reinstall",
+                "check_update",
+                "version"
+            ],
+            "x-enum-varnames": [
+                "ActionRollback",
+                "ActionInstall",
+                "ActionUpdate",
+                "ActionRemove",
+                "ActionReinstall",
+                "ActionCheckUpdate",
+                "ActionVersion"
+            ]
         },
         "channel.Action": {
             "type": "object",
@@ -21442,6 +21709,9 @@ const docTemplate = `{
                 "app_id": {
                     "type": "string"
                 },
+                "plan_id": {
+                    "type": "string"
+                },
                 "registry_id": {
                     "type": "string"
                 },
@@ -21504,6 +21774,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "last_error": {
+                    "type": "string"
+                },
+                "last_error_code": {
                     "type": "string"
                 },
                 "license": {
@@ -21601,6 +21874,9 @@ const docTemplate = `{
                 "registry_id": {
                     "type": "string"
                 },
+                "revision": {
+                    "type": "string"
+                },
                 "version": {
                     "type": "string"
                 }
@@ -21669,6 +21945,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/handlers.AppRemovalPreviewDependency"
                     }
                 },
+                "dependency_revisions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "installation_id": {
                     "type": "string"
                 },
@@ -21677,6 +21959,40 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/handlers.AppRemovalPreviewApp"
                     }
+                },
+                "revision": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.AppRemoveRequest": {
+            "type": "object",
+            "properties": {
+                "dependency_revisions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "required_app_revisions": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "revision": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.AppResumeRequest": {
+            "type": "object",
+            "properties": {
+                "plan_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "string"
                 }
             }
         },
@@ -21703,6 +22019,9 @@ const docTemplate = `{
         "handlers.AppStreamEvent": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string"
+                },
                 "args": {
                     "type": "object",
                     "additionalProperties": {
@@ -21717,6 +22036,9 @@ const docTemplate = `{
                 },
                 "detail": {
                     "type": "string"
+                },
+                "failure": {
+                    "$ref": "#/definitions/workspacedeps.PlanFailure"
                 },
                 "id": {
                     "type": "string"
@@ -21735,6 +22057,12 @@ const docTemplate = `{
                 },
                 "request_id": {
                     "type": "string"
+                },
+                "required_by": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "status": {
                     "type": "string"
@@ -21779,12 +22107,18 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "plan_id": {
+                    "type": "string"
+                },
                 "registry_id": {
                     "type": "string"
                 },
                 "release": {
                     "description": "Release moves the installation to the registry's current release.",
                     "type": "boolean"
+                },
+                "revision": {
+                    "type": "string"
                 }
             }
         },
@@ -24052,6 +24386,9 @@ const docTemplate = `{
                 "definition_revision": {
                     "type": "string"
                 },
+                "plan_id": {
+                    "type": "string"
+                },
                 "session_id": {
                     "description": "SessionID optionally routes operation progress to its originating conversation.",
                     "type": "string"
@@ -24105,7 +24442,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "image_version": {
-                    "description": "ImageVersion is the version of the workspace's toolkit copy, omitted\nwhen no toolkit copy remains. Native removal clears it as well.",
+                    "description": "ImageVersion is the version of the workspace's toolkit copy, omitted\nwhen no toolkit copy remains. Removing a managed overlay preserves it.",
                     "type": "string"
                 },
                 "install_path": {
@@ -24253,6 +24590,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.WorkspaceDependencyPlanRequest": {
+            "type": "object",
+            "properties": {
+                "roots": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspacedeps.PlanRoot"
+                    }
+                }
+            }
+        },
         "handlers.WorkspaceDependencyPlatform": {
             "type": "object",
             "properties": {
@@ -24377,6 +24725,9 @@ const docTemplate = `{
         "handlers.WorkspaceDependencyStreamEvent": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string"
+                },
                 "args": {
                     "type": "object",
                     "additionalProperties": {
@@ -24404,10 +24755,22 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "failure": {
+                    "$ref": "#/definitions/workspacedeps.PlanFailure"
+                },
                 "message": {
                     "type": "string"
                 },
                 "request_id": {
+                    "type": "string"
+                },
+                "required_by": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
                     "type": "string"
                 },
                 "stream": {
@@ -24421,6 +24784,7 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "started",
+                        "node",
                         "log",
                         "done",
                         "error"
@@ -27544,6 +27908,175 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/workspace.WorkspaceTarget"
                     }
+                }
+            }
+        },
+        "workspacedeps.Plan": {
+            "type": "object",
+            "properties": {
+                "bot_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspacedeps.PlanNode"
+                    }
+                },
+                "roots": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspacedeps.PlanRoot"
+                    }
+                }
+            }
+        },
+        "workspacedeps.PlanFailure": {
+            "type": "object",
+            "properties": {
+                "dependency_id": {
+                    "type": "string"
+                },
+                "operation_id": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "root": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspacedeps.PlanNode": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "dependency_id": {
+                    "type": "string"
+                },
+                "manifest_digest": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "required_by": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "requires": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "root": {
+                    "type": "boolean"
+                },
+                "script": {
+                    "$ref": "#/definitions/workspacedeps.ScriptPreview"
+                },
+                "source_url": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspacedeps.PlanRoot": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "$ref": "#/definitions/catalog.Action"
+                },
+                "dependency_id": {
+                    "type": "string"
+                },
+                "ensure": {
+                    "type": "boolean"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "workspacedeps.ScriptEnvEntry": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "secret": {
+                    "description": "Secret marks operator-supplied entries whose value must not leave the\nServer, such as registry tokens passed through ScriptEnv.",
+                    "type": "boolean"
+                },
+                "value": {
+                    "description": "Value is the real value when it is known before the run and a\nplaceholder in angle brackets otherwise (result path, values that are\nonly known once the workspace has been probed or read). It is empty\nwhen Secret is set.",
+                    "type": "string"
+                }
+            }
+        },
+        "workspacedeps.ScriptPreview": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "$ref": "#/definitions/catalog.Action"
+                },
+                "definition_revision": {
+                    "type": "string"
+                },
+                "dependency_id": {
+                    "type": "string"
+                },
+                "digest": {
+                    "description": "Digest is the manifest digest over dependency.yaml and every script\nfile the manifest references; it is what state.json records after a\nsuccessful install.",
+                    "type": "string"
+                },
+                "env": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/workspacedeps.ScriptEnvEntry"
+                    }
+                },
+                "exec": {
+                    "description": "Exec is the command the runner starts; the script arrives on its stdin.",
+                    "type": "string"
+                },
+                "registry_id": {
+                    "type": "string"
+                },
+                "script": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
                 }
             }
         }

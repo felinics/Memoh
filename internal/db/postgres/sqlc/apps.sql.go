@@ -48,19 +48,27 @@ func (q *Queries) DeleteAppConnectorRef(ctx context.Context, arg DeleteAppConnec
 }
 
 const deleteAppDependencyRef = `-- name: DeleteAppDependencyRef :execrows
+WITH admission AS MATERIALIZED (
+ SELECT graph.owner FROM bot_dependency_graphs graph
+ JOIN bot_app_installations app ON app.bot_id = graph.bot_id AND app.team_id = graph.team_id
+ WHERE app.team_id = public.memoh_current_team_id() AND app.id = $1
+   AND graph.owner = $3::text AND graph.lease_until > now()
+ FOR UPDATE OF graph
+)
 DELETE FROM bot_app_dependency_refs
 WHERE team_id = public.memoh_current_team_id()
-  AND installation_id = $1
-  AND dependency_id = $2
+  AND installation_id = $1 AND dependency_id = $2
+  AND EXISTS (SELECT 1 FROM admission)
 `
 
 type DeleteAppDependencyRefParams struct {
 	InstallationID pgtype.UUID `json:"installation_id"`
 	DependencyID   string      `json:"dependency_id"`
+	GraphOwner     string      `json:"graph_owner"`
 }
 
 func (q *Queries) DeleteAppDependencyRef(ctx context.Context, arg DeleteAppDependencyRefParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAppDependencyRef, arg.InstallationID, arg.DependencyID)
+	result, err := q.db.Exec(ctx, deleteAppDependencyRef, arg.InstallationID, arg.DependencyID, arg.GraphOwner)
 	if err != nil {
 		return 0, err
 	}
@@ -68,22 +76,30 @@ func (q *Queries) DeleteAppDependencyRef(ctx context.Context, arg DeleteAppDepen
 }
 
 const deleteBotAppInstallation = `-- name: DeleteBotAppInstallation :one
+WITH admission AS MATERIALIZED (
+ SELECT owner FROM bot_dependency_graphs
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
+ AND owner = $3::text AND lease_until > now()
+ FOR UPDATE
+)
 DELETE FROM bot_app_installations
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $1
+  AND bot_app_installations.bot_id = $1
   AND id = $2
+ AND EXISTS (SELECT 1 FROM admission)
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
           status, reason, available_revision, available_version, last_checked_at, last_error,
           release, installed_at, updated_at
 `
 
 type DeleteBotAppInstallationParams struct {
-	BotID pgtype.UUID `json:"bot_id"`
-	ID    pgtype.UUID `json:"id"`
+	BotID      pgtype.UUID `json:"bot_id"`
+	ID         pgtype.UUID `json:"id"`
+	GraphOwner string      `json:"graph_owner"`
 }
 
 func (q *Queries) DeleteBotAppInstallation(ctx context.Context, arg DeleteBotAppInstallationParams) (BotAppInstallation, error) {
-	row := q.db.QueryRow(ctx, deleteBotAppInstallation, arg.BotID, arg.ID)
+	row := q.db.QueryRow(ctx, deleteBotAppInstallation, arg.BotID, arg.ID, arg.GraphOwner)
 	var i BotAppInstallation
 	err := row.Scan(
 		&i.ID,
@@ -494,6 +510,12 @@ func (q *Queries) UpdateBotAppInstallationCheck(ctx context.Context, arg UpdateB
 }
 
 const updateBotAppInstallationRelease = `-- name: UpdateBotAppInstallationRelease :one
+WITH admission AS MATERIALIZED (
+ SELECT owner FROM bot_dependency_graphs
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = $4
+ AND owner = $6::text AND lease_until > now()
+ FOR UPDATE
+)
 UPDATE bot_app_installations
 SET revision = $1,
     version = $2,
@@ -502,19 +524,21 @@ SET revision = $1,
     available_version = '',
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $4
+  AND bot_app_installations.bot_id = $4
   AND id = $5
+ AND EXISTS (SELECT 1 FROM admission)
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
           status, reason, available_revision, available_version, last_checked_at, last_error,
           release, installed_at, updated_at
 `
 
 type UpdateBotAppInstallationReleaseParams struct {
-	Revision string      `json:"revision"`
-	Version  string      `json:"version"`
-	Release  []byte      `json:"release"`
-	BotID    pgtype.UUID `json:"bot_id"`
-	ID       pgtype.UUID `json:"id"`
+	Revision   string      `json:"revision"`
+	Version    string      `json:"version"`
+	Release    []byte      `json:"release"`
+	BotID      pgtype.UUID `json:"bot_id"`
+	ID         pgtype.UUID `json:"id"`
+	GraphOwner string      `json:"graph_owner"`
 }
 
 func (q *Queries) UpdateBotAppInstallationRelease(ctx context.Context, arg UpdateBotAppInstallationReleaseParams) (BotAppInstallation, error) {
@@ -524,6 +548,7 @@ func (q *Queries) UpdateBotAppInstallationRelease(ctx context.Context, arg Updat
 		arg.Release,
 		arg.BotID,
 		arg.ID,
+		arg.GraphOwner,
 	)
 	var i BotAppInstallation
 	err := row.Scan(
@@ -635,8 +660,15 @@ func (q *Queries) UpsertAppConnectorRef(ctx context.Context, arg UpsertAppConnec
 }
 
 const upsertAppDependencyRef = `-- name: UpsertAppDependencyRef :one
+WITH admission AS MATERIALIZED (
+ SELECT graph.owner FROM bot_dependency_graphs graph
+ JOIN bot_app_installations app ON app.bot_id = graph.bot_id AND app.team_id = graph.team_id
+ WHERE app.team_id = public.memoh_current_team_id() AND app.id = $1
+   AND graph.owner = $3::text AND graph.lease_until > now()
+ FOR UPDATE OF graph
+)
 INSERT INTO bot_app_dependency_refs (installation_id, dependency_id)
-VALUES ($1, $2)
+SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM admission)
 ON CONFLICT (team_id, installation_id, dependency_id) DO UPDATE SET dependency_id = EXCLUDED.dependency_id
 RETURNING id, team_id, installation_id, dependency_id, created_at
 `
@@ -644,10 +676,11 @@ RETURNING id, team_id, installation_id, dependency_id, created_at
 type UpsertAppDependencyRefParams struct {
 	InstallationID pgtype.UUID `json:"installation_id"`
 	DependencyID   string      `json:"dependency_id"`
+	GraphOwner     string      `json:"graph_owner"`
 }
 
 func (q *Queries) UpsertAppDependencyRef(ctx context.Context, arg UpsertAppDependencyRefParams) (BotAppDependencyRef, error) {
-	row := q.db.QueryRow(ctx, upsertAppDependencyRef, arg.InstallationID, arg.DependencyID)
+	row := q.db.QueryRow(ctx, upsertAppDependencyRef, arg.InstallationID, arg.DependencyID, arg.GraphOwner)
 	var i BotAppDependencyRef
 	err := row.Scan(
 		&i.ID,
@@ -660,10 +693,16 @@ func (q *Queries) UpsertAppDependencyRef(ctx context.Context, arg UpsertAppDepen
 }
 
 const upsertBotAppInstallation = `-- name: UpsertBotAppInstallation :one
+WITH admission AS MATERIALIZED (
+ SELECT owner FROM bot_dependency_graphs
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
+ AND owner = $9::text AND lease_until > now()
+ FOR UPDATE
+)
 INSERT INTO bot_app_installations (
   bot_id, registry_id, app_id, revision, version, status, reason, release
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8 WHERE EXISTS (SELECT 1 FROM admission)
 ON CONFLICT (team_id, bot_id, registry_id, app_id)
 DO UPDATE SET revision = EXCLUDED.revision,
               version = EXCLUDED.version,
@@ -686,6 +725,7 @@ type UpsertBotAppInstallationParams struct {
 	Status     string      `json:"status"`
 	Reason     string      `json:"reason"`
 	Release    []byte      `json:"release"`
+	GraphOwner string      `json:"graph_owner"`
 }
 
 func (q *Queries) UpsertBotAppInstallation(ctx context.Context, arg UpsertBotAppInstallationParams) (BotAppInstallation, error) {
@@ -698,6 +738,7 @@ func (q *Queries) UpsertBotAppInstallation(ctx context.Context, arg UpsertBotApp
 		arg.Status,
 		arg.Reason,
 		arg.Release,
+		arg.GraphOwner,
 	)
 	var i BotAppInstallation
 	err := row.Scan(

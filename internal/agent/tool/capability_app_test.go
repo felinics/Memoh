@@ -11,6 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/apps"
 	"github.com/felinics/memoh/internal/supermarket"
+	"github.com/felinics/memoh/internal/workspacedeps"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
@@ -161,4 +162,8 @@ func TestCapabilityAppRefreshInvalidatesConnectorDiscoveryAfterAuthorization(t *
 	if invalidated != session.BotID {
 		t.Fatal("authorization refresh left connector discovery cached")
 	}
+}
+
+func (*capabilityTestApps) Prepare(_ context.Context, _ string, req apps.PrepareRequest) (apps.PreparedOperation, error) {
+	return apps.PreparedOperation{Revision: req.Revision, Plan: workspacedeps.Plan{ID: "approved-plan"}}, nil
 }

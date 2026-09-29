@@ -26,6 +26,7 @@ import (
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/supermarket"
+	"github.com/felinics/memoh/internal/workspacedeps"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
@@ -46,6 +47,7 @@ type CapabilityOAuth interface {
 }
 
 type CapabilityApps interface {
+	Prepare(context.Context, string, apps.PrepareRequest) (apps.PreparedOperation, error)
 	List(context.Context, string, bool) (apps.ListResult, error)
 	Get(context.Context, string, string) (apps.Item, error)
 	Install(context.Context, string, apps.InstallRequest, apps.EventSink) (apps.OperationResult, error)
@@ -492,6 +494,17 @@ func (p *CapabilityProvider) manageApp(ctx *toolexec.ToolExecContext, session Se
 		if err != nil {
 			return nil, err
 		}
+		operation, err := p.opts.Apps.Prepare(frozen, session.BotID, apps.PrepareRequest{Action: action, RegistryID: release.RegistryID, AppID: release.AppID, Revision: release.Revision, InstallationID: id, Release: action == "update"})
+		if err != nil {
+			return nil, err
+		}
+		frozen = workspacedeps.RequireConfirmedPlan(workspacedeps.WithPlanID(frozen, operation.Plan.ID))
+		reviewPlan := operation.Plan
+		reviewPlan.Nodes = append([]workspacedeps.PlanNode(nil), operation.Plan.Nodes...)
+		for i := range reviewPlan.Nodes {
+			reviewPlan.Nodes[i].Script = nil
+		}
+		prepared["dependency_plan"] = reviewPlan
 		prepared["revision"] = release.Revision
 		prepared["dependencies"] = revisions
 		prepared["connectors"] = release.Connectors
@@ -547,7 +560,7 @@ func (p *CapabilityProvider) manageApp(ctx *toolexec.ToolExecContext, session Se
 	}
 	sink := apps.EventFunc(func(evt apps.Event) {
 		if ctx.SendProgress != nil && evt.Type != apps.EventLog {
-			ctx.SendProgress(toolexec.OutputFromValue(map[string]any{"type": evt.Type, "kind": evt.Kind, "id": evt.ID, "status": evt.Status, "message": appProgressMessage(action, evt)}))
+			ctx.SendProgress(toolexec.OutputFromValue(map[string]any{"type": evt.Type, "kind": evt.Kind, "id": evt.ID, "status": evt.Status, "action": evt.Action, "required_by": evt.RequiredBy, "failure": evt.Failure, "message": appProgressMessage(action, evt)}))
 		}
 	})
 	// Operations can publish some components before failing; always invalidate.
@@ -561,7 +574,11 @@ func (p *CapabilityProvider) manageApp(ctx *toolexec.ToolExecContext, session Se
 	case "resume":
 		result, err = p.opts.Apps.ResumeApproved(frozen, session.BotID, id, release.Revision, sink)
 	case "uninstall":
-		result, err = p.opts.Apps.Remove(ctx.Context, session.BotID, id, apps.RemoveOptions{RemoveUnreferencedRequired: args["remove_unreferenced_required"] == true}, sink)
+		requiredRevisions := map[string]string{}
+		for _, required := range removal.RequiredApps {
+			requiredRevisions[required.ID] = required.Revision
+		}
+		result, err = p.opts.Apps.Remove(ctx.Context, session.BotID, id, apps.RemoveOptions{ExpectedRevision: removal.Installation.Revision, DependencyRevisions: removal.DependencyRevisions, RequiredAppRevisions: requiredRevisions, RemoveUnreferencedRequired: args["remove_unreferenced_required"] == true}, sink)
 	}
 	if err != nil {
 		return nil, err

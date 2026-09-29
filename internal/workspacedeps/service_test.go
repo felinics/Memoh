@@ -102,6 +102,9 @@ func serviceCatalog(t *testing.T) *catalog.Catalog {
 
 // fakeStore is an in-memory Store that records every status transition.
 type fakeStore struct {
+	plans   map[string]Plan
+	graphs  map[string]DependencyGraph
+	owners  map[string]string
 	mu      sync.Mutex
 	now     func() time.Time
 	records map[InstallationKey]Installation
@@ -228,8 +231,22 @@ func (f *fakeStore) FinishOperation(_ context.Context, key InstallationKey, oper
 	}
 	f.writes++
 	if terminal == nil {
+		delete(f.graphs[key.BotID], key.DependencyID)
 		delete(f.records, key)
 		return rec, nil
+	}
+	if terminal.Status == StatusInstalled && terminal.RelationshipsKnown {
+		if f.graphs == nil {
+			f.graphs = map[string]DependencyGraph{}
+		}
+		if f.graphs[key.BotID] == nil {
+			f.graphs[key.BotID] = DependencyGraph{}
+		}
+		rel := f.graphs[key.BotID][key.DependencyID]
+		rel.Requires, rel.Pending, rel.Known = slices.Clone(terminal.Requires), nil, true
+		rel.Revision, rel.Digest = terminal.DefinitionRevision, terminal.ManifestDigest
+		rel.PlanID, rel.Version = terminal.PlanID, terminal.InstalledVersion
+		f.graphs[key.BotID][key.DependencyID] = rel
 	}
 	finished := *terminal
 	finished.ID, finished.BotID, finished.DependencyID = rec.ID, rec.BotID, rec.DependencyID
@@ -761,8 +778,8 @@ func TestListImageBaselineAndOverlay(t *testing.T) {
 	if agent.InstalledVersion != "1.9.0" || agent.ImageVersion != "1.9.0" || agent.Overlay || agent.Installation.Source != InstallationSourceImage {
 		t.Errorf("agent-x entry = %+v, want the image copy as baseline", agent)
 	}
-	if got := actionsOf(agent); got != "install,remove" {
-		t.Errorf("agent-x actions = %s, want install and remove", got)
+	if got := actionsOf(agent); got != "install" {
+		t.Errorf("agent-x actions = %s, want only overlay installation", got)
 	}
 	tool := f.entry(t, result, "tool-y")
 	if !tool.Overlay || tool.InstalledVersion != "1.0.0" || tool.ImageVersion != "0.9.0" || tool.Installation.Source != InstallationSourceManaged {
@@ -775,22 +792,21 @@ func TestListImageBaselineAndOverlay(t *testing.T) {
 		t.Errorf("tool-y actions = %s", got)
 	}
 
-	// Removing the dependency clears both copies; discovery has nothing left
-	// to adopt and the installed list must drop the row.
-	f.writeState(t, "tool-y", State{Version: "1.0.0", Entrypoints: map[string]string{"tool-y": managedTool.Path}})
+	// Removing the managed overlay exposes the image baseline again.
+	f.writeState(t, "tool-y", State{Version: "1.0.0", ManifestDigest: f.cat.MustGet("tool-y").ManifestDigest, Entrypoints: map[string]string{"tool-y": managedTool.Path}})
 	if _, err := f.svc.Remove(f.ctx(), testBot, "tool-y", nil); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	f.absent("tool-y")
+	f.present("tool-y", SourceToolkit, "0.9.0", nil)
 	result, err = f.svc.List(f.ctx(), testBot)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	tool = f.entry(t, result, "tool-y")
-	if tool.Status != "" || tool.InstalledVersion != "" || tool.Installation != nil || tool.Observed.Present {
-		t.Errorf("tool-y entry after remove = %+v, want an absent dependency", tool)
+	if tool.Status != StatusInstalled || tool.InstalledVersion != "0.9.0" || tool.Installation == nil || !tool.Observed.Present {
+		t.Errorf("tool-y entry after remove = %+v, want the preserved image baseline", tool)
 	}
-	if got := actionsOf(tool); got != "install" {
+	if got := actionsOf(tool); got != "install,check_update" {
 		t.Errorf("tool-y actions after remove = %s", got)
 	}
 }
@@ -922,13 +938,13 @@ func TestInstallSucceeds(t *testing.T) {
 		t.Errorf("shim mode = %v, want executable", info.Mode())
 	}
 
-	if f.discovered() != 1 {
+	if f.discovered() != 3 {
 		t.Fatalf("discover calls = %d", f.discovered())
 	}
 	if _, err := f.svc.List(f.ctx(), testBot); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if f.discovered() != 2 {
+	if f.discovered() != 4 {
 		t.Errorf("cache was not invalidated after install (discover calls = %d)", f.discovered())
 	}
 
@@ -1048,16 +1064,16 @@ func TestInstallBusy(t *testing.T) {
 	if _, err := f.svc.Remove(f.ctx(), testBot, "tool-y", nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("concurrent Remove error = %v, want ErrBusy", err)
 	}
-	// Another dependency of the same bot is not blocked.
-	if _, err := f.svc.Install(f.ctx(), testBot, "agent-x", "", nil); err != nil {
+	// Graph mutations of the same workspace share admission.
+	if _, err := f.svc.Install(f.ctx(), testBot, "agent-x", "", nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("Install of another dependency: %v", err)
 	}
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatalf("first Install: %v", err)
 	}
-	if len(f.runSpecs()) != 2 {
-		t.Errorf("runs = %d, want 2 (the busy calls never ran a script)", len(f.runSpecs()))
+	if len(f.runSpecs()) != 1 {
+		t.Errorf("runs = %d, want 1 (the busy calls never ran a script)", len(f.runSpecs()))
 	}
 
 	// The prelude's lock (another Server instance) is also reported as busy.
@@ -1084,7 +1100,6 @@ func TestBusyVerdictRestoresRecord(t *testing.T) {
 	f := newServiceFixture(t)
 	f.setRun(func(RunSpec) (Result, error) { return Result{ExitCode: exitCodeLocked}, ErrLocked })
 	f.store.seed(Installation{BotID: testBot, DependencyID: "tool-y", Source: InstallationSourceManaged, Status: StatusFailed, InstalledVersion: "1.0.0", LastError: "boom"})
-	f.store.seed(Installation{BotID: testBot, DependencyID: "mac-only", Source: InstallationSourceManaged, Status: StatusInstalling, UpdatedAt: f.now.Add(-time.Hour)})
 	before := f.store.writeCount()
 
 	if _, err := f.svc.Install(f.ctx(), testBot, "tool-y", "", nil); !errors.Is(err, ErrBusy) {
@@ -1101,6 +1116,7 @@ func TestBusyVerdictRestoresRecord(t *testing.T) {
 		t.Errorf("record created for the busy operation survived: %+v", rec)
 	}
 
+	f.store.seed(Installation{BotID: testBot, DependencyID: "mac-only", Source: InstallationSourceManaged, Status: StatusInstalling, UpdatedAt: f.now.Add(-time.Hour)})
 	if _, err := f.svc.Remove(f.ctx(), testBot, "mac-only", nil); !errors.Is(err, ErrBusy) {
 		t.Fatalf("Remove error = %v, want ErrBusy", err)
 	}
@@ -1127,35 +1143,35 @@ func TestBusyVerdictRestoresRecord(t *testing.T) {
 // way a database driver does, so tests can prove that the writes recording an
 // outcome are detached from the request that started the operation.
 type cancelSensitiveStore struct {
-	Store
+	*fakeStore
 }
 
 func (s cancelSensitiveStore) Upsert(ctx context.Context, in UpsertInstallation) (Installation, error) {
 	if err := ctx.Err(); err != nil {
 		return Installation{}, err
 	}
-	return s.Store.Upsert(ctx, in)
+	return s.fakeStore.Upsert(ctx, in)
 }
 
 func (s cancelSensitiveStore) SetStatus(ctx context.Context, key InstallationKey, status Status, lastError string) (Installation, error) {
 	if err := ctx.Err(); err != nil {
 		return Installation{}, err
 	}
-	return s.Store.SetStatus(ctx, key, status, lastError)
+	return s.fakeStore.SetStatus(ctx, key, status, lastError)
 }
 
 func (s cancelSensitiveStore) UpdateObserved(ctx context.Context, key InstallationKey, upd ObservedUpdate) (Installation, error) {
 	if err := ctx.Err(); err != nil {
 		return Installation{}, err
 	}
-	return s.Store.UpdateObserved(ctx, key, upd)
+	return s.fakeStore.UpdateObserved(ctx, key, upd)
 }
 
 func (s cancelSensitiveStore) Delete(ctx context.Context, key InstallationKey) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.Store.Delete(ctx, key)
+	return s.fakeStore.Delete(ctx, key)
 }
 
 // TestCancelledOperationRecordsFailure covers the user closing the dialog (or
@@ -1192,7 +1208,7 @@ func TestCancelledOperationRecordsFailure(t *testing.T) {
 	if _, err := f.svc.List(f.ctx(), testBot); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if f.discovered() != 2 {
+	if f.discovered() != 4 {
 		t.Errorf("discovery cache not invalidated after the failure (discover calls = %d)", f.discovered())
 	}
 }
@@ -1231,6 +1247,8 @@ func TestCancelledRequestStillCommitsFinishedScript(t *testing.T) {
 		t.Errorf("shim missing after commit: %v", err)
 	}
 
+	presentState := f.readState(t, "tool-y")
+	f.present("tool-y", SourceManaged, "1.0.0", &presentState)
 	ctx, cancel = context.WithCancel(f.ctx())
 	defer cancel()
 	if _, err := f.svc.Remove(ctx, testBot, "tool-y", nil); err != nil {
@@ -1529,7 +1547,7 @@ func TestRemoveDeletesShimsAndRecord(t *testing.T) {
 	f := newServiceFixture(t)
 	f.seed("tool-y", StatusInstalled, "1.0.0")
 	f.present("tool-y", SourceManaged, "1.0.0", nil)
-	f.writeState(t, "tool-y", State{Version: "1.0.0", Entrypoints: map[string]string{"tool-y": "/x"}})
+	f.writeState(t, "tool-y", State{Version: "1.0.0", ManifestDigest: f.cat.MustGet("tool-y").ManifestDigest, Entrypoints: map[string]string{"tool-y": "/x"}})
 	f.writeShim(t, "tool-y")
 	f.writeShim(t, "other")
 	if _, err := f.svc.List(f.ctx(), testBot); err != nil {
@@ -1565,13 +1583,13 @@ func TestRemoveDeletesShimsAndRecord(t *testing.T) {
 	if _, err := os.Stat(f.shimPath("other")); err != nil {
 		t.Errorf("unrelated shim was deleted: %v", err)
 	}
-	if f.discovered() != 1 {
+	if f.discovered() != 4 {
 		t.Fatalf("discover calls = %d", f.discovered())
 	}
 	if _, err := f.svc.List(f.ctx(), testBot); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if f.discovered() != 2 {
+	if f.discovered() != 5 {
 		t.Errorf("cache was not invalidated after remove")
 	}
 }
@@ -1589,7 +1607,7 @@ func TestRollback(t *testing.T) {
 	if _, err := f.svc.Rollback(f.ctx(), testBot, "tool-y"); !errors.Is(err, ErrRollbackUnavailable) {
 		t.Errorf("Rollback without previous version error = %v", err)
 	}
-	f.writeState(t, "tool-y", State{Version: "1.1.0", PreviousVersion: "1.0.0", ManifestDigest: "sha256:old", Entrypoints: entrypoints})
+	f.writeState(t, "tool-y", State{Version: "1.1.0", PreviousVersion: "1.0.0", Previous: &PreviousInstallation{Version: "1.0.0", ManifestDigest: f.cat.MustGet("tool-y").ManifestDigest, Entrypoints: entrypoints}, ManifestDigest: "sha256:old", Entrypoints: entrypoints})
 	if _, err := f.svc.Rollback(f.ctx(), testBot, "tool-y"); !errors.Is(err, ErrRollbackUnavailable) {
 		t.Errorf("Rollback with missing versions dir error = %v", err)
 	}
@@ -1621,7 +1639,7 @@ func TestRollback(t *testing.T) {
 		t.Errorf("status history = %v", got)
 	}
 	state := f.readState(t, "tool-y")
-	if state.Version != "1.0.0" || state.PreviousVersion != "1.1.0" || state.ManifestDigest != "sha256:old" || state.Entrypoints["tool-y"] != entrypoints["tool-y"] || !state.InstalledAt.Equal(f.now) {
+	if state.Version != "1.0.0" || state.PreviousVersion != "1.1.0" || state.ManifestDigest != f.cat.MustGet("tool-y").ManifestDigest || state.Entrypoints["tool-y"] != entrypoints["tool-y"] || !state.InstalledAt.Equal(f.now) {
 		t.Errorf("state.json = %+v", state)
 	}
 }

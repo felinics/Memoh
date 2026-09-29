@@ -239,7 +239,11 @@
       "catalog_unavailable": "暂时无法获取依赖目录，请稍后重试。",
       "definition_invalid": "依赖定义未通过校验，请刷新目录后重试。",
       "definition_unavailable": "本地没有缓存这份依赖定义，请连接 Supermarket 后重试。",
-      "discovery_failed": "暂时无法检查工作区依赖，请重试。"
+      "discovery_failed": "暂时无法检查工作区依赖，请重试。",
+      "plan_changed": "依赖计划已变化，请重新预览并确认。",
+      "referenced": "无法移除 {dependency_id}：{required_by} 仍需要它。请先解除这些依赖。",
+      "graph_unresolved": "无法确认旧安装的依赖关系，请先修复安装再卸载。",
+      "prerequisite_missing": "所需工具已丢失，请先修复依赖再检查更新。"
     },
     "acp": {
       "request_invalid": "Agent 运行实例请求无效，请检查后重试。",
@@ -3927,7 +3931,8 @@
       "reason": {
         "shared": "被其他应用使用",
         "image": "随工作区镜像自带",
-        "absent": "未安装"
+        "absent": "未安装",
+        "unresolved": "历史依赖关系待修复，保留工具"
       }
     },
     "progress": {
@@ -4115,5 +4120,28 @@
   "elicitation": {
     "done": "已完成",
     "cancel": "取消"
+  },
+  "dependenciesPlan": {
+    "title": "依赖安装计划",
+    "preparing": "正在检查所需工具…",
+    "failed": "无法准备依赖计划，请重试。",
+    "requested": "此操作所需",
+    "requiredBy": "{names} 需要它",
+    "script": "查看脚本",
+    "resume": "继续安装 {name}",
+    "description": "确认下列工具后继续安装。已完成的依赖会保留。",
+    "progress": "正在处理 {name}，{names} 需要它",
+    "actions": {
+      "install": "安装",
+      "update": "更新",
+      "reinstall": "重新安装",
+      "rollback": "回滚",
+      "reuse": "使用现有版本",
+      "remove": "移除",
+      "keep": "保留"
+    },
+    "removeTitle": "移除 {name}",
+    "removeDescription": "移除受管理的 {name}。其他 App 或工具仍需要它时会拒绝操作；镜像基线和用户文件将保留。",
+    "removing": "正在移除 {name}"
   }
 }

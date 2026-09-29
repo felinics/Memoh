@@ -10,7 +10,7 @@ import (
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
-func TestRemovalScriptDeletesWorkspaceCopies(t *testing.T) {
+func TestRemovalScriptKeepsImageBaselineAndDeletesManagedCopy(t *testing.T) {
 	for _, tc := range []struct {
 		id       string
 		commands []string
@@ -43,11 +43,15 @@ func TestRemovalScriptDeletesWorkspaceCopies(t *testing.T) {
 			if out, err := runRemovalFixture(t, body, home, "native"); err != nil {
 				t.Fatalf("remove: %v: %s", err, out)
 			}
-			for _, name := range append(append([]string{home}, removalFixturePaths(toolkit, "bin", tc.commands)...), removalFixturePaths(toolkit, "", tc.trees)...) {
-				if _, err := os.Lstat(name); !os.IsNotExist(err) {
-					t.Errorf("dependency file remains: %s (%v)", name, err)
+			if _, err := os.Lstat(home); !os.IsNotExist(err) {
+				t.Errorf("managed home remains: %v", err)
+			}
+			for _, name := range append(removalFixturePaths(toolkit, "bin", tc.commands), removalFixturePaths(toolkit, "", tc.trees)...) {
+				if _, err := os.Lstat(name); err != nil {
+					t.Errorf("image baseline removed: %s: %v", name, err)
 				}
 			}
+
 			if _, err := os.Stat(unrelated); err != nil {
 				t.Fatalf("unrelated toolkit file removed: %v", err)
 			}
@@ -100,8 +104,8 @@ func TestRemovalScriptDoesNotFollowToolkitSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := removalScript(catalog.Dependency{ID: "uv", Provides: []string{"../keep", "uv"}}, ":", toolkit)
-	if out, err := runRemovalFixture(t, body, filepath.Join(root, "managed"), "native"); err == nil {
-		t.Fatalf("symlink ancestor must fail: %s", out)
+	if out, err := runRemovalFixture(t, body, filepath.Join(root, "managed"), "native"); err != nil {
+		t.Fatalf("untouched toolkit symlink prevented managed removal: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "keep")); err != nil {
 		t.Fatal("followed toolkit symlink")

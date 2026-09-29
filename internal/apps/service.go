@@ -59,6 +59,12 @@ type SkillPublisher interface {
 
 // DependencyManager is the slice of *workspacedeps.Service the service uses.
 type DependencyManager interface {
+	AcquireGraph(context.Context, string) (context.Context, func(), error)
+	PreparePlan(context.Context, string, []workspacedeps.PlanRoot) (workspacedeps.Plan, error)
+	ConfirmPlan(context.Context, string, string, []workspacedeps.PlanRoot) (context.Context, error)
+	ExecutePlan(context.Context, string, string, workspacedeps.LogSink) (workspacedeps.PlanResult, error)
+	RemovalBlockers(context.Context, string, string, string, bool) ([]string, error)
+
 	List(ctx context.Context, botID string) (workspacedeps.ListResult, error)
 	Refresh(ctx context.Context, botID string) (workspacedeps.ListResult, error)
 	CheckUpdates(ctx context.Context, botID string) (workspacedeps.ListResult, error)
@@ -160,6 +166,11 @@ func (s *Service) Install(ctx context.Context, botID string, req InstallRequest,
 	if reason == "" {
 		reason = ReasonUser
 	}
+	ctx, releaseGraph, err := s.acquireDependencies(ctx, botID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	defer releaseGraph()
 	unlock, err := lockInstallation(ctx, botID, registryID, appID)
 	if err != nil {
 		return OperationResult{}, err
@@ -190,6 +201,11 @@ func (s *Service) resume(ctx context.Context, botID, installationID, revision st
 	if err != nil {
 		return OperationResult{}, err
 	}
+	ctx, releaseGraph, err := s.acquireDependencies(ctx, botID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	defer releaseGraph()
 	unlock, err := lockInstallation(ctx, botID, inst.RegistryID, inst.AppID)
 	if err != nil {
 		return OperationResult{}, err
@@ -259,6 +275,11 @@ func normalizeRelease(release supermarket.AppDescriptor) supermarket.AppDescript
 func (s *Service) materialize(ctx context.Context, botID string, release supermarket.AppDescriptor, reason Reason, transient Status, sink EventSink, announced bool) (OperationResult, error) {
 	sink = nonNilSink(sink)
 	release = normalizeRelease(release)
+	var planErr error
+	ctx, planErr = s.ensureDependencyPlan(ctx, botID, rootsForRelease(ctx, release.Dependencies))
+	if planErr != nil {
+		return OperationResult{}, planErr
+	}
 	releaseBytes, err := json.Marshal(release)
 	if err != nil {
 		return OperationResult{}, fmt.Errorf("apps: encode release: %w", err)
@@ -293,33 +314,35 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 			partial = true
 			problems = append(problems, step.Kind+" "+step.ID+": "+step.Error)
 		}
-		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error, Failure: step.Failure})
 	}
 
-	// 1. Dependencies: link present ones, install missing ones.
-	states, statesErr := s.dependencyStates(ctx, botID)
+	// All direct roots share one frozen, deduplicated dependency plan. Only
+	// direct App edges belong to this table; Requires edges live in workspacedeps.
 	for _, depID := range release.Dependencies {
-		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
 		if err := s.store.AddDependencyRef(ctx, inst.ID, depID); err != nil {
-			return result, s.failInstallation(ctx, inst, fail("record dependency reference "+depID, err))
+			return result, s.failInstallation(ctx, inst, err)
 		}
-		switch {
-		case s.dependencies == nil:
-			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: ErrDependenciesUnavailable.Error()})
-		case statesErr != nil:
-			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: publicCause(statesErr)})
-		default:
-			entry, known := states[depID]
-			if known && dependencyPresent(entry) {
-				record(StepResult{Kind: KindDependency, ID: depID, Status: StepLinked, Version: entry.InstalledVersion})
-				continue
+	}
+	if len(release.Dependencies) > 0 {
+		planResult, err := s.dependencies.ExecutePlan(planEvents(workspacedeps.WithAutomaticDependencies(ctx), sink), botID, workspacedeps.PlanID(ctx), nil)
+		byID := map[string]workspacedeps.PlanNodeResult{}
+		for _, node := range planResult.Nodes {
+			byID[node.DependencyID] = node
+		}
+		for _, depID := range release.Dependencies {
+			node, ok := byID[depID]
+			step := StepResult{Kind: KindDependency, ID: depID, Status: StepInstalled, Version: node.Operation.Version, Failure: node.Failure}
+			switch {
+			case !ok || node.Failure != nil:
+				step.Status, step.Error = StepFailed, "Dependency installation failed. Retry the App to continue."
+			case node.Status == "reused":
+				step.Status = StepLinked
 			}
-			res, err := s.dependencies.Install(ctx, botID, depID, "", logSink(sink, KindDependency, depID))
-			if err != nil {
-				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: err.Error()})
-				continue
-			}
-			record(StepResult{Kind: KindDependency, ID: depID, Status: StepInstalled, Version: res.Version})
+			record(step)
+		}
+		if err != nil {
+			s.logger.WarnContext(ctx, "App dependency plan failed", slog.Any("error", err))
 		}
 	}
 

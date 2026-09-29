@@ -96,7 +96,7 @@ type WorkspaceDependencyItem struct {
 	// PATH).
 	InstalledVersion string `json:"installed_version,omitempty"`
 	// ImageVersion is the version of the workspace's toolkit copy, omitted
-	// when no toolkit copy remains. Native removal clears it as well.
+	// when no toolkit copy remains. Removing a managed overlay preserves it.
 	ImageVersion string `json:"image_version,omitempty"`
 	// Overlay is set when the copy in effect is a managed one installed over
 	// an image copy.
@@ -203,6 +203,7 @@ type WorkspaceDependencyPreflightItem struct {
 // WorkspaceDependencyInstallRequest is the optional body of install, update,
 // and reinstall.
 type WorkspaceDependencyInstallRequest struct {
+	PlanID string `json:"plan_id,omitempty"`
 	// SessionID optionally routes operation progress to its originating conversation.
 	SessionID          string `json:"session_id,omitempty"`
 	DefinitionRevision string `json:"definition_revision,omitempty"`
@@ -259,18 +260,22 @@ type WorkspaceDependencyScriptResponse struct {
 // codesync(workspace-dependency-stream): keep in sync with
 // apps/web/src/composables/api/useWorkspaceDependencyStream.ts.
 type WorkspaceDependencyStreamEvent struct {
-	DefinitionRevision string            `json:"definition_revision,omitempty"`
-	Type               string            `json:"type" enums:"started,log,done,error"`
-	DependencyID       string            `json:"dependency_id,omitempty"`
-	Version            string            `json:"version,omitempty"`
-	Stream             string            `json:"stream,omitempty" enums:"stdout,stderr"`
-	Data               string            `json:"data,omitempty"`
-	Entrypoints        map[string]string `json:"entrypoints,omitempty"`
-	Code               string            `json:"code,omitempty"`
-	Args               map[string]string `json:"args,omitempty"`
-	Detail             string            `json:"detail,omitempty"`
-	Message            string            `json:"message,omitempty"`
-	RequestID          string            `json:"request_id,omitempty"`
+	Action             string                     `json:"action,omitempty"`
+	Status             string                     `json:"status,omitempty"`
+	RequiredBy         []string                   `json:"required_by,omitempty"`
+	Failure            *workspacedeps.PlanFailure `json:"failure,omitempty"`
+	DefinitionRevision string                     `json:"definition_revision,omitempty"`
+	Type               string                     `json:"type" enums:"started,node,log,done,error"`
+	DependencyID       string                     `json:"dependency_id,omitempty"`
+	Version            string                     `json:"version,omitempty"`
+	Stream             string                     `json:"stream,omitempty" enums:"stdout,stderr"`
+	Data               string                     `json:"data,omitempty"`
+	Entrypoints        map[string]string          `json:"entrypoints,omitempty"`
+	Code               string                     `json:"code,omitempty"`
+	Args               map[string]string          `json:"args,omitempty"`
+	Detail             string                     `json:"detail,omitempty"`
+	Message            string                     `json:"message,omitempty"`
+	RequestID          string                     `json:"request_id,omitempty"`
 }
 
 // The frames actually written. They are separate from the documentation
@@ -476,6 +481,8 @@ func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 }
 
 // RollbackWorkspaceDependency godoc
+// @Accept json
+// @Param payload body WorkspaceDependencyInstallRequest true "Confirmed plan"
 // @Summary Roll a workspace dependency back to its previous version
 // @Description Switches the dependency back to the previous version kept in the workspace. A pure data operation: nothing is downloaded and no log is streamed.
 // @Tags containerd
@@ -501,6 +508,11 @@ func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 		return apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
 	ctx := c.Request().Context()
+	var req WorkspaceDependencyInstallRequest
+	if err := bindWorkspaceManagementRequest(c, &req); err != nil || req.PlanID == "" {
+		return workspaceDependencyError(workspacedeps.ErrPlanChanged)
+	}
+	ctx = workspacedeps.RequireConfirmedPlan(workspacedeps.WithPlanID(ctx, req.PlanID))
 	result, err := svc.Rollback(ctx, botID, depID)
 	if err != nil {
 		return workspaceDependencyError(err)
@@ -599,11 +611,25 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	if request.DefinitionRevision != "" {
 		ctx = workspacedeps.WithDefinitionRevision(ctx, request.DefinitionRevision)
 	}
-	preview, err := svc.ScriptPreviewDetails(ctx, botID, depID, action)
+	var preview workspacedeps.ScriptPreview
+	if request.PlanID == "" {
+		return workspaceDependencyError(workspacedeps.ErrPlanChanged)
+	}
+	if planner, ok := svc.(interface {
+		PlanScriptPreview(context.Context, string, string, workspacedeps.PlanRoot) (workspacedeps.ScriptPreview, error)
+	}); ok {
+		preview, err = planner.PlanScriptPreview(ctx, botID, request.PlanID, workspacedeps.PlanRoot{DependencyID: depID, Action: action, Version: request.Version})
+	} else {
+		preview, err = svc.ScriptPreviewDetails(ctx, botID, depID, action)
+	}
 	if err != nil {
 		return workspaceDependencyError(err)
 	}
 	ctx = workspacedeps.WithDefinitionRevision(ctx, preview.Revision)
+	{
+		ctx = workspacedeps.RequireConfirmedPlan(workspacedeps.WithPlanID(ctx, request.PlanID))
+	}
+
 	if validator, ok := svc.(interface {
 		ValidateOperationSession(context.Context, string, string) error
 	}); ok {
@@ -623,6 +649,13 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 	}
 	stream := newWorkspaceDependencyStream(writer, flusher, workspaceDependencyHeartbeatInterval)
 	defer stream.close()
+	ctx = workspacedeps.WithPlanEvents(ctx, func(event workspacedeps.PlanEvent) {
+		kind := "node"
+		if event.Status == "log" {
+			return
+		}
+		stream.send(WorkspaceDependencyStreamEvent{Type: kind, DependencyID: event.DependencyID, Action: event.Action, Status: event.Status, RequiredBy: event.RequiredBy, Failure: event.Failure})
+	})
 
 	stream.send(workspaceDependencyStartedEvent{Type: "started", DependencyID: depID, Version: version, DefinitionRevision: preview.Revision})
 	sink := workspacedeps.LogFunc(func(name, line string) {
@@ -841,6 +874,24 @@ func workspaceDependencyError(err error) error {
 		return nil
 	case apperror.CodeOf(err) != "":
 		return err
+	case errors.Is(err, workspacedeps.ErrPrerequisiteMissing):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyPrerequisiteMissing, err, nil)
+	case errors.Is(err, workspacedeps.ErrPlanChanged):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyPlanChanged, err, nil)
+	case errors.Is(err, workspacedeps.ErrGraphUnresolved):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyGraphUnresolved, err, nil)
+	case errors.Is(err, workspacedeps.ErrDependencyReferenced):
+		var referenced *workspacedeps.ReferencedError
+		args := map[string]string{}
+		if errors.As(err, &referenced) {
+			args["dependency_id"] = referenced.DependencyID
+			users := make([]string, 0, len(referenced.Users))
+			for _, user := range referenced.Users {
+				users = append(users, strings.Replace(user, "app:", "App ", 1))
+			}
+			args["required_by"] = strings.Join(users, ", ")
+		}
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyReferenced, err, args)
 	case errors.Is(err, workspacedeps.ErrInvalidVersion):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, err, nil)
 	case errors.Is(err, workspacedeps.ErrCatalogUnavailable):
@@ -994,6 +1045,9 @@ func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) Workspa
 		item.LastCheckedAt = rec.LastCheckedAt
 		if rec.LastError != "" {
 			item.LastErrorCode = string(apperror.CodeWorkspaceDependencyOperationFailed)
+			if rec.LastError == workspacedeps.ErrPrerequisiteMissing.Error() {
+				item.LastErrorCode = string(apperror.CodeWorkspaceDependencyPrerequisiteMissing)
+			}
 			item.LastError = workspacedeps.SafeErrorDetail(rec.LastError)
 		}
 	}
@@ -1022,4 +1076,22 @@ func preflightState(item workspacedeps.PreflightItem) string {
 		return workspacedeps.PreflightReasonMissing
 	}
 	return item.Reason
+}
+
+// RemoveWorkspaceDependency godoc
+// @Summary Remove an unreferenced managed workspace dependency
+// @Description Requires a confirmed plan and refuses App, dependency, pending or unresolved references. Image baselines and user files are preserved.
+// @Tags containerd
+// @Accept json
+// @Produce text/event-stream
+// @Param bot_id path string true "Bot ID"
+// @Param dep_id path string true "Dependency ID"
+// @Param payload body WorkspaceDependencyInstallRequest true "Confirmed removal plan"
+// @Success 200 {object} WorkspaceDependencyStreamEvent
+// @Failure 409 {object} apperror.Problem
+// @Router /bots/{bot_id}/dependencies/{dep_id}/remove [post].
+func (h *ContainerdHandler) RemoveWorkspaceDependency(c echo.Context) error {
+	return h.streamWorkspaceDependencyOperation(c, catalog.ActionRemove, func(svc workspaceDependencyService, ctx context.Context, botID, depID, _ string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error) {
+		return svc.Remove(ctx, botID, depID, sink)
+	})
 }

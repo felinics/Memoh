@@ -14,13 +14,13 @@ import (
 // that a shared resource is unused. Retained references let later requests
 // resume cleanup after a failure or Server restart.
 //
-// Dependencies no other App references are removed from the workspace before
-// their reference is dropped. Connector references are only unlinked: the
-// bot-level connection stays authorized until the user disconnects it or
-// uninstalls the last App that uses it.
+// Dropped dependency references are released after the release commits. Their
+// tools remain installed: release updates do not authorize extra remove scripts
+// or automatic garbage collection. Connector references are likewise unlinked.
+// Explicit App removal retains its separately reviewed cleanup behavior.
 //
-// This snapshot does not fence concurrent reference writers across Apps or
-// Servers. Resource-level deletion claims are a separate lifecycle change.
+// The caller holds the workspacedeps workspace graph admission across reference
+// writes and cleanup, including other App and standalone dependency operations.
 func (s *Service) pruneReferences(ctx context.Context, inst Installation, release supermarket.AppDescriptor, sink EventSink, result *OperationResult) error {
 	deps, err := s.store.ListDependencyRefs(ctx, inst.ID)
 	if err != nil {
@@ -45,9 +45,9 @@ func (s *Service) pruneReferences(ctx context.Context, inst Installation, releas
 			return fail("inspect shared dependencies before cleanup", err)
 		}
 	}
-	states, err := s.cleanupDependencyStates(ctx, inst, deps, botRefs)
+	states, err := s.dependencyStates(ctx, inst.BotID)
 	if err != nil {
-		return err
+		return fail("inspect dependencies before cleanup", err)
 	}
 	record := func(step StepResult, cause error) error {
 		if cause != nil {
@@ -69,11 +69,7 @@ func (s *Service) pruneReferences(ctx context.Context, inst Installation, releas
 		case entry.Observed.Source != workspacedeps.SourceManaged:
 			step.Error = RemovalReasonImage
 		default:
-			sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: ref.DependencyID})
-			if _, err := s.dependencies.Remove(ctx, inst.BotID, ref.DependencyID, logSink(sink, KindDependency, ref.DependencyID)); err != nil {
-				return record(step, fail("remove dependency "+ref.DependencyID, err))
-			}
-			step.Status = StepRemoved
+			step.Error = RemovalReasonRetained
 		}
 		if err := s.store.RemoveDependencyRef(ctx, inst.ID, ref.DependencyID); err != nil {
 			return record(step, fail("drop dependency reference "+ref.DependencyID, err))

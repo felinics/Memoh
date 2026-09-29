@@ -430,6 +430,21 @@ export type ApperrorProblem = {
     type: string;
 };
 
+export type AppsPrepareRequest = {
+    action?: string;
+    app_id?: string;
+    dependencies?: Array<string>;
+    installation_id?: string;
+    registry_id?: string;
+    release?: boolean;
+    revision?: string;
+};
+
+export type AppsPreparedOperation = {
+    plan?: WorkspacedepsPlan;
+    revision?: string;
+};
+
 export type AudioConfigSchema = {
     fields?: Array<AudioFieldSchema>;
 };
@@ -818,6 +833,8 @@ export type BotsUserGrant = {
     user_id?: string;
     user_username?: string;
 };
+
+export type CatalogAction = 'rollback' | 'install' | 'update' | 'remove' | 'reinstall' | 'check_update' | 'version';
 
 export type ChannelAction = {
     label?: string;
@@ -1733,6 +1750,7 @@ export type HandlersAppDependencyItem = {
 
 export type HandlersAppInstallRequest = {
     app_id: string;
+    plan_id?: string;
     registry_id: string;
     revision: string;
 };
@@ -1762,6 +1780,7 @@ export type HandlersAppItem = {
     installed_at?: string;
     last_checked_at?: string;
     last_error?: string;
+    last_error_code?: string;
     license?: string;
     name?: string;
     reason?: 'user' | 'required';
@@ -1791,6 +1810,7 @@ export type HandlersAppRemovalPreviewApp = {
     app_id?: string;
     installation_id?: string;
     registry_id?: string;
+    revision?: string;
     version?: string;
 };
 
@@ -1810,8 +1830,27 @@ export type HandlersAppRemovalPreviewDependency = {
 export type HandlersAppRemovalPreviewResponse = {
     connectors?: Array<HandlersAppRemovalPreviewConnector>;
     dependencies?: Array<HandlersAppRemovalPreviewDependency>;
+    dependency_revisions?: {
+        [key: string]: string;
+    };
     installation_id?: string;
     required_apps?: Array<HandlersAppRemovalPreviewApp>;
+    revision?: string;
+};
+
+export type HandlersAppRemoveRequest = {
+    dependency_revisions?: {
+        [key: string]: string;
+    };
+    required_app_revisions?: {
+        [key: string]: string;
+    };
+    revision?: string;
+};
+
+export type HandlersAppResumeRequest = {
+    plan_id?: string;
+    revision?: string;
 };
 
 export type HandlersAppSkillItem = {
@@ -1823,16 +1862,19 @@ export type HandlersAppSkillItem = {
 };
 
 export type HandlersAppStreamEvent = {
+    action?: string;
     args?: {
         [key: string]: string;
     };
     code?: string;
     data?: string;
     detail?: string;
+    failure?: WorkspacedepsPlanFailure;
     id?: string;
     kind?: 'app' | 'dependency' | 'skills' | 'connector';
     message?: string;
     request_id?: string;
+    required_by?: Array<string>;
     status?: string;
     stream?: 'stdout' | 'stderr';
     type?: 'started' | 'step' | 'log' | 'step_done' | 'done' | 'error';
@@ -1845,11 +1887,13 @@ export type HandlersAppUpdateRequest = {
      * Dependencies are updated to their latest version.
      */
     dependencies?: Array<string>;
+    plan_id?: string;
     registry_id: string;
     /**
      * Release moves the installation to the registry's current release.
      */
     release?: boolean;
+    revision?: string;
 };
 
 export type HandlersBatchDeleteRequest = {
@@ -2717,6 +2761,7 @@ export type HandlersWorkspaceDependencyCatalogResponse = {
 
 export type HandlersWorkspaceDependencyInstallRequest = {
     definition_revision?: string;
+    plan_id?: string;
     /**
      * SessionID optionally routes operation progress to its originating conversation.
      */
@@ -2745,7 +2790,7 @@ export type HandlersWorkspaceDependencyItem = {
     id?: string;
     /**
      * ImageVersion is the version of the workspace's toolkit copy, omitted
-     * when no toolkit copy remains. Native removal clears it as well.
+     * when no toolkit copy remains. Removing a managed overlay preserves it.
      */
     image_version?: string;
     /**
@@ -2836,6 +2881,10 @@ export type HandlersWorkspaceDependencyOperationResponse = {
     version?: string;
 };
 
+export type HandlersWorkspaceDependencyPlanRequest = {
+    roots?: Array<WorkspacedepsPlanRoot>;
+};
+
 export type HandlersWorkspaceDependencyPlatform = {
     arch?: string;
     libc?: string;
@@ -2879,6 +2928,7 @@ export type HandlersWorkspaceDependencyScriptResponse = {
 };
 
 export type HandlersWorkspaceDependencyStreamEvent = {
+    action?: string;
     args?: {
         [key: string]: string;
     };
@@ -2890,10 +2940,13 @@ export type HandlersWorkspaceDependencyStreamEvent = {
     entrypoints?: {
         [key: string]: string;
     };
+    failure?: WorkspacedepsPlanFailure;
     message?: string;
     request_id?: string;
+    required_by?: Array<string>;
+    status?: string;
     stream?: 'stdout' | 'stderr';
-    type?: 'started' | 'log' | 'done' | 'error';
+    type?: 'started' | 'node' | 'log' | 'done' | 'error';
     version?: string;
 };
 
@@ -4299,6 +4352,81 @@ export type WorkspaceWorkspaceTargetToolApproval = {
 
 export type WorkspaceWorkspaceTargetsResponse = {
     targets?: Array<WorkspaceWorkspaceTarget>;
+};
+
+export type WorkspacedepsPlan = {
+    bot_id?: string;
+    id?: string;
+    nodes?: Array<WorkspacedepsPlanNode>;
+    roots?: Array<WorkspacedepsPlanRoot>;
+};
+
+export type WorkspacedepsPlanFailure = {
+    dependency_id?: string;
+    operation_id?: string;
+    path?: Array<string>;
+    phase?: string;
+    root?: string;
+};
+
+export type WorkspacedepsPlanNode = {
+    action?: string;
+    definition_revision?: string;
+    dependency_id?: string;
+    manifest_digest?: string;
+    name?: string;
+    reason?: string;
+    registry_id?: string;
+    required_by?: Array<string>;
+    requires?: Array<string>;
+    root?: boolean;
+    script?: WorkspacedepsScriptPreview;
+    source_url?: string;
+    version?: string;
+};
+
+export type WorkspacedepsPlanRoot = {
+    action?: CatalogAction;
+    dependency_id?: string;
+    ensure?: boolean;
+    version?: string;
+};
+
+export type WorkspacedepsScriptEnvEntry = {
+    key?: string;
+    /**
+     * Secret marks operator-supplied entries whose value must not leave the
+     * Server, such as registry tokens passed through ScriptEnv.
+     */
+    secret?: boolean;
+    /**
+     * Value is the real value when it is known before the run and a
+     * placeholder in angle brackets otherwise (result path, values that are
+     * only known once the workspace has been probed or read). It is empty
+     * when Secret is set.
+     */
+    value?: string;
+};
+
+export type WorkspacedepsScriptPreview = {
+    action?: CatalogAction;
+    definition_revision?: string;
+    dependency_id?: string;
+    /**
+     * Digest is the manifest digest over dependency.yaml and every script
+     * file the manifest references; it is what state.json records after a
+     * successful install.
+     */
+    digest?: string;
+    env?: Array<WorkspacedepsScriptEnvEntry>;
+    /**
+     * Exec is the command the runner starts; the script arrives on its stdin.
+     */
+    exec?: string;
+    registry_id?: string;
+    script?: string;
+    source_url?: string;
+    timeout_seconds?: number;
 };
 
 export type GetAcpProfilesData = {
@@ -6260,6 +6388,47 @@ export type PostBotsByBotIdAppsCheckUpdatesResponses = {
 
 export type PostBotsByBotIdAppsCheckUpdatesResponse = PostBotsByBotIdAppsCheckUpdatesResponses[keyof PostBotsByBotIdAppsCheckUpdatesResponses];
 
+export type PostBotsByBotIdAppsPrepareData = {
+    /**
+     * App operation
+     */
+    body: AppsPrepareRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/apps/prepare';
+};
+
+export type PostBotsByBotIdAppsPrepareErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdAppsPrepareError = PostBotsByBotIdAppsPrepareErrors[keyof PostBotsByBotIdAppsPrepareErrors];
+
+export type PostBotsByBotIdAppsPrepareResponses = {
+    /**
+     * OK
+     */
+    200: AppsPreparedOperation;
+};
+
+export type PostBotsByBotIdAppsPrepareResponse = PostBotsByBotIdAppsPrepareResponses[keyof PostBotsByBotIdAppsPrepareResponses];
+
 export type PostBotsByBotIdAppsUpdateData = {
     /**
      * What to update
@@ -6306,7 +6475,10 @@ export type PostBotsByBotIdAppsUpdateResponses = {
 export type PostBotsByBotIdAppsUpdateResponse = PostBotsByBotIdAppsUpdateResponses[keyof PostBotsByBotIdAppsUpdateResponses];
 
 export type DeleteBotsByBotIdAppsByInstallationIdData = {
-    body?: never;
+    /**
+     * Reviewed removal publications
+     */
+    body: HandlersAppRemoveRequest;
     path: {
         /**
          * Bot ID
@@ -6547,7 +6719,10 @@ export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses = {
 export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponse = GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses[keyof GetBotsByBotIdAppsByInstallationIdRemovalPreviewResponses];
 
 export type PostBotsByBotIdAppsByInstallationIdResumeData = {
-    body?: never;
+    /**
+     * Confirmed dependency plan
+     */
+    body: HandlersAppResumeRequest;
     path: {
         /**
          * Bot ID
@@ -8686,6 +8861,47 @@ export type PostBotsByBotIdDependenciesCheckUpdatesResponses = {
 
 export type PostBotsByBotIdDependenciesCheckUpdatesResponse = PostBotsByBotIdDependenciesCheckUpdatesResponses[keyof PostBotsByBotIdDependenciesCheckUpdatesResponses];
 
+export type PostBotsByBotIdDependenciesPlanData = {
+    /**
+     * Requested operations
+     */
+    body: HandlersWorkspaceDependencyPlanRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/dependencies/plan';
+};
+
+export type PostBotsByBotIdDependenciesPlanErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesPlanError = PostBotsByBotIdDependenciesPlanErrors[keyof PostBotsByBotIdDependenciesPlanErrors];
+
+export type PostBotsByBotIdDependenciesPlanResponses = {
+    /**
+     * OK
+     */
+    200: WorkspacedepsPlan;
+};
+
+export type PostBotsByBotIdDependenciesPlanResponse = PostBotsByBotIdDependenciesPlanResponses[keyof PostBotsByBotIdDependenciesPlanResponses];
+
 export type PostBotsByBotIdDependenciesPreflightData = {
     /**
      * Dependencies to check
@@ -8841,8 +9057,48 @@ export type PostBotsByBotIdDependenciesByDepIdReinstallResponses = {
 
 export type PostBotsByBotIdDependenciesByDepIdReinstallResponse = PostBotsByBotIdDependenciesByDepIdReinstallResponses[keyof PostBotsByBotIdDependenciesByDepIdReinstallResponses];
 
+export type PostBotsByBotIdDependenciesByDepIdRemoveData = {
+    /**
+     * Confirmed removal plan
+     */
+    body: HandlersWorkspaceDependencyInstallRequest;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Dependency ID
+         */
+        dep_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/dependencies/{dep_id}/remove';
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRemoveErrors = {
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRemoveError = PostBotsByBotIdDependenciesByDepIdRemoveErrors[keyof PostBotsByBotIdDependenciesByDepIdRemoveErrors];
+
+export type PostBotsByBotIdDependenciesByDepIdRemoveResponses = {
+    /**
+     * OK
+     */
+    200: HandlersWorkspaceDependencyStreamEvent;
+};
+
+export type PostBotsByBotIdDependenciesByDepIdRemoveResponse = PostBotsByBotIdDependenciesByDepIdRemoveResponses[keyof PostBotsByBotIdDependenciesByDepIdRemoveResponses];
+
 export type PostBotsByBotIdDependenciesByDepIdRollbackData = {
-    body?: never;
+    /**
+     * Confirmed plan
+     */
+    body: HandlersWorkspaceDependencyInstallRequest;
     path: {
         /**
          * Bot ID

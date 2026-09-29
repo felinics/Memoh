@@ -30,9 +30,12 @@ import {
   validDependencyVersion,
   type DependencyConfirmMode,
 } from '@/utils/workspace-dependency'
+import DependencyPlanPreview from './dependency-plan-preview.vue'
+import { useDependencyPlan } from '@/composables/useDependencyPlan'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 
 const props = withDefaults(defineProps<{
+  botId: string
   open: boolean
   mode: DependencyConfirmMode
   item: DependencyItem | null
@@ -50,7 +53,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'update:open': [value: boolean]
   /** The trimmed version the user typed; empty means the latest. */
-  confirm: [version: string]
+  confirm: [version: string, planId: string]
 }>()
 
 const { t } = useI18n()
@@ -71,9 +74,15 @@ watch(() => props.open, (open) => {
   if (open) form.resetForm()
 })
 
+const preview = useDependencyPlan(() => props.botId, () => props.open && props.item?.id ? {
+  roots: [{ dependency_id: props.item.id, action: props.mode, version: form.values.version?.trim() || '' }],
+} : null)
+
 const title = computed(() => {
   const args = { name: name.value }
   switch (props.mode) {
+    case 'remove':
+      return t('dependenciesPlan.removeTitle', args)
     case 'reinstall':
       return t('bots.dependencies.confirm.reinstallTitle', args)
     case 'update':
@@ -85,6 +94,8 @@ const title = computed(() => {
 
 const description = computed(() => {
   switch (props.mode) {
+    case 'remove':
+      return t('dependenciesPlan.removeDescription', { name: name.value })
     case 'reinstall':
       return t('bots.dependencies.confirm.reinstallDescription', { name: name.value })
     case 'update':
@@ -97,6 +108,8 @@ const description = computed(() => {
 const confirmText = computed(() => {
   if (props.confirmLabel) return props.confirmLabel
   switch (props.mode) {
+    case 'remove':
+      return t('dependenciesPlan.actions.remove')
     case 'reinstall':
       return t('bots.dependencies.action.reinstall')
     case 'update':
@@ -113,8 +126,8 @@ function onOpenChange(value: boolean) {
 }
 
 const submit = form.handleSubmit(({ version }) => {
-  if (props.loading) return
-  emit('confirm', version)
+  if (props.loading || !preview.ready.value) return
+  emit('confirm', version, preview.plan.value?.id ?? '')
 })
 </script>
 
@@ -142,6 +155,7 @@ const submit = form.handleSubmit(({ version }) => {
           @submit.prevent="submit"
         >
           <FormField
+            v-if="mode !== 'remove'"
             v-slot="{ componentField }"
             name="version"
           >
@@ -162,6 +176,12 @@ const submit = form.handleSubmit(({ version }) => {
             </FieldStack>
           </FormField>
         </form>
+        <DependencyPlanPreview
+          :plan="preview.plan.value"
+          :loading="preview.loading.value"
+          :error="preview.error.value"
+          @retry="preview.retry"
+        />
       </DialogBody>
 
       <DialogFooter class="min-w-0 items-center gap-2">
@@ -173,9 +193,11 @@ const submit = form.handleSubmit(({ version }) => {
           {{ t('common.cancel') }}
         </Button>
         <Button
+          :variant="mode === 'remove' ? 'destructive' : 'default'"
           form="dependency-confirm-form"
           type="submit"
           :loading="loading"
+          :disabled="!preview.ready.value"
         >
           {{ confirmText }}
         </Button>

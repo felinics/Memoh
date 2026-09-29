@@ -78,6 +78,8 @@ const subtitle = computed(() => {
   if (props.status === 'unknown') return t('bots.dependencies.progress.unknownTitle')
   const args = { name: props.name }
   switch (props.action) {
+    case 'remove':
+      return t('dependenciesPlan.removing', args)
     case 'update':
       return t('bots.dependencies.progress.updating', args)
     case 'reinstall':

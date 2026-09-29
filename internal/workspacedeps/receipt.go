@@ -21,6 +21,7 @@ import (
 // accepted mutation after a Server or stream failure. Result and completion
 // are read from files written by the workspace process under its kernel lock.
 type OperationReceipt struct {
+	PlanID             string         `json:"plan_id,omitempty"`
 	ID                 string         `json:"id"`
 	DependencyID       string         `json:"dependency_id"`
 	Action             catalog.Action `json:"action"`

@@ -243,6 +243,14 @@ type BotChannelRoute struct {
 	TeamID                 pgtype.UUID        `json:"team_id"`
 }
 
+type BotDependencyGraph struct {
+	TeamID     pgtype.UUID        `json:"team_id"`
+	BotID      pgtype.UUID        `json:"bot_id"`
+	Owner      string             `json:"owner"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	Graph      []byte             `json:"graph"`
+}
+
 type BotDependencyInstallation struct {
 	ID                 pgtype.UUID        `json:"id"`
 	TeamID             pgtype.UUID        `json:"team_id"`
@@ -261,6 +269,14 @@ type BotDependencyInstallation struct {
 	OperationID        string             `json:"operation_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotDependencyPlan struct {
+	TeamID    pgtype.UUID        `json:"team_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	ID        string             `json:"id"`
+	Plan      []byte             `json:"plan"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type BotHistoryMessage struct {

@@ -226,7 +226,13 @@ function finish() {
               :is="stepIcon(step)"
               class="size-4 shrink-0 text-muted-foreground"
             />
-            <span class="min-w-0 flex-1 truncate">{{ stepLabel(step) }}</span>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate">{{ stepLabel(step) }}</span>
+              <span
+                v-if="step.requiredBy?.length"
+                class="block text-caption text-muted-foreground"
+              >{{ t('dependenciesPlan.requiredBy', { names: step.requiredBy.join(', ') }) }}</span>
+            </span>
             <span
               v-if="step.version && step.kind !== 'skills'"
               class="font-mono text-caption text-muted-foreground"

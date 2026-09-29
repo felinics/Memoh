@@ -52,6 +52,8 @@ const requiredApps = computed(() => props.preview?.required_apps ?? [])
 
 function reasonLabel(reason?: string): string {
   switch (reason) {
+    case 'unresolved':
+      return t('apps.remove.reason.unresolved')
     case 'shared':
       return t('apps.remove.reason.shared')
     case 'image':

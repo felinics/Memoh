@@ -28,10 +28,16 @@ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
 ORDER BY registry_id, app_id;
 
 -- name: UpsertBotAppInstallation :one
+WITH admission AS MATERIALIZED (
+ SELECT owner FROM bot_dependency_graphs
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
+ AND owner = sqlc.arg(graph_owner)::text AND lease_until > now()
+ FOR UPDATE
+)
 INSERT INTO bot_app_installations (
   bot_id, registry_id, app_id, revision, version, status, reason, release
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8 WHERE EXISTS (SELECT 1 FROM admission)
 ON CONFLICT (team_id, bot_id, registry_id, app_id)
 DO UPDATE SET revision = EXCLUDED.revision,
               version = EXCLUDED.version,
@@ -57,6 +63,12 @@ RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
           release, installed_at, updated_at;
 
 -- name: UpdateBotAppInstallationRelease :one
+WITH admission AS MATERIALIZED (
+ SELECT owner FROM bot_dependency_graphs
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id)
+ AND owner = sqlc.arg(graph_owner)::text AND lease_until > now()
+ FOR UPDATE
+)
 UPDATE bot_app_installations
 SET revision = sqlc.arg(revision),
     version = sqlc.arg(version),
@@ -65,8 +77,9 @@ SET revision = sqlc.arg(revision),
     available_version = '',
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = sqlc.arg(bot_id)
+  AND bot_app_installations.bot_id = sqlc.arg(bot_id)
   AND id = sqlc.arg(id)
+ AND EXISTS (SELECT 1 FROM admission)
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
           status, reason, available_revision, available_version, last_checked_at, last_error,
           release, installed_at, updated_at;
@@ -85,10 +98,17 @@ RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
           release, installed_at, updated_at;
 
 -- name: DeleteBotAppInstallation :one
+WITH admission AS MATERIALIZED (
+ SELECT owner FROM bot_dependency_graphs
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1
+ AND owner = sqlc.arg(graph_owner)::text AND lease_until > now()
+ FOR UPDATE
+)
 DELETE FROM bot_app_installations
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = $1
+  AND bot_app_installations.bot_id = $1
   AND id = $2
+ AND EXISTS (SELECT 1 FROM admission)
 RETURNING id, team_id, bot_id, registry_id, app_id, revision, version,
           status, reason, available_revision, available_version, last_checked_at, last_error,
           release, installed_at, updated_at;
@@ -111,16 +131,30 @@ WHERE r.team_id = public.memoh_current_team_id()
 ORDER BY r.dependency_id, i.registry_id, i.app_id;
 
 -- name: UpsertAppDependencyRef :one
+WITH admission AS MATERIALIZED (
+ SELECT graph.owner FROM bot_dependency_graphs graph
+ JOIN bot_app_installations app ON app.bot_id = graph.bot_id AND app.team_id = graph.team_id
+ WHERE app.team_id = public.memoh_current_team_id() AND app.id = $1
+   AND graph.owner = sqlc.arg(graph_owner)::text AND graph.lease_until > now()
+ FOR UPDATE OF graph
+)
 INSERT INTO bot_app_dependency_refs (installation_id, dependency_id)
-VALUES ($1, $2)
+SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM admission)
 ON CONFLICT (team_id, installation_id, dependency_id) DO UPDATE SET dependency_id = EXCLUDED.dependency_id
 RETURNING id, team_id, installation_id, dependency_id, created_at;
 
 -- name: DeleteAppDependencyRef :execrows
+WITH admission AS MATERIALIZED (
+ SELECT graph.owner FROM bot_dependency_graphs graph
+ JOIN bot_app_installations app ON app.bot_id = graph.bot_id AND app.team_id = graph.team_id
+ WHERE app.team_id = public.memoh_current_team_id() AND app.id = $1
+   AND graph.owner = sqlc.arg(graph_owner)::text AND graph.lease_until > now()
+ FOR UPDATE OF graph
+)
 DELETE FROM bot_app_dependency_refs
 WHERE team_id = public.memoh_current_team_id()
-  AND installation_id = $1
-  AND dependency_id = $2;
+  AND installation_id = $1 AND dependency_id = $2
+  AND EXISTS (SELECT 1 FROM admission);
 
 -- name: ListAppConnectorRefs :many
 SELECT id, team_id, installation_id, connector_type, connection_id, required, created_at, updated_at

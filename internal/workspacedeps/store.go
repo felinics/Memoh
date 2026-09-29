@@ -40,6 +40,9 @@ const (
 
 // Installation is one row of bot_dependency_installations.
 type Installation struct {
+	PlanID             string
+	Requires           []string
+	RelationshipsKnown bool
 	OperationID        string
 	SourceURL          string
 	RegistryID         string
@@ -68,6 +71,7 @@ type InstallationKey struct {
 
 // UpsertInstallation creates or replaces the intent portion of a record.
 type UpsertInstallation struct {
+	GraphOwner         string
 	SourceURL          string
 	RegistryID         string
 	DefinitionRevision string

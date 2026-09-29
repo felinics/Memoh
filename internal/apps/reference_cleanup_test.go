@@ -235,7 +235,7 @@ func TestUpdateCleanupReadFailuresPreserveSharedResources(t *testing.T) {
 }
 
 func TestUpdateCleanupMutationFailuresRemainRetryable(t *testing.T) {
-	for _, failure := range []string{"remove_dependency", "drop_dependency_ref", "drop_connector_ref"} {
+	for _, failure := range []string{"drop_dependency_ref", "drop_connector_ref"} {
 		t.Run(failure, func(t *testing.T) {
 			f := newCleanupFixture(t)
 			if failure == "remove_dependency" {
@@ -266,14 +266,14 @@ func TestUpdateCleanupMutationFailuresRemainRetryable(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertCleanupDone(t, f, rec)
-			if len(f.deps.removed) != 1 {
-				t.Fatalf("retry repeated completed dependency removal: %v", f.deps.removed)
+			if len(f.deps.removed) != 0 {
+				t.Fatalf("retry removed retained tools: %v", f.deps.removed)
 			}
 		})
 	}
 }
 
-func TestCleanupRejectsIncompleteDependencyDiscovery(t *testing.T) {
+func TestReferenceCleanupRetainsToolsWithoutCompleteWorkspaceDiscovery(t *testing.T) {
 	for _, state := range []string{"query_error", "missing", "discovery_error", "busy", "start_failed"} {
 		t.Run(state, func(t *testing.T) {
 			f := newCleanupFixture(t)
@@ -294,6 +294,16 @@ func TestCleanupRejectsIncompleteDependencyDiscovery(t *testing.T) {
 			f.depFaults.view = &view
 			rec := &recorder{}
 			_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec)
+			if state != "query_error" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertCleanupDone(t, f, rec)
+				if len(f.deps.removed) != 0 {
+					t.Fatal("reference-only cleanup ran unconfirmed removal")
+				}
+				return
+			}
 			assertCleanupFailed(t, f, rec, err)
 			if len(f.deps.removed) != 0 || len(f.connectors.deleted) != 0 {
 				t.Fatal("incomplete discovery must not authorize cleanup")
@@ -309,17 +319,17 @@ func TestCleanupRejectsIncompleteDependencyDiscovery(t *testing.T) {
 	}
 }
 
-func TestCleanupStartsStoppedNativeWorkspace(t *testing.T) {
+func TestReferenceCleanupDoesNotStartStoppedWorkspace(t *testing.T) {
 	f := newCleanupFixture(t)
 	view := f.deps.list()
 	view.Workspace = workspacedeps.WorkspaceNotRunning
 	f.depFaults.view = &view
 	rec := &recorder{}
 	if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, rec); err != nil {
-		t.Fatalf("a stopped workspace must be started, not reported: %v", err)
+		t.Fatalf("reference cleanup must not need a running workspace: %v", err)
 	}
 	assertCleanupDone(t, f, rec)
-	if f.depFaults.started != 1 || strings.Join(f.deps.removed, ",") != "node" {
+	if f.depFaults.started != 0 || len(f.deps.removed) != 0 {
 		t.Fatalf("started=%d removed=%v", f.depFaults.started, f.deps.removed)
 	}
 }
@@ -346,7 +356,7 @@ func TestUpdateUnlinksConnectorButKeepsConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCleanupDone(t, f, rec)
-	if strings.Join(f.deps.removed, ",") != "node" || !strings.Contains(rec.types(), "step_done:connector:github=unlinked") {
+	if len(f.deps.removed) != 0 || !strings.Contains(rec.types(), "step_done:connector:github=unlinked") {
 		t.Fatalf("removed=%v events=%s", f.deps.removed, rec.types())
 	}
 }
@@ -363,8 +373,8 @@ func TestMatchingReleaseStillCleansRetainedReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCleanupDone(t, f, rec)
-	if len(f.deps.removed) != 1 || len(f.publisher.published) != 1 {
-		t.Fatal("same-release cleanup must remove old dependencies without republishing Skills")
+	if len(f.deps.removed) != 0 || len(f.publisher.published) != 1 {
+		t.Fatal("same-release cleanup releases references without removing tools or republishing Skills")
 	}
 }
 
@@ -421,11 +431,11 @@ func TestFailedCleanupPersistsPublicMessageOnly(t *testing.T) {
 	})
 	t.Run("sentinel keeps its text", func(t *testing.T) {
 		f := newCleanupFixture(t)
-		f.depFaults.removeErr = workspacedeps.ErrBusy
+		f.depFaults.listErr = workspacedeps.ErrBusy
 		if _, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{}); !errors.Is(err, workspacedeps.ErrBusy) {
 			t.Fatalf("err = %v", err)
 		}
-		if got := f.installation(t).LastError; got != "remove dependency node: "+workspacedeps.ErrBusy.Error() {
+		if got := f.installation(t).LastError; got != "inspect dependencies before cleanup: "+workspacedeps.ErrBusy.Error() {
 			t.Fatalf("last_error = %q", got)
 		}
 	})

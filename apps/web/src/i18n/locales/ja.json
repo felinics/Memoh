@@ -236,7 +236,11 @@
       "catalog_unavailable": "依存関係カタログを取得できません。しばらくしてから再試行してください。",
       "definition_invalid": "依存関係の定義を検証できませんでした。カタログを更新して再試行してください。",
       "definition_unavailable": "この依存関係の定義はキャッシュされていません。Supermarket に接続して再試行してください。",
-      "discovery_failed": "Workspace の依存関係を確認できませんでした。再試行してください。"
+      "discovery_failed": "Workspace の依存関係を確認できませんでした。再試行してください。",
+      "plan_changed": "依存計画が変わりました。もう一度プレビューして確認してください。",
+      "referenced": "{dependency_id} は {required_by} に必要です。先に依存元の参照を解除してください。",
+      "graph_unresolved": "以前の依存関係を確認できません。削除する前にインストールを修復してください。",
+      "prerequisite_missing": "必要なツールがありません。更新の確認前に依存ツールを修復してください。"
     },
     "acp": {
       "request_invalid": "Agent ランタイムのリクエストが無効です。内容を確認して、もう一度お試しください。",
@@ -3921,7 +3925,8 @@
       "reason": {
         "shared": "他のアプリが使用中",
         "image": "ワークスペースイメージに同梱",
-        "absent": "未インストール"
+        "absent": "未インストール",
+        "unresolved": "履歴の修復が必要なため保持"
       }
     },
     "progress": {
@@ -4109,5 +4114,28 @@
   "elicitation": {
     "done": "完了",
     "cancel": "キャンセル"
+  },
+  "dependenciesPlan": {
+    "title": "依存ツールの計画",
+    "preparing": "必要なツールを確認中…",
+    "failed": "計画を準備できませんでした。もう一度お試しください。",
+    "requested": "この操作に必要",
+    "requiredBy": "{names} に必要",
+    "script": "スクリプトを表示",
+    "resume": "{name} のインストールを再開",
+    "description": "必要なツールを確認して続行します。完了した依存ツールは保持されます。",
+    "progress": "{names} に必要な {name} を準備中",
+    "actions": {
+      "install": "インストール",
+      "update": "更新",
+      "reinstall": "再インストール",
+      "rollback": "ロールバック",
+      "reuse": "既存のバージョンを使用",
+      "remove": "削除",
+      "keep": "保持"
+    },
+    "removeTitle": "{name} を削除",
+    "removeDescription": "管理対象の {name} を削除します。他の App やツールが使用中の場合は拒否されます。イメージ内のツールとユーザーファイルは保持します。",
+    "removing": "{name} を削除中"
   }
 }

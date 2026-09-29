@@ -32,6 +32,16 @@ type Queries interface {
 	RetireInterruptedSessionRun(context.Context, pgtype.UUID) (int64, error)
 
 	DeleteAgentSessionPublicationsBySession(ctx context.Context, sessionID pgtype.UUID) (int64, error)
+	EnsureDependencyGraph(context.Context, pgtype.UUID) error
+	LockDependencyGraph(context.Context, pgtype.UUID) (string, error)
+	ClaimDependencyGraph(ctx context.Context, arg dbsqlc.ClaimDependencyGraphParams) ([]byte, error)
+	GetDependencyGraph(ctx context.Context, botID pgtype.UUID) ([]byte, error)
+	GetDependencyPlan(ctx context.Context, arg dbsqlc.GetDependencyPlanParams) ([]byte, error)
+	ListDependencyAppUsers(ctx context.Context, arg dbsqlc.ListDependencyAppUsersParams) ([]dbsqlc.ListDependencyAppUsersRow, error)
+	ReleaseDependencyGraph(ctx context.Context, arg dbsqlc.ReleaseDependencyGraphParams) error
+	RenewDependencyGraph(ctx context.Context, arg dbsqlc.RenewDependencyGraphParams) (int64, error)
+	SaveDependencyPlan(ctx context.Context, arg dbsqlc.SaveDependencyPlanParams) error
+	WriteDependencyGraph(ctx context.Context, arg dbsqlc.WriteDependencyGraphParams) (int64, error)
 	CreateAgentAuthorization(context.Context, dbsqlc.CreateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
 	GetAgentAuthorization(context.Context, dbsqlc.GetAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
 	UpdateAgentAuthorization(context.Context, dbsqlc.UpdateAgentAuthorizationParams) (dbsqlc.AgentAuthorization, error)
@@ -50,8 +60,8 @@ type Queries interface {
 	RenewBotWorkspaceLease(ctx context.Context, arg dbsqlc.RenewBotWorkspaceLeaseParams) (int64, error)
 	UpdateBotWorkspaceObserved(ctx context.Context, arg dbsqlc.UpdateBotWorkspaceObservedParams) (dbsqlc.BotWorkspace, error)
 	UpsertBotWorkspaceIntent(ctx context.Context, arg dbsqlc.UpsertBotWorkspaceIntentParams) (dbsqlc.BotWorkspace, error)
-	FinishBotDependencyOperation(ctx context.Context, arg dbsqlc.FinishBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
-	DeleteBotDependencyOperation(ctx context.Context, arg dbsqlc.DeleteBotDependencyOperationParams) (dbsqlc.BotDependencyInstallation, error)
+	FinishBotDependencyOperation(ctx context.Context, arg dbsqlc.FinishBotDependencyOperationParams) (dbsqlc.FinishBotDependencyOperationRow, error)
+	DeleteBotDependencyOperation(ctx context.Context, arg dbsqlc.DeleteBotDependencyOperationParams) (dbsqlc.DeleteBotDependencyOperationRow, error)
 	PruneWorkspaceDependencyDefinitions(ctx context.Context, sourceURL string) (int64, error)
 	CreateAgentCredential(ctx context.Context, arg dbsqlc.CreateAgentCredentialParams) (dbsqlc.AgentCredential, error)
 	GetAgentCredential(ctx context.Context, id pgtype.UUID) (dbsqlc.AgentCredential, error)

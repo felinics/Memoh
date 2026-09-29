@@ -1,5 +1,6 @@
 import {
   postBotsByBotIdDependenciesByDepIdInstall,
+  postBotsByBotIdDependenciesByDepIdRemove,
   postBotsByBotIdDependenciesByDepIdReinstall,
   postBotsByBotIdDependenciesByDepIdUpdate,
 } from '@memohai/sdk'
@@ -18,6 +19,7 @@ import type { DependencyOperationAction } from './useWorkspaceDependencies'
 // HandlersWorkspaceDependencyStreamEvent flattens them into one all-optional
 // bag, which is why the union is spelled out here.
 export type WorkspaceDependencyStreamEvent =
+  | { type: 'node'; dependency_id: string; action: string; status: string; required_by?: string[] }
   | { type: 'started'; dependency_id: string; version?: string; definition_revision?: string }
   | { type: 'log'; stream: 'stdout' | 'stderr'; data: string }
   | { type: 'done'; version?: string; entrypoints?: Record<string, string>; definition_revision?: string }
@@ -27,6 +29,7 @@ export interface WorkspaceDependencyStreamRequestOptions {
   /** Conversation that requested this manager-confirmed operation. */
   sessionId?: string
   /** Revision returned by this operation's script preview. Omit to resolve latest. */
+  planId?: string
   definitionRevision?: string
   /**
    * Version to install / update / reinstall to. Empty means the latest the
@@ -60,6 +63,8 @@ export function isWorkspaceDependencyStreamEvent(value: unknown): value is Works
   const event = value as Record<string, unknown>
   if (event.definition_revision !== undefined && typeof event.definition_revision !== 'string') return false
   switch (event.type) {
+    case 'node':
+      return typeof event.dependency_id === 'string' && typeof event.action === 'string' && typeof event.status === 'string'
     case 'started':
       return typeof event.dependency_id === 'string'
         && (event.version === undefined || typeof event.version === 'string')
@@ -118,14 +123,17 @@ export async function* streamDependencyOperation(
   const sessionId = options.sessionId?.trim() ?? ''
   const versioned = {
     ...request,
-    body: version || definitionRevision || sessionId ? {
+    body: version || definitionRevision || sessionId || options.planId ? {
+      plan_id: options.planId,
       version: version || undefined,
       definition_revision: definitionRevision || undefined,
       session_id: sessionId || undefined,
     } : undefined,
   }
 
-  const result = action === 'update'
+  const result = action === 'remove'
+    ? await postBotsByBotIdDependenciesByDepIdRemove({ ...versioned, body: versioned.body ?? { plan_id: options.planId } })
+    : action === 'update'
     ? await postBotsByBotIdDependenciesByDepIdUpdate(versioned)
     : action === 'reinstall'
       ? await postBotsByBotIdDependenciesByDepIdReinstall(versioned)
@@ -154,7 +162,7 @@ export function openWorkspaceDependencyStream(
       options.botId,
       options.depId,
       options.action,
-      { version: options.version, definitionRevision: options.definitionRevision, sessionId: options.sessionId, signal: options.signal },
+      { planId: options.planId, version: options.version, definitionRevision: options.definitionRevision, sessionId: options.sessionId, signal: options.signal },
     ),
   }
 }

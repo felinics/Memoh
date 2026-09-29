@@ -223,6 +223,7 @@ type depsCall struct {
 	depID          string
 	body           any
 	userID         string
+	omitPlan       bool
 	omitRevision   bool
 	requestContext context.Context
 }
@@ -238,6 +239,15 @@ func (call depsCall) invoke(t *testing.T, fn func(echo.Context) error) (*httptes
 				body.DefinitionRevision = strings.Repeat("a", 64)
 				call.body = body
 			}
+		}
+	}
+	if !call.omitPlan && call.depID != "" && call.method == http.MethodPost {
+		switch body := call.body.(type) {
+		case nil:
+			call.body = WorkspaceDependencyInstallRequest{PlanID: "confirmed-plan"}
+		case WorkspaceDependencyInstallRequest:
+			body.PlanID = "confirmed-plan"
+			call.body = body
 		}
 	}
 	var body *strings.Reader
@@ -950,7 +960,7 @@ func TestWorkspaceDependencyErrorMapping(t *testing.T) {
 	}
 }
 
-func TestWorkspaceDependencyMutationPreparesRevisionWithoutClientPreview(t *testing.T) {
+func TestWorkspaceDependencyMutationUsesPlanWithoutOpeningScriptViewer(t *testing.T) {
 	for _, action := range []string{"update", "reinstall"} {
 		t.Run(action, func(t *testing.T) {
 			revision := strings.Repeat("b", 64)
@@ -1087,4 +1097,33 @@ func TestWorkspaceDependencyCatalogUnavailable(t *testing.T) {
 	e := echo.New()
 	err := h.ListWorkspaceDependencyCatalog(e.NewContext(httptest.NewRequest(http.MethodGet, "/workspace-dependencies", nil), httptest.NewRecorder()))
 	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyCatalogUnavailable)
+}
+
+func TestWorkspaceDependencyMutationRequiresPlanConfirmation(t *testing.T) {
+	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog()}
+	h := newDepsTestHandler("admin", svc)
+	_, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex", omitPlan: true}).invoke(t, h.InstallWorkspaceDependency)
+	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyPlanChanged)
+	for _, call := range svc.calls {
+		if call == "install" {
+			t.Fatal("unconfirmed plan ran")
+		}
+	}
+}
+
+func TestExplicitDependencyRemovalReportsUsersWithoutPrivateDiagnostics(t *testing.T) {
+	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog(), opErr: &workspacedeps.ReferencedError{DependencyID: "codex", Users: []string{"app:editor", "parent-tool"}}}
+	h := newDepsTestHandler("admin", svc)
+	response, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/remove", depID: "codex"}).invoke(t, h.RemoveWorkspaceDependency)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames := sseFrames(t, response.Body.String())
+	last := frames[len(frames)-1]
+	if last["type"] != "error" || last["code"] != string(apperror.CodeWorkspaceDependencyReferenced) {
+		t.Fatal(last)
+	}
+	if !strings.Contains(response.Body.String(), "parent-tool") || !strings.Contains(response.Body.String(), "App editor") {
+		t.Fatal("missing dependents", last)
+	}
 }

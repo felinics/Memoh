@@ -25,6 +25,7 @@ import {
   getSupermarketRegistriesByRegistryIdAppsByAppId,
   postBotsByBotIdContainerStart,
   type BotagentsBotAgent,
+  type HandlersSupermarketAppDescriptor,
 } from '@memohai/sdk'
 import {
   preflightDependencies,
@@ -34,6 +35,8 @@ import { appDisplayName } from '@/composables/api/useApps'
 import { useAppOperationsStore, type AppOperation } from '@/store/app-operations'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { dependencyDisplayName } from '@/utils/workspace-dependency'
+import DependencyPlanPreview from './dependency-plan-preview.vue'
+import { useDependencyPlan } from '@/composables/useDependencyPlan'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
 import AppProgressDialog from './app-progress-dialog.vue'
 import {
@@ -67,6 +70,10 @@ const starting = ref(false)
 
 const confirmOpen = ref(false)
 const installing = ref(false)
+const release = shallowRef<HandlersSupermarketAppDescriptor | null>(null)
+const preview = useDependencyPlan(() => props.botId, () => confirmOpen.value && release.value ? {
+ app: { action: 'install', registry_id: DEPENDENCY_REGISTRY, app_id: release.value.app_id, revision: release.value.revision },
+} : null)
 
 const VIEWER_ID = 'dependency-enable-flow'
 const progressOpen = ref(false)
@@ -134,6 +141,14 @@ async function preflight() {
         showProgress(running)
         return
       }
+      try {
+        const { data } = await getSupermarketRegistriesByRegistryIdAppsByAppId({ path: { registry_id: DEPENDENCY_REGISTRY, app_id: step.item.id ?? '' }, throwOnError: true })
+        if (currentGeneration !== generation) return
+        release.value = data
+      } catch (error) {
+        toast.error(resolveApiErrorMessage(error, t('dependenciesPlan.failed')))
+        return finish(false)
+      }
       confirmOpen.value = true
       return
     }
@@ -180,10 +195,8 @@ async function onConfirmed() {
   if (!current || !depId) return finish(false)
   installing.value = true
   try {
-    const { data } = await getSupermarketRegistriesByRegistryIdAppsByAppId({
-      path: { registry_id: DEPENDENCY_REGISTRY, app_id: depId },
-      throwOnError: true,
-    })
+    const data = release.value
+    if (!preview.ready.value || !data) return
     if (!data.revision) throw new Error('missing revision')
     const result = store.start({
       botId: props.botId,
@@ -191,6 +204,7 @@ async function onConfirmed() {
       appId: depId,
       name: appDisplayName(data, locale.value),
       action: 'install',
+      planId: preview.plan.value?.id,
       install: { registryId: DEPENDENCY_REGISTRY, appId: depId, revision: data.revision },
       onBackgroundDone,
     })
@@ -231,6 +245,7 @@ function hideProgress() {
 }
 
 function retryOperation() {
+  if (displayed.value?.needsReview) { hideProgress(); confirmOpen.value = true; preview.retry(); return }
   if (displayed.value) store.retry(displayed.value.key)
 }
 
@@ -313,6 +328,12 @@ defineExpose({ run, checking })
       </DialogHeader>
       <DialogBody class="min-w-0">
         <DependencyKvList :rows="workspaceRows" />
+        <DependencyPlanPreview
+          :plan="preview.plan.value"
+          :loading="preview.loading.value"
+          :error="preview.error.value"
+          @retry="preview.retry"
+        />
       </DialogBody>
       <DialogFooter class="min-w-0 items-center gap-2">
         <Button
@@ -324,6 +345,7 @@ defineExpose({ run, checking })
         </Button>
         <Button
           :loading="installing"
+          :disabled="!preview.ready.value"
           @click="onConfirmed"
         >
           {{ t('bots.dependencies.confirm.installAndEnable') }}

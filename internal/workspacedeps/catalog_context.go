@@ -56,6 +56,9 @@ func (s *Service) catalogFor(ctx context.Context) *catalog.Catalog {
 }
 
 func (s *Service) operationCatalog(ctx context.Context, depID string) (*catalog.Catalog, error) {
+	if frozen, ok := ctx.Value(nodeCatalogContextKey{}).(*catalog.Catalog); ok {
+		return frozen, nil
+	}
 	revision, _ := ctx.Value(revisionContextKey{}).(string)
 	// A revision returned by preparation is already the choice for this
 	// operation. Do not re-resolve latest between preview and execution.

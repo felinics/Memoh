@@ -13,34 +13,34 @@ import (
 // ScriptEnvEntry is one environment variable the runner injects into a
 // script.
 type ScriptEnvEntry struct {
-	Key string
+	Key string `json:"key"`
 	// Value is the real value when it is known before the run and a
 	// placeholder in angle brackets otherwise (result path, values that are
 	// only known once the workspace has been probed or read). It is empty
 	// when Secret is set.
-	Value string
+	Value string `json:"value"`
 	// Secret marks operator-supplied entries whose value must not leave the
 	// Server, such as registry tokens passed through ScriptEnv.
-	Secret bool
+	Secret bool `json:"secret"`
 }
 
 // ScriptPreview describes the exact stdin text, execution command, time budget,
 // and the environment it sees.
 type ScriptPreview struct {
-	SourceURL    string
-	RegistryID   string
-	Revision     string
-	DependencyID string
-	Action       catalog.Action
+	SourceURL    string         `json:"source_url"`
+	RegistryID   string         `json:"registry_id"`
+	Revision     string         `json:"definition_revision"`
+	DependencyID string         `json:"dependency_id"`
+	Action       catalog.Action `json:"action"`
 	// Digest is the manifest digest over dependency.yaml and every script
 	// file the manifest references; it is what state.json records after a
 	// successful install.
-	Digest string
+	Digest string `json:"digest"`
 	// Exec is the command the runner starts; the script arrives on its stdin.
-	Exec           string
-	TimeoutSeconds int
-	Env            []ScriptEnvEntry
-	Script         string
+	Exec           string           `json:"exec"`
+	TimeoutSeconds int              `json:"timeout_seconds"`
+	Env            []ScriptEnvEntry `json:"env"`
+	Script         string           `json:"script"`
 }
 
 // Placeholders for environment values the preview cannot know.

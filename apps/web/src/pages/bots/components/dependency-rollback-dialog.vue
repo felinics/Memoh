@@ -18,9 +18,12 @@ import {
 } from '@felinic/ui'
 import type { DependencyItem } from '@/composables/api/useWorkspaceDependencies'
 import { dependencyDisplayName, formatDependencyVersion } from '@/utils/workspace-dependency'
+import DependencyPlanPreview from './dependency-plan-preview.vue'
+import { useDependencyPlan } from '@/composables/useDependencyPlan'
 import DependencyKvList, { type DependencyKvRow } from './dependency-kv-list.vue'
 
 const props = withDefaults(defineProps<{
+  botId: string
   open: boolean
   item: DependencyItem | null
   loading?: boolean
@@ -30,10 +33,11 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  confirm: []
+  confirm: [planId: string]
 }>()
 
 const { t } = useI18n()
+const preview = useDependencyPlan(() => props.botId, () => props.open && props.item?.id ? { roots: [{ dependency_id: props.item.id, action: 'rollback' }] } : null)
 
 const name = computed(() => (props.item ? dependencyDisplayName(props.item) : ''))
 const from = computed(() => formatDependencyVersion(props.item?.installed_version))
@@ -68,6 +72,12 @@ function onOpenChange(value: boolean) {
 
       <DialogBody>
         <DependencyKvList :rows="rows" />
+        <DependencyPlanPreview
+          :plan="preview.plan.value"
+          :loading="preview.loading.value"
+          :error="preview.error.value"
+          @retry="preview.retry"
+        />
       </DialogBody>
 
       <DialogFooter>
@@ -80,7 +90,8 @@ function onOpenChange(value: boolean) {
         </Button>
         <Button
           :loading="loading"
-          @click="emit('confirm')"
+          :disabled="!preview.ready.value"
+          @click="emit('confirm', preview.plan.value?.id ?? '')"
         >
           {{ t('bots.dependencies.rollback.confirm', { to }) }}
         </Button>

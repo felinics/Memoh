@@ -8,6 +8,8 @@ import (
 
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/supermarket"
+	"github.com/felinics/memoh/internal/workspacedeps"
+	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
 // UpdateRequest selects what to update for one App in a bot's isolated workspace.
@@ -46,6 +48,11 @@ func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateR
 		return OperationResult{}, ErrDependenciesUnavailable
 	}
 
+	ctx, releaseGraph, err := s.acquireDependencies(ctx, botID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	defer releaseGraph()
 	unlock, err := lockInstallation(ctx, botID, registryID, appID)
 	if err != nil {
 		return OperationResult{}, err
@@ -77,34 +84,37 @@ func (s *Service) UpdateSelection(ctx context.Context, botID string, req UpdateR
 		}
 	}
 
+	if req.Release {
+		ctx = context.WithValue(ctx, selectedUpdatesKey{}, depIDs)
+		return s.updateRelease(ctx, botID, inst, sink, false, req.Revision)
+	}
+	roots := make([]workspacedeps.PlanRoot, 0, len(depIDs))
+	for _, id := range depIDs {
+		roots = append(roots, workspacedeps.PlanRoot{DependencyID: id, Action: catalog.ActionUpdate})
+	}
+	ctx, err = s.ensureDependencyPlan(ctx, botID, roots)
+	if err != nil {
+		return OperationResult{}, err
+	}
 	result := OperationResult{Installation: inst}
 	sink.Send(Event{Type: EventStarted, Kind: KindApp, ID: appID, Version: inst.Version})
-	var firstErr error
+	planned, firstErr := s.dependencies.ExecutePlan(planEvents(workspacedeps.WithAutomaticDependencies(ctx), sink), botID, workspacedeps.PlanID(ctx), nil)
+	byID := map[string]workspacedeps.PlanNodeResult{}
+	for _, node := range planned.Nodes {
+		byID[node.DependencyID] = node
+	}
 	failed := 0
 	for _, depID := range depIDs {
-		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
-		step := StepResult{Kind: KindDependency, ID: depID}
-		res, err := s.dependencies.Update(ctx, botID, depID, "", logSink(sink, KindDependency, depID))
-		if err != nil {
-			step.Status, step.Error = StepFailed, err.Error()
+		node, ok := byID[depID]
+		step := StepResult{Kind: KindDependency, ID: depID, Status: StepUpdated, Version: node.Operation.Version, Failure: node.Failure}
+		if !ok || node.Failure != nil {
+			step.Status, step.Error = StepFailed, "Dependency update failed. Retry to continue."
 			failed++
-			if firstErr == nil {
-				firstErr = err
-			}
-		} else {
-			step.Status, step.Version = StepUpdated, res.Version
 		}
 		result.Steps = append(result.Steps, step)
-		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
+		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error, Failure: step.Failure})
 	}
-	if req.Release {
-		releaseResult, err := s.updateRelease(ctx, botID, inst, sink, true, req.Revision)
-		result.Steps = append(result.Steps, releaseResult.Steps...)
-		if releaseResult.Installation.ID != "" {
-			result.Installation = releaseResult.Installation
-		}
-		return result, err
-	}
+
 	if failed == len(depIDs) {
 		return result, fmt.Errorf("apps: update dependencies of %s: %w", appID, firstErr)
 	}
@@ -143,6 +153,11 @@ func (s *Service) Update(ctx context.Context, botID, installationID string, sink
 	if err != nil {
 		return OperationResult{}, err
 	}
+	ctx, releaseGraph, err := s.acquireDependencies(ctx, botID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	defer releaseGraph()
 	unlock, err := lockInstallation(ctx, botID, inst.RegistryID, inst.AppID)
 	if err != nil {
 		return OperationResult{}, err
@@ -168,7 +183,8 @@ func (s *Service) updateRelease(ctx context.Context, botID string, inst Installa
 	if err != nil {
 		return OperationResult{}, err
 	}
-	if current.Revision == inst.Revision && (inst.Status == StatusInstalled || inst.Status == StatusPartial) {
+	selected, _ := ctx.Value(selectedUpdatesKey{}).([]string)
+	if len(selected) == 0 && current.Revision == inst.Revision && (inst.Status == StatusInstalled || inst.Status == StatusPartial) {
 		release, err := s.releaseFor(ctx, inst)
 		if err != nil {
 			return OperationResult{}, err

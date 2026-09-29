@@ -38,7 +38,7 @@ function imageCopy(overrides: Partial<DependencyItem> = {}): DependencyItem {
     status: 'installed',
     installed_version: '24.14.0',
     image_version: '24.14.0',
-    actions: ['install', 'remove', 'check_update'],
+    actions: ['install', 'check_update'],
     ...overrides,
   })
 }
@@ -192,9 +192,10 @@ describe('dependencyMenuActions', () => {
       previous_version: 'v0.147.0',
       actions: ['update', 'reinstall', 'remove', 'rollback'],
     }), 'running')
-    expect(actions.map(action => action.kind)).toEqual(['reinstall', 'rollback', 'viewScript'])
+    expect(actions.map(action => action.kind)).toEqual(['reinstall', 'rollback', 'remove', 'viewScript'])
     expect(actions[1]).toMatchObject({ args: { version: '0.147.0' }, disabled: false })
-    expect(actions[2]).toMatchObject({ separatorBefore: true, disabled: false })
+    expect(actions[2]).toMatchObject({ kind: 'remove', destructive: true, disabled: false })
+    expect(actions[3]).toMatchObject({ separatorBefore: true, disabled: false })
   })
 
   it('reinstalls a preinstalled copy through install, including when an update is available', () => {
@@ -209,13 +210,14 @@ describe('dependencyMenuActions', () => {
     expect(dependencyPrimaryAction(updatable, 'running')).toMatchObject({ kind: 'update', operation: 'update' })
     expect(dependencyMenuActions(updatable, 'running')).toEqual([
       expect.objectContaining({ kind: 'reinstall', operation: 'reinstall' }),
+      expect.objectContaining({ kind: 'remove', operation: 'remove', destructive: true }),
       expect.objectContaining({ kind: 'viewScript' }),
     ])
   })
 
-  it('never offers removal per dependency: the App that references it removes it', () => {
+  it('offers explicit managed removal while preserving image baselines', () => {
     const overlay = imageCopy({ source: 'managed', overlay: true, actions: ['update', 'reinstall', 'remove'] })
-    expect(dependencyMenuActions(overlay, 'running').map(action => String(action.kind))).not.toContain('remove')
+    expect(dependencyMenuActions(overlay, 'running').map(action => String(action.kind))).toContain('remove')
     expect(dependencyMenuActions(imageCopy({ latest_version: '24.15.0' }), 'running').map(action => String(action.kind))).not.toContain('remove')
     // After removal no copy or record remains, so the installed list drops it.
     expect(dependencyIsInstalled(item({ actions: ['install'] }))).toBe(false)
@@ -233,7 +235,7 @@ describe('dependencyMenuActions', () => {
 
   it('offers script and remove for a missing row, script only for an uninstalled one', () => {
     expect(dependencyMenuActions(item({ status: 'missing', actions: ['install', 'remove'] }), 'running').map(action => action.kind))
-      .toEqual(['viewScript'])
+      .toEqual(['remove', 'viewScript'])
     expect(dependencyMenuActions(item({ actions: ['install'] }), 'running').map(action => action.kind)).toEqual(['viewScript'])
   })
 
@@ -244,7 +246,7 @@ describe('dependencyMenuActions', () => {
   it('hides rollback until the Server lists it, even with a previous version recorded', () => {
     const kinds = dependencyMenuActions(item({ status: 'installed', previous_version: '0.1.0', actions: ['update', 'reinstall', 'remove'] }), 'running')
       .map(action => action.kind)
-    expect(kinds).toEqual(['reinstall', 'viewScript'])
+    expect(kinds).toEqual(['reinstall', 'remove', 'viewScript'])
   })
 
   it('has no menu at all when the Server lists no scripted action', () => {

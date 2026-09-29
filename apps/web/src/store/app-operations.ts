@@ -1,3 +1,5 @@
+import { dependencyPlanNeedsReview } from '@/utils/workspace-dependency'
+import type { HandlersAppRemoveRequest } from '@memohai/sdk'
 import { defineStore } from 'pinia'
 import { reactive } from 'vue'
 import { useQueryCache } from '@pinia/colada'
@@ -15,7 +17,7 @@ import {
   type AppUpdateSelection,
 } from '@/composables/api/useAppStream'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { apiErrorStatus, resolveApiErrorMessage } from '@/utils/api-error'
+import { apiErrorStatus, resolveApiErrorMessage, parseMemohError } from '@/utils/api-error'
 import type { DependencyLogLine, DependencyProgressStatus } from '@/utils/workspace-dependency'
 
 // Streamed App operations that outlive the dialog that started them,
@@ -26,6 +28,8 @@ import type { DependencyLogLine, DependencyProgressStatus } from '@/utils/worksp
 // There is no cancel: the Server keeps running the operation regardless.
 
 export interface AppOperationStep {
+  action?: string
+  requiredBy?: string[]
   kind: AppStepKind
   id: string
   /** running while the step streams; afterwards the Server's step_done status. */
@@ -35,6 +39,10 @@ export interface AppOperationStep {
 }
 
 export interface AppOperation {
+  needsReview?: boolean
+  removal?: HandlersAppRemoveRequest
+  planId?: string
+  revision?: string
   /** `appOperationKey(botId, registryId, appId)`. */
   key: string
   botId: string
@@ -59,6 +67,9 @@ export interface AppOperation {
 }
 
 export interface StartAppOperationInput {
+  removal?: HandlersAppRemoveRequest
+  planId?: string
+  revision?: string
   botId: string
 
   registryId: string
@@ -304,6 +315,9 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
         botId: operation.botId,
         action: operation.action,
         installationId: operation.installationId || undefined,
+        removal: operation.removal,
+        planId: operation.planId,
+        revision: operation.revision,
         install: operation.install,
         update: operation.update,
         registryId: operation.registryId,
@@ -317,15 +331,21 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
           case 'started':
             if (event.version) operation.version = event.version
             break
-          case 'step':
-            stepFor(operation, event.kind, event.id).status = 'running'
+          case 'step': {
+            const step = stepFor(operation, event.kind, event.id)
+            step.status = 'running'
+            step.action = event.action
+            step.requiredBy = event.required_by
             break
+          }
           case 'log':
             pushLine(operation, event.stream, event.data)
             break
           case 'step_done': {
             const step = stepFor(operation, event.kind, event.id)
             step.status = event.status
+            step.action = event.action ?? step.action
+            step.requiredBy = event.required_by ?? step.requiredBy
             step.version = event.version ?? ''
             step.message = event.message ?? ''
             break
@@ -336,6 +356,7 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
             if (event.version) operation.version = event.version
             break
           case 'error':
+            operation.needsReview = dependencyPlanNeedsReview(event.code)
             operation.status = 'error'
             operation.error = event.message
             break
@@ -348,6 +369,7 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
         operation.error = t('apps.progress.unknownHint')
       }
     } catch (error) {
+      operation.needsReview = dependencyPlanNeedsReview(parseMemohError(error)?.code)
       if (signal.aborted) return
       if (operation.status !== 'running') return
       if (apiErrorStatus(error)) {
@@ -371,6 +393,7 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
     operation.steps = []
     operation.lines = []
     operation.error = ''
+    operation.needsReview = false
     void consume(operation, controller.signal)
   }
 
@@ -400,6 +423,9 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
       installationId: input.installationId ?? '',
       name: input.name,
       action: input.action,
+      removal: input.removal,
+      planId: input.planId,
+      revision: input.revision,
       install: input.install,
       update: input.update,
       removeUnreferencedRequired: input.removeUnreferencedRequired ?? false,
@@ -418,7 +444,7 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
   /** Replays a failed operation in place. */
   function retry(key: string): boolean {
     const operation = operations.get(key)
-    if (!operation || operation.status !== 'error') return false
+    if (!operation || operation.status !== 'error' || operation.needsReview) return false
     if (runningFor(operation.botId)) return false
     run(operation)
     return true

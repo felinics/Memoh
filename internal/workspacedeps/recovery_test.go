@@ -171,6 +171,10 @@ func TestCrossServerClaimAndRecoveryRejectSupersededReceipt(t *testing.T) {
 	other.probe = func(context.Context, *bridge.Client) (Platform, error) { return f.platform, nil }
 	// The script has released its workspace lock but finalization has not run.
 	// A second Server still cannot replace its durable operation ownership.
+	// Simulate the dead Server's graph lease expiry after its node is fenced.
+	f.store.mu.Lock()
+	delete(f.store.owners, testBot)
+	f.store.mu.Unlock()
 	if _, err := other.Install(f.ctx(), testBot, "foo", "2.0.0", nil); !errors.Is(err, ErrBusy) {
 		t.Fatalf("cross-server admission replaced unfinished operation: %v", err)
 	}
@@ -240,6 +244,10 @@ func TestReaperFencesPausedClaimBeforeNewOperation(t *testing.T) {
 	if count, err := other.ReapStale(f.ctx()); err != nil || count != 1 {
 		t.Fatalf("reap paused claim: count=%d err=%v", count, err)
 	}
+	// Simulate the dead Server's graph lease expiry after its node is fenced.
+	f.store.mu.Lock()
+	delete(f.store.owners, testBot)
+	f.store.mu.Unlock()
 	if _, err := other.Install(f.ctx(), testBot, "foo", "2.0.0", nil); err != nil {
 		t.Fatal(err)
 	}

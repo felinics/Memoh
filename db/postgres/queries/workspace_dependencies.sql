@@ -97,11 +97,18 @@ WHERE team_id = public.memoh_current_team_id()
   AND operation_id = '';
 
 -- name: ClaimBotDependencyOperation :one
+WITH admission AS MATERIALIZED (
+ SELECT owner FROM bot_dependency_graphs
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = $1 AND lease_until > now()
+ FOR UPDATE
+)
 INSERT INTO bot_dependency_installations (
   bot_id, dependency_id, source, status,
   installed_version, manifest_digest, source_url, registry_id, definition_revision, operation_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+WHERE (sqlc.arg(graph_owner)::text = '' AND NOT EXISTS (SELECT 1 FROM admission WHERE owner <> ''))
+ OR EXISTS (SELECT 1 FROM admission WHERE owner = sqlc.arg(graph_owner) AND owner <> '')
 ON CONFLICT (team_id, bot_id, dependency_id)
 DO UPDATE SET status = EXCLUDED.status,
               last_error = '',
@@ -113,6 +120,7 @@ RETURNING id, team_id, bot_id, dependency_id, source, status,
           manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;
 
 -- name: FinishBotDependencyOperation :one
+WITH finished AS (
 UPDATE bot_dependency_installations
 SET source = sqlc.arg(source),
     status = sqlc.arg(status),
@@ -127,19 +135,38 @@ SET source = sqlc.arg(source),
     operation_id = '',
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = sqlc.arg(bot_id)
-  AND dependency_id = sqlc.arg(dependency_id)
+  AND bot_dependency_installations.bot_id = sqlc.arg(bot_id)
+  AND bot_dependency_installations.dependency_id = sqlc.arg(dependency_id)
   AND operation_id = sqlc.arg(operation_id) AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
-          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;
+          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+), relationships AS (
+ INSERT INTO bot_dependency_graphs (bot_id, graph)
+ SELECT bot_id, jsonb_build_object(dependency_id, jsonb_build_object(
+  'revision', definition_revision, 'digest', manifest_digest,
+  'requires', sqlc.arg(requires)::jsonb, 'pending', '[]'::jsonb, 'known', true, 'plan_id', sqlc.arg(plan_id)::text, 'version', installed_version))
+ FROM finished WHERE status = 'installed' AND sqlc.arg(relationships_known)::boolean
+ ON CONFLICT (team_id, bot_id) DO UPDATE SET graph = jsonb_set(
+  bot_dependency_graphs.graph, ARRAY[sqlc.arg(dependency_id)::text],
+  COALESCE(bot_dependency_graphs.graph -> sqlc.arg(dependency_id)::text, '{}'::jsonb)
+   || (EXCLUDED.graph -> sqlc.arg(dependency_id)::text))
+)
+SELECT * FROM finished;
 
 -- name: DeleteBotDependencyOperation :one
+WITH removed AS (
 DELETE FROM bot_dependency_installations
 WHERE team_id = public.memoh_current_team_id()
-  AND bot_id = sqlc.arg(bot_id)
-  AND dependency_id = sqlc.arg(dependency_id)
+  AND bot_dependency_installations.bot_id = sqlc.arg(bot_id)
+  AND bot_dependency_installations.dependency_id = sqlc.arg(dependency_id)
   AND operation_id = sqlc.arg(operation_id) AND operation_id <> ''
 RETURNING id, team_id, bot_id, dependency_id, source, status,
           installed_version, latest_version, last_checked_at, last_error,
-          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at;
+          manifest_digest, source_url, registry_id, definition_revision, operation_id, created_at, updated_at
+), relationships AS (
+ UPDATE bot_dependency_graphs SET graph = graph - sqlc.arg(dependency_id)::text
+ WHERE team_id = public.memoh_current_team_id() AND bot_id = sqlc.arg(bot_id)
+ AND EXISTS (SELECT 1 FROM removed)
+)
+SELECT * FROM removed;

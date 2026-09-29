@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/felinics/memoh/internal/connectors"
 	"github.com/felinics/memoh/internal/workspacedeps"
@@ -16,9 +17,11 @@ const (
 	RemovalActionDisconnect = "disconnect"
 	RemovalActionNone       = "none"
 
-	RemovalReasonShared = "shared"
-	RemovalReasonImage  = "image"
-	RemovalReasonAbsent = "absent"
+	RemovalReasonRetained   = "retained"
+	RemovalReasonUnresolved = "unresolved"
+	RemovalReasonShared     = "shared"
+	RemovalReasonImage      = "image"
+	RemovalReasonAbsent     = "absent"
 )
 
 // RemovalPreviewDependency says what removing the App does to one
@@ -40,9 +43,10 @@ type RemovalPreviewConnector struct {
 
 // RemovalPreview is the plan of an App removal.
 type RemovalPreview struct {
-	Installation Installation
-	Dependencies []RemovalPreviewDependency
-	Connectors   []RemovalPreviewConnector
+	DependencyRevisions map[string]string
+	Installation        Installation
+	Dependencies        []RemovalPreviewDependency
+	Connectors          []RemovalPreviewConnector
 	// RequiredApps are auto-installed Apps that no other App
 	// would reference once this one is gone.
 	RequiredApps []Installation
@@ -50,6 +54,9 @@ type RemovalPreview struct {
 
 // RemoveOptions tunes Remove.
 type RemoveOptions struct {
+	ExpectedRevision     string
+	DependencyRevisions  map[string]string
+	RequiredAppRevisions map[string]string
 	// RemoveUnreferencedRequired also removes the auto-installed Apps
 	// listed by RemovalPreview.RequiredApps.
 	RemoveUnreferencedRequired bool
@@ -83,6 +90,12 @@ func (s *Service) plan(ctx context.Context, inst Installation, prepareWorkspace 
 	if err != nil {
 		return RemovalPreview{}, fail("inspect dependencies before removal", err)
 	}
+	preview.DependencyRevisions = map[string]string{}
+	for id, entry := range states {
+		if state := entry.Observed.State; state != nil && state.DefinitionRevision != "" {
+			preview.DependencyRevisions[id] = state.DefinitionRevision
+		}
+	}
 	for _, ref := range depRefs {
 		item := RemovalPreviewDependency{ID: ref.DependencyID, Action: RemovalActionRemove}
 		entry, known := states[ref.DependencyID]
@@ -93,6 +106,24 @@ func (s *Service) plan(ctx context.Context, inst Installation, prepareWorkspace 
 			item.Action, item.Reason = RemovalActionKeep, RemovalReasonAbsent
 		case entry.Observed.Source != workspacedeps.SourceManaged:
 			item.Action, item.Reason = RemovalActionKeep, RemovalReasonImage
+		}
+		if item.Action == RemovalActionRemove && s.dependencies != nil {
+			users, err := s.dependencies.RemovalBlockers(ctx, inst.BotID, ref.DependencyID, inst.ID, true)
+			if err != nil {
+				return RemovalPreview{}, err
+			}
+			if len(users) > 0 {
+				item.Action, item.Reason = RemovalActionKeep, RemovalReasonShared
+				for _, user := range users {
+					if strings.HasPrefix(user, "unresolved:") {
+						item.Reason = RemovalReasonUnresolved
+						break
+					}
+				}
+			}
+		}
+		if item.Action == RemovalActionRemove && entry.Dependency.Revision != "" && preview.DependencyRevisions[ref.DependencyID] == "" {
+			item.Action, item.Reason = RemovalActionKeep, RemovalReasonUnresolved
 		}
 		preview.Dependencies = append(preview.Dependencies, item)
 	}
@@ -197,6 +228,11 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	if err != nil {
 		return OperationResult{}, err
 	}
+	ctx, releaseGraph, err := s.acquireDependencies(ctx, botID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	defer releaseGraph()
 	unlock, err := lockInstallation(ctx, botID, inst.RegistryID, inst.AppID)
 	if err != nil {
 		return OperationResult{}, err
@@ -206,12 +242,25 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	if err != nil {
 		return OperationResult{}, err
 	}
+	if opts.ExpectedRevision != "" && opts.ExpectedRevision != inst.Revision {
+		return OperationResult{}, workspacedeps.ErrPlanChanged
+	}
+	if opts.DependencyRevisions != nil {
+		ctx = workspacedeps.WithRemovalDefinitions(ctx, opts.DependencyRevisions)
+	}
 	failRemoval := func(cause error) error {
 		return s.failInstallation(ctx, inst, fail("App removal failed", cause))
 	}
 	plan, err := s.plan(ctx, inst, true)
 	if err != nil {
 		return OperationResult{}, failRemoval(err)
+	}
+	if opts.RemoveUnreferencedRequired && opts.RequiredAppRevisions != nil {
+		for _, required := range plan.RequiredApps {
+			if revision, ok := opts.RequiredAppRevisions[required.ID]; ok && revision != required.Revision {
+				return OperationResult{}, workspacedeps.ErrPlanChanged
+			}
+		}
 	}
 	if inst, err = s.store.SetStatus(ctx, botID, inst.ID, StatusRemoving, ""); err != nil {
 		return OperationResult{}, fmt.Errorf("apps: record removal: %w", err)
@@ -233,7 +282,7 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 	for _, dep := range plan.Dependencies {
 		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: dep.ID})
 		if dep.Action == RemovalActionRemove && s.dependencies != nil {
-			if _, err := s.dependencies.Remove(ctx, botID, dep.ID, logSink(sink, KindDependency, dep.ID)); err != nil {
+			if _, err := s.dependencies.Remove(workspacedeps.WithAppRemoval(ctx, inst.ID), botID, dep.ID, logSink(sink, KindDependency, dep.ID)); err != nil {
 				cause := fail("remove dependency "+dep.ID, err)
 				record(StepResult{Kind: KindDependency, ID: dep.ID, Status: StepFailed, Error: publicMessage(cause)})
 				return result, failRemoval(errors.Join(cause, tx.Rollback(ctx)))
@@ -278,7 +327,12 @@ func (s *Service) Remove(ctx context.Context, botID, installationID string, opts
 			}
 		})
 		for _, required := range plan.RequiredApps {
-			nested, err := s.Remove(ctx, botID, required.ID, RemoveOptions{}, childSink)
+			if opts.RequiredAppRevisions != nil {
+				if _, ok := opts.RequiredAppRevisions[required.ID]; !ok {
+					continue
+				}
+			}
+			nested, err := s.Remove(ctx, botID, required.ID, RemoveOptions{ExpectedRevision: required.Revision, DependencyRevisions: opts.DependencyRevisions}, childSink)
 			result.Steps = append(result.Steps, nested.Steps...)
 			if err != nil {
 				return result, failRemoval(errors.Join(fail("remove required App "+required.AppID, err), tx.Rollback(ctx)))

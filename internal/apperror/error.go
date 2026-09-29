@@ -16,6 +16,10 @@ const (
 	CodeCapabilityOperationFailed                Code = "capability.operation_failed"
 	CodeCapabilityRequestInvalid                 Code = "capability.request_invalid"
 	CodeCapabilityAccessDenied                   Code = "capability.access_denied"
+	CodeWorkspaceDependencyPrerequisiteMissing   Code = "workspace_dependency.prerequisite_missing"
+	CodeWorkspaceDependencyPlanChanged           Code = "workspace_dependency.plan_changed"
+	CodeWorkspaceDependencyReferenced            Code = "workspace_dependency.referenced"
+	CodeWorkspaceDependencyGraphUnresolved       Code = "workspace_dependency.graph_unresolved"
 	CodeWorkspaceDependencyDiscoveryFailed       Code = "workspace_dependency.discovery_failed"
 	CodeWorkspaceDependencyDefinitionUnavailable Code = "workspace_dependency.definition_unavailable"
 	CodeWorkspaceDependencyDefinitionInvalid     Code = "workspace_dependency.definition_invalid"
@@ -306,6 +310,10 @@ var catalog = map[Code]Definition{
 	// §11). The 409 family tells the UI what to offer instead: start or
 	// create the workspace, wait for the other operation, bring the remote
 	// computer online.
+	CodeWorkspaceDependencyPrerequisiteMissing:   {HTTPStatus: http.StatusConflict, Detail: "A required tool is missing. Repair the dependency before checking for updates."},
+	CodeWorkspaceDependencyPlanChanged:           {HTTPStatus: http.StatusConflict, Detail: "The dependency plan changed. Preview and confirm the operation again."},
+	CodeWorkspaceDependencyReferenced:            {HTTPStatus: http.StatusConflict, Detail: "This dependency is still in use. Remove its dependents first.", AllowedArgs: []string{"dependency_id", "required_by"}},
+	CodeWorkspaceDependencyGraphUnresolved:       {HTTPStatus: http.StatusConflict, Detail: "Historical dependency relationships could not be verified. Repair the installation before removing tools."},
 	CodeWorkspaceDependencyDiscoveryFailed:       {HTTPStatus: http.StatusServiceUnavailable, Detail: "Workspace dependencies could not be inspected. Please try again."},
 	CodeWorkspaceDependencyCatalogUnavailable:    {HTTPStatus: http.StatusServiceUnavailable, Detail: "The dependency catalog is unavailable. Please try again later."},
 	CodeWorkspaceDependencyDefinitionInvalid:     {HTTPStatus: http.StatusBadGateway, Detail: "The dependency definition could not be verified. Please refresh the catalog."},

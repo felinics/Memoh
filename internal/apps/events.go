@@ -1,5 +1,7 @@
 package apps
 
+import "github.com/felinics/memoh/internal/workspacedeps"
+
 // Event types emitted while an App operation runs.
 const (
 	EventStarted  = "started"
@@ -38,14 +40,17 @@ const (
 // fields are meaningful: step and step_done carry Kind and ID, log carries
 // Stream and Data, step_done and done carry Status.
 type Event struct {
-	Type    string
-	Kind    string
-	ID      string
-	Stream  string
-	Data    string
-	Status  string
-	Version string
-	Message string
+	Action     string
+	RequiredBy []string
+	Failure    *workspacedeps.PlanFailure
+	Type       string
+	Kind       string
+	ID         string
+	Stream     string
+	Data       string
+	Status     string
+	Version    string
+	Message    string
 }
 
 // EventSink receives operation events.
@@ -64,6 +69,7 @@ func (f EventFunc) Send(event Event) {
 
 // StepResult summarizes one step of a completed operation.
 type StepResult struct {
+	Failure *workspacedeps.PlanFailure
 	Kind    string
 	ID      string
 	Status  string

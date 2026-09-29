@@ -62,6 +62,7 @@ func (h *AppsHandler) Register(e *echo.Echo) {
 	g := e.Group("/bots/:bot_id/apps")
 	g.GET("", h.List)
 	g.POST("", h.Install)
+	g.POST("/prepare", h.Prepare)
 	g.POST("/check-updates", h.CheckUpdates)
 	g.POST("/update", h.UpdateSelection)
 	g.GET("/:installation_id", h.Get)
@@ -123,6 +124,7 @@ type AppItem struct {
 	AvailableRevision string                                      `json:"available_revision,omitempty"`
 	AvailableVersion  string                                      `json:"available_version,omitempty"`
 	LastCheckedAt     *time.Time                                  `json:"last_checked_at,omitempty"`
+	LastErrorCode     string                                      `json:"last_error_code,omitempty"`
 	LastError         string                                      `json:"last_error,omitempty"`
 	Icon              *supermarketclient.SkillIcon                `json:"icon,omitempty"`
 	Category          string                                      `json:"category,omitempty"`
@@ -149,6 +151,7 @@ type AppListResponse struct {
 
 // AppInstallRequest names one immutable App release to install.
 type AppInstallRequest struct {
+	PlanID     string `json:"plan_id"`
 	RegistryID string `json:"registry_id" validate:"required"`
 	AppID      string `json:"app_id" validate:"required"`
 	Revision   string `json:"revision" validate:"required"`
@@ -157,6 +160,8 @@ type AppInstallRequest struct {
 // AppUpdateRequest selects what to update for one App on a workspace
 // target: its dependencies, its release, or both.
 type AppUpdateRequest struct {
+	PlanID     string `json:"plan_id"`
+	Revision   string `json:"revision,omitempty"`
 	RegistryID string `json:"registry_id" validate:"required"`
 	AppID      string `json:"app_id" validate:"required"`
 
@@ -186,6 +191,7 @@ type AppRemovalPreviewConnector struct {
 // AppRemovalPreviewApp is an auto-installed App that would lose
 // its last reference.
 type AppRemovalPreviewApp struct {
+	Revision       string `json:"revision"`
 	InstallationID string `json:"installation_id"`
 	RegistryID     string `json:"registry_id"`
 	AppID          string `json:"app_id"`
@@ -194,10 +200,12 @@ type AppRemovalPreviewApp struct {
 
 // AppRemovalPreviewResponse is the plan of an App removal.
 type AppRemovalPreviewResponse struct {
-	InstallationID string                        `json:"installation_id"`
-	Dependencies   []AppRemovalPreviewDependency `json:"dependencies"`
-	Connectors     []AppRemovalPreviewConnector  `json:"connectors"`
-	RequiredApps   []AppRemovalPreviewApp        `json:"required_apps"`
+	Revision            string                        `json:"revision"`
+	DependencyRevisions map[string]string             `json:"dependency_revisions"`
+	InstallationID      string                        `json:"installation_id"`
+	Dependencies        []AppRemovalPreviewDependency `json:"dependencies"`
+	Connectors          []AppRemovalPreviewConnector  `json:"connectors"`
+	RequiredApps        []AppRemovalPreviewApp        `json:"required_apps"`
 }
 
 // AppConnectorOAuthRequest starts OAuth for a referenced connector.
@@ -219,18 +227,21 @@ type AppConnectorCredentialRequest struct {
 // codesync(app-stream): keep in sync with
 // apps/web/src/composables/api/useAppStream.ts.
 type AppStreamEvent struct {
-	Type      string            `json:"type" enums:"started,step,log,step_done,done,error"`
-	Kind      string            `json:"kind,omitempty" enums:"app,dependency,skills,connector"`
-	ID        string            `json:"id,omitempty"`
-	Stream    string            `json:"stream,omitempty" enums:"stdout,stderr"`
-	Data      string            `json:"data,omitempty"`
-	Status    string            `json:"status,omitempty"`
-	Version   string            `json:"version,omitempty"`
-	Message   string            `json:"message,omitempty"`
-	Code      string            `json:"code,omitempty"`
-	Args      map[string]string `json:"args,omitempty"`
-	Detail    string            `json:"detail,omitempty"`
-	RequestID string            `json:"request_id,omitempty"`
+	Action     string                     `json:"action,omitempty"`
+	RequiredBy []string                   `json:"required_by,omitempty"`
+	Failure    *workspacedeps.PlanFailure `json:"failure,omitempty"`
+	Type       string                     `json:"type" enums:"started,step,log,step_done,done,error"`
+	Kind       string                     `json:"kind,omitempty" enums:"app,dependency,skills,connector"`
+	ID         string                     `json:"id,omitempty"`
+	Stream     string                     `json:"stream,omitempty" enums:"stdout,stderr"`
+	Data       string                     `json:"data,omitempty"`
+	Status     string                     `json:"status,omitempty"`
+	Version    string                     `json:"version,omitempty"`
+	Message    string                     `json:"message,omitempty"`
+	Code       string                     `json:"code,omitempty"`
+	Args       map[string]string          `json:"args,omitempty"`
+	Detail     string                     `json:"detail,omitempty"`
+	RequestID  string                     `json:"request_id,omitempty"`
 }
 
 // --- Handlers ---
@@ -336,10 +347,10 @@ func (h *AppsHandler) RemovalPreview(c echo.Context) error {
 		return h.httpError(err)
 	}
 	resp := AppRemovalPreviewResponse{
-		InstallationID: preview.Installation.ID,
-		Dependencies:   make([]AppRemovalPreviewDependency, 0, len(preview.Dependencies)),
-		Connectors:     make([]AppRemovalPreviewConnector, 0, len(preview.Connectors)),
-		RequiredApps:   make([]AppRemovalPreviewApp, 0, len(preview.RequiredApps)),
+		InstallationID: preview.Installation.ID, Revision: preview.Installation.Revision, DependencyRevisions: preview.DependencyRevisions,
+		Dependencies: make([]AppRemovalPreviewDependency, 0, len(preview.Dependencies)),
+		Connectors:   make([]AppRemovalPreviewConnector, 0, len(preview.Connectors)),
+		RequiredApps: make([]AppRemovalPreviewApp, 0, len(preview.RequiredApps)),
 	}
 	for _, dep := range preview.Dependencies {
 		resp.Dependencies = append(resp.Dependencies, AppRemovalPreviewDependency{ID: dep.ID, Action: dep.Action, Reason: dep.Reason})
@@ -348,7 +359,7 @@ func (h *AppsHandler) RemovalPreview(c echo.Context) error {
 		resp.Connectors = append(resp.Connectors, AppRemovalPreviewConnector{Type: conn.Type, ConnectionID: conn.ConnectionID, Action: conn.Action, Reason: conn.Reason})
 	}
 	for _, pkg := range preview.RequiredApps {
-		resp.RequiredApps = append(resp.RequiredApps, AppRemovalPreviewApp{InstallationID: pkg.ID, RegistryID: pkg.RegistryID, AppID: pkg.AppID, Version: pkg.Version})
+		resp.RequiredApps = append(resp.RequiredApps, AppRemovalPreviewApp{Revision: pkg.Revision, InstallationID: pkg.ID, RegistryID: pkg.RegistryID, AppID: pkg.AppID, Version: pkg.Version})
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -380,13 +391,20 @@ func (h *AppsHandler) Install(c echo.Context) error {
 		return apperror.New(apperror.CodeAppRequestInvalid, nil)
 	}
 	return h.stream(c, "install", func(ctx context.Context, sink apps.EventSink) (apps.OperationResult, error) {
-		return h.service.Install(ctx, botID, apps.InstallRequest{
+		return h.service.Install(workspacedeps.RequireConfirmedPlan(workspacedeps.WithPlanID(ctx, req.PlanID)), botID, apps.InstallRequest{
 			RegistryID: req.RegistryID, AppID: req.AppID, Revision: req.Revision,
 		}, sink)
 	})
 }
 
+type AppResumeRequest struct {
+	Revision string `json:"revision"`
+	PlanID   string `json:"plan_id"`
+}
+
 // Resume godoc
+// @Param payload body AppResumeRequest true "Confirmed dependency plan"
+// @Accept json
 // @Summary Continue a partial App installation
 // @Description Installs dependencies that are still missing, reconciles the Skills and links connectors that were authorized since. Events: started, step, log, step_done, done, error.
 // @Tags apps
@@ -406,8 +424,18 @@ func (h *AppsHandler) Resume(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	var req AppResumeRequest
+	if err := bindWorkspaceManagementRequest(c, &req); err != nil {
+		return apperror.New(apperror.CodeAppRequestInvalid, nil)
+	}
 	return h.stream(c, "resume", func(ctx context.Context, sink apps.EventSink) (apps.OperationResult, error) {
-		return h.service.Resume(ctx, botID, installationID, sink)
+		approved, ok := h.service.(interface {
+			ResumeApproved(context.Context, string, string, string, apps.EventSink) (apps.OperationResult, error)
+		})
+		if !ok || !supermarketclient.IsCanonicalSHA256(req.Revision) {
+			return apps.OperationResult{}, workspacedeps.ErrPlanChanged
+		}
+		return approved.ResumeApproved(workspacedeps.RequireConfirmedPlan(workspacedeps.WithPlanID(ctx, req.PlanID)), botID, installationID, req.Revision, sink)
 	})
 }
 
@@ -434,18 +462,26 @@ func (h *AppsHandler) UpdateSelection(c echo.Context) error {
 	if err := bindWorkspaceManagementRequest(c, &req); err != nil {
 		return apperror.Wrap(apperror.CodeAppRequestInvalid, err, nil)
 	}
-	if strings.TrimSpace(req.RegistryID) == "" || strings.TrimSpace(req.AppID) == "" || (!req.Release && len(req.Dependencies) == 0) {
+	if (req.Release && !supermarketclient.IsCanonicalSHA256(req.Revision)) || strings.TrimSpace(req.RegistryID) == "" || strings.TrimSpace(req.AppID) == "" || (!req.Release && len(req.Dependencies) == 0) {
 		return apperror.New(apperror.CodeAppRequestInvalid, nil)
 	}
 	return h.stream(c, "update", func(ctx context.Context, sink apps.EventSink) (apps.OperationResult, error) {
-		return h.service.UpdateSelection(ctx, botID, apps.UpdateRequest{
+		return h.service.UpdateSelection(workspacedeps.RequireConfirmedPlan(workspacedeps.WithPlanID(ctx, req.PlanID)), botID, apps.UpdateRequest{
 			RegistryID: req.RegistryID, AppID: req.AppID,
-			Release: req.Release, Dependencies: req.Dependencies,
+			Release: req.Release, Dependencies: req.Dependencies, Revision: req.Revision,
 		}, sink)
 	})
 }
 
+type AppRemoveRequest struct {
+	Revision             string            `json:"revision"`
+	DependencyRevisions  map[string]string `json:"dependency_revisions"`
+	RequiredAppRevisions map[string]string `json:"required_app_revisions"`
+}
+
 // Remove godoc
+// @Accept json
+// @Param payload body AppRemoveRequest true "Reviewed removal publications"
 // @Summary Remove an App from a bot workspace
 // @Description Removes the Skills, the dependencies no other App references and the connections no other App references, streaming progress. Events: started, step, log, step_done, done, error.
 // @Tags apps
@@ -466,7 +502,11 @@ func (h *AppsHandler) Remove(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	opts := apps.RemoveOptions{RemoveUnreferencedRequired: c.QueryParam("remove_unreferenced_required") == "true"}
+	var req AppRemoveRequest
+	if err := bindWorkspaceManagementRequest(c, &req); err != nil || !supermarketclient.IsCanonicalSHA256(req.Revision) || req.DependencyRevisions == nil || req.RequiredAppRevisions == nil {
+		return workspaceDependencyError(workspacedeps.ErrPlanChanged)
+	}
+	opts := apps.RemoveOptions{ExpectedRevision: req.Revision, DependencyRevisions: req.DependencyRevisions, RequiredAppRevisions: req.RequiredAppRevisions, RemoveUnreferencedRequired: c.QueryParam("remove_unreferenced_required") == "true"}
 	return h.stream(c, "remove", func(ctx context.Context, sink apps.EventSink) (apps.OperationResult, error) {
 		return h.service.Remove(ctx, botID, installationID, opts, sink)
 	})
@@ -605,10 +645,25 @@ func (h *AppsHandler) stream(c echo.Context, action string, run appOperation) er
 	stream := newWorkspaceDependencyStream(writer, flusher, workspaceDependencyHeartbeatInterval)
 	defer stream.close()
 	sink := apps.EventFunc(func(event apps.Event) {
-		stream.send(AppStreamEvent{
+		frame := AppStreamEvent{
+			Action: event.Action, RequiredBy: event.RequiredBy, Failure: event.Failure,
 			Type: event.Type, Kind: event.Kind, ID: event.ID, Stream: event.Stream, Data: event.Data,
 			Status: event.Status, Version: event.Version, Message: event.Message,
-		})
+		}
+		if event.Kind == apps.KindDependency && event.Status == apps.StepFailed {
+			mapped := apperror.New(apperror.CodeWorkspaceDependencyOperationFailed, nil)
+			var publicError error = mapped
+			if event.Failure != nil {
+				publicError = workspaceDependencyError(event.Failure)
+			}
+			if public, ok := apperror.PublicFrom(publicError, httpx.RequestID(c)); ok {
+				frame.Code = string(public.Code)
+				frame.Args = public.Args
+				frame.Detail = public.Detail
+				frame.Message = public.Detail
+			}
+		}
+		stream.send(frame)
 	})
 	if _, err := run(ctx, sink); err != nil {
 		requestID := httpx.RequestID(c)
@@ -651,7 +706,7 @@ func (h *AppsHandler) httpError(err error) error {
 		return apperror.Wrap(apperror.CodeAppRequestInvalid, err, nil)
 	case errors.Is(err, connectors.ErrInvalidInput), errors.Is(err, connectors.ErrNotConfigured), errors.Is(err, connectors.ErrUpstreamUnavailable):
 		return connectorHTTPError(err)
-	case errors.Is(err, workspacedeps.ErrWorkspaceNotRunning), errors.Is(err, workspacedeps.ErrWorkspaceMissing),
+	case errors.Is(err, workspacedeps.ErrPlanChanged), errors.Is(err, workspacedeps.ErrDependencyReferenced), errors.Is(err, workspacedeps.ErrGraphUnresolved), errors.Is(err, workspacedeps.ErrWorkspaceNotRunning), errors.Is(err, workspacedeps.ErrWorkspaceMissing),
 		errors.Is(err, workspacedeps.ErrBusy),
 		errors.Is(err, workspacedeps.ErrDependencyNotFound), errors.Is(err, workspacedeps.ErrCatalogUnavailable),
 		errors.Is(err, workspacedeps.ErrDefinitionInvalid), errors.Is(err, workspacedeps.ErrDefinitionUnavailable):
@@ -693,6 +748,10 @@ func appItem(item apps.Item, dataRoot string) AppItem {
 		out.AvailableVersion = inst.AvailableVersion
 		out.LastCheckedAt = inst.LastCheckedAt
 		out.LastError = inst.LastError
+		if inst.Status == apps.StatusPartial && inst.LastError != "" {
+			out.LastErrorCode = string(apperror.CodeWorkspaceDependencyOperationFailed)
+		}
+
 		installedAt, updatedAt := inst.InstalledAt, inst.UpdatedAt
 		if !installedAt.IsZero() {
 			out.InstalledAt = &installedAt

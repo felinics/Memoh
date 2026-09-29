@@ -50,12 +50,13 @@ export function useDependencyOperation(botId: Ref<string>) {
    * streaming just reopens its log; another dependency streaming for this bot
    * is refused (the Server would answer `workspace_dependency.busy`).
    */
-  function start(item: DependencyItem, action: DependencyOperationAction, options: { version?: string; definitionRevision?: string; sessionId?: string } = {}): boolean {
+  function start(item: DependencyItem, action: DependencyOperationAction, options: { planId?: string; version?: string; definitionRevision?: string; sessionId?: string } = {}): boolean {
     const result = store.start({
       botId: botId.value,
       item,
       action,
       version: options.version,
+      planId: options.planId,
       definitionRevision: options.definitionRevision,
       sessionId: options.sessionId,
     })

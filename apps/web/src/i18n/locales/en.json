@@ -239,7 +239,11 @@
       "catalog_unavailable": "The dependency catalog is unavailable. Please try again later.",
       "definition_invalid": "The dependency definition could not be verified. Please refresh the catalog.",
       "definition_unavailable": "The dependency definition is not cached. Please reconnect to Supermarket and try again.",
-      "discovery_failed": "Workspace dependencies could not be inspected. Please try again."
+      "discovery_failed": "Workspace dependencies could not be inspected. Please try again.",
+      "plan_changed": "The dependency plan changed. Preview and confirm it again.",
+      "referenced": "Cannot remove {dependency_id}: it is required by {required_by}. Remove those references first.",
+      "graph_unresolved": "Historical dependency relationships could not be verified. Repair the installation before removing tools.",
+      "prerequisite_missing": "A required tool is missing. Repair the dependency before checking for updates."
     },
     "acp": {
       "request_invalid": "The Agent runtime request is invalid. Check the request and try again.",
@@ -3927,7 +3931,8 @@
       "reason": {
         "shared": "used by another App",
         "image": "shipped with the workspace image",
-        "absent": "not installed"
+        "absent": "not installed",
+        "unresolved": "History needs repair; tool kept"
       }
     },
     "progress": {
@@ -4115,5 +4120,28 @@
   "elicitation": {
     "done": "Done",
     "cancel": "Cancel"
+  },
+  "dependenciesPlan": {
+    "title": "Dependency plan",
+    "preparing": "Checking required tools…",
+    "failed": "Could not prepare the dependency plan. Please try again.",
+    "requested": "Required for this operation",
+    "requiredBy": "Required by {names}",
+    "script": "View script",
+    "resume": "Resume {name}",
+    "description": "Review the tools below to continue. Completed dependencies are preserved.",
+    "progress": "Preparing {name}, required by {names}",
+    "actions": {
+      "install": "Install",
+      "update": "Update",
+      "reinstall": "Reinstall",
+      "rollback": "Roll back",
+      "reuse": "Use installed version",
+      "remove": "Remove",
+      "keep": "Keep"
+    },
+    "removeTitle": "Remove {name}",
+    "removeDescription": "Remove the managed copy of {name}. Apps and dependent tools must release it first. Image baselines and user files are preserved.",
+    "removing": "Removing {name}"
   }
 }

@@ -14,8 +14,9 @@ import {
 } from '@/composables/api/useWorkspaceDependencies'
 import { streamDependencyOperation } from '@/composables/api/useWorkspaceDependencyStream'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { apiErrorStatus, isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
+import { apiErrorStatus, isApiErrorCode, resolveApiErrorMessage, parseMemohError } from '@/utils/api-error'
 import {
+  dependencyPlanNeedsReview,
   dependencyDisplayName,
   formatDependencyVersion,
   type DependencyLogLine,
@@ -42,6 +43,8 @@ import {
 // its last viewer closes.
 
 export interface DependencyOperation {
+  needsReview?: boolean
+  planId?: string
   definitionRevision: string
   /** `operationKey(botId, depId)`. */
   key: string
@@ -61,6 +64,7 @@ export interface DependencyOperation {
 }
 
 export interface StartDependencyOperationInput {
+  planId?: string
   definitionRevision?: string
   botId: string
 
@@ -257,11 +261,14 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
         operation.botId,
         operation.item.id ?? '',
         operation.action,
-        { version: operation.version, definitionRevision: operation.definitionRevision || undefined, sessionId: operation.sessionId, signal },
+        { planId: operation.planId, version: operation.version, definitionRevision: operation.definitionRevision || undefined, sessionId: operation.sessionId, signal },
       )
       for await (const event of stream) {
         if (signal.aborted) return
         switch (event.type) {
+          case 'node':
+            if (event.status === 'running') pushLine(operation, 'stdout', t('dependenciesPlan.progress', { name: event.dependency_id, names: event.required_by?.join(', ') || operation.item.name }))
+            break
           case 'started':
             operation.definitionRevision = event.definition_revision ?? operation.definitionRevision
             break
@@ -274,6 +281,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
             operation.entrypoint = Object.values(event.entrypoints ?? {})[0] ?? ''
             break
           case 'error':
+            operation.needsReview = dependencyPlanNeedsReview(event.code)
             operation.status = event.code === 'workspace_dependency_operation_unknown' ? 'unknown' : 'error'
             operation.error = operation.status === 'unknown' ? t('bots.dependencies.progress.unknownHint') : event.message
             break
@@ -289,6 +297,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
         operation.error = t('bots.dependencies.progress.unknownHint')
       }
     } catch (error) {
+      operation.needsReview = dependencyPlanNeedsReview(parseMemohError(error)?.code)
       if (signal.aborted) return
       if (operation.status !== 'running') return
       operation.status = isApiErrorCode(error, 'workspace_dependency_operation_unknown') || !apiErrorStatus(error) ? 'unknown' : 'error'
@@ -307,6 +316,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
     operation.status = 'running'
     operation.lines = []
     operation.error = ''
+    operation.needsReview = false
     operation.resultVersion = ''
     operation.entrypoint = ''
     patchCachedStatus(operation, optimisticStatus(operation.action))
@@ -341,6 +351,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
       item: input.item,
       action: input.action,
       version: input.version?.trim() ?? '',
+      planId: input.planId,
       definitionRevision: input.definitionRevision?.trim() || input.item.definition_revision?.trim() || '',
       status: 'running',
       lines: [],
@@ -356,7 +367,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
   /** Replays a failed operation in place (the progress dialog's Retry). */
   function retry(key: string): boolean {
     const operation = operations.get(key)
-    if (!operation || operation.status !== 'error') return false
+    if (!operation || operation.status !== 'error' || operation.needsReview) return false
     if (runningFor(operation.botId)) return false
     run(operation)
     return true

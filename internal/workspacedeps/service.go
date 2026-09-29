@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -249,6 +250,8 @@ type PreflightResult struct {
 
 // OperationResult is the receipt of a completed action.
 type OperationResult struct {
+	OperationID        string
+	FailurePhase       string
 	SourceURL          string
 	RegistryID         string
 	DefinitionRevision string
@@ -699,7 +702,7 @@ func SupportedActions(dep catalog.Dependency) []catalog.Action {
 
 // availableActions lists the actions the current state allows. A managed
 // copy is what install produces and what update, reinstall, and rollback
-// operate on. Remove also clears commands supplied by the workspace image.
+// operate on. Remove preserves image baselines and user-owned commands.
 // Update checks follow the script and the pin, not the category: an agent
 // CLI is checked upstream like any other tool.
 func availableActions(dep catalog.Dependency, rec *Installation, obs Observed) []catalog.Action {
@@ -716,10 +719,8 @@ func availableActions(dep catalog.Dependency, rec *Installation, obs Observed) [
 		} else if rec != nil {
 			actions = append(actions, catalog.ActionReinstall)
 		}
-		imageCopy := rec != nil && (imageCandidate(obs).Path != "" || obs.Source == SourceToolkit)
-		if ActionSupported(dep, catalog.ActionRemove) && ((rec != nil && !obs.Present) || imageCopy) {
-			// Remove clears native image copies as well as missing/failed
-			// installation records.
+		if ActionSupported(dep, catalog.ActionRemove) && (rec != nil && !obs.Present) {
+			// Missing/failed records may be explicitly cleared.
 			actions = append(actions, catalog.ActionRemove)
 		}
 	default:
@@ -792,56 +793,55 @@ func preflightItem(cat *catalog.Catalog, snap Snapshot, depID string) PreflightI
 // For a dependency the image already ships the result
 // is a managed overlay that shadows the image copy.
 func (s *Service) Install(ctx context.Context, botID, depID, version string, sink LogSink) (OperationResult, error) {
-	ctx, cancelOperation := context.WithCancel(ctx)
-	defer cancelOperation()
-	stopShutdown := s.cancelOnShutdown(cancelOperation)
-	defer stopShutdown()
-	op, err := s.begin(ctx, botID, depID, version, true)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	defer op.release()
-	if op.dep.Retired {
-		return OperationResult{}, ErrDependencyNotFound
-	}
-	return s.provision(ctx, op, catalog.ActionInstall, StatusInstalling, sink)
+	return s.executeRoot(ctx, botID, depID, version, catalog.ActionInstall, sink)
 }
 
 // Update runs the update script, falling back to the install script when the
 // manifest has none. version follows the Install rules.
 func (s *Service) Update(ctx context.Context, botID, depID, version string, sink LogSink) (OperationResult, error) {
-	ctx, cancelOperation := context.WithCancel(ctx)
-	defer cancelOperation()
-	stopShutdown := s.cancelOnShutdown(cancelOperation)
-	defer stopShutdown()
-	op, err := s.begin(ctx, botID, depID, version, true)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	defer op.release()
-	return s.provision(ctx, op, catalog.ActionUpdate, StatusUpdating, sink)
+	return s.executeRoot(ctx, botID, depID, version, catalog.ActionUpdate, sink)
 }
 
 // Reinstall runs the explicit reinstall script, or repeats install. Keeping
 // the existing tree until install commits its staged replacement preserves both
 // the working copy on failure and the previous version used by rollback.
 func (s *Service) Reinstall(ctx context.Context, botID, depID, version string, sink LogSink) (OperationResult, error) {
-	ctx, cancelOperation := context.WithCancel(ctx)
-	defer cancelOperation()
-	stopShutdown := s.cancelOnShutdown(cancelOperation)
-	defer stopShutdown()
-	op, err := s.begin(ctx, botID, depID, version, true)
-	if err != nil {
-		return OperationResult{}, err
-	}
-	defer op.release()
-	return s.provision(ctx, op, catalog.ActionReinstall, StatusInstalling, sink)
+	return s.executeRoot(ctx, botID, depID, version, catalog.ActionReinstall, sink)
 }
 
 // Remove runs the remove script, deletes the shims, and drops the record.
-// Native workspaces also remove the image's copy so discovery cannot adopt
-// the same dependency again immediately after a successful removal.
+// Image baselines and user-owned commands remain available after a managed
+// overlay is removed. Graph and App references are checked before any script.
 func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink) (OperationResult, error) {
+	if excluding, _ := ctx.Value(appRemovalContextKey{}).(string); excluding != "" {
+		return s.removeNode(ctx, botID, depID, sink)
+	}
+	return s.executeRoot(ctx, botID, depID, "", catalog.ActionRemove, sink)
+}
+
+func (s *Service) removeNode(ctx context.Context, botID, depID string, sink LogSink) (OperationResult, error) {
+	ctx, releaseGraph, err := s.AcquireGraph(ctx, botID)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	defer releaseGraph()
+	if err := s.reconcileRelationships(ctx, botID); err != nil {
+		return OperationResult{}, err
+	}
+	excluding, _ := ctx.Value(appRemovalContextKey{}).(string)
+	users, err := s.RemovalBlockers(ctx, botID, depID, excluding, excluding != "")
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if len(users) != 0 {
+		for _, user := range users {
+			if strings.HasPrefix(user, "unresolved:") {
+				return OperationResult{}, errors.Join(ErrGraphUnresolved, &ReferencedError{depID, users})
+			}
+		}
+		return OperationResult{}, &ReferencedError{depID, users}
+	}
+
 	ctx, cancelOperation := context.WithCancel(ctx)
 	defer cancelOperation()
 	stopShutdown := s.cancelOnShutdown(cancelOperation)
@@ -851,6 +851,54 @@ func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink)
 		return OperationResult{}, err
 	}
 	defer op.release()
+	observed, err := s.discover(ctx, op.client, op.catalog, op.dataRoot, []string{depID}, op.platform)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if !hasManagedCopy(observed[depID]) {
+		if _, err := s.store.Get(ctx, op.key); err == nil {
+			if err := s.store.Delete(ctx, op.key); err != nil {
+				return OperationResult{}, err
+			}
+		} else if !errors.Is(err, ErrInstallationNotFound) {
+			return OperationResult{}, err
+		}
+
+		delete(ctx.Value(graphContextKey{}).(*graphAdmission).graph, depID)
+		if err := s.saveGraph(ctx); err != nil {
+			return OperationResult{}, err
+		}
+		return OperationResult{DependencyID: depID, Action: catalog.ActionRemove}, nil
+	}
+	installed, err := op.readState(ctx)
+	if err != nil {
+		return OperationResult{}, err
+	}
+	if PlanID(ctx) != "" && installed != nil && (op.dep.Revision != installed.DefinitionRevision || op.dep.ManifestDigest != installed.ManifestDigest) {
+		return OperationResult{}, ErrPlanChanged
+	}
+	if revisions, ok := ctx.Value(removalDefinitionsKey{}).(map[string]string); ok {
+		if installed == nil || revisions[depID] == "" || revisions[depID] != installed.DefinitionRevision {
+			return OperationResult{}, ErrPlanChanged
+		}
+	}
+	if s.provider != nil {
+		if installed == nil || installed.DefinitionRevision == "" {
+			return OperationResult{}, ErrGraphUnresolved
+		}
+		definition, err := s.provider.StoredDefinition(ctx, DefinitionKey{installed.SourceURL, depID, installed.DefinitionRevision})
+		if err != nil {
+			return OperationResult{}, err
+		}
+		if definition.Dependency().ManifestDigest != installed.ManifestDigest {
+			return OperationResult{}, ErrDefinitionInvalid
+		}
+		op.catalog, err = op.catalog.Using(definition)
+		if err != nil {
+			return OperationResult{}, err
+		}
+		op.dep = definition.Dependency()
+	}
 	script, ok := op.catalog.Script(op.dep.ID, catalog.ActionRemove)
 	if !ok {
 		return OperationResult{}, fmt.Errorf("%w: %s has no remove script", ErrActionUnsupported, op.dep.ID)
@@ -873,6 +921,10 @@ func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink)
 	if _, err := s.store.FinishOperation(finalCtx, op.key, op.operationID, nil); err != nil {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: delete record for %s: %w", op.dep.ID, err))
 	}
+	delete(ctx.Value(graphContextKey{}).(*graphAdmission).graph, depID)
+	if err := s.saveGraph(finalCtx); err != nil {
+		return OperationResult{}, err
+	}
 	s.cleanupReceipt(ctx, op)
 	s.cache.Invalidate(op.key.BotID)
 	return OperationResult{DependencyID: op.dep.ID, Action: catalog.ActionRemove, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID, DefinitionRevision: op.dep.Revision}, nil
@@ -882,6 +934,10 @@ func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink)
 // state.json. It runs no catalog script and needs no network;
 // the only workspace command is the symlink switch through the prelude.
 func (s *Service) Rollback(ctx context.Context, botID, depID string) (OperationResult, error) {
+	return s.executeRoot(ctx, botID, depID, "", ActionRollback, nil)
+}
+
+func (s *Service) rollbackNode(ctx context.Context, botID, depID string) (OperationResult, error) {
 	ctx, cancelOperation := context.WithCancel(ctx)
 	defer cancelOperation()
 	stopShutdown := s.cancelOnShutdown(cancelOperation)
@@ -902,6 +958,9 @@ func (s *Service) Rollback(ctx context.Context, botID, depID string) (OperationR
 	}
 	if current == nil || strings.TrimSpace(current.PreviousVersion) == "" {
 		return OperationResult{}, ErrRollbackUnavailable
+	}
+	if current.Previous == nil || current.Previous.DefinitionRevision != op.dep.Revision || current.Previous.ManifestDigest != op.dep.ManifestDigest {
+		return OperationResult{}, ErrPlanChanged
 	}
 	previous := strings.TrimSpace(current.PreviousVersion)
 	if _, err := op.client.Stat(ctx, path.Join(VersionsDir(op.home), previous)); err != nil {
@@ -968,7 +1027,24 @@ func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, e
 		if !s.locks.tryLock(key) {
 			continue
 		}
-		check, checkErr := s.checkUpdate(ctx, client, dataRoot, result.Platform, entry.Dependency, entry.InstalledVersion)
+		var check updateCheck
+		var checkErr error
+		for _, required := range entry.Dependency.Requires {
+			found := false
+			for _, candidate := range result.Entries {
+				if candidate.Dependency.ID == required && candidate.Observed.Present {
+					found = true
+					break
+				}
+			}
+			if !found {
+				checkErr = ErrPrerequisiteMissing
+				break
+			}
+		}
+		if checkErr == nil {
+			check, checkErr = s.checkUpdate(ctx, client, dataRoot, result.Platform, entry.Dependency, entry.InstalledVersion)
+		}
 		recordErr := s.recordCheck(ctx, key, check, checkErr)
 		s.locks.unlock(key)
 		if err := recordErr; err != nil {
@@ -1283,9 +1359,24 @@ func (s *Service) record(ctx context.Context, op *operation, action catalog.Acti
 	terminal.InstalledVersion, terminal.ManifestDigest = state.Version, state.ManifestDigest
 	terminal.SourceURL, terminal.RegistryID, terminal.DefinitionRevision = state.SourceURL, state.RegistryID, state.DefinitionRevision
 	terminal.LastError = ""
+	terminal.PlanID = PlanID(ctx)
+	if op.receipt != nil && op.receipt.PlanID != "" {
+		terminal.PlanID = op.receipt.PlanID
+	}
+	terminal.Requires, terminal.RelationshipsKnown = slices.Clone(op.dep.Requires), true
 	rec, err := s.store.FinishOperation(storeCtx, op.key, op.operationID, &terminal)
 	if err != nil {
 		return OperationResult{}, s.fail(ctx, op, fmt.Errorf("workspacedeps: record %s %s: %w", action, op.dep.ID, err))
+	}
+	if a, ok := ctx.Value(graphContextKey{}).(*graphAdmission); ok {
+		rel := a.graph[op.dep.ID]
+		rel.Requires, rel.Pending, rel.Known = slices.Clone(op.dep.Requires), nil, true
+		rel.Revision, rel.Digest = state.DefinitionRevision, state.ManifestDigest
+		rel.PlanID, rel.Version = terminal.PlanID, state.Version
+		a.graph[op.dep.ID] = rel
+		if err := s.saveGraph(ctx); err != nil {
+			return OperationResult{}, err
+		}
 	}
 	s.cleanupReceipt(ctx, op)
 	s.cache.Invalidate(op.key.BotID)
@@ -1320,7 +1411,7 @@ func (s *Service) runScript(ctx context.Context, op *operation, action catalog.A
 	}
 	s.logger.InfoContext(ctx, "execute dependency definition", slog.String("bot_id", op.key.BotID), slog.String("dependency_id", op.dep.ID), slog.String("action", string(action)), slog.String("definition_revision", op.dep.Revision))
 	spec.Receipt = &OperationReceipt{
-		ID: op.operationID, DependencyID: op.dep.ID, Action: action, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID,
+		PlanID: PlanID(ctx), ID: op.operationID, DependencyID: op.dep.ID, Action: action, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID,
 		DefinitionRevision: op.dep.Revision, ManifestDigest: op.dep.ManifestDigest,
 		RequestedVersion: version, StartedAt: op.startedAt, Previous: op.previous,
 	}
@@ -1358,7 +1449,7 @@ func (s *Service) markInProgress(ctx context.Context, op *operation, status Stat
 		return err
 	}
 	op.operationID = hex.EncodeToString(nonce[:])
-	marked, err := s.store.ClaimOperation(ctx, UpsertInstallation{InstallationKey: op.key, Source: InstallationSourceManaged, Status: status, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID, DefinitionRevision: op.dep.Revision}, op.operationID)
+	marked, err := s.store.ClaimOperation(ctx, UpsertInstallation{GraphOwner: GraphOwner(ctx), InstallationKey: op.key, Source: InstallationSourceManaged, Status: status, SourceURL: op.dep.SourceURL, RegistryID: op.dep.RegistryID, DefinitionRevision: op.dep.Revision}, op.operationID)
 	if err != nil {
 		return err
 	}
@@ -1518,6 +1609,18 @@ func targetVersion(dep catalog.Dependency, requested string) string {
 // checkUpdate runs the check_update script and decodes its result. The exit
 // status only says whether the check ran.
 func (s *Service) checkUpdate(ctx context.Context, client *bridge.Client, dataRoot string, platform Platform, dep catalog.Dependency, currentVersion string) (updateCheck, error) {
+	if len(dep.Requires) > 0 {
+		observed, err := s.discover(ctx, client, s.catalogFor(ctx), dataRoot, dep.Requires, platform)
+		if err != nil {
+			return updateCheck{}, err
+		}
+		for _, id := range dep.Requires {
+			if !observed[id].Present {
+				return updateCheck{}, ErrPrerequisiteMissing
+			}
+		}
+	}
+
 	script, ok := s.catalogFor(ctx).Script(dep.ID, catalog.ActionCheckUpdate)
 	if !ok {
 		return updateCheck{}, fmt.Errorf("%w: %s has no check_update script", ErrActionUnsupported, dep.ID)

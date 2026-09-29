@@ -12,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workspacedeps"
 )
 
 type postgresStore struct {
@@ -64,10 +65,14 @@ func (s *postgresStore) Upsert(ctx context.Context, in UpsertInstallation) (Inst
 		release = []byte{}
 	}
 	row, err := s.q.UpsertBotAppInstallation(ctx, dbsqlc.UpsertBotAppInstallationParams{
+		GraphOwner: workspacedeps.GraphOwner(ctx),
 		BotID:      botUUID,
 		RegistryID: in.RegistryID, AppID: in.AppID, Revision: in.Revision, Version: in.Version,
 		Status: string(in.Status), Reason: string(in.Reason), Release: release,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Installation{}, workspacedeps.ErrBusy
+	}
 	return installationResult(row, err)
 }
 
@@ -91,8 +96,12 @@ func (s *postgresStore) SetRelease(ctx context.Context, botID, installationID, r
 		release = []byte{}
 	}
 	row, err := s.q.UpdateBotAppInstallationRelease(ctx, dbsqlc.UpdateBotAppInstallationReleaseParams{
-		Revision: revision, Version: version, Release: release, BotID: botUUID, ID: id,
+		GraphOwner: workspacedeps.GraphOwner(ctx),
+		Revision:   revision, Version: version, Release: release, BotID: botUUID, ID: id,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Installation{}, workspacedeps.ErrBusy
+	}
 	return installationResult(row, err)
 }
 
@@ -114,7 +123,10 @@ func (s *postgresStore) Delete(ctx context.Context, botID, installationID string
 	if err != nil {
 		return Installation{}, err
 	}
-	row, err := s.q.DeleteBotAppInstallation(ctx, dbsqlc.DeleteBotAppInstallationParams{BotID: botUUID, ID: id})
+	row, err := s.q.DeleteBotAppInstallation(ctx, dbsqlc.DeleteBotAppInstallationParams{GraphOwner: workspacedeps.GraphOwner(ctx), BotID: botUUID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Installation{}, workspacedeps.ErrBusy
+	}
 	return installationResult(row, err)
 }
 
@@ -158,7 +170,10 @@ func (s *postgresStore) AddDependencyRef(ctx context.Context, installationID, de
 	if err != nil {
 		return err
 	}
-	_, err = s.q.UpsertAppDependencyRef(ctx, dbsqlc.UpsertAppDependencyRefParams{InstallationID: id, DependencyID: dependencyID})
+	_, err = s.q.UpsertAppDependencyRef(ctx, dbsqlc.UpsertAppDependencyRefParams{InstallationID: id, DependencyID: dependencyID, GraphOwner: workspacedeps.GraphOwner(ctx)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return workspacedeps.ErrBusy
+	}
 	return err
 }
 
@@ -167,7 +182,10 @@ func (s *postgresStore) RemoveDependencyRef(ctx context.Context, installationID,
 	if err != nil {
 		return err
 	}
-	_, err = s.q.DeleteAppDependencyRef(ctx, dbsqlc.DeleteAppDependencyRefParams{InstallationID: id, DependencyID: dependencyID})
+	n, err := s.q.DeleteAppDependencyRef(ctx, dbsqlc.DeleteAppDependencyRefParams{InstallationID: id, DependencyID: dependencyID, GraphOwner: workspacedeps.GraphOwner(ctx)})
+	if err == nil && n == 0 {
+		return workspacedeps.ErrBusy
+	}
 	return err
 }
 

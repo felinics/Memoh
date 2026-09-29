@@ -21,9 +21,13 @@ import {
   appUpdateAvailable,
   type AppItem,
 } from '@/composables/api/useApps'
+import DependencyPlanPreview from './dependency-plan-preview.vue'
+import { useDependencyPlan } from '@/composables/useDependencyPlan'
 import { dependencyDisplayName, formatDependencyVersion } from '@/utils/workspace-dependency'
 
 export interface AppUpdateChoice {
+  planId?: string
+  revision?: string
   release: boolean
   dependencies: string[]
 }
@@ -36,6 +40,8 @@ interface Candidate {
 }
 
 const props = defineProps<{
+  resume?: boolean
+  botId: string
   open: boolean
   item: AppItem | null
 }>()
@@ -88,8 +94,19 @@ function toggle(key: string, value: boolean | 'indeterminate') {
 
 const selectedCount = computed(() => candidates.value.filter(candidate => selected.value.has(candidate.key)).length)
 
+const preview = useDependencyPlan(() => props.botId, () => props.open && props.item && (props.resume || selectedCount.value) ? {
+  app: {
+    action: props.resume ? 'resume' : 'update', installation_id: props.item.installation_id, registry_id: props.item.registry_id, app_id: props.item.app_id,
+    release: selected.value.has(RELEASE_KEY),
+    dependencies: candidates.value.filter(c => c.key !== RELEASE_KEY && selected.value.has(c.key)).map(c => c.key.slice(4)),
+  },
+} : null)
+
 function confirm() {
+  if (!preview.ready.value) return
   emit('confirm', {
+    planId: preview.plan.value?.id,
+    revision: preview.revision.value,
     release: selected.value.has(RELEASE_KEY),
     dependencies: candidates.value
       .filter(candidate => candidate.key !== RELEASE_KEY && selected.value.has(candidate.key))
@@ -109,22 +126,22 @@ function confirm() {
     >
       <DialogHeader class="min-w-0">
         <DialogTitle class="break-words">
-          {{ t('apps.update.title', { name }) }}
+          {{ resume ? t('dependenciesPlan.resume', { name }) : t('apps.update.title', { name }) }}
         </DialogTitle>
         <DialogDescription class="break-words">
-          {{ t('apps.update.description') }}
+          {{ resume ? t('dependenciesPlan.description') : t('apps.update.description') }}
         </DialogDescription>
       </DialogHeader>
 
       <DialogBody class="min-w-0">
         <p
-          v-if="!candidates.length"
+          v-if="!resume && !candidates.length"
           class="text-body text-muted-foreground"
         >
           {{ t('apps.update.none') }}
         </p>
         <ul
-          v-else
+          v-else-if="!resume"
           class="divide-y divide-border rounded-lg border border-border"
         >
           <li
@@ -143,6 +160,12 @@ function confirm() {
             </label>
           </li>
         </ul>
+        <DependencyPlanPreview
+          :plan="preview.plan.value"
+          :loading="preview.loading.value"
+          :error="preview.error.value"
+          @retry="preview.retry"
+        />
       </DialogBody>
 
       <DialogFooter>
@@ -153,10 +176,10 @@ function confirm() {
           {{ t('common.cancel') }}
         </Button>
         <Button
-          :disabled="!selectedCount"
+          :disabled="(!resume && !selectedCount) || !preview.ready.value"
           @click="confirm"
         >
-          {{ t('apps.update.confirm', { count: selectedCount }, selectedCount) }}
+          {{ resume ? t('common.confirm') : t('apps.update.confirm', { count: selectedCount }, selectedCount) }}
         </Button>
       </DialogFooter>
     </DialogPanel>

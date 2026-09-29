@@ -1,5 +1,7 @@
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   deleteBotsByBotIdAppsByInstallationId,
+  type HandlersAppRemoveRequest,
   postBotsByBotIdApps,
   postBotsByBotIdAppsByInstallationIdResume,
   postBotsByBotIdAppsUpdate,
@@ -20,9 +22,9 @@ export type AppStepKind = 'app' | 'dependency' | 'skills' | 'connector'
 
 export type AppStreamEvent =
   | { type: 'started'; kind?: AppStepKind; id?: string; version?: string }
-  | { type: 'step'; kind: AppStepKind; id: string }
+  | { type: 'step'; kind: AppStepKind; id: string; action?: string; required_by?: string[] }
   | { type: 'log'; kind?: AppStepKind; id?: string; stream: 'stdout' | 'stderr'; data: string }
-  | { type: 'step_done'; kind: AppStepKind; id: string; status: string; version?: string; message?: string }
+  | { type: 'step_done'; code?: string; args?: Record<string, string>; detail?: string; action?: string; required_by?: string[]; kind: AppStepKind; id: string; status: string; version?: string; message?: string }
   | { type: 'done'; kind?: AppStepKind; id?: string; status?: string; version?: string }
   | SSEErrorEvent
 
@@ -37,12 +39,16 @@ export interface AppInstallTarget {
 
 /** What an update touches: the release, the dependencies, or both. */
 export interface AppUpdateSelection {
+  revision?: string
   release: boolean
   dependencies: string[]
   /** Omitted → the Server uses the bot's current target. */
 }
 
 export interface AppStreamOptions {
+  removal?: HandlersAppRemoveRequest
+  planId?: string
+  revision?: string
   botId: string
   action: AppOperationAction
   /** Required by resume and remove. */
@@ -126,6 +132,7 @@ export async function* streamAppOperation(
           registry_id: install.registryId,
           app_id: install.appId,
           revision: install.revision,
+          plan_id: options.planId ?? '',
         },
       })
       break
@@ -140,6 +147,8 @@ export async function* streamAppOperation(
           registry_id: options.registryId,
           app_id: options.appId,
           release: update.release,
+          revision: update.revision,
+          plan_id: options.planId ?? '',
           dependencies: update.dependencies,
         },
       })
@@ -149,19 +158,21 @@ export async function* streamAppOperation(
       result = await postBotsByBotIdAppsByInstallationIdResume({
         ...common,
         path: { bot_id: options.botId, installation_id: requireInstallation(options) },
+        body: { plan_id: options.planId ?? '', revision: options.revision ?? '' },
       })
       break
     default:
       result = await deleteBotsByBotIdAppsByInstallationId({
         ...common,
         path: { bot_id: options.botId, installation_id: requireInstallation(options) },
+        body: options.removal!,
         query: options.removeUnreferencedRequired ? { remove_unreferenced_required: true } : undefined,
       })
   }
 
   for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
     if (!isAppStreamEvent(event)) throw new Error(INVALID_EVENT)
-    yield event.type === 'error' ? localizeSSEErrorEvent(event) : event
+    yield event.type === 'error' ? localizeSSEErrorEvent(event) : event.type === 'step_done' && event.code ? { ...event, message: resolveApiErrorMessage(event, event.message ?? '') } : event
   }
 
   if (streamError) {

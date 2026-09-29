@@ -717,6 +717,32 @@ definitions:
     - status
     - type
     type: object
+  apps.PrepareRequest:
+    properties:
+      action:
+        type: string
+      app_id:
+        type: string
+      dependencies:
+        items:
+          type: string
+        type: array
+      installation_id:
+        type: string
+      registry_id:
+        type: string
+      release:
+        type: boolean
+      revision:
+        type: string
+    type: object
+  apps.PreparedOperation:
+    properties:
+      plan:
+        $ref: '#/definitions/workspacedeps.Plan'
+      revision:
+        type: string
+    type: object
   audio.ConfigSchema:
     properties:
       fields:
@@ -1372,6 +1398,24 @@ definitions:
       user_username:
         type: string
     type: object
+  catalog.Action:
+    enum:
+    - rollback
+    - install
+    - update
+    - remove
+    - reinstall
+    - check_update
+    - version
+    type: string
+    x-enum-varnames:
+    - ActionRollback
+    - ActionInstall
+    - ActionUpdate
+    - ActionRemove
+    - ActionReinstall
+    - ActionCheckUpdate
+    - ActionVersion
   channel.Action:
     properties:
       label:
@@ -3085,6 +3129,8 @@ definitions:
     properties:
       app_id:
         type: string
+      plan_id:
+        type: string
       registry_id:
         type: string
       revision:
@@ -3136,6 +3182,8 @@ definitions:
       last_checked_at:
         type: string
       last_error:
+        type: string
+      last_error_code:
         type: string
       license:
         type: string
@@ -3203,6 +3251,8 @@ definitions:
         type: string
       registry_id:
         type: string
+      revision:
+        type: string
       version:
         type: string
     type: object
@@ -3249,12 +3299,38 @@ definitions:
         items:
           $ref: '#/definitions/handlers.AppRemovalPreviewDependency'
         type: array
+      dependency_revisions:
+        additionalProperties:
+          type: string
+        type: object
       installation_id:
         type: string
       required_apps:
         items:
           $ref: '#/definitions/handlers.AppRemovalPreviewApp'
         type: array
+      revision:
+        type: string
+    type: object
+  handlers.AppRemoveRequest:
+    properties:
+      dependency_revisions:
+        additionalProperties:
+          type: string
+        type: object
+      required_app_revisions:
+        additionalProperties:
+          type: string
+        type: object
+      revision:
+        type: string
+    type: object
+  handlers.AppResumeRequest:
+    properties:
+      plan_id:
+        type: string
+      revision:
+        type: string
     type: object
   handlers.AppSkillItem:
     properties:
@@ -3271,6 +3347,8 @@ definitions:
     type: object
   handlers.AppStreamEvent:
     properties:
+      action:
+        type: string
       args:
         additionalProperties:
           type: string
@@ -3281,6 +3359,8 @@ definitions:
         type: string
       detail:
         type: string
+      failure:
+        $ref: '#/definitions/workspacedeps.PlanFailure'
       id:
         type: string
       kind:
@@ -3294,6 +3374,10 @@ definitions:
         type: string
       request_id:
         type: string
+      required_by:
+        items:
+          type: string
+        type: array
       status:
         type: string
       stream:
@@ -3322,11 +3406,15 @@ definitions:
         items:
           type: string
         type: array
+      plan_id:
+        type: string
       registry_id:
         type: string
       release:
         description: Release moves the installation to the registry's current release.
         type: boolean
+      revision:
+        type: string
     required:
     - app_id
     - registry_id
@@ -4864,6 +4952,8 @@ definitions:
     properties:
       definition_revision:
         type: string
+      plan_id:
+        type: string
       session_id:
         description: SessionID optionally routes operation progress to its originating
           conversation.
@@ -4909,7 +4999,7 @@ definitions:
       image_version:
         description: |-
           ImageVersion is the version of the workspace's toolkit copy, omitted
-          when no toolkit copy remains. Native removal clears it as well.
+          when no toolkit copy remains. Removing a managed overlay preserves it.
         type: string
       install_path:
         description: |-
@@ -5035,6 +5125,13 @@ definitions:
       version:
         type: string
     type: object
+  handlers.WorkspaceDependencyPlanRequest:
+    properties:
+      roots:
+        items:
+          $ref: '#/definitions/workspacedeps.PlanRoot'
+        type: array
+    type: object
   handlers.WorkspaceDependencyPlatform:
     properties:
       arch:
@@ -5119,6 +5216,8 @@ definitions:
     type: object
   handlers.WorkspaceDependencyStreamEvent:
     properties:
+      action:
+        type: string
       args:
         additionalProperties:
           type: string
@@ -5137,9 +5236,17 @@ definitions:
         additionalProperties:
           type: string
         type: object
+      failure:
+        $ref: '#/definitions/workspacedeps.PlanFailure'
       message:
         type: string
       request_id:
+        type: string
+      required_by:
+        items:
+          type: string
+        type: array
+      status:
         type: string
       stream:
         enum:
@@ -5149,6 +5256,7 @@ definitions:
       type:
         enum:
         - started
+        - node
         - log
         - done
         - error
@@ -7346,6 +7454,128 @@ definitions:
           $ref: '#/definitions/workspace.WorkspaceTarget'
         type: array
     type: object
+  workspacedeps.Plan:
+    properties:
+      bot_id:
+        type: string
+      id:
+        type: string
+      nodes:
+        items:
+          $ref: '#/definitions/workspacedeps.PlanNode'
+        type: array
+      roots:
+        items:
+          $ref: '#/definitions/workspacedeps.PlanRoot'
+        type: array
+    type: object
+  workspacedeps.PlanFailure:
+    properties:
+      dependency_id:
+        type: string
+      operation_id:
+        type: string
+      path:
+        items:
+          type: string
+        type: array
+      phase:
+        type: string
+      root:
+        type: string
+    type: object
+  workspacedeps.PlanNode:
+    properties:
+      action:
+        type: string
+      definition_revision:
+        type: string
+      dependency_id:
+        type: string
+      manifest_digest:
+        type: string
+      name:
+        type: string
+      reason:
+        type: string
+      registry_id:
+        type: string
+      required_by:
+        items:
+          type: string
+        type: array
+      requires:
+        items:
+          type: string
+        type: array
+      root:
+        type: boolean
+      script:
+        $ref: '#/definitions/workspacedeps.ScriptPreview'
+      source_url:
+        type: string
+      version:
+        type: string
+    type: object
+  workspacedeps.PlanRoot:
+    properties:
+      action:
+        $ref: '#/definitions/catalog.Action'
+      dependency_id:
+        type: string
+      ensure:
+        type: boolean
+      version:
+        type: string
+    type: object
+  workspacedeps.ScriptEnvEntry:
+    properties:
+      key:
+        type: string
+      secret:
+        description: |-
+          Secret marks operator-supplied entries whose value must not leave the
+          Server, such as registry tokens passed through ScriptEnv.
+        type: boolean
+      value:
+        description: |-
+          Value is the real value when it is known before the run and a
+          placeholder in angle brackets otherwise (result path, values that are
+          only known once the workspace has been probed or read). It is empty
+          when Secret is set.
+        type: string
+    type: object
+  workspacedeps.ScriptPreview:
+    properties:
+      action:
+        $ref: '#/definitions/catalog.Action'
+      definition_revision:
+        type: string
+      dependency_id:
+        type: string
+      digest:
+        description: |-
+          Digest is the manifest digest over dependency.yaml and every script
+          file the manifest references; it is what state.json records after a
+          successful install.
+        type: string
+      env:
+        items:
+          $ref: '#/definitions/workspacedeps.ScriptEnvEntry'
+        type: array
+      exec:
+        description: Exec is the command the runner starts; the script arrives on
+          its stdin.
+        type: string
+      registry_id:
+        type: string
+      script:
+        type: string
+      source_url:
+        type: string
+      timeout_seconds:
+        type: integer
+    type: object
 info:
   contact: {}
   title: Memoh API
@@ -8828,10 +9058,18 @@ paths:
       - apps
   /bots/{bot_id}/apps/{installation_id}:
     delete:
+      consumes:
+      - application/json
       description: 'Removes the Skills, the dependencies no other App references and
         the connections no other App references, streaming progress. Events: started,
         step, log, step_done, done, error.'
       parameters:
+      - description: Reviewed removal publications
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AppRemoveRequest'
       - description: Bot ID
         in: path
         name: bot_id
@@ -9051,10 +9289,18 @@ paths:
       - apps
   /bots/{bot_id}/apps/{installation_id}/resume:
     post:
+      consumes:
+      - application/json
       description: 'Installs dependencies that are still missing, reconciles the Skills
         and links connectors that were authorized since. Events: started, step, log,
         step_done, done, error.'
       parameters:
+      - description: Confirmed dependency plan
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AppResumeRequest'
       - description: Bot ID
         in: path
         name: bot_id
@@ -9113,6 +9359,44 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Check installed Apps for newer releases
+      tags:
+      - apps
+  /bots/{bot_id}/apps/prepare:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: App operation
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/apps.PrepareRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/apps.PreparedOperation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Preview the complete dependency plan for an App operation
       tags:
       - apps
   /bots/{bot_id}/apps/update:
@@ -10942,11 +11226,56 @@ paths:
       summary: Reinstall a workspace dependency
       tags:
       - containerd
+  /bots/{bot_id}/dependencies/{dep_id}/remove:
+    post:
+      consumes:
+      - application/json
+      description: Requires a confirmed plan and refuses App, dependency, pending
+        or unresolved references. Image baselines and user files are preserved.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Dependency ID
+        in: path
+        name: dep_id
+        required: true
+        type: string
+      - description: Confirmed removal plan
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.WorkspaceDependencyStreamEvent'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Remove an unreferenced managed workspace dependency
+      tags:
+      - containerd
   /bots/{bot_id}/dependencies/{dep_id}/rollback:
     post:
+      consumes:
+      - application/json
       description: 'Switches the dependency back to the previous version kept in the
         workspace. A pure data operation: nothing is downloaded and no log is streamed.'
       parameters:
+      - description: Confirmed plan
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyInstallRequest'
       - description: Bot ID
         in: path
         name: bot_id
@@ -11148,6 +11477,44 @@ paths:
           schema:
             $ref: '#/definitions/apperror.Problem'
       summary: Check workspace dependencies for updates
+      tags:
+      - containerd
+  /bots/{bot_id}/dependencies/plan:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Requested operations
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.WorkspaceDependencyPlanRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workspacedeps.Plan'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Prepare an immutable workspace dependency plan
       tags:
       - containerd
   /bots/{bot_id}/dependencies/preflight:

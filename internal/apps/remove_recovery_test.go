@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/felinics/memoh/internal/workspacedeps"
 )
 
 type removalConnectors struct {
@@ -115,7 +117,7 @@ func TestDiscoveryErrorNeverBecomesPublicFailureText(t *testing.T) {
 	view := f.deps.list()
 	view.DiscoveryError = "bridge dial 10.0.0.8 password=synthetic-test-secret"
 	f.depFaults.view = &view
-	_, err := f.service.Update(t.Context(), testBotID, f.inst.ID, &recorder{})
+	_, err := f.service.Remove(t.Context(), testBotID, f.inst.ID, RemoveOptions{}, &recorder{})
 	if err == nil || !strings.Contains(err.Error(), view.DiscoveryError) {
 		t.Fatalf("logs must retain the cause: %v", err)
 	}
@@ -149,5 +151,23 @@ func TestRemoveRequiredAppFailureKeepsParentRetryable(t *testing.T) {
 	}
 	if strings.Count(rec.types(), "done=removed") != 1 {
 		t.Fatalf("nested completion escaped before parent finished: %s", rec.types())
+	}
+}
+
+func TestRemovalRejectsAChangedReviewedAppBeforeDeletingAnything(t *testing.T) {
+	f := newCleanupFixture(t)
+	preview, err := f.service.RemovalPreview(t.Context(), testBotID, f.inst.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.SetRelease(t.Context(), testBotID, f.inst.ID, f.v2.Revision, f.v2.Version, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.service.Remove(t.Context(), testBotID, f.inst.ID, RemoveOptions{ExpectedRevision: preview.Installation.Revision, DependencyRevisions: preview.DependencyRevisions}, nil)
+	if !errors.Is(err, workspacedeps.ErrPlanChanged) {
+		t.Fatal(err)
+	}
+	if len(f.deps.removed) != 0 {
+		t.Fatal("changed removal deleted a dependency")
 	}
 }

@@ -36,7 +36,7 @@ export interface DependencyPrimaryAction {
   disabled: boolean
 }
 
-export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'viewScript'
+export type DependencyMenuActionKind = 'install' | 'reinstall' | 'rollback' | 'viewScript' | 'remove'
 
 export interface DependencyMenuAction {
   kind: DependencyMenuActionKind
@@ -51,7 +51,7 @@ export interface DependencyMenuAction {
   separatorBefore: boolean
 }
 
-export type DependencyConfirmMode = 'install' | 'update' | 'reinstall'
+export type DependencyConfirmMode = 'install' | 'update' | 'reinstall' | 'remove'
 
 export type DependencyProgressStatus = 'running' | 'done' | 'error' | 'unknown'
 
@@ -303,9 +303,16 @@ export function dependencyMenuActions(
       separatorBefore: false,
     })
   }
-  // Removal is not offered per dependency: the App that references the
-  // dependency removes it, so shared copies are never pulled out from under
-  // another App.
+  if (dependencyAllows(item, 'remove')) {
+    items.push({ kind: 'remove', operation: 'remove', labelKey: 'dependenciesPlan.actions.remove', destructive: true, disabled: readonly, separatorBefore: items.length > 0 })
+  }
   if (scripted) items.push({ ...viewScript, separatorBefore: items.length > 0 })
   return items
+}
+
+/** These stable codes require fresh user review, never automatic replanning. */
+export function dependencyPlanNeedsReview(code?: string): boolean {
+  return code === 'workspace_dependency.plan_changed'
+    || code === 'workspace_dependency.definition_unavailable'
+    || code === 'workspace_dependency.definition_invalid'
 }

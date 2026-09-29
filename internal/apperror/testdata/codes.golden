@@ -112,6 +112,7 @@ search_provider.type_conflict	409
 session.model_preference_conflict	409
 session_runtime.abort_failed	500
 session_runtime.history_inconsistent	500
+session_runtime.interrupted	503
 session_runtime.invocation_conflict	409
 session_runtime.publish_failed	503
 session_runtime.reset_conflict	409
@@ -148,11 +149,14 @@ workspace_dependency.catalog_unavailable	503
 workspace_dependency.definition_invalid	502
 workspace_dependency.definition_unavailable	503
 workspace_dependency.discovery_failed	503
+workspace_dependency.graph_unresolved	409
 workspace_dependency.not_found	404
 workspace_dependency.operation_failed	500
+workspace_dependency.plan_changed	409
 workspace_dependency.platform_unsupported	422
+workspace_dependency.prerequisite_missing	409
+workspace_dependency.referenced	409
 workspace_dependency.request_invalid	400
 workspace_dependency.rollback_unavailable	409
 workspace_dependency.workspace_missing	409
 workspace_dependency.workspace_not_running	409
-session_runtime.interrupted	503

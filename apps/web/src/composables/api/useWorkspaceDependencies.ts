@@ -41,7 +41,7 @@ export type DependencyOperationResponse = HandlersWorkspaceDependencyOperationRe
  * an overlay for a dependency an App already references; removal belongs
  * to the App. Rollback is synchronous.
  */
-export type DependencyOperationAction = 'install' | 'update' | 'reinstall'
+export type DependencyOperationAction = 'install' | 'update' | 'reinstall' | 'remove'
 
 export const BOT_DEPENDENCIES_QUERY_KEY = 'bot-dependencies'
 
@@ -93,9 +93,11 @@ export async function preflightDependencies(
 export async function rollbackDependency(
   botId: string,
   depId: string,
+  planId: string,
 ): Promise<DependencyOperationResponse> {
   const { data } = await postBotsByBotIdDependenciesByDepIdRollback({
     path: { bot_id: botId, dep_id: depId },
+    body: { plan_id: planId },
     throwOnError: true,
   })
   return data
