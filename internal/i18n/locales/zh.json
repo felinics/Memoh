@@ -474,6 +474,10 @@
       "unsupportedLegacyEndpoint": "该端点不支持 requested skills。",
       "invalidQuickActionScope": "该快捷操作不能绑定到 session。",
       "permissionDenied": "你没有权限使用该 slash 命令。",
+      "permissionSessionRequired": "请先进入一个外部 Agent 会话，再使用 /permission。",
+      "permissionModeUnsupported": "这个 Agent 没有声明可切换的会话模式。",
+      "permissionModeUnavailable": "这个模式不适用于当前 Agent 会话。",
+      "permissionModeFailed": "无法读取或切换 Agent 会话模式。",
       "reservedSkillMetadata": "不能提交保留的 skill metadata。",
       "generic": "slash 命令执行失败。"
     }

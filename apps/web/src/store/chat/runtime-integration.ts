@@ -10,6 +10,7 @@ import type { createChatRealtimeController } from './realtime'
 import type { RuntimeProjectionChange } from './runtime-client'
 import { isRuntimeRunActive } from './runtime-projection'
 import type { createSessionList } from './session-list'
+import { commandActionErrorMessage } from './messages'
 import { CommandStreamError, StreamFailureError, failureStage } from './send'
 import type {
   ChatAssistantTurn,
@@ -17,6 +18,11 @@ import type {
   ChatViewTarget,
 } from './types'
 import type { createChatViewRegistry } from './view-registry'
+
+// The catalog code of a WS failure frame.
+export function wsFrameErrorCode(event: { code?: string }): string {
+  return event.code?.trim() ?? ''
+}
 
 type AssistantStreams = ReturnType<typeof createAssistantStreamRegistry>
 type Decisions = ReturnType<typeof createChatDecisions>
@@ -263,7 +269,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (event.type === 'command_error' && invocationId && pending) {
         deps.assistantStreams.rejectAssistantStream(
           invocationId,
-          new CommandStreamError(event.error?.message || 'slash command failed'),
+          new CommandStreamError(commandActionErrorMessage(event), event),
         )
       }
       return
@@ -281,10 +287,15 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         pending.replacesTurn,
         deps.hasVisibleAssistantBlocks(pending.assistantTurn),
       )
+      // History keeps a turn the server accepted and failed with a code; a
+      // send refused before acceptance is not in history and returns to the
+      // composer without leaving a turn behind.
+      const acceptedWithCode = Boolean(pending.assistantTurn.runtimeRunId?.trim())
+        && Boolean(wsFrameErrorCode(event))
       if (
         stage === 'startup'
         && !deps.hasVisibleAssistantBlocks(pending.assistantTurn)
-        && !event.code
+        && !acceptedWithCode
       ) {
         deps.removeTurnFromSession(
           pending.botId,
@@ -294,7 +305,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       }
       deps.assistantStreams.rejectAssistantStream(
         invocationId,
-        new StreamFailureError(message, stage, event.feedback ?? event),
+        new StreamFailureError(message, stage, event),
       )
     }
   }

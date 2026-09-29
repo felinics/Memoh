@@ -474,6 +474,10 @@
       "unsupportedLegacyEndpoint": "This endpoint does not support requested skills.",
       "invalidQuickActionScope": "This quick action cannot be scoped to a session.",
       "permissionDenied": "You do not have permission to use that slash command.",
+      "permissionSessionRequired": "Open an external-Agent session before using /permission.",
+      "permissionModeUnsupported": "This Agent does not declare selectable session modes.",
+      "permissionModeUnavailable": "That mode is not available for this Agent session.",
+      "permissionModeFailed": "The Agent session mode could not be loaded or changed.",
       "reservedSkillMetadata": "Reserved skill metadata cannot be supplied.",
       "generic": "Slash command failed."
     }

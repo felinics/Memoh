@@ -349,17 +349,11 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 
 			// A persisted turn_id is the only grouping key. Plain-text assistant
 			// messages and tool calls with that same id remain one reply.
-			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 && len(notices) == 0 {
-				if code := persistedHistoryErrorCode(raw.Metadata); code != "" {
-					if pending == nil {
-						pending = newPendingAssistantTurn(raw)
-					}
-					appendPendingAssistantMessage(pending, UIMessage{
-						Type:    UIMessageError,
-						Code:    code,
-						Content: persistedHistoryErrorDetail(raw.Metadata),
-					})
-				}
+			// A row that recorded a failure keeps its error block after whatever
+			// output it already had, so a partially answered turn still shows why
+			// it stopped once history is reloaded.
+			errorCode := persistedHistoryErrorCode(raw.Metadata)
+			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 && len(notices) == 0 && errorCode == "" {
 				continue
 			}
 
@@ -397,6 +391,13 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 					ID:          pending.NextID,
 					Type:        UIMessageAttachments,
 					Attachments: attachments,
+				})
+			}
+			if errorCode != "" {
+				appendPendingAssistantMessage(pending, UIMessage{
+					Type:    UIMessageError,
+					Code:    errorCode,
+					Content: persistedHistoryErrorDetail(raw.Metadata),
 				})
 			}
 

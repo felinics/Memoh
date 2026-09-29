@@ -247,6 +247,12 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	if strings.Contains(message, "image pull failed") {
 		t.Fatalf("backend error leaked into the stream message %q", message)
 	}
+	if last["code"] != "workspace_setup_failed" {
+		t.Fatalf("error code = %#v, want workspace_setup_failed", last["code"])
+	}
+	if _, ok := last["i18n_key"]; ok {
+		t.Fatalf("error event = %#v, want no i18n_key", last)
+	}
 	// The handler only records intent; bots.status is derived by the
 	// reconciler, so the request path must not touch it.
 	if streamDB.status != "" {

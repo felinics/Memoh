@@ -642,11 +642,26 @@ type misskeyBlockStream struct {
 	closed      bool
 }
 
-func (s *misskeyBlockStream) Push(_ context.Context, event channel.PreparedStreamEvent) error {
+func (s *misskeyBlockStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s.closed {
 		return nil
 	}
 	switch event.Type {
+	case channel.StreamEventError:
+		errText := redact.Text(strings.TrimSpace(event.Error))
+		s.textBuilder.Reset()
+		s.attachments = nil
+		s.final = nil
+		if errText == "" {
+			return nil
+		}
+		return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
+			Target: s.target,
+			Message: channel.PreparedMessage{Message: channel.Message{
+				Format: channel.MessageFormatPlain,
+				Text:   channel.ErrorReplyText(event.ErrorCode, errText),
+			}},
+		})
 	case channel.StreamEventDelta:
 		if strings.TrimSpace(event.Delta) != "" && event.Phase != channel.StreamPhaseReasoning {
 			s.textBuilder.WriteString(event.Delta)

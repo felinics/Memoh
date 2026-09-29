@@ -187,7 +187,6 @@ func TestValidateStreamEventInvalidPayload(t *testing.T) {
 		{name: "empty attachment payload", event: StreamEvent{Type: StreamEventAttachment}},
 		{name: "processing failed missing error", event: StreamEvent{Type: StreamEventProcessingFailed}},
 		{name: "missing final payload", event: StreamEvent{Type: StreamEventFinal}},
-		{name: "missing error payload", event: StreamEvent{Type: StreamEventError}},
 		{name: "unsupported type", event: StreamEvent{Type: StreamEventType("unknown")}},
 	}
 
@@ -252,6 +251,61 @@ func TestManagerStreamAttachmentUsesDynamicOutboundCapabilities(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "attachments") {
 		t.Fatalf("expected dynamic attachment capability error, got %v", err)
+	}
+}
+
+func TestManagerStreamErrorReplyText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		event StreamEvent
+		want  []StreamEvent
+	}{
+		{
+			name:  "coded copy reaches the adapter",
+			event: StreamEvent{Type: StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
+			want:  []StreamEvent{{Type: StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"}},
+		},
+		{
+			name:  "uncoded text reaches the adapter",
+			event: StreamEvent{Type: StreamEventError, Error: "boom"},
+			want:  []StreamEvent{{Type: StreamEventError, Error: "boom"}},
+		},
+		{name: "blank text is dropped", event: StreamEvent{Type: StreamEventError, Error: " \n "}},
+		{name: "code without text is dropped", event: StreamEvent{Type: StreamEventError, ErrorCode: "workspace.unreachable"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			channelType := ChannelType("stream-error-reply")
+			registry := NewRegistry()
+			if err := registry.Register(&streamValidationAdapter{channelType: channelType}); err != nil {
+				t.Fatalf("register adapter failed: %v", err)
+			}
+			manager := &Manager{registry: registry, attachmentStore: channeltest.NewMemoryAttachmentStore()}
+			recorder := &recordingStream{}
+			stream := &managerOutboundStream{
+				manager:     manager,
+				config:      ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+				stream:      recorder,
+				channelType: channelType,
+				target:      "chat-1",
+				policy:      manager.resolveOutboundPolicy(channelType),
+			}
+			if err := stream.Push(context.Background(), tt.event); err != nil {
+				t.Fatalf("Push returned error: %v", err)
+			}
+			got := recorder.Events()
+			if len(got) != len(tt.want) {
+				t.Fatalf("adapter events = %#v, want %#v", got, tt.want)
+			}
+			for i := range got {
+				if got[i].Type != tt.want[i].Type || got[i].Error != tt.want[i].Error || got[i].ErrorCode != tt.want[i].ErrorCode {
+					t.Fatalf("adapter event %d = %#v, want %#v", i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }
 

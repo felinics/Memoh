@@ -22,6 +22,18 @@ export interface MemohError {
   fault?: ApiErrorFault
 }
 
+/**
+ * An error raised by this client's own code whose message is already copy for
+ * the user, such as a form check. resolveApiErrorMessage shows its message;
+ * the text of any other error is never shown.
+ */
+export class UserFacingError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UserFacingError'
+  }
+}
+
 const apiErrorFaults: readonly string[] = ['client', 'server', 'dependency', 'canceled']
 
 // The framework codes for client statuses, so an unrecognized code still gets
@@ -97,26 +109,25 @@ function formatMessage(template: string, args?: ErrorRecord): string {
   })
 }
 
-function renderI18nMessage(key: string, args?: ErrorRecord): string {
+/**
+ * The copy for an i18n key in the stored locale, for code outside a component
+ * that has no vue-i18n instance. Empty when no locale has the key.
+ */
+export function renderI18nMessage(key: string, args?: ErrorRecord): string {
   const trimmed = key.trim()
   const template = lookupMessage(currentLocale(), trimmed) || lookupMessage('en', trimmed)
   return template ? formatMessage(template, args).trim() : ''
 }
 
+// The copy for an error is looked up by its code alone. A server-supplied
+// i18n_key is not read: every code the server sends has copy under
+// errors.<code>, including the rows written before the key was dropped.
 function pickApiFeedbackMessage(error: unknown): string {
   for (const record of collectErrorRecords(error)) {
-    const args = asRecord(record.args) ?? undefined
-
-    const explicitKey = record.i18n_key ?? record.i18nKey
-    if (typeof explicitKey === 'string' && explicitKey.trim()) {
-      const rendered = renderI18nMessage(explicitKey, args)
-      if (rendered) return rendered
-    }
-
     const code = (typeof record.code === 'string' && record.code.trim())
       || (typeof record.error_code === 'string' && record.error_code.trim())
     if (code) {
-      const rendered = renderI18nMessage(`errors.${code}`, args)
+      const rendered = renderI18nMessage(`errors.${code}`, asRecord(record.args) ?? undefined)
       if (rendered) return rendered
     }
   }
@@ -151,6 +162,20 @@ function pickFaultMessage(error: unknown): string | undefined {
     return renderI18nMessage('errors.internal')
   }
   return undefined
+}
+
+// An error with neither copy nor a fault is described by its HTTP status
+// alone, the same way: what the client got wrong for a 4xx, a retry for a 5xx.
+function pickStatusMessage(error: unknown): string {
+  for (const record of collectErrorRecords(error)) {
+    const status = readStatus(record)
+    if (status === undefined) continue
+    if (status >= 400 && status < 500) {
+      return renderI18nMessage(`errors.${clientStatusCodes[status] ?? 'http.bad_request'}`)
+    }
+    if (status >= 500) return renderI18nMessage('errors.internal')
+  }
+  return ''
 }
 
 function pickErrorDetail(error: unknown): string {
@@ -222,7 +247,9 @@ export function isApiErrorAnswered(error: unknown): boolean {
 
 /**
  * The message to show for error. It is empty for a canceled request, which is
- * not shown.
+ * not shown. The error's own text is shown only for a UserFacingError: any
+ * other error this client has no copy, fault or status for is described by
+ * fallback.
  */
 export function resolveApiErrorMessage(
   error: unknown,
@@ -234,12 +261,10 @@ export function resolveApiErrorMessage(
   if (faultMessage === '') return ''
   const detail = feedback
     || faultMessage
+    || (error instanceof UserFacingError ? error.message.trim() : '')
+    || pickStatusMessage(error)
     || pickNetworkErrorMessage(error)
-    || pickErrorDetail(error)
-  const documentStart = detail.replace(/^(?:<!--[\s\S]*?-->\s*)+/, '')
-  if (!detail || /^(?:<!doctype\s+html\b|<html\b)/i.test(documentStart)) {
-    return fallback
-  }
+  if (!detail) return fallback
 
   if (options.prefixFallback) {
     return `${fallback}: ${detail}`

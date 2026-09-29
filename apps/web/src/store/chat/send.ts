@@ -64,8 +64,8 @@ export function failureStage(assistantTurn: ChatAssistantTurn, replacesTurn: boo
 }
 
 export class CommandStreamError extends StreamFailureError {
-  constructor(message: string) {
-    super(message, 'startup')
+  constructor(message: string, feedback?: unknown) {
+    super(message, 'startup', feedback)
     this.name = 'CommandStreamError'
   }
 }

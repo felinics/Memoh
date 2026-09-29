@@ -44,6 +44,7 @@ import (
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/redact"
 	"github.com/felinics/memoh/internal/runtimefence"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
@@ -184,7 +185,9 @@ type CommandEventResponse struct {
 	ActionID      string               `json:"action_id,omitempty"`
 	Terminal      bool                 `json:"terminal"`
 	Result        *CommandActionResult `json:"result,omitempty"`
-	Error         *CommandActionError  `json:"error,omitempty"`
+	// Code and Message describe a command_error; the client renders the code.
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type CommandActionResult struct {
@@ -203,11 +206,6 @@ type CommandActionListItem struct {
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 	Kind        string `json:"kind,omitempty"`
-}
-
-type CommandActionError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
 }
 
 // ExecuteQuickAction godoc
@@ -276,7 +274,7 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	event := commandEvent(req.InvocationID, req.ComposerScope, sessionID, actionID)
 	if slashErr != nil {
 		event.Type = "command_error"
-		event.Error = &CommandActionError{Code: slashErr.Code, Message: slashUserMessage(slashErr.Code)}
+		event.Code, event.Message = slashErr.Code, slashUserMessage(slashErr.Code)
 		return c.JSON(http.StatusOK, event)
 	}
 	event.Type = "command_result"
@@ -618,7 +616,7 @@ func webActionID(resource, action string) string {
 func sendWSCommandError(writer *wsWriter, msg wsClientMessage, code string) {
 	event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, "")
 	event.Type = "command_error"
-	event.Error = &CommandActionError{Code: code, Message: slashUserMessage(code)}
+	event.Code, event.Message = code, slashUserMessage(code)
 	writer.SendJSON(event)
 }
 
@@ -672,7 +670,7 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 		}
 		event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID)
 		event.Type = "command_error"
-		event.Error = &CommandActionError{Code: string(public.Code), Message: public.Detail}
+		event.Code, event.Message = string(public.Code), public.Detail
 		writer.SendJSON(event)
 		return
 	}
@@ -798,7 +796,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if jsonBodyHasKey(body, "requested_skills") {
 		event := commandEvent("", "", "", "")
 		event.Type = "command_error"
-		event.Error = &CommandActionError{Code: slash.CodeUnsupportedLegacyEndpoint, Message: slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)}
+		event.Code, event.Message = slash.CodeUnsupportedLegacyEndpoint, slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)
 		return c.JSON(http.StatusBadRequest, event)
 	}
 	var req LocalChannelMessageRequest
@@ -827,7 +825,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if err := channel.RejectReservedSkillMetadata(req.Message); err != nil {
 		event := commandEvent("", "", "", "")
 		event.Type = "command_error"
-		event.Error = &CommandActionError{Code: slash.CodeReservedSkillMetadata, Message: slashUserMessage(slash.CodeReservedSkillMetadata)}
+		event.Code, event.Message = slash.CodeReservedSkillMetadata, slashUserMessage(slash.CodeReservedSkillMetadata)
 		return c.JSON(http.StatusBadRequest, event)
 	}
 	// Slash CONTROL input (commands, skill activation) is WS-only; the legacy
@@ -837,7 +835,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if decision := h.classifyWebSlash(strings.TrimSpace(req.Message.PlainText()), len(req.Message.Attachments) > 0, slash.SurfaceWebWS); decision.Kind != slash.DecisionNormalChat {
 		event := commandEvent("", "", "", "")
 		event.Type = "command_error"
-		event.Error = &CommandActionError{Code: slash.CodeUnsupportedLegacyEndpoint, Message: slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)}
+		event.Code, event.Message = slash.CodeUnsupportedLegacyEndpoint, slashUserMessage(slash.CodeUnsupportedLegacyEndpoint)
 		return c.JSON(http.StatusOK, event)
 	}
 	cfg, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
@@ -979,7 +977,8 @@ type wsOutboundEvent struct {
 	Duplicate bool   `json:"duplicate,omitempty"`
 	Data      any    `json:"data,omitempty"`
 	Message   string `json:"message,omitempty"`
-	Feedback  any    `json:"feedback,omitempty"`
+	// Args are the public parameters of Code, for the client's copy of it.
+	Args map[string]string `json:"args,omitempty"`
 	// Control, ControlID and Applied describe the outcome of a control request.
 	// Applied is reported separately from Code because "the run was already over"
 	// is not a failure: the control was resolved, it simply changed nothing, and a
@@ -1248,16 +1247,24 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	return resolved, nil
 }
 
+// sendWSError sends an uncoded error. Its text is redacted because it may
+// carry a raw cause.
 func sendWSError(writer *wsWriter, ref wsTurnRef, message string) {
 	event := ref.event("error")
-	event.Message = message
+	event.Message = redact.Text(message)
 	writer.SendJSON(event)
 }
 
+// sendWSAgentError sends a stream error. A catalogued code carries its public
+// detail; any other text is redacted before it leaves the server.
 func sendWSAgentError(writer *wsWriter, ref wsTurnRef, streamEvent native.StreamEvent) {
 	event := ref.event("error")
 	event.Code = strings.TrimSpace(streamEvent.Code)
-	event.Message = strings.TrimSpace(streamEvent.Error)
+	if definition, ok := apperror.Lookup(apperror.Code(event.Code)); ok {
+		event.Message = definition.Detail
+	} else {
+		event.Message = redact.Text(strings.TrimSpace(streamEvent.Error))
+	}
 	if event.Message == "" {
 		event.Message = "stream error"
 	}
@@ -1347,8 +1354,9 @@ func newWSAppErrorEvent(ref wsTurnRef, err error) (wsOutboundEvent, bool) {
 		return wsOutboundEvent{}, false
 	}
 	event := ref.event("error")
+	event.Code = string(public.Code)
+	event.Args = public.Args
 	event.Message = public.Detail
-	event.Feedback = public
 	return event, true
 }
 
@@ -2104,7 +2112,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 							if code == "" {
 								code = apperror.CodeRuntimeControlFailed
 							}
-							event.Error = &CommandActionError{Code: string(code)}
+							event.Code = string(code)
 							writer.SendJSON(event)
 							return
 						}

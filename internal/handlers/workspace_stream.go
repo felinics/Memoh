@@ -62,7 +62,7 @@ func streamWorkspaceProvisioning(
 	events <-chan botworkspace.ProgressEvent,
 	await func(ctx context.Context) (botworkspace.Workspace, error),
 	requestID string,
-	sendError func(code, i18nKey, message string),
+	sendError func(code, message string),
 ) workspaceStreamOutcome {
 	// The await runs on a child context so a client that disconnects mid-way
 	// releases this goroutine instead of holding it for the whole budget.
@@ -131,9 +131,9 @@ func streamWorkspaceProvisioning(
 			}
 			if res.err != nil {
 				if errors.Is(res.err, context.DeadlineExceeded) || errors.Is(res.err, context.Canceled) {
-					sendError("workspace_setup_timeout", "bots.create.failedSubtitle", "workspace setup is still in progress; check the bot's workspace page")
+					sendError("workspace_setup_timeout", "workspace setup is still in progress; check the bot's workspace page")
 				} else {
-					sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed")
+					sendError("workspace_setup_failed", "workspace setup failed")
 				}
 				return workspaceStreamOutcome{Workspace: res.w, Failed: true, ErrorSent: true}
 			}
@@ -205,7 +205,7 @@ func workspaceCompleteEvent(ctx context.Context, log *slog.Logger, status worksp
 // sendWorkspaceFailure emits the stable error event for a failed observation.
 // Template bootstrap failures keep their dedicated app-error code; everything
 // else is the generic setup failure without leaking backend details.
-func sendWorkspaceFailure(send func(payload any) bool, sendError func(code, i18nKey, message string), w botworkspace.Workspace, requestID string) {
+func sendWorkspaceFailure(send func(payload any) bool, sendError func(code, message string), w botworkspace.Workspace, requestID string) {
 	if w.LastErrorPhase == botworkspace.PhaseBootstrap {
 		err := errors.New(w.LastError)
 		if event, ok := newWorkspaceSetupAppError(errors.Join(workspace.ErrWorkspaceTemplateBootstrapFailed, err), requestID); ok {
@@ -213,7 +213,7 @@ func sendWorkspaceFailure(send func(payload any) bool, sendError func(code, i18n
 			return
 		}
 	}
-	sendError("workspace_setup_failed", "bots.create.failedSubtitle", "workspace setup failed")
+	sendError("workspace_setup_failed", "workspace setup failed")
 }
 
 // workspaceStreamBudget bounds how long an SSE stream follows a provisioning

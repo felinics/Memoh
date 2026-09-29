@@ -228,7 +228,6 @@ type displayPrepareStreamEvent struct {
 	Type      string            `json:"type"`
 	Step      string            `json:"step,omitempty"`
 	Code      string            `json:"code,omitempty"`
-	I18nKey   string            `json:"i18n_key,omitempty"`
 	Args      map[string]string `json:"args,omitempty"`
 	Detail    string            `json:"detail,omitempty"`
 	Message   string            `json:"message,omitempty"`
@@ -280,12 +279,11 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	send := func(payload displayPrepareStreamEvent) {
 		_ = writeSSEJSON(writer, flusher, payload)
 	}
-	sendError := func(step, code, i18nKey, message string) {
+	sendError := func(step, code, message string) {
 		send(displayPrepareStreamEvent{
 			Type:      "error",
 			Step:      step,
 			Code:      code,
-			I18nKey:   i18nKey,
 			Args:      map[string]string{},
 			Message:   message,
 			RequestID: httpx.RequestID(c),
@@ -305,11 +303,11 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 
 	ctx := c.Request().Context()
 	if h.manager == nil {
-		sendError("checking", "workspace_manager_unavailable", "chat.display.unavailable.manager", "manager not configured")
+		sendError("checking", "workspace_manager_unavailable", "manager not configured")
 		return nil
 	}
 	if !h.manager.BotDisplayEnabled(ctx, botID) {
-		sendError("checking", "workspace_display_disabled", "chat.display.unavailable.disabled", "workspace display is not enabled")
+		sendError("checking", "workspace_display_disabled", "workspace display is not enabled")
 		return nil
 	}
 

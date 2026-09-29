@@ -1278,6 +1278,7 @@ import { useChatScroll } from '../composables/useChatScroll'
 import { useComposerPlacementMotion } from '../composables/useComposerPlacementMotion'
 import { useQueueTurnAnchors } from '../composables/useQueueTurnAnchors'
 import { isRuntimeContinuationUserTurn, isRuntimeSteerUserTurn } from '@/store/chat/types'
+import { resolveCommandErrorMessage } from '@/store/chat/messages'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
 import ChatForkDialog from './chat-fork-dialog.vue'
@@ -1299,7 +1300,7 @@ import { useComposerPair } from '../composables/useComposerPair'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { provideConnectorLogos } from '../composables/useConnectorLogos'
-import { enqueueSteerQueue, enqueueFollowUpQueue, fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
+import { enqueueSteerQueue, enqueueFollowUpQueue, fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionListItem, type CommandEventResponse, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { parseSessionQueueCommand, SessionQueueSubmissionGate } from './session-queue-submission'
 import { localizeRuntimeControls, localizeRuntimeCommandResult } from '@/utils/runtime-control-presentation'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
@@ -1310,7 +1311,7 @@ import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
 import { findMissingRequiredManagedField, readACPAgentConfig } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, normalizeBotAgentRuntime } from '@/utils/bot-agent'
-import { isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
+import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
 import { findLatestPendingChatDecision } from './chat-pending-decision'
@@ -2327,7 +2328,7 @@ async function runPendingPermission(text: string) {
       },
     })
   } catch (error) {
-    complete({ type: 'command_error', terminal: true, error: { code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('chat.modeSwitchFailed')) } })
+    complete({ type: 'command_error', terminal: true, code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('chat.modeSwitchFailed')) })
   }
 }
 
@@ -2434,7 +2435,7 @@ function clearCurrentCommandEvent() {
 
 const commandPanelEvent = computed(() => chatStore.commandEventForScope(currentPaneCommandScope()))
 const commandResult = computed(() => commandPanelEvent.value?.type === 'command_result' ? commandPanelEvent.value.result : null)
-const commandError = computed(() => commandPanelEvent.value?.type === 'command_error' ? commandPanelEvent.value.error : null)
+const commandError = computed(() => commandPanelEvent.value?.type === 'command_error' ? commandPanelEvent.value : null)
 const commandPanelActionID = computed(() => commandPanelEvent.value?.action_id?.trim() ?? '')
 const commandPanelIsError = computed(() => !!commandError.value)
 const presentedCommandResult = computed(() => commandResult.value
@@ -2450,14 +2451,10 @@ const commandPanelTitle = computed(() => {
   if (commandError.value) return t('chat.slash.commandError')
   return presentedCommandResult.value?.title || t('chat.slash.commandResult')
 })
-function localizedCommandErrorMessage(error: CommandActionError): string {
-  const code = error.code.trim()
-  if (code) {
-    const key = `chat.slash.errorMessages.${code}`
-    const translated = t(key)
-    if (translated !== key) return translated
-  }
-  return error.message || t('chat.slash.errorMessages.generic')
+// The chat store's command_error copy, read through vue-i18n so the panel
+// follows a locale switch.
+function localizedCommandErrorMessage(error: CommandEventResponse): string {
+  return resolveCommandErrorMessage(error, key => te(key) || te(key, 'en') ? t(key) : '')
 }
 
 const commandPanelText = computed(() => commandError.value ? localizedCommandErrorMessage(commandError.value) : presentedCommandResult.value?.text || '')
@@ -3160,7 +3157,7 @@ async function setRuntimeMode(modeId: string, modeKind: 'permission' | 'plan' = 
       if (modeKind === 'permission' && activeUsesACPRuntime.value) await setACPMode(modeId)
       else {
         const modes = modeKind === 'plan' ? runtimeControlSnapshot.value?.plan_mode?.available_modes ?? [] : runtimeModes.value
-        if (!modes.some(mode => mode.id === modeId)) throw new Error(t('chat.slash.errorMessages.permission_mode_unavailable'))
+        if (!modes.some(mode => mode.id === modeId)) throw new UserFacingError(t('chat.slash.errorMessages.permission_mode_unavailable'))
         chatStore.setPendingRuntimeMode(modeId, paneTarget.value, modeKind)
       }
     } else await runtimeControls.setMode(modeId, modeKind)
@@ -4013,7 +4010,7 @@ async function handleSend() {
         result: { kind: 'runtime_command', title, ...(Object.keys(result).length ? result : { text: runtimeCommand.completed_text, text_key: 'common.toast.success' }) },
       })
     } catch (error) {
-      complete({ type: 'command_error', terminal: true, error: { code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('errors.runtime_control.failed')) } })
+      complete({ type: 'command_error', terminal: true, code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('errors.runtime_control.failed')) })
     }
     return
   }

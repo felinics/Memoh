@@ -667,9 +667,8 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 			return err
 		}
 	case StreamEventError:
-		if strings.TrimSpace(event.Error) == "" {
-			return errors.New("stream error is required")
-		}
+		// A blank error has nothing to show; Push drops it instead of sending
+		// an empty reply.
 	default:
 		return fmt.Errorf("unsupported stream event type: %s", event.Type)
 	}
@@ -787,6 +786,9 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 	}
 	if err := validateStreamEvent(s.manager.registry, s.channelType, event); err != nil {
 		return err
+	}
+	if event.Type == StreamEventError && strings.TrimSpace(event.Error) == "" {
+		return nil
 	}
 	if event.Type == StreamEventAttachment {
 		if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {

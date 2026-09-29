@@ -41,7 +41,7 @@ func TestStreamWorkspaceProvisioningStopsWhenClientDisconnects(t *testing.T) {
 		events,
 		await,
 		"req-1",
-		func(string, string, string) { errorSent = true },
+		func(string, string) { errorSent = true },
 	)
 
 	if !outcome.Disconnected {
@@ -194,6 +194,9 @@ func TestCreateContainerReportsRestoreFailure(t *testing.T) {
 	errEvent, ok := findEventType(events, "error")
 	if !ok || errEvent["code"] != "workspace_restore_failed" {
 		t.Fatalf("error event = %#v, want workspace_restore_failed", errEvent)
+	}
+	if _, ok := errEvent["i18n_key"]; ok {
+		t.Fatalf("error event = %#v, want no i18n_key", errEvent)
 	}
 }
 

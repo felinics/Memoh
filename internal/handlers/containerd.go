@@ -113,7 +113,6 @@ type createContainerRestoringEvent struct {
 type createContainerErrorEvent struct {
 	Type      string            `json:"type"`
 	Code      string            `json:"code"`
-	I18nKey   string            `json:"i18n_key,omitempty"`
 	Args      map[string]string `json:"args"`
 	Detail    string            `json:"detail,omitempty"`
 	Message   string            `json:"message"`
@@ -426,11 +425,10 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		}
 		return writeSSEData(writer, flusher, string(data)) == nil
 	}
-	sendError := func(code, i18nKey, message string) {
+	sendError := func(code, message string) {
 		send(createContainerErrorEvent{
 			Type:      "error",
 			Code:      code,
-			I18nKey:   i18nKey,
 			Args:      map[string]string{},
 			Message:   message,
 			RequestID: httpx.RequestID(c),
@@ -445,7 +443,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	cancelIntent()
 	if err != nil {
 		h.logger.ErrorContext(c.Request().Context(), "record workspace intent failed", slog.String("bot_id", botID), slog.Any("error", err))
-		sendError("workspace_create_failed", "bots.container.createFailed", "workspace creation could not be scheduled")
+		sendError("workspace_create_failed", "workspace creation could not be scheduled")
 		return nil
 	}
 
@@ -453,10 +451,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	defer cancel()
 	outcome := streamWorkspaceProvisioning(streamCtx, send, events, func(ctx context.Context) (botworkspace.Workspace, error) {
 		return h.workspaces.Await(ctx, botID, intent.DesiredGeneration)
-	}, httpx.RequestID(c), func(code, _ string, message string) {
-		// Workspace-page errors use the container i18n namespace.
-		sendError(code, "bots.container.createFailed", message)
-	})
+	}, httpx.RequestID(c), sendError)
 	if outcome.Failed || outcome.Disconnected {
 		return nil
 	}
@@ -468,7 +463,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 		send(createContainerRestoringEvent{Type: "restoring"})
 		if err := h.manager.RestorePreservedData(streamCtx, botID); err != nil {
 			h.logger.ErrorContext(c.Request().Context(), "restore preserved data failed", slog.String("bot_id", botID), slog.Any("error", err))
-			sendError("workspace_restore_failed", "bots.container.createFailed", "restore preserved data failed: "+err.Error())
+			sendError("workspace_restore_failed", "restore preserved data failed: "+err.Error())
 			return nil
 		}
 		dataRestored = true

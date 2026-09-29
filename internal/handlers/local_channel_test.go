@@ -24,6 +24,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/application"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
 	attachmentpkg "github.com/felinics/memoh/internal/attachment"
@@ -34,6 +35,7 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/media"
+	"github.com/felinics/memoh/internal/redact"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
 	"github.com/felinics/memoh/internal/storage"
@@ -141,6 +143,67 @@ func TestSendWSErrorFromErrorRejectsAdmissionSentinels(t *testing.T) {
 	}
 }
 
+// Uncoded error text leaves the socket redacted; a catalogued code carries its
+// catalog detail instead of the text it came with.
+func TestWSErrorFramesRedactUncodedText(t *testing.T) {
+	redact.ResetForTest()
+	t.Cleanup(redact.ResetForTest)
+	const secret = "ws-secret-value-123456"
+	redact.SetSecrets("ws-error-test", secret)
+	masked := strings.Repeat("*", len(secret))
+	ref := wsTurn("invocation-1", "session-1").withRun("run-1")
+
+	cases := []struct {
+		name        string
+		send        func(*wsWriter)
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name:        "uncoded error",
+			send:        func(w *wsWriter) { sendWSErrorFromError(w, ref, errors.New("dial failed: "+secret)) },
+			wantMessage: "dial failed: " + masked,
+		},
+		{
+			name: "uncoded stream error",
+			send: func(w *wsWriter) {
+				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Error: "provider said " + secret})
+			},
+			wantMessage: "provider said " + masked,
+		},
+		{
+			name: "uncatalogued stream code",
+			send: func(w *wsWriter) {
+				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Error: "provider said " + secret})
+			},
+			wantCode:    "not.in_catalog",
+			wantMessage: "provider said " + masked,
+		},
+		{
+			name: "catalogued stream code",
+			send: func(w *wsWriter) {
+				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: " agent.provider_overloaded ", Error: "provider said " + secret})
+			},
+			wantCode:    "agent.provider_overloaded",
+			wantMessage: "The model provider is overloaded right now. Please try again in a moment.",
+		},
+		{
+			name:        "blank stream error",
+			send:        func(w *wsWriter) { sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Error: "  "}) },
+			wantMessage: "stream error",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			event := decodeWSTestEvent(t, tc.send)
+			code, _ := event["code"].(string)
+			if event["type"] != "error" || code != tc.wantCode || event["message"] != tc.wantMessage {
+				t.Fatalf("event = %#v, want code %q message %q", event, tc.wantCode, tc.wantMessage)
+			}
+		})
+	}
+}
+
 func TestNewWSAppErrorEventUsesPublicCatalogOnly(t *testing.T) {
 	t.Parallel()
 
@@ -151,15 +214,14 @@ func TestNewWSAppErrorEventUsesPublicCatalogOnly(t *testing.T) {
 	if !ok {
 		t.Fatal("newWSAppErrorEvent() did not recognize application error")
 	}
-	feedback, ok := event.Feedback.(apperror.Public)
-	if !ok || feedback.Code != apperror.CodeACPConfigUpdateFailed {
-		t.Fatalf("event feedback = %#v", event.Feedback)
+	if event.Code != string(apperror.CodeACPConfigUpdateFailed) || event.Message != "The external agent could not apply the selected settings. Please retry." {
+		t.Fatalf("event = %#v", event)
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), "SECRET") || strings.Contains(string(data), "i18n_key") {
+	if strings.Contains(string(data), "SECRET") || strings.Contains(string(data), "i18n_key") || strings.Contains(string(data), "feedback") {
 		t.Fatalf("public WebSocket error leaked private or legacy data: %s", data)
 	}
 }
@@ -1052,8 +1114,8 @@ func TestLocalChannelWSQuickActionSkillListRejectsACPSession(t *testing.T) {
 	if event.Type != "command_error" {
 		t.Fatalf("event type = %q, want command_error; event=%#v", event.Type, event)
 	}
-	if event.Error == nil || event.Error.Code != slash.CodeUnsupportedSkillSlashContext {
-		t.Fatalf("error = %#v, want code %q", event.Error, slash.CodeUnsupportedSkillSlashContext)
+	if event.Code != slash.CodeUnsupportedSkillSlashContext {
+		t.Fatalf("code = %q, want %q", event.Code, slash.CodeUnsupportedSkillSlashContext)
 	}
 }
 
@@ -1369,8 +1431,8 @@ func TestPostMessageRejectsSlashOnLegacyRESTEndpoint(t *testing.T) {
 	if event.Type != "command_error" {
 		t.Fatalf("event type = %q, want command_error; event=%#v", event.Type, event)
 	}
-	if event.Error == nil || event.Error.Code != slash.CodeUnsupportedLegacyEndpoint {
-		t.Fatalf("error = %#v, want code %q", event.Error, slash.CodeUnsupportedLegacyEndpoint)
+	if event.Code != slash.CodeUnsupportedLegacyEndpoint {
+		t.Fatalf("code = %q, want %q", event.Code, slash.CodeUnsupportedLegacyEndpoint)
 	}
 }
 
@@ -1764,8 +1826,8 @@ func TestWebQueueCommandErrorsUsePublicCatalog(t *testing.T) {
 				h.executeWSQueueCommand(context.Background(), w, wsClientMessage{SessionID: tc.session, InvocationID: "invocation"}, "user", "bot", action, tc.text)
 			})
 			public, _ := apperror.PublicFrom(apperror.New(tc.code, nil), "")
-			failure := event["error"].(map[string]any)
-			if event["type"] != "command_error" || event["terminal"] != true || failure["code"] != string(tc.code) || failure["message"] != public.Detail {
+			_, nested := event["error"]
+			if event["type"] != "command_error" || event["terminal"] != true || event["code"] != string(tc.code) || event["message"] != public.Detail || nested {
 				t.Fatalf("unexpected queue error envelope: %#v", event)
 			}
 		}

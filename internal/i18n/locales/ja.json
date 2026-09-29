@@ -474,6 +474,10 @@
       "unsupportedLegacyEndpoint": "この endpoint は requested skills に対応していません。",
       "invalidQuickActionScope": "このクイック操作は session に紐づけられません。",
       "permissionDenied": "この slash コマンドを使用する権限がありません。",
+      "permissionSessionRequired": "/permission を使う前に、外部 Agent セッションを開いてください。",
+      "permissionModeUnsupported": "この Agent は選択可能なセッションモードを宣言していません。",
+      "permissionModeUnavailable": "そのモードは現在の Agent セッションでは利用できません。",
+      "permissionModeFailed": "Agent セッションモードを読み込みまたは変更できませんでした。",
       "reservedSkillMetadata": "予約済みの skill metadata は指定できません。",
       "generic": "slash コマンドに失敗しました。"
     }

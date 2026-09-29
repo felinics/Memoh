@@ -3530,6 +3530,7 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 		wantToolName  string
 		wantAttCount  int
 		wantError     string
+		wantErrorCode string
 		wantNilEvents bool
 	}{
 		{
@@ -3616,6 +3617,19 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			wantError: "fallback msg",
 		},
 		{
+			name:          "error with a catalogued code shows its copy",
+			chunk:         `{"type":"error","code":"agent.provider_overloaded","error":"upstream 529 overloaded_error"}`,
+			wantType:      channel.StreamEventError,
+			wantError:     "The model provider is overloaded right now. Please try again in a moment.",
+			wantErrorCode: "agent.provider_overloaded",
+		},
+		{
+			name:      "error with an unknown code keeps its text",
+			chunk:     `{"type":"error","code":"not.in_catalog","error":"something failed"}`,
+			wantType:  channel.StreamEventError,
+			wantError: "something failed",
+		},
+		{
 			name:     "agent_start",
 			chunk:    `{"type":"agent_start","input":{"agent":"planner"}}`,
 			wantType: channel.StreamEventAgentStart,
@@ -3657,7 +3671,7 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(tt.chunk))
+			events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(tt.chunk), i18n.New("en"))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -3694,6 +3708,9 @@ func TestMapStreamChunkToChannelEvents(t *testing.T) {
 			if tt.wantError != "" && ev.Error != tt.wantError {
 				t.Fatalf("expected error %q, got %q", tt.wantError, ev.Error)
 			}
+			if ev.ErrorCode != tt.wantErrorCode {
+				t.Fatalf("expected error code %q, got %q", tt.wantErrorCode, ev.ErrorCode)
+			}
 		})
 	}
 }
@@ -3702,7 +3719,7 @@ func TestMapStreamChunkToChannelEvents_ToolCallFields(t *testing.T) {
 	t.Parallel()
 
 	chunk := `{"type":"tool_call_end","toolName":"calc","toolCallId":"c1","input":{"x":1},"result":{"sum":2}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3726,7 +3743,7 @@ func TestMapStreamChunkToChannelEvents_UserInputRequest(t *testing.T) {
 	t.Parallel()
 
 	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","input":{"questions":[{"text":"Original model input","kind":"single_select","options":[{"label":"Alpha"},{"label":"Beta"}]}]},"metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"Pick one","kind":"single_select","options":[{"id":"q1.o1","label":"Alpha"},{"id":"q1.o2","label":"Beta"}]}]}}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3766,7 +3783,7 @@ func TestMapStreamChunkToChannelEvents_UserInputTextFallback(t *testing.T) {
 	t.Parallel()
 
 	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","input":{"questions":[{"id":"q1","text":"Explain","kind":"text"}]}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3783,7 +3800,7 @@ func TestMapStreamChunkToChannelEvents_UserInputCustomOptionFallback(t *testing.
 	t.Parallel()
 
 	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"Pick one","kind":"single_select","allow_custom":true,"options":[{"id":"q1.o1","label":"Alpha"},{"id":"q1.o2","label":"Beta"}]}]}}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3800,7 +3817,7 @@ func TestMapStreamChunkToChannelEvents_UserInputMultiQuestionKeepsActions(t *tes
 	// show_tool_calls_in_im filter does not drop the pending card. Telegram
 	// rebuilds the paged keyboard from the payload.
 	chunk := `{"type":"user_input_request","toolName":"ask_user","toolCallId":"ask-1","userInputId":"input-1","shortId":7,"status":"pending","metadata":{"ui_payload":{"version":2,"questions":[{"id":"q1","text":"What?","kind":"text"},{"id":"q2","text":"How fast?","kind":"single_select","options":[{"id":"q2.o1","label":"Fast"},{"id":"q2.o2","label":"Slow"}]}]}}}`
-	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk))
+	events, _, err := mapStreamChunkToChannelEvents(json.RawMessage(chunk), i18n.New("en"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3874,7 +3891,7 @@ func TestMapStreamChunkToChannelEvents_FinalMessages(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			events, messages, err := mapStreamChunkToChannelEvents(json.RawMessage(tt.chunk))
+			events, messages, err := mapStreamChunkToChannelEvents(json.RawMessage(tt.chunk), i18n.New("en"))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

@@ -593,7 +593,7 @@ func TestPostgresWSStepHistoryUncodedFailure(t *testing.T) {
 			},
 			[]string{
 				`user "` + directLifecyclePrompt + `"`,
-				`assistant [text "` + got.text + `"]`,
+				`assistant [text "` + got.text + `"] [error ` + code + `]`,
 			},
 		)
 	})
@@ -631,7 +631,7 @@ func TestPostgresWSStepHistoryFailureAfterPartialOutput(t *testing.T) {
 		},
 		[]string{
 			`user "` + directLifecyclePrompt + `"`,
-			`assistant [text "` + wsStepHistoryPartialText + `"]`,
+			`assistant [text "` + wsStepHistoryPartialText + `"] [error agent.response_interrupted]`,
 		},
 	)
 }
@@ -652,7 +652,7 @@ func TestPostgresWSStepHistoryFailureAfterCommittedStep(t *testing.T) {
 		},
 		[]string{
 			`user "` + directLifecyclePrompt + `"`,
-			`assistant [tool] [text "` + wsStepHistoryPartialText + `"]`,
+			`assistant [tool] [text "` + wsStepHistoryPartialText + `"] [error agent.response_interrupted]`,
 		},
 	)
 }

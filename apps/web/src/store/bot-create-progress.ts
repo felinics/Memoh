@@ -17,7 +17,7 @@ import {
   type BotCreateTerminalLine,
 } from '@/composables/api/botCreateTerminal'
 import { markOnboardingCompleted } from '@/composables/useOnboarding'
-import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
+import { apiErrorStatus, parseMemohError, renderI18nMessage, resolveApiErrorMessage } from '@/utils/api-error'
 import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
 import { writeCreatedBotSession, type CreatedBotSession, type CreatedBotSessionRuntime } from '@/pages/bots/created-bot-session'
@@ -83,8 +83,6 @@ const NOTHING_APPLIED: BotCreateStartResult = { settingsApplied: false, agentApp
 export const BOT_STATUS_POLL_INTERVAL_MS = 2000
 export const BOT_STATUS_POLL_BUDGET_MS = 15 * 60 * 1000
 
-const WORKSPACE_FAILURE_FALLBACK = { i18n_key: 'bots.create.failedSubtitle' }
-const WORKSPACE_STILL_PROVISIONING = { i18n_key: 'bots.create.stillProvisioning' }
 const BOT_STATUS_FAILED = 'failed'
 const BOT_STATUS_CREATING = 'creating'
 const CONTAINER_INIT_CHECK = 'container.init'
@@ -167,7 +165,7 @@ async function workspaceFailureDetail(botId: string): Promise<string> {
   } catch {
     // The check list is a nicety; the failure itself is already known.
   }
-  return resolveApiErrorMessage(WORKSPACE_FAILURE_FALLBACK, 'Workspace setup failed')
+  return renderI18nMessage('bots.create.failedSubtitle') || 'Workspace setup failed'
 }
 
 // Owns the bot-create SSE stream and derived state so it survives navigation
@@ -404,7 +402,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         return NOTHING_APPLIED
       }
       if (current.status === BOT_STATUS_CREATING) {
-        failWorkspace(resolveApiErrorMessage(WORKSPACE_STILL_PROVISIONING, 'Workspace setup is still in progress'), 'workspace_setup_timeout')
+        failWorkspace(renderI18nMessage('bots.create.stillProvisioning') || 'Workspace setup is still in progress', 'workspace_setup_timeout')
         return NOTHING_APPLIED
       }
       lines.value = finalizeBotCreateTerminalLines(lines.value)

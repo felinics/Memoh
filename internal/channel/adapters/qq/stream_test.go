@@ -14,11 +14,12 @@ import (
 
 func preparedQQEvent(event channel.StreamEvent) channel.PreparedStreamEvent {
 	prepared := channel.PreparedStreamEvent{
-		Type:   event.Type,
-		Delta:  event.Delta,
-		Error:  event.Error,
-		Status: event.Status,
-		Phase:  event.Phase,
+		Type:      event.Type,
+		Delta:     event.Delta,
+		Error:     event.Error,
+		ErrorCode: event.ErrorCode,
+		Status:    event.Status,
+		Phase:     event.Phase,
 	}
 	if len(event.Attachments) > 0 {
 		prepared.Attachments = make([]channel.PreparedAttachment, 0, len(event.Attachments))
@@ -206,7 +207,7 @@ func TestQQOutboundStreamRejectsAfterClose(t *testing.T) {
 	}
 }
 
-func TestQQOutboundStreamErrorRedactsRegisteredTokenFragments(t *testing.T) {
+func TestQQOutboundStreamErrorReply(t *testing.T) {
 	redact.ResetForTest()
 	t.Cleanup(redact.ResetForTest)
 
@@ -214,24 +215,44 @@ func TestQQOutboundStreamErrorRedactsRegisteredTokenFragments(t *testing.T) {
 	redact.SetSecrets("test", token)
 	prefixHalf := token[:len(token)/2]
 
-	var sent []channel.OutboundMessage
-	stream := &qqOutboundStream{
-		target: "c2c:user-openid",
-		send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
-			sent = append(sent, msg.LogicalMessage())
-			return nil
+	cases := []struct {
+		name  string
+		event channel.StreamEvent
+		want  []string
+	}{
+		{
+			name:  "coded error shows the copy as it is",
+			event: channel.StreamEvent{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
+			want:  []string{"The workspace is unreachable."},
+		},
+		{
+			name:  "uncoded error is redacted and labelled",
+			event: channel.StreamEvent{Type: channel.StreamEventError, Error: "failed: " + prefixHalf},
+			want:  []string{"Error: failed: " + strings.Repeat("*", len(prefixHalf))},
+		},
+		{
+			name:  "blank error sends nothing",
+			event: channel.StreamEvent{Type: channel.StreamEventError, Error: "  "},
+			want:  nil,
 		},
 	}
-
-	err := stream.Push(context.Background(), preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventError, Error: "failed: " + prefixHalf}))
-	if err != nil {
-		t.Fatalf("push error: %v", err)
-	}
-	if len(sent) != 1 {
-		t.Fatalf("expected one outbound message, got %d", len(sent))
-	}
-	if got := sent[0].Message.PlainText(); strings.Contains(got, prefixHalf) {
-		t.Fatalf("expected redacted token fragment, got %q", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent []string
+			stream := &qqOutboundStream{
+				target: "c2c:user-openid",
+				send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
+					sent = append(sent, msg.LogicalMessage().Message.PlainText())
+					return nil
+				},
+			}
+			if err := stream.Push(context.Background(), preparedQQEvent(tc.event)); err != nil {
+				t.Fatalf("push error: %v", err)
+			}
+			if len(sent) != len(tc.want) || strings.Join(sent, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("sent messages = %q, want %q", sent, tc.want)
+			}
+		})
 	}
 }
 

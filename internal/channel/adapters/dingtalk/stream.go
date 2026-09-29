@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 // dingtalkOutboundStream accumulates streaming events and flushes the final message
@@ -100,7 +101,7 @@ func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.Prepare
 		return s.flush(ctx)
 
 	case channel.StreamEventError:
-		text := strings.TrimSpace(event.Error)
+		text := redact.Text(strings.TrimSpace(event.Error))
 		if text == "" {
 			return nil
 		}

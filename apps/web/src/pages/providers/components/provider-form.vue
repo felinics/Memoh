@@ -817,7 +817,7 @@ async function pollOAuthAuthorization(notifyOnSuccess = false) {
     }
   } catch (error) {
     clearDevicePollTimer()
-    toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
+    toast.error(resolveApiErrorMessage(error, t('provider.oauth.authorizeFailed')))
   }
 }
 
@@ -875,7 +875,7 @@ async function handleAuthorize() {
       device: result.device,
     }
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
+    toast.error(resolveApiErrorMessage(error, t('provider.oauth.authorizeFailed')))
   } finally {
     authorizeLoading.value = false
   }
@@ -893,7 +893,7 @@ async function handleRevoke() {
     toast.success(t('provider.oauth.revokeSuccess'))
     await fetchOAuthStatus()
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : t('provider.oauth.revokeFailed'))
+    toast.error(resolveApiErrorMessage(error, t('provider.oauth.revokeFailed')))
   } finally {
     revokeLoading.value = false
   }

@@ -1904,11 +1904,6 @@ export type HandlersChannelMeta = {
     user_config_schema?: ChannelConfigSchema;
 };
 
-export type HandlersCommandActionError = {
-    code?: string;
-    message?: string;
-};
-
 export type HandlersCommandActionListItem = {
     description?: string;
     i18n_key?: string;
@@ -1929,9 +1924,13 @@ export type HandlersCommandActionResult = {
 
 export type HandlersCommandEventResponse = {
     action_id?: string;
+    /**
+     * Code and Message describe a command_error; the client renders the code.
+     */
+    code?: string;
     composer_scope?: string;
-    error?: HandlersCommandActionError;
     invocation_id?: string;
+    message?: string;
     result?: HandlersCommandActionResult;
     session_id?: string;
     terminal?: boolean;

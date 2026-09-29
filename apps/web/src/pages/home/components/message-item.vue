@@ -421,6 +421,7 @@ import MessageActions from './message-actions.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import DependencyMissingBlock from './dependency-missing-block.vue'
 import { isDependencyMissingBlock } from './dependency-missing'
+import { errorBlockText } from './error-block'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 import { useUserStore } from '@/store/user'
 import { useI18n } from 'vue-i18n'
@@ -851,13 +852,14 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
 }
 
 function errorBlockContent(block: Pick<ErrorBlock, 'code' | 'content'> & { args?: Record<string, string> }): string {
-  const code = block.code?.trim()
-  const key = code ? `errors.${code}` : ''
-  return key && te(key) ? t(key, block.args ?? {}) : block.content
+  return errorBlockText(block, t, te)
 }
 
+// A notice's name may be a catalog code with copy; otherwise its own text stands.
 function noticeBlockContent(block: { name?: string; content: string; args?: Record<string, string> }): string {
-  return errorBlockContent({ code: block.name, content: block.content, args: block.args })
+  const code = block.name?.trim()
+  const key = code ? `errors.${code}` : ''
+  return key && te(key) ? t(key, block.args ?? {}) : block.content
 }
 
 // Consecutive tools and reasoning form one process, regardless of tool kind.

@@ -872,6 +872,152 @@ describe('chat-list store', () => {
     },
   )
 
+  // A run that fails after streaming text keeps the text and shows one error
+  // block with the run's code: the in-stream frame is only an early hint, and
+  // history, which records the same code after the text, shows the same turn.
+  it.each([
+    ['error frame first', 'top-level code'],
+    ['projection first', 'top-level code'],
+    ['error frame first', 'different frame code'],
+  ])('shows one error block after partial text, live and after reload (%s, %s)', async (order, position) => {
+      const runCode = 'agent.response_interrupted'
+      h.sendUpdates = [
+        runtime.started,
+        runtime.message({ id: 1, type: 'text', content: 'partial' }),
+      ]
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      const turnId = `turn-${wsRunId(0)}`
+      api.fetchMessagesUI.mockResolvedValue([
+        {
+          id: 'user-1',
+          turn_id: turnId,
+          role: 'user',
+          text: 'hello',
+          attachments: [],
+          timestamp: '2026-09-28T08:00:00.000Z',
+        },
+        {
+          id: 'assistant-1',
+          turn_id: turnId,
+          role: 'assistant',
+          messages: [
+            { id: 0, type: 'text', content: 'partial' },
+            { id: 1, type: 'error', code: runCode, content: '' },
+          ],
+          timestamp: '2026-09-28T08:00:01.000Z',
+          streaming: false,
+        },
+      ])
+      const frame = {
+        type: 'error' as const,
+        run_id: wsRunId(0),
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        message: 'stream reset',
+      }
+      const errorFrame = () => h.streamHandler?.(
+        position === 'top-level code' ? { ...frame, code: runCode }
+        : { ...frame, code: 'agent.provider_auth_failed' })
+      const projection = () => emitRuntime(runtime.failed('stream reset', runCode))
+      if (order === 'error frame first') {
+        errorFrame()
+        projection()
+      } else {
+        projection()
+        errorFrame()
+      }
+      const result = await sending
+
+      // The send reports the frame's code at once; the transcript shows the run's.
+      expect(result).toMatchObject({
+        ok: false,
+        stage: 'stream',
+        errorCode: position === 'different frame code' ? 'agent.provider_auth_failed' : runCode,
+      })
+      expect(store.startupSendFailure).toBeNull()
+      const blocks = (chat = store) => (chat.messages[1] as ChatAssistantTurn).messages
+        .map(block => block.type === 'error' ? `error ${block.code}` : `${block.type} ${'content' in block ? block.content : ''}`)
+      expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      const live = blocks()
+      expect(live).toEqual(['text partial', `error ${runCode}`])
+
+      // A page reload: a fresh store opens the session from history.
+      setActivePinia(createPinia())
+      const reloaded = useChatStore()
+      await reloaded.selectBot('bot-1')
+      await reloaded.selectSession('session-1')
+      await flushPromises()
+      expect(api.fetchMessagesUI).toHaveBeenCalled()
+      expect(reloaded.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      expect(blocks(reloaded)).toEqual(live)
+    })
+
+  // A send the server refused before accepting a run is not in history, so the
+  // composer gets it back and no turn is left behind, whichever position of
+  // the frame carries the code.
+  it.each([
+    ['top-level code', { code: 'acp_agent_not_configured' }],
+  ])('returns a pre-admission failure with a %s to the composer', async (_position, coded) => {
+      h.acceptRuns = false
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      h.streamHandler?.({
+        type: 'error',
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        message: 'raw',
+        ...coded,
+      })
+      const result = await sending
+
+      expect(result).toMatchObject({
+        ok: false,
+        stage: 'startup',
+        restoreInput: 'hello',
+        error: 'External agent setup is incomplete for this bot.',
+        errorCode: 'acp_agent_not_configured',
+      })
+      expect(store.startupSendFailure).toMatchObject({ restoreInput: 'hello' })
+      expect(store.messages).toEqual([])
+    })
+
+  it.each([
+    ['runtime_control.failed', 'The runtime control could not be completed. Try again.'],
+    ['unknown_slash', 'Unknown slash command.'],
+    ['not.a.catalog.code', 'Slash command failed.'],
+  ])('renders a command_error with code %s', async (code, expected) => {
+      h.acceptRuns = false
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      h.streamHandler?.({
+        type: 'command_error',
+        invocation_id: wsInvocationId(0),
+        session_id: 'session-1',
+        terminal: true,
+        code,
+        message: 'server message',
+      })
+      const result = await sending
+
+      expect(result).toMatchObject({
+        ok: false,
+        stage: 'startup',
+        restoreInput: 'hello',
+        error: expected,
+        errorCode: code,
+      })
+    })
+
   it('returns a send to the composer when the socket fails before the server accepts it', async () => {
       const store = useChatStore()
 
@@ -896,7 +1042,7 @@ describe('chat-list store', () => {
   it('uses structured API feedback for startup send failures', async () => {
       api.createSession.mockRejectedValueOnce({
         body: {
-          i18n_key: 'chat.externalAgent.agentNotConfigured',
+          code: 'acp_agent_not_configured',
           message: 'raw backend message',
         },
       })
@@ -3383,6 +3529,25 @@ describe('chat-list store', () => {
       expect(onTurnAppendAborted).not.toHaveBeenCalled()
     })
 
+  it('renders a quick action command_error by its catalog code', async () => {
+      api.executeQuickAction.mockResolvedValueOnce({
+        type: 'command_error',
+        terminal: true,
+        composer_scope: 'bot-1:panel-a',
+        code: 'runtime_control.failed',
+        message: 'server message',
+      })
+      const store = useChatStore()
+
+      await store.selectBot('bot-1')
+      const result = await store.sendMessage('/help', undefined, { composerScope: 'bot-1:panel-a' })
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: 'The runtime control could not be completed. Try again.',
+      })
+    })
+
   it('keeps quick action transport failures as startup command errors', async () => {
       api.executeQuickAction.mockRejectedValueOnce(new Error('network unavailable'))
       const store = useChatStore()
@@ -3394,13 +3559,14 @@ describe('chat-list store', () => {
         ok: false,
         stage: 'startup',
         restoreInput: '/help',
-        error: 'network unavailable',
+        error: 'Slash command failed.',
       })
       const commandEvent = store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:panel-a' })
       expect(commandEvent).toMatchObject({
         type: 'command_error',
         composer_scope: 'bot-1:panel-a',
-        error: { code: 'generic', message: 'network unavailable' },
+        code: 'generic',
+        message: 'Slash command failed.',
       })
     })
 
@@ -3817,10 +3983,8 @@ describe('chat-list store', () => {
         session_id: 'created-session',
         composer_scope: 'bot-1:draft-a',
         terminal: true,
-        error: {
-          code: 'unsupported_skill_slash_context',
-          message: 'Requested skills are not supported here.',
-        },
+        code: 'unsupported_skill_slash_context',
+        message: 'Requested skills are not supported here.',
       })
       const result = await sendPromise
 
@@ -3887,10 +4051,8 @@ describe('chat-list store', () => {
         session_id: 'created-session',
         composer_scope: 'bot-1:draft-a',
         terminal: true,
-        error: {
-          code: 'unsupported_skill_slash_context',
-          message: 'Requested skills are not supported here.',
-        },
+        code: 'unsupported_skill_slash_context',
+        message: 'Requested skills are not supported here.',
       })
       const result = await sendPromise
 
@@ -3972,11 +4134,11 @@ describe('chat-list store', () => {
       expect(store.commandEvent).toMatchObject({
         type: 'command_error',
         session_id: 'session-b',
-        error: { code: 'current_error' },
+        code: 'current_error',
       })
       expect(store.commandEventForScope({ botId: 'bot-1', composerScope: 'bot-1:draft-a' })).toMatchObject({
         type: 'command_error',
-        error: { code: 'late_error' },
+        code: 'late_error',
       })
     })
 

@@ -212,7 +212,8 @@ func TestDiscussRecoveredRetryIsNotBroadcast(t *testing.T) {
 }
 
 // When the handle reports run_terminal but the run ends without one (its owner
-// lost the run), the held error events are broadcast as they arrived.
+// lost the run), the held error events are broadcast as they arrived, with
+// the copy and code of their catalogued code.
 func TestDiscussHeldErrorsReleasedWithoutRunTerminal(t *testing.T) {
 	_, b := runScriptedDiscuss(t, scriptedDiscussService{
 		fakeTurnService: &fakeTurnService{}, reportsTerminal: true,
@@ -221,7 +222,7 @@ func TestDiscussHeldErrorsReleasedWithoutRunTerminal(t *testing.T) {
 			agentevent.StreamEvent{Type: agentevent.AgentAbort},
 		),
 	})
-	assertOneFailure(t, b, "", discussOverloadedCopy)
+	assertOneFailure(t, b, "agent.provider_overloaded", discussOverloadedCopy)
 	if last := b.events[len(b.events)-1]; last.Type != channel.StreamEventError {
 		t.Fatalf("last broadcast = %s, want the released error after agent_end", last.Type)
 	}

@@ -576,11 +576,10 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 		}
 		return true
 	}
-	sendError := func(code, i18nKey, message string) {
+	sendError := func(code, message string) {
 		_ = send(createContainerErrorEvent{
 			Type:      "error",
 			Code:      code,
-			I18nKey:   i18nKey,
 			Args:      map[string]string{},
 			Message:   message,
 			RequestID: httpx.RequestID(c),
@@ -613,7 +612,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 			slog.String("bot_id", bot.ID),
 			slog.Any("error", err),
 		)
-		sendError("bot_ready_update_failed", "bots.create.failedSubtitle", "bot could not be loaded after workspace setup")
+		sendError("bot_ready_update_failed", "bot could not be loaded after workspace setup")
 		return nil
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})

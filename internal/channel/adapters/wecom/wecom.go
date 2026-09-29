@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const Type channel.ChannelType = "wecom"
@@ -318,7 +319,7 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.mu.Unlock()
 		return s.flush(ctx)
 	case channel.StreamEventError:
-		text := strings.TrimSpace(event.Error)
+		text := redact.Text(strings.TrimSpace(event.Error))
 		if text == "" {
 			return nil
 		}

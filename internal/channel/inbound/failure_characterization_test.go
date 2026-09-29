@@ -92,10 +92,10 @@ func assertIMFailure(t *testing.T, got imFailureResult, wantErrCode string, want
 	}
 }
 
-// Scenario 1 and 10: a start failure is shown to the IM user as err.Error().
+// Scenario 1 and 10: a start failure is shown to the IM user.
 //
-// Current behavior: a plain cause leaks its raw text; a coded cause shows the
-// bare code string, because apperror's Error() is the code.
+// Current behavior: a plain cause keeps its raw text, which the adapter labels
+// and redacts; a coded cause shows its code's copy.
 func TestCharacterizeIMStartFailureText_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
@@ -103,12 +103,12 @@ func TestCharacterizeIMStartFailureText_CurrentBehavior(t *testing.T) {
 	}), "", true, "SECRET resolve failed")
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
 		fakeChatGateway: fakeChatGateway{startErr: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("SECRET dial"), nil)},
-	}), "workspace.unreachable", true, "workspace.unreachable")
+	}), "workspace.unreachable", true, "The workspace could not be reached.")
 }
 
 // Scenario 1 and 10 after output started: a turn-port error is shown the same way.
 //
-// Current behavior: raw text for a plain cause, the bare code for a coded one.
+// Current behavior: raw text for a plain cause, the code's copy for a coded one.
 func TestCharacterizeIMTurnErrorText_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
@@ -117,7 +117,7 @@ func TestCharacterizeIMTurnErrorText_CurrentBehavior(t *testing.T) {
 	}), "", true, "SECRET provider exploded")
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
 		tailErr: apperror.Wrap(apperror.CodeAgentResponseInterrupted, errors.New("SECRET cause"), nil),
-	}), "agent.response_interrupted", true, "agent.response_interrupted")
+	}), "agent.response_interrupted", true, "The model response was interrupted. Please try again.")
 }
 
 // Scenario 2: the native runtime gives up after retries; the application layer

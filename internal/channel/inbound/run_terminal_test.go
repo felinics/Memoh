@@ -156,7 +156,7 @@ func TestIMExternalAgentFailureWithRunTerminal(t *testing.T) {
 }
 
 // Without run_terminal, a handle that reports it releases the held error
-// events unchanged.
+// events as they arrived.
 func TestIMHeldErrorsReleasedWithoutRunTerminal(t *testing.T) {
 	t.Parallel()
 	got, failures := runIMTerminal(t, &terminalFailureGateway{scriptedFailureGateway: scriptedFailureGateway{payloads: []string{
@@ -164,8 +164,8 @@ func TestIMHeldErrorsReleasedWithoutRunTerminal(t *testing.T) {
 		`{"type":"agent_abort","messages":[]}`,
 	}}})
 	assertIMFailure(t, got, "", false, overloadedCopy)
-	if failures[0].ErrorCode != "" {
-		t.Fatalf("released event code = %q, want the event unchanged", failures[0].ErrorCode)
+	if failures[0].ErrorCode != "agent.provider_overloaded" {
+		t.Fatalf("released event code = %q, want the event's code", failures[0].ErrorCode)
 	}
 }
 

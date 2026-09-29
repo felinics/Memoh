@@ -227,7 +227,7 @@ func TestCharacterizeWSPlainRunnerError_CurrentBehavior(t *testing.T) {
 
 // Scenario 1 and 10 with a catalogued runner error (X1).
 //
-// Current behavior: the socket frame puts the code only in feedback.code.
+// The socket frame carries the code at the top level with the catalog detail.
 // session_runs records the runner's code in error_code and no message; the run
 // view carries the same code and no error text.
 func TestCharacterizeWSCodedRunnerError(t *testing.T) {
@@ -237,18 +237,10 @@ func TestCharacterizeWSCodedRunnerError(t *testing.T) {
 	r.finish(runErr)
 	sendWSErrorFromError(r.writer, r.ref, runErr)
 
-	frames := r.frames(t)
-	if len(frames) != 1 {
-		t.Fatalf("frames = %#v, want one", frames)
-	}
-	frame := frames[0]
-	if _, hasCode := frame["code"]; hasCode {
-		t.Fatalf("frame = %#v, current behavior has no top-level code", frame)
-	}
-	feedback, _ := frame["feedback"].(map[string]any)
-	if frame["type"] != "error" || feedback["code"] != "workspace.unreachable" || frame["message"] != feedback["detail"] {
-		t.Fatalf("frame = %#v", frame)
-	}
+	assertFrames(t, r.frames(t), []map[string]any{{
+		"type": "error", "run_id": r.admission.RunID, "session_id": failureCharSessionID,
+		"code": "workspace.unreachable", "message": "The workspace could not be reached.",
+	}})
 	if got, want := r.ledgerColumns(t), [3]string{"failed", "workspace.unreachable", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}

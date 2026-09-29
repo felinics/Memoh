@@ -50,7 +50,7 @@ import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime, formatRelativeTime } from '@/utils/date-time'
 import { shortenImageRef } from '@/utils/image-ref'
 import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { UserFacingError, resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
 const { t, locale } = useI18n()
@@ -426,7 +426,7 @@ async function handleCreateContainer() {
   try {
     const gpuDevices = parseCDIDevices(createGPUDevices.value)
     if (createGPUEnabled.value && gpuDevices.length === 0) {
-      throw new Error(t('bots.container.gpuDevicesRequired'))
+      throw new UserFacingError(t('bots.container.gpuDevicesRequired'))
     }
 
     const body: HandlersCreateContainerRequest = {
@@ -516,7 +516,7 @@ function parseLimitInput(value: string, fieldLabel: string): number {
 
   const parsed = Number(trimmed)
   if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(t('bots.container.resourceLimits.invalidNumber', { field: fieldLabel }))
+    throw new UserFacingError(t('bots.container.resourceLimits.invalidNumber', { field: fieldLabel }))
   }
   return parsed
 }

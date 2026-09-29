@@ -21988,17 +21988,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.CommandActionError": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.CommandActionListItem": {
             "type": "object",
             "properties": {
@@ -22052,13 +22041,17 @@ const docTemplate = `{
                 "action_id": {
                     "type": "string"
                 },
+                "code": {
+                    "description": "Code and Message describe a command_error; the client renders the code.",
+                    "type": "string"
+                },
                 "composer_scope": {
                     "type": "string"
                 },
-                "error": {
-                    "$ref": "#/definitions/handlers.CommandActionError"
-                },
                 "invocation_id": {
+                    "type": "string"
+                },
+                "message": {
                     "type": "string"
                 },
                 "result": {

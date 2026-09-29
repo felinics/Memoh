@@ -5,6 +5,7 @@ import {
   isApiErrorCode,
   parseMemohError,
   resolveApiErrorMessage,
+  UserFacingError,
 } from '@/utils/api-error'
 
 describe('resolveApiErrorMessage', () => {
@@ -26,7 +27,6 @@ describe('resolveApiErrorMessage', () => {
     const message = resolveApiErrorMessage({
       body: {
         code: 'no_workspace_exec',
-        i18n_key: 'chat.externalAgent.noWorkspaceExec',
         args: {},
         message: 'raw backend message',
       },
@@ -39,7 +39,6 @@ describe('resolveApiErrorMessage', () => {
     const message = resolveApiErrorMessage({
       message: {
         code: 'no_workspace_exec',
-        i18n_key: 'chat.externalAgent.noWorkspaceExec',
         args: {},
         message: 'raw backend message',
       },
@@ -48,21 +47,24 @@ describe('resolveApiErrorMessage', () => {
     expect(message).toBe('You do not have permission to run workspace commands for this bot.')
   })
 
-  it('renders ACP feedback when WebSocket stream errors carry it under feedback', () => {
+  it('renders a WebSocket error frame by its top-level code', () => {
     locale = 'zh'
 
     const message = resolveApiErrorMessage({
       type: 'error',
+      code: 'no_workspace_exec',
+      args: {},
       message: 'raw backend message',
-      feedback: {
-        code: 'no_workspace_exec',
-        i18n_key: 'chat.externalAgent.noWorkspaceExec',
-        args: {},
-        message: 'raw backend message',
-      },
     }, 'fallback')
 
     expect(message).toBe('你没有执行该 Bot 工作区命令的权限。')
+  })
+
+  it('does not render copy from an i18n_key without a code', () => {
+    expect(resolveApiErrorMessage({
+      i18n_key: 'chat.externalAgent.noWorkspaceExec',
+      message: 'raw backend message',
+    }, 'fallback')).toBe('fallback')
   })
 
   it('reads error_code when code is absent', () => {
@@ -76,8 +78,35 @@ describe('resolveApiErrorMessage', () => {
     }, 'fallback')).toBe('The model did not respond in time. Please try again.')
   })
 
-  it('falls back to existing detail extraction', () => {
-    expect(resolveApiErrorMessage({ detail: 'plain detail' }, 'fallback')).toBe('plain detail')
+  it.each([
+    'plain detail',
+    new Error('plain detail'),
+    { detail: 'plain detail' },
+    { message: 'plain detail' },
+    { response: { data: { error: 'plain detail' } } },
+    new SyntaxError('Unexpected token < in JSON at position 0'),
+  ])('does not show the text of an error without a code: %s', (error) => {
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe('fallback')
+    expect(resolveApiErrorMessage(error, 'fallback', { prefixFallback: true })).toBe('fallback')
+  })
+
+  it.each([
+    [404, 'The requested resource was not found.'],
+    [422, 'The request is invalid.'],
+    [502, 'Something went wrong on the server. Please try again.'],
+  ])('describes an error without a code or fault by its status %d', (status, expected) => {
+    const error = { status, message: 'raw gateway text' }
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
+    expect(resolveApiErrorMessage(error, 'Save failed', { prefixFallback: true })).toBe(`Save failed: ${expected}`)
+  })
+
+  it('shows the message of a UserFacingError', () => {
+    const error = new UserFacingError('Enter at least one GPU device.')
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe('Enter at least one GPU device.')
+    expect(resolveApiErrorMessage(error, 'Save failed', { prefixFallback: true }))
+      .toBe('Save failed: Enter at least one GPU device.')
   })
 
   it.each(['en', 'zh', 'ja'])('localizes durable runtime notices in %s', (language) => {
@@ -105,23 +134,6 @@ describe('resolveApiErrorMessage', () => {
     expect(resolveApiErrorMessage(error, '无法预览备份', { prefixFallback: true })).toBe('无法预览备份')
   })
 
-  it('keeps prefixing plain error details', () => {
-    expect(resolveApiErrorMessage({ detail: 'plain detail' }, 'fallback', { prefixFallback: true }))
-      .toBe('fallback: plain detail')
-  })
-
-  it.each([
-    '<!-- gateway --> plain detail',
-    '<!-- expected <html> --> invalid document',
-    '<!-- prefix -->plain detail <!-- suffix --><html>example</html>',
-    '<!-- unterminated comment with <html>',
-    'Expected <html> at the beginning of the document',
-  ])('preserves non-document error details: %s', (detail) => {
-    expect(resolveApiErrorMessage({ detail }, 'fallback')).toBe(detail)
-    expect(resolveApiErrorMessage({ detail }, 'fallback', { prefixFallback: true }))
-      .toBe(`fallback: ${detail}`)
-  })
-
   it.each([
     '<html><body>Gateway timeout</body></html>',
     '<!-- proxy -->\n<html><body>Gateway timeout</body></html>',
@@ -146,9 +158,9 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
-    ['zh', '启动工作区失败'],
-    ['ja', 'Workspace を起動できませんでした'],
-  ])('localizes workspace errors for %s instead of exposing backend English', (language, expected) => {
+    ['zh', '启动工作区失败，请重试。'],
+    ['ja', 'Workspace を起動できませんでした。もう一度お試しください。'],
+  ])('localizes workspace errors for %s by code, ignoring a legacy i18n_key', (language, expected) => {
     locale = language
 
     const message = resolveApiErrorMessage({
@@ -288,7 +300,7 @@ describe('resolveApiErrorMessage', () => {
     }
 
     expect(parseMemohError(error)?.code).toBe('future.new_condition')
-    expect(resolveApiErrorMessage(error, 'fallback')).toBe('A future error occurred.')
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe('fallback')
   })
 
   it.each([

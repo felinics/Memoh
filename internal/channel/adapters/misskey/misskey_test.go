@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 var (
@@ -203,5 +204,63 @@ func TestBuildInboundMessageRenoteMapsForward(t *testing.T) {
 		inbound.Message.Forward.Sender != "Source" ||
 		inbound.Message.Forward.Date == 0 {
 		t.Fatalf("unexpected forward ref: %#v", inbound.Message.Forward)
+	}
+}
+
+func TestBlockStreamErrorReply(t *testing.T) {
+	redact.ResetForTest()
+	t.Cleanup(redact.ResetForTest)
+	const secret = "misskey-secret-value-123456"
+	redact.SetSecrets("misskey-stream-test", secret)
+
+	cases := []struct {
+		name  string
+		event channel.PreparedStreamEvent
+		want  []string
+	}{
+		{
+			name:  "coded error shows the copy as it is",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
+			want:  []string{"The workspace is unreachable."},
+		},
+		{
+			name:  "uncoded error is redacted and labelled",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "request failed with token " + secret},
+			want:  []string{"Error: request failed with token " + strings.Repeat("*", len(secret))},
+		},
+		{
+			name:  "blank error sends nothing",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "  "},
+			want:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent []string
+			cfg, _ := withMisskeyHTTPStub(t, func(w http.ResponseWriter, r *http.Request) {
+				var note createNoteRequest
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &note)
+				sent = append(sent, note.Text)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"createdNote":{"id":"note-3"}}`))
+			})
+			stream, err := NewMisskeyAdapter(nil).OpenStream(context.Background(), cfg, "note-source", channel.StreamOptions{})
+			if err != nil {
+				t.Fatalf("OpenStream: %v", err)
+			}
+			if err := stream.Push(context.Background(), channel.PreparedStreamEvent{Type: channel.StreamEventDelta, Delta: "draft"}); err != nil {
+				t.Fatalf("Push delta: %v", err)
+			}
+			if err := stream.Push(context.Background(), tc.event); err != nil {
+				t.Fatalf("Push error: %v", err)
+			}
+			if err := stream.Close(context.Background()); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			if strings.Join(sent, "|") != strings.Join(tc.want, "|") || len(sent) != len(tc.want) {
+				t.Fatalf("sent notes = %q, want %q", sent, tc.want)
+			}
+		})
 	}
 }

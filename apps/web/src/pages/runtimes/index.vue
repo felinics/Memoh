@@ -274,7 +274,7 @@ import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
 } from '@/lib/desktop-shell'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { UserFacingError, resolveApiErrorMessage } from '@/utils/api-error'
 
 const { t } = useI18n()
 const desktopRuntimeBridge = inject(DesktopRuntimeKey, undefined)
@@ -451,7 +451,7 @@ const enableDesktopRuntime = connectForm.handleSubmit(async (values) => {
   try {
     created = await createRuntime(name)
     if (!created.id || !created.key) {
-      throw new Error(t('runtimes.thisComputer.invalidCredential'))
+      throw new UserFacingError(t('runtimes.thisComputer.invalidCredential'))
     }
     desktopRuntimeState.value = await bridge.configureRuntime({
       runtimeId: created.id,

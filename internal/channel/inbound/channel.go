@@ -1192,10 +1192,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			return nil
 		}
-		_ = stream.Push(ctx, channel.StreamEvent{
-			Type:  channel.StreamEventError,
-			Error: startErr.Error(),
-		})
+		_ = stream.Push(ctx, channel.ErrorEvent(p.localizer(ctx, identity.BotID), startErr))
 		if statusNotifier != nil {
 			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, startErr); notifyErr != nil {
 				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
@@ -1213,6 +1210,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	// A run that ends with run_terminal is answered from it: error events are
 	// held back and the one failure reply carries the copy for the run's code.
 	failures := runFailureReply{reportsTerminal: turn.ReportsRunTerminal(handle)}
+	loc := p.localizer(ctx, identity.BotID)
 	var (
 		finalMessages []turn.ModelMessage
 		streamErr     error
@@ -1228,7 +1226,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			if failures.observeTerminal(turnEvent) {
 				continue
 			}
-			events, messages, parseErr := mapStreamChunkToChannelEvents(turnEvent.Payload)
+			events, messages, parseErr := mapStreamChunkToChannelEvents(turnEvent.Payload, loc)
 			if parseErr != nil {
 				if p.logger != nil {
 					p.logger.WarnContext(ctx,
@@ -1243,7 +1241,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			for i, event := range events {
 				if isUserInputEvent(&events[i]) {
-					events[i].ToolCall.Locale = p.localizer(ctx, identity.BotID).Locale()
+					events[i].ToolCall.Locale = loc.Locale()
 				}
 				if event.Type == channel.StreamEventAttachment && len(event.Attachments) > 0 {
 					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Attachments)
@@ -1291,7 +1289,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
-	loc := p.localizer(ctx, identity.BotID)
 	if !pushBroken {
 		for _, held := range failures.release() {
 			if pushErr := stream.Push(ctx, held); pushErr != nil {
@@ -1321,10 +1318,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			return streamErr
 		}
 		if !hasFailureReply {
-			failureReply = channel.StreamEvent{
-				Type:  channel.StreamEventError,
-				Error: streamErr.Error(),
-			}
+			failureReply = channel.ErrorEvent(loc, streamErr)
 		}
 		_ = stream.Push(ctx, failureReply)
 		if statusNotifier != nil {
@@ -1768,6 +1762,14 @@ func slashChannelMessageKey(code string) string {
 		return "slash.error.invalidQuickActionScope"
 	case slash.CodePermissionDenied:
 		return "slash.error.permissionDenied"
+	case slash.CodePermissionSessionRequired:
+		return "slash.error.permissionSessionRequired"
+	case slash.CodePermissionModeUnsupported:
+		return "slash.error.permissionModeUnsupported"
+	case slash.CodePermissionModeUnavailable:
+		return "slash.error.permissionModeUnavailable"
+	case slash.CodePermissionModeFailed:
+		return "slash.error.permissionModeFailed"
 	case slash.CodeReservedSkillMetadata:
 		return "slash.error.reservedSkillMetadata"
 	case QueueCommandCodeNoActiveRun:
@@ -2193,6 +2195,7 @@ func contentPartText(part turn.ContentPart) string {
 type agentStreamEnvelope struct {
 	Type     string              `json:"type"`
 	Delta    string              `json:"delta"`
+	Code     string              `json:"code"`
 	Error    string              `json:"error"`
 	Message  string              `json:"message"`
 	Data     json.RawMessage     `json:"data"`
@@ -2212,7 +2215,10 @@ type agentStreamEnvelope struct {
 	Speeches    json.RawMessage `json:"speeches"`
 }
 
-func mapStreamChunkToChannelEvents(chunk json.RawMessage) ([]channel.StreamEvent, []turn.ModelMessage, error) {
+// mapStreamChunkToChannelEvents converts one agent stream chunk. An error
+// event whose code has copy in t is shown with that copy; any other error keeps
+// its own text.
+func mapStreamChunkToChannelEvents(chunk json.RawMessage, t *i18n.Localizer) ([]channel.StreamEvent, []turn.ModelMessage, error) {
 	if len(chunk) == 0 {
 		return nil, nil, nil
 	}
@@ -2397,6 +2403,16 @@ func mapStreamChunkToChannelEvents(chunk json.RawMessage) ([]channel.StreamEvent
 			},
 		}, finalMessages, nil
 	case "error":
+		code := apperror.Code(strings.TrimSpace(envelope.Code))
+		if text, ok := channel.ErrorCodeText(t, code, nil); ok {
+			return []channel.StreamEvent{
+				{
+					Type:      channel.StreamEventError,
+					Error:     text,
+					ErrorCode: string(code),
+				},
+			}, finalMessages, nil
+		}
 		streamError := strings.TrimSpace(envelope.Error)
 		if streamError == "" {
 			streamError = strings.TrimSpace(envelope.Message)
@@ -3897,6 +3913,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 		close(errCh)
 	}()
 
+	loc := p.localizer(ctx, identity.BotID)
 	var finalMessages []turn.ModelMessage
 	var continuationErr error
 	accepted := false
@@ -3918,7 +3935,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 				}
 				continue
 			}
-			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
+			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk, loc)
 			if parseErr != nil {
 				if p.logger != nil {
 					p.logger.WarnContext(ctx, "approval stream chunk parse failed", slog.Any("error", parseErr))
@@ -3930,7 +3947,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 			}
 			for _, event := range events {
 				if isUserInputEvent(&event) {
-					event.ToolCall.Locale = p.localizer(ctx, identity.BotID).Locale()
+					event.ToolCall.Locale = loc.Locale()
 				}
 				// Approval continuations should not flash transient "running"
 				// tool messages in IM. If tool visibility is enabled, the
@@ -3960,14 +3977,13 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 
 	if continuationErr != nil {
 		if !accepted {
-			_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: p.localizer(ctx, identity.BotID).T("cmd.userInput.submitFailed")})
+			_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: loc.T("cmd.userInput.submitFailed")})
 			return continuationErr
 		}
 		if p.logger != nil {
 			p.logger.WarnContext(ctx, "accepted decision delivery interrupted", slog.Any("error", continuationErr))
 		}
-		public, _ := apperror.PublicFrom(apperror.Wrap(apperror.CodeAgentResponseInterrupted, continuationErr, nil), "")
-		if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: public.Detail}); err != nil {
+		if err := stream.Push(ctx, channel.RunFailureEvent(loc, apperror.CodeAgentResponseInterrupted, nil)); err != nil {
 			return err
 		}
 		return closeStream()

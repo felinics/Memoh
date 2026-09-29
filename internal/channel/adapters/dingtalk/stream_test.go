@@ -2,6 +2,7 @@ package dingtalk
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 func TestOutboundStreamSnapshotBuffersVisibleTextAndAttachments(t *testing.T) {
@@ -155,6 +157,78 @@ func TestOpenStreamUsesSourceMessageIDAsReply(t *testing.T) {
 	}
 }
 
+func TestOutboundStreamErrorReply(t *testing.T) {
+	redact.ResetForTest()
+	t.Cleanup(redact.ResetForTest)
+	const secret = "dingtalk-secret-value-123456"
+	redact.SetSecrets("dingtalk-stream-test", secret)
+
+	cases := []struct {
+		name  string
+		event channel.PreparedStreamEvent
+		want  []string
+	}{
+		{
+			name:  "coded error shows the copy as it is",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
+			want:  []string{"The workspace is unreachable."},
+		},
+		{
+			name:  "uncoded error is redacted and labelled",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "request failed with token " + secret},
+			want:  []string{"Error: request failed with token " + strings.Repeat("*", len(secret))},
+		},
+		{
+			name:  "blank error sends nothing",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "  "},
+			want:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var (
+				mu   sync.Mutex
+				sent []string
+			)
+			server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Text struct {
+						Content string `json:"content"`
+					} `json:"text"`
+				}
+				raw, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(raw, &body)
+				mu.Lock()
+				sent = append(sent, body.Text.Content)
+				mu.Unlock()
+			}))
+			t.Cleanup(server.Close)
+
+			adapter := NewDingTalkAdapter(nil)
+			cfg := channel.ChannelConfig{ID: "cfg-1"}
+			adapter.rememberWebhook(cfg.ID, "source-1", sessionWebhookContext{
+				SessionWebhook: server.URL,
+				ExpiredTime:    time.Now().Add(time.Minute).UnixMilli(),
+			})
+			stream, err := adapter.OpenStream(context.Background(), cfg, "user:alice", channel.StreamOptions{SourceMessageID: "source-1"})
+			if err != nil {
+				t.Fatalf("OpenStream: %v", err)
+			}
+			if err := stream.Push(context.Background(), channel.PreparedStreamEvent{Type: channel.StreamEventDelta, Delta: "draft"}); err != nil {
+				t.Fatalf("Push delta: %v", err)
+			}
+			if err := stream.Push(context.Background(), tc.event); err != nil {
+				t.Fatalf("Push error: %v", err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(sent) != len(tc.want) || strings.Join(sent, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("sent messages = %q, want %q", sent, tc.want)
+			}
+		})
+	}
+}
+
 // An error replaces the answer: the attachments buffered for it are not sent
 // with the error, nor by a later Close.
 func TestOutboundStreamErrorDropsBufferedAnswer(t *testing.T) {
@@ -186,7 +260,7 @@ func TestOutboundStreamErrorDropsBufferedAnswer(t *testing.T) {
 			Kind:    channel.PreparedAttachmentPublicURL,
 			Logical: channel.Attachment{Type: channel.AttachmentImage, URL: "https://example.com/previous.png"},
 		}}},
-		{Type: channel.StreamEventError, Error: "The workspace is unreachable."},
+		{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
 	}
 	var pushErr error
 	for _, event := range events {

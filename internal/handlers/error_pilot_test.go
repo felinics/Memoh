@@ -62,9 +62,6 @@ func TestDisplayPrepareAppErrorUsesSharedWorkspaceCode(t *testing.T) {
 	if event.Code != string(apperror.CodeWorkspaceUnreachable) {
 		t.Fatalf("code = %q", event.Code)
 	}
-	if event.I18nKey != "" {
-		t.Fatalf("new AppError event exposed i18n_key = %q", event.I18nKey)
-	}
 	if event.Message != "The workspace could not be reached." {
 		t.Fatalf("message = %q", event.Message)
 	}
@@ -104,9 +101,6 @@ func TestWorkspaceSetupAppErrorKeepsBootstrapDiagnosticPrivate(t *testing.T) {
 	}
 	if event.Code != string(apperror.CodeWorkspaceTemplateBootstrapFailed) {
 		t.Fatalf("code = %q", event.Code)
-	}
-	if event.I18nKey != "" {
-		t.Fatalf("i18n_key = %q, want empty", event.I18nKey)
 	}
 	if event.Detail != "The workspace files could not be initialized." {
 		t.Fatalf("detail = %q", event.Detail)

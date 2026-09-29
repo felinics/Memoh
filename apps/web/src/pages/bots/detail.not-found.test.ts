@@ -133,7 +133,8 @@ describe('bot detail page', () => {
     const el = await mountDetail('errs-bot')
 
     expect(el.textContent).toContain('bots.loadFailed')
-    expect(el.textContent).toContain('upstream down')
+    expect(el.textContent).toContain('common.loadFailed')
+    expect(el.textContent).not.toContain('upstream down')
     expect(el.textContent).not.toContain('bots.notFound')
 
     sdk.getBot.mockResolvedValueOnce({ data: existingBot, error: undefined, response: { status: 200 } })

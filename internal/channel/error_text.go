@@ -41,3 +41,17 @@ func RunFailureEvent(t *i18n.Localizer, code apperror.Code, args map[string]stri
 	text, _ := ErrorCodeText(t, apperror.CodeRuntimeRunFailed, nil)
 	return StreamEvent{Type: StreamEventError, Error: text, ErrorCode: string(apperror.CodeRuntimeRunFailed)}
 }
+
+// ErrorEvent is the stream error a channel shows for err. An error whose code
+// has copy is shown with that copy and carries the code; any other error keeps
+// its own text, which the adapter labels and redacts.
+func ErrorEvent(t *i18n.Localizer, err error) StreamEvent {
+	if err == nil {
+		return StreamEvent{Type: StreamEventError}
+	}
+	code := apperror.CodeOf(err)
+	if text, ok := ErrorCodeText(t, code, apperror.ArgsOf(err)); ok {
+		return StreamEvent{Type: StreamEventError, Error: text, ErrorCode: string(code)}
+	}
+	return StreamEvent{Type: StreamEventError, Error: err.Error()}
+}

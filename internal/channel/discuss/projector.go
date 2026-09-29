@@ -118,6 +118,11 @@ func agentEventToChannelEvent(event agentevent.StreamEvent) (channel.StreamEvent
 	case agentevent.AgentEnd, agentevent.AgentAbort:
 		return channel.StreamEvent{Type: channel.StreamEventAgentEnd}, true
 	case agentevent.Error:
+		// A catalogued code gets the channel copy; anything else keeps its text.
+		code := apperror.Code(strings.TrimSpace(event.Code))
+		if text, ok := channel.ErrorCodeText(i18n.New(""), code, nil); ok {
+			return channel.StreamEvent{Type: channel.StreamEventError, Error: text, ErrorCode: string(code)}, true
+		}
 		return channel.StreamEvent{Type: channel.StreamEventError, Error: event.Error}, true
 	default:
 		return channel.StreamEvent{}, false

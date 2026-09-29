@@ -298,7 +298,7 @@ describe('useBotCreateProgressStore', () => {
 
     expect(store.status).toBe('error')
     expect(store.errorCode).toBe('bot.name_taken')
-    expect(store.setupError).toBe('bot name already taken')
+    expect(store.setupError).toBe('The request conflicts with the current state. Refresh and try again.')
   })
 
   it('applies model and memory settings after the bot is ready', async () => {
@@ -531,7 +531,7 @@ describe('useBotCreateProgressStore', () => {
     expect(store.status).toBe('error')
     expect(store.bot).toBeNull()
     expect(store.canRetry).toBe(false)
-    expect(store.setupError).toBe('bot not found')
+    expect(store.setupError).toBe('The requested resource was not found.')
     expect(readCreatedBotSession()).toBeNull()
   })
 

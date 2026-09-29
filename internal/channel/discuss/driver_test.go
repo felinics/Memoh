@@ -482,6 +482,40 @@ func TestHandleReplyWithTurn_UsesPersistedDiscussCursor(t *testing.T) {
 	}
 }
 
+func TestAgentEventToChannelEventMapsErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		event    agentevent.StreamEvent
+		wantText string
+		wantCode string
+	}{
+		{
+			name:     "catalogued code gets channel copy",
+			event:    agentevent.StreamEvent{Type: agentevent.Error, Code: " agent.provider_overloaded ", Error: "raw provider text"},
+			wantText: "The model provider is overloaded right now. Please try again in a moment.",
+			wantCode: "agent.provider_overloaded",
+		},
+		{
+			name:     "unknown code keeps text",
+			event:    agentevent.StreamEvent{Type: agentevent.Error, Code: "not.in_catalog", Error: "raw provider text"},
+			wantText: "raw provider text",
+		},
+		{
+			name:     "uncoded keeps text",
+			event:    agentevent.StreamEvent{Type: agentevent.Error, Error: "raw provider text"},
+			wantText: "raw provider text",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := agentEventToChannelEvent(tt.event)
+			if !ok || got.Type != channel.StreamEventError || got.Error != tt.wantText || got.ErrorCode != tt.wantCode {
+				t.Fatalf("event = %+v ok=%v, want error %q code %q", got, ok, tt.wantText, tt.wantCode)
+			}
+		})
+	}
+}
+
 func TestAgentEventToChannelEventMapsACPDecisionRequests(t *testing.T) {
 	approval, ok := agentEventToChannelEvent(agentevent.StreamEvent{
 		Type:       agentevent.ToolApprovalRequest,

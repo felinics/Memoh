@@ -4,7 +4,6 @@ import { parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 export interface SSEErrorEvent {
   type: 'error'
   code?: string
-  i18n_key?: string
   args?: Record<string, unknown>
   detail?: string
   message: string
@@ -18,7 +17,6 @@ export function isSSEErrorEvent(value: unknown): value is SSEErrorEvent {
     && typeof event.message === 'string'
     && (event.detail === undefined || typeof event.detail === 'string')
     && (event.code === undefined || typeof event.code === 'string')
-    && (event.i18n_key === undefined || typeof event.i18n_key === 'string')
     && (event.args === undefined || (!!event.args && typeof event.args === 'object' && !Array.isArray(event.args)))
     && (event.request_id === undefined || typeof event.request_id === 'string')
 }
