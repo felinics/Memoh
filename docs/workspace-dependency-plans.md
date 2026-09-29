@@ -66,3 +66,19 @@ SSE 提供当前节点、动作、状态、依赖原因，以及失败节点、�
 ```
 
 窄屏下行内容堆叠，标题与确认按钮留在滚动区域外。深色与中文布局使用现有设计 token。
+
+## 运行与界面验收记录
+
+[MEMOH-6](https://linear.app/felinic/issue/MEMOH-6) 跟踪本次修复。2026-09-29 在隔离的 Linux arm64 / Debian 12 原生工作区、PostgreSQL 17 和当前源码构建的 Server 上复测；Web 使用本机开发服务器。文档工具链完成 DOCX → PDF → 文本转换，输出匹配测试内容。
+
+浏览器验证了干净工作区的完整安装预览、冻结脚本详情、480×760 窄屏布局、取消，以及已安装工作区的重复安装。重复安装的 9 个依赖均复用，App 与 Skill 完成；移除 Micromamba 时列出 Pandoc / Poppler 依赖者并禁止执行。以下图片由实际应用捕获，仅代表 Agent 验证，不代表人工 QA：
+
+| 场景 | 截图 |
+| --- | --- |
+| 拓扑计划与传递依赖原因 | [桌面计划](screenshots/dependency-requires/plan-wide.png) |
+| 窄屏内容滚动与固定操作区 | [窄屏计划](screenshots/dependency-requires/plan-narrow.png) |
+| 不可变定义与实际脚本 | [脚本预览](screenshots/dependency-requires/script-preview.png) |
+| 共享前置删除保护 | [拒绝移除](screenshots/dependency-requires/removal-blocked.png) |
+| 重复安装全部复用 | [执行成功](screenshots/dependency-requires/reinstall-reuse-success.png) |
+
+相关 Go、PostgreSQL 集成、迁移回退升级、156 项 Web 测试、Go lint、修改文件 ESLint 和 SDK 类型检查通过。全量 Web 类型检查仍有现有 UI 别名 / 类型环境错误，主线源码对照也失败；UI contract 检查被未修改的 `tool-call-diff-panel.vue` 的加载图标用法阻塞。未实测 Linux amd64、Windows、Apple Virtualization 端到端。
