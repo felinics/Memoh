@@ -49,13 +49,11 @@ func newQueueClient(t *testing.T, handlers map[string]runtimeRpc.Handler) *Clien
 	return NewClient(runtimeRpc.NewClient(conn))
 }
 
-func TestQueueCodesSurviveBothEncodings(t *testing.T) {
+func TestQueueCodesSurviveEnvelope(t *testing.T) {
 	for _, code := range queueCodes {
 		envelope := func(context.Context, json.RawMessage) (any, error) { return nil, queueStatus(code) }
-		legacy := func(context.Context, json.RawMessage) (any, error) { return nil, status.Error(codes.Unknown, code) }
 		encodings := map[string]map[string]runtimeRpc.Handler{
 			"envelope": {MethodQueueEnqueueSteer: envelope},
-			"legacy":   {MethodQueueEnqueueSteer: legacy},
 			"server":   Handlers(nil, &queueHandlerStub{err: inbound.NewQueueCommandError(code)}, nil, nil),
 		}
 		for name, handlers := range encodings {
@@ -72,19 +70,35 @@ func TestQueueCodesSurviveBothEncodings(t *testing.T) {
 	}
 }
 
+// Servers sent a queue code as Unknown with the code as the status message
+// before the envelope. Without the envelope the queue call returns the status
+// as received, without a queue code.
+func TestQueueCallIgnoresPreEnvelopeText(t *testing.T) {
+	for _, code := range queueCodes {
+		sent := status.Error(codes.Unknown, code)
+		err := newQueueClient(t, map[string]runtimeRpc.Handler{
+			MethodQueueEnqueueSteer: func(context.Context, json.RawMessage) (any, error) { return nil, sent },
+		}).EnqueueSteer(context.Background(), inbound.QueueCommandInput{BotID: "bot-1"})
+		if got := inbound.QueueCommandErrorCode(err); got != "" {
+			t.Fatalf("%s: queue code = %q from a status without the envelope", code, got)
+		}
+		if status.Code(err) != codes.Unknown || status.Convert(err).Message() != code {
+			t.Fatalf("%s: got %v, want the received status", code, err)
+		}
+	}
+}
+
 // A reason outside the queue vocabulary is not read as a queue code, even
-// when the legacy text would match one.
+// when the status message is one.
 func TestQueueCallIgnoresOtherReasons(t *testing.T) {
-	// Unknown makes the runtime client restore the message as the error text,
-	// which is what the legacy matching reads.
 	other := rpc.Reason{Reason: "test.other", Code: codes.Unknown, Message: inbound.QueueCommandCodeConflict}.Status("")
 	err := newQueueClient(t, map[string]runtimeRpc.Handler{
 		MethodQueueEnqueueSteer: func(context.Context, json.RawMessage) (any, error) { return nil, other },
 	}).EnqueueSteer(context.Background(), inbound.QueueCommandInput{BotID: "bot-1"})
-	if err == nil || err.Error() != inbound.QueueCommandCodeConflict {
-		t.Fatalf("err = %v, want the status message as text", err)
-	}
 	if code := inbound.QueueCommandErrorCode(err); code != "" {
 		t.Fatalf("queue code = %q from a foreign reason", code)
+	}
+	if reason, ok := rpc.ReasonOf(err); !ok || reason != "test.other" {
+		t.Fatalf("got %v, want the received status with its reason", err)
 	}
 }

@@ -52,11 +52,10 @@ func newStatusClient(t *testing.T, err error) *Client {
 	return NewClient(conn)
 }
 
-func TestTurnSentinelsSurviveBothEncodings(t *testing.T) {
+func TestTurnSentinelsSurviveEnvelope(t *testing.T) {
 	for _, entry := range turnReasons {
 		encodings := map[string]error{
 			"envelope": entry.Status(""),
-			"legacy":   status.Error(entry.Code, entry.Message),
 			"server":   (*Server)(nil).mapError(context.Background(), "test", entry.Err),
 		}
 		for name, wire := range encodings {
@@ -98,14 +97,36 @@ func TestTurnCatalogCodeSurvivesEnvelope(t *testing.T) {
 	}
 }
 
-func TestRuntimeControlLegacyCodeStillDecodes(t *testing.T) {
-	legacy := status.Error(codes.FailedPrecondition, runtimeControlErrorPrefix+string(apperror.CodeBotNameTaken))
-	_, err := newStatusClient(t, legacy).RuntimeCommands(context.Background(), turn.RuntimeControlRequest{TeamID: "team-1"})
-	if apperror.CodeOf(err) != apperror.CodeBotNameTaken {
-		t.Fatalf("got %v, want the catalog code", err)
+// A status without the envelope is returned as received: the status codes,
+// the "turn deferred" message and the runtime control and External Agent
+// feedback prefixes that servers sent before the envelope restore nothing.
+func TestPreEnvelopeEncodingIsNotRestored(t *testing.T) {
+	encodings := map[string]error{
+		"runtime control prefix": status.Error(codes.FailedPrecondition, "memoh-runtime-control:"+string(apperror.CodeBotNameTaken)),
+		"feedback prefix":        status.Error(codes.FailedPrecondition, `memoh-acp-feedback:{"code":"agent_dependency_missing","args":{"dep_id":"codex"}}`),
 	}
-	if status.Convert(rpc.Received(err)).Message() != runtimeControlErrorPrefix+string(apperror.CodeBotNameTaken) {
-		t.Fatalf("received status = %v", rpc.Received(err))
+	for _, entry := range turnReasons {
+		encodings[entry.Reason+" status code"] = status.Error(entry.Code, entry.Message)
+	}
+	for name, wire := range encodings {
+		t.Run(name, func(t *testing.T) {
+			client := newStatusClient(t, wire)
+			_, stopErr := client.StopTurn(context.Background(), turn.StopCommand{TeamID: "team-1"})
+			_, controlErr := client.RuntimeCommands(context.Background(), turn.RuntimeControlRequest{TeamID: "team-1"})
+			for path, err := range map[string]error{"stop": stopErr, "runtime control": controlErr} {
+				for _, entry := range turnReasons {
+					if errors.Is(err, entry.Err) {
+						t.Fatalf("%s: restored %v", path, entry.Err)
+					}
+				}
+				if code := apperror.CodeOf(err); code != "" {
+					t.Fatalf("%s: restored the catalog code %q", path, code)
+				}
+				if status.Code(err) != status.Code(wire) || status.Convert(err).Message() != status.Convert(wire).Message() {
+					t.Fatalf("%s: got %v, want the received status %v", path, err, wire)
+				}
+			}
+		})
 	}
 }
 

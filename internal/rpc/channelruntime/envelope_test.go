@@ -21,7 +21,7 @@ func overWire(t *testing.T, err error) error {
 	return status.FromProto(st.Proto()).Err()
 }
 
-func TestChannelSentinelsSurviveBothEncodings(t *testing.T) {
+func TestChannelSentinelsSurviveEnvelope(t *testing.T) {
 	const cause = "telegram: getMe failed"
 	for _, entry := range reasons {
 		encodings := []struct {
@@ -31,8 +31,6 @@ func TestChannelSentinelsSurviveBothEncodings(t *testing.T) {
 		}{
 			{"envelope", entry.Status(""), entry.Err.Error()},
 			{"envelope with adapter message", entry.Status(cause), cause},
-			{"legacy bare reason", status.Error(entry.Code, entry.Reason), entry.Err.Error()},
-			{"legacy with cause", status.Error(entry.Code, entry.Reason+reasonDetailSep+cause), cause},
 			{"server encoding", safeChannelError(errors.Join(entry.Err, errors.New(cause))), entry.Err.Error() + "\n" + cause},
 		}
 		for _, encoding := range encodings {

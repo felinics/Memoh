@@ -11,23 +11,16 @@ import (
 	"github.com/felinics/memoh/internal/rpc"
 )
 
-const (
-	// turnDeferredStatusMessage is part of the private gRPC vocabulary. Keep it
-	// centralized because the client uses it to distinguish a deferred
-	// admission result from other ResourceExhausted failures.
-	turnDeferredStatusMessage = "turn deferred"
-)
-
 // turnReasons registers the turn sentinels on the error envelope. The server
-// encoding and the client decoding both read it; the codes and messages are
-// those of the legacy encoding.
+// encoding and the client decoding both read it. The client restores a
+// sentinel by its reason; the status code and message are not read.
 var turnReasons = rpc.Reasons{
 	{Err: turn.ErrSessionBusy, Reason: "turn.session_busy", Code: codes.Aborted, Message: "thread busy"},
 	{Err: turn.ErrDuplicateTurn, Reason: "turn.duplicate_turn", Code: codes.AlreadyExists, Message: "duplicate turn"},
 	// A deferred turn is an accepted admission result, not a failure. It
 	// crosses the process boundary so channel adapters can acknowledge the
 	// queued message.
-	{Err: turn.ErrTurnDeferred, Reason: "turn.deferred", Code: codes.ResourceExhausted, Message: turnDeferredStatusMessage},
+	{Err: turn.ErrTurnDeferred, Reason: "turn.deferred", Code: codes.ResourceExhausted, Message: "turn deferred"},
 	{Err: turn.ErrTeamNotServed, Reason: "turn.team_not_served", Code: codes.PermissionDenied, Message: "team is not served"},
 }
 

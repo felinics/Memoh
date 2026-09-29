@@ -144,11 +144,10 @@ func (c *Client) Call(ctx context.Context, method string, input, output any) err
 	return json.Unmarshal(resp.GetPayload(), output)
 }
 
-// decodeError maps a received status to what the caller sees. The envelope
-// comes first, then the encoding of peers that do not write it yet. A catalog
-// code is restored to its apperror. A status neither decoding recognizes is
-// returned unchanged, for the handler group's client to restore its own
-// reasons.
+// decodeError maps a received status to what the caller sees. A Public error
+// is restored from its envelope and a catalog code to its apperror. A status
+// this transport does not recognize is returned unchanged, for the handler
+// group's client to restore its own reasons.
 func decodeError(err error) error {
 	if restored := reasons.Decode(err); restored != nil {
 		return restored
@@ -164,11 +163,6 @@ func decodeError(err error) error {
 		return errors.Join(ErrUnavailable, err)
 	case codes.Unauthenticated:
 		return errors.Join(ErrUnavailable, ErrUnauthenticated, err)
-	case codes.Unknown:
-		// Legacy encoding: Unknown carries a Public() message from the
-		// peer's handler as the status message. Callers (and users) see
-		// the original adapter error text.
-		return rpc.Restored(rpc.WithAdapterMessage(errPublic, status.Convert(err).Message()), err)
 	default:
 		return err
 	}

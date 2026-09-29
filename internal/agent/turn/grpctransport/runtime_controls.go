@@ -3,15 +3,12 @@ package grpctransport
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
-	"github.com/felinics/memoh/internal/apperror"
-	"github.com/felinics/memoh/internal/rpc"
 )
 
 func (s *Server) RuntimeCommands(ctx context.Context, req *turnpb.JsonRequest) (*turnpb.JsonResponse, error) {
@@ -42,7 +39,7 @@ func (c *Client) RuntimeCommands(ctx context.Context, input turn.RuntimeControlR
 	}
 	response, err := c.client.RuntimeCommands(ctx, &turnpb.JsonRequest{Json: data})
 	if err != nil {
-		return out, runtimeControlClientError(err)
+		return out, mapClientError(err)
 	}
 	err = json.Unmarshal(response.GetJson(), &out)
 	return out, err
@@ -76,7 +73,7 @@ func (c *Client) RuntimeControls(ctx context.Context, input turn.RuntimeControlR
 	}
 	response, err := c.client.RuntimeControls(ctx, &turnpb.JsonRequest{Json: data})
 	if err != nil {
-		return out, runtimeControlClientError(err)
+		return out, mapClientError(err)
 	}
 	err = json.Unmarshal(response.GetJson(), &out)
 	return out, err
@@ -110,7 +107,7 @@ func (c *Client) SetRuntimeMode(ctx context.Context, input turn.RuntimeControlRe
 	}
 	response, err := c.client.SetRuntimeMode(ctx, &turnpb.JsonRequest{Json: data})
 	if err != nil {
-		return out, runtimeControlClientError(err)
+		return out, mapClientError(err)
 	}
 	err = json.Unmarshal(response.GetJson(), &out)
 	return out, err
@@ -144,19 +141,8 @@ func (c *Client) ExecuteRuntimeCommand(ctx context.Context, input turn.RuntimeCo
 	}
 	response, err := c.client.ExecuteRuntimeCommand(ctx, &turnpb.JsonRequest{Json: data})
 	if err != nil {
-		return out, runtimeControlClientError(err)
+		return out, mapClientError(err)
 	}
 	err = json.Unmarshal(response.GetJson(), &out)
 	return out, err
-}
-
-const runtimeControlErrorPrefix = "memoh-runtime-control:"
-
-// runtimeControlClientError restores the apperror a runtime control failure
-// carries in the legacy prefix. mapClientError reads the error envelope.
-func runtimeControlClientError(err error) error {
-	if status.Code(err) == codes.FailedPrecondition && strings.HasPrefix(status.Convert(err).Message(), runtimeControlErrorPrefix) {
-		return rpc.Restored(apperror.New(apperror.Code(strings.TrimPrefix(status.Convert(err).Message(), runtimeControlErrorPrefix)), nil), err)
-	}
-	return mapClientError(err)
 }

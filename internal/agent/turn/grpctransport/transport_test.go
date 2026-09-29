@@ -14,9 +14,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
@@ -445,25 +443,6 @@ func TestExternalAgentErrorSurvivesTransport(t *testing.T) {
 	}
 	if args := apperror.ArgsOf(startErr); args["dep_id"] != "codex" || args["operation_in_progress"] != "true" {
 		t.Fatalf("start error args = %v", args)
-	}
-}
-
-// TestLegacyFeedbackStatusStillDecodes pins the client side of the old
-// feedback prefix: a status from a server that still sends it restores the
-// catalog code and its args.
-func TestLegacyFeedbackStatusStillDecodes(t *testing.T) {
-	received := status.Error(codes.FailedPrecondition, `memoh-acp-feedback:{"code":"agent_dependency_missing","reason":"dependency_missing","http_status":409,"i18n_key":"chat.externalAgent.dependencyMissing","args":{"dep_id":"codex","install_task_id":"task-1"},"message":"Codex is not installed"}`)
-	restored := mapClientError(received)
-	if code := apperror.CodeOf(restored); code != apperror.CodeAgentDependencyMissing {
-		t.Fatalf("code = %q (%v)", code, restored)
-	}
-	if args := apperror.ArgsOf(restored); args["dep_id"] != "codex" || args["install_task_id"] != "task-1" {
-		t.Fatalf("args = %v", args)
-	}
-
-	unknown := status.Error(codes.FailedPrecondition, `memoh-acp-feedback:{"code":"not_a_catalog_code"}`)
-	if got := mapClientError(unknown); apperror.CodeOf(got) != "" || status.Code(got) != codes.FailedPrecondition {
-		t.Fatalf("unknown legacy code = %v", got)
 	}
 }
 

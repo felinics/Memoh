@@ -97,17 +97,14 @@ func (c *Client) queueCall(ctx context.Context, method string, input inbound.Que
 	return err
 }
 
-// queueCommandCode reads the queue code of a failed queue call: the reason of
-// the error envelope, or else the text of the legacy encoding. Only the stable
-// queue vocabulary is accepted.
+// queueCommandCode reads the queue code of a failed queue call from the reason
+// of the error envelope. Only the stable queue vocabulary is accepted.
 func queueCommandCode(err error) string {
-	if err == nil {
+	reason, ok := intrpc.ReasonOf(err)
+	if !ok {
 		return ""
 	}
-	if reason, ok := intrpc.ReasonOf(err); ok {
-		return inbound.NormalizeQueueCommandCode(reason)
-	}
-	return inbound.NormalizeQueueCommandCode(err.Error())
+	return inbound.NormalizeQueueCommandCode(reason)
 }
 
 // queueStatus is the error envelope of a queue code. Every queue code is a

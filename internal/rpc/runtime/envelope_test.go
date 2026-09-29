@@ -46,11 +46,10 @@ func dialOverWire(t *testing.T, handlerErr error) *grpc.ClientConn {
 	return conn
 }
 
-func TestPublicErrorSurvivesBothEncodings(t *testing.T) {
+func TestPublicErrorSurvivesEnvelope(t *testing.T) {
 	const text = "telegram: chat not found"
 	for name, handlerErr := range map[string]error{
 		"envelope": publicReason.Status(text),
-		"legacy":   status.Error(codes.Unknown, text),
 		"server":   Public(errors.New(text)),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -68,6 +67,20 @@ func TestPublicErrorSurvivesBothEncodings(t *testing.T) {
 				t.Fatal("restored error is not marked remote")
 			}
 		})
+	}
+}
+
+// Servers sent a Public error as Unknown with the adapter text as the status
+// message before the envelope. Without the envelope the status is returned as
+// received, not as a Public error.
+func TestPreEnvelopePublicErrorIsNotRestored(t *testing.T) {
+	const text = "telegram: chat not found"
+	err := callOverWire(t, status.Error(codes.Unknown, text))
+	if errors.Is(err, errPublic) || err.Error() == text {
+		t.Fatalf("%v was restored as a Public error", err)
+	}
+	if status.Code(err) != codes.Unknown || status.Convert(err).Message() != text {
+		t.Fatalf("got %v, want the received status", err)
 	}
 }
 

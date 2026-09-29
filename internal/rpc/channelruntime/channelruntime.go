@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/rpc"
@@ -104,11 +102,6 @@ var reasons = rpc.Reasons{
 	{Err: channel.ErrWebhookEndpointUnsupported, Reason: reasonWebhookUnsupported, Code: codes.Unimplemented, Message: "channel webhook endpoint unsupported"},
 }
 
-// reasonDetailSep separates the stable reason token from the original error
-// text in the legacy status message. A non-printable unit separator cannot
-// collide with error message content.
-const reasonDetailSep = "\x1f"
-
 func (c *Client) call(ctx context.Context, method string, input, output any) error {
 	err := c.rpc.Call(ctx, method, input, output)
 	if err == nil || errors.Is(err, runtimeRpc.ErrUnavailable) {
@@ -117,22 +110,13 @@ func (c *Client) call(ctx context.Context, method string, input, output any) err
 	return restoreChannelError(err)
 }
 
-// restoreChannelError maps a wire error back to its channel sentinel, keeping
-// any transported cause text so operators keep seeing the platform-side cause
-// (e.g. the getMe failure behind a discovery error). The envelope comes first,
-// then the legacy status message.
+// restoreChannelError maps a wire error back to its channel sentinel from the
+// error envelope, keeping any transported cause text so operators keep seeing
+// the platform-side cause (e.g. the getMe failure behind a discovery error).
+// A status without the envelope is returned unchanged.
 func restoreChannelError(err error) error {
 	if restored := reasons.Decode(err); restored != nil {
 		return restored
-	}
-	message := status.Convert(err).Message()
-	for _, entry := range reasons {
-		if message == entry.Reason {
-			return rpc.Restored(entry.Err, err)
-		}
-		if detail, ok := strings.CutPrefix(message, entry.Reason+reasonDetailSep); ok {
-			return rpc.Restored(rpc.WithAdapterMessage(entry.Err, detail), err)
-		}
 	}
 	return err
 }

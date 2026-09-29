@@ -242,9 +242,9 @@ func (h *runHandle) pump() {
 	}
 }
 
-// mapClientError restores the turn failure a status carries: first from the
-// error envelope, then from the legacy status codes. A restored failure keeps
-// the received status on its chain.
+// mapClientError restores the turn failure an error envelope carries, keeping
+// the received status on its chain. A canceled or expired call reads as the
+// context error. Any other status is returned unchanged.
 func mapClientError(err error) error {
 	if err == nil {
 		return nil
@@ -256,26 +256,10 @@ func mapClientError(err error) error {
 		return restored
 	}
 	switch status.Code(err) {
-	case codes.Aborted:
-		return rpc.Restored(turn.ErrSessionBusy, err)
-	case codes.AlreadyExists:
-		return rpc.Restored(turn.ErrDuplicateTurn, err)
-	case codes.ResourceExhausted:
-		if status.Convert(err).Message() == turnDeferredStatusMessage {
-			return rpc.Restored(turn.ErrTurnDeferred, err)
-		}
-		return err
-	case codes.PermissionDenied:
-		return rpc.Restored(turn.ErrTeamNotServed, err)
 	case codes.Canceled:
 		return context.Canceled
 	case codes.DeadlineExceeded:
 		return context.DeadlineExceeded
-	case codes.FailedPrecondition:
-		if restored := decodeLegacyFeedback(err, status.Convert(err).Message()); restored != nil {
-			return restored
-		}
-		return err
 	default:
 		return err
 	}
