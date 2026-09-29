@@ -10,7 +10,6 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
 )
 
 // fakeLauncherResolver returns one canned launcher (or error) and records
@@ -121,8 +120,8 @@ func TestResolveLauncherMissingKeepsTheDependency(t *testing.T) {
 	if *missing != want {
 		t.Fatalf("missing = %+v, want %+v", *missing, want)
 	}
-	if apperror.CodeOf(err) != "" {
-		t.Fatalf("missing dependency wrapped in apperror %q", apperror.CodeOf(err))
+	if external.IsFailure(err) {
+		t.Fatalf("missing dependency wrapped in a runtime failure: %v", err)
 	}
 	// A wrapped sentinel still resolves to the missing dependency.
 	resolver.err = errors.Join(errors.New("probe"), &external.DependencyMissingError{DependencyID: "claude-code"})
@@ -134,15 +133,19 @@ func TestResolveLauncherMissingKeepsTheDependency(t *testing.T) {
 
 func TestResolveLauncherOtherErrorsAreRuntimeUnavailable(t *testing.T) {
 	_, err := launcherDriver(&fakeLauncherResolver{err: errors.New("workspace is not running")}).resolveLauncher(t.Context(), "bot-1")
-	if apperror.CodeOf(err) != apperror.CodeExternalRuntimeUnavailable {
-		t.Fatalf("err = %v, want %s", err, apperror.CodeExternalRuntimeUnavailable)
-	}
+	assertClaudeUnavailable(t, err)
 	if errors.Is(err, external.ErrDependencyMissing) {
 		t.Fatalf("generic resolver error must not become a missing dependency: %v", err)
 	}
 	_, err = launcherDriver(&fakeLauncherResolver{launcher: external.Launcher{Path: "  "}}).resolveLauncher(t.Context(), "bot-1")
-	if apperror.CodeOf(err) != apperror.CodeExternalRuntimeUnavailable {
-		t.Fatalf("empty path err = %v, want %s", err, apperror.CodeExternalRuntimeUnavailable)
+	assertClaudeUnavailable(t, err)
+}
+
+func assertClaudeUnavailable(t *testing.T, err error) {
+	t.Helper()
+	var failure *external.Failure
+	if !errors.As(err, &failure) || failure.Kind != external.FailureUnavailable {
+		t.Fatalf("err = %T %v, want an unavailable runtime", err, err)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
@@ -366,5 +367,86 @@ func TestBotAgentsHandlerListModelsWrapsPlainRuntimeErrors(t *testing.T) {
 	problem, ok := apperror.ProblemFrom(err, "")
 	if !ok || problem.Code != string(apperror.CodeExternalRuntimeUnavailable) || problem.Status != http.StatusServiceUnavailable {
 		t.Fatalf("ListModels() error = %v, want %d %s", err, http.StatusServiceUnavailable, apperror.CodeExternalRuntimeUnavailable)
+	}
+}
+
+// A runtime failure the model catalog reports keeps its own code and status.
+func TestBotAgentsHandlerListModelsAnswersRuntimeFailuresWithTheirCode(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		code   apperror.Code
+		status int
+	}{
+		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired, http.StatusConflict},
+		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked, http.StatusConflict},
+		{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := &botAgentsQueries{rows: []sqlc.BotAgent{
+				botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, true),
+			}}
+			handler := newBotAgentsTestHandler(queries, catalogDriver{
+				plainDriver: plainDriver{runtimeType: botagents.RuntimeCodex},
+				err:         fmt.Errorf("model catalog: %w", tc.err),
+			})
+			ctx, _ := listModelsRequest(t)
+			problem, ok := apperror.ProblemFrom(handler.ListModels(ctx), "")
+			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
+				t.Fatalf("ListModels() problem = %+v, want %d %s", problem, tc.status, tc.code)
+			}
+		})
+	}
+}
+
+// purgeDriver is a direct runtime whose credential purge fails.
+type purgeDriver struct {
+	plainDriver
+	err error
+}
+
+func (d purgeDriver) PurgeBotAgentAuth(context.Context, string, string) error { return d.err }
+
+func (q *botAgentsQueries) SoftDeleteBotAgent(_ context.Context, params sqlc.SoftDeleteBotAgentParams) (sqlc.BotAgent, error) {
+	for _, row := range q.rows {
+		if row.ID == params.ID {
+			return row, nil
+		}
+	}
+	return sqlc.BotAgent{}, pgx.ErrNoRows
+}
+
+// purgeFailures are the ways a runtime's credential purge fails: a runtime
+// failure keeps its own code, and any other error is a materialization failure.
+var purgeFailures = []struct {
+	name   string
+	err    error
+	code   apperror.Code
+	status int
+}{
+	{"credential in use", external.Fail(external.FailureCredentialBusy, nil), apperror.CodeAgentCredentialRuntimeBusy, http.StatusConflict},
+	{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
+	{"missing dependency", &external.DependencyMissingError{DependencyID: "codex"}, apperror.CodeAgentCredentialMaterializationFailed, http.StatusInternalServerError},
+	{"plain error", errors.New("delete auth.json: permission denied"), apperror.CodeAgentCredentialMaterializationFailed, http.StatusInternalServerError},
+}
+
+func TestBotAgentsHandlerDeleteAnswersPurgeFailures(t *testing.T) {
+	for _, tc := range purgeFailures {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := &botAgentsQueries{rows: []sqlc.BotAgent{
+				botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, true),
+			}}
+			handler := newBotAgentsTestHandler(queries, purgeDriver{
+				plainDriver: plainDriver{runtimeType: botagents.RuntimeCodex},
+				err:         tc.err,
+			})
+			ctx, _ := botAgentsRequest(t, http.MethodDelete, "/bots/"+botAgentsTestBotID+"/agents/"+botAgentsTestCodexID, "")
+			ctx.SetParamNames("bot_id", "id")
+			ctx.SetParamValues(botAgentsTestBotID, botAgentsTestCodexID)
+			problem, ok := apperror.ProblemFrom(handler.Delete(ctx), "")
+			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
+				t.Fatalf("Delete() problem = %+v, want %d %s", problem, tc.status, tc.code)
+			}
+		})
 	}
 }

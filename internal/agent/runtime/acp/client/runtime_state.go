@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 	"github.com/felinics/memoh/internal/workspace/shellenv"
@@ -71,21 +72,21 @@ func prepareGuardedRuntimeLease(ctx context.Context, client *bridge.Client, opts
 
 func prepareRuntimeLeaseUnguarded(ctx context.Context, client *bridge.Client, opts processOptions) (*runtimeLease, error) {
 	if client == nil {
-		return nil, errors.New("workspace bridge client is required")
+		return nil, errs.New("workspace bridge client is required")
 	}
 	profile, ok := acpprofile.Lookup(opts.AgentID)
 	if !ok {
-		return nil, fmt.Errorf("ACP profile %q is not registered", opts.AgentID)
+		return nil, errs.New(fmt.Sprintf("ACP profile %q is not registered", opts.AgentID))
 	}
 	modeName := string(normalizeSetupMode(opts.SetupMode))
 	if !slices.ContainsFunc(profile.SetupModes, func(mode string) bool {
 		return acpprofile.NormalizeAgentID(mode) == modeName
 	}) {
-		return nil, fmt.Errorf("ACP profile %q does not support setup mode %q", profile.ID, modeName)
+		return nil, errs.New(fmt.Sprintf("ACP profile %q does not support setup mode %q", profile.ID, modeName))
 	}
 	agentID := acpprofile.NormalizeAgentID(profile.ID)
 	if !safeRuntimeAgentID(agentID) {
-		return nil, fmt.Errorf("ACP profile %q has an unsafe runtime directory name", profile.ID)
+		return nil, errs.New(fmt.Sprintf("ACP profile %q has an unsafe runtime directory name", profile.ID))
 	}
 
 	agentRoot := path.Join(runtimeStateRoot, agentID)
@@ -111,14 +112,14 @@ func prepareRuntimeLeaseUnguarded(ctx context.Context, client *bridge.Client, op
 	}
 
 	if result, err := client.Exec(ctx, "chmod 0700 "+escapeShellArg(root), dataMountPath, 5); err != nil {
-		return abort(fmt.Errorf("secure ACP runtime directory: %w", err))
+		return abort(errs.WrapDependency(err, "secure ACP runtime directory"))
 	} else if result.ExitCode != 0 {
-		return abort(fmt.Errorf("secure ACP runtime directory: chmod exited with status %d", result.ExitCode))
+		return abort(errs.NewDependency(fmt.Sprintf("secure ACP runtime directory: chmod exited with status %d", result.ExitCode)))
 	}
 	if entry, exists, err := lease.safeEntry(ctx, "/tmp", root); err != nil {
 		return abort(fmt.Errorf("validate ACP runtime directory: %w", err))
 	} else if !exists || !entry.GetIsDir() {
-		return abort(errors.New("ACP runtime path is not a safe directory"))
+		return abort(errs.New("ACP runtime path is not a safe directory"))
 	}
 	agentEnv, toolEnv, unsetEnv, err := lease.buildEnvironments(ctx, opts, profile.RuntimeStorage.AgentEnv)
 	if err != nil {
@@ -225,7 +226,7 @@ func (l *runtimeLease) ensureSafeDirectory(ctx context.Context, anchor, target s
 	anchor = path.Clean(anchor)
 	target = path.Clean(target)
 	if target != anchor && !strings.HasPrefix(target, anchor+"/") {
-		return errors.New("directory path escapes its allowed root")
+		return errs.New("directory path escapes its allowed root")
 	}
 	inspectionAnchor := anchor
 	if l != nil && l.root != "" && anchor == path.Clean(l.root) {
@@ -238,7 +239,7 @@ func (l *runtimeLease) ensureSafeDirectory(ctx context.Context, anchor, target s
 		return err
 	}
 	if !exists || !anchorEntry.GetIsDir() {
-		return errors.New("directory anchor is not a directory")
+		return errs.New("directory anchor is not a directory")
 	}
 	if target == anchor {
 		return nil
@@ -253,19 +254,19 @@ func (l *runtimeLease) ensureSafeDirectory(ctx context.Context, anchor, target s
 		}
 		if exists {
 			if !entry.GetIsDir() {
-				return fmt.Errorf("directory path component %q is not a directory", current)
+				return errs.New(fmt.Sprintf("directory path component %q is not a directory", current))
 			}
 			continue
 		}
 		if err := l.client.Mkdir(ctx, current); err != nil {
-			return err
+			return errs.WrapDependency(err, "")
 		}
 		entry, exists, err = l.safeEntry(ctx, inspectionAnchor, current)
 		if err != nil {
 			return err
 		}
 		if !exists || !entry.GetIsDir() {
-			return fmt.Errorf("created directory path component %q is not a safe directory", current)
+			return errs.New(fmt.Sprintf("created directory path component %q is not a safe directory", current))
 		}
 	}
 	return nil
@@ -275,14 +276,14 @@ func (l *runtimeLease) safeEntry(ctx context.Context, anchor, target string) (*p
 	anchor = path.Clean(anchor)
 	target = path.Clean(target)
 	if target != anchor && !strings.HasPrefix(target, anchor+"/") {
-		return nil, false, errors.New("artifact path escapes its allowed root")
+		return nil, false, errs.New("artifact path escapes its allowed root")
 	}
 	if target == anchor {
 		entry, err := l.client.Stat(ctx, anchor)
 		if errors.Is(err, bridge.ErrNotFound) {
 			return nil, false, nil
 		}
-		return entry, err == nil, err
+		return entry, err == nil, errs.WrapDependency(err, "")
 	}
 
 	current := anchor
@@ -293,7 +294,7 @@ func (l *runtimeLease) safeEntry(ctx context.Context, anchor, target string) (*p
 			return nil, false, nil
 		}
 		if err != nil {
-			return nil, false, err
+			return nil, false, errs.WrapDependency(err, "")
 		}
 		var found *pb.FileEntry
 		for _, entry := range entries {
@@ -306,10 +307,10 @@ func (l *runtimeLease) safeEntry(ctx context.Context, anchor, target string) (*p
 			return nil, false, nil
 		}
 		if isSymlinkMode(found.GetMode()) {
-			return nil, false, fmt.Errorf("artifact path contains symbolic link %q", path.Join(current, part))
+			return nil, false, errs.New(fmt.Sprintf("artifact path contains symbolic link %q", path.Join(current, part)))
 		}
 		if index < len(parts)-1 && !found.GetIsDir() {
-			return nil, false, fmt.Errorf("artifact path component %q is not a directory", path.Join(current, part))
+			return nil, false, errs.New(fmt.Sprintf("artifact path component %q is not a directory", path.Join(current, part)))
 		}
 		current = path.Join(current, part)
 		if index == len(parts)-1 {
@@ -333,7 +334,7 @@ func (l *runtimeLease) cleanup(ctx context.Context) error {
 		return nil
 	}
 	if !validOwnedRuntimeRoot(l.root, l.agentID) {
-		return fmt.Errorf("refusing to remove unsafe ACP runtime path %q", l.root)
+		return errs.New(fmt.Sprintf("refusing to remove unsafe ACP runtime path %q", l.root))
 	}
 	entry, exists, err := l.safeEntry(ctx, "/tmp", l.root)
 	if err != nil {
@@ -344,10 +345,10 @@ func (l *runtimeLease) cleanup(ctx context.Context) error {
 		return nil
 	}
 	if !entry.GetIsDir() {
-		return fmt.Errorf("refusing to remove non-directory ACP runtime path %q", l.root)
+		return errs.New(fmt.Sprintf("refusing to remove non-directory ACP runtime path %q", l.root))
 	}
 	if err := l.client.DeleteFile(ctx, l.root, true); err != nil {
-		return err
+		return errs.WrapDependency(err, "")
 	}
 	l.cleaned = true
 	return nil

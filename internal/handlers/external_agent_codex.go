@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -152,6 +153,7 @@ func (h *ExternalAgentCodexHandler) PollDevice(c echo.Context) error {
 	status := h.driver.PollDeviceLogin(botID, botAgentID, loginID)
 	if status.Status == "success" {
 		if err := h.driver.CompleteChatGPTDeviceLogin(c.Request().Context(), ownerUserID, botID, botAgentID, loginID); err != nil {
+			err = application.ExternalRuntimeError(err)
 			if apperror.CodeOf(err) != "" {
 				return err
 			}
@@ -225,7 +227,7 @@ func (h *ExternalAgentCodexHandler) Usage(c echo.Context) error {
 	}
 	usage, err := h.driver.AccountUsage(c.Request().Context(), botID, botAgentID)
 	if err != nil {
-		return err
+		return codexUsageError(err)
 	}
 	response := CodexUsageResponse{LimitReached: usage.LimitReached, Windows: make([]CodexUsageWindow, 0, len(usage.Windows))}
 	for _, window := range usage.Windows {
@@ -236,4 +238,18 @@ func (h *ExternalAgentCodexHandler) Usage(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, response)
+}
+
+// codexUsageError translates a failed usage read: an Agent credential or
+// runtime failure by its kind, and a rejected sign-in or an unreadable usage
+// endpoint by its own code.
+func codexUsageError(err error) error {
+	switch {
+	case errors.Is(err, codexruntime.ErrUsageSignInExpired):
+		return apperror.Wrap(apperror.CodeAgentCredentialUsageAuthExpired, err, nil)
+	case errors.Is(err, codexruntime.ErrUsageUnavailable):
+		return apperror.Wrap(apperror.CodeAgentCredentialUsageUnavailable, err, nil)
+	default:
+		return application.ExternalRuntimeError(err)
+	}
 }

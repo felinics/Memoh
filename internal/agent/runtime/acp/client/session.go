@@ -19,7 +19,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/toolcontext"
 	"github.com/felinics/memoh/internal/version"
@@ -129,13 +129,13 @@ type Session struct {
 //nolint:contextcheck // startup failure closes the owned process through its lifecycle API.
 func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventSink) (*Session, error) {
 	if r == nil || r.workspace == nil {
-		return nil, errors.New("ACP workspace provider is not configured")
+		return nil, errs.New("ACP workspace provider is not configured")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return nil, errors.New("bot_id is required")
+		return nil, errs.New("bot_id is required")
 	}
 	if strings.TrimSpace(req.AgentID) == "" {
-		return nil, errors.New("ACP agent id is required")
+		return nil, errs.New("ACP agent id is required")
 	}
 
 	info, err := r.workspace.WorkspaceInfo(ctx, req.BotID)
@@ -150,7 +150,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		projectPath = strings.TrimSpace(req.Resolved.ProjectPath)
 		backend = req.Resolved.Backend
 		if root == "" || projectPath == "" {
-			return nil, errors.New("resolved ACP session context is incomplete")
+			return nil, errs.New("resolved ACP session context is incomplete")
 		}
 	} else {
 		root, projectPath, backend, err = resolveWorkspacePaths(info, req.ProjectPath)
@@ -221,9 +221,9 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			}
 			if sink != nil {
 				sink.EmitStreamEvent(event.StreamEvent{
-					Type:  event.RuntimeNotice,
-					Code:  string(apperror.CodeRuntimeToolsUnavailable),
-					Delta: "Memoh tools are unavailable for this session: tool bridge failed to start",
+					Type:       event.RuntimeNotice,
+					NoticeKind: event.NoticeToolsUnavailable,
+					Delta:      "Memoh tools are unavailable for this session: tool bridge failed to start",
 				})
 			}
 			toolHTTPURL = ""
@@ -299,11 +299,11 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			toolHTTPStop()
 		}
 		cancel()
-		return nil, fmt.Errorf(
+		return nil, errs.NewDependency(fmt.Sprintf(
 			"initialize ACP agent: unsupported protocol version %d (client supports %d)",
 			initResp.ProtocolVersion,
 			acp.ProtocolVersionNumber,
-		)
+		))
 	}
 
 	mcpServers := []acp.McpServer{}
@@ -417,7 +417,7 @@ func startSession(
 		return sessionResponse{}, fmt.Errorf("create ACP session: %w", err)
 	}
 	if strings.TrimSpace(string(resp.SessionId)) == "" {
-		return sessionResponse{}, errors.New("create ACP session: agent returned an empty session id")
+		return sessionResponse{}, errs.NewDependency("create ACP session: agent returned an empty session id")
 	}
 	return resp, nil
 }
@@ -433,7 +433,7 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 		return nil
 	}
 	if modes == nil {
-		return fmt.Errorf("pin ACP session mode %q: agent did not report session modes", desired)
+		return errs.NewDependency(fmt.Sprintf("pin ACP session mode %q: agent did not report session modes", desired))
 	}
 	if string(modes.CurrentModeId) == desired {
 		return nil
@@ -452,7 +452,7 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 				slog.String("desired_mode", desired),
 				slog.String("current_mode", string(modes.CurrentModeId)))
 		}
-		return fmt.Errorf("pin ACP session mode %q: mode is not advertised by agent", desired)
+		return errs.NewDependency(fmt.Sprintf("pin ACP session mode %q: mode is not advertised by agent", desired))
 	}
 	if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
 		SessionId: sessionID,
@@ -473,7 +473,7 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 
 func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client *bridge.Client, route string, handler http.Handler) (*bridge.Client, func(), error) {
 	if client == nil {
-		return nil, nil, errors.New("workspace bridge client is required")
+		return nil, nil, errs.New("workspace bridge client is required")
 	}
 	current := client
 	var lastErr error
@@ -482,9 +482,9 @@ func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client
 		if err == nil {
 			return current, stop, nil
 		}
-		lastErr = err
+		lastErr = errs.WrapDependency(err, "")
 		if ctx.Err() != nil || !isClosingBridgeClientError(err) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
-			return current, nil, err
+			return current, nil, lastErr
 		}
 		_ = current.Close()
 		if err := sleepContext(ctx, time.Duration(attempt+1)*150*time.Millisecond); err != nil {
@@ -522,7 +522,7 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 
 func guardToolHTTPHandler(rawURL string, handler http.Handler) (string, string, http.Handler, error) {
 	if handler == nil {
-		return "", "", nil, errors.New("tool HTTP handler is required")
+		return "", "", nil, errs.New("tool HTTP handler is required")
 	}
 	guardedURL, guardPath, err := guardedToolHTTPURL(rawURL)
 	if err != nil {
@@ -543,7 +543,7 @@ func guardedToolHTTPURL(rawURL string) (string, string, error) {
 		return "", "", err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", "", fmt.Errorf("invalid Memoh tools URL %q", rawURL)
+		return "", "", errs.New(fmt.Sprintf("invalid Memoh tools URL %q", rawURL))
 	}
 	basePath := strings.TrimRight(u.Path, "/")
 	if basePath == "" {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -110,7 +111,7 @@ func TestEnsureResumableSession(t *testing.T) {
 	if got := d.ensureResumableSession(t.Context(), fs, input, claudeTestSession); got != "" {
 		t.Fatalf("missing transcript resumed %q", got)
 	}
-	if len(sink.events) != 1 || sink.events[0].Code != "native_history_lost" {
+	if len(sink.events) != 1 || sink.events[0].NoticeKind != event.NoticeNativeHistoryLost || sink.events[0].Code != "" {
 		t.Fatalf("lost history was not announced: %+v", sink.events)
 	}
 }

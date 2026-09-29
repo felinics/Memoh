@@ -579,7 +579,7 @@ func (s *Service) streamChatWSResultWithHooks(
 		if preflight != nil || postPersist != nil {
 			return nil, RunOutcome{}, apperror.New(apperror.CodeExternalAgentTurnReplacementUnsupported, nil)
 		}
-		outcome, err := s.streamRuntimeWS(ctx, dispatch.driver, req, eventCh, abortCh)
+		outcome, err := s.streamRuntimeWS(ctx, dispatch.driver, req, eventCh, abortCh, true)
 		return nil, outcome, err
 	}
 	var prepareErr error

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // dependencyID is the workspace dependency catalog id that provisions the
@@ -30,8 +30,8 @@ func (d *Driver) SetLauncherResolver(resolver external.LauncherResolver) {
 
 // resolveLauncher picks the CLI executable for botID. A missing dependency
 // becomes external.DependencyMissingError, which callers must not wrap in
-// apperror so the application can translate it; any other resolver failure
-// is a runtime-unavailable error like a failed bridge lookup.
+// an external.Failure so the application can translate it; any other
+// resolver failure is a runtime-unavailable error like a failed bridge lookup.
 func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.Launcher, error) {
 	if d.launchers == nil {
 		return external.Launcher{Path: defaultLauncherPath, Source: external.LauncherSourceToolkit}, nil
@@ -42,12 +42,10 @@ func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.La
 		if errors.As(err, &missing) {
 			return external.Launcher{}, dependencyMissing(missing)
 		}
-		return external.Launcher{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable,
-			fmt.Errorf("resolve claude launcher: %w", err), map[string]string{"runtime": RuntimeType})
+		return external.Launcher{}, external.Unavailable(fmt.Errorf("resolve claude launcher: %w", err))
 	}
 	if strings.TrimSpace(launcher.Path) == "" {
-		return external.Launcher{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable,
-			errors.New("resolve claude launcher: resolver returned an empty path"), map[string]string{"runtime": RuntimeType})
+		return external.Launcher{}, external.Unavailable(errs.New("resolve claude launcher: resolver returned an empty path"))
 	}
 	return launcher, nil
 }

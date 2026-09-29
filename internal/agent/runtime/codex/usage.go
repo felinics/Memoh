@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -10,8 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agentcredential"
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 	modelspkg "github.com/felinics/memoh/internal/models"
 )
 
@@ -20,6 +22,14 @@ const (
 	usageRequestTimeout = 15 * time.Second
 	usageResponseLimit  = 1 << 20
 	usageErrorBodyLimit = 4 << 10
+)
+
+var (
+	// ErrUsageSignInExpired: the ChatGPT backend rejected the saved access
+	// token. The app-server refreshes it on the next turn.
+	ErrUsageSignInExpired = errors.New("codex usage: chatgpt sign-in expired")
+	// ErrUsageUnavailable: the usage endpoint could not be read.
+	ErrUsageUnavailable = errors.New("codex usage unavailable")
 )
 
 // AccountUsage is the ChatGPT account's Codex usage: one entry per rolling
@@ -62,7 +72,7 @@ func (d *Driver) AccountUsage(ctx context.Context, botID, botAgentID string) (Ac
 		return AccountUsage{}, err
 	}
 	if cfg.Auth != AuthChatGPT {
-		return AccountUsage{}, apperror.Wrap(apperror.CodeAgentCredentialIncompatible, agentcredential.ErrIncompatible, nil)
+		return AccountUsage{}, external.CredentialError(agentcredential.ErrIncompatible)
 	}
 	return fetchAccountUsage(ctx, modelspkg.NewProviderHTTPClient(usageRequestTimeout), chatGPTBackendURL,
 		credential.Secret["access_token"], credential.Secret["account_id"])
@@ -79,20 +89,20 @@ func fetchAccountUsage(ctx context.Context, client *http.Client, baseURL, access
 	req.Header.Set("Accept", "application/json")
 	resp, err := client.Do(req) //nolint:gosec // The URL is the fixed ChatGPT backend; only tests substitute a local server.
 	if err != nil {
-		return AccountUsage{}, apperror.Wrap(apperror.CodeAgentCredentialUsageUnavailable, err, nil)
+		return AccountUsage{}, errs.WrapDependency(errors.Join(ErrUsageUnavailable, err), "")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return AccountUsage{}, apperror.New(apperror.CodeAgentCredentialUsageAuthExpired, nil)
+		return AccountUsage{}, errs.WrapDependency(ErrUsageSignInExpired, "")
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, usageErrorBodyLimit))
-		return AccountUsage{}, apperror.Wrap(apperror.CodeAgentCredentialUsageUnavailable,
-			fmt.Errorf("codex usage request failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body))), nil)
+		return AccountUsage{}, errs.WrapDependency(
+			fmt.Errorf("%w: status %d: %s", ErrUsageUnavailable, resp.StatusCode, strings.TrimSpace(string(body))), "")
 	}
 	var payload usagePayload
 	if err := json.NewDecoder(io.LimitReader(resp.Body, usageResponseLimit)).Decode(&payload); err != nil {
-		return AccountUsage{}, apperror.Wrap(apperror.CodeAgentCredentialUsageUnavailable, fmt.Errorf("decode codex usage: %w", err), nil)
+		return AccountUsage{}, errs.WrapDependency(fmt.Errorf("%w: decode: %w", ErrUsageUnavailable, err), "")
 	}
 	usage := AccountUsage{Windows: []UsageWindow{}}
 	if limit := payload.RateLimit; limit != nil {

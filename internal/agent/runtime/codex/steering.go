@@ -2,14 +2,13 @@ package codex
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // Private journal marker: never sent over the public event transport.
@@ -54,8 +53,7 @@ func startSteering(ctx context.Context, client *conn, turn *turnState) func() {
 			if err != nil {
 				if ctx.Err() == nil && (ok || workerCtx.Err() == nil) {
 					turn.logger.WarnContext(ctx, "codex steer was not delivered", slog.Any("error", err))
-					public, _ := apperror.PublicFrom(apperror.New(apperror.CodeRuntimeControlSteerFailed, nil), "")
-					turn.emit(event.StreamEvent{Type: event.RuntimeNotice, Code: string(public.Code), Delta: public.Detail})
+					turn.emit(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
 				}
 				return // Never retry an uncertain RPC or silently move it to another turn.
 			}
@@ -85,7 +83,7 @@ func submitSteer(ctx context.Context, client *conn, turn *turnState, input exter
 	expected := turn.turnID
 	turn.mu.Unlock()
 	if expected == "" || input.ID == "" || input.Text == "" {
-		return errors.New("invalid steer input or active turn")
+		return errs.New("invalid steer input or active turn")
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	watcherDone := make(chan struct{})
@@ -105,7 +103,7 @@ func submitSteer(ctx context.Context, client *conn, turn *turnState, input exter
 	cancel()
 	<-watcherDone
 	if err == nil && response.TurnID != expected {
-		err = errors.New("codex accepted steer for a different turn")
+		err = errs.NewDependency("codex accepted steer for a different turn")
 	}
 	if err == nil {
 		// The RPC accepts into Codex's input buffer. Only the correlated item
@@ -114,7 +112,7 @@ func submitSteer(ctx context.Context, client *conn, turn *turnState, input exter
 		case deliveryErr := <-pending.settled:
 			return deliveryErr
 		case <-turn.done:
-			err = errors.New("turn ended before the steer input was consumed")
+			err = errs.New("turn ended before the steer input was consumed")
 		case <-ctx.Done():
 			err = ctx.Err()
 		}
@@ -131,7 +129,7 @@ func submitSteer(ctx context.Context, client *conn, turn *turnState, input exter
 	case deliveryErr := <-pending.settled:
 		return deliveryErr
 	case <-time.After(6 * time.Second):
-		return errors.New("steer projection did not settle")
+		return errs.New("steer projection did not settle")
 	}
 }
 

@@ -32,7 +32,8 @@ const (
 	Error               StreamEventType = "error"
 	// RuntimeNotice surfaces a runtime-side degradation the user should see
 	// in the conversation (tools unavailable, an interaction declined).
-	// Code carries the machine-readable reason, Delta the human text.
+	// A runtime sets NoticeKind and Delta; the application turns the kind
+	// into the public Code before the event leaves it.
 	RuntimeNotice StreamEventType = "runtime_notice"
 	// CommandOutput is native command output, separate from model prose.
 	CommandOutput StreamEventType = "command_output"
@@ -44,6 +45,23 @@ const (
 	// emitted before the step's commit barrier runs, so a consumer that has
 	// seen it holds the complete pre-commit projection of that step.
 	StepEnd StreamEventType = "step_end"
+)
+
+// NoticeKind names the degradation a RuntimeNotice reports.
+type NoticeKind string
+
+const (
+	// NoticeNativeHistoryLost: the runtime started a new native session and
+	// does not remember the conversation shown so far.
+	NoticeNativeHistoryLost NoticeKind = "native_history_lost"
+	// NoticeToolsUnavailable: Memoh tools could not be mounted for the turn.
+	NoticeToolsUnavailable NoticeKind = "tools_unavailable"
+	// NoticeElicitationDeclined: a request for user input was declined
+	// without asking the user.
+	NoticeElicitationDeclined NoticeKind = "elicitation_declined"
+	// NoticeSteerFailed: an instruction sent during the turn was not
+	// delivered to the runtime.
+	NoticeSteerFailed NoticeKind = "steer_failed"
 )
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON
@@ -79,6 +97,9 @@ type StreamEvent struct {
 	StepNumber     int              `json:"stepNumber,omitempty"`
 	TotalSteps     int              `json:"totalSteps,omitempty"`
 	ProgressStatus string           `json:"progressStatus,omitempty"`
+	// NoticeKind is set by the runtime on a RuntimeNotice. It never reaches
+	// the wire: the application replaces it with Code.
+	NoticeKind NoticeKind `json:"-"`
 }
 
 // IsTerminal returns true for events that signal end of stream.

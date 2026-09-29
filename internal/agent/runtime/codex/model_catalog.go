@@ -2,13 +2,13 @@ package codex
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 
 	openairesponses "github.com/felinics/twilight/provider/openai/responses"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 	modelspkg "github.com/felinics/memoh/internal/models"
 )
 
@@ -26,7 +26,7 @@ func customBaseURLModelCatalog(ctx context.Context, cfg Config, httpClient *http
 	)
 	available, err := provider.ListModels(ctx)
 	if err != nil {
-		return external.ModelCatalog{}, fmt.Errorf("list Codex models from custom Base URL: %w", err)
+		return external.ModelCatalog{}, errs.WrapDependency(err, "list Codex models from custom Base URL")
 	}
 
 	models := make([]external.ModelOption, 0, len(available))

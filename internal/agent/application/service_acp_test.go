@@ -266,14 +266,14 @@ func TestStreamACPAgentWSTransformedConfigFailurePersistsStableCode(t *testing.T
 	lifecycles := &recordingContextLifecycleStore{}
 	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
 
-	_, err := service.streamACPAgentWS(context.Background(), ChatRequest{
+	outcome, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 		BotID:    lifecycleTestBotID,
 		ThreadID: lifecycleTestSessionID,
 		RunID:    lifecycleTestRunID,
 		Query:    "inspect",
 	}, make(chan WSStreamEvent, 8), make(chan struct{}))
-	if got := apperror.CodeOf(err); got != apperror.CodeACPModelUnavailable {
-		t.Fatalf("streamACPAgentWS() code = %q, want %q", got, apperror.CodeACPModelUnavailable)
+	if err != nil || outcome.ErrorCode() != string(apperror.CodeACPModelUnavailable) {
+		t.Fatalf("streamACPAgentWS() = %q, %v, want %q", outcome.ErrorCode(), err, apperror.CodeACPModelUnavailable)
 	}
 	row, _ := requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusFailedProvider)
 	if !row.ErrorCode.Valid || row.ErrorCode.String != string(apperror.CodeACPModelUnavailable) {
@@ -1621,8 +1621,8 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	if len(messages.persisted) != 2 {
 		t.Fatalf("persisted %d messages, want user + assistant", len(messages.persisted))
 	}
-	if got := persistedText(t, messages.persisted[1].Content); got != "The external agent could not complete this turn." {
-		t.Fatalf("assistant failure text = %q, want sanitized user-facing error", got)
+	if got := persistedText(t, messages.persisted[1].Content); got != "" {
+		t.Fatalf("assistant failure text = %q, want no text beside the failure code", got)
 	}
 	if _, exists := messages.persisted[1].Metadata["error"]; exists {
 		t.Fatalf("assistant metadata = %#v, want the failure recorded by its code alone", messages.persisted[1].Metadata)
@@ -1637,9 +1637,16 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 		t.Fatalf("failed turn unexpectedly published head: %#v", publication)
 	}
 	events := drainAgentEvents(t, eventCh)
+	if containsStreamEvent(events, native.EventTextDelta) {
+		t.Fatalf("events = %#v, want the failure sent only as its error event", events)
+	}
+	if failure := requireStreamEvent(t, events, native.EventError); failure.Code != "runtime_prompt_failed" {
+		t.Fatalf("failure event = %#v, want runtime_prompt_failed", failure)
+	}
 	abort := requireStreamEvent(t, events, native.EventAbort)
-	if got := terminalAssistantText(t, abort); got != "The external agent could not complete this turn." {
-		t.Fatalf("terminal abort assistant text = %q, want sanitized failure", got)
+	var terminalMessages []ModelMessage
+	if err := json.Unmarshal(abort.Messages, &terminalMessages); err != nil || len(terminalMessages) != 0 {
+		t.Fatalf("terminal abort messages = %s (%v), want none", abort.Messages, err)
 	}
 	select {
 	case got := <-memory.afterChat:
@@ -1769,7 +1776,7 @@ func TestStreamACPAgentWSStopRacingCompletionPersistsAsAbort(t *testing.T) {
 	}
 }
 
-func TestStreamACPAgentWSExternalAgentErrorSkipsPersistence(t *testing.T) {
+func TestStreamACPAgentWSExternalAgentErrorKeepsTheSend(t *testing.T) {
 	t.Parallel()
 
 	messages := &recordingMessageService{}
@@ -1778,7 +1785,7 @@ func TestStreamACPAgentWSExternalAgentErrorSkipsPersistence(t *testing.T) {
 	resolver := newACPLifecycleService(t, pool, messages, lifecycles)
 
 	eventCh := make(chan WSStreamEvent, 8)
-	_, err := resolver.streamACPAgentWS(
+	outcome, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    lifecycleTestBotID,
@@ -1789,19 +1796,29 @@ func TestStreamACPAgentWSExternalAgentErrorSkipsPersistence(t *testing.T) {
 		eventCh,
 		make(chan struct{}),
 	)
-	if apperror.CodeOf(err) != apperror.CodeACPAgentNotConfigured {
-		t.Fatalf("streamACPAgentWS() error = %v, want %s", err, apperror.CodeACPAgentNotConfigured)
+	if err != nil || outcome.ErrorCode() != string(apperror.CodeACPAgentNotConfigured) {
+		t.Fatalf("streamACPAgentWS() = %q, %v, want %s", outcome.ErrorCode(), err, apperror.CodeACPAgentNotConfigured)
 	}
-	if len(messages.persisted) != 1 || messages.persisted[0].Role != "user" {
-		t.Fatalf("staged messages = %#v, want only the user turn", messages.persisted)
-	}
-	if len(messages.deleted) != 1 || !slices.Equal(messages.deleted[0], []string{"message-id"}) {
-		t.Fatalf("cleanup calls = %#v, want staged user deletion", messages.deleted)
-	}
+	requireWebSendFailureRound(t, messages, apperror.CodeACPAgentNotConfigured)
 	requireACPLifecycle(t, lifecycles, lifecycleTestRunID, contextLifecycleStatusFailedProvider)
 	events := drainAgentEvents(t, eventCh)
-	if !containsStreamEvent(events, native.EventStart) || containsStreamEvent(events, native.EventAbort) {
-		t.Fatalf("events = %#v, want only startup event before the error return", events)
+	if !containsStreamEvent(events, native.EventError) || !containsStreamEvent(events, native.EventAbort) {
+		t.Fatalf("events = %#v, want the failure frame and an aborted terminal", events)
+	}
+}
+
+// requireWebSendFailureRound checks that a failed Web send kept its user
+// message and recorded one failure row under code.
+func requireWebSendFailureRound(t *testing.T, messages *recordingMessageService, code apperror.Code) {
+	t.Helper()
+	if len(messages.deleted) != 0 {
+		t.Fatalf("cleanup calls = %#v, want the user message kept", messages.deleted)
+	}
+	if len(messages.persisted) != 2 || messages.persisted[0].Role != "user" {
+		t.Fatalf("persisted = %#v, want the user turn and its failure row", messages.persisted)
+	}
+	if got, _ := messages.persisted[1].Metadata["error_code"].(string); got != string(code) {
+		t.Fatalf("history error_code = %q, want %q", got, code)
 	}
 }
 
@@ -1831,7 +1848,7 @@ func TestStreamACPAgentWSImageCapabilityErrorCarriesItsCode(t *testing.T) {
 	}
 	resolver.SetACPSessionPool(&recordingACPPrompter{err: acpclient.ErrImagePromptUnsupported})
 
-	_, err := resolver.streamACPAgentWS(
+	outcome, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    "bot-1",
@@ -1847,15 +1864,10 @@ func TestStreamACPAgentWSImageCapabilityErrorCarriesItsCode(t *testing.T) {
 		make(chan WSStreamEvent, 8),
 		make(chan struct{}),
 	)
-	if apperror.CodeOf(err) != apperror.CodeACPImageInputUnsupported {
-		t.Fatalf("streamACPAgentWS() error = %#v, want %s", err, apperror.CodeACPImageInputUnsupported)
+	if err != nil || outcome.ErrorCode() != string(apperror.CodeACPImageInputUnsupported) {
+		t.Fatalf("streamACPAgentWS() = %q, %#v, want %s", outcome.ErrorCode(), err, apperror.CodeACPImageInputUnsupported)
 	}
-	if len(messages.persisted) != 1 || messages.persisted[0].Role != "user" {
-		t.Fatalf("staged messages = %#v, want only the user turn", messages.persisted)
-	}
-	if len(messages.deleted) != 1 || !slices.Equal(messages.deleted[0], []string{"message-id"}) {
-		t.Fatalf("cleanup calls = %#v, want staged user deletion", messages.deleted)
-	}
+	requireWebSendFailureRound(t, messages, apperror.CodeACPImageInputUnsupported)
 }
 
 func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
@@ -1947,27 +1959,6 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 	if snapshot.MemoryRecall.ProviderID != storeRoundMemoryProviderID || snapshot.MemoryRecall.CacheState != "miss" ||
 		snapshot.MemoryRecall.Result.Count != 1 || !slices.Equal(snapshot.MemoryRecall.Result.Refs, []string{"memory-1"}) {
 		t.Fatalf("ACP memory trace = %#v", snapshot.MemoryRecall)
-	}
-}
-
-func TestRuntimeFailureResultSanitizesGenericErrors(t *testing.T) {
-	t.Parallel()
-
-	partial := acpagent.DriverPromptResult(acpclient.PromptResult{Text: "partial answer"}, "codex")
-	got, delta := runtimeFailureResult(partial, errors.New("adapter crashed"))
-	if !strings.Contains(delta, "could not complete this turn") {
-		t.Fatalf("runtimeFailureResult() delta = %q, want sanitized failure", delta)
-	}
-	if strings.Contains(delta, "adapter crashed") {
-		t.Fatalf("generic failure leaked raw upstream error: delta=%q", delta)
-	}
-	_ = got
-
-	// A coded failure names its code, not its cause.
-	coded := apperror.Wrap(apperror.CodeACPImageInputUnsupported, errors.New("SECRET adapter detail"), nil)
-	_, codedDelta := runtimeFailureResult(acpagent.DriverPromptResult(acpclient.PromptResult{}, "codex"), coded)
-	if !strings.Contains(codedDelta, "("+string(apperror.CodeACPImageInputUnsupported)+")") || strings.Contains(codedDelta, "SECRET") {
-		t.Fatalf("coded failure delta = %q, want the code without the cause", codedDelta)
 	}
 }
 
@@ -2554,7 +2545,7 @@ func TestACPDecisionAuthorityRequiresLiveWorkspaceExec(t *testing.T) {
 // streamACPAgentWS preserves the pre-unification test entry: it runs the
 // unified runtime flow through an ACP driver over the service's pool.
 func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) (RunOutcome, error) {
-	return s.streamRuntimeWS(ctx, acpagent.NewDriver(s.acpPool), req, eventCh, abortCh)
+	return s.streamRuntimeWS(ctx, acpagent.NewDriver(s.acpPool), req, eventCh, abortCh, true)
 }
 
 // persistACPRound preserves the pre-unification test entry: it maps the pool

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func ValidateManagedACPConfig(profile acpprofile.Profile, setup acpprofile.AgentSetup, mode SetupMode) error {
@@ -18,7 +19,7 @@ func ValidateManagedACPConfig(profile acpprofile.Profile, setup acpprofile.Agent
 			continue
 		}
 		if strings.TrimSpace(values[field.ID]) == "" {
-			return fmt.Errorf("%s required for %s %s setup", field.ID, profile.DisplayName, mode)
+			return errs.New(fmt.Sprintf("%s required for %s %s setup", field.ID, profile.DisplayName, mode))
 		}
 	}
 	return nil

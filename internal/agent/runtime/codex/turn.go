@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // interruptSettleTimeout bounds how long an interrupted turn may take to
@@ -703,7 +703,7 @@ func (t *turnState) result() (external.PromptResult, error) {
 		if turnErr != nil && strings.TrimSpace(turnErr.Message) != "" {
 			message = turnErr.Message
 		}
-		return out, errors.New(message)
+		return out, errs.NewDependency(message)
 	}
 }
 

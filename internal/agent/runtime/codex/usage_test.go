@@ -2,12 +2,11 @@ package codex
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestFetchAccountUsage(t *testing.T) {
@@ -44,7 +43,7 @@ func TestFetchAccountUsageReportsExpiredSignIn(t *testing.T) {
 	defer server.Close()
 
 	_, err := fetchAccountUsage(context.Background(), server.Client(), server.URL, "stale", "account")
-	if apperror.CodeOf(err) != apperror.CodeAgentCredentialUsageAuthExpired {
-		t.Fatalf("err = %v, want usage_auth_expired", err)
+	if !errors.Is(err, ErrUsageSignInExpired) {
+		t.Fatalf("err = %v, want ErrUsageSignInExpired", err)
 	}
 }

@@ -209,7 +209,7 @@ func (h *BotAgentsHandler) Delete(c echo.Context) error {
 	}
 	botAgentID := strings.TrimSpace(c.Param("id"))
 	err = h.service.Delete(c.Request().Context(), botID, botAgentID, func(agent botagents.BotAgent) error {
-		purgeErr := h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID)
+		purgeErr := application.ExternalRuntimeError(h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID))
 		if purgeErr != nil && apperror.CodeOf(purgeErr) == "" {
 			return apperror.Wrap(apperror.CodeAgentCredentialMaterializationFailed, purgeErr, nil)
 		}

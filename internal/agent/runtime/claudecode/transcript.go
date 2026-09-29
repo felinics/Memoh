@@ -3,10 +3,10 @@ package claudecode
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path"
 	"strings"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -40,11 +40,11 @@ func locateSessionTranscript(ctx context.Context, fs transcriptFS, sessionID str
 		if errors.Is(err, bridge.ErrNotFound) {
 			return "", false, nil
 		}
-		return "", false, fmt.Errorf("stat claude projects dir: %w", err)
+		return "", false, errs.WrapDependency(err, "stat claude projects dir")
 	}
 	entries, err := fs.ListDirBounded(ctx, projectsRoot, true, maxProjectEntries)
 	if err != nil {
-		return "", false, fmt.Errorf("list claude projects dir: %w", err)
+		return "", false, errs.WrapDependency(err, "list claude projects dir")
 	}
 	wanted := sessionID + ".jsonl"
 	for _, entry := range entries {
@@ -78,7 +78,7 @@ func cleanTranscriptRelPath(value string) string {
 func validateClaudeSessionID(value string) error {
 	if value == "" || strings.TrimSpace(value) != value || len(value) > 256 ||
 		strings.ContainsAny(value, "\x00\r\n/\\") || value == "." || value == ".." {
-		return errors.New("claude session id is not a safe file name")
+		return errs.New("claude session id is not a safe file name")
 	}
 	return nil
 }

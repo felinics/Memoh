@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const codexManagedConfigHeader = "# Managed by Memoh. Changes are overwritten when this Agent starts.\n"
@@ -31,7 +33,7 @@ func materializeCodexConfig(ctx context.Context, writer codexConfigWriter, home 
 	}
 	configPath := path.Join(home, "config.toml")
 	if err := writer.WriteFile(ctx, configPath, payload); err != nil {
-		return fmt.Errorf("write codex config %s: %w", configPath, err)
+		return errs.WrapDependency(err, "write codex config "+configPath)
 	}
 	return nil
 }

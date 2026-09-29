@@ -98,7 +98,7 @@ func (s *Service) streamRuntimeChunks(ctx context.Context, driver external.Drive
 	done := make(chan error, 1)
 	go func() {
 		defer close(eventCh)
-		_, err := s.streamRuntimeWS(ctx, driver, req, eventCh, nil)
+		_, err := s.streamRuntimeWS(ctx, driver, req, eventCh, nil, false)
 		done <- err
 		close(done)
 	}()
@@ -156,8 +156,9 @@ func runtimeSessionMeta(sess session.Thread) map[string]any {
 // claude-code) and streams events to the WS surface. The runtime owns its
 // durable session state (keyed through runtime metadata), Memoh's history is
 // a projection persisted per round. Runtimes may request an observed-round
-// publication for warm-process fencing.
-func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) (RunOutcome, error) {
+// publication for warm-process fencing. webSend is set by the Web chat caller
+// for a new send, whose every admitted failure is recorded in history.
+func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}, webSend bool) (RunOutcome, error) {
 	req.RunID = runIDForChatRequest(req.RunID)
 	if s.sessionRuntime != nil {
 		// External drivers block their turn inline on decisions; declare it
@@ -320,6 +321,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 
 	var notices runtimeNotices
 	emitWithContext := func(deliveryCtx context.Context, ev native.StreamEvent) {
+		ev = publicRuntimeNotice(ev)
 		if !notices.observe(ev) {
 			return
 		}
@@ -394,6 +396,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		CanRequestUserInput: s.canDeliverUserInputWS(eventCh),
 		Sink:                external.EventSinkFunc(emit),
 	})
+	configurationFailure := isRuntimeConfigurationError(err)
 	err = ExternalAgentError(err)
 	notices.apply(&result)
 	outcome.setCause(err)
@@ -404,6 +407,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		// timeout is a failed turn and must carry agent.response_timeout through
 		// history, lifecycle, and the live stream.
 		err = context.Cause(idleCtx)
+		configurationFailure = false
 		outcome.setCause(err)
 	}
 
@@ -456,18 +460,16 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 			emitWithContext(ctx, runtimeTerminalStreamEvent(native.EventAbort, result))
 			return outcome.ownerOutcome(), nil
 		}
-		if isRuntimeConfigurationError(err) && !runtimeTurnRan(result) && len(result.Notices) == 0 {
-			// Configuration-class failure: nothing ran, so persist nothing.
-			// Repeated attempts must not pile failure rounds into history.
+		if configurationFailure && !webSend && !runtimeTurnRan(result) && len(result.Notices) == 0 {
+			// Configuration-class failure off the Web chat: nothing ran, so
+			// persist nothing. Repeated attempts must not pile failure rounds
+			// into history. A Web send keeps its message and records the
+			// failure like any other, before its failure frame is sent.
 			cleanupProjections()
 			cleanupLeadingUser()
 			return RunOutcome{}, err
 		}
-		failedResult, failureDelta := runtimeFailureResult(result, err)
-		if failureDelta != "" {
-			emit(native.StreamEvent{Type: native.EventTextDelta, Delta: failureDelta})
-		}
-		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, failedResult, err, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
+		if persistErr := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, result, err, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); persistErr != nil {
 			outcome.setCause(runtimeHistoryError(persistErr))
 			s.logger.ErrorContext(ctx, "external failure persist failed", slog.Any("error", persistErr), slog.String("session_id", req.ThreadID))
 			switch s.resolveRuntimeRoundPersistFailure(ctx, req, persistErr, cleanupProjectionsIn) {
@@ -475,7 +477,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 				outcome.setCause(err)
 				cleanupProjections()
 				emit(native.StreamEvent{Type: native.EventTextEnd})
-				emit(runtimeTerminalStreamEvent(native.EventAbort, failedResult))
+				emit(runtimeTerminalStreamEvent(native.EventAbort, result))
 				return outcome.ownerOutcome(), nil
 			case runtimeRoundUnresolved:
 				return RunOutcome{}, apperror.Wrap(apperror.CodeSessionHistoryInconsistent, persistErr, nil)
@@ -491,7 +493,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 			emit(runtimeFailureEvent(outcome.cause))
 		}
 		emit(native.StreamEvent{Type: native.EventTextEnd})
-		emit(runtimeTerminalStreamEvent(native.EventAbort, failedResult))
+		emit(runtimeTerminalStreamEvent(native.EventAbort, result))
 		return outcome.ownerOutcome(), nil
 	}
 
@@ -664,17 +666,21 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 		// Nobody is on the other end of a scheduled run.
 		CanRequestUserInput: false,
 		Sink: external.EventSinkFunc(func(ev native.StreamEvent) {
+			ev = publicRuntimeNotice(ev)
 			notices.observe(ev)
 			idleCancel.Observe(ev)
 			reasoningTiming.observe(ev)
 		}),
 	})
+	configurationFailure := isRuntimeConfigurationError(promptErr)
 	promptErr = ExternalAgentError(promptErr)
 	notices.apply(&result)
 	if idleCancel.DidFire() {
 		promptErr = context.Cause(idleCtx)
+		configurationFailure = false
 	} else if errors.Is(context.Cause(ctx), schedule.ErrExecutionTimeout) {
 		promptErr = agentAbortCause(ctx)
+		configurationFailure = false
 	}
 	lifecycleCause = promptErr
 	// Same contract as the chat path: the round must not commit past a lost
@@ -716,7 +722,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 	}
 	if promptErr != nil {
 		s.cancelPendingRuntimeApprovals(context.WithoutCancel(ctx), req, "tool approval cancelled: the scheduled run ended before a decision arrived")
-		if isRuntimeConfigurationError(promptErr) && !runtimeTurnRan(result) && len(result.Notices) == 0 {
+		if configurationFailure && !runtimeTurnRan(result) && len(result.Notices) == 0 {
 			// Configuration-class failure: nothing ran; the schedule log keeps
 			// the failure record without polluting the session history.
 			if leadingUser != nil {
@@ -724,8 +730,7 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 			}
 			return schedule.TriggerResult{}, promptErr
 		}
-		failedResult, _ := runtimeFailureResult(result, promptErr)
-		if err := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, failedResult, promptErr, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); err != nil {
+		if err := s.persistRuntimeRound(context.WithoutCancel(ctx), req, runtimeType, projectPath, result, promptErr, false, contextLifecycle, takeTerminalReasoningTiming(reasoningTiming, native.EventAgentAbort)); err != nil {
 			lifecycleCause = runtimeHistoryError(err)
 			s.logger.ErrorContext(ctx, "external schedule failure persist failed", slog.Any("error", err), slog.String("session_id", payload.SessionID))
 		}
@@ -984,56 +989,12 @@ func (s *Service) persistRuntimeRound(
 	return err
 }
 
-// runtimeFailureResult appends a short, sanitized failure marker to the
-// partial result; detailed errors stay in logs, not user-visible history.
-func runtimeFailureResult(result external.PromptResult, err error) (external.PromptResult, string) {
-	message := runtimeUserFacingFailureMessage(err)
-	if message == "" {
-		return result, ""
-	}
-	result.Output = external.AppendTranscriptText(result.Output, message)
-	return result, "\n\n" + message
-}
-
-func runtimeUserFacingFailureMessage(err error) string {
-	if err == nil {
-		return ""
-	}
-	if code := strings.TrimSpace(string(apperror.CodeOf(err))); code != "" {
-		return "The external agent could not complete this turn (" + code + ")."
-	}
-	return "The external agent could not complete this turn."
-}
-
 // runtimeTurnRan reports evidence that the runtime accepted the turn. "Nothing
 // ran" is otherwise only a driver's promise about its error codes, and a wrong
 // code must cost a stored failure round, never the user's message. A publication
 // request is no evidence: ACP reports it on every result.
 func runtimeTurnRan(result external.PromptResult) bool {
 	return strings.TrimSpace(result.AgentTurnID) != "" || len(result.Output) > 0
-}
-
-// isRuntimeConfigurationError reports failures where nothing ran:
-// the turn must not persist a round, and the caller surfaces the error
-// directly. Drivers normalize their configuration-class errors into apperror
-// codes or the package errors ExternalAgentError translates.
-func isRuntimeConfigurationError(err error) bool {
-	code := apperror.CodeOf(ExternalAgentError(err))
-	if apperror.IsExternalAgentCode(code) {
-		return true
-	}
-	switch code {
-	case apperror.CodeExternalRuntimeAuthRequired, apperror.CodeExternalRuntimeUnavailable,
-		apperror.CodeRuntimeControlGoalRequiresDefaultMode,
-		apperror.CodeExternalRuntimeSessionResumeFailed,
-		apperror.CodeACPModelSelectionUnsupported, apperror.CodeACPModelIDRequired,
-		apperror.CodeACPModelUnavailable, apperror.CodeACPReasoningUnsupported,
-		apperror.CodeACPReasoningEffortRequired, apperror.CodeACPReasoningUnavailable,
-		apperror.CodeACPConfigUpdateFailed:
-		return true
-	default:
-		return false
-	}
 }
 
 // runtimeFailureEvent is the public stream event for a failed External Agent

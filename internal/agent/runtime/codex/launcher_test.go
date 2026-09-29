@@ -8,7 +8,6 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -142,8 +141,8 @@ func TestResolveLauncherMissingDependencyKeepsItsFields(t *testing.T) {
 	if !errors.As(shaped, &missing) {
 		t.Fatalf("wrapServerError hid the missing dependency: %v", shaped)
 	}
-	if apperror.CodeOf(shaped) != "" {
-		t.Fatalf("wrapServerError wrapped the missing dependency in apperror %q", apperror.CodeOf(shaped))
+	if external.IsFailure(shaped) {
+		t.Fatalf("wrapServerError wrapped the missing dependency in a runtime failure: %v", shaped)
 	}
 }
 
@@ -169,8 +168,9 @@ func TestResolveLauncherOtherErrorsAreWrapped(t *testing.T) {
 	if errors.Is(err, external.ErrDependencyMissing) {
 		t.Fatal("a plain resolver failure must not become a missing dependency")
 	}
-	if code := apperror.CodeOf(wrapServerError(err)); code != apperror.CodeExternalRuntimeUnavailable {
-		t.Fatalf("wrapServerError code = %q", code)
+	var failure *external.Failure
+	if shaped := wrapServerError(err); !errors.As(shaped, &failure) || failure.Kind != external.FailureUnavailable {
+		t.Fatalf("wrapServerError = %T %v, want an unavailable runtime", shaped, shaped)
 	}
 
 	empty := &Driver{launchers: &fakeLauncherResolver{launcher: external.Launcher{Source: external.LauncherSourceManaged}}}
@@ -191,7 +191,7 @@ func TestThreadNoticesOnlyReportToollessThreads(t *testing.T) {
 	srv.setThreadToolless("thread-a", true)
 	emitThreadNotices(srv, "thread-a", sink)
 	emitThreadNotices(srv, "thread-a", sink)
-	if len(sink.events) != 2 || sink.events[0].Code != "tools_unavailable" || sink.events[1].Code != "tools_unavailable" {
+	if len(sink.events) != 2 || sink.events[0].NoticeKind != event.NoticeToolsUnavailable || sink.events[1].NoticeKind != event.NoticeToolsUnavailable {
 		t.Fatalf("events = %+v", sink.events)
 	}
 }
