@@ -12,6 +12,6 @@ export function canDispatchKeyboardCommand(command: AppKeyboardCommand, path: st
   const dialog = dialogs.at(-1)
   const mediaCommand = keyboardBindings.find(binding => binding.command === command)?.scope === 'mediaLightbox'
   if (dialog) return mediaCommand && dialog.dataset.keyboardScope === 'mediaLightbox'
-  if (mediaCommand) return false
+  if (mediaCommand) return true
   return command === appKeyboardCommands.openSettings || chatRoute
 }
