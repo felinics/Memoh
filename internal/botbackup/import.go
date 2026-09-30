@@ -30,7 +30,6 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/mcp"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	modelpkg "github.com/felinics/memoh/internal/models"
 	providerpkg "github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -485,6 +484,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	if err != nil {
 		return ImportResult{}, fmt.Errorf("read bot/settings.json: %w", err)
 	}
+	cfg = resolveLegacyMemoryProvider(state, cfg)
 	// Dependencies (providers/models/...) are global, idempotent resources; they
 	// are created before the bot and are intentionally NOT rolled back, so a
 	// retry reuses them by name.
@@ -734,7 +734,6 @@ type dependencyMap struct {
 	models          map[string]string
 	searchProviders map[string]string
 	fetchProviders  map[string]string
-	memoryProviders map[string]string
 }
 
 func newDependencyMap() dependencyMap {
@@ -743,7 +742,6 @@ func newDependencyMap() dependencyMap {
 		models:          map[string]string{},
 		searchProviders: map[string]string{},
 		fetchProviders:  map[string]string{},
-		memoryProviders: map[string]string{},
 	}
 }
 
@@ -794,15 +792,6 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 			continue
 		}
 		deps.fetchProviders[item.ID] = id
-	}
-	memoryProviders, _ := readEntry[[]memprovider.ProviderGetResponse](state, "dependencies/memory_providers.json")
-	for _, item := range memoryProviders {
-		id, err := s.ensureMemoryProvider(ctx, item)
-		if err != nil {
-			s.skipImport(ctx, state, "memory_provider_dependency", "memory provider dependency skipped", err)
-			continue
-		}
-		deps.memoryProviders[item.ID] = id
 	}
 	return deps, nil
 }
@@ -880,7 +869,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.ImageModelID = current.ImageModelID
 				eff.SearchProviderID = current.SearchProviderID
 				eff.FetchProviderID = current.FetchProviderID
-				eff.MemoryProviderID = current.MemoryProviderID
+				eff.MemoryEnabled = current.MemoryEnabled
 				eff.TtsModelID = current.TtsModelID
 				eff.TranscriptionModelID = current.TranscriptionModelID
 				eff.CompactionModelID = current.CompactionModelID
@@ -932,6 +921,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	overlayEnabled := eff.OverlayEnabled
 	overlayProvider := eff.OverlayProvider
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
+	memoryEnabled := eff.MemoryEnabled
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
 		ChatModelID:             ptrStringAllowEmpty(modelID(eff.ChatModelID, deps.models)),
 		ChatRuntime:             ptrStringAllowEmpty(eff.ChatRuntime),
@@ -941,7 +931,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		ImageModelID:            ptrStringAllowEmpty(modelID(eff.ImageModelID, deps.models)),
 		SearchProviderID:        ptrStringAllowEmpty(modelID(eff.SearchProviderID, deps.searchProviders)),
 		FetchProviderID:         &fetchProviderID,
-		MemoryProviderID:        ptrStringAllowEmpty(modelID(eff.MemoryProviderID, deps.memoryProviders)),
+		MemoryEnabled:           &memoryEnabled,
 		TtsModelID:              ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
 		TranscriptionModelID:    ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
 		AclDefaultEffect:        eff.AclDefaultEffect,
@@ -1990,27 +1980,6 @@ func (s *Service) ensureFetchProvider(ctx context.Context, item fetchpkg.GetResp
 		if _, err := s.fetchProviders.Update(ctx, created.ID, fetchpkg.UpdateRequest{Enable: &enable}); err != nil {
 			return "", err
 		}
-	}
-	return created.ID, nil
-}
-
-func (s *Service) ensureMemoryProvider(ctx context.Context, item memprovider.ProviderGetResponse) (string, error) {
-	if s.memoryProviders == nil {
-		return item.ID, errors.New("memory provider service not configured")
-	}
-	list, _ := s.memoryProviders.List(ctx)
-	for _, existing := range list {
-		if existing.Name == item.Name {
-			return existing.ID, nil
-		}
-	}
-	created, err := s.memoryProviders.Create(ctx, memprovider.ProviderCreateRequest{
-		Name:     item.Name,
-		Provider: memprovider.ProviderType(item.Provider),
-		Config:   item.Config,
-	})
-	if err != nil {
-		return "", err
 	}
 	return created.ID, nil
 }

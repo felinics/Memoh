@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/config"
@@ -17,13 +19,43 @@ import (
 	"github.com/felinics/memoh/internal/mcp"
 )
 
-type providerBootstrapQueries struct {
+type memoryConfigQueries struct {
 	dbstore.Queries
-	providers []sqlc.MemoryProvider
+	rows        []sqlc.MemoryProvider
+	createCalls int
 }
 
-func (q *providerBootstrapQueries) ListMemoryProviders(context.Context) ([]sqlc.MemoryProvider, error) {
-	return q.providers, nil
+func (q *memoryConfigQueries) GetBuiltinMemoryProvider(context.Context) (sqlc.MemoryProvider, error) {
+	for _, row := range q.rows {
+		if row.Provider == string(ProviderBuiltin) {
+			return row, nil
+		}
+	}
+	return sqlc.MemoryProvider{}, pgx.ErrNoRows
+}
+
+func (q *memoryConfigQueries) CreateMemoryProvider(_ context.Context, arg sqlc.CreateMemoryProviderParams) (sqlc.MemoryProvider, error) {
+	q.createCalls++
+	row := sqlc.MemoryProvider{
+		ID:        pgtype.UUID{Bytes: [16]byte{0xcc, uint8(q.createCalls)}, Valid: true}, // #nosec G115 -- test fixture counter stays tiny
+		Name:      arg.Name,
+		Provider:  arg.Provider,
+		Config:    arg.Config,
+		IsDefault: arg.IsDefault,
+	}
+	q.rows = append(q.rows, row)
+	return row, nil
+}
+
+func (q *memoryConfigQueries) UpdateMemoryProvider(_ context.Context, arg sqlc.UpdateMemoryProviderParams) (sqlc.MemoryProvider, error) {
+	for i := range q.rows {
+		if q.rows[i].ID == arg.ID {
+			q.rows[i].Name = arg.Name
+			q.rows[i].Config = arg.Config
+			return q.rows[i], nil
+		}
+	}
+	return sqlc.MemoryProvider{}, pgx.ErrNoRows
 }
 
 type bootstrapProvider struct {
@@ -90,33 +122,104 @@ func (*bootstrapProvider) Usage(context.Context, map[string]any) (UsageResponse,
 	return UsageResponse{}, nil
 }
 
-func TestInstantiateAllLoadsConfiguredProvidersIntoRegistry(t *testing.T) {
+func TestGetConfigWithoutBuiltinRowReadsEmpty(t *testing.T) {
 	t.Parallel()
+	queries := &memoryConfigQueries{}
+	service := NewService(slog.Default(), queries, config.Config{})
 
-	providerID := pgtype.UUID{Bytes: [16]byte{1, 2, 3}, Valid: true}
-	registry := NewRegistry(slog.Default())
-	registry.RegisterFactory(string(ProviderMem0), func(_ context.Context, _, _ string, _ map[string]any) (Provider, error) {
-		return &bootstrapProvider{providerType: string(ProviderMem0)}, nil
-	})
-	service := NewService(slog.Default(), &providerBootstrapQueries{
-		providers: []sqlc.MemoryProvider{{
-			ID:       providerID,
-			Name:     "Mem0",
-			Provider: string(ProviderMem0),
-			Config:   []byte(`{"api_key":"test"}`),
-		}},
-	}, config.Config{})
-	service.SetRegistry(registry)
-
-	loaded, err := service.InstantiateAll(context.Background())
+	cfg, err := service.GetConfig(context.Background())
 	if err != nil {
-		t.Fatalf("InstantiateAll() error = %v", err)
+		t.Fatalf("GetConfig() error = %v", err)
 	}
-	if loaded != 1 {
-		t.Fatalf("loaded providers = %d, want 1", loaded)
+	if cfg.EmbeddingModelID != "" {
+		t.Fatalf("embedding model = %q, want empty", cfg.EmbeddingModelID)
 	}
-	if _, err := registry.Get(context.Background(), providerID.String()); err != nil {
-		t.Fatalf("registry missing configured provider after InstantiateAll(): %v", err)
+	if queries.createCalls != 0 {
+		t.Fatalf("GetConfig() created %d rows, want 0", queries.createCalls)
+	}
+}
+
+func TestUpdateConfigCreatesBuiltinRowOnFirstSave(t *testing.T) {
+	t.Parallel()
+	queries := &memoryConfigQueries{}
+	service := NewService(slog.Default(), queries, config.Config{})
+	model := "embedding-model"
+
+	cfg, err := service.UpdateConfig(context.Background(), MemoryConfigUpdateRequest{EmbeddingModelID: &model})
+	if err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+	if cfg.EmbeddingModelID != model {
+		t.Fatalf("embedding model = %q, want %q", cfg.EmbeddingModelID, model)
+	}
+	if queries.createCalls != 1 || len(queries.rows) != 1 {
+		t.Fatalf("builtin rows = %d (creates %d), want 1", len(queries.rows), queries.createCalls)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(queries.rows[0].Config, &stored); err != nil {
+		t.Fatalf("stored config: %v", err)
+	}
+	if stored["memory_mode"] != "graph" || stored["embedding_model_id"] != model {
+		t.Fatalf("stored config = %v", stored)
+	}
+}
+
+func TestUpdateConfigClearsEmbeddingAndKeepsOtherKeys(t *testing.T) {
+	t.Parallel()
+	queries := &memoryConfigQueries{rows: []sqlc.MemoryProvider{{
+		ID:       pgtype.UUID{Bytes: [16]byte{9}, Valid: true},
+		Name:     "Built-in",
+		Provider: string(ProviderBuiltin),
+		Config:   []byte(`{"memory_mode":"graph","embedding_model_id":"old","context_target_items":4}`),
+	}}}
+	service := NewService(slog.Default(), queries, config.Config{})
+	empty := ""
+
+	cfg, err := service.UpdateConfig(context.Background(), MemoryConfigUpdateRequest{EmbeddingModelID: &empty})
+	if err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+	if cfg.EmbeddingModelID != "" {
+		t.Fatalf("embedding model = %q, want cleared", cfg.EmbeddingModelID)
+	}
+	if queries.createCalls != 0 {
+		t.Fatalf("UpdateConfig() created %d rows, want 0", queries.createCalls)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(queries.rows[0].Config, &stored); err != nil {
+		t.Fatalf("stored config: %v", err)
+	}
+	if _, ok := stored["embedding_model_id"]; ok {
+		t.Fatalf("embedding_model_id still stored: %v", stored)
+	}
+	if stored["context_target_items"] != float64(4) {
+		t.Fatalf("context_target_items = %v, want 4", stored["context_target_items"])
+	}
+	if queries.rows[0].Name != "Built-in" {
+		t.Fatalf("name = %q, want unchanged", queries.rows[0].Name)
+	}
+}
+
+func TestEnsureBuiltinIDReusesExistingRow(t *testing.T) {
+	t.Parallel()
+	existing := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+	queries := &memoryConfigQueries{rows: []sqlc.MemoryProvider{{
+		ID:       existing,
+		Name:     "Built-in",
+		Provider: string(ProviderBuiltin),
+		Config:   []byte(`{}`),
+	}}}
+	service := NewService(slog.Default(), queries, config.Config{})
+
+	id, err := service.EnsureBuiltinID(context.Background())
+	if err != nil {
+		t.Fatalf("EnsureBuiltinID() error = %v", err)
+	}
+	if id != existing.String() {
+		t.Fatalf("EnsureBuiltinID() = %q, want %q", id, existing.String())
+	}
+	if queries.createCalls != 0 {
+		t.Fatalf("EnsureBuiltinID() created %d rows, want 0", queries.createCalls)
 	}
 }
 
@@ -137,11 +240,11 @@ func teamRegistryContext(teamID string) context.Context {
 func TestRegistryIsolatesSameProviderIDByTeam(t *testing.T) {
 	t.Parallel()
 	registry := NewRegistry(slog.Default(), registryTeamResolver)
-	registry.RegisterFactory(string(ProviderMem0), func(_ context.Context, teamID, _ string, _ map[string]any) (Provider, error) {
+	registry.RegisterFactory(string(ProviderBuiltin), func(_ context.Context, teamID, _ string, _ map[string]any) (Provider, error) {
 		return &bootstrapProvider{providerType: teamID}, nil
 	})
 	registry.SetConfigLoader(func(_ context.Context, _ string) (string, map[string]any, error) {
-		return string(ProviderMem0), map[string]any{}, nil
+		return string(ProviderBuiltin), map[string]any{}, nil
 	})
 
 	teamA := teamRegistryContext("team-a")
@@ -170,13 +273,13 @@ func TestRegistryConcurrentMissInstantiatesOnce(t *testing.T) {
 	t.Parallel()
 	registry := NewRegistry(slog.Default())
 	var factoryCalls atomic.Int32
-	registry.RegisterFactory(string(ProviderMem0), func(_ context.Context, _, _ string, _ map[string]any) (Provider, error) {
+	registry.RegisterFactory(string(ProviderBuiltin), func(_ context.Context, _, _ string, _ map[string]any) (Provider, error) {
 		factoryCalls.Add(1)
 		time.Sleep(20 * time.Millisecond)
-		return &bootstrapProvider{providerType: string(ProviderMem0)}, nil
+		return &bootstrapProvider{providerType: string(ProviderBuiltin)}, nil
 	})
 	registry.SetConfigLoader(func(_ context.Context, _ string) (string, map[string]any, error) {
-		return string(ProviderMem0), map[string]any{}, nil
+		return string(ProviderBuiltin), map[string]any{}, nil
 	})
 
 	const workers = 24
@@ -209,7 +312,7 @@ func TestRegistryUpdateCannotBeOverwrittenByInflightLoad(t *testing.T) {
 	registry := NewRegistry(slog.Default())
 	oldFactoryStarted := make(chan struct{})
 	releaseOldFactory := make(chan struct{})
-	registry.RegisterFactory(string(ProviderMem0), func(_ context.Context, _, _ string, config map[string]any) (Provider, error) {
+	registry.RegisterFactory(string(ProviderBuiltin), func(_ context.Context, _, _ string, config map[string]any) (Provider, error) {
 		version, _ := config["version"].(string)
 		if version == "old" {
 			close(oldFactoryStarted)
@@ -218,7 +321,7 @@ func TestRegistryUpdateCannotBeOverwrittenByInflightLoad(t *testing.T) {
 		return &bootstrapProvider{providerType: version}, nil
 	})
 	registry.SetConfigLoader(func(_ context.Context, _ string) (string, map[string]any, error) {
-		return string(ProviderMem0), map[string]any{"version": "old"}, nil
+		return string(ProviderBuiltin), map[string]any{"version": "old"}, nil
 	})
 
 	oldResult := make(chan Provider, 1)
@@ -236,7 +339,7 @@ func TestRegistryUpdateCannotBeOverwrittenByInflightLoad(t *testing.T) {
 			updateErr <- err
 			return
 		}
-		_, err := registry.Instantiate(context.Background(), "provider-id", string(ProviderMem0), map[string]any{"version": "new"})
+		_, err := registry.Instantiate(context.Background(), "provider-id", string(ProviderBuiltin), map[string]any{"version": "new"})
 		updateErr <- err
 	}()
 	close(releaseOldFactory)
@@ -271,7 +374,7 @@ func TestRegistryRemoveClosesProvider(t *testing.T) {
 	t.Parallel()
 	registry := NewRegistry(slog.Default())
 	var closeCalls atomic.Int32
-	provider := &bootstrapProvider{providerType: string(ProviderMem0), closeCalls: &closeCalls}
+	provider := &bootstrapProvider{providerType: string(ProviderBuiltin), closeCalls: &closeCalls}
 	if err := registry.RegisterContext(context.Background(), "provider-id", provider); err != nil {
 		t.Fatalf("RegisterContext() error = %v", err)
 	}
@@ -296,13 +399,13 @@ func TestRegistryCloseClosesAllProvidersOnce(t *testing.T) {
 	var firstCloseCalls atomic.Int32
 	var secondCloseCalls atomic.Int32
 	if err := registry.RegisterContext(context.Background(), "first", &bootstrapProvider{
-		providerType: string(ProviderMem0),
+		providerType: string(ProviderBuiltin),
 		closeCalls:   &firstCloseCalls,
 	}); err != nil {
 		t.Fatalf("RegisterContext(first) error = %v", err)
 	}
 	if err := registry.RegisterContext(context.Background(), "second", &bootstrapProvider{
-		providerType: string(ProviderMem0),
+		providerType: string(ProviderBuiltin),
 		closeCalls:   &secondCloseCalls,
 	}); err != nil {
 		t.Fatalf("RegisterContext(second) error = %v", err)

@@ -77,8 +77,6 @@ import (
 	"github.com/felinics/memoh/internal/media"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
-	memmem0 "github.com/felinics/memoh/internal/memory/adapters/mem0"
-	memopenviking "github.com/felinics/memoh/internal/memory/adapters/openviking"
 	"github.com/felinics/memoh/internal/memory/memllm"
 	storefs "github.com/felinics/memoh/internal/memory/storefs"
 	"github.com/felinics/memoh/internal/memory/wikistore"
@@ -278,10 +276,12 @@ func provideSettingsService(
 	networkService *netctl.Service,
 	modelsService *models.Service,
 	botAgentsService *botagents.Service,
+	memoryProviderService *memprovider.Service,
 ) *settings.Service {
 	service := settings.NewService(log, queries, aclService, networkService)
 	service.SetReasoningOptionsResolver(modelsService)
 	service.SetBotAgents(botAgentsService)
+	service.SetBuiltinMemoryResolver(memoryProviderService)
 	return service
 }
 
@@ -426,12 +426,6 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, provid
 		p.SetLLM(llm)
 		p.ApplyProviderConfig(providerConfig)
 		return p, nil
-	})
-	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		return memmem0.NewMem0Provider(log, providerConfig, fileStore)
-	})
-	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		return memopenviking.NewOpenVikingProvider(log, providerConfig)
 	})
 	// Default provider for bots without an explicit memory_provider_id. Uses the
 	// graph runtime (PG nodes/edges as source of truth) when a wiki store is
@@ -1010,7 +1004,7 @@ func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, serv
 	})
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
 		DB:              conn,
@@ -1025,7 +1019,6 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		Models:          modelsService,
 		SearchProviders: searchProviderService,
 		FetchProviders:  fetchProviderService,
-		MemoryProviders: memoryProviderService,
 		Workspace:       manager,
 		ACPRuntimes:     acpPool,
 		Workdirs:        workdirStore,

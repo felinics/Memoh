@@ -91,3 +91,44 @@ func (h *Handler) buildSearchGroup() *CommandGroup {
 	})
 	return g
 }
+
+// providerListRecord builds a compact provider row: the name as the label, then
+// chips for current/default and the engine slug — but the engine chip is shown
+// only when it adds information the name doesn't already convey, so e.g.
+// "Built-in Memory" does not get a redundant "builtin" chip.
+func providerListRecord(cc CommandContext, name, provider string, isDefault, isCurrent bool) listRecord {
+	fields := []kv{{cc.T("cmd.common.fieldName"), name}}
+	if isCurrent {
+		fields = append(fields, kv{"", cc.T("cmd.common.current")})
+	}
+	if isDefault {
+		fields = append(fields, kv{"", cc.T("cmd.common.default")})
+	}
+	if engine := distinctProviderEngine(name, provider); engine != "" {
+		fields = append(fields, kv{"", engine})
+	}
+	return listRecord{selected: isCurrent, fields: fields}
+}
+
+// distinctProviderEngine returns the provider engine slug only when it is not
+// already implied by the name (comparing alphanumerics only); otherwise "".
+func distinctProviderEngine(name, provider string) string {
+	p := strings.TrimSpace(provider)
+	if p == "" {
+		return ""
+	}
+	if n, pn := alnumLower(name), alnumLower(p); pn == "" || strings.Contains(n, pn) {
+		return ""
+	}
+	return p
+}
+
+func alnumLower(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

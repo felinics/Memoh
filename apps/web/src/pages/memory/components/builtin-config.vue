@@ -1,9 +1,9 @@
 <template>
-  <!-- Built-in backend: one settings card holding the embedding-model row.
-       The provider's configured state needs no stat tiles — the mode is always
-       graph (the only mode the built-in runtime saves) and semantic readiness
-       is fully derived from whether this row's model is set. -->
-  <SectionGroup :title="$t('memory.providerNames.builtin')">
+  <!-- Built-in Memory: one settings card holding the team's embedding-model
+       row. The mode is always graph and semantic readiness is fully derived
+       from whether this row's model is set; whether a bot uses memory at all
+       is that bot's own switch in its settings. -->
+  <SectionGroup :title="$t('memory.builtinTitle')">
     <SettingsSection>
       <SettingsRow
         :label="$t('memory.semanticEmbeddingModel')"
@@ -31,23 +31,26 @@ import { useServerSyncedScalar } from '@/composables/use-server-synced-form'
 import { SectionGroup, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
+  getMemoryConfig,
   getModels,
   getProviders,
-  postMemoryProviders,
-  putMemoryProvidersById,
+  putMemoryConfig,
 } from '@memohai/sdk'
-import type { AdaptersProviderGetResponse } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
 import ModelSelect from '@/pages/bots/components/model-select.vue'
-
-const props = defineProps<{
-  provider?: AdaptersProviderGetResponse | null
-}>()
 
 const { t } = useI18n()
 const queryCache = useQueryCache()
 const saveLoading = ref(false)
 const embeddingModelId = ref('')
+
+const { data: configData } = useQuery({
+  key: () => ['memory-config'],
+  query: async () => {
+    const { data } = await getMemoryConfig({ throwOnError: true })
+    return data
+  },
+})
 
 const { data: modelData } = useQuery({
   key: () => ['models'],
@@ -68,51 +71,32 @@ const { data: providerData } = useQuery({
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
 
-const savedEmbeddingModelId = computed(() => {
-  const config = (props.provider?.config ?? {}) as Record<string, unknown>
-  return typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
-})
-const hasChanges = computed(() => {
-  const config = (props.provider?.config ?? {}) as Record<string, unknown>
-  if (!props.provider?.id || config.memory_mode !== 'graph') return true
-  return embeddingModelId.value.trim() !== savedEmbeddingModelId.value
-})
+const savedEmbeddingModelId = computed(() => configData.value?.embedding_model_id ?? '')
+const hasChanges = computed(() =>
+  configData.value !== undefined && embeddingModelId.value.trim() !== savedEmbeddingModelId.value,
+)
 
 // embeddingModelId is shared between the user's draft and the server snapshot
 // that colada's refetchOnWindowFocus can replace at any moment — the
-// composable reconciles them (hard reset on provider switch, guard otherwise).
+// composable reconciles them (hard reset once the config first loads, guard
+// otherwise).
 useServerSyncedScalar(embeddingModelId, {
-  source: () => props.provider,
-  identity: provider => String(provider?.id ?? 'builtin-template'),
-  server: (provider) => {
-    const config = (provider?.config ?? {}) as Record<string, unknown>
-    return typeof config.embedding_model_id === 'string' ? config.embedding_model_id : ''
-  },
+  source: () => configData.value,
+  identity: config => (config === undefined ? 'loading' : 'builtin'),
+  server: config => config?.embedding_model_id ?? '',
 })
 
 async function handleSave() {
   saveLoading.value = true
   try {
-    const config: Record<string, unknown> = { memory_mode: 'graph' }
-    if (embeddingModelId.value.trim()) {
-      config.embedding_model_id = embeddingModelId.value.trim()
-    }
-    if (props.provider?.id) {
-      await putMemoryProvidersById({
-        path: { id: props.provider.id },
-        body: { name: props.provider.name ?? 'Built-in', config },
-        throwOnError: true,
-      })
-    } else {
-      await postMemoryProviders({
-        body: { name: 'Built-in', provider: 'builtin', config },
-        throwOnError: true,
-      })
-    }
+    await putMemoryConfig({
+      body: { embedding_model_id: embeddingModelId.value.trim() },
+      throwOnError: true,
+    })
     toast.success(t('memory.saveSuccess'))
-    queryCache.invalidateQueries({ key: ['memory-providers'] })
+    queryCache.invalidateQueries({ key: ['memory-config'] })
   } catch (error) {
-    console.error('Failed to save memory provider:', error)
+    console.error('Failed to save memory config:', error)
     toast.error(t('common.saveFailed'))
   } finally {
     saveLoading.value = false

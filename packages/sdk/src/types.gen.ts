@@ -256,6 +256,18 @@ export type AdaptersMemoryCompactCapability = {
     semantic?: boolean;
 };
 
+export type AdaptersMemoryConfig = {
+    /**
+     * EmbeddingModelID optionally maintains the pgvector semantic seed index
+     * for graph recall. Empty means graph-only recall.
+     */
+    embedding_model_id?: string;
+};
+
+export type AdaptersMemoryConfigUpdateRequest = {
+    embedding_model_id?: string;
+};
+
 export type AdaptersMemoryItem = {
     agent_id?: string;
     bot_id?: string;
@@ -296,70 +308,6 @@ export type AdaptersMemoryStatusResponse = {
 export type AdaptersMessage = {
     content?: string;
     role?: string;
-};
-
-export type AdaptersProviderCollectionStatus = {
-    exists?: boolean;
-    health?: AdaptersHealthStatus;
-    name?: string;
-    points?: number;
-};
-
-export type AdaptersProviderConfigSchema = {
-    fields?: {
-        [key: string]: AdaptersProviderFieldSchema;
-    };
-};
-
-export type AdaptersProviderCreateRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-    provider?: AdaptersProviderType;
-};
-
-export type AdaptersProviderFieldSchema = {
-    description?: string;
-    example?: unknown;
-    required?: boolean;
-    secret?: boolean;
-    title?: string;
-    type?: string;
-};
-
-export type AdaptersProviderGetResponse = {
-    config?: {
-        [key: string]: unknown;
-    };
-    created_at?: string;
-    id?: string;
-    is_default?: boolean;
-    name?: string;
-    provider?: string;
-    updated_at?: string;
-};
-
-export type AdaptersProviderMeta = {
-    config_schema?: AdaptersProviderConfigSchema;
-    display_name?: string;
-    provider?: string;
-};
-
-export type AdaptersProviderStatusResponse = {
-    collections?: Array<AdaptersProviderCollectionStatus>;
-    embedding_model_id?: string;
-    memory_mode?: string;
-    provider_type?: string;
-};
-
-export type AdaptersProviderType = 'builtin' | 'mem0' | 'openviking';
-
-export type AdaptersProviderUpdateRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
 };
 
 export type AdaptersRebuildResult = {
@@ -3956,7 +3904,11 @@ export type SettingsSettings = {
     display_enabled?: boolean;
     fetch_provider_id?: string;
     image_model_id?: string;
-    memory_provider_id?: string;
+    /**
+     * MemoryEnabled reports whether the bot uses Built-in Memory. It is derived
+     * from MemoryProviderID, which stays internal to the server.
+     */
+    memory_enabled?: boolean;
     overlay_config?: {
         [key: string]: unknown;
     };
@@ -4024,7 +3976,10 @@ export type SettingsUpsertRequest = {
     display_enabled?: boolean;
     fetch_provider_id?: string;
     image_model_id?: string;
-    memory_provider_id?: string;
+    /**
+     * MemoryEnabled turns Built-in Memory on or off; nil keeps the current state.
+     */
+    memory_enabled?: boolean;
     overlay_config?: {
         [key: string]: unknown;
     };
@@ -14455,42 +14410,42 @@ export type PutFetchProvidersByIdResponses = {
 
 export type PutFetchProvidersByIdResponse = PutFetchProvidersByIdResponses[keyof PutFetchProvidersByIdResponses];
 
-export type GetMemoryProvidersData = {
+export type GetMemoryConfigData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/memory-providers';
+    url: '/memory/config';
 };
 
-export type GetMemoryProvidersErrors = {
+export type GetMemoryConfigErrors = {
     /**
      * Internal Server Error
      */
     500: ApperrorProblem;
 };
 
-export type GetMemoryProvidersError = GetMemoryProvidersErrors[keyof GetMemoryProvidersErrors];
+export type GetMemoryConfigError = GetMemoryConfigErrors[keyof GetMemoryConfigErrors];
 
-export type GetMemoryProvidersResponses = {
+export type GetMemoryConfigResponses = {
     /**
      * OK
      */
-    200: Array<AdaptersProviderGetResponse>;
+    200: AdaptersMemoryConfig;
 };
 
-export type GetMemoryProvidersResponse = GetMemoryProvidersResponses[keyof GetMemoryProvidersResponses];
+export type GetMemoryConfigResponse = GetMemoryConfigResponses[keyof GetMemoryConfigResponses];
 
-export type PostMemoryProvidersData = {
+export type PutMemoryConfigData = {
     /**
-     * Memory provider configuration
+     * Built-in Memory configuration
      */
-    body: AdaptersProviderCreateRequest;
+    body: AdaptersMemoryConfigUpdateRequest;
     path?: never;
     query?: never;
-    url: '/memory-providers';
+    url: '/memory/config';
 };
 
-export type PostMemoryProvidersErrors = {
+export type PutMemoryConfigErrors = {
     /**
      * Bad Request
      */
@@ -14501,173 +14456,16 @@ export type PostMemoryProvidersErrors = {
     500: ApperrorProblem;
 };
 
-export type PostMemoryProvidersError = PostMemoryProvidersErrors[keyof PostMemoryProvidersErrors];
+export type PutMemoryConfigError = PutMemoryConfigErrors[keyof PutMemoryConfigErrors];
 
-export type PostMemoryProvidersResponses = {
-    /**
-     * Created
-     */
-    201: AdaptersProviderGetResponse;
-};
-
-export type PostMemoryProvidersResponse = PostMemoryProvidersResponses[keyof PostMemoryProvidersResponses];
-
-export type GetMemoryProvidersMetaData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/memory-providers/meta';
-};
-
-export type GetMemoryProvidersMetaResponses = {
+export type PutMemoryConfigResponses = {
     /**
      * OK
      */
-    200: Array<AdaptersProviderMeta>;
+    200: AdaptersMemoryConfig;
 };
 
-export type GetMemoryProvidersMetaResponse = GetMemoryProvidersMetaResponses[keyof GetMemoryProvidersMetaResponses];
-
-export type DeleteMemoryProvidersByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/memory-providers/{id}';
-};
-
-export type DeleteMemoryProvidersByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-};
-
-export type DeleteMemoryProvidersByIdError = DeleteMemoryProvidersByIdErrors[keyof DeleteMemoryProvidersByIdErrors];
-
-export type DeleteMemoryProvidersByIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetMemoryProvidersByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/memory-providers/{id}';
-};
-
-export type GetMemoryProvidersByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-};
-
-export type GetMemoryProvidersByIdError = GetMemoryProvidersByIdErrors[keyof GetMemoryProvidersByIdErrors];
-
-export type GetMemoryProvidersByIdResponses = {
-    /**
-     * OK
-     */
-    200: AdaptersProviderGetResponse;
-};
-
-export type GetMemoryProvidersByIdResponse = GetMemoryProvidersByIdResponses[keyof GetMemoryProvidersByIdResponses];
-
-export type PutMemoryProvidersByIdData = {
-    /**
-     * Updated configuration
-     */
-    body: AdaptersProviderUpdateRequest;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/memory-providers/{id}';
-};
-
-export type PutMemoryProvidersByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-};
-
-export type PutMemoryProvidersByIdError = PutMemoryProvidersByIdErrors[keyof PutMemoryProvidersByIdErrors];
-
-export type PutMemoryProvidersByIdResponses = {
-    /**
-     * OK
-     */
-    200: AdaptersProviderGetResponse;
-};
-
-export type PutMemoryProvidersByIdResponse = PutMemoryProvidersByIdResponses[keyof PutMemoryProvidersByIdResponses];
-
-export type GetMemoryProvidersByIdStatusData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/memory-providers/{id}/status';
-};
-
-export type GetMemoryProvidersByIdStatusErrors = {
-    /**
-     * Bad Request
-     */
-    400: ApperrorProblem;
-    /**
-     * Not Found
-     */
-    404: ApperrorProblem;
-    /**
-     * Internal Server Error
-     */
-    500: ApperrorProblem;
-};
-
-export type GetMemoryProvidersByIdStatusError = GetMemoryProvidersByIdStatusErrors[keyof GetMemoryProvidersByIdStatusErrors];
-
-export type GetMemoryProvidersByIdStatusResponses = {
-    /**
-     * OK
-     */
-    200: AdaptersProviderStatusResponse;
-};
-
-export type GetMemoryProvidersByIdStatusResponse = GetMemoryProvidersByIdStatusResponses[keyof GetMemoryProvidersByIdStatusResponses];
+export type PutMemoryConfigResponse = PutMemoryConfigResponses[keyof PutMemoryConfigResponses];
 
 export type GetModelsData = {
     body?: never;

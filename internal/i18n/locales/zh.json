@@ -207,9 +207,9 @@
           "set": "设置推理级别"
         },
         "memory": {
-          "list": "列出全部记忆服务商",
-          "current": "查看当前记忆服务商",
-          "set": "设置此机器人的记忆服务商"
+          "status": "查看记忆是否开启",
+          "on": "为此机器人开启记忆",
+          "off": "为此机器人关闭记忆"
         },
         "search": {
           "list": "列出全部搜索服务商",
@@ -248,7 +248,7 @@
       "fieldAclDefault": "默认权限",
       "fieldChatModel": "对话模型",
       "fieldSearchProvider": "搜索服务商",
-      "fieldMemoryProvider": "记忆服务商",
+      "fieldMemory": "记忆",
       "fieldCommandLanguage": "命令界面语言",
       "aclDeny": "拒绝 — 工具执行前需确认",
       "aclAllow": "允许 — 工具直接执行",
@@ -298,14 +298,15 @@
       }
     },
     "memory": {
-      "title": "记忆服务商",
-      "label": "记忆服务商",
+      "label": "记忆",
       "unavailable": "记忆功能暂不可用。",
-      "empty": "尚未配置记忆服务商。\n\n记忆让机器人跨对话保留上下文。请在 Web 控制台添加。",
-      "noneSet": "还没有设置记忆服务商。用 {list} 查看选项，然后用 {set} 选择。",
-      "active": "当前记忆服务商：{name}",
-      "setUsage": "用法：/memory set <name>",
-      "notFound": "没有名为 {name} 的记忆服务商。用 {command} 查看选项。"
+      "status": "记忆：{state}",
+      "hintOn": "用 {command} 开启。",
+      "hintOff": "用 {command} 关闭。",
+      "action": {
+        "on": "开启",
+        "off": "关闭"
+      }
     },
     "search": {
       "title": "搜索服务商",
@@ -505,7 +506,7 @@
     "reasoning": "调整推理级别",
     "settings": "查看和修改设置",
     "language": "切换命令界面语言",
-    "memory": "选择记忆服务商",
+    "memory": "开启或关闭记忆",
     "search": "选择搜索服务商",
     "schedule": "管理定时任务",
     "mcp": "管理 MCP 连接",

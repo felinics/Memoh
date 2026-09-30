@@ -187,7 +187,6 @@ src/
 │   │       ├── reasoning-effort-select.vue  # Reasoning effort selector
 │   │       ├── reasoning-effort.ts    # Reasoning effort constants
 │   │       ├── search-provider-select.vue   # Search provider selector
-│   │       ├── memory-provider-select.vue   # Memory provider selector
 │   │       ├── tts-model-select.vue         # TTS model selector
 │   │       ├── channel-settings-panel.vue   # Channel settings panel
 │   │       ├── container-create-progress.vue # Container creation progress
@@ -201,7 +200,7 @@ src/
 │   │       └── weixin-qr-login.vue          # WeChat QR login
 │   ├── providers/             #   LLM provider & model management
 │   ├── web-search/            #   Web search provider management
-│   ├── memory/                #   Memory provider management
+│   ├── memory/                #   Built-in Memory settings (embedding model)
 │   ├── speech/                #   Legacy TTS page (redirects to voice)
 │   ├── transcription/         #   Legacy transcription page (redirects to voice)
 │   ├── voice/                 #   TTS + transcription provider management
@@ -275,7 +274,7 @@ Chat routes register **null stub components** in the router. The real UI (`MainS
 | `/settings/bots/:botName` | bot-detail | `bots/detail.vue` | Bot detail with tabs |
 | `/settings/providers` | providers | `providers/index.vue` | LLM provider & model management |
 | `/settings/web-search` | web-search | `web-search/index.vue` | Web search provider management |
-| `/settings/memory` | memory | `memory/index.vue` | Memory provider management |
+| `/settings/memory` | memory | `memory/index.vue` | Built-in Memory settings |
 | `/settings/voice` | voice | `voice/index.vue` | TTS + transcription providers |
 | `/settings/speech` | — | redirect | Legacy alias → `voice` |
 | `/settings/transcription` | — | redirect | Legacy alias → `voice` |

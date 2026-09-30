@@ -41,7 +41,7 @@ export type BotCreateDisplay = {
 
 export type BotCreateSettings = {
   chat_model_id?: string
-  memory_provider_id?: string
+  memory_enabled?: boolean
   reasoning_effort?: string
 }
 
@@ -88,13 +88,13 @@ const BOT_STATUS_CREATING = 'creating'
 const CONTAINER_INIT_CHECK = 'container.init'
 
 function hasSettings(settings?: BotCreateSettings): boolean {
-  return !!(settings && (settings.chat_model_id || settings.memory_provider_id || settings.reasoning_effort))
+  return !!(settings && (settings.chat_model_id || settings.memory_enabled !== undefined || settings.reasoning_effort))
 }
 
 function settingsBody(settings: BotCreateSettings) {
   return {
     ...(settings.chat_model_id ? { chat_model_id: settings.chat_model_id } : {}),
-    ...(settings.memory_provider_id ? { memory_provider_id: settings.memory_provider_id } : {}),
+    ...(settings.memory_enabled !== undefined ? { memory_enabled: settings.memory_enabled } : {}),
     ...(settings.reasoning_effort ? { reasoning_effort: settings.reasoning_effort } : {}),
   }
 }

@@ -28,12 +28,19 @@ type ReasoningOptionsResolver interface {
 	ResolveReasoningOptions(context.Context, string) (reasoning.Options, error)
 }
 
+// BuiltinMemoryResolver returns the team's Built-in Memory provider row that a
+// memory-enabled bot references, creating it on first use.
+type BuiltinMemoryResolver interface {
+	EnsureBuiltinID(context.Context) (string, error)
+}
+
 type Service struct {
 	queries           dbstore.Queries
 	acl               *acl.Service
 	network           *netctl.Service
 	reasoningResolver ReasoningOptionsResolver
 	botAgents         *botagents.Service
+	builtinMemory     BuiltinMemoryResolver
 	logger            *slog.Logger
 }
 
@@ -82,6 +89,10 @@ func (s *Service) SetReasoningOptionsResolver(resolver ReasoningOptionsResolver)
 
 func (s *Service) SetBotAgents(service *botagents.Service) {
 	s.botAgents = service
+}
+
+func (s *Service) SetBuiltinMemoryResolver(resolver BuiltinMemoryResolver) {
+	s.builtinMemory = resolver
 }
 
 func (s *Service) GetBot(ctx context.Context, botID string) (Settings, error) {
@@ -164,6 +175,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		current.ChatACPAgentID = existingSettings.ChatACPAgentID
 		current.ChatACPProjectPath = existingSettings.ChatACPProjectPath
 		current.ChatACPProjectMode = existingSettings.ChatACPProjectMode
+		current.MemoryProviderID = existingSettings.MemoryProviderID
 		current.ToolApprovalConfig = parseToolApprovalConfig(settingsRow.ToolApprovalConfig)
 		current.DisplayEnabled = settingsRow.DisplayEnabled
 		current.CommandUILanguage = settingsRow.CommandUiLanguage
@@ -341,15 +353,28 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			fetchProviderUUID = providerID
 		}
 	}
+	// Enabling memory keeps a bot's existing Built-in Memory reference and
+	// otherwise points it at the team's builtin row; disabling clears it.
 	memoryProviderUUID := pgtype.UUID{}
-	memoryProviderIDSet := req.MemoryProviderID != nil
-	if req.MemoryProviderID != nil {
-		if value := strings.TrimSpace(*req.MemoryProviderID); value != "" {
+	memoryProviderIDSet := false
+	if req.MemoryEnabled != nil {
+		switch {
+		case !*req.MemoryEnabled:
+			memoryProviderIDSet = true
+		case strings.TrimSpace(current.MemoryProviderID) == "":
+			if s.builtinMemory == nil {
+				return Settings{}, errors.New("built-in memory not configured")
+			}
+			value, err := s.builtinMemory.EnsureBuiltinID(ctx)
+			if err != nil {
+				return Settings{}, err
+			}
 			providerID, err := db.ParseUUID(value)
 			if err != nil {
 				return Settings{}, err
 			}
 			memoryProviderUUID = providerID
+			memoryProviderIDSet = true
 		}
 	}
 	ttsModelUUID := pgtype.UUID{}
@@ -800,6 +825,7 @@ func normalizeBotSettingsFields(
 	}
 	if memoryProviderID.Valid {
 		settings.MemoryProviderID = uuid.UUID(memoryProviderID.Bytes).String()
+		settings.MemoryEnabled = true
 	}
 	if ttsModelID.Valid {
 		settings.TtsModelID = uuid.UUID(ttsModelID.Bytes).String()

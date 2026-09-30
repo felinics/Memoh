@@ -180,7 +180,6 @@ type Queries interface {
 	DeleteMCPConnection(ctx context.Context, arg dbsqlc.DeleteMCPConnectionParams) error
 	DeleteConnector(ctx context.Context, arg dbsqlc.DeleteConnectorParams) error
 	DeleteMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) error
-	DeleteMemoryProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID) error
 	ClearHistoryByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error
@@ -241,7 +240,7 @@ type Queries interface {
 	GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotHistoryMessageCompact, error)
 	GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (dbsqlc.Container, error)
 	GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotWorkspaceResourceLimit, error)
-	GetDefaultMemoryProvider(ctx context.Context) (dbsqlc.MemoryProvider, error)
+	GetBuiltinMemoryProvider(ctx context.Context) (dbsqlc.MemoryProvider, error)
 	GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.FetchProvider, error)
 	GetFetchProviderByName(ctx context.Context, name string) (dbsqlc.FetchProvider, error)
 	GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (dbsqlc.GetContextLifecycleByRunIDRow, error)

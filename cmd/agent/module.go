@@ -116,7 +116,7 @@ func commonOptions() fx.Option {
 			provideServerHandler(handlers.NewCompactionHandler),
 			provideServerHandler(handlers.NewChannelHandler),
 			provideServerHandler(provideUsersHandler),
-			provideServerHandler(handlers.NewMemoryProvidersHandler),
+			provideServerHandler(handlers.NewMemoryConfigHandler),
 			provideServerHandler(handlers.NewNetworkHandler),
 			provideServerHandler(handlers.NewAudioHandler),
 			provideServerHandler(handlers.NewVideoHandler),

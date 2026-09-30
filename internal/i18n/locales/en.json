@@ -207,9 +207,9 @@
           "set": "Set the reasoning level"
         },
         "memory": {
-          "list": "List all memory providers",
-          "current": "Show the current memory provider",
-          "set": "Set the memory provider for this bot"
+          "status": "Show whether memory is on",
+          "on": "Turn memory on for this bot",
+          "off": "Turn memory off for this bot"
         },
         "search": {
           "list": "List all search providers",
@@ -248,7 +248,7 @@
       "fieldAclDefault": "ACL default",
       "fieldChatModel": "Chat Model",
       "fieldSearchProvider": "Search Provider",
-      "fieldMemoryProvider": "Memory Provider",
+      "fieldMemory": "Memory",
       "fieldCommandLanguage": "Command Language",
       "aclDeny": "deny — tools ask before running",
       "aclAllow": "allow — tools run without asking",
@@ -298,14 +298,15 @@
       }
     },
     "memory": {
-      "title": "Memory Providers",
-      "label": "Memory provider",
+      "label": "Memory",
       "unavailable": "Memory isn't available right now.",
-      "empty": "No memory providers yet.\n\nMemory providers give the bot long-term memory across conversations. Add one in the web dashboard.",
-      "noneSet": "No memory provider is set. See options with {list}, then choose one with {set}.",
-      "active": "Active memory provider: {name}",
-      "setUsage": "Usage: /memory set <name>",
-      "notFound": "No memory provider named {name}. See options with {command}."
+      "status": "Memory: {state}",
+      "hintOn": "Turn it on with {command}.",
+      "hintOff": "Turn it off with {command}.",
+      "action": {
+        "on": "Turn on",
+        "off": "Turn off"
+      }
     },
     "search": {
       "title": "Search Providers",
@@ -505,7 +506,7 @@
     "reasoning": "Set reasoning level",
     "settings": "View and update bot settings",
     "language": "Change command UI language",
-    "memory": "Choose the memory provider",
+    "memory": "Turn memory on or off",
     "search": "Choose the search provider",
     "schedule": "Manage scheduled tasks",
     "mcp": "Manage MCP connections",

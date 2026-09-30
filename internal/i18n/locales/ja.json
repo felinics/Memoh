@@ -207,9 +207,9 @@
           "set": "推論レベルを設定する"
         },
         "memory": {
-          "list": "すべてのMemoryProviderをリストする",
-          "current": "現在のMemoryProviderを表示する",
-          "set": "このBotのMemoryProviderを設定します"
+          "status": "Memoryがオンかどうかを表示する",
+          "on": "このBotのMemoryをオンにする",
+          "off": "このBotのMemoryをオフにする"
         },
         "search": {
           "list": "すべての検索Providerをリストする",
@@ -248,7 +248,7 @@
       "fieldAclDefault": "ACLデフォルト",
       "fieldChatModel": "チャットModel",
       "fieldSearchProvider": "検索Provider",
-      "fieldMemoryProvider": "MemoryProvider",
+      "fieldMemory": "Memory",
       "fieldCommandLanguage": "コマンドUIの言語",
       "aclDeny": "拒否 — Toolは実行前に尋ねます",
       "aclAllow": "許可 — Toolは何も要求せずに実行されます",
@@ -298,14 +298,15 @@
       }
     },
     "memory": {
-      "title": "MemoryProvider",
-      "label": "MemoryProvider",
+      "label": "Memory",
       "unavailable": "現在Memoryが利用できません。",
-      "empty": "MemoryProviderはまだありません。\n\nMemory Providerは、Botに会話全体にわたる長期Memoryを提供します。 Web ダッシュボードに 1 つ追加します。",
-      "noneSet": "MemoryProviderが設定されていません。 {list} でオプションを確認し、{set} でいずれかを選択します。",
-      "active": "アクティブ Memory Provider: {name}",
-      "setUsage": "使い方: /memory セット<name>",
-      "notFound": "{name} という名前のMemory Providerがありません。 {command} のオプションを参照してください。"
+      "status": "Memory: {state}",
+      "hintOn": "{command} でオンにできます。",
+      "hintOff": "{command} でオフにできます。",
+      "action": {
+        "on": "オンにする",
+        "off": "オフにする"
+      }
     },
     "search": {
       "title": "検索Provider",
@@ -505,7 +506,7 @@
     "reasoning": "推論レベルを設定する",
     "settings": "Bot設定の表示と更新",
     "language": "コマンドUIの言語を変更",
-    "memory": "MemoryProviderを選択する",
+    "memory": "Memoryのオン／オフを切り替える",
     "search": "検索Providerを選択する",
     "schedule": "スケジュールされたタスクを管理する",
     "mcp": "管理MCP接続",

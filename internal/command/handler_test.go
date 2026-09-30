@@ -108,11 +108,11 @@ func (f *fakeCommandQueries) UpdateSessionModelPreference(_ context.Context, arg
 
 // newTestHandler creates a Handler with nil services for use in tests.
 func newTestHandler(roleResolver MemberRoleResolver) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func newTestHandlerWithQueries(roleResolver MemberRoleResolver, queries CommandQueries) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, queries, nil, nil, nil)
 }
 
 // The /model and /reasoning clear path (issue #879, P11′): a session-bound
@@ -141,7 +141,7 @@ func TestClearSessionModelPreference(t *testing.T) {
 }
 
 func newTestHandlerWithACL(roleResolver MemberRoleResolver, evaluator AccessEvaluator) *Handler {
-	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
+	return NewHandler(nil, roleResolver, nil, nil, nil, nil, nil, nil, nil, evaluator, nil, nil)
 }
 
 // --- tests ---
@@ -430,6 +430,35 @@ func TestExecute_SettingsDefaultAction(t *testing.T) {
 	}
 }
 
+func TestMemoryStatusResultOffersTheOppositeSwitch(t *testing.T) {
+	t.Parallel()
+	cc := CommandContext{L: i18n.New("en")}
+	cases := []struct {
+		enabled    bool
+		wantState  string
+		wantAction string
+	}{
+		{enabled: true, wantState: "Memory: on", wantAction: "off"},
+		{enabled: false, wantState: "Memory: off", wantAction: "on"},
+	}
+	for _, tc := range cases {
+		result := memoryStatusResult(cc, tc.enabled)
+		if !strings.Contains(result.Text, tc.wantState) {
+			t.Fatalf("status text = %q, want %q", result.Text, tc.wantState)
+		}
+		if !strings.Contains(result.Text, "/memory "+tc.wantAction) {
+			t.Fatalf("status text = %q, want text-channel hint for /memory %s", result.Text, tc.wantAction)
+		}
+		if result.Interactive == nil || result.Interactive.Choices == nil || len(result.Interactive.Choices.Choices) != 1 {
+			t.Fatalf("status choices = %#v, want one switch", result.Interactive)
+		}
+		action := result.Interactive.Choices.Choices[0].Action
+		if action == nil || action.Resource != "memory" || action.Action != tc.wantAction {
+			t.Fatalf("switch action = %#v, want memory %s", action, tc.wantAction)
+		}
+	}
+}
+
 func TestSettingsResultUsesFocusedActions(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -513,7 +542,6 @@ func TestExecute_MissingArgs(t *testing.T) {
 		{"/mcp delete", "Usage:"},
 		{"/fs read", "isn't available"},
 		{"/model set", "Usage:"},
-		{"/memory set", "Usage:"},
 		{"/search set", "Usage:"},
 	}
 	for _, tt := range tests {
@@ -601,7 +629,7 @@ func TestBareInvocationLandings(t *testing.T) {
 	h := newTestHandler(nil)
 	// Groups that previously dumped Usage() help now land on a useful read view.
 	want := map[string]string{
-		"schedule": "list", "mcp": "list", "memory": "list",
+		"schedule": "list", "mcp": "list", "memory": "status",
 		"search": "list", "fs": "list",
 	}
 	for name, action := range want {

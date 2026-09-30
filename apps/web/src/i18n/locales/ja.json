@@ -1861,36 +1861,14 @@
     }
   },
   "memory": {
-    "title": "メモリプロバイダー",
-    "add": "メモリプロバイダーを追加",
-    "empty": "メモリプロバイダーがありません",
-    "provider": "プロバイダーの種類",
-    "providerRequired": "プロバイダーの種類を選択してください",
-    "nameRequired": "名前を入力してください",
-    "searchPlaceholder": "プロバイダーを検索...",
-    "emptyTitle": "メモリプロバイダーがありません",
-    "saveSuccess": "メモリプロバイダーを保存しました",
-    "deleteSuccess": "メモリプロバイダーを削除しました",
-    "deleteFailed": "メモリプロバイダーの削除に失敗しました",
-    "deleteConfirm": "このメモリプロバイダーを削除してもよろしいですか？これを使用する Bot はメモリアクセスを失います。",
-    "name": "名前",
-    "namePlaceholder": "プロバイダー名を入力してください",
-    "advanced": "詳細",
-    "advancedHint": "高度な設定向けのカスタムメモリバックエンド。",
+    "builtinTitle": "Built-in Memory",
+    "saveSuccess": "Memory設定を保存しました",
     "graphTitle": "メモリグラフ",
     "graphNodes": "記憶",
     "graphEdges": "リンク",
     "semanticIndexDescription": "Postgres では Embedding Model と pgvector でグラフ想起のセマンティック起点を作れます。SQLite と Local はグラフのみです。",
     "semanticEmbeddingModel": "Embedding Model",
     "semanticEmbeddingModelPlaceholder": "Embedding Modelを選択",
-    "modeNames": {
-      "graph": "グラフ"
-    },
-    "providerNames": {
-      "builtin": "内蔵",
-      "mem0": "Mem0",
-      "openviking": "オープンバイキング"
-    },
     "graphEmpty": "記憶がまだありません — 追加するとグラフが表示されます。"
   },
   "network": {
@@ -2301,8 +2279,6 @@
       "model": "Model",
       "modelDesc": "チャット Modelを選択します (オプション)",
       "agent": "エージェント",
-      "memory": "Memory",
-      "memoryDesc": "MemoryProvider (オプション)",
       "settings": "設定",
       "settingsDesc": "タイムゾーンなど"
     },
@@ -3112,11 +3088,9 @@
       "searchProviderPlaceholder": "ウェブ検索を選択",
       "fetchProvider": "ウェブフェッチ",
       "fetchProviderPlaceholder": "Web フェッチを選択します",
-      "memoryProvider": "MemoryProvider",
-      "memoryProviderPlaceholder": "MemoryProviderの選択 (空の場合は無効)",
-      "memoryModePreview": "選択された組み込みモード: {mode}",
+      "memory": "Memory",
+      "memoryDescription": "Built-in Memoryで、会話をまたいで事実や好みを記憶します。",
       "memoryMarkdownFiles": "マークダウンファイル",
-      "memorySourceEntries": "ソースエントリ",
       "memoryGraphEdges": "グラフリンク",
       "memoryIndexedEntries": "インデックス付きエントリ",
       "ttsModel": "TTSModel",

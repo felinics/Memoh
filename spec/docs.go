@@ -12834,133 +12834,25 @@ const docTemplate = `{
                 }
             }
         },
-        "/memory-providers": {
+        "/memory/config": {
             "get": {
-                "description": "List configured memory providers",
+                "description": "Get the team-level Built-in Memory configuration",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "memory-providers"
+                    "memory"
                 ],
-                "summary": "List memory providers",
+                "summary": "Get Built-in Memory configuration",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/adapters.ProviderGetResponse"
-                            }
+                            "$ref": "#/definitions/adapters.MemoryConfig"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Create a memory provider configuration",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "memory-providers"
-                ],
-                "summary": "Create a memory provider",
-                "parameters": [
-                    {
-                        "description": "Memory provider configuration",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/adapters.ProviderCreateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/adapters.ProviderGetResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/memory-providers/meta": {
-            "get": {
-                "description": "List available memory provider types and config schemas",
-                "tags": [
-                    "memory-providers"
-                ],
-                "summary": "List memory provider metadata",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/adapters.ProviderMeta"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/memory-providers/{id}": {
-            "get": {
-                "description": "Get memory provider by ID",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "memory-providers"
-                ],
-                "summary": "Get a memory provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/adapters.ProviderGetResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -12968,7 +12860,7 @@ const docTemplate = `{
                 }
             },
             "put": {
-                "description": "Update memory provider by ID",
+                "description": "Update the team-level Built-in Memory configuration",
                 "consumes": [
                     "application/json"
                 ],
@@ -12976,24 +12868,17 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "memory-providers"
+                    "memory"
                 ],
-                "summary": "Update a memory provider",
+                "summary": "Update Built-in Memory configuration",
                 "parameters": [
                     {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Updated configuration",
+                        "description": "Built-in Memory configuration",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/adapters.ProviderUpdateRequest"
+                            "$ref": "#/definitions/adapters.MemoryConfigUpdateRequest"
                         }
                     }
                 ],
@@ -13001,91 +12886,11 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/adapters.ProviderGetResponse"
+                            "$ref": "#/definitions/adapters.MemoryConfig"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "description": "Delete memory provider by ID",
-                "tags": [
-                    "memory-providers"
-                ],
-                "summary": "Delete a memory provider",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    }
-                }
-            }
-        },
-        "/memory-providers/{id}/status": {
-            "get": {
-                "description": "Get runtime status data for a memory provider",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "memory-providers"
-                ],
-                "summary": "Get memory provider status",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Provider ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/adapters.ProviderStatusResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -17650,6 +17455,23 @@ const docTemplate = `{
                 }
             }
         },
+        "adapters.MemoryConfig": {
+            "type": "object",
+            "properties": {
+                "embedding_model_id": {
+                    "description": "EmbeddingModelID optionally maintains the pgvector semantic seed index\nfor graph recall. Empty means graph-only recall.",
+                    "type": "string"
+                }
+            }
+        },
+        "adapters.MemoryConfigUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "embedding_model_id": {
+                    "type": "string"
+                }
+            }
+        },
         "adapters.MemoryItem": {
             "type": "object",
             "properties": {
@@ -17744,156 +17566,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "role": {
-                    "type": "string"
-                }
-            }
-        },
-        "adapters.ProviderCollectionStatus": {
-            "type": "object",
-            "properties": {
-                "exists": {
-                    "type": "boolean"
-                },
-                "health": {
-                    "$ref": "#/definitions/adapters.HealthStatus"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "points": {
-                    "type": "integer"
-                }
-            }
-        },
-        "adapters.ProviderConfigSchema": {
-            "type": "object",
-            "properties": {
-                "fields": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "$ref": "#/definitions/adapters.ProviderFieldSchema"
-                    }
-                }
-            }
-        },
-        "adapters.ProviderCreateRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
-                    "type": "string"
-                },
-                "provider": {
-                    "$ref": "#/definitions/adapters.ProviderType"
-                }
-            }
-        },
-        "adapters.ProviderFieldSchema": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "example": {},
-                "required": {
-                    "type": "boolean"
-                },
-                "secret": {
-                    "type": "boolean"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "adapters.ProviderGetResponse": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "is_default": {
-                    "type": "boolean"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "adapters.ProviderMeta": {
-            "type": "object",
-            "properties": {
-                "config_schema": {
-                    "$ref": "#/definitions/adapters.ProviderConfigSchema"
-                },
-                "display_name": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                }
-            }
-        },
-        "adapters.ProviderStatusResponse": {
-            "type": "object",
-            "properties": {
-                "collections": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/adapters.ProviderCollectionStatus"
-                    }
-                },
-                "embedding_model_id": {
-                    "type": "string"
-                },
-                "memory_mode": {
-                    "type": "string"
-                },
-                "provider_type": {
-                    "type": "string"
-                }
-            }
-        },
-        "adapters.ProviderType": {
-            "type": "string",
-            "enum": [
-                "builtin",
-                "mem0",
-                "openviking"
-            ],
-            "x-enum-varnames": [
-                "ProviderBuiltin",
-                "ProviderMem0",
-                "ProviderOpenViking"
-            ]
-        },
-        "adapters.ProviderUpdateRequest": {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "name": {
                     "type": "string"
                 }
             }
@@ -26737,8 +26409,9 @@ const docTemplate = `{
                 "image_model_id": {
                     "type": "string"
                 },
-                "memory_provider_id": {
-                    "type": "string"
+                "memory_enabled": {
+                    "description": "MemoryEnabled reports whether the bot uses Built-in Memory. It is derived\nfrom MemoryProviderID, which stays internal to the server.",
+                    "type": "boolean"
                 },
                 "overlay_config": {
                     "type": "object",
@@ -26908,8 +26581,9 @@ const docTemplate = `{
                 "image_model_id": {
                     "type": "string"
                 },
-                "memory_provider_id": {
-                    "type": "string"
+                "memory_enabled": {
+                    "description": "MemoryEnabled turns Built-in Memory on or off; nil keeps the current state.",
+                    "type": "boolean"
                 },
                 "overlay_config": {
                     "type": "object",

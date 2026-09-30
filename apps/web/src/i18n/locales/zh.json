@@ -1892,36 +1892,14 @@
     }
   },
   "memory": {
-    "title": "记忆提供方",
-    "add": "添加记忆提供方",
-    "empty": "暂无记忆提供方",
-    "provider": "提供方类型",
-    "providerRequired": "请选择提供方类型",
-    "nameRequired": "请填写名称",
-    "searchPlaceholder": "搜索提供方...",
-    "emptyTitle": "暂无记忆提供方",
-    "saveSuccess": "记忆提供方已保存",
-    "deleteSuccess": "记忆提供方已删除",
-    "deleteFailed": "删除记忆提供方失败",
-    "deleteConfirm": "确定要删除该记忆提供方吗？使用它的 Bot 将失去记忆访问。",
-    "name": "名称",
-    "namePlaceholder": "输入提供方名称",
-    "advanced": "高级",
-    "advancedHint": "面向进阶场景的自定义记忆后端。",
+    "builtinTitle": "内置记忆",
+    "saveSuccess": "记忆设置已保存",
     "graphTitle": "记忆图谱",
     "graphNodes": "记忆",
     "graphEdges": "关联",
     "semanticIndexDescription": "Postgres 部署可用 Embedding 模型和 pgvector 为图谱召回提供语义起点。SQLite 和 Local 保持纯图谱。",
     "semanticEmbeddingModel": "Embedding 模型",
     "semanticEmbeddingModelPlaceholder": "选择 Embedding 模型",
-    "modeNames": {
-      "graph": "图谱"
-    },
-    "providerNames": {
-      "builtin": "内置",
-      "mem0": "Mem0",
-      "openviking": "OpenViking"
-    },
     "graphEmpty": "还没有记忆——添加一些以查看图谱。"
   },
   "network": {
@@ -2302,8 +2280,6 @@
       "model": "模型",
       "modelDesc": "选择聊天模型（可选）",
       "agent": "Agent",
-      "memory": "记忆",
-      "memoryDesc": "记忆提供者（可选）",
       "settings": "设置",
       "settingsDesc": "时区等"
     },
@@ -3105,11 +3081,9 @@
       "searchProviderPlaceholder": "选择搜索提供方",
       "fetchProvider": "网页抓取提供方",
       "fetchProviderPlaceholder": "选择网页抓取提供方",
-      "memoryProvider": "记忆提供方",
-      "memoryProviderPlaceholder": "选择记忆提供方（为空则禁用）",
-      "memoryModePreview": "当前内置模式：{mode}",
+      "memory": "记忆",
+      "memoryDescription": "使用内置记忆，跨对话记住事实和偏好。",
       "memoryMarkdownFiles": "Markdown 文件数",
-      "memorySourceEntries": "源条目数",
       "memoryGraphEdges": "图谱关联数",
       "memoryIndexedEntries": "索引条目数",
       "ttsModel": "语音合成模型",

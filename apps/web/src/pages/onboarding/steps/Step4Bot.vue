@@ -18,11 +18,11 @@ import {
   TooltipTrigger,
 } from '@felinic/ui'
 import { SquarePen, CircleHelp, Bot, Dices } from 'lucide-vue-next'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { FieldStack, InlineLoadingRow, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
-import { getBots, getBotsByBotIdSettings, getModels, getProviders, getProvidersByIdModels, getMemoryProviders, putModelsById } from '@memohai/sdk'
+import { getBots, getBotsByBotIdSettings, getModels, getProviders, getProvidersByIdModels, putModelsById } from '@memohai/sdk'
 import { markOnboardingCompleted, useOnboarding } from '@/composables/useOnboarding'
 import { useUserStore } from '@/store/user'
 import { readCreatedBotSession } from '@/pages/bots/created-bot-session'
@@ -136,7 +136,6 @@ const form = reactive({
   display_name: randomCatName(),
   avatar_url: '',
   chat_model_id: '',
-  memory_provider_id: '',
 })
 
 const avatarDialogOpen = ref(false)
@@ -145,24 +144,6 @@ const avatarFallback = useAvatarInitials(() => form.display_name || '')
 function rollRandomName() {
   form.display_name = randomCatName(form.display_name)
 }
-
-const { data: memoryProviderData } = useQuery({
-  key: ['memory-providers'],
-  query: async () => {
-    const { data } = await getMemoryProviders({ throwOnError: true })
-    return data
-  },
-})
-
-const memoryProviders = computed(() => memoryProviderData.value ?? [])
-
-watch(memoryProviders, (list) => {
-  if (form.memory_provider_id) return
-  const builtin = list.find(p => p.provider === 'builtin')
-  if (builtin?.id) {
-    form.memory_provider_id = builtin.id
-  }
-}, { immediate: true })
 
 const { data: modelData } = useQuery({
   key: ['models'],
@@ -266,7 +247,7 @@ async function handleSubmit() {
     },
     settings: {
       chat_model_id: form.chat_model_id || undefined,
-      memory_provider_id: form.memory_provider_id || undefined,
+      memory_enabled: true,
     },
     ...(selectedDirectRuntime.value
       ? {

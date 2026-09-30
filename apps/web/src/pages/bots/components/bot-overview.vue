@@ -403,11 +403,7 @@ const reminders = computed<BotReminder[]>(() => {
   return list
 })
 
-const showMemorySection = computed(() => !!settings.value?.memory_provider_id)
-
-const memoryIsBuiltin = computed(() =>
-  (memoryStatus.value?.provider_type ?? 'builtin') === 'builtin',
-)
+const showMemorySection = computed(() => !!settings.value?.memory_enabled)
 
 const memoryMetricCards = computed(() => {
   const status = memoryStatus.value
@@ -420,10 +416,8 @@ const memoryMetricCards = computed(() => {
     },
     {
       key: 'edges',
-      label: memoryIsBuiltin.value
-        ? t('bots.settings.memoryGraphEdges')
-        : t('bots.settings.memorySourceEntries'),
-      value: formatCount(memoryIsBuiltin.value ? status?.edge_count : status?.source_count),
+      label: t('bots.settings.memoryGraphEdges'),
+      value: formatCount(status?.edge_count),
     },
     {
       key: 'sources',
@@ -435,7 +429,7 @@ const memoryMetricCards = computed(() => {
 
 const memoryStatsNote = computed(() => {
   if (memoryLoading.value) return ''
-  if (!settings.value?.memory_provider_id) return ''
+  if (!settings.value?.memory_enabled) return ''
   if (memoryStatus.value) return ''
   return t('bots.overview.memoryNoStats')
 })

@@ -1892,36 +1892,14 @@
     }
   },
   "memory": {
-    "title": "Memory Providers",
-    "add": "Add Memory Provider",
-    "empty": "No memory providers",
-    "provider": "Provider Type",
-    "providerRequired": "Provider type is required",
-    "nameRequired": "Name is required",
-    "searchPlaceholder": "Search providers...",
-    "emptyTitle": "No Memory Providers",
-    "saveSuccess": "Memory provider saved",
-    "deleteSuccess": "Memory provider deleted",
-    "deleteFailed": "Failed to delete memory provider",
-    "deleteConfirm": "Are you sure you want to delete this memory provider? Bots using it will lose memory access.",
-    "name": "Name",
-    "namePlaceholder": "Enter provider name",
-    "advanced": "Advanced",
-    "advancedHint": "Custom memory backends for advanced setups.",
+    "builtinTitle": "Built-in Memory",
+    "saveSuccess": "Memory settings saved",
     "graphTitle": "Memory Graph",
     "graphNodes": "Memories",
     "graphEdges": "Links",
     "semanticIndexDescription": "Postgres deployments can use an embedding model with pgvector for semantic graph seeds. SQLite and Local stay graph-only.",
     "semanticEmbeddingModel": "Embedding Model",
     "semanticEmbeddingModelPlaceholder": "Select embedding model",
-    "modeNames": {
-      "graph": "Graph"
-    },
-    "providerNames": {
-      "builtin": "Built-in",
-      "mem0": "Mem0",
-      "openviking": "OpenViking"
-    },
     "graphEmpty": "No memories yet — add some to see the graph."
   },
   "network": {
@@ -2302,8 +2280,6 @@
       "model": "Model",
       "modelDesc": "Choose a chat model (optional)",
       "agent": "Agent",
-      "memory": "Memory",
-      "memoryDesc": "Memory provider (optional)",
       "settings": "Settings",
       "settingsDesc": "Timezone and more"
     },
@@ -3105,11 +3081,9 @@
       "searchProviderPlaceholder": "Select web search",
       "fetchProvider": "Web Fetch",
       "fetchProviderPlaceholder": "Select web fetch",
-      "memoryProvider": "Memory Provider",
-      "memoryProviderPlaceholder": "Select memory provider (disabled if empty)",
-      "memoryModePreview": "Selected built-in mode: {mode}",
+      "memory": "Memory",
+      "memoryDescription": "Remember facts and preferences across conversations with Built-in Memory.",
       "memoryMarkdownFiles": "Markdown Files",
-      "memorySourceEntries": "Source Entries",
       "memoryGraphEdges": "Graph Links",
       "memoryIndexedEntries": "Indexed Entries",
       "ttsModel": "TTS Model",

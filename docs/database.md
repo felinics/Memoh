@@ -58,7 +58,7 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `models` — Model definitions (chat/embedding/speech types, modalities, reasoning, vision, tool calling)
 - `model_variants` — Model variant definitions (weight, metadata)
 - `search_providers` — Search engine provider configurations
-- `memory_providers` — Multi-provider memory adapter configurations
+- `memory_providers` — Team Built-in Memory configuration (embedding model); `bots.memory_provider_id` is non-null when a bot's memory is on
 
 **MCP**
 - `mcp_connections` — MCP connection configurations per bot

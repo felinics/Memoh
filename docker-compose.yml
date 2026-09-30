@@ -240,8 +240,6 @@ volumes:
     driver: local
   server_cni_state:
     driver: local
-  openviking_data:
-    driver: local
 
 networks:
   memoh-network:

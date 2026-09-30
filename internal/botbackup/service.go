@@ -30,7 +30,6 @@ import (
 	"github.com/felinics/memoh/internal/errlog"
 	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/mcp"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	modelpkg "github.com/felinics/memoh/internal/models"
 	providerpkg "github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/schedule"
@@ -65,7 +64,6 @@ type Service struct {
 	models          *modelpkg.Service
 	searchProviders *searchpkg.Service
 	fetchProviders  *fetchpkg.Service
-	memoryProviders *memprovider.Service
 	workspace       WorkspaceData
 	acpRuntimes     ACPRuntimeCloser
 	workdirs        dbstore.BotWorkdirStore
@@ -93,7 +91,6 @@ type Params struct {
 	Models          *modelpkg.Service
 	SearchProviders *searchpkg.Service
 	FetchProviders  *fetchpkg.Service
-	MemoryProviders *memprovider.Service
 	Workspace       WorkspaceData
 	ACPRuntimes     ACPRuntimeCloser
 	Workdirs        dbstore.BotWorkdirStore
@@ -118,7 +115,6 @@ func New(params Params) *Service {
 		models:          params.Models,
 		searchProviders: params.SearchProviders,
 		fetchProviders:  params.FetchProviders,
-		memoryProviders: params.MemoryProviders,
 		workspace:       params.Workspace,
 		acpRuntimes:     params.ACPRuntimes,
 		workdirs:        params.Workdirs,
@@ -225,9 +221,6 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 			return err
 		}
 		if err := writer.writeJSON("dependencies/fetch_providers.json", "fetch_providers", data.Dependencies.FetchProviders, opts); err != nil {
-			return err
-		}
-		if err := writer.writeJSON("dependencies/memory_providers.json", "memory_providers", data.Dependencies.MemoryProviders, opts); err != nil {
 			return err
 		}
 	}
@@ -488,21 +481,11 @@ func (s *Service) collectDependencies(ctx context.Context, botID string, cfg set
 			s.recordSkipped(ctx, exportOperation, botID, "fetch_provider_dependency", err)
 		}
 	}
-	memoryProviders := []memprovider.ProviderGetResponse{}
-	if s.memoryProviders != nil && cfg.MemoryProviderID != "" {
-		if item, err := s.memoryProviders.Get(ctx, cfg.MemoryProviderID); err == nil {
-			memoryProviders = append(memoryProviders, item)
-		} else {
-			warnings = append(warnings, "memory provider dependency missing: "+cfg.MemoryProviderID)
-			s.recordSkipped(ctx, exportOperation, botID, "memory_provider_dependency", err)
-		}
-	}
 	return backupDependencies{
 		Providers:       providers,
 		Models:          models,
 		SearchProviders: searchProviders,
 		FetchProviders:  fetchProviders,
-		MemoryProviders: memoryProviders,
 	}, warnings
 }
 

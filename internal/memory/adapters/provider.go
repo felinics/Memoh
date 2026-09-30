@@ -17,11 +17,10 @@ const (
 // persisted memory_provider_id. Registries materialize it per team.
 const DefaultBuiltinProviderID = "__builtin_default__"
 
-// Provider is the unified interface for memory systems. Each provider type
-// (builtin, mem0, openviking, etc.) implements this independently with its
-// own storage, retrieval, and tool logic.
+// Provider is the interface the Built-in Memory runtime implements for chat
+// hooks, memory tools, and management operations.
 type Provider interface {
-	// Type returns the provider type identifier (e.g. "builtin", "mem0").
+	// Type returns the provider type identifier ("builtin").
 	Type() string
 
 	// --- Conversation Hooks ---

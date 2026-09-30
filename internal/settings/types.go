@@ -19,16 +19,19 @@ const (
 )
 
 type Settings struct {
-	ChatModelID          string `json:"chat_model_id"`
-	DefaultBotAgentID    string `json:"default_bot_agent_id,omitempty"`
-	ChatRuntime          string `json:"chat_runtime"`
-	ChatACPAgentID       string `json:"chat_acp_agent_id,omitempty"`
-	ChatACPProjectPath   string `json:"chat_acp_project_path,omitempty"`
-	ChatACPProjectMode   string `json:"chat_acp_project_mode,omitempty"`
-	ImageModelID         string `json:"image_model_id"`
-	SearchProviderID     string `json:"search_provider_id"`
-	FetchProviderID      string `json:"fetch_provider_id"`
-	MemoryProviderID     string `json:"memory_provider_id"`
+	ChatModelID        string `json:"chat_model_id"`
+	DefaultBotAgentID  string `json:"default_bot_agent_id,omitempty"`
+	ChatRuntime        string `json:"chat_runtime"`
+	ChatACPAgentID     string `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath string `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode string `json:"chat_acp_project_mode,omitempty"`
+	ImageModelID       string `json:"image_model_id"`
+	SearchProviderID   string `json:"search_provider_id"`
+	FetchProviderID    string `json:"fetch_provider_id"`
+	// MemoryEnabled reports whether the bot uses Built-in Memory. It is derived
+	// from MemoryProviderID, which stays internal to the server.
+	MemoryEnabled        bool   `json:"memory_enabled"`
+	MemoryProviderID     string `json:"-"`
 	TtsModelID           string `json:"tts_model_id"`
 	TranscriptionModelID string `json:"transcription_model_id"`
 	VideoModelID         string `json:"video_model_id"`
@@ -58,16 +61,17 @@ type UpsertRequest struct {
 	// service mirrors each into a `<field>_set` SQL flag (same pattern as
 	// FetchProviderID / CompactionModelID); plain strings would make ""
 	// indistinguishable from "not sent".
-	ChatModelID             *string             `json:"chat_model_id,omitempty"`
-	DefaultBotAgentID       *string             `json:"default_bot_agent_id,omitempty"`
-	ChatRuntime             *string             `json:"chat_runtime,omitempty"`
-	ChatACPAgentID          *string             `json:"chat_acp_agent_id,omitempty"`
-	ChatACPProjectPath      *string             `json:"chat_acp_project_path,omitempty"`
-	ChatACPProjectMode      *string             `json:"chat_acp_project_mode,omitempty"`
-	ImageModelID            *string             `json:"image_model_id,omitempty"`
-	SearchProviderID        *string             `json:"search_provider_id,omitempty"`
-	FetchProviderID         *string             `json:"fetch_provider_id,omitempty"`
-	MemoryProviderID        *string             `json:"memory_provider_id,omitempty"`
+	ChatModelID        *string `json:"chat_model_id,omitempty"`
+	DefaultBotAgentID  *string `json:"default_bot_agent_id,omitempty"`
+	ChatRuntime        *string `json:"chat_runtime,omitempty"`
+	ChatACPAgentID     *string `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath *string `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode *string `json:"chat_acp_project_mode,omitempty"`
+	ImageModelID       *string `json:"image_model_id,omitempty"`
+	SearchProviderID   *string `json:"search_provider_id,omitempty"`
+	FetchProviderID    *string `json:"fetch_provider_id,omitempty"`
+	// MemoryEnabled turns Built-in Memory on or off; nil keeps the current state.
+	MemoryEnabled           *bool               `json:"memory_enabled,omitempty"`
 	TtsModelID              *string             `json:"tts_model_id,omitempty"`
 	TranscriptionModelID    *string             `json:"transcription_model_id,omitempty"`
 	VideoModelID            *string             `json:"video_model_id,omitempty"`

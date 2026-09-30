@@ -58,7 +58,6 @@ import (
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/media"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/policy"
 	"github.com/felinics/memoh/internal/providers"
@@ -266,7 +265,6 @@ func provideCommandHandler(
 	mcpConnService *mcp.ConnectionService,
 	modelsService *models.Service,
 	providersService *providers.Service,
-	memProvService *memprovider.Service,
 	searchProvService *searchproviders.Service,
 	queries dbstore.Queries,
 	aclService *acl.Service,
@@ -282,7 +280,6 @@ func provideCommandHandler(
 		mcpConnService,
 		modelsService,
 		providersService,
-		memProvService,
 		searchProvService,
 		queries,
 		aclService,
