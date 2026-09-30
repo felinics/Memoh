@@ -513,17 +513,15 @@ function createChatWindow(): BrowserWindow {
   })
   if (process.platform === 'win32') window.setMenuBarVisibility(false)
   keyboardCapture = false
-  window.webContents.on('before-input-event', (event, input) => {
-    window.webContents.setIgnoreMenuShortcuts(keyboardCapture || input.isAutoRepeat || input.isComposing)
-    if (keyboardCapture || input.isAutoRepeat || input.isComposing || input.type !== 'keyDown') return
+  window.webContents.on('before-input-event', (_event, input) => {
     const key = { key: input.key, ctrlKey: input.control, metaKey: input.meta, altKey: input.alt, shiftKey: input.shift }
     const platform = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux'
     const command = appKeyboardCommands.closeCurrentWorkspaceTab
-    if (!matchesMenuAccelerator(key, effectiveMenuAccelerator(command), platform)) return
-    event.preventDefault()
-    dispatchFocusedWindowCommand(chatWindow, window, command, key)
+    window.webContents.setIgnoreMenuShortcuts(keyboardCapture || input.isAutoRepeat || input.isComposing
+      || matchesMenuAccelerator(key, effectiveMenuAccelerator(command), platform))
   })
-  window.webContents.on('did-start-loading', () => {
+  window.webContents.on('did-start-navigation', (event) => {
+    if (!event.isMainFrame || event.isSameDocument) return
     keyboardCapture = false
     window.webContents.setIgnoreMenuShortcuts(false)
   })
