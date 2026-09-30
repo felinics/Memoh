@@ -14,6 +14,12 @@ function createWindow(options: { loading?: boolean } = {}) {
 }
 
 describe('dispatchFocusedWindowCommand', () => {
+  it('delivers the original key input so the renderer can resolve scoped collisions', () => {
+    const window = createWindow()
+    const input = { key: 'g', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }
+    expect(dispatchFocusedWindowCommand(window, window, appKeyboardCommands.closeCurrentWorkspaceTab, input)).toBe(true)
+    expect(window.webContents.send).toHaveBeenCalledWith(DESKTOP_KEYBOARD_COMMAND_CHANNEL, appKeyboardCommands.closeCurrentWorkspaceTab, input)
+  })
   it('dispatches keyboard commands to the chat renderer', () => {
     const chatWindow = createWindow()
 

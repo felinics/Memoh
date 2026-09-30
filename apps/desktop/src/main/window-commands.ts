@@ -2,6 +2,7 @@ import {
   DESKTOP_KEYBOARD_COMMAND_CHANNEL,
   appKeyboardCommands,
   type AppKeyboardCommand,
+  type KeyboardCommandInput,
 } from '../shared/keyboard-commands'
 
 interface CommandWindow {
@@ -9,7 +10,7 @@ interface CommandWindow {
   isDestroyed(): boolean
   webContents: {
     isLoading?(): boolean
-    send(channel: string, command: AppKeyboardCommand): void
+    send(channel: string, command: AppKeyboardCommand, input?: KeyboardCommandInput): void
   }
 }
 
@@ -21,12 +22,14 @@ export function dispatchFocusedWindowCommand(
   chatWindow: CommandWindow | null,
   focusedWindow: CommandWindow | null,
   command: AppKeyboardCommand,
+  input?: KeyboardCommandInput,
 ): boolean {
   if (!focusedWindow || focusedWindow.isDestroyed()) return false
 
   if (chatWindow && !chatWindow.isDestroyed() && focusedWindow === chatWindow) {
     if (canSendRendererCommand(focusedWindow)) {
-      focusedWindow.webContents.send(DESKTOP_KEYBOARD_COMMAND_CHANNEL, command)
+      if (input) focusedWindow.webContents.send(DESKTOP_KEYBOARD_COMMAND_CHANNEL, command, input)
+      else focusedWindow.webContents.send(DESKTOP_KEYBOARD_COMMAND_CHANNEL, command)
       return true
     }
   }

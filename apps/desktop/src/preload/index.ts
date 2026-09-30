@@ -3,7 +3,9 @@ import { electronAPI } from '@electron-toolkit/preload'
 import {
   DESKTOP_KEYBOARD_COMMAND_CHANNEL,
   isAppKeyboardCommand,
+  isKeyboardCommandInput,
   type AppKeyboardCommand,
+  type KeyboardCommandInput,
 } from '../shared/keyboard-commands'
 import type { ServerConnectResult, ServerConnectionResult } from '../shared/server-connection'
 import type { DesktopRuntimeConfig, DesktopRuntimeState } from '../shared/remote-runtime'
@@ -100,9 +102,11 @@ const api = {
         cb(target)
       })
     },
-    onKeyboardCommand: (cb: (command: AppKeyboardCommand) => void): (() => void) => {
-      const listener = (_event: IpcRendererEvent, command: unknown) => {
-        if (isAppKeyboardCommand(command)) cb(command)
+    onKeyboardCommand: (cb: (command: AppKeyboardCommand, input?: KeyboardCommandInput) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, command: unknown, input: unknown) => {
+        if (!isAppKeyboardCommand(command)) return
+        if (input !== undefined && !isKeyboardCommandInput(input)) return
+        cb(command, input)
       }
       ipcRenderer.on(DESKTOP_KEYBOARD_COMMAND_CHANNEL, listener)
       return () => {

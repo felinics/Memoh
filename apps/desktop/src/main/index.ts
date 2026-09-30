@@ -19,7 +19,7 @@ import { homedir, hostname } from 'node:os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
-import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
+import { acceleratorForCommand, appKeyboardCommands, matchesMenuAccelerator, type AppKeyboardCommand } from '../shared/keyboard-commands'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
 import { macWindowChromeOptions } from './window-chrome'
@@ -513,8 +513,15 @@ function createChatWindow(): BrowserWindow {
   })
   if (process.platform === 'win32') window.setMenuBarVisibility(false)
   keyboardCapture = false
-  window.webContents.on('before-input-event', (_event, input) => {
+  window.webContents.on('before-input-event', (event, input) => {
     window.webContents.setIgnoreMenuShortcuts(keyboardCapture || input.isAutoRepeat || input.isComposing)
+    if (keyboardCapture || input.isAutoRepeat || input.isComposing || input.type !== 'keyDown') return
+    const key = { key: input.key, ctrlKey: input.control, metaKey: input.meta, altKey: input.alt, shiftKey: input.shift }
+    const platform = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux'
+    const command = appKeyboardCommands.closeCurrentWorkspaceTab
+    if (!matchesMenuAccelerator(key, effectiveMenuAccelerator(command), platform)) return
+    event.preventDefault()
+    dispatchFocusedWindowCommand(chatWindow, window, command, key)
   })
   window.webContents.on('did-start-loading', () => {
     keyboardCapture = false
