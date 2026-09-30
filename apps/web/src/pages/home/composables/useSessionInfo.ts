@@ -22,6 +22,10 @@ interface UseSessionInfoOptions {
   fallbackContextWindow?: Ref<number | null | undefined>
 }
 
+interface CompactionOptions {
+  quietSuccess?: () => boolean
+}
+
 export function useSessionInfo(options: UseSessionInfoOptions = {}) {
   const chatStore = useChatStore()
   const storeRefs = storeToRefs(chatStore)
@@ -83,34 +87,39 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     currentBotId.value ?? '', sessionId.value ?? '',
   ))
 
-  async function runCompaction(execute: () => Promise<unknown>) {
+  // `quietSuccess` lets a caller that shows its own success state in view
+  // skip the toast; it is read when the request settles, not when it starts.
+  // Failures always toast. Resolves true on success.
+  async function runCompaction(execute: () => Promise<unknown>, opts: CompactionOptions = {}) {
     const botId = currentBotId.value
     const sid = sessionId.value
-    if (!botId || !sid) return
+    if (!botId || !sid) return false
     const finish = chatStore.beginSessionCompaction(botId, sid)
-    if (!finish) return
+    if (!finish) return false
 
     try {
       await execute()
-      toast.success(t('chat.compactSuccess'))
+      if (!opts.quietSuccess?.()) toast.success(t('chat.compactSuccess'))
       queryCache.invalidateQueries({ key: ['session-status', botId, sid] })
+      return true
     }
     catch (error) {
       toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))
+      return false
     }
     finally {
       finish()
     }
   }
 
-  async function triggerCompact() {
+  async function triggerCompact(opts: CompactionOptions = {}) {
     const botId = currentBotId.value
     const sid = sessionId.value
-    if (!botId || !sid) return
-    await runCompaction(() => postBotsByBotIdSessionsBySessionIdCompact({
+    if (!botId || !sid) return false
+    return runCompaction(() => postBotsByBotIdSessionsBySessionIdCompact({
       path: { bot_id: botId, session_id: sid },
       throwOnError: true,
-    }))
+    }), opts)
   }
 
   installTurnEndInvalidation(storeRefs.streamingSessionIds, queryCache)
