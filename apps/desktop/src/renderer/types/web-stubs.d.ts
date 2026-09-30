@@ -77,7 +77,7 @@ declare module '@memohai/web/lib/keyboard-commands' {
     connect(api: KeyboardCommandApi, onUnhandled?: UnhandledKeyboardCommandCallback): () => void
   }
   export function isAppKeyboardCommand(value: unknown): value is AppKeyboardCommand
-  export function createKeyboardCommandRegistry(): KeyboardCommandRegistry
+  export function createKeyboardCommandRegistry(canDispatch?: (command: AppKeyboardCommand) => boolean): KeyboardCommandRegistry
 }
 
 declare module '@memohai/web/lib/keyboard-bindings' {

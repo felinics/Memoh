@@ -42,6 +42,24 @@ describe('keyboard command registry', () => {
     expect(effects).toEqual(['focused'])
   })
 
+  it('consumes blocked IPC commands without triggering the window fallback', () => {
+    let blocked = true
+    const registry = createKeyboardCommandRegistry(() => !blocked)
+    const action = vi.fn(() => true)
+    const fallback = vi.fn()
+    let listener: (command: AppKeyboardCommand) => void = () => {}
+    registry.register(appKeyboardCommands.closeCurrentWorkspaceTab, action)
+    registry.connect({ onKeyboardCommand: cb => { listener = cb } }, fallback)
+
+    listener(appKeyboardCommands.closeCurrentWorkspaceTab)
+    expect(action).not.toHaveBeenCalled()
+    expect(fallback).not.toHaveBeenCalled()
+    blocked = false
+    listener(appKeyboardCommands.closeCurrentWorkspaceTab)
+    expect(action).toHaveBeenCalledOnce()
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
   it('unregisters command handlers', () => {
     const registry = createKeyboardCommandRegistry()
     const handler = vi.fn(() => true)

@@ -66,7 +66,9 @@ export function createScopedKeyboardBinding(
   }
 }
 
-export function createKeyboardCommandRegistry(): KeyboardCommandRegistry {
+export function createKeyboardCommandRegistry(
+  canDispatch: (command: AppKeyboardCommand) => boolean = () => true,
+): KeyboardCommandRegistry {
   const handlers = new Map<AppKeyboardCommand, Set<KeyboardCommandHandler>>()
 
   return {
@@ -81,6 +83,7 @@ export function createKeyboardCommandRegistry(): KeyboardCommandRegistry {
     },
 
     dispatch(command) {
+      if (!canDispatch(command)) return true
       const commandHandlers = handlers.get(command)
       if (!commandHandlers) return false
       for (const handler of commandHandlers) {
