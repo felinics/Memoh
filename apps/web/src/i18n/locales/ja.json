@@ -478,9 +478,9 @@
     "providers": "プロバイダー",
     "webSearch": "ウェブ検索",
     "group": {
-      "capabilities": "モデルと機能",
+      "resources": "リソース",
       "team": "チーム",
-      "preferences": "環境設定"
+      "personal": "個人設定"
     },
     "network": "ネットワーク",
     "speech": "音声合成",
@@ -488,13 +488,13 @@
     "voice": "音声",
     "video": "動画",
     "settings": "設定",
-    "profile": "プロフィール",
+    "profile": "アカウント",
     "home": "ホーム",
     "mcp": "MCP",
     "usage": "使用状況",
     "people": "メンバー",
     "appearance": "外観",
-    "keyboard": "ショートカット",
+    "keyboard": "キーボードショートカット",
     "supermarket": "マーケットプレイス",
     "about": "Memoh について",
     "userMenu": "アカウントメニュー",
