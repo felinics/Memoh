@@ -91,6 +91,7 @@ const api = {
     },
   },
   window: {
+    setIgnoreMenuShortcuts: (ignore: boolean): Promise<void> => ipcRenderer.invoke('window:ignore-menu-shortcuts', ignore),
     closeSelf: (): Promise<void> => ipcRenderer.invoke('window:close-self'),
     // Native app/tray menu actions ask the renderer to navigate by route path.
     // Listener lives for the entire renderer lifetime.

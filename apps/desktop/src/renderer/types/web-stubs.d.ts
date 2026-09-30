@@ -279,6 +279,7 @@ declare module '@memohai/web/lib/desktop-shell' {
   export interface DesktopWindowBridge {
     isFullScreen(): Promise<boolean>
     onFullScreenChanged(listener: (fullScreen: boolean) => void): () => void
+    setIgnoreMenuShortcuts?(ignore: boolean): Promise<void>
   }
   export const DesktopWindowKey: InjectionKey<DesktopWindowBridge | undefined>
   export type DesktopUpdateStatus =

@@ -69,6 +69,7 @@ type TraySettingsItem = {
 }
 
 let chatWindow: BrowserWindow | null = null
+let keyboardCapture = false
 let appTray: Tray | null = null
 let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
@@ -511,6 +512,14 @@ function createChatWindow(): BrowserWindow {
     },
   })
   if (process.platform === 'win32') window.setMenuBarVisibility(false)
+  keyboardCapture = false
+  window.webContents.on('before-input-event', (_event, input) => {
+    window.webContents.setIgnoreMenuShortcuts(keyboardCapture || input.isAutoRepeat || input.isComposing)
+  })
+  window.webContents.on('did-start-loading', () => {
+    keyboardCapture = false
+    window.webContents.setIgnoreMenuShortcuts(false)
+  })
   attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
   // macOS hides the traffic lights in fullscreen — the renderer drops its
@@ -716,6 +725,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:configure-runtime', (event, config: unknown) => {
     assertTrustedRenderer(event)
     return requireRemoteRuntimeManager().configure(normalizeDesktopRuntimeConfig(config))
+  })
+  ipcMain.handle('window:ignore-menu-shortcuts', (event, ignore: unknown) => {
+    assertTrustedRenderer(event)
+    if (event.sender !== chatWindow?.webContents || typeof ignore !== 'boolean') return
+    keyboardCapture = ignore
+    event.sender.setIgnoreMenuShortcuts(ignore)
   })
   ipcMain.handle('desktop:set-menu-accelerators', async (event, rawPayload: unknown) => {
     assertTrustedRenderer(event)

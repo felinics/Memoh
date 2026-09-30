@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, inject, onScopeDispose, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useEventListener } from '@vueuse/core'
 import {
@@ -12,6 +12,7 @@ import {
   DialogTitle,
   Kbd,
   KbdGroup,
+  toast,
 } from '@felinic/ui'
 import {
   displayKeyCombo,
@@ -26,6 +27,7 @@ import {
   type ConflictResult,
 } from '@/store/keyboard-shortcuts'
 import type { AppKeyboardCommand } from '@/lib/keyboard-commands'
+import { DesktopWindowKey } from '@/lib/desktop-shell'
 
 const props = defineProps<{
   open: boolean
@@ -43,10 +45,17 @@ const platform = detectPlatform()
 const isMac = platform === 'mac'
 
 const captured = ref<ParsedKeyCombo | null>(null)
+const windowBridge = inject(DesktopWindowKey, undefined)
+
+function setCapture(open: boolean) {
+  void windowBridge?.setIgnoreMenuShortcuts?.(open)?.catch(() => toast.error(t('common.saveFailed')))
+}
 
 watch(() => props.open, (isOpen) => {
+  setCapture(isOpen)
   if (!isOpen) captured.value = null
-})
+}, { immediate: true })
+onScopeDispose(() => setCapture(false))
 
 // Capture-phase listener so we run BEFORE the global dispatcher's bubble-phase
 // listener registered in main.ts. stopImmediatePropagation cancels both that
