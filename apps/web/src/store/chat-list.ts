@@ -608,7 +608,7 @@ export const useChatStore = defineStore('chat', () => {
     _hasLoadedOlder: hasLoadedOlder,
 
     startupSendFailure, startupSendFailureFor,
-    firstSendFor: firstSend.entryFor, acknowledgeFirstSendRollback: firstSend.acknowledgeRollback,
+    firstSendFor: firstSend.entryFor, isSessionTentative: firstSend.isSessionTentative,
     commandEvent, commandEventForScope, rememberCommandEvent, beginCommandEvent, showCommandError,
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
     backgroundTaskFor,

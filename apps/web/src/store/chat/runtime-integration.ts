@@ -143,7 +143,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       }
       return
     }
-    deps.firstSend.advance(event.invocation_id, 'admitted')
+    deps.firstSend.admit(event.invocation_id, sessionId)
     const deferredAbort = deferredAbortByInvocation.get(event.invocation_id)
     if (deferredAbort) {
       deferredAbortByInvocation.delete(event.invocation_id)
@@ -167,6 +167,8 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         session_mode: 'chat',
         runtime_type: 'model',
         title: provisionalSessionTitle(promoted.transcript.latestOptimisticUserText()),
+        // Places the row in its folder rather than Recents.
+        workdir_id: (event.workdir_id ?? '').trim() || undefined,
         created_at: now,
         updated_at: now,
       })

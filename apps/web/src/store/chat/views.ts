@@ -261,8 +261,7 @@ export function createChatViews(deps: ChatViewsDeps) {
     // A first send is in flight from Enter until it settles. Its new session's
     // runtime projection only arrives a round trip after session_created, and
     // the view must not read as idle (stop -> send -> stop) in between.
-    const pendingFirstSend = firstSend.entryFor(resolved)
-    if (pendingFirstSend && pendingFirstSend.phase !== 'rolledBack') return true
+    if (firstSend.entryFor(resolved)) return true
     return resolved.sessionId
       ? isSessionStreaming(resolved.botId, resolved.sessionId)
       : assistantStreams.isUnboundComposerStreaming(

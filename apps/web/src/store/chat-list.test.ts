@@ -791,14 +791,11 @@ describe('chat-list store', () => {
         restoreInput: 'hello',
       })
       // The session the message created in-band is deleted and the draft is
-      // empty again; the removed turns are handed to the pane for their exit.
+      // empty again, with no first send left in flight.
       expect(api.deleteSession).toHaveBeenCalledWith('bot-1', 'session-1')
       expect(store.sessionId).toBeNull()
       expect(store.messages).toEqual([])
-      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toMatchObject({
-        phase: 'rolledBack',
-        exitTurns: [{ role: 'user', text: 'hello' }, { role: 'assistant' }],
-      })
+      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toBeUndefined()
       expect(store.startupSendFailure).toMatchObject({
         botId: 'bot-1',
         sessionId: '',
@@ -843,14 +840,10 @@ describe('chat-list store', () => {
         error: 'External agent setup is incomplete for this bot.',
         restoreInput: 'hello',
       })
-      // The failed first send is undone: the draft is empty again, the turns
-      // are handed to the pane for their exit, and the composer gets the
-      // input back.
+      // The failed first send is undone: the draft is empty again, no first
+      // send is left in flight, and the composer gets the input back.
       expect(store.messages).toEqual([])
-      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toMatchObject({
-        phase: 'rolledBack',
-        exitTurns: [{ role: 'user', text: 'hello' }, { role: 'assistant' }],
-      })
+      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toBeUndefined()
       expect(api.deleteSession).not.toHaveBeenCalled()
       expect(store.startupSendFailure).toMatchObject({
         sessionId: '',

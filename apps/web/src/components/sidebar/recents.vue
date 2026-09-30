@@ -187,7 +187,10 @@ const liveWorkdirIds = computed(() => new Set(
 ))
 
 const visibleSessions = computed(() => {
-  const inScope = sessions.value.filter(s => SIDEBAR_SESSION_MODES.has(normalizedSessionMode(s)))
+  // A first send's session joins the list once its reply starts; before
+  // that a failure would delete it again (see isSessionTentative).
+  const inScope = sessions.value.filter(s => SIDEBAR_SESSION_MODES.has(normalizedSessionMode(s))
+    && !chatStore.isSessionTentative(s.id))
   const unbound = inScope.filter(s => !liveWorkdirIds.value.has((s.workdir_id ?? '').trim()))
   return sortByRecency(unbound)
 })

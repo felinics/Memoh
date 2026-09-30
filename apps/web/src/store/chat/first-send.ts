@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
-import type { ChatMessage, ChatViewTarget } from './types'
+import { hasVisibleAssistantBlocks } from './transcript'
+import type { ChatAssistantTurn, ChatViewTarget } from './types'
 
 // The lifecycle of the first message sent from an empty draft. The draft is
 // promoted to a session only when the server names it (session_created), so
@@ -10,13 +11,14 @@ import type { ChatMessage, ChatViewTarget } from './types'
 //   optimistic  the turn is on screen; the message is on the wire
 //   admitted    session_created arrived; the view is now a session view
 //   streaming   run_accepted arrived; the run is the server's
-//   rolledBack  startup failed; exitTurns are animating out and the composer
-//               holds the restored input until the pane acknowledges
 //
-// No entry means idle. The phase is keyed by (bot, view id) because both the
-// promotion (draft -> session) and the rollback (session -> fresh draft)
-// keep the pane's view id, so the phase survives both rebinds.
-export type FirstSendPhase = 'optimistic' | 'admitted' | 'streaming' | 'rolledBack'
+// No entry means idle. A send that fails before its reply starts is undone
+// by the store in one step (turns removed, session deleted, input handed
+// back), and its entry goes away with it. Until the reply starts, the session
+// it created is therefore tentative (see isSessionTentative). The phase is
+// keyed by (bot, view id) because the promotion (draft -> session) keeps the
+// pane's view id, so the phase survives that rebind.
+export type FirstSendPhase = 'optimistic' | 'admitted' | 'streaming'
 
 export interface FirstSendEntry {
   readonly key: string
@@ -28,12 +30,15 @@ export interface FirstSendEntry {
   // The workdir this send asked the server to bind the new session to. Empty
   // when none was requested.
   readonly requestedWorkdirId: string
-  // The turns removed by a rollback, kept only so the pane can animate them
-  // out. They are no longer part of any transcript.
-  exitTurns: ChatMessage[]
+  // The session the server created for this send. Empty until admitted.
+  sessionId: string
+  // The assistant turn of this send. Its first visible block is the point
+  // after which a failure no longer rolls the send back (send.ts decides the
+  // rollback on the same turn), so it also ends the session's tentativeness.
+  readonly reply: ChatAssistantTurn
 }
 
-const PHASE_ORDER: Record<Exclude<FirstSendPhase, 'rolledBack'>, number> = {
+const PHASE_ORDER: Record<FirstSendPhase, number> = {
   optimistic: 0,
   admitted: 1,
   streaming: 2,
@@ -55,9 +60,14 @@ export function createFirstSendTracker() {
     return undefined
   }
 
-  // A new first send replaces whatever the view still held, including an
-  // unacknowledged rollback: the send guards only admit one send per view.
-  function begin(target: ChatViewTarget, invocationId: string, requestedWorkdirId: string) {
+  // A new first send replaces whatever the view still held: the send guards
+  // only admit one send per view.
+  function begin(
+    target: ChatViewTarget,
+    invocationId: string,
+    requestedWorkdirId: string,
+    reply: ChatAssistantTurn,
+  ) {
     const key = firstSendKey(target.botId, target.viewId)
     entries.set(key, {
       key,
@@ -65,16 +75,40 @@ export function createFirstSendTracker() {
       phase: 'optimistic',
       stopRequested: false,
       requestedWorkdirId: requestedWorkdirId.trim(),
-      exitTurns: [],
+      sessionId: '',
+      reply,
     })
   }
 
   // Phases only move forward. Events can repeat (a reconnect replays
   // reliable requests) and a stale one must not reopen an earlier phase.
-  function advance(invocationId: string, phase: 'admitted' | 'streaming') {
+  function advance(invocationId: string, phase: 'streaming') {
     const entry = entryForInvocation(invocationId)
-    if (!entry || entry.phase === 'rolledBack') return
+    if (!entry) return
     if (PHASE_ORDER[phase] > PHASE_ORDER[entry.phase]) entry.phase = phase
+  }
+
+  // The server named the send's session (session_created, or the REST
+  // creation that preceded the send).
+  function admit(invocationId: string, sessionId: string) {
+    const entry = entryForInvocation(invocationId)
+    if (!entry) return
+    if (!entry.sessionId) entry.sessionId = sessionId.trim()
+    if (PHASE_ORDER.admitted > PHASE_ORDER[entry.phase]) entry.phase = 'admitted'
+  }
+
+  // A first send's session exists server-side from admission, but until the
+  // reply starts it is the send's to undo: a failure deletes it again. Until
+  // then, session lists leave it out and titles (tab, window, mobile top bar)
+  // show the draft it came from, so a rollback has nothing on screen to take
+  // back.
+  function isSessionTentative(sessionId: string): boolean {
+    const id = sessionId.trim()
+    if (!id) return false
+    for (const entry of entries.values()) {
+      if (entry.sessionId === id) return !hasVisibleAssistantBlocks(entry.reply)
+    }
+    return false
   }
 
   // True while the run cannot yet be addressed by an abort control, which is
@@ -86,36 +120,19 @@ export function createFirstSendTracker() {
 
   function requestStop(invocationId: string) {
     const entry = entryForInvocation(invocationId)
-    if (entry && entry.phase !== 'rolledBack') entry.stopRequested = true
+    if (entry) entry.stopRequested = true
   }
 
   function requestedWorkdirFor(invocationId: string): string {
     return entryForInvocation(invocationId)?.requestedWorkdirId ?? ''
   }
 
-  // Terminal without rollback: the send succeeded, was stopped, or failed
-  // after the reply started. The view is an ordinary session from here on.
+  // Terminal: the send succeeded, was stopped, failed after the reply
+  // started (the view is an ordinary session from here on), or was rolled
+  // back (the view is the draft it was before Enter).
   function finish(invocationId: string) {
     const entry = entryForInvocation(invocationId)
-    if (entry && entry.phase !== 'rolledBack') entries.delete(entry.key)
-  }
-
-  function rollBack(invocationId: string, exitTurns: ChatMessage[]) {
-    const entry = entryForInvocation(invocationId)
-    if (!entry) return
-    entry.phase = 'rolledBack'
-    entry.stopRequested = false
-    entry.exitTurns = exitTurns
-  }
-
-  // The pane has finished (or skipped) the exit animation. Guarded by
-  // invocation so a late acknowledgement cannot clear a newer send.
-  function acknowledgeRollback(target: ChatViewTarget, invocationId: string) {
-    const key = firstSendKey(target.botId, target.viewId)
-    const entry = entries.get(key)
-    if (entry?.phase === 'rolledBack' && entry.invocationId === invocationId) {
-      entries.delete(key)
-    }
+    if (entry) entries.delete(entry.key)
   }
 
   function entryFor(target: Pick<ChatViewTarget, 'botId' | 'viewId'>): FirstSendEntry | undefined {
@@ -132,12 +149,12 @@ export function createFirstSendTracker() {
   return {
     begin,
     advance,
+    admit,
     isAwaitingRun,
+    isSessionTentative,
     requestStop,
     requestedWorkdirFor,
     finish,
-    rollBack,
-    acknowledgeRollback,
     entryFor,
     reset,
   }

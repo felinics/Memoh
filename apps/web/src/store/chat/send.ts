@@ -143,7 +143,7 @@ export interface ChatSendDeps {
   rememberStartupSendFailure: (failure: Omit<StartupSendFailure, 'id'>) => void
   // The workdir a native draft is bound to; sent with its first message.
   draftWorkdirIdFor: (botId: string) => string
-  firstSend: Pick<FirstSendTracker, 'begin' | 'advance' | 'finish' | 'rollBack'>
+  firstSend: Pick<FirstSendTracker, 'begin' | 'admit' | 'finish'>
   sendFailedMessage: () => string
   updateForkAnchorForReplacedMessage: (
     sessionId: string,
@@ -319,16 +319,16 @@ export function createChatSend(deps: ChatSendDeps) {
       // The workdir the draft is bound to travels with the message, because
       // the server now creates the session. The binding is fixed at creation.
       const workdirId = inband ? deps.draftWorkdirIdFor(botId).trim() : ''
+      assistantTurn = transcript.createOptimisticAssistantTurn(sendInvocationId)
       if (wasDraft) {
         // Started in the same synchronous step as the append below, so the
         // pane leaves welcome in the same frame the turn appears. A REST-created
         // session is already named, so that send starts admitted.
-        deps.firstSend.begin(viewTarget, sendInvocationId, workdirId)
-        if (!inband) deps.firstSend.advance(sendInvocationId, 'admitted')
+        deps.firstSend.begin(viewTarget, sendInvocationId, workdirId, assistantTurn)
+        if (!inband) deps.firstSend.admit(sendInvocationId, targetSessionId)
         firstSendStarted = true
       }
 
-      assistantTurn = transcript.createOptimisticAssistantTurn(sendInvocationId)
       turnAppendStarted = true
       options.onBeforeTurnAppend?.({ ...viewTarget })
       if (!serverSkillActivation) {
@@ -403,7 +403,6 @@ export function createChatSend(deps: ChatSendDeps) {
         && (!isAbort || !targetSessionId)
 
       if (rollBack) {
-        const exitTurns = userTurn && assistantTurn ? [userTurn, assistantTurn] : []
         if (targetSessionId) {
           // Removes the session view, tombstones the session and resets the
           // pane to a fresh draft with the same view id. Only the server-side
@@ -411,8 +410,10 @@ export function createChatSend(deps: ChatSendDeps) {
           // the rollback does not wait for that round trip.
           void deps.cleanupFailedDeferredSession(botId, targetSessionId, composerScope)
         }
-        for (const turn of exitTurns) deps.removeTurnFromSession(botId, '', turn)
-        deps.firstSend.rollBack(sendInvocationId, exitTurns)
+        for (const turn of [userTurn, assistantTurn]) {
+          if (turn) deps.removeTurnFromSession(botId, '', turn)
+        }
+        deps.firstSend.finish(sendInvocationId)
       } else {
         if (firstSendStarted) deps.firstSend.finish(sendInvocationId)
         if (assistantTurn) {
