@@ -1834,6 +1834,7 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		}
 	}
 
+	retryMessageFloor := ctrl.converter.RetryMessageFloor()
 	var messages []chatview.UIMessage
 	switch event.Type {
 	case native.EventAgentStart:
@@ -1845,7 +1846,9 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	}
 	if event.Type == native.EventStepEnd {
 		// The marker itself changes nothing visible; it only advances the step
-		// cursor that queue steer anchoring waits on.
+		// cursor that queue steer anchoring waits on. Everything projected before
+		// this marker belongs to a completed step and must survive a later retry.
+		ctrl.converter.CheckpointRetryBoundary()
 		ctrl.markStepConsumed(event.StepNumber)
 		return nil, nil
 	}
@@ -1888,8 +1891,9 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		snapshot.UpdatedAt = now
 		run.UpdatedAt = now
 		if event.Type == native.EventRetry {
-			run.Messages = []chatview.UIMessage{}
-			// A retry discards the failed attempt whole, error included: the
+			run.Messages = messagesBeforeRetryFloor(run.Messages, retryMessageFloor)
+			// A retry discards the failed attempt, error included, but preserves
+			// completed steps and the decision prefix of a resumed run. The
 			// native stream publishes EventError before retrying, so keeping
 			// that text would park the run in errored the moment the recovered
 			// attempt reaches its clean end — and nothing after a terminal
@@ -1953,6 +1957,12 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 		case native.EventError, native.EventRetry:
 			delta.Run = runtimeRunPatch(snapshot, false, true, false).Run
 		}
+		if event.Type == native.EventRetry && snapshot.CurrentRunView != nil {
+			// Reset removes the failed suffix on subscribers; replaying the
+			// protected prefix in the same delta keeps their view equal to the
+			// backend snapshot instead of making it disappear until terminal sync.
+			delta.MessageUpserts = append([]chatview.UIMessage(nil), snapshot.CurrentRunView.Messages...)
+		}
 		return delta
 	})
 	if err != nil {
@@ -1963,6 +1973,12 @@ func (m *Manager) handleAgentEvent(ctx context.Context, handle RunHandle, event 
 	}
 	if !changed {
 		return nil, nil
+	}
+	if event.Type == native.EventAgentStart || terminalDecisionEvent(event) {
+		// A re-entering decision continuation (or an inline answered decision)
+		// starts its retryable provider attempt after the transcript already on
+		// screen. Protect that prefix before any new output is allocated.
+		ctrl.converter.CheckpointRetryBoundary()
 	}
 	if committedStatus != nil && snapshot.CurrentRunView != nil && snapshot.CurrentRunView.RunID == handle.RunID {
 		if terminalProposal.prepared {

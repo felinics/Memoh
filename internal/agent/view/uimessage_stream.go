@@ -39,6 +39,10 @@ type UIMessageStreamConverter struct {
 	status    *UIMessage
 	tools     map[string]*uiToolStreamState
 	emitted   []uiEmittedBlock
+	// retryFloor is the first block ID owned by the current provider attempt.
+	// A retry may discard blocks allocated from this point onward, but it must
+	// keep the completed steps and decision cards that preceded the attempt.
+	retryFloor int
 }
 
 // NewUIMessageStreamConverter creates a new UI stream converter.
@@ -48,22 +52,83 @@ func NewUIMessageStreamConverter() *UIMessageStreamConverter {
 	}
 }
 
+// NewUIMessageStreamConverterFromMessages restores the live block identity
+// after a waiting-decision run changes owner. The continuation must allocate
+// IDs after the existing projection and update the pending decision in place;
+// starting again from zero would overwrite unrelated earlier blocks.
+func NewUIMessageStreamConverterFromMessages(messages []UIMessage) *UIMessageStreamConverter {
+	converter := NewUIMessageStreamConverter()
+	for i := range messages {
+		message := messages[i]
+		if message.ID >= converter.nextID {
+			converter.nextID = message.ID + 1
+		}
+		converter.emitted = append(converter.emitted, uiEmittedBlock{
+			Kind:       message.Type,
+			ToolCallID: strings.TrimSpace(message.ToolCallID),
+			ID:         message.ID,
+		})
+		if message.Type == UIMessageStatus {
+			status := message
+			converter.status = &status
+		}
+		if restorableToolMessage(message) {
+			converter.tools[strings.TrimSpace(message.ToolCallID)] = &uiToolStreamState{Message: message}
+		}
+	}
+	converter.CheckpointRetryBoundary()
+	return converter
+}
+
+// CheckpointRetryBoundary protects every block allocated so far from the next
+// provider retry. Callers advance it only at durable step or continuation
+// boundaries, never for partial output from the active provider attempt.
+func (c *UIMessageStreamConverter) CheckpointRetryBoundary() {
+	if c == nil {
+		return
+	}
+	c.retryFloor = c.nextID
+}
+
+// RetryMessageFloor returns the first message ID that belongs to the current
+// provider attempt.
+func (c *UIMessageStreamConverter) RetryMessageFloor() int {
+	if c == nil {
+		return 0
+	}
+	return c.retryFloor
+}
+
 // HandleEvent updates converter state and returns zero or one complete UI messages.
 func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIMessage {
 	switch strings.ToLower(strings.TrimSpace(event.Type)) {
 	case "retry":
-		// A retried attempt regenerates its output from scratch, so the terminal
-		// snapshot will contain only the surviving attempt's messages. Drop the
-		// bookkeeping for the discarded attempt (including the emitted-block log)
-		// so ConvertTerminalMessages aligns against the surviving attempt's
-		// blocks only — otherwise an orphaned pre-retry text/reasoning block
-		// shifts the positional match and the final reply overwrites the wrong
-		// block. IDs (c.nextID) keep advancing so re-emitted blocks stay unique.
-		c.text = nil
-		c.reasoning = nil
-		c.status = nil
-		c.tools = map[string]*uiToolStreamState{}
-		c.emitted = nil
+		// The provider regenerates only the uncommitted attempt. Keep converter
+		// state for blocks before retryFloor so a decision continuation does not
+		// erase or renumber the transcript that led to the decision.
+		if c.text != nil && c.text.ID >= c.retryFloor {
+			c.text = nil
+		}
+		if c.reasoning != nil && c.reasoning.ID >= c.retryFloor {
+			c.reasoning = nil
+		}
+		if c.status != nil && c.status.ID >= c.retryFloor {
+			c.status = nil
+		}
+		protectedTools := make(map[string]*uiToolStreamState, len(c.tools))
+		for id, state := range c.tools {
+			if state != nil && state.Message.ID < c.retryFloor {
+				protectedTools[id] = state
+			}
+		}
+		c.tools = protectedTools
+		protectedBlocks := c.emitted[:0]
+		for _, block := range c.emitted {
+			if block.ID < c.retryFloor {
+				protectedBlocks = append(protectedBlocks, block)
+			}
+		}
+		c.emitted = protectedBlocks
 		return nil
 
 	case "text_start":
@@ -332,6 +397,22 @@ func (c *UIMessageStreamConverter) HandleEvent(event UIMessageStreamEvent) []UIM
 	default:
 		return nil
 	}
+}
+
+func restorableToolMessage(message UIMessage) bool {
+	if message.Type != UIMessageTool || strings.TrimSpace(message.ToolCallID) == "" {
+		return false
+	}
+	if message.Running != nil && *message.Running {
+		return true
+	}
+	if message.Approval != nil && (message.Approval.CanApprove || strings.EqualFold(message.Approval.Status, "pending")) {
+		return true
+	}
+	if message.UserInput != nil && (message.UserInput.CanRespond || strings.EqualFold(message.UserInput.Status, "pending")) {
+		return true
+	}
+	return isBackgroundToolStillRunning(message)
 }
 
 func (c *UIMessageStreamConverter) nextMessageID() int {
