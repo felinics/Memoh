@@ -133,10 +133,12 @@ async function mountSplit() {
   }
   async function save(index: number) {
     editors[index]!.focus()
-    editors[index]!.dispatchEvent(new KeyboardEvent('keydown', {
+    const event = new KeyboardEvent('keydown', {
       key: 's', ctrlKey: true, bubbles: true, cancelable: true,
-    }))
+    })
+    editors[index]!.dispatchEvent(event)
     await nextTick()
+    return event
   }
   return { ...dock, edit, save }
 }
@@ -164,6 +166,18 @@ describe('workspace keyboard ownership', () => {
     await view.save(0)
     expect(sdk.write).not.toHaveBeenCalled()
     expect(store.fileDirty['file:/b.txt']).toBe(true)
+  })
+
+  it('consumes a second save press while the first write is pending', async () => {
+    const view = await mountSplit()
+    await view.edit(0, 'A')
+    let finish!: (value: { data: { revision: string } }) => void
+    sdk.write.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    expect((await view.save(0)).defaultPrevented).toBe(true)
+    expect((await view.save(0)).defaultPrevented).toBe(true)
+    expect(sdk.write).toHaveBeenCalledOnce()
+    finish({ data: { revision: 'r1' } })
+    await vi.waitFor(() => expect(store.dirtyFileCount).toBe(0))
   })
 
   it.each(['cancel', 'discard', 'save', 'failure'] as const)('protects dirty close through %s after focus moves', async (action) => {

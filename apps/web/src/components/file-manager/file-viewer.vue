@@ -721,6 +721,7 @@ async function refreshCompare() {
 // to browser save would be confusing.
 useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
   if (props.keyboardActive === false) return false
+  if (saving.value) return true
   if (!isFileSaveEligible({
     readonly: props.readonly ?? false,
     isText: isText.value,
