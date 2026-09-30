@@ -742,6 +742,33 @@ describe('workspace layout store', () => {
     expect(panel?.title).toBe('localhost:3000/app')
   })
 
+  it('cycles tabs within the focused group, wraps, and leaves other splits unchanged', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openFilePinned('/a.txt')
+    store.openFilePinned('/b.txt')
+    const first = dock.getPanel('file:/a.txt')!
+    const second = dock.getPanel('file:/b.txt')!
+    store.openFileToSide('/right.txt')
+    const right = dock.getPanel('file:/right.txt')!
+    first.api.setActive()
+    expect(store.focusAdjacentTab(1)).toBe(true)
+    expect(store.activeId).toBe(second.id)
+    expect(store.focusAdjacentTab(-1)).toBe(true)
+    expect(store.activeId).toBe(first.id)
+    const groupIds = first.group!.panels.map(panel => panel.id)
+    store.focusAdjacentTab(-1)
+    expect(store.activeId).toBe(groupIds.at(-1))
+    store.focusAdjacentTab(1)
+    expect(store.activeId).toBe(groupIds[0])
+    expect(right.group!.activePanel?.id).toBe(right.id)
+  })
+
+  it('does not navigate without a workspace', () => {
+    expect(useWorkspaceTabsStore().focusAdjacentTab(1)).toBe(false)
+  })
+
   it('opens a browser tab at an address and focuses the existing one on the same URL', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
