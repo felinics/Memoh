@@ -35,8 +35,9 @@ setupApiClient({
 installFileDropGuard()
 
 const pinia = createPinia().use(piniaPluginPersistedstate)
-const keyboardCommands = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, router.currentRoute.value.path))
-registerWorkspaceTabCommands(keyboardCommands, useWorkspaceTabsStore(pinia))
+const workspaceTabs = useWorkspaceTabsStore(pinia)
+const keyboardCommands = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, router.currentRoute.value, document, workspaceTabs.activeId !== null))
+registerWorkspaceTabCommands(keyboardCommands, workspaceTabs)
 // Browser-owned combos (e.g. Cmd/Ctrl+W on its default) are excluded by
 // selectWebBindings, so they keep their native behavior — we don't intercept
 // them in the browser. The getter form reads from the shortcuts store on each

@@ -831,7 +831,7 @@ describe('workspace layout store', () => {
     const dock = createFakeDock()
     store.registerApi(dock as never)
     let path = '/'
-    const registry = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, path, {
+    const registry = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, { name: path === '/' ? 'home' : 'keyboard', path }, {
       querySelectorAll: () => [],
     } as unknown as Document))
     const unregister = registerWorkbenchCommands(registry, store)

@@ -69,8 +69,9 @@ async function bootstrap() {
   const serverProbe = window.api.desktop.probeServer()
 
   const pinia = createPinia().use(piniaPluginPersistedstate)
-  const keyboardCommands = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, router.currentRoute.value.path))
-  registerWorkspaceTabCommands(keyboardCommands, useWorkspaceTabsStore(pinia))
+  const workspaceTabs = useWorkspaceTabsStore(pinia)
+  const keyboardCommands = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, router.currentRoute.value, document, workspaceTabs.activeId !== null))
+  registerWorkspaceTabCommands(keyboardCommands, workspaceTabs)
   // Menu-delivered commands arrive over IPC; closing the window when no tab
   // remains is a distinct window-management concern (see closeWindowWhenNoTab).
   keyboardCommands.connect(window.api.window, closeWindowWhenNoTab)
