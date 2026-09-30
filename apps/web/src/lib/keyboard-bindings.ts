@@ -26,7 +26,7 @@ export type KeyboardPlatform = 'mac' | 'win' | 'linux'
  *                     so a scoped handler claims the key only when mounted;
  *                     collisions with global bindings are warnings, not errors.
  */
-export type KeyboardScope = 'global' | 'mediaLightbox'
+export type KeyboardScope = 'global' | 'workspace' | 'mediaLightbox'
 
 export interface KeyboardBinding {
   command: AppKeyboardCommand
@@ -43,6 +43,7 @@ export interface KeyboardBinding {
   mod?: boolean
   alt?: boolean
   shift?: boolean
+  repeat?: boolean
   desktop: DesktopDelivery
   browser: BrowserBehavior
   scope: KeyboardScope

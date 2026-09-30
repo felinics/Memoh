@@ -590,6 +590,7 @@
       "intro": "各行の「編集」をクリックしてから、新しい組み合わせを押してください。Cmd/Ctrl + W、Q、T、N はブラウザと OS に予約されているため変更できません。",
       "resetAll": "すべてリセット",
       "scopes": {
+        "workspace": "ワークスペース",
         "global": "Global",
         "mediaLightbox": "メディアライトボックス"
       },
@@ -606,6 +607,54 @@
         "crossScopeWarn": "{command} でも使用されています（異なるコンテキストでのみ有効）。"
       },
       "commands": {
+        "newChatSession": {
+          "label": "新しいセッション",
+          "description": "現在のグループで新しいチャットを開くか、既存の下書きに移動します。"
+        },
+        "focusChatInput": {
+          "label": "チャット入力にフォーカス",
+          "description": "チャットパネルに移動し、メッセージ入力欄にフォーカスします。"
+        },
+        "showSessions": {
+          "label": "セッションを表示",
+          "description": "セッションのサイドバーを開きます。"
+        },
+        "showFiles": {
+          "label": "ファイルを表示",
+          "description": "ワークスペースのファイルサイドバーを開きます。"
+        },
+        "showSchedule": {
+          "label": "スケジュールを表示",
+          "description": "スケジュールのサイドバーを開きます。"
+        },
+        "showSupermarket": {
+          "label": "Supermarket を表示",
+          "description": "Supermarket のサイドバーを開きます。"
+        },
+        "nextWorkspaceTab": {
+          "label": "次のタブ",
+          "description": "現在のグループの次のタブに移動します。"
+        },
+        "previousWorkspaceTab": {
+          "label": "前のタブ",
+          "description": "現在のグループの前のタブに移動します。"
+        },
+        "splitWorkspaceRight": {
+          "label": "右に分割",
+          "description": "現在のパネルを右側に分割します。"
+        },
+        "splitWorkspaceBelow": {
+          "label": "下に分割",
+          "description": "現在のパネルを下側に分割します。"
+        },
+        "newTerminal": {
+          "label": "新しいターミナル",
+          "description": "現在のグループでターミナルを開きます。"
+        },
+        "newBrowser": {
+          "label": "新しいブラウザー",
+          "description": "現在のグループでワークスペースのブラウザーを開きます。"
+        },
         "closeCurrentWorkspaceTab": {
           "label": "現在の Workspace タブを閉じる",
           "description": "Workspace ペインで開いているタブを閉じます (OS の閉じる動作にフォールバックします)。"

@@ -18,12 +18,13 @@ const editingI18nKey = ref<string | null>(null)
 const grouped = computed(() => {
   const result: Record<KeyboardScope, KeyboardBinding[]> = {
     global: [],
+    workspace: [],
     mediaLightbox: [],
   }
   for (const binding of store.effectiveBindings) {
     result[binding.scope].push(binding)
   }
-  return result
+  return Object.entries(result).filter(([, bindings]) => bindings.length).map(([scope, bindings]) => ({ scope, bindings }))
 })
 
 function openEdit(binding: KeyboardBinding) {
@@ -53,23 +54,12 @@ const hasAnyOverride = computed(() => Object.keys(store.overrides).length > 0)
 
     <div class="space-y-8">
       <SettingsSection
-        v-if="grouped.global.length"
-        :title="t('settings.keyboard.scopes.global')"
+        v-for="group in grouped"
+        :key="group.scope"
+        :title="t(`settings.keyboard.scopes.${group.scope}`)"
       >
         <ShortcutRow
-          v-for="binding in grouped.global"
-          :key="binding.command"
-          :binding="binding"
-          @edit="openEdit(binding)"
-        />
-      </SettingsSection>
-
-      <SettingsSection
-        v-if="grouped.mediaLightbox.length"
-        :title="t('settings.keyboard.scopes.mediaLightbox')"
-      >
-        <ShortcutRow
-          v-for="binding in grouped.mediaLightbox"
+          v-for="binding in group.bindings"
           :key="binding.command"
           :binding="binding"
           @edit="openEdit(binding)"

@@ -593,6 +593,7 @@
       "intro": "Click Edit on a row, then press the new key combination. Cmd/Ctrl + W, Q, T, N stay reserved for the browser and OS.",
       "resetAll": "Reset all",
       "scopes": {
+        "workspace": "Workspace",
         "global": "Global",
         "mediaLightbox": "Media Lightbox"
       },
@@ -609,6 +610,54 @@
         "crossScopeWarn": "Also used by {command} (only active in a different context)."
       },
       "commands": {
+        "newChatSession": {
+          "label": "New session",
+          "description": "Open or focus a new chat in the current group."
+        },
+        "focusChatInput": {
+          "label": "Focus chat input",
+          "description": "Activate chat and focus its message input."
+        },
+        "showSessions": {
+          "label": "Show sessions",
+          "description": "Open the sessions sidebar."
+        },
+        "showFiles": {
+          "label": "Show files",
+          "description": "Open the workspace files sidebar."
+        },
+        "showSchedule": {
+          "label": "Show schedules",
+          "description": "Open the schedules sidebar."
+        },
+        "showSupermarket": {
+          "label": "Show Supermarket",
+          "description": "Open the Supermarket sidebar."
+        },
+        "nextWorkspaceTab": {
+          "label": "Next tab",
+          "description": "Focus the next tab in the current group."
+        },
+        "previousWorkspaceTab": {
+          "label": "Previous tab",
+          "description": "Focus the previous tab in the current group."
+        },
+        "splitWorkspaceRight": {
+          "label": "Split right",
+          "description": "Split the current panel to the right."
+        },
+        "splitWorkspaceBelow": {
+          "label": "Split below",
+          "description": "Split the current panel below."
+        },
+        "newTerminal": {
+          "label": "New terminal",
+          "description": "Open a terminal in the current group."
+        },
+        "newBrowser": {
+          "label": "New browser",
+          "description": "Open a workspace browser in the current group."
+        },
         "closeCurrentWorkspaceTab": {
           "label": "Close current workspace tab",
           "description": "Close the active tab in the workspace pane (falls back to the OS close behavior)."

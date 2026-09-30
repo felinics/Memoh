@@ -101,13 +101,14 @@ declare module '@memohai/web/lib/keyboard-bindings' {
   import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
   export type DesktopDelivery = 'menu' | 'keydown'
   export type BrowserBehavior = 'intercept' | 'passthrough'
-  export type KeyboardScope = 'global' | 'mediaLightbox'
+  export type KeyboardScope = 'global' | 'workspace' | 'mediaLightbox'
   export interface KeyboardBinding {
     command: AppKeyboardCommand
     key: string
     mod?: boolean
     alt?: boolean
     shift?: boolean
+    repeat?: boolean
     desktop: DesktopDelivery
     browser: BrowserBehavior
     scope: KeyboardScope
@@ -129,6 +130,7 @@ declare module '@memohai/web/lib/browser-keyboard-shortcuts' {
     mod?: boolean
     alt?: boolean
     shift?: boolean
+    repeat?: boolean
   }
   export function handleBrowserKeyboardShortcut(
     event: {

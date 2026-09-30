@@ -589,6 +589,7 @@
       "intro": "点击任意一行右侧的「编辑」，然后按下新的组合键。Cmd/Ctrl + W、Q、T、N 为浏览器和系统保留，不可绑定。",
       "resetAll": "全部重置",
       "scopes": {
+        "workspace": "工作区",
         "global": "全局",
         "mediaLightbox": "媒体灯箱"
       },
@@ -605,6 +606,54 @@
         "crossScopeWarn": "也被 {command} 使用（仅在其作用域内生效）。"
       },
       "commands": {
+        "newChatSession": {
+          "label": "新建会话",
+          "description": "在当前分组打开或聚焦一个新会话。"
+        },
+        "focusChatInput": {
+          "label": "聚焦聊天输入",
+          "description": "切换到聊天面板并聚焦消息输入框。"
+        },
+        "showSessions": {
+          "label": "显示会话",
+          "description": "打开会话侧栏。"
+        },
+        "showFiles": {
+          "label": "显示文件",
+          "description": "打开工作区文件侧栏。"
+        },
+        "showSchedule": {
+          "label": "显示计划任务",
+          "description": "打开计划任务侧栏。"
+        },
+        "showSupermarket": {
+          "label": "显示 Supermarket",
+          "description": "打开 Supermarket 侧栏。"
+        },
+        "nextWorkspaceTab": {
+          "label": "下一个标签",
+          "description": "聚焦当前分组的下一个标签。"
+        },
+        "previousWorkspaceTab": {
+          "label": "上一个标签",
+          "description": "聚焦当前分组的上一个标签。"
+        },
+        "splitWorkspaceRight": {
+          "label": "向右分屏",
+          "description": "在当前面板右侧创建分屏。"
+        },
+        "splitWorkspaceBelow": {
+          "label": "向下分屏",
+          "description": "在当前面板下方创建分屏。"
+        },
+        "newTerminal": {
+          "label": "新建终端",
+          "description": "在当前分组打开终端。"
+        },
+        "newBrowser": {
+          "label": "新建浏览器",
+          "description": "在当前分组打开工作区浏览器。"
+        },
         "closeCurrentWorkspaceTab": {
           "label": "关闭当前工作区标签页",
           "description": "关闭工作区面板内激活的标签页（退回到系统的关闭行为）。"
