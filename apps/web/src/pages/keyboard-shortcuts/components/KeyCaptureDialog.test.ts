@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createApp, h, nextTick, ref, type App } from 'vue'
+import { createApp, h, KeepAlive, nextTick, ref, type App } from 'vue'
 import { createPinia } from 'pinia'
 import { afterEach, expect, it, vi } from 'vitest'
 import KeyCaptureDialog from './KeyCaptureDialog.vue'
@@ -46,5 +46,34 @@ it('suppresses native menus during capture and restores them on close and dispos
   expect(setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(true)
   app.unmount()
   app = undefined
+  expect(setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false)
+})
+
+it('releases capture when a cached settings page deactivates and returns with the dialog closed', async () => {
+  const setIgnoreMenuShortcuts = vi.fn(async (_ignored: boolean) => {})
+  const open = ref(true)
+  const visible = ref(true)
+  const page = { setup: () => () => h(KeyCaptureDialog, {
+    open: open.value, command: appKeyboardCommands.toggleSidebar, i18nKey: 'toggleSidebar',
+    'onUpdate:open': (value: boolean) => { open.value = value },
+  }) }
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp({ setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(page) : null }) })
+    .use(createPinia()).use(i18n).provide(DesktopWindowKey, {
+      isFullScreen: async () => false, onFullScreenChanged: () => () => {}, setIgnoreMenuShortcuts,
+    })
+  app.mount(host)
+  await nextTick()
+  expect(setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(true)
+  visible.value = false
+  await nextTick()
+  expect(open.value).toBe(false)
+  expect(setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false)
+  const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })
+  document.body.dispatchEvent(event)
+  expect(event.defaultPrevented).toBe(false)
+  visible.value = true
+  await nextTick()
   expect(setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false)
 })

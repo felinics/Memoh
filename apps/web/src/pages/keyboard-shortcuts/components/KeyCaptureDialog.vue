@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, onScopeDispose, ref, watch } from 'vue'
+import { computed, inject, onActivated, onDeactivated, onScopeDispose, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useEventListener } from '@vueuse/core'
 import {
@@ -45,6 +45,7 @@ const platform = detectPlatform()
 const isMac = platform === 'mac'
 
 const captured = ref<ParsedKeyCombo | null>(null)
+const active = ref(true)
 const windowBridge = inject(DesktopWindowKey, undefined)
 
 function setCapture(open: boolean) {
@@ -52,10 +53,19 @@ function setCapture(open: boolean) {
 }
 
 watch(() => props.open, (isOpen) => {
-  setCapture(isOpen)
+  setCapture(isOpen && active.value)
   if (!isOpen) captured.value = null
 }, { immediate: true })
 onScopeDispose(() => setCapture(false))
+onActivated(() => {
+  active.value = true
+  setCapture(props.open)
+})
+onDeactivated(() => {
+  active.value = false
+  setCapture(false)
+  emit('update:open', false)
+})
 
 // Capture-phase listener so we run BEFORE the global dispatcher's bubble-phase
 // listener registered in main.ts. stopImmediatePropagation cancels both that
@@ -66,7 +76,7 @@ onScopeDispose(() => setCapture(false))
 // Enter or Space requires focus to be off those buttons (e.g. the capture
 // surface), which matches OS-level keybinding dialogs.
 useEventListener(window, 'keydown', (event: KeyboardEvent) => {
-  if (!props.open) return
+  if (!props.open || !active.value) return
   if (isModifierKey(event.key)) return
   if ((event.key === 'Enter' || event.key === ' ') && event.target instanceof HTMLButtonElement) return
   event.preventDefault()
@@ -116,7 +126,7 @@ function handleCancel() {
 
 <template>
   <Dialog
-    :open="open"
+    :open="open && active"
     @update:open="(v: boolean) => emit('update:open', v)"
   >
     <DialogContent class="sm:max-w-md">
