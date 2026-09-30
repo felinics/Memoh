@@ -288,6 +288,7 @@ const DOM_TO_ELECTRON_KEY: Record<string, string> = {
   ArrowDown: 'Down',
   Escape: 'Esc',
   ' ': 'Space',
+  '+': 'Plus',
 }
 
 function normalizeAcceleratorKey(key: string): string {
@@ -297,7 +298,7 @@ function normalizeAcceleratorKey(key: string): string {
 }
 
 /** Derive an Electron accelerator string, e.g. `{ key: 'w', mod: true }` becomes `CmdOrCtrl+W`. */
-export function toElectronAccelerator(binding: KeyboardBinding): string {
+export function toElectronAccelerator(binding: Pick<KeyboardBinding, 'key' | 'mod' | 'alt' | 'shift'>): string {
   const parts: string[] = []
   if (binding.mod) parts.push('CmdOrCtrl')
   if (binding.alt) parts.push('Alt')

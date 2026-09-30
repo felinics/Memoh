@@ -63,6 +63,10 @@ describe('toElectronAccelerator', () => {
     expect(toElectronAccelerator({ command: appKeyboardCommands.closeCurrentWorkspaceTab, key: 'w', mod: true, desktop: 'menu', browser: 'passthrough' })).toBe('CmdOrCtrl+W')
   })
 
+  it('encodes a literal plus key for the native accelerator parser', () => {
+    expect(toElectronAccelerator({ key: '+', mod: true, shift: true })).toBe('CmdOrCtrl+Shift+Plus')
+  })
+
   it('orders modifiers CmdOrCtrl, Alt, Shift and uppercases single-char keys', () => {
     const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, desktop: 'keydown', browser: 'intercept', scope: 'global', i18nKey: 'saveActiveFile' }
     expect(toElectronAccelerator(binding)).toBe('CmdOrCtrl+Alt+Shift+K')

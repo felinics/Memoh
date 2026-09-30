@@ -124,7 +124,7 @@ declare module '@memohai/web/lib/keyboard-bindings' {
   }
   export const keyboardBindings: KeyboardBinding[]
   export const RESERVED_BROWSER_COMBOS: Set<string>
-  export function toElectronAccelerator(binding: KeyboardBinding): string
+  export function toElectronAccelerator(binding: Pick<KeyboardBinding, 'key' | 'mod' | 'alt' | 'shift'>): string
   export function acceleratorForCommand(command: AppKeyboardCommand): string | undefined
   export function selectWebBindings(bindings: KeyboardBinding[]): KeyboardBinding[]
   export function selectDesktopKeydownBindings(bindings: KeyboardBinding[]): KeyboardBinding[]
