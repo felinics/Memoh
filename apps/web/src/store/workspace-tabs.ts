@@ -688,6 +688,19 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // ---- panel operations ----------------------------------------------------
 
   const activeId = computed<string | null>(() => activePanelId.value)
+  const pendingChatInputFocus = ref<{ panelId: string; botId: string; sessionId: string | null } | null>(null)
+  watch([activeId, currentBotId, () => selection.sessionId], () => { pendingChatInputFocus.value = null }, { flush: 'sync' })
+
+  function requestChatInputFocus() {
+    activateChatPanel()
+    const panel = api.value?.activePanel
+    if (!activePanelIsChat.value || !panel || !currentBotId.value) return
+    pendingChatInputFocus.value = {
+      panelId: panel.id,
+      botId: currentBotId.value,
+      sessionId: panel.params?.sessionId ?? null,
+    }
+  }
 
   function focusAdjacentTab(direction: -1 | 1): boolean {
     const group = api.value?.activeGroup
@@ -2346,6 +2359,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   return {
     api,
     activeId,
+    pendingChatInputFocus,
+    requestChatInputFocus,
     focusAdjacentTab,
     isMobile,
     activePanelIsChat,

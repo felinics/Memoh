@@ -1,4 +1,3 @@
-import { nextTick } from 'vue'
 import { appKeyboardCommands, type AppKeyboardCommand, type KeyboardCommandRegistry } from '@/lib/keyboard-commands'
 import type { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 
@@ -29,13 +28,7 @@ export function registerWorkbenchCommands(registry: KeyboardCommandRegistry, sto
     return true
   }))
   unregister.push(registry.register(appKeyboardCommands.focusChatInput, () => {
-    if (store.activePanelIsChat) return false
-    store.activateChatPanel()
-    if (store.activePanelIsChat) {
-      void nextTick(() => {
-        if (store.activePanelIsChat) registry.dispatch(appKeyboardCommands.focusChatInput)
-      })
-    }
+    store.requestChatInputFocus()
     return true
   }))
   return () => { unregister.forEach(dispose => dispose()) }

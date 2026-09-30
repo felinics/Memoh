@@ -826,23 +826,19 @@ describe('workspace layout store', () => {
     expect(registry.dispatch(appKeyboardCommands.newTerminal)).toBe(false)
   })
 
-  it('activates chat before asking the focused composer to take focus once', async () => {
+  it('retains focus intent for the selected chat until its composer mounts', async () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
     store.openTerminal()
     const registry = createKeyboardCommandRegistry()
     const unregister = registerWorkbenchCommands(registry, store)
-    const focused: string[] = []
-    registry.register(appKeyboardCommands.focusChatInput, () => {
-      if (!store.activePanelIsChat) return false
-      focused.push(store.activeId!)
-      return true
-    })
     registry.dispatch(appKeyboardCommands.focusChatInput)
     await nextTick()
-    expect(focused).toHaveLength(1)
-    expect(dock.getPanel(focused[0]!)?.component).toBe('chat')
+    expect(store.pendingChatInputFocus?.panelId).toBe(store.activeId)
+    expect(dock.getPanel(store.pendingChatInputFocus!.panelId)?.component).toBe('chat')
+    store.openTerminal()
+    expect(store.pendingChatInputFocus).toBeNull()
     unregister()
   })
 

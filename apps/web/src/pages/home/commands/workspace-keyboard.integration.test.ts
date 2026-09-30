@@ -5,11 +5,14 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import PanelFile from '../components/dockview/panel-file.vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useChatSelectionStore } from '@/store/chat-selection'
 import { KEYBOARD_REGISTRY } from '@/composables/useKeyboardCommand'
 import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 import { connectBrowserKeyboardShortcutsLive } from '@/lib/browser-keyboard-shortcuts'
 import { keyboardBindings, selectWebBindings } from '@/lib/keyboard-bindings'
 import { registerWorkspaceTabCommands } from './workspace-tab-commands'
+import { registerWorkbenchCommands } from './workbench-commands'
+import { useComposerKeyboardFocus } from '../composables/useComposerKeyboardFocus'
 
 const sdk = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }))
 vi.mock('@memohai/sdk', () => ({
@@ -32,6 +35,8 @@ vi.mock('@/store/chat-list', async () => {
     fsChangedAt: ref(0), currentBotId: ref('bot-a'),
     bots: ref([{ id: 'bot-a', current_user_permissions: ['workspace_write'] }]),
     affectsPath: () => false, fsEventForPath: () => null,
+    focusChatView: vi.fn(),
+    selectDraft: vi.fn(),
     sessions: ref([]), knownSessions: ref([]), sessionId: ref(null), loadingChats: ref(false),
     hasExplicitSessionSelection: ref(false), activeSession: ref(null),
     pendingExternalAgentSessionInput: ref(null), draftViewRequested: ref(null),
@@ -91,6 +96,7 @@ function registerDock() {
   const disposable = () => ({ dispose() {} })
   const dock = {
     panels, groups: [], activePanel: panels[0],
+    clear: vi.fn(),
     getPanel: (id: string) => panels.find(panel => panel.id === id),
     onDidActivePanelChange: (cb: typeof onActive) => { onActive = cb; return disposable() },
     onDidLayoutChange: disposable,
@@ -144,6 +150,49 @@ async function mountSplit() {
 }
 
 describe('workspace keyboard ownership', () => {
+  it('transfers a focus shortcut through the store to a late, initially hidden composer', async () => {
+    useChatSelectionStore().setBot('bot-a')
+    const dock = registerDock()
+    const chat = {
+      ...dock.panels[0]!, id: 'chat:focus', component: 'chat', params: { sessionId: null }, group: { id: 'group' },
+      api: {
+        ...dock.panels[0]!.api, id: 'chat:focus', setActive: () => dock.activate(2),
+        updateParameters: vi.fn(), setTitle: vi.fn(),
+      },
+    }
+    dock.dock.panels.push(chat)
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    const removeListener = connectBrowserKeyboardShortcutsLive(registry, () => selectWebBindings(keyboardBindings))
+    disconnect = () => { unregister(); removeListener() }
+    const key = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, altKey: true, bubbles: true, cancelable: true })
+    document.body.dispatchEvent(key)
+    expect(key.defaultPrevented).toBe(true)
+    expect(store.pendingChatInputFocus).toEqual({ panelId: chat.id, botId: 'bot-a', sessionId: null })
+
+    const ready = ref(false)
+    host = document.createElement('div')
+    host.style.visibility = 'hidden'
+    document.body.append(host)
+    app = createApp({ setup() {
+      const textarea = ref<HTMLTextAreaElement | null>(null)
+      useComposerKeyboardFocus({
+        textarea, enabled: () => store.activeId === chat.id, available: () => true,
+        ready: () => ready.value, owner: () => 'bot-a:chat:focus:',
+        request: () => store.pendingChatInputFocus?.panelId === chat.id,
+        consumeRequest: () => { store.pendingChatInputFocus = null },
+      })
+      return () => h('textarea', { ref: textarea, disabled: !ready.value })
+    } })
+    app.mount(host)
+    ready.value = true
+    await nextTick()
+    expect(document.activeElement).toBe(document.body)
+    host.style.visibility = 'visible'
+    await vi.waitFor(() => expect(document.activeElement).toBe(host!.querySelector('textarea')))
+    expect(store.pendingChatInputFocus).toBeNull()
+  })
+
   it('saves only the focused split and follows a later focus change', async () => {
     const view = await mountSplit()
     await view.edit(0, 'A')

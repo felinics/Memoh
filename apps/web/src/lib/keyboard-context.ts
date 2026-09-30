@@ -1,14 +1,18 @@
 import { appKeyboardCommands, type AppKeyboardCommand } from './keyboard-commands'
 import { keyboardBindings } from './keyboard-bindings'
 
-function activeKeyboardDialog(root: Document): HTMLElement | undefined {
+export function isKeyboardElementVisible(element: HTMLElement, root: Document = document): boolean {
+  if (element.closest('[aria-hidden="true"]')) return false
+  if (root.defaultView?.getComputedStyle(element).visibility === 'hidden') return false
+  for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+    if (ancestor.hidden || root.defaultView?.getComputedStyle(ancestor).display === 'none') return false
+  }
+  return true
+}
+
+export function activeKeyboardDialog(root: Document = document): HTMLElement | undefined {
   return [...root.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')].filter(element => {
-    if (element.dataset.state === 'closed' || element.closest('[aria-hidden="true"]')) return false
-    if (root.defaultView?.getComputedStyle(element).visibility === 'hidden') return false
-    for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
-      if (ancestor.hidden || root.defaultView?.getComputedStyle(ancestor).display === 'none') return false
-    }
-    return true
+    return element.dataset.state !== 'closed' && isKeyboardElementVisible(element, root)
   }).at(-1)
 }
 
