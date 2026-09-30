@@ -469,7 +469,7 @@
                    Docked (non-welcome) state compresses and quiets: no min
                    height + tighter padding (p-2.5) + a shorter textarea row
                    (min-h-10) pull the two rows together — the centered welcome
-                   card keeps the full presence (min-h-28, p-3); docked it sits
+                   card keeps the full presence (min-h-28, wider --composer-pad); docked it sits
                    under the conversation and should read lighter, with the edge
                    softened to --border-soft (.chat-composer-docked, style.css).
                    Mobile radius is DERIVED from the control circles inside:
@@ -482,9 +482,9 @@
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge @container/composer relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text max-md:rounded-3xl max-md:p-2.5"
+                class="chat-composer-edge @container/composer relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text p-(--composer-pad) max-md:rounded-3xl"
                 :class="[
-                  isWelcome ? 'min-h-28 p-3' : 'p-2.5 chat-composer-docked',
+                  isWelcome ? 'min-h-28' : 'chat-composer-docked',
                   voiceInputState !== 'idle' ? 'chat-composer-voice' : '',
                 ]"
                 @click="handleComposerClick"

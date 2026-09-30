@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-col">
-    <div class="px-3 py-1.5">
+    <div class="px-(--composer-text-inset) py-1.5">
       <p
         data-slot="tool-approval-title"
         class="flex min-w-0 items-baseline gap-1.5 text-label font-medium text-foreground"
@@ -48,7 +48,7 @@
 
     <ToolApprovalActions
       v-model:reason="rejectionReason"
-      class="mt-2 px-3 pb-2"
+      class="mt-2 px-(--composer-text-inset) pb-2"
       :options="approval.options"
       :responding="responding"
       :rejecting="rejecting"

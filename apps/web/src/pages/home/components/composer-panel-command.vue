@@ -1,10 +1,15 @@
 <template>
   <div>
-    <div class="flex items-start gap-2 px-1.5 py-1">
-      <CircleAlert
+    <div class="flex items-start gap-2 px-(--composer-text-inset) py-1">
+      <!-- Line-box icon slot on the title's rung, same geometry as CalloutBanner
+           size="sm", so the glyph centers on the title line. -->
+      <span
         v-if="isError"
-        class="mt-0.5 size-4 shrink-0 text-destructive"
-      />
+        class="flex h-lh shrink-0 items-center text-label text-destructive"
+        aria-hidden="true"
+      >
+        <AlertGlyph class="size-3.5" />
+      </span>
       <div class="min-w-0 flex-1">
         <p
           class="truncate text-label font-medium"
@@ -93,7 +98,8 @@
 // the slash picker.
 import { ref, watch } from 'vue'
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, TextButton, Command, CommandGroup, CommandItem, CommandKeyBridge, CommandList } from '@felinic/ui'
-import { Check, CircleAlert, List, Sparkles, X } from 'lucide-vue-next'
+import { Check, List, Sparkles, X } from 'lucide-vue-next'
+import AlertGlyph from '@/components/alert-glyph/index.vue'
 import type { CommandActionListItem } from '@/composables/api/useChat'
 import { isCommandResultItemDisplayOnly } from './slash-command-result'
 
