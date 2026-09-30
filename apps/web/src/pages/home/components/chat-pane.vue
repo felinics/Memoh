@@ -441,7 +441,6 @@
               :command-panel="composerCommandPanel"
               :error-message="composerPanelError"
               :pending-user-input="pendingUserInput"
-              :compacting="isCompactingSession"
               :usage-notice="composerUsageNotice"
               @select-command-item="selectCommandResultItem"
               @dismiss-command="clearCurrentCommandEvent"

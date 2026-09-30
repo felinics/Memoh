@@ -1,6 +1,6 @@
 <template>
-  <!-- Notices (usage, error, command result) stack as their own banners; decision
-       surfaces (compaction status, approvals) share ONE capsule below them. -->
+  <!-- Notices (usage, error, command result) stack as their own banners; the
+       approval decision surface sits in a capsule below them. -->
   <div class="flex flex-col gap-2">
     <ComposerPanelUsage
       v-if="usageNotice"
@@ -25,15 +25,11 @@
       @dismiss="emit('dismissCommand')"
     />
     <ComposerCapsule
-      v-if="compacting || approvalHead"
+      v-if="approvalHead"
       :label="$t('chat.panel.regionLabel')"
     >
       <AutoHeight>
-        <ComposerPanelCompaction v-if="compacting" />
-        <div
-          v-if="approvalHead"
-          :class="compacting ? 'mt-2 border-t border-border-soft pt-2' : ''"
-        >
+        <div>
           <Transition
             mode="out-in"
             enter-active-class="transition-opacity duration-150 ease-out"
@@ -94,7 +90,6 @@ import ComposerCapsule from './composer-capsule.vue'
 import ComposerPanelApproval from './composer-panel-approval.vue'
 import ComposerPanelCommand from './composer-panel-command.vue'
 import ComposerPanelError from './composer-panel-error.vue'
-import ComposerPanelCompaction from './composer-panel-compaction.vue'
 import ComposerPanelUsage from './composer-panel-usage.vue'
 import type { PendingApprovalItem } from '../composables/usePendingApprovals'
 import type { CommandActionListItem } from '@/composables/api/useChat'
@@ -118,7 +113,6 @@ const props = defineProps<{
   approvals: PendingApprovalItem[]
   commandPanel: CommandPanelData | null
   errorMessage: string
-  compacting?: boolean
   usageNotice?: UsageNotice | null
 }>()
 
