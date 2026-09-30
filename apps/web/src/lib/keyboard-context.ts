@@ -18,7 +18,8 @@ export function activeKeyboardDialog(root: Document = document): HTMLElement | u
 
 export function selectActiveKeyboardBindings<T extends { scope: string }>(bindings: T[], root: Document = document): T[] {
   const mediaActive = activeKeyboardDialog(root)?.dataset.keyboardScope === 'mediaLightbox'
-  return bindings.filter(binding => binding.scope !== 'mediaLightbox' || mediaActive)
+  if (!mediaActive) return bindings.filter(binding => binding.scope !== 'mediaLightbox')
+  return [...bindings.filter(binding => binding.scope === 'mediaLightbox'), ...bindings.filter(binding => binding.scope !== 'mediaLightbox')]
 }
 
 export function canDispatchKeyboardCommand(command: AppKeyboardCommand, route: { name?: unknown; path: string }, root: Document = document, hasWorkspace = true): boolean {
