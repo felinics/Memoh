@@ -8,7 +8,7 @@ import './style.css'
 import App from './App.vue'
 import router from './router'
 import { appKeyboardCommands, createKeyboardCommandRegistry } from './lib/keyboard-commands'
-import { canDispatchKeyboardCommand } from './lib/keyboard-context'
+import { canDispatchKeyboardCommand, selectActiveKeyboardBindings } from './lib/keyboard-context'
 import { connectBrowserKeyboardShortcutsLive } from './lib/browser-keyboard-shortcuts'
 import { selectWebBindings } from './lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from './composables/useKeyboardCommand'
@@ -45,7 +45,7 @@ registerWorkspaceTabCommands(keyboardCommands, workspaceTabs)
 const shortcutsStore = useKeyboardShortcutsStore(pinia)
 connectBrowserKeyboardShortcutsLive(
   keyboardCommands,
-  () => selectWebBindings(shortcutsStore.effectiveBindings),
+  () => selectActiveKeyboardBindings(selectWebBindings(shortcutsStore.effectiveBindings)),
 )
 keyboardCommands.register(appKeyboardCommands.openSettings, () => {
   // Already inside settings → no-op. Pushing /settings would redirect to

@@ -14,7 +14,7 @@ import { setupApiClient } from '@memohai/web/api-client'
 import { configureProviderIconLoader } from '@memohai/web/components/provider-icon/preload'
 import { installFileDropGuard } from '@memohai/web/lib/file-drop-guard'
 import { appKeyboardCommands, createKeyboardCommandRegistry, type AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
-import { canDispatchKeyboardCommand } from '@memohai/web/lib/keyboard-context'
+import { canDispatchKeyboardCommand, selectActiveKeyboardBindings } from '@memohai/web/lib/keyboard-context'
 import { connectBrowserKeyboardShortcutsLive } from '@memohai/web/lib/browser-keyboard-shortcuts'
 import { selectDesktopKeydownBindings, toElectronAccelerator } from '@memohai/web/lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from '@memohai/web/composables/useKeyboardCommand'
@@ -82,7 +82,7 @@ async function bootstrap() {
   const shortcutsStore = useKeyboardShortcutsStore(pinia)
   connectBrowserKeyboardShortcutsLive(
     keyboardCommands,
-    () => selectDesktopKeydownBindings(shortcutsStore.effectiveBindings),
+    () => selectActiveKeyboardBindings(selectDesktopKeydownBindings(shortcutsStore.effectiveBindings)),
   )
   // Push the latest accelerators for menu-delivered commands to main so the
   // native menu items stay in sync with whatever the user has bound — without

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { appKeyboardCommands, createKeyboardCommandRegistry, type AppKeyboardCommand } from './keyboard-commands'
-import { canDispatchKeyboardCommand } from './keyboard-context'
+import { canDispatchKeyboardCommand, selectActiveKeyboardBindings } from './keyboard-context'
 import { handleBrowserKeyboardShortcut } from './browser-keyboard-shortcuts'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createAppRoutes } from '@/routes'
@@ -77,6 +77,29 @@ describe('keyboard command context', () => {
       { command: appKeyboardCommands.saveActiveFile, key: 's', mod: true },
     ], 'linux')
     expect(save).toHaveBeenCalledOnce()
+  })
+
+  it('lets a held navigation key bypass an inactive non-repeat scope', () => {
+    const registry = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, route('/')))
+    const next = vi.fn(() => true)
+    registry.register(appKeyboardCommands.closeMediaLightbox, () => false)
+    registry.register(appKeyboardCommands.nextWorkspaceTab, next)
+    const bindings = selectActiveKeyboardBindings([
+      { command: appKeyboardCommands.closeMediaLightbox, key: ']', mod: true, alt: true, scope: 'mediaLightbox', repeat: false },
+      { command: appKeyboardCommands.nextWorkspaceTab, key: ']', mod: true, alt: true, scope: 'workspace', repeat: true },
+    ])
+    handleBrowserKeyboardShortcut(new KeyboardEvent('keydown', { key: ']', ctrlKey: true, altKey: true, repeat: true }), registry, bindings, 'linux')
+    expect(next).toHaveBeenCalledOnce()
+  })
+
+  it('ignores dialogs beneath a hidden ancestor', () => {
+    const wrapper = document.createElement('div')
+    wrapper.style.display = 'none'
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    wrapper.append(dialog)
+    document.body.append(wrapper)
+    expect(canDispatchKeyboardCommand(appKeyboardCommands.openSettings, route('/'))).toBe(true)
   })
 
   it('consumes blocked menu delivery without closing the window and resumes after dismissal', () => {

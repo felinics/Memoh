@@ -229,6 +229,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     desktop: 'keydown',
     browser: 'intercept',
     scope: 'mediaLightbox',
+    repeat: true,
     i18nKey: 'mediaLightboxPrev',
   },
   {
@@ -237,6 +238,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     desktop: 'keydown',
     browser: 'intercept',
     scope: 'mediaLightbox',
+    repeat: true,
     i18nKey: 'mediaLightboxNext',
   },
 ]

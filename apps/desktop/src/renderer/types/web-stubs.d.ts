@@ -93,6 +93,7 @@ declare module '@memohai/web/lib/keyboard-commands' {
 }
 
 declare module '@memohai/web/lib/keyboard-context' {
+  export function selectActiveKeyboardBindings<T extends { scope: string }>(bindings: T[], root?: Document): T[]
   import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
   export function canDispatchKeyboardCommand(command: AppKeyboardCommand, route: { name?: unknown; path: string }, root?: Document, hasWorkspace?: boolean): boolean
 }
