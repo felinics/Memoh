@@ -260,26 +260,22 @@ function filterItems(items: NavItem[]): NavItem[] {
   })
 }
 
-// Four groups, ordered by what the user came here to do: the things they own
-// (bots, computers, the market they install from), the service providers those
-// things draw on, the org-level view (who is in it, what it consumes), and
-// their own preferences. `providers` is the single entry to the whole provider
-// family — web search / voice / video live behind it, navigated by the
-// in-page provider-scope-tabs rail (see lib/provider-scopes.ts).
-// Groups that end up empty after filtering drop out entirely.
+// Bot management and app discovery lead without a group label. Shared resources,
+// team administration, and personal settings follow; empty groups are hidden
+// after filtering.
 const navGroups = computed<NavGroup[]>(() => [
   {
     key: 'workspace',
     items: [
       { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
-      { title: t('sidebar.runtimes'), name: 'runtimes', icon: ComputerIcon },
       { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
     ],
   },
   {
-    key: 'capabilities',
-    label: t('sidebar.group.capabilities'),
+    key: 'resources',
+    label: t('sidebar.group.resources'),
     items: [
+      { title: t('sidebar.runtimes'), name: 'runtimes', icon: ComputerIcon },
       { title: t('sidebar.providers'), name: 'providers', icon: Box },
     ],
   },
@@ -292,12 +288,12 @@ const navGroups = computed<NavGroup[]>(() => [
     ],
   },
   {
-    key: 'preferences',
-    label: t('sidebar.group.preferences'),
+    key: 'personal',
+    label: t('sidebar.group.personal'),
     items: [
+      { title: t('sidebar.profile'), name: 'profile', icon: CircleUserRound },
       { title: t('sidebar.appearance'), name: 'appearance', icon: AppearanceIcon },
       { title: t('sidebar.keyboard'), name: 'keyboard', icon: Keyboard },
-      { title: t('sidebar.profile'), name: 'profile', icon: CircleUserRound },
       { title: t('sidebar.about'), name: 'about', icon: Info },
     ],
   },
