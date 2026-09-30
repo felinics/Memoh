@@ -904,7 +904,7 @@ describe('workspace layout store', () => {
       activeGroup: group.id,
     }
     localStorage.setItem('workspace-layout', JSON.stringify({
-      'bot-1': { layout, terminalCounter: 4, ephemeralIds: [] },
+      'bot-1': { layout, ephemeralIds: [] },
     }))
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
@@ -921,7 +921,7 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('terminal:5')?.group).toBe(dock.getPanel(terminal.id)?.group)
   })
 
-  it('keeps terminal ids monotonic per bot', () => {
+  it('keeps terminal ids monotonic while terminals stay open', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
@@ -936,6 +936,40 @@ describe('workspace layout store', () => {
     expect(dock.getPanel('terminal:1')).toBeUndefined()
     expect(dock.getPanel('terminal:2')).toBeTruthy()
     expect(dock.getPanel('terminal:3')).toBeTruthy()
+  })
+
+  // #1341: the old per-bot counter only ever climbed, so the number in the tab
+  // title was a lifetime total — close every terminal and the next one opened
+  // as "Terminal 56" even with nothing else open. Numbering must be derived
+  // from the open panels instead.
+  it('restarts terminal numbering once every terminal is closed', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openTerminal()
+    store.openTerminal()
+    expect(dock.getPanel('terminal:2')?.title).toBe('Terminal 2')
+    store.closeTab('terminal:1')
+    store.closeTab('terminal:2')
+    expect(dock.panels.filter(panel => panel.id.startsWith('terminal:'))).toHaveLength(0)
+
+    store.openTerminal()
+    expect(dock.getPanel('terminal:1')?.title).toBe('Terminal 1')
+  })
+
+  it('restarts browser numbering once every browser panel is closed', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openBrowser()
+    expect(dock.getPanel('browser:1')?.title).toBe('Browser 1')
+    store.closeTab('browser:1')
+    expect(dock.panels.filter(panel => panel.id.startsWith('browser:'))).toHaveLength(0)
+
+    store.openBrowser()
+    expect(dock.getPanel('browser:1')?.title).toBe('Browser 1')
   })
 
   it('repairs legacy terminal titles when restoring a layout', async () => {
@@ -955,7 +989,6 @@ describe('workspace layout store', () => {
             },
           },
         },
-        terminalCounter: 2,
         ephemeralIds: [],
       },
     }))
@@ -2460,9 +2493,9 @@ describe('workspace layout store', () => {
       await nextTick()
 
       // The mobile stack (draft chat + terminal) must NOT be serialized over
-      // the desktop snapshot: the layout tree round-trips untouched. The
-      // terminalCounter bump sharing the record is expected — it numbers the
-      // new panel, it does not reshape the desktop arrangement.
+      // the desktop snapshot: the layout tree round-trips untouched. Opening
+      // the terminal only adds a panel to the live dock; it does not reshape
+      // the desktop arrangement.
       const written = JSON.parse(localStorage.getItem('workspace-layout')!)
       expect(written['bot-1'].layout).toEqual(storedLayout)
     })

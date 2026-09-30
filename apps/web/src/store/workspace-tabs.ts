@@ -47,8 +47,6 @@ export type WorkspacePanelComponent = 'chat' | 'file' | 'preview' | 'asset' | 't
 
 interface BotLayoutState {
   layout: SerializedDockview | null
-  terminalCounter: number
-  browserCounter: number
   displayCounter: number
   scheduleCounter: number
   chatCounter: number
@@ -63,8 +61,6 @@ type WorkspaceLayoutStorage = Record<string, BotLayoutState>
 function emptyBotLayout(): BotLayoutState {
   return {
     layout: null,
-    terminalCounter: 0,
-    browserCounter: 0,
     displayCounter: 0,
     scheduleCounter: 0,
     chatCounter: 0,
@@ -297,6 +293,26 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   function numberedFallbackTitle(prefix: string, id: string): string {
     const suffix = id.split(':')[1]?.trim()
     return suffix ? `${prefix} ${suffix}` : prefix
+  }
+
+  // The next free number for a `<prefix>:<n>` panel, derived from the panels
+  // that are actually open rather than from a counter that only ever climbs.
+  // A monotonic counter makes the label a lifetime total: close every terminal
+  // and the next one opens as "Terminal 56" even though nothing else is open
+  // (#1341). Scanning the live dock also keeps ids unique after a restore or a
+  // reset, which is all the counter was ever needed for. Returns the smallest
+  // number above every open panel of this kind, so a dock holding only
+  // `terminal:2` still opens `terminal:3` and never reuses a live id.
+  function nextPanelNumber(prefix: string): number {
+    const dock = api.value
+    if (!dock) return 1
+    let highest = 0
+    for (const panel of dock.panels) {
+      if (!panel.id.startsWith(`${prefix}:`)) continue
+      const n = Number.parseInt(panel.id.slice(prefix.length + 1), 10)
+      if (Number.isInteger(n) && n > highest) highest = n
+    }
+    return highest + 1
   }
 
   function terminalTitleFallback(id: string): string {
@@ -1522,9 +1538,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         return
       }
     }
-    const next = state.terminalCounter + 1
-    patchBotLayout(bid, { terminalCounter: next })
-    const id = `terminal:${next}`
+    const id = `terminal:${nextPanelNumber('terminal')}`
     focusOrAdd({
       id,
       component: 'terminal',
@@ -1557,8 +1571,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const bid = (currentBotId.value ?? '').trim()
     const state = ensureBotLayout(bid)
     if (!state || !api.value) return false
-    const next = state.browserCounter + 1
-    patchBotLayout(bid, { browserCounter: next })
+    const next = nextPanelNumber('browser')
     focusOrAdd({
       id: `browser:${next}`,
       component: 'browser',
@@ -1754,11 +1767,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'terminal': {
         if (!hasCurrentPermission('workspace_exec')) return
         const bid = (currentBotId.value ?? '').trim()
-        const state = ensureBotLayout(bid)
-        if (!state) return
-        const next = state.terminalCounter + 1
-        patchBotLayout(bid, { terminalCounter: next })
-        const id = `terminal:${next}`
+        if (!ensureBotLayout(bid)) return
+        const id = `terminal:${nextPanelNumber('terminal')}`
         dock.addPanel({
           id,
           component: 'terminal',
@@ -1784,10 +1794,8 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       case 'browser': {
         if (!hasCurrentPermission('manage')) return
         const bid = (currentBotId.value ?? '').trim()
-        const state = ensureBotLayout(bid)
-        if (!state) return
-        const next = state.browserCounter + 1
-        patchBotLayout(bid, { browserCounter: next })
+        if (!ensureBotLayout(bid)) return
+        const next = nextPanelNumber('browser')
         dock.addPanel({
           id: `browser:${next}`,
           component: 'browser',
