@@ -1291,6 +1291,8 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
+import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
+import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useComposerPair } from '../composables/useComposerPair'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
@@ -3210,6 +3212,12 @@ const {
   focusTextarea,
   modelTriggerMaxWidth,
 } = useComposerLayout()
+
+useKeyboardCommand(appKeyboardCommands.focusChatInput, () => {
+  if (!isActive.value || !isVisible.value) return false
+  focusTextarea()
+  return true
+})
 
 useUnfocusedComposerInput({
   textarea: textareaEl,

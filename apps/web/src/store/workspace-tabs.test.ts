@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
 import { useWorkspaceTabsStore } from './workspace-tabs'
+import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
+import { registerWorkbenchCommands } from '@/pages/home/commands/workbench-commands'
 
 vi.hoisted(() => {
   class MemoryStorage implements Storage {
@@ -767,6 +769,57 @@ describe('workspace layout store', () => {
 
   it('does not navigate without a workspace', () => {
     expect(useWorkspaceTabsStore().focusAdjacentTab(1)).toBe(false)
+  })
+
+  it('routes workbench commands through the existing sidebar, session, split and creation operations', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    const views = [
+      [appKeyboardCommands.showSessions, 'sessions'], [appKeyboardCommands.showFiles, 'files'],
+      [appKeyboardCommands.showSchedule, 'schedule'], [appKeyboardCommands.showSupermarket, 'supermarket'],
+    ] as const
+    for (const [command, view] of views) {
+      registry.dispatch(command)
+      expect(store.sidebarView).toBe(view)
+      expect(store.workbenchOpen).toBe(true)
+    }
+    registry.dispatch(appKeyboardCommands.newTerminal)
+    expect(dock.getPanel('terminal:1')?.component).toBe('terminal')
+    registry.dispatch(appKeyboardCommands.newBrowser)
+    expect(dock.getPanel('browser:1')?.component).toBe('browser')
+    registry.dispatch(appKeyboardCommands.newChatSession)
+    expect(dock.activePanel?.component).toBe('chat')
+    expect(dock.activePanel?.params.sessionId).toBeNull()
+    const groupCount = dock.groups.length
+    registry.dispatch(appKeyboardCommands.splitWorkspaceRight)
+    expect(dock.groups).toHaveLength(groupCount + 1)
+    registry.dispatch(appKeyboardCommands.splitWorkspaceBelow)
+    expect(dock.groups).toHaveLength(groupCount + 2)
+    unregister()
+    expect(registry.dispatch(appKeyboardCommands.newTerminal)).toBe(false)
+  })
+
+  it('activates chat before asking the focused composer to take focus once', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openTerminal()
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    const focused: string[] = []
+    registry.register(appKeyboardCommands.focusChatInput, () => {
+      if (!store.activePanelIsChat) return false
+      focused.push(store.activeId!)
+      return true
+    })
+    registry.dispatch(appKeyboardCommands.focusChatInput)
+    await nextTick()
+    expect(focused).toHaveLength(1)
+    expect(dock.getPanel(focused[0]!)?.component).toBe('chat')
+    unregister()
   })
 
   it('opens a browser tab at an address and focuses the existing one on the same URL', () => {
