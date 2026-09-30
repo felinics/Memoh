@@ -25,6 +25,23 @@ describe('keyboard command registry', () => {
     expect(handler).toHaveBeenCalledOnce()
   })
 
+  it('stops after the first handler consumes a command', () => {
+    const registry = createKeyboardCommandRegistry()
+    const effects: string[] = []
+    registry.register(appKeyboardCommands.saveActiveFile, () => false)
+    registry.register(appKeyboardCommands.saveActiveFile, () => {
+      effects.push('focused')
+      return true
+    })
+    registry.register(appKeyboardCommands.saveActiveFile, () => {
+      effects.push('background')
+      return true
+    })
+
+    expect(registry.dispatch(appKeyboardCommands.saveActiveFile)).toBe(true)
+    expect(effects).toEqual(['focused'])
+  })
+
   it('unregisters command handlers', () => {
     const registry = createKeyboardCommandRegistry()
     const handler = vi.fn(() => true)

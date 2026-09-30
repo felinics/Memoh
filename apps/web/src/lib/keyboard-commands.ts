@@ -83,11 +83,10 @@ export function createKeyboardCommandRegistry(): KeyboardCommandRegistry {
     dispatch(command) {
       const commandHandlers = handlers.get(command)
       if (!commandHandlers) return false
-      let handled = false
       for (const handler of commandHandlers) {
-        handled = handler() === true || handled
+        if (handler() === true) return true
       }
-      return handled
+      return false
     },
 
     connect(api, onUnhandled) {

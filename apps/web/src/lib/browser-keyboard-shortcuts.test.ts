@@ -117,6 +117,37 @@ describe('browser keyboard shortcuts matcher', () => {
     expect(registry.dispatch).not.toHaveBeenCalled()
   })
 
+  it.each([
+    { defaultPrevented: true },
+    { isComposing: true },
+    { keyCode: 229 },
+    { getModifierState: (key: string) => key === 'AltGraph' },
+  ])('leaves consumed events and text composition alone (%j)', (state) => {
+    const registry = createRegistry()
+    const event = { ...createKeyboardEventLike({ key: 's', ctrlKey: true }), ...state }
+
+    expect(handleBrowserKeyboardShortcut(event, registry, [saveBinding], 'linux')).toBe(false)
+    expect(registry.dispatch).not.toHaveBeenCalled()
+    expect(event.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('consumes a held shortcut without executing the command again', () => {
+    const registry = createRegistry()
+    const event = { ...createKeyboardEventLike({ key: 's', ctrlKey: true }), repeat: true }
+
+    expect(handleBrowserKeyboardShortcut(event, registry, [saveBinding], 'linux')).toBe(true)
+    expect(registry.dispatch).not.toHaveBeenCalled()
+    expect(event.preventDefault).toHaveBeenCalledOnce()
+  })
+
+  it('allows repeat when a navigation binding explicitly requests it', () => {
+    const registry = createRegistry()
+    const event = { ...createKeyboardEventLike({ key: 's', ctrlKey: true }), repeat: true }
+
+    expect(handleBrowserKeyboardShortcut(event, registry, [{ ...saveBinding, repeat: true }], 'linux')).toBe(true)
+    expect(registry.dispatch).toHaveBeenCalledOnce()
+  })
+
   it('matches the per-platform key override for the active platform', () => {
     const registry = createRegistry(true)
     const binding: BrowserKeyboardShortcutBinding = {

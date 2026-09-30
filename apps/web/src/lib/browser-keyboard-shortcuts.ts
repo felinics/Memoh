@@ -7,6 +7,11 @@ export interface BrowserKeyboardShortcutEvent {
   ctrlKey: boolean
   altKey: boolean
   shiftKey: boolean
+  defaultPrevented?: boolean
+  isComposing?: boolean
+  keyCode?: number
+  repeat?: boolean
+  getModifierState?(key: string): boolean
   preventDefault(): void
 }
 
@@ -20,6 +25,7 @@ export interface BrowserKeyboardShortcutBinding {
   mod?: boolean
   alt?: boolean
   shift?: boolean
+  repeat?: boolean
 }
 
 interface BrowserKeyboardShortcutTarget {
@@ -76,8 +82,13 @@ export function handleBrowserKeyboardShortcut(
   bindings: BrowserKeyboardShortcutBinding[],
   platform: KeyboardPlatform = detectPlatform(),
 ): boolean {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return false
   for (const binding of bindings) {
     if (!bindingMatchesEvent(binding, event, platform)) continue
+    if (event.repeat && !binding.repeat) {
+      event.preventDefault()
+      return true
+    }
     const handled = registry.dispatch(binding.command)
     if (!handled) continue
     event.preventDefault()
