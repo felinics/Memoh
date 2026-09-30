@@ -441,7 +441,6 @@
               :command-panel="composerCommandPanel"
               :error-message="goalSubmissionBlocked ? goalExecutionBlockedReason : runtimeModeUnavailableReason || composerError"
               :pending-user-input="pendingUserInput"
-              :compacting="isCompactingSession"
               @select-command-item="selectCommandResultItem"
               @dismiss-command="clearCurrentCommandEvent"
               @reveal-composer="handleDockRevealComposer"
