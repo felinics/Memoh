@@ -37,6 +37,7 @@ const props = defineProps<{
   botId: string
   file: HandlersFsFileInfo
   readonly?: boolean
+  keyboardActive?: boolean
 }>()
 
 const EXTERNAL_FILE_POLL_MS = 2_000
@@ -719,6 +720,7 @@ async function refreshCompare() {
 // keyboard layer because we've already shown the conflict UI; falling through
 // to browser save would be confusing.
 useKeyboardCommand(appKeyboardCommands.saveActiveFile, () => {
+  if (props.keyboardActive === false) return false
   if (!isFileSaveEligible({
     readonly: props.readonly ?? false,
     isText: isText.value,
