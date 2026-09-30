@@ -1,10 +1,9 @@
 import { appKeyboardCommands, type AppKeyboardCommand } from './keyboard-commands'
 
 /**
- * Where a binding is delivered inside the Electron desktop app:
- * - `menu`    - owned by a native menu item with an accelerator (routed via IPC).
- *               Excluded from the renderer keydown listener to avoid double-firing.
- * - `keydown` - handled by the shared renderer keydown listener, exactly like web.
+ * - `menu`    - also exposed in the native menu; menu clicks route via IPC.
+ * - `keydown` - exposed through the shared renderer keydown listener.
+ * Both use the shared DOM listener for physical keys in the chat window.
  */
 export type DesktopDelivery = 'menu' | 'keydown'
 
@@ -20,11 +19,9 @@ export type KeyboardPlatform = 'mac' | 'win' | 'linux'
 
 /**
  * Logical grouping for the settings page and conflict-detection rules:
- * - `global`        - always live; collisions with other globals block save.
- * - `mediaLightbox` - only live while the media lightbox is open. The
- *                     dispatcher iterator continues past unhandled commands,
- *                     so a scoped handler claims the key only when mounted;
- *                     collisions with global bindings are warnings, not errors.
+ * - `global`        - application navigation outside modal overlays.
+ * - `workspace`     - operations in the active chat workbench.
+ * - `mediaLightbox` - operations in the active media preview overlay.
  */
 export type KeyboardScope = 'global' | 'workspace' | 'mediaLightbox'
 
