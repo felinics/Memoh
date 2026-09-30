@@ -2062,6 +2062,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // shown. Collapsing the whole sidebar lives on the workbench toggle (the
   // chrome button over the dock), not on the nav items.
   function selectSidebarView(view: SidebarView) {
+    if (view === 'files' && !hasCurrentPermission('workspace_read')) return
     sidebarView.value = view
     sidebarOpen.value = true
     setWorkbench(true)

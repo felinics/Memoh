@@ -234,6 +234,10 @@ vi.mock('@/store/chat-list', () => ({
         id: 'bot-without-layout',
         current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'],
       },
+      {
+        id: 'bot-chat-only',
+        current_user_permissions: ['chat'],
+      },
     ],
     isSessionStreaming: vi.fn(() => false),
     knownSessionSummary: chatStoreMock.knownSessionSummary,
@@ -773,6 +777,22 @@ describe('workspace layout store', () => {
 
   it('does not navigate without a workspace', () => {
     expect(useWorkspaceTabsStore().focusAdjacentTab(1)).toBe(false)
+  })
+
+  it('keeps unavailable file navigation and execution commands behind existing permissions', () => {
+    useChatSelectionStore().setBot('bot-chat-only')
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.selectSidebarView('schedule')
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    registry.dispatch(appKeyboardCommands.showFiles)
+    expect(store.sidebarView).toBe('schedule')
+    registry.dispatch(appKeyboardCommands.newTerminal)
+    registry.dispatch(appKeyboardCommands.newBrowser)
+    expect(dock.panels.filter(panel => panel.component === 'terminal' || panel.component === 'browser')).toHaveLength(0)
+    unregister()
   })
 
   it('routes workbench commands through the existing sidebar, session, split and creation operations', () => {
