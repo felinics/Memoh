@@ -602,7 +602,7 @@
         "resetDefault": "恢复默认",
         "reservedError": "该组合键已被浏览器或操作系统占用。",
         "noModifierError": "全局快捷键必须包含 Cmd/Ctrl 或 Alt 修饰键，否则会在普通输入时被触发。",
-        "sameScopeError": "已被 {command} 占用。",
+        "sameScopeError": "这个组合已用于“{command}”。",
         "crossScopeWarn": "也被 {command} 使用（仅在其作用域内生效）。"
       },
       "commands": {

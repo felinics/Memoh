@@ -606,7 +606,7 @@
         "resetDefault": "Reset to default",
         "reservedError": "This combination is reserved by the browser or OS.",
         "noModifierError": "Global shortcuts need a Cmd/Ctrl or Alt modifier so they don't fire while typing.",
-        "sameScopeError": "Already used by {command}.",
+        "sameScopeError": "This combination is already used by {command}.",
         "crossScopeWarn": "Also used by {command} (only active in a different context)."
       },
       "commands": {

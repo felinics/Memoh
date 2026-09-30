@@ -5,6 +5,10 @@ import { useChatSelectionStore } from './chat-selection'
 import { useWorkspaceTabsStore } from './workspace-tabs'
 import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 import { registerWorkbenchCommands } from '@/pages/home/commands/workbench-commands'
+import { canDispatchKeyboardCommand } from '@/lib/keyboard-context'
+import { handleBrowserKeyboardShortcut } from '@/lib/browser-keyboard-shortcuts'
+import { selectWebBindings } from '@/lib/keyboard-bindings'
+import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
 
 vi.hoisted(() => {
   class MemoryStorage implements Storage {
@@ -819,6 +823,33 @@ describe('workspace layout store', () => {
     await nextTick()
     expect(focused).toHaveLength(1)
     expect(dock.getPanel(focused[0]!)?.component).toBe('chat')
+    unregister()
+  })
+
+  it('creates once from a shortcut, suppresses repeat, blocks settings and accepts a live rebind', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    let path = '/'
+    const registry = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, path, {
+      querySelectorAll: () => [],
+    } as unknown as Document))
+    const unregister = registerWorkbenchCommands(registry, store)
+    const shortcuts = useKeyboardShortcutsStore()
+    const event = (key: string, repeat = false) => ({ key, ctrlKey: true, metaKey: false, altKey: true, shiftKey: false, repeat, preventDefault: vi.fn() })
+    const press = (key: string, repeat = false) => handleBrowserKeyboardShortcut(event(key, repeat), registry, selectWebBindings(shortcuts.effectiveBindings), 'linux')
+    expect(press('x')).toBe(true)
+    press('x', true)
+    expect(dock.getPanel('terminal:1')).toBeTruthy()
+    expect(dock.getPanel('terminal:2')).toBeUndefined()
+    path = '/settings/keyboard'
+    press('x')
+    expect(dock.getPanel('terminal:2')).toBeUndefined()
+    path = '/'
+    expect(shortcuts.setBinding(appKeyboardCommands.newTerminal, 'Mod+Alt+z').kind).toBe('none')
+    expect(press('x')).toBe(false)
+    expect(press('z')).toBe(true)
+    expect(dock.getPanel('terminal:2')).toBeTruthy()
     unregister()
   })
 

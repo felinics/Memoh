@@ -60,8 +60,8 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     // inactive the matcher falls through to the global. Stable sort preserves
     // intra-scope order from the source table.
     return [...merged].sort((a, b) => {
-      if (a.scope === b.scope) return 0
-      return a.scope === 'global' ? 1 : -1
+      const order = { mediaLightbox: 0, workspace: 1, global: 2 }
+      return order[a.scope] - order[b.scope]
     })
   })
 
@@ -83,7 +83,7 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     // keystroke (e.g. binding 'b' would make typing 'b' open the sidebar).
     // Scoped bindings only register their handler while the owning component is
     // mounted, so a bare arrow key for the lightbox is fine.
-    if (ownBinding.scope === 'global' && !combo.mod && !combo.alt) {
+    if (ownBinding.scope !== 'mediaLightbox' && !combo.mod && !combo.alt) {
       return { kind: 'no-modifier' }
     }
     // Scan every matching binding before deciding: a same-scope collision must
@@ -94,7 +94,9 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     for (const binding of effectiveBindings.value) {
       if (binding.command === command) continue
       if (!keyCombosEqual(comboFromBinding(binding), combo)) continue
-      if (binding.scope === ownBinding.scope) return { kind: 'same-scope', collidesWith: binding.command }
+      if (binding.scope === ownBinding.scope || (binding.scope !== 'mediaLightbox' && ownBinding.scope !== 'mediaLightbox')) {
+        return { kind: 'same-scope', collidesWith: binding.command }
+      }
       crossScopeMatch = crossScopeMatch ?? binding.command
     }
     if (crossScopeMatch) return { kind: 'cross-scope', collidesWith: crossScopeMatch }

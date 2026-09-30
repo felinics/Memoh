@@ -603,7 +603,7 @@
         "resetDefault": "デフォルトに戻す",
         "reservedError": "この組み合わせはブラウザまたは OS に予約されています。",
         "noModifierError": "グローバルショートカットには Cmd/Ctrl または Alt 修飾キーが必要です（通常入力で誤発火しないように）。",
-        "sameScopeError": "すでに {command} で使用されています。",
+        "sameScopeError": "このキーの組み合わせは {command} で使用されています。",
         "crossScopeWarn": "{command} でも使用されています（異なるコンテキストでのみ有効）。"
       },
       "commands": {

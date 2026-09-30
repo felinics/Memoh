@@ -73,6 +73,13 @@ describe('useKeyboardShortcutsStore', () => {
     expect(store.isOverridden(appKeyboardCommands.toggleSidebar)).toBe(false)
   })
 
+  it('blocks collisions between workspace and global commands that can run together', () => {
+    const store = useKeyboardShortcutsStore()
+    expect(store.setBinding(appKeyboardCommands.newTerminal, 'Mod+k').kind).toBe('same-scope')
+    expect(store.isOverridden(appKeyboardCommands.newTerminal)).toBe(false)
+    expect(store.setBinding(appKeyboardCommands.newChatSession, 'n').kind).toBe('no-modifier')
+  })
+
   it('rejects bare-key global bindings so typing the key in a form does not fire the command', () => {
     const store = useKeyboardShortcutsStore()
     expect(store.setBinding(appKeyboardCommands.toggleSidebar, 'b').kind).toBe('no-modifier')

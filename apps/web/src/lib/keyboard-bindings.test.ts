@@ -17,13 +17,13 @@ describe('keyboard bindings table', () => {
     const close = keyboardBindings.find(b => b.command === appKeyboardCommands.closeCurrentWorkspaceTab)
     const save = keyboardBindings.find(b => b.command === appKeyboardCommands.saveActiveFile)
 
-    expect(close).toMatchObject({ key: 'w', mod: true, desktop: 'menu', browser: 'passthrough', scope: 'global' })
-    expect(save).toMatchObject({ key: 's', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
+    expect(close).toMatchObject({ key: 'w', mod: true, desktop: 'menu', browser: 'passthrough', scope: 'workspace' })
+    expect(save).toMatchObject({ key: 's', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'workspace' })
   })
 
   it('migrates the previously hardcoded sidebar toggle into the table', () => {
     const toggle = keyboardBindings.find(b => b.command === appKeyboardCommands.toggleSidebar)
-    expect(toggle).toMatchObject({ key: 'b', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
+    expect(toggle).toMatchObject({ key: 'b', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'workspace' })
   })
 
   it('declares Mod+K as the open-settings global shortcut', () => {
@@ -49,6 +49,12 @@ describe('keyboard bindings table', () => {
     const keys = keyboardBindings.map(b => b.i18nKey)
     expect(keys.every(Boolean)).toBe(true)
     expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('gives every app command exactly one discoverable binding', () => {
+    for (const command of Object.values(appKeyboardCommands)) {
+      expect(keyboardBindings.filter(binding => binding.command === command), command).toHaveLength(1)
+    }
   })
 })
 
@@ -160,7 +166,7 @@ describe('menu bindings do not use per-platform key overrides', () => {
 describe('reserved browser combos invariant', () => {
   it('never marks an OS/browser-reserved combo as browser:intercept', () => {
     const offenders = keyboardBindings.filter(
-      b => b.mod === true && b.browser === 'intercept' && RESERVED_BROWSER_COMBOS.has(b.key.toLowerCase()),
+      b => b.mod === true && !b.alt && !b.shift && b.browser === 'intercept' && RESERVED_BROWSER_COMBOS.has(b.key.toLowerCase()),
     )
     expect(offenders).toEqual([])
   })
