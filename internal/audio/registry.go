@@ -347,7 +347,7 @@ func defaultProviderDefinitions() []ProviderDefinition {
 			}},
 			DefaultModel:              "gpt-4o-mini-tts",
 			SupportsList:              true,
-			DefaultTranscriptionModel: "gpt-4o-mini-transcribe",
+			DefaultTranscriptionModel: "gpt-transcribe",
 			SupportsTranscriptionList: true,
 			Models: []ModelInfo{{
 				ID:          "gpt-4o-mini-tts",
@@ -370,20 +370,14 @@ func defaultProviderDefinitions() []ProviderDefinition {
 				},
 			}},
 			TranscriptionModels: []ModelInfo{{
-				ID:          "gpt-4o-mini-transcribe",
-				Name:        "gpt-4o-mini-transcribe",
-				Description: "Default OpenAI transcription model",
+				ID:          "gpt-transcribe",
+				Name:        "gpt-transcribe",
+				Description: "Default OpenAI transcription model for completed audio files",
 				ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language", "Language", "Optional ISO language hint", false, "", 10),
-					stringField("prompt", "Prompt", "Optional prompt to guide transcription", false, "", 20),
-					numberField("temperature", "Temperature", "Sampling temperature", false, 0, 30),
-					enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "verbose_json", "text", "srt", "vtt"}, 40),
+					stringField("prompt", "Prompt", "Optional context to guide transcription", false, "", 10),
 				}},
 				Capabilities: ModelCapabilities{ConfigSchema: ConfigSchema{Fields: []FieldSchema{
-					stringField("language", "Language", "Optional ISO language hint", false, "", 10),
-					stringField("prompt", "Prompt", "Optional prompt to guide transcription", false, "", 20),
-					numberField("temperature", "Temperature", "Sampling temperature", false, 0, 30),
-					enumField("response_format", "Response Format", "Transcription response format", false, []string{"json", "verbose_json", "text", "srt", "vtt"}, 40),
+					stringField("prompt", "Prompt", "Optional context to guide transcription", false, "", 10),
 				}}},
 			}},
 			Factory: func(config map[string]any) (sdk.SpeechProvider, error) {
