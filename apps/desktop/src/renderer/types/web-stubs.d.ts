@@ -79,14 +79,21 @@ declare module '@memohai/web/lib/keyboard-commands' {
   export type AppKeyboardCommand =
     typeof appKeyboardCommands[keyof typeof appKeyboardCommands]
   export type KeyboardCommandHandler = () => boolean | void
+  export interface KeyboardCommandInput {
+    key: string
+    ctrlKey: boolean
+    metaKey: boolean
+    altKey: boolean
+    shiftKey: boolean
+  }
   export type UnhandledKeyboardCommandCallback = (command: AppKeyboardCommand) => void
   export interface KeyboardCommandApi {
-    onKeyboardCommand(cb: (command: AppKeyboardCommand) => void): (() => void) | void
+    onKeyboardCommand(cb: (command: AppKeyboardCommand, input?: KeyboardCommandInput) => void): (() => void) | void
   }
   export interface KeyboardCommandRegistry {
     register(command: AppKeyboardCommand, handler: KeyboardCommandHandler): () => void
     dispatch(command: AppKeyboardCommand): boolean
-    connect(api: KeyboardCommandApi, onUnhandled?: UnhandledKeyboardCommandCallback): () => void
+    connect(api: KeyboardCommandApi, onUnhandled?: UnhandledKeyboardCommandCallback, onShortcut?: (input: KeyboardCommandInput) => void): () => void
   }
   export function isAppKeyboardCommand(value: unknown): value is AppKeyboardCommand
   export function createKeyboardCommandRegistry(canDispatch?: (command: AppKeyboardCommand) => boolean): KeyboardCommandRegistry

@@ -31,8 +31,25 @@ export function isAppKeyboardCommand(value: unknown): value is AppKeyboardComman
 
 export type KeyboardCommandHandler = () => boolean | void
 
+export interface KeyboardCommandInput {
+  key: string
+  ctrlKey: boolean
+  metaKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+}
+
+export function isKeyboardCommandInput(value: unknown): value is KeyboardCommandInput {
+  return typeof value === 'object' && value !== null
+    && 'key' in value && typeof value.key === 'string'
+    && 'ctrlKey' in value && typeof value.ctrlKey === 'boolean'
+    && 'metaKey' in value && typeof value.metaKey === 'boolean'
+    && 'altKey' in value && typeof value.altKey === 'boolean'
+    && 'shiftKey' in value && typeof value.shiftKey === 'boolean'
+}
+
 export interface KeyboardCommandApi {
-  onKeyboardCommand(cb: (command: AppKeyboardCommand) => void): (() => void) | void
+  onKeyboardCommand(cb: (command: AppKeyboardCommand, input?: KeyboardCommandInput) => void): (() => void) | void
 }
 
 export type UnhandledKeyboardCommandCallback = (command: AppKeyboardCommand) => void
@@ -45,7 +62,7 @@ export interface KeyboardCommandRegistry {
    * `onUnhandled` fires for commands no registered handler claimed. Desktop uses
    * it to fall back to closing the window when there is no workspace tab to close.
    */
-  connect(api: KeyboardCommandApi, onUnhandled?: UnhandledKeyboardCommandCallback): () => void
+  connect(api: KeyboardCommandApi, onUnhandled?: UnhandledKeyboardCommandCallback, onShortcut?: (input: KeyboardCommandInput) => void): () => void
 }
 
 export interface ScopedKeyboardBinding {
@@ -104,8 +121,12 @@ export function createKeyboardCommandRegistry(
       return false
     },
 
-    connect(api, onUnhandled) {
-      const unsubscribe = api.onKeyboardCommand((command) => {
+    connect(api, onUnhandled, onShortcut) {
+      const unsubscribe = api.onKeyboardCommand((command, input) => {
+        if (input && onShortcut) {
+          onShortcut(input)
+          return
+        }
         const handled = this.dispatch(command)
         if (!handled) onUnhandled?.(command)
       })
