@@ -14,6 +14,7 @@ import { setupApiClient } from '@memohai/web/api-client'
 import { configureProviderIconLoader } from '@memohai/web/components/provider-icon/preload'
 import { installFileDropGuard } from '@memohai/web/lib/file-drop-guard'
 import { appKeyboardCommands, createKeyboardCommandRegistry, type AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
+import { canDispatchKeyboardCommand } from '@memohai/web/lib/keyboard-context'
 import { connectBrowserKeyboardShortcutsLive } from '@memohai/web/lib/browser-keyboard-shortcuts'
 import { selectDesktopKeydownBindings, toElectronAccelerator } from '@memohai/web/lib/keyboard-bindings'
 import { KEYBOARD_REGISTRY } from '@memohai/web/composables/useKeyboardCommand'
@@ -68,7 +69,7 @@ async function bootstrap() {
   const serverProbe = window.api.desktop.probeServer()
 
   const pinia = createPinia().use(piniaPluginPersistedstate)
-  const keyboardCommands = createKeyboardCommandRegistry()
+  const keyboardCommands = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, router.currentRoute.value.path))
   registerWorkspaceTabCommands(keyboardCommands, useWorkspaceTabsStore(pinia))
   // Menu-delivered commands arrive over IPC; closing the window when no tab
   // remains is a distinct window-management concern (see closeWindowWhenNoTab).

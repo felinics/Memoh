@@ -80,6 +80,11 @@ declare module '@memohai/web/lib/keyboard-commands' {
   export function createKeyboardCommandRegistry(canDispatch?: (command: AppKeyboardCommand) => boolean): KeyboardCommandRegistry
 }
 
+declare module '@memohai/web/lib/keyboard-context' {
+  import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
+  export function canDispatchKeyboardCommand(command: AppKeyboardCommand, path: string, root?: Document): boolean
+}
+
 declare module '@memohai/web/lib/keyboard-bindings' {
   import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
   export type DesktopDelivery = 'menu' | 'keydown'
