@@ -45,7 +45,13 @@ func realPlanFixture(t *testing.T, edges map[string][]string, failing string) *s
 	cat := requiresCatalog(t, edges, failing)
 	f.cat, f.svc.catalog = cat, cat
 	f.svc.discover = Discover
-	f.platform = Platform{OS: "darwin", Arch: "arm64", TmpDir: t.TempDir()}
+	// Scripts really run on this host, so the lock wrapper must match it.
+	platform, err := ProbePlatform(f.ctx(), f.client)
+	if err != nil {
+		t.Fatalf("ProbePlatform: %v", err)
+	}
+	platform.TmpDir = t.TempDir()
+	f.platform = platform
 	f.svc.run = func(ctx context.Context, client *bridge.Client, spec RunSpec, sink LogSink) (Result, error) {
 		f.mu.Lock()
 		f.runs = append(f.runs, spec)
