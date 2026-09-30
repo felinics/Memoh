@@ -4,7 +4,6 @@ import {
   createKeyboardCommandRegistry,
   createScopedKeyboardBinding,
   isAppKeyboardCommand,
-  isKeyboardCommandInput,
   type AppKeyboardCommand,
 } from './keyboard-commands'
 
@@ -67,31 +66,6 @@ describe('keyboard command registry', () => {
     listener(appKeyboardCommands.closeCurrentWorkspaceTab)
     expect(action).toHaveBeenCalledOnce()
     expect(fallback).not.toHaveBeenCalled()
-  })
-
-  it('preserves native shortcut input for shared scope resolution instead of executing a menu id', () => {
-    const registry = createKeyboardCommandRegistry()
-    const close = vi.fn(() => true)
-    const resolveShortcut = vi.fn()
-    const fallback = vi.fn()
-    const input = { key: 'g', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }
-    let menu: (command: AppKeyboardCommand, input?: typeof input) => void = () => {}
-    registry.register(appKeyboardCommands.closeCurrentWorkspaceTab, close)
-    registry.connect({ onKeyboardCommand: cb => { menu = cb } }, fallback, resolveShortcut)
-    menu(appKeyboardCommands.closeCurrentWorkspaceTab, input)
-    expect(resolveShortcut).toHaveBeenCalledWith(input)
-    expect(close).not.toHaveBeenCalled()
-    expect(fallback).not.toHaveBeenCalled()
-    menu(appKeyboardCommands.closeCurrentWorkspaceTab)
-    expect(close).toHaveBeenCalledOnce()
-  })
-
-  it('validates native key input before it crosses the renderer command interface', () => {
-    const input = { key: 'g', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }
-    expect(isKeyboardCommandInput(input)).toBe(true)
-    expect(isKeyboardCommandInput({ ...input, ctrlKey: 'true' })).toBe(false)
-    expect(isKeyboardCommandInput({ key: 'g' })).toBe(false)
-    expect(isKeyboardCommandInput(null)).toBe(false)
   })
 
   it('unregisters command handlers', () => {

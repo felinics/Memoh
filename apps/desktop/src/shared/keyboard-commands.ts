@@ -1,16 +1,16 @@
 import {
   appKeyboardCommands,
   isAppKeyboardCommand,
-  isKeyboardCommandInput,
   type AppKeyboardCommand,
-  type KeyboardCommandInput,
 } from '../../../web/src/lib/keyboard-commands'
 import { acceleratorForCommand, toElectronAccelerator, type KeyboardPlatform } from '../../../web/src/lib/keyboard-bindings'
 
 export const DESKTOP_KEYBOARD_COMMAND_CHANNEL = 'desktop:keyboard-command'
 
-export { appKeyboardCommands, isAppKeyboardCommand, isKeyboardCommandInput, acceleratorForCommand }
-export type { AppKeyboardCommand, KeyboardCommandInput }
+export { appKeyboardCommands, isAppKeyboardCommand, acceleratorForCommand }
+export type { AppKeyboardCommand }
+
+type KeyboardCommandInput = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>
 
 export function matchesMenuAccelerator(input: KeyboardCommandInput, accelerator: string | undefined, platform: KeyboardPlatform): boolean {
   if (platform === 'mac' ? input.ctrlKey : input.metaKey) return false
