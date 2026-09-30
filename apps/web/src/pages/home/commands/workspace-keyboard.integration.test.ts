@@ -6,9 +6,10 @@ import type { DockviewApi, DockviewPanelApi } from 'dockview-vue'
 import PanelFile from '../components/dockview/panel-file.vue'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { KEYBOARD_REGISTRY } from '@/composables/useKeyboardCommand'
-import { createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
+import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
 import { connectBrowserKeyboardShortcutsLive } from '@/lib/browser-keyboard-shortcuts'
 import { keyboardBindings, selectWebBindings } from '@/lib/keyboard-bindings'
+import { registerWorkspaceTabCommands } from './workspace-tab-commands'
 
 const sdk = vi.hoisted(() => ({ read: vi.fn(), write: vi.fn() }))
 vi.mock('@memohai/sdk', () => ({
@@ -69,6 +70,7 @@ afterEach(() => {
 })
 
 function registerDock() {
+  let onRemove: (panel: { id: string }) => void = () => {}
   const panels = ['/a.txt', '/b.txt'].map(path => ({
     id: `file:${path}`, component: 'file',
     api: {
@@ -79,13 +81,20 @@ function registerDock() {
       onDidActiveGroupChange: () => ({ dispose() {} }),
     },
   }))
+  for (const panel of panels) {
+    panel.api.close.mockImplementation(() => {
+      panels.splice(panels.indexOf(panel), 1)
+      onRemove(panel)
+    })
+  }
   let onActive: (event: { panel: typeof panels[number] }) => void = () => {}
   const disposable = () => ({ dispose() {} })
   const dock = {
     panels, groups: [], activePanel: panels[0],
     getPanel: (id: string) => panels.find(panel => panel.id === id),
     onDidActivePanelChange: (cb: typeof onActive) => { onActive = cb; return disposable() },
-    onDidLayoutChange: disposable, onDidRemovePanel: disposable,
+    onDidLayoutChange: disposable,
+    onDidRemovePanel: (cb: typeof onRemove) => { onRemove = cb; return disposable() },
     onWillDragPanel: disposable, onWillDragGroup: disposable,
     onWillShowOverlay: disposable, onWillDrop: disposable,
   }
@@ -96,7 +105,7 @@ function registerDock() {
     onActive({ panel })
   }
   activate(0)
-  return { panels, dock, activate }
+  return { panels: [...panels], dock, activate }
 }
 
 async function mountSplit() {
@@ -155,5 +164,30 @@ describe('workspace keyboard ownership', () => {
     await view.save(0)
     expect(sdk.write).not.toHaveBeenCalled()
     expect(store.fileDirty['file:/b.txt']).toBe(true)
+  })
+
+  it.each(['cancel', 'discard', 'save', 'failure'] as const)('protects dirty close through %s after focus moves', async (action) => {
+    const view = await mountSplit()
+    await view.edit(0, 'A')
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkspaceTabCommands(registry, store)
+    try {
+      registry.dispatch(appKeyboardCommands.closeCurrentWorkspaceTab)
+      registry.dispatch(appKeyboardCommands.closeCurrentWorkspaceTab)
+      expect(view.panels[0]!.api.close).not.toHaveBeenCalled()
+      expect(store.pendingClose?.panelId).toBe('file:/a.txt')
+      view.activate(1)
+      await nextTick()
+      if (action === 'failure') sdk.write.mockRejectedValueOnce(new Error('write failed'))
+      await store.resolvePendingClose(action === 'failure' ? 'save' : action)
+
+      expect(view.panels[0]!.api.close).toHaveBeenCalledTimes(action === 'save' || action === 'discard' ? 1 : 0)
+      expect(view.panels[1]!.api.close).not.toHaveBeenCalled()
+      expect(sdk.write.mock.calls.map(([request]) => request.body.path)).toEqual(action === 'save' || action === 'failure' ? ['/a.txt'] : [])
+      expect(store.pendingClose).toBeNull()
+      expect(!!store.fileDirty['file:/a.txt']).toBe(action === 'cancel' || action === 'failure')
+    } finally {
+      unregister()
+    }
   })
 })

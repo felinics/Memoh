@@ -171,7 +171,7 @@ declare module '@memohai/web/pages/home/commands/workspace-tab-commands' {
   import type { AppKeyboardCommand, KeyboardCommandRegistry } from '@memohai/web/lib/keyboard-commands'
   export interface WorkspaceTabCommandStore {
     activeId: string | null
-    closeTab(id: string): void
+    requestCloseTab(id: string): void
   }
   export function handleWorkspaceKeyboardCommand(
     command: AppKeyboardCommand,
@@ -193,7 +193,7 @@ declare module '@memohai/web/store/settings' {
 declare module '@memohai/web/store/workspace-tabs' {
   export function useWorkspaceTabsStore(pinia?: unknown): {
     activeId: string | null
-    closeTab: (id: string) => void
+    requestCloseTab: (id: string) => void
   }
 }
 
