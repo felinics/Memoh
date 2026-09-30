@@ -1,3 +1,4 @@
+import type { ChatGPTConnectRequest, ChatGPTConnectResult } from '../shared/chatgpt-auth'
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import {
@@ -27,6 +28,8 @@ export interface RendererInvalidatePayload {
 // node-privileged main process.
 const api = {
   desktop: {
+    connectChatGPT: (request: ChatGPTConnectRequest): Promise<ChatGPTConnectResult> => ipcRenderer.invoke('desktop:chatgpt-connect', request),
+    cancelChatGPT: (): Promise<void> => ipcRenderer.invoke('desktop:chatgpt-cancel'),
     loadRemoteIcon: (url: string): Promise<string> => ipcRenderer.invoke('desktop:load-remote-icon', url),
     getServerStatus: (): Promise<{
       baseUrl: string

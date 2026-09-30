@@ -146,6 +146,7 @@ import type { ModelsGetResponse, ModelsTestResponse, ModelsUpdateRequest } from 
 import { useQueryCache } from '@pinia/colada'
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 import { getModelDescription } from '@/utils/model-description'
 
 const props = withDefaults(defineProps<{
@@ -196,6 +197,7 @@ const statusDotClass = computed(() => {
 
 async function runTest() {
   if (!props.model.id) return
+  const providerId = props.model.provider_id
   testLoading.value = true
   testResult.value = null
   try {
@@ -204,10 +206,11 @@ async function runTest() {
       throwOnError: true,
     })
     testResult.value = data ?? null
-  } catch {
-    testResult.value = { status: 'error' }
+  } catch (error) {
+    testResult.value = { status: 'error', message: resolveApiErrorMessage(error, t('models.testFailed')) }
   } finally {
     testLoading.value = false
+    if (providerId) queryCache.invalidateQueries({ key: ['providers', providerId, 'chatgpt-status'] })
   }
 }
 

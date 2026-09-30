@@ -1,0 +1,4 @@
+name: ChatGPT
+client_type: openai-chatgpt
+icon: openai
+base_url: https://api.openai.com/v1

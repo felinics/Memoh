@@ -58,6 +58,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/chatgptplan"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/connectors"
 	ctr "github.com/felinics/memoh/internal/container"
@@ -400,8 +401,9 @@ func provideWorkspaceManager(log *slog.Logger, service ctr.Service, networkContr
 	return mgr, nil
 }
 
-func provideMemoryLLM(modelsService *models.Service, settingsService *settings.Service, queries dbstore.Queries, log *slog.Logger) memprovider.LLM {
+func provideMemoryLLM(providerService *providers.Service, modelsService *models.Service, settingsService *settings.Service, queries dbstore.Queries, log *slog.Logger) memprovider.LLM {
 	return &lazyLLMClient{
+		providerService: providerService,
 		modelsService:   modelsService,
 		settingsService: settingsService,
 		queries:         queries,
@@ -785,8 +787,9 @@ func provideExternalAgentCodexHandler(log *slog.Logger, driver *codexruntime.Dri
 	return handlers.NewExternalAgentCodexHandler(log, driver, botAgents, botService, accountService)
 }
 
-func provideAgentService(log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, directAgents external.Drivers, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, cfg config.Config) *application.Service {
+func provideAgentService(providerService *providers.Service, log *slog.Logger, a *native.Agent, modelsService *models.Service, queries dbstore.Queries, msgService *message.DBService, settingsService *settings.Service, accountService *accounts.Service, botService *bots.Service, mediaService *media.Service, containerdHandler *handlers.ContainerdHandler, workspaceManager *workspace.Manager, memoryRegistry *memprovider.Registry, channelStore *channel.Store, _ *route.DBService, sessionService *sessionpkg.Service, eventHub *event.Hub, compactionService *compaction.Service, pipeline *timeline.Pipeline, rc *boot.RuntimeConfig, bgManager *background.Manager, toolApproval *toolapproval.Service, userInput *userinput.Service, acpPool *acpagent.SessionPool, directAgents external.Drivers, hookService *hookspkg.Service, sessionRuntime *sessionruntime.Manager, workdirService *workdir.Service, cfg config.Config) *application.Service {
 	service := application.NewService(log, modelsService, queries, msgService, settingsService, accountService, a, rc.TimezoneLocation, 120*time.Second)
+	service.SetProviderService(providerService)
 	service.SetResumeSecret(rc.JwtSecret)
 	service.SetResumeReadiness(func(ctx context.Context, botID, targetID string) error {
 		client, err := workspaceManager.NativeMCPClient(ctx, botID)
@@ -1093,7 +1096,7 @@ func provideBackgroundManager(log *slog.Logger) *background.Manager {
 	return background.New(log)
 }
 
-func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, appService *apps.Service, oauthService *mcp.OAuthService, approvalService *toolapproval.Service, workspaceDeps *workspacedeps.Service, cfg config.Config, containerdHandler *handlers.ContainerdHandler, fedSource *mcpfederation.Source) []agenttools.ToolProvider {
+func provideToolProviders(providerService *providers.Service, log *slog.Logger, channelRuntime channel.Runtime, registry *channel.Registry, routeService *route.DBService, scheduleService *schedule.Service, settingsService *settings.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, displayService *displaypkg.Service, mediaService *media.Service, memoryRegistry *memprovider.Registry, fedGateway *handlers.MCPFederationGateway, mcpConnService *mcp.ConnectionService, connectorSource *connectors.Source, modelsService *models.Service, queries dbstore.Queries, audioService *audiopkg.Service, videoService *videopkg.Service, sessionService *sessionpkg.Service, messageService *message.DBService, bgManager *background.Manager, hookService *hookspkg.Service, workdirService *workdir.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, appService *apps.Service, oauthService *mcp.OAuthService, approvalService *toolapproval.Service, workspaceDeps *workspacedeps.Service, cfg config.Config, containerdHandler *handlers.ContainerdHandler, fedSource *mcpfederation.Source) []agenttools.ToolProvider {
 	var assetResolver messaging.AssetResolver
 	if mediaService != nil {
 		assetResolver = &mediaAssetResolverAdapter{media: mediaService}
@@ -1144,7 +1147,7 @@ func provideToolProviders(log *slog.Logger, channelRuntime channel.Runtime, regi
 		agenttools.NewBackgroundProvider(log, bgManager),
 		agenttools.NewBrowserProvider(log, settingsService, nativeWorkspaceBridgeProvider{manager: manager}, displayService, config.DefaultDataMount),
 		agenttools.NewWebFetchProvider(log, settingsService, fetchProviderService),
-		agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager),
+		configuredSpawnProvider(providerService, log, settingsService, modelsService, queries, sessionService, bgManager),
 		agenttools.NewSkillProvider(log, func(ctx context.Context, botID string) (map[string]agenttools.SkillDetail, error) {
 			items, err := containerdHandler.LoadSkills(ctx, botID)
 			if err != nil {
@@ -1259,8 +1262,10 @@ func startBackgroundTaskCleanup(lc fx.Lifecycle, mgr *background.Manager) {
 
 // inboundTranscriptionResult moved to the shared Channel module.
 
-func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config) *providers.Service {
-	return providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
+func provideProvidersService(log *slog.Logger, queries dbstore.Queries, cfg config.Config, sessions *chatgptplan.SessionService) *providers.Service {
+	service := providers.NewService(log, queries, defaultProviderOAuthCallbackURL(), cfg.Registry.ProvidersPath())
+	service.SetChatGPTSessions(sessions)
+	return service
 }
 
 func defaultProviderOAuthCallbackURL() string {
@@ -1381,6 +1386,7 @@ func EnsureAdminUser(ctx context.Context, log *slog.Logger, accountStore dbstore
 }
 
 type lazyLLMClient struct {
+	providerService *providers.Service
 	modelsService   *models.Service
 	settingsService *settings.Service
 	queries         dbstore.Queries
@@ -1432,10 +1438,21 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 	if err != nil {
 		return nil, err
 	}
+	creds := providers.ModelCredentials{APIKey: providers.ProviderConfigString(memoryProvider, "api_key")}
+	if models.ClientType(memoryProvider.ClientType) == models.ClientTypeOpenAIChatGPT {
+		if c.providerService == nil {
+			return nil, chatgptplan.ErrEncryptionUnavailable
+		}
+		creds, err = c.providerService.ResolveModelCredentials(ctx, memoryProvider)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return memllm.New(memllm.Config{
 		ModelID:               memoryModel.ModelID,
 		BaseURL:               strings.TrimRight(providers.ProviderConfigString(memoryProvider, "base_url"), "/"),
-		APIKey:                providers.ProviderConfigString(memoryProvider, "api_key"),
+		APIKey:                creds.APIKey,
+		TokenSource:           creds.TokenSource,
 		ClientType:            memoryProvider.ClientType,
 		ChatCompletionsCompat: providers.ProviderConfigString(memoryProvider, models.ChatCompletionsCompatConfigKey),
 		Timeout:               c.timeout,
@@ -1578,4 +1595,16 @@ func (a *applicationBotPermissionChecker) HasBotPermission(ctx context.Context, 
 func provideFederationSource(log *slog.Logger, gateway *handlers.MCPFederationGateway, connections *mcp.ConnectionService, oauth *mcp.OAuthService) *mcpfederation.Source {
 	gateway.SetOAuthService(oauth)
 	return mcpfederation.NewSource(log, gateway, connections, mcpfederation.WithReservedToolName(agenttools.IsBuiltInToolName))
+}
+
+func provideModelsService(log *slog.Logger, queries dbstore.Queries, sessions *chatgptplan.SessionService) *models.Service {
+	service := models.NewService(log, queries)
+	service.SetChatGPTSessions(sessions)
+	return service
+}
+
+func configuredSpawnProvider(providerService *providers.Service, log *slog.Logger, settingsService *settings.Service, modelsService *models.Service, queries dbstore.Queries, sessionService *sessionpkg.Service, bgManager *background.Manager) *agenttools.SpawnProvider {
+	p := agenttools.NewSpawnProvider(log, settingsService, modelsService, queries, sessionService, bgManager)
+	p.SetProviderService(providerService)
+	return p
 }

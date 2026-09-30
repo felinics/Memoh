@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { createPinia } from 'pinia'
+import { PiniaColada } from '@pinia/colada'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, defineComponent, h, nextTick, ref } from 'vue'
 import type { Slots } from 'vue'
@@ -7,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   ensureProvider: vi.fn(),
   saveProvider: vi.fn(),
   getAuthorize: vi.fn(),
+  getPlanStatus: vi.fn(),
+  revokePlan: vi.fn(),
   getOAuthStatus: vi.fn(),
   pollOAuth: vi.fn(),
   syncCatalog: vi.fn(),
@@ -30,6 +34,8 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('@memohai/sdk', () => ({
+  getChatGptAuthorizationStatus: mocks.getPlanStatus,
+  revokeChatGptAuthorization: mocks.revokePlan,
   deleteProvidersByIdOauthToken: vi.fn(),
   getProvidersByIdOauthAuthorize: mocks.getAuthorize,
   getProvidersByIdOauthStatus: mocks.getOAuthStatus,
@@ -40,6 +46,8 @@ vi.mock('@memohai/sdk', () => ({
 vi.mock('@/composables/useProviderModelCatalog', () => ({
   useProviderModelCatalog: () => ({ syncProviderModelCatalog: mocks.syncCatalog }),
 }))
+
+vi.mock('@/lib/api-client', () => ({ sdkAuthQuery: () => ({ token: 'memoh-session' }) }))
 
 vi.mock('lucide-vue-next', () => ({
   AlertCircle: () => h('span'),
@@ -61,7 +69,7 @@ vi.mock('@felinic/ui', async () => {
     Button,
     ConfirmPopover: Passthrough,
     DeviceCodePanel,
-    SettingsRow: Passthrough,
+    SettingsRow: (props: { description?: string }, { slots }: { slots: Slots }) => h('div', { 'data-description': props.description }, slots.default?.()),
     SettingsSection: Passthrough,
     FormControl: Passthrough,
     FormField,
@@ -156,6 +164,8 @@ describe('provider OAuth model sync', () => {
       ensureProvider: mocks.ensureProvider,
       saveProvider: mocks.saveProvider,
     })
+    app.use(createPinia())
+    app.use(PiniaColada)
     app.config.globalProperties.$t = translate
     app.mount(root)
     await flushPromises()
@@ -190,6 +200,8 @@ describe('provider OAuth model sync', () => {
       ensureProvider: mocks.ensureProvider,
       saveProvider: mocks.saveProvider,
     })
+    app.use(createPinia())
+    app.use(PiniaColada)
     app.config.globalProperties.$t = translate
     app.mount(root)
     await flushPromises()
@@ -249,6 +261,8 @@ describe('provider OAuth model sync', () => {
     const root = document.createElement('div')
     document.body.append(root)
     const app = createApp(Wrapper)
+    app.use(createPinia())
+    app.use(PiniaColada)
     app.config.globalProperties.$t = translate
     app.mount(root)
     await flushPromises()
@@ -273,4 +287,32 @@ describe('provider OAuth model sync', () => {
     app.unmount()
     root.remove()
   })
+  it('offers direct reauthorization while retaining the connected registration', async () => {
+    mocks.getPlanStatus.mockResolvedValue({ data: { configured: true, usage_enabled: true, available: true, needs_recovery: true, email: 'account@example.com' } })
+    const { DesktopChatGPTKey } = await import('@/lib/desktop-shell')
+    const connect = vi.fn().mockResolvedValue({ ok: false, code: 'chatgpt.authorization_cancelled' })
+    const providerForm = (await import('./provider-form.vue')).default
+    const root = document.createElement('div')
+    document.body.append(root)
+    // eslint-disable-next-line vue/one-component-per-file -- Root props, not a component definition.
+    const app = createApp(providerForm, {
+      provider: { id: 'plan-provider', name: 'ChatGPT', client_type: 'openai-chatgpt', enable: true, config: {} },
+      editLoading: false, ensureProvider: mocks.ensureProvider, saveProvider: mocks.saveProvider,
+    })
+    app.use(createPinia())
+    app.use(PiniaColada)
+    app.provide(DesktopChatGPTKey, { connectChatGPT: connect, cancelChatGPT: vi.fn() })
+    app.config.globalProperties.$t = translate
+    app.mount(root)
+    await flushPromises()
+    expect(root.querySelector('[data-description="provider.chatgpt.needsRecovery"]')).not.toBeNull()
+    const reconnect = [...root.querySelectorAll('button')].find(button => button.textContent?.includes('provider.chatgpt.reconnect'))
+    expect(reconnect).toBeDefined()
+    reconnect!.click()
+    await flushPromises()
+    expect(connect).toHaveBeenCalledWith({ providerId: 'plan-provider', token: 'memoh-session' })
+    expect(mocks.revokePlan).not.toHaveBeenCalled()
+    app.unmount()
+  })
+
 })

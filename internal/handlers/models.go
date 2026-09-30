@@ -11,9 +11,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providerfail"
 	"github.com/felinics/memoh/internal/providers"
 )
 
@@ -359,9 +361,13 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 200 {object} models.TestResponse
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 429 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
 // @Router /models/{id}/test [post].
 func (h *ModelsHandler) Test(c echo.Context) error {
 	id := c.Param("id")
@@ -376,6 +382,9 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
+		if mapped := providerfail.ChatGPT(ctx, h.logger, err); apperror.CodeOf(mapped) != "" {
+			return mapped
+		}
 		if strings.Contains(err.Error(), "invalid") {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}

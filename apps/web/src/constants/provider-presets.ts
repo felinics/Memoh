@@ -12,6 +12,9 @@ export interface ProviderPreset {
 }
 
 export const providerPresets: ProviderPreset[] = [
+  { id: 'chatgpt', name: 'ChatGPT', clientType: 'openai-chatgpt',
+    baseUrl: 'https://api.openai.com/v1', icon: 'openai', source: 'chatgpt.yaml',
+    requiresApiKey: false, requiresBaseUrl: false },
   {
     id: 'openai',
     name: 'OpenAI',

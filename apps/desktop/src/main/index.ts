@@ -1,3 +1,4 @@
+import { connectChatGPT, normalizeChatGPTRequest } from './chatgpt-auth'
 import { loadRemoteIcon } from './remote-icon'
 import {
   app,
@@ -44,6 +45,8 @@ const guardedExternalLinkWebContents = new WeakSet<Electron.WebContents>()
 
 // Must run before anything resolves `app.getPath('userData')`.
 app.setName(DESKTOP_PRODUCT_NAME)
+
+const chatGPTAuthorizations = new Map<number, AbortController>()
 
 const CHAT_DEFAULTS = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
 type WindowKind = 'chat'
@@ -231,6 +234,7 @@ async function connectToServer(rawBaseUrl: unknown): Promise<ServerConnectResult
 async function finishQuitCleanup(): Promise<void> {
   if (quitCleanupFinished) return
   if (!quitCleanupPromise) {
+    for (const controller of chatGPTAuthorizations.values()) controller.abort()
     quitCleanupPromise = (remoteRuntimeManager?.stop() ?? Promise.resolve())
       .catch(error => console.warn('failed to stop desktop runtime during quit', error))
       .then(() => {
@@ -708,6 +712,28 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:connect-server', (event, baseUrl: unknown) => {
     assertTrustedRenderer(event)
     return connectToServer(baseUrl)
+  })
+  ipcMain.handle('desktop:chatgpt-connect', async (event, raw: unknown) => {
+    assertTrustedRenderer(event)
+    const request = normalizeChatGPTRequest(raw)
+    if (!request) return { ok: false, code: 'chatgpt.authorization_invalid' }
+    const sender = event.sender
+    if (chatGPTAuthorizations.has(sender.id)) return { ok: false, code: 'chatgpt.authorization_invalid' }
+    const controller = new AbortController()
+    chatGPTAuthorizations.set(sender.id, controller)
+    const cancel = () => controller.abort()
+    sender.once('destroyed', cancel)
+    try {
+      return await connectChatGPT({ baseUrl: getDesktopApiBaseUrl(), request, signal: controller.signal,
+        openExternal: url => shell.openExternal(url), currentBaseUrl: getDesktopApiBaseUrl })
+    } finally {
+      sender.removeListener('destroyed', cancel)
+      chatGPTAuthorizations.delete(sender.id)
+    }
+  })
+  ipcMain.handle('desktop:chatgpt-cancel', (event) => {
+    assertTrustedRenderer(event)
+    chatGPTAuthorizations.get(event.sender.id)?.abort()
   })
   ipcMain.handle('desktop:runtime-state', (event) => {
     assertTrustedRenderer(event)

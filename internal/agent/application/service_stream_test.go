@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -441,6 +443,101 @@ func TestPersistTerminalSnapshotStoresTimeoutBeforeVisibleOutput(t *testing.T) {
 	}
 	if messages.persisted[1].Metadata[messagepkg.AgentStepInterruptedMetadataKey] != true {
 		t.Fatalf("expected interrupted metadata on timeout assistant")
+	}
+}
+
+func TestStreamFailurePersistsPublicCodeBeforeOutput(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []apperror.Code{
+		apperror.CodeChatGPTUsageLimit,
+		apperror.CodeChatGPTNotConnected,
+		apperror.CodeChatGPTPermissionRequired,
+		apperror.CodeChatGPTUnavailable,
+		apperror.CodeContextBudgetUnsatisfied,
+	} {
+		t.Run(string(code), func(t *testing.T) {
+			for _, name := range []string{"terminal snapshot", "without snapshot", "admitted step"} {
+				t.Run(name, func(t *testing.T) {
+					messages := &recordingMessageService{}
+					resolver := &Service{messageService: messages, logger: slog.New(slog.DiscardHandler)}
+					cause := apperror.Wrap(code, errors.New("SECRET upstream diagnostic"), nil)
+					event := agentFailureStreamEvent(cause)
+					failureCode := snapshotFailureCode(false, agentStreamLifecycleError(event))
+					req := ChatRequest{BotID: "bot-1", ThreadID: "session-1", Query: "hello"}
+					switch name {
+					case "terminal snapshot":
+						err := resolver.persistTerminalSnapshot(context.Background(), req, resolvedContext{}, terminalSnapshot{
+							aborted: true, failureCode: failureCode,
+						})
+						if err != nil {
+							t.Fatalf("persistTerminalSnapshot: %v", err)
+						}
+					case "without snapshot":
+						resolver.persistPartialResult(context.Background(), req, resolvedContext{}, nil, nil, 0, false, false, failureCode, nil)
+					case "admitted step":
+						store := &recordingStepPersister{recordingMessageService: messages}
+						committer := &agentStepCommitter{
+							service: resolver, persister: store, ownerContext: context.Background(), req: req,
+							rc: resolvedContext{runConfig: native.RunConfig{ContextLifecycle: contextfrag.NewLifecycleHolder()}},
+						}
+						for range 2 {
+							if err := committer.finish(context.Background(), 0, failureCode); err != nil {
+								t.Fatalf("finish: %v", err)
+							}
+						}
+						if len(store.steps) != 1 || !store.steps[0].Interrupted {
+							t.Fatalf("expected one interrupted step, got %#v", store.steps)
+						}
+						messages.persisted = store.steps[0].Messages
+					}
+					if len(messages.persisted) != 2 {
+						t.Fatalf("expected user + failure assistant, got %#v", messages.persisted)
+					}
+					assistant := messages.persisted[1]
+					if messages.persisted[0].Role != "user" || assistant.Role != "assistant" {
+						t.Fatalf("unexpected persisted roles: %#v", messages.persisted)
+					}
+					if got := assistant.Metadata[messagepkg.HistoryErrorCodeMetadataKey]; got != string(code) {
+						t.Fatalf("persisted error code = %v, want %s", got, code)
+					}
+					if assistant.Metadata[messagepkg.AgentStepInterruptedMetadataKey] != true {
+						t.Fatal("failure assistant must be marked interrupted")
+					}
+					payload, err := json.Marshal(messages.persisted)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if strings.Contains(string(payload), "SECRET") || strings.Contains(event.Error, "SECRET") {
+						t.Fatal("private diagnostic leaked into stream or history")
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestSnapshotFailureCodePreservesCancellationBoundary(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name      string
+		cause     error
+		idleFired bool
+		want      apperror.Code
+	}{
+		{name: "success"},
+		{name: "user cancel", cause: context.Canceled},
+		{name: "private diagnostic", cause: errors.New("SECRET upstream diagnostic")},
+		{name: "unknown code", cause: apperror.New("unregistered.error", nil)},
+		{name: "idle timeout", cause: context.Canceled, idleFired: true, want: apperror.CodeAgentResponseTimeout},
+		{name: "specific timeout", cause: apperror.New(apperror.CodeAgentToolTimeout, nil), idleFired: true, want: apperror.CodeAgentToolTimeout},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := snapshotFailureCode(tt.idleFired, tt.cause); got != tt.want {
+				t.Fatalf("snapshotFailureCode() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -380,10 +380,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	// can cross the same durable boundary as the main chat stream.
 	terminalCtx := context.WithoutCancel(ctx)
 	if hasTerminalEvent || timedOut {
-		var failureCode apperror.Code
-		if timedOut {
-			failureCode = snapshotFailureCode(true, lifecycleCause)
-		}
+		failureCode := snapshotFailureCode(timedOut, lifecycleCause)
 		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
 			lifecycleCause = historyErr
@@ -439,7 +436,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	failureCode apperror.Code,
 ) error {
 	var sdkMsgs []sdk.Message
-	if len(finalMessages) > 0 && json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 {
+	if len(finalMessages) > 0 && json.Unmarshal(finalMessages, &sdkMsgs) == nil && len(sdkMsgs) > 0 && (failureCode == "" || hasPersistableAssistantOutput(sdkMessagesWithOrigins(sdkMsgs, nil))) {
 		return s.storeDiscussRound(
 			ctx,
 			runConfig.RunID,

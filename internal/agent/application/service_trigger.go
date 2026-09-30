@@ -274,7 +274,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 			hasSnapshot = true
 			if !stored && !runOwnershipLost(ctx) {
 				if stepCommitter != nil {
-					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage), snap.failureCode); storeErr != nil {
 						terminalPersistErr = runtimeHistoryError(storeErr)
 						if streamErr == nil {
 							streamErr = terminalPersistErr
@@ -298,16 +298,16 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		}
 		if event.IsTerminal() && !stored && !runOwnershipLost(ctx) && terminalPersistErr == nil {
 			switch {
-			case !hasVisibleOutput:
-				// A terminal event before visible assistant output has no output
-				// row to persist; the admitted user message is already durable.
-				stored = true
 			case stepCommitter != nil:
-				if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+				if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens, snapshotFailureCode(idle != nil && idle.DidFire(), streamErr)); storeErr != nil {
 					terminalPersistErr = runtimeHistoryError(storeErr)
 				} else {
 					stored = true
 				}
+			case !hasVisibleOutput:
+				_, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(idle != nil && idle.DidFire(), streamErr))
+				terminalPersistErr = runtimeHistoryError(storeErr)
+				stored = terminalPersistErr == nil
 			default:
 				terminalPersistErr = runtimeHistoryError(errors.New("agent terminal event has no persistable snapshot"))
 			}
@@ -336,7 +336,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 	// behavior change from the Generate era, which persisted nothing on
 	// failure — the partial record is the more honest one.
 	if !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
-		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens, snapshotFailureCode(idle != nil && idle.DidFire(), streamErr)); storeErr != nil {
 			if streamErr == nil {
 				streamErr = storeErr
 			}
@@ -356,7 +356,7 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		// outcome so the schedule log records the stop, not a success.
 		return schedule.TriggerResult{}, streamErr
 	case streamErr != nil && !hasSnapshot:
-		if idle != nil && idle.DidFire() {
+		if idle != nil && idle.DidFire() && !stored && stepCommitter == nil {
 			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, rc, snapshotFailureCode(true, streamErr)); storeErr != nil {
 				s.logger.ErrorContext(ctx, "triggered run timeout persist failed", slog.Any("error", storeErr))
 			}

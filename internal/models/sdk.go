@@ -11,6 +11,7 @@ import (
 	openairesponses "github.com/felinics/twilight/provider/openai/responses"
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/chatgptplan"
 	memohcopilot "github.com/felinics/memoh/internal/copilot"
 	"github.com/felinics/memoh/internal/reasoning"
 )
@@ -22,6 +23,7 @@ type SDKModelConfig struct {
 	ClientType     string
 	APIKey         string //nolint:gosec // carries provider credential material at runtime
 	CodexAccountID string
+	TokenSource    chatgptplan.TokenSource
 	BaseURL        string
 	// ChatCompletionsCompat selects narrow compatibility behavior for
 	// OpenAI-compatible /chat/completions backends.
@@ -83,6 +85,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 		}
 		p := openairesponses.New(opts...)
 		return p.ChatModel(cfg.ModelID)
+
+	case ClientTypeOpenAIChatGPT:
+		return chatgptplan.NewProvider(cfg.APIKey, cfg.TokenSource, cfg.HTTPClient).ChatModel(cfg.ModelID)
 
 	case ClientTypeOpenAICodex:
 		opts := []openaicodex.Option{
@@ -245,7 +250,7 @@ func ReasoningEffortParam(cfg SDKModelConfig) (string, bool) {
 		// a property of the model, not of the request.
 		return "", false
 
-	case ClientTypeOpenAIResponses, ClientTypeOpenAICodex, ClientTypeOpenAICompletions:
+	case ClientTypeOpenAIResponses, ClientTypeOpenAICodex, ClientTypeOpenAIChatGPT, ClientTypeOpenAICompletions:
 		return openAIEffortParam(ct, rc)
 
 	default:
@@ -287,7 +292,7 @@ func openAIEffortParam(clientType ClientType, rc *ReasoningConfig) (string, bool
 // clients, so this only fires for values that bypassed it — a stale stored effort,
 // or a caller that built a ReasoningConfig by hand.
 func openAIWireEffort(clientType ClientType, effort string) string {
-	if clientType != ClientTypeOpenAICodex && effort == reasoning.EffortMax {
+	if clientType != ClientTypeOpenAICodex && clientType != ClientTypeOpenAIChatGPT && effort == reasoning.EffortMax {
 		return reasoning.EffortXHigh
 	}
 	return effort
@@ -342,6 +347,8 @@ func ResolveClientType(model *sdk.Model) string {
 		return string(ClientTypeGoogleGenerativeAI)
 	case strings.Contains(name, "github-copilot"), strings.Contains(name, "copilot"):
 		return string(ClientTypeGitHubCopilot)
+	case name == "openai-chatgpt":
+		return string(ClientTypeOpenAIChatGPT)
 	case strings.Contains(name, "codex"):
 		return string(ClientTypeOpenAICodex)
 	case strings.Contains(name, "responses"):

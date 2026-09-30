@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/providerfail"
 )
 
 // runStream runs the streaming agent invocation with a Memoh-owned step loop:
@@ -1144,6 +1145,12 @@ partLoop:
 // the stable public error instead. Non-retryable failures abort the engine.
 func (e *streamEngine) streamFailure(err error) (string, bool) {
 	if contextStepBudgetError(e.streamCtx) != nil {
+		e.aborted = true
+		return "", false
+	}
+	if public, ok := apperror.PublicFrom(providerfail.ChatGPT(e.streamCtx, e.agent.logger, err), ""); ok {
+		e.turnError = public.Detail
+		e.emit(StreamEvent{Type: EventError, Code: string(public.Code), Error: public.Detail})
 		e.aborted = true
 		return "", false
 	}

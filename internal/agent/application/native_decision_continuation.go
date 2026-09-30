@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/models"
@@ -101,7 +100,7 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 				}
 				var storeErr error
 				if stepCommitter != nil {
-					storeErr = stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage))
+					storeErr = stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage), snap.failureCode)
 				} else {
 					storeErr = s.persistTerminalSnapshot(
 						context.WithoutCancel(ctx),
@@ -118,6 +117,13 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 				stored = true
 			}
 		}
+		if event.IsTerminal() && !stored && stepCommitter != nil {
+			if storeErr := stepCommitter.finish(ctx, 0, snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)); storeErr != nil {
+				lifecycleCause = storeErr
+				return storeErr
+			}
+			stored = true
+		}
 		if eventCh != nil && shouldForwardAfterIdleFailure(event, failureEventForwarded) {
 			select {
 			case eventCh <- json.RawMessage(data):
@@ -128,7 +134,7 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 		}
 	}
 	if !stored && stepCommitter != nil {
-		if storeErr := stepCommitter.finish(ctx, 0); storeErr != nil {
+		if storeErr := stepCommitter.finish(ctx, 0, snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)); storeErr != nil {
 			lifecycleCause = storeErr
 			return storeErr
 		}
@@ -140,13 +146,14 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 			return commitErr
 		}
 	}
+	if !stored {
+		if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, resolvedContext{runConfig: cfg, model: models.GetResponse{ID: modelID}}, snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)); storeErr != nil {
+			lifecycleCause = storeErr
+			return storeErr
+		}
+	}
 	if idleCancel.DidFire() {
 		lifecycleCause = context.Cause(idleCtx)
-		if !stored {
-			if _, storeErr := s.persistTurnFailure(context.WithoutCancel(ctx), req, resolvedContext{runConfig: cfg, model: models.GetResponse{ID: modelID}}, snapshotFailureCode(true, lifecycleCause)); storeErr != nil {
-				s.logger.ErrorContext(ctx, "decision continuation timeout persist failed", slog.Any("error", storeErr))
-			}
-		}
 		if eventCh != nil && !failureEventForwarded {
 			if data, marshalErr := json.Marshal(agentFailureStreamEvent(lifecycleCause)); marshalErr == nil {
 				select {

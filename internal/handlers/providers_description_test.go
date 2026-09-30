@@ -151,3 +151,14 @@ func TestMergeDiscoveredConfigRefreshesTrustedReasoningMetadata(t *testing.T) {
 
 func boolPointer(value bool) *bool { return &value }
 func intPointer(value int) *int    { return &value }
+
+func TestManagedCatalogRefreshUpdatesPosition(t *testing.T) {
+	discovered := modelConfigFromRemote(providers.RemoteModel{CatalogOrder: intPointer(0)}, nil)
+	got, changed := mergeManagedDiscoveredConfig(models.ModelConfig{CatalogOrder: intPointer(2)}, discovered)
+	if !changed || got.CatalogOrder == nil || *got.CatalogOrder != 0 {
+		t.Fatalf("refreshed catalog position = %+v, changed = %v", got, changed)
+	}
+	if _, changed := mergeManagedDiscoveredConfig(got, discovered); changed {
+		t.Fatal("unchanged catalog reported another update")
+	}
+}

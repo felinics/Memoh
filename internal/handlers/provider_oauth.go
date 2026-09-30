@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"html/template"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -13,14 +14,20 @@ import (
 )
 
 type ProviderOAuthHandler struct {
+	logger  *slog.Logger
 	service *providers.Service
 }
 
-func NewProviderOAuthHandler(service *providers.Service) *ProviderOAuthHandler {
-	return &ProviderOAuthHandler{service: service}
+func NewProviderOAuthHandler(log *slog.Logger, service *providers.Service) *ProviderOAuthHandler {
+	return &ProviderOAuthHandler{service: service, logger: log}
 }
 
 func (h *ProviderOAuthHandler) Register(e *echo.Echo) {
+	e.POST("/providers/:id/chatgpt/authorize", h.BeginChatGPT)
+	e.POST("/providers/:id/chatgpt/registration", h.RetainChatGPTRegistration)
+	e.POST("/providers/:id/chatgpt/complete", h.CompleteChatGPT)
+	e.GET("/providers/:id/chatgpt/status", h.ChatGPTStatus)
+	e.DELETE("/providers/:id/chatgpt/token", h.RevokeChatGPT)
 	e.GET("/providers/:id/oauth/authorize", h.Authorize)
 	e.POST("/providers/:id/oauth/poll", h.Poll)
 	e.GET("/providers/:id/oauth/status", h.Status)

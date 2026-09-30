@@ -16,6 +16,7 @@ import (
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providerfail"
 	"github.com/felinics/memoh/internal/providers"
 )
 
@@ -298,9 +299,13 @@ func (h *ProvidersHandler) Count(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.TestResponse
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 429 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
 // @Router /providers/{id}/test [post].
 func (h *ProvidersHandler) Test(c echo.Context) error {
 	id := c.Param("id")
@@ -315,6 +320,9 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
+		if mapped := providerfail.ChatGPT(ctx, h.logger, err); apperror.CodeOf(mapped) != "" {
+			return mapped
+		}
 		if strings.Contains(err.Error(), "invalid") {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
@@ -333,9 +341,13 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 // @Param id path string true "Provider ID (UUID)"
 // @Param request body providers.ImportModelsRequest false "Explicit defaults for unknown custom chat models"
 // @Success 200 {object} providers.ImportModelsResponse
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 429 {object} apperror.Problem
+// @Failure 503 {object} apperror.Problem
 // @Router /providers/{id}/import-models [post].
 func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	id := c.Param("id")
@@ -365,6 +377,9 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
 	if err != nil {
+		if mapped := providerfail.ChatGPT(ctx, h.logger, err); apperror.CodeOf(mapped) != "" {
+			return mapped
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote models: %v", err))
 	}
 
@@ -528,6 +543,7 @@ func modelConfigFromRemote(m providers.RemoteModel, compatibilities []string) mo
 		ThinkingBudgetMax:   m.ThinkingBudgetMax,
 		ContextWindow:       m.ContextWindow,
 		Dimensions:          m.Dimensions,
+		CatalogOrder:        m.CatalogOrder,
 	}
 }
 
@@ -635,6 +651,10 @@ func mergeDiscoveredConfig(existing, discovered models.ModelConfig) (models.Mode
 	}
 	if discovered.CatalogAvailable != nil && (out.CatalogAvailable == nil || *discovered.CatalogAvailable != *out.CatalogAvailable) {
 		out.CatalogAvailable = discovered.CatalogAvailable
+		changed = true
+	}
+	if discovered.CatalogOrder != nil && !sameIntPointer(out.CatalogOrder, discovered.CatalogOrder) {
+		out.CatalogOrder = discovered.CatalogOrder
 		changed = true
 	}
 	// Compatibilities are additive: keep anything already present and add the

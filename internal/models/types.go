@@ -27,6 +27,7 @@ const (
 	ClientTypeAnthropicMessages       ClientType = "anthropic-messages"
 	ClientTypeGoogleGenerativeAI      ClientType = "google-generative-ai"
 	ClientTypeOpenAICodex             ClientType = "openai-codex"
+	ClientTypeOpenAIChatGPT           ClientType = "openai-chatgpt"
 	ClientTypeGitHubCopilot           ClientType = "github-copilot"
 	ClientTypeEdgeSpeech              ClientType = "edge-speech"
 	ClientTypeOpenAISpeech            ClientType = "openai-speech"
@@ -135,6 +136,7 @@ type ModelConfig struct {
 	ReasoningEfforts []string `json:"reasoning_efforts,omitempty"`
 	ThinkingMode     string   `json:"thinking_mode,omitempty"`
 	CatalogAvailable *bool    `json:"catalog_available,omitempty"`
+	CatalogOrder     *int     `json:"catalog_order,omitempty"`
 	// ReasoningDialect declares the wire shape of this model's thinking control,
 	// which cannot be inferred from the tiers it advertises: Gemini 2.5 takes a
 	// token budget while 3.x takes a named level, and the two are mutually

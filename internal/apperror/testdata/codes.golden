@@ -56,6 +56,17 @@ capability.operation_failed	502
 capability.request_invalid	400
 channel.runtime_unavailable	503
 channel.verification_failed	502
+chatgpt.authorization_cancelled	400
+chatgpt.authorization_invalid	400
+chatgpt.capability_unsupported	400
+chatgpt.encryption_unavailable	503
+chatgpt.not_connected	409
+chatgpt.not_eligible	403
+chatgpt.owner_required	403
+chatgpt.permission_required	403
+chatgpt.secure_transport_required	400
+chatgpt.unavailable	503
+chatgpt.usage_limit	429
 compaction.model_unavailable	400
 connector.conflict	409
 connector.not_configured	503
@@ -114,6 +125,7 @@ search_provider.type_conflict	409
 session.model_preference_conflict	409
 session_runtime.abort_failed	500
 session_runtime.history_inconsistent	500
+session_runtime.interrupted	503
 session_runtime.invocation_conflict	409
 session_runtime.publish_failed	503
 session_runtime.reset_conflict	409
@@ -157,4 +169,3 @@ workspace_dependency.request_invalid	400
 workspace_dependency.rollback_unavailable	409
 workspace_dependency.workspace_missing	409
 workspace_dependency.workspace_not_running	409
-session_runtime.interrupted	503

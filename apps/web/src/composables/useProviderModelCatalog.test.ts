@@ -34,6 +34,7 @@ describe('useProviderModelCatalog', () => {
     expect(mocks.invalidateQueries.mock.calls).toEqual([
       [{ key: ['provider-models'] }],
       [{ key: ['models'] }],
+      [{ key: ['providers', 'provider-id', 'chatgpt-status'] }],
     ])
   })
 
@@ -49,4 +50,11 @@ describe('useProviderModelCatalog', () => {
       throwOnError: true,
     })
   })
+  it('refreshes authorization state even when catalog import fails', async () => {
+    const error = { code: 'chatgpt.not_connected' }
+    mocks.importModels.mockRejectedValue(error)
+    await expect(useProviderModelCatalog().syncProviderModelCatalog('provider-id')).rejects.toEqual(error)
+    expect(mocks.invalidateQueries).toHaveBeenCalledExactlyOnceWith({ key: ['providers', 'provider-id', 'chatgpt-status'] })
+  })
+
 })

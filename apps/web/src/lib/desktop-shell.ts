@@ -78,3 +78,9 @@ export interface DesktopUpdateBridge {
 }
 
 export const DesktopUpdatesKey: InjectionKey<DesktopUpdateBridge | undefined> = Symbol('memohai:desktop-updates')
+
+export interface DesktopChatGPTBridge {
+  connectChatGPT(request: { providerId: string, token: string }): Promise<{ok: true} | {ok: false, code: string}>
+  cancelChatGPT(): Promise<void>
+}
+export const DesktopChatGPTKey: InjectionKey<DesktopChatGPTBridge | undefined> = Symbol('memohai:desktop-chatgpt')

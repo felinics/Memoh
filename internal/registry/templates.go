@@ -18,7 +18,7 @@ func ProviderTemplateDefinitions(definitions []ProviderDefinition) []providertem
 		for name, value := range definition.Config {
 			defaultConfig[name] = value
 		}
-		if strings.TrimSpace(definition.BaseURL) != "" {
+		if strings.TrimSpace(definition.BaseURL) != "" && definition.ClientType != "openai-chatgpt" {
 			defaultConfig["base_url"] = definition.BaseURL
 		}
 		lastModelIndex := make(map[string]int, len(definition.Models))
@@ -95,7 +95,7 @@ func providerTemplateDomain(definition ProviderDefinition) providertemplates.Dom
 
 func providerTemplateConfigSchema(definition ProviderDefinition) map[string]any {
 	fields := map[string]any{}
-	if strings.TrimSpace(definition.BaseURL) != "" {
+	if strings.TrimSpace(definition.BaseURL) != "" && definition.ClientType != "openai-chatgpt" {
 		fields["base_url"] = map[string]any{
 			"type":     "string",
 			"required": false,
@@ -113,7 +113,7 @@ func providerTemplateConfigSchema(definition ProviderDefinition) map[string]any 
 
 func providerTemplateRequiresAPIKey(clientType, baseURL string) bool {
 	switch strings.TrimSpace(clientType) {
-	case "edge-speech", "openai-codex", "github-copilot":
+	case "edge-speech", "openai-codex", "github-copilot", "openai-chatgpt":
 		return false
 	}
 	baseURL = strings.ToLower(strings.TrimSpace(baseURL))

@@ -11,6 +11,17 @@ import (
 type Code string
 
 const (
+	CodeChatGPTSecureTransportRequired           Code = "chatgpt.secure_transport_required"
+	CodeChatGPTAuthorizationCancelled            Code = "chatgpt.authorization_cancelled"
+	CodeChatGPTEncryptionUnavailable             Code = "chatgpt.encryption_unavailable"
+	CodeChatGPTOwnerRequired                     Code = "chatgpt.owner_required"
+	CodeChatGPTNotConnected                      Code = "chatgpt.not_connected"
+	CodeChatGPTAuthorizationInvalid              Code = "chatgpt.authorization_invalid"
+	CodeChatGPTUsageLimit                        Code = "chatgpt.usage_limit"
+	CodeChatGPTNotEligible                       Code = "chatgpt.not_eligible"
+	CodeChatGPTCapabilityUnsupported             Code = "chatgpt.capability_unsupported"
+	CodeChatGPTPermissionRequired                Code = "chatgpt.permission_required"
+	CodeChatGPTUnavailable                       Code = "chatgpt.unavailable"
 	CodeCapabilityNotFound                       Code = "capability.not_found"
 	CodeCapabilityApprovalRequired               Code = "capability.approval_required"
 	CodeCapabilityOperationFailed                Code = "capability.operation_failed"
@@ -189,11 +200,22 @@ type Definition struct {
 // clients; the localized copies live under errors.* in
 // apps/web/src/i18n/locales/{en,zh,ja}.json. Keep both sides in sync.
 var catalog = map[Code]Definition{
-	CodeAgentAuthorizationExpired:     {HTTPStatus: http.StatusGone, Detail: "This authorization has expired. Connect your account again."},
-	CodeAgentAuthorizationNotReady:    {HTTPStatus: http.StatusConflict, Detail: "Finish connecting your account before creating the Bot."},
-	CodeAgentAuthorizationLimit:       {HTTPStatus: http.StatusTooManyRequests, Detail: "Close other pending authorizations and try again."},
-	CodeAgentAuthorizationFailed:      {HTTPStatus: http.StatusServiceUnavailable, Detail: "Account authorization failed. Please try again."},
-	CodeAgentAuthorizationCodeInvalid: {HTTPStatus: http.StatusBadRequest, Detail: "The authorization code is invalid or expired. Copy the complete code from Claude or connect again."},
+	CodeChatGPTSecureTransportRequired: {HTTPStatus: 400, Detail: "Use HTTPS for a remote server before transferring ChatGPT credentials."},
+	CodeChatGPTAuthorizationCancelled:  {HTTPStatus: 400, Detail: "ChatGPT sign-in was cancelled. Start again when ready."},
+	CodeChatGPTEncryptionUnavailable:   {HTTPStatus: 503, Detail: "ChatGPT credential encryption is unavailable. Configure the server encryption key."},
+	CodeChatGPTOwnerRequired:           {HTTPStatus: 403, Detail: "Only the user who connected ChatGPT can manage this connection."},
+	CodeChatGPTNotConnected:            {HTTPStatus: 409, Detail: "ChatGPT is not connected. Sign in to continue."},
+	CodeChatGPTAuthorizationInvalid:    {HTTPStatus: 400, Detail: "ChatGPT authorization could not be verified. Start sign-in again."},
+	CodeChatGPTUsageLimit:              {HTTPStatus: 429, Detail: "ChatGPT usage limit reached. Check your usage settings before retrying."},
+	CodeChatGPTNotEligible:             {HTTPStatus: 403, Detail: "ChatGPT plan usage is unavailable for this account or workspace."},
+	CodeChatGPTCapabilityUnsupported:   {HTTPStatus: 400, Detail: "This capability is unavailable with ChatGPT plan usage."},
+	CodeChatGPTPermissionRequired:      {HTTPStatus: 403, Detail: "ChatGPT plan permission is missing. Check the account and sign-in permissions."},
+	CodeChatGPTUnavailable:             {HTTPStatus: 503, Detail: "ChatGPT is temporarily unavailable. Try again later."},
+	CodeAgentAuthorizationExpired:      {HTTPStatus: http.StatusGone, Detail: "This authorization has expired. Connect your account again."},
+	CodeAgentAuthorizationNotReady:     {HTTPStatus: http.StatusConflict, Detail: "Finish connecting your account before creating the Bot."},
+	CodeAgentAuthorizationLimit:        {HTTPStatus: http.StatusTooManyRequests, Detail: "Close other pending authorizations and try again."},
+	CodeAgentAuthorizationFailed:       {HTTPStatus: http.StatusServiceUnavailable, Detail: "Account authorization failed. Please try again."},
+	CodeAgentAuthorizationCodeInvalid:  {HTTPStatus: http.StatusBadRequest, Detail: "The authorization code is invalid or expired. Copy the complete code from Claude or connect again."},
 	CodeAgentCredentialNotFound: {
 		HTTPStatus: http.StatusNotFound,
 		Detail:     "The Agent credential was not found.",

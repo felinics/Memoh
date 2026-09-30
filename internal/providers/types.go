@@ -140,6 +140,7 @@ type RemoteModel struct {
 	ContextWindow       *int   `json:"context_window,omitempty"`
 	Dimensions          *int   `json:"dimensions,omitempty"`
 	CapabilitiesKnown   bool   `json:"-"`
+	CatalogOrder        *int   `json:"-"`
 }
 
 // ImportModelsRequest carries caller-supplied capability defaults for chat
@@ -160,5 +161,5 @@ type ImportModelsResponse struct {
 // IsManagedModelCatalogClientType reports whether model rows are reconciled
 // against an account-scoped upstream catalog instead of manually maintained.
 func IsManagedModelCatalogClientType(clientType models.ClientType) bool {
-	return clientType == models.ClientTypeOpenAICodex || clientType == models.ClientTypeGitHubCopilot
+	return clientType == models.ClientTypeOpenAICodex || clientType == models.ClientTypeGitHubCopilot || clientType == models.ClientTypeOpenAIChatGPT
 }

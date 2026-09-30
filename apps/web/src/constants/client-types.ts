@@ -4,7 +4,7 @@ export interface ClientTypeMeta {
   hint: string
 }
 
-const MANAGED_OAUTH_CLIENT_TYPES = new Set(['openai-codex', 'github-copilot'])
+const MANAGED_OAUTH_CLIENT_TYPES = new Set(['openai-codex', 'github-copilot', 'openai-chatgpt'])
 
 // These API protocols commonly carry tool calls and reasoning metadata for
 // agent models. Custom-provider auto import submits these as an explicit
@@ -43,6 +43,7 @@ export const CLIENT_TYPE_META: Record<string, ClientTypeMeta> = {
     label: 'OpenAI Completions',
     hint: 'Chat Completions API (widely compatible)',
   },
+  'openai-chatgpt': { value: 'openai-chatgpt', label: 'ChatGPT', hint: 'Sign in with ChatGPT plan usage' },
   'openai-codex': {
     value: 'openai-codex',
     label: 'OpenAI Codex',

@@ -342,6 +342,19 @@
     },
     "video": {
       "job_outcome_unknown": "无法确认视频任务状态，请先检查已保存的任务，再决定是否重新生成。"
+    },
+    "chatgpt": {
+      "encryption_unavailable": "服务器尚未配置凭据加密密钥，请先设置 auth.agent_credentials_encryption_key。",
+      "owner_required": "只有连接此 ChatGPT 账号的用户可以管理授权。",
+      "not_connected": "ChatGPT 未连接，请登录或重新授权。",
+      "authorization_invalid": "无法验证 ChatGPT 授权，请重新开始登录。",
+      "usage_limit": "已达到 ChatGPT 使用上限，请先到 ChatGPT 用量设置中检查应用额度。",
+      "not_eligible": "此账号或工作区暂不支持 ChatGPT 订阅额度接入。",
+      "capability_unsupported": "ChatGPT 订阅接入暂不支持此功能，请调整模型或工具配置。",
+      "permission_required": "尚未获得 ChatGPT 额度权限，请检查登录账号和授权范围。",
+      "unavailable": "ChatGPT 暂时无法连接，请稍后重试。",
+      "secure_transport_required": "远程服务器需要使用 HTTPS，才能安全传递 ChatGPT 凭据。",
+      "authorization_cancelled": "已取消 ChatGPT 登录，可以重新开始。"
     }
   },
   "auth": {
@@ -1723,7 +1736,23 @@
       "connecting": "连接中"
     },
     "saveSuccess": "服务商配置已保存",
-    "saveBeforeTest": "请先保存修改，再测试连接。"
+    "saveBeforeTest": "请先保存修改，再测试连接。",
+    "chatgpt": {
+      "sectionTitle": "ChatGPT 订阅",
+      "account": "ChatGPT 账号",
+      "signIn": "使用 ChatGPT 登录",
+      "reconnect": "重新登录",
+      "needsRecovery": "连接需要恢复，请重试请求或重新登录。",
+      "desktopRequired": "在 Memoh Desktop 中连接此服务器，即可使用 ChatGPT 登录。",
+      "connectDescription": "使用 ChatGPT 订阅额度运行此服务器的原生 Agent。",
+      "awaitingSignIn": "请在浏览器中完成登录，然后返回 Memoh。",
+      "connected": "已连接到此服务器。",
+      "usage": "订阅用量",
+      "sharedUsage": "与 ChatGPT 共用订阅额度，可在 ChatGPT 中管理 Memoh 的使用上限。",
+      "permissionMissing": "已登录，批准使用订阅额度后即可调用模型。",
+      "enableUsage": "授权使用额度",
+      "manageUsage": "在 ChatGPT 中管理"
+    }
   },
   "providerConnect": {
     "title": "添加 Provider",

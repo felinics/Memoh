@@ -7,15 +7,19 @@ export function useProviderModelCatalog() {
   const queryCache = useQueryCache()
 
   async function syncProviderModelCatalog(providerId: string, defaultCompatibilities?: string[]) {
-    const { data } = await postProvidersByIdImportModels({
-      path: { id: providerId },
-      ...(defaultCompatibilities && { body: { default_compatibilities: defaultCompatibilities } }),
-      throwOnError: true,
-    })
-    for (const key of MODEL_QUERY_KEYS) {
-      queryCache.invalidateQueries({ key: [key] })
+    try {
+      const { data } = await postProvidersByIdImportModels({
+        path: { id: providerId },
+        ...(defaultCompatibilities && { body: { default_compatibilities: defaultCompatibilities } }),
+        throwOnError: true,
+      })
+      for (const key of MODEL_QUERY_KEYS) {
+        queryCache.invalidateQueries({ key: [key] })
+      }
+      return data
+    } finally {
+      queryCache.invalidateQueries({ key: ['providers', providerId, 'chatgpt-status'] })
     }
-    return data
   }
 
   return {

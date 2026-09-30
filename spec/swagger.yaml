@@ -1891,6 +1891,84 @@ definitions:
         description: Granted forces Manage ON (true) or OFF (false) locally.
         type: boolean
     type: object
+  chatgptplan.BeginRequest:
+    properties:
+      redirect_uri:
+        type: string
+    type: object
+  chatgptplan.BeginResponse:
+    properties:
+      authorization_url:
+        type: string
+      client_id:
+        type: string
+      code_verifier:
+        type: string
+      expires_at:
+        type: string
+      state:
+        type: string
+    type: object
+  chatgptplan.CompleteRequest:
+    properties:
+      client_id:
+        type: string
+      state:
+        type: string
+      tokens:
+        $ref: '#/definitions/chatgptplan.Tokens'
+    type: object
+  chatgptplan.RegistrationRequest:
+    properties:
+      client_id:
+        type: string
+      state:
+        type: string
+    type: object
+  chatgptplan.Status:
+    properties:
+      available:
+        type: boolean
+      client_id:
+        type: string
+      configured:
+        type: boolean
+      email:
+        type: string
+      expires_at:
+        type: string
+      needs_recovery:
+        type: boolean
+      owner_user_id:
+        type: string
+      scope:
+        type: string
+      usage_enabled:
+        type: boolean
+    type: object
+  chatgptplan.Tokens:
+    properties:
+      access_token:
+        description: '#nosec G117 -- OAuth wire DTO; persistence is encrypted and
+          responses never include it.'
+        type: string
+      earliest_refresh_at:
+        items:
+          type: integer
+        type: array
+      expires_in:
+        type: integer
+      id_token:
+        type: string
+      refresh_token:
+        description: '#nosec G117 -- OAuth wire DTO; persistence is encrypted and
+          responses never include it.'
+        type: string
+      scope:
+        type: string
+      token_type:
+        type: string
+    type: object
   compaction.ListLogsResponse:
     properties:
       items:
@@ -5950,6 +6028,8 @@ definitions:
     properties:
       catalog_available:
         type: boolean
+      catalog_order:
+        type: integer
       compatibilities:
         items:
           type: string
@@ -16334,15 +16414,31 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Test model connectivity
       tags:
       - models
@@ -16709,6 +16805,161 @@ paths:
       summary: Update provider
       tags:
       - providers
+  /providers/{id}/chatgpt/authorize:
+    post:
+      operationId: beginChatGPTAuthorization
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Local callback
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/chatgptplan.BeginRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/chatgptplan.BeginResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Prepare local Sign in with ChatGPT
+      tags:
+      - providers-oauth
+  /providers/{id}/chatgpt/complete:
+    post:
+      operationId: completeChatGPTAuthorization
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Locally exchanged grant
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/chatgptplan.CompleteRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/chatgptplan.Status'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Import a locally exchanged ChatGPT grant
+      tags:
+      - providers-oauth
+  /providers/{id}/chatgpt/registration:
+    post:
+      operationId: retainChatGPTRegistration
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Validated local callback
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/chatgptplan.RegistrationRequest'
+      responses:
+        "204":
+          description: Registration retained
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Retain the client issued to a pending ChatGPT authorization
+      tags:
+      - providers-oauth
+  /providers/{id}/chatgpt/status:
+    get:
+      operationId: getChatGPTAuthorizationStatus
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/chatgptplan.Status'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get redacted ChatGPT connection state
+      tags:
+      - providers-oauth
+  /providers/{id}/chatgpt/token:
+    delete:
+      operationId: revokeChatGPTAuthorization
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Disconnected
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Disconnect ChatGPT, preserving registration for sign-in
+      tags:
+      - providers-oauth
   /providers/{id}/import-models:
     post:
       consumes:
@@ -16735,15 +16986,31 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Import models from provider
       tags:
       - providers
@@ -16898,15 +17165,31 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
       summary: Test provider connectivity
       tags:
       - providers

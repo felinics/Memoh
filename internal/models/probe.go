@@ -17,6 +17,7 @@ import (
 	openairesponses "github.com/felinics/twilight/provider/openai/responses"
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/chatgptplan"
 	memohcopilot "github.com/felinics/memoh/internal/copilot"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -53,11 +54,14 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return s.testEmbeddingModel(ctx, string(clientType), baseURL, creds.APIKey, model.ModelID, nil)
 	}
 
-	sdkProvider := NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
+	sdkProvider := NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil, creds.TokenSource)
 
 	start := time.Now()
 
 	providerResult := sdkProvider.Test(ctx)
+	if clientType == ClientTypeOpenAIChatGPT && providerResult.Error != nil {
+		return TestResponse{}, providerResult.Error
+	}
 	switch providerResult.Status {
 	case sdk.ProviderStatusUnreachable:
 		return TestResponse{
@@ -86,6 +90,9 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
+		if clientType == ClientTypeOpenAIChatGPT {
+			return TestResponse{}, err
+		}
 		return TestResponse{
 			Status:    TestStatusError,
 			Reachable: true,
@@ -141,7 +148,7 @@ func (*Service) testEmbeddingModel(ctx context.Context, clientType, baseURL, api
 
 // NewSDKProvider creates a Twilight AI SDK Provider for the given client type.
 // It is exported so that other packages (e.g. providers) can reuse it for testing.
-func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientType, timeout time.Duration, httpClient *http.Client) sdk.Provider {
+func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientType, timeout time.Duration, httpClient *http.Client, tokenSources ...chatgptplan.TokenSource) sdk.Provider {
 	if httpClient == nil {
 		httpClient = NewProviderHTTPClient(timeout)
 	}
@@ -156,6 +163,13 @@ func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientTyp
 			opts = append(opts, openairesponses.WithBaseURL(baseURL))
 		}
 		return openairesponses.New(opts...)
+
+	case ClientTypeOpenAIChatGPT:
+		var source chatgptplan.TokenSource
+		if len(tokenSources) > 0 {
+			source = tokenSources[0]
+		}
+		return chatgptplan.NewProvider(apiKey, source, httpClient)
 
 	case ClientTypeOpenAICodex:
 		opts := []openaicodex.Option{
@@ -203,6 +217,7 @@ func NewSDKProvider(baseURL, apiKey, codexAccountID string, clientType ClientTyp
 }
 
 type modelCredentials struct {
+	TokenSource    chatgptplan.TokenSource
 	APIKey         string //nolint:gosec // runtime credential material used to construct SDK providers
 	CodexAccountID string
 }
@@ -217,6 +232,12 @@ func (s *Service) resolveModelCredentials(ctx context.Context, provider sqlc.Pro
 			return modelCredentials{}, err
 		}
 		return modelCredentials{APIKey: token}, nil
+
+	case ClientTypeOpenAIChatGPT:
+		if s.planSessions == nil {
+			return modelCredentials{}, chatgptplan.ErrEncryptionUnavailable
+		}
+		return modelCredentials{TokenSource: s.planSessions.TokenSource(provider.ID.String())}, nil
 
 	case ClientTypeOpenAICodex:
 		tokenRow, err := s.queries.GetProviderOAuthTokenByProvider(ctx, provider.ID)

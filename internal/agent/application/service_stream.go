@@ -35,22 +35,16 @@ type terminalSnapshot struct {
 }
 
 func snapshotFailureCode(idleFired bool, cause error) apperror.Code {
-	if idleFired && apperror.CodeOf(cause) == "" {
+	code := apperror.CodeOf(cause)
+	if idleFired && code == "" {
 		return apperror.CodeAgentResponseTimeout
 	}
-	switch code := apperror.CodeOf(cause); code {
-	case apperror.CodeAgentResponseTimeout,
-		apperror.CodeAgentToolTimeout,
-		apperror.CodeScheduleExecutionTimeout,
-		apperror.CodeAgentResponseInterrupted,
-		apperror.CodeAgentProviderOverloaded,
-		apperror.CodeAgentProviderRateLimited,
-		apperror.CodeAgentProviderQuotaExhausted,
-		apperror.CodeAgentProviderAuthFailed:
+	// History uses the same public error contract as the stream. Maintaining a
+	// second allowlist here silently drops failures when new codes are added.
+	if _, ok := apperror.Lookup(code); ok {
 		return code
-	default:
-		return ""
 	}
+	return ""
 }
 
 func shouldForwardAfterIdleFailure(event native.StreamEvent, failureEventForwarded bool) bool {
@@ -407,7 +401,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 						lifecycleCause = agentAbortCause(streamCtx)
 					}
 					if !stored && !runOwnershipLost(streamCtx) && stepCommitter != nil {
-						if storeErr := stepCommitter.finish(streamCtx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+						if storeErr := stepCommitter.finish(streamCtx, extractInputTokensFromUsage(snap.usage), snap.failureCode); storeErr != nil {
 							terminalPersistErr = runtimeHistoryError(storeErr)
 							if lifecycleCause == nil {
 								lifecycleCause = terminalPersistErr
@@ -434,14 +428,15 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 			}
 			if event.IsTerminal() && !stored && !runOwnershipLost(streamCtx) && terminalPersistErr == nil {
 				switch {
-				case !hasVisibleOutput:
-					stored = true
 				case stepCommitter != nil:
-					if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
+					if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens, snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)); storeErr != nil {
 						terminalPersistErr = runtimeHistoryError(storeErr)
 					} else {
 						stored = true
 					}
+				case !hasVisibleOutput:
+					_, terminalPersistErr = s.persistTurnFailure(context.WithoutCancel(streamCtx), streamReq, rc, snapshotFailureCode(idleCancel.DidFire(), lifecycleCause))
+					stored = terminalPersistErr == nil
 				default:
 					terminalPersistErr = runtimeHistoryError(errors.New("agent terminal event has no persistable snapshot"))
 				}
@@ -485,7 +480,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		// snapshot are treated as unsent so the Web UI can restore the draft
 		// without polluting history.
 		if !stored && stepCommitter != nil && !runOwnershipLost(streamCtx) {
-			if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens); storeErr != nil {
+			if storeErr := stepCommitter.finish(streamCtx, rc.estimatedTokens, snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)); storeErr != nil {
 				if lifecycleCause == nil {
 					lifecycleCause = storeErr
 				}
@@ -775,7 +770,7 @@ func (s *Service) streamChatWSResultWithHooks(
 					lifecycleCause = agentAbortCause(streamCtx)
 				}
 				if !stored && !runOwnershipLost(ctx) && stepCommitter != nil {
-					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage)); storeErr != nil {
+					if storeErr := stepCommitter.finish(ctx, extractInputTokensFromUsage(snap.usage), snap.failureCode); storeErr != nil {
 						if lifecycleCause == nil {
 							lifecycleCause = storeErr
 						}
@@ -799,6 +794,16 @@ func (s *Service) streamChatWSResultWithHooks(
 			}
 		}
 
+		// Empty terminal snapshots still cross the history barrier before the
+		// terminal event makes an admitted run no longer writable.
+		if event.IsTerminal() && !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
+			if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens, snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)); storeErr != nil {
+				lifecycleCause = runtimeHistoryError(storeErr)
+				return persistedMessages, lifecycleCause
+			}
+			persistedMessages = stepCommitter.persistedMessages()
+			stored = true
+		}
 		if event.IsTerminal() && postPersist != nil && stepCommitter == nil && !postPersistApplied {
 			if err := postPersist(context.WithoutCancel(ctx), persistedMessages); err != nil {
 				lifecycleCause = err
@@ -829,7 +834,7 @@ func (s *Service) streamChatWSResultWithHooks(
 
 	// Intermediate persistence on abort/error
 	if !stored && stepCommitter != nil && !runOwnershipLost(ctx) {
-		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens); storeErr != nil {
+		if storeErr := stepCommitter.finish(ctx, rc.estimatedTokens, snapshotFailureCode(idleCancel.DidFire(), lifecycleCause)); storeErr != nil {
 			if lifecycleCause == nil {
 				lifecycleCause = storeErr
 			}

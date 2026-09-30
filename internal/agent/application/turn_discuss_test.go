@@ -30,6 +30,16 @@ type fakeAgentStreamer struct {
 
 type silentDiscussAgentStreamer struct{}
 
+type failedDiscussAgentStreamer struct{}
+
+func (*failedDiscussAgentStreamer) Stream(context.Context, native.RunConfig) <-chan native.StreamEvent {
+	ch := make(chan native.StreamEvent, 2)
+	ch <- native.StreamEvent{Type: native.EventError, Code: string(apperror.CodeChatGPTNotConnected)}
+	ch <- native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)}
+	close(ch)
+	return ch
+}
+
 func (*silentDiscussAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-chan native.StreamEvent {
 	ch := make(chan native.StreamEvent, 1)
 	go func() {
@@ -389,6 +399,24 @@ func TestAdmittedDiscussSilencePublishesStableTimeoutFailure(t *testing.T) {
 	}
 	if len(runtime.finishes) != 1 || runtime.finishes[0].status != sessionruntime.RunStatusErrored || runtime.finishes[0].message != string(apperror.CodeAgentResponseTimeout) {
 		t.Fatalf("runtime finishes = %#v", runtime.finishes)
+	}
+}
+
+func TestAdmittedDiscussPersistsPublicFailureBeforeOutput(t *testing.T) {
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{ModelID: "model-1"}}
+	service := newDiscussTestService(&fakeRunner{}, &failedDiscussAgentStreamer{}, resolver)
+	configureDiscussLifecycle(service)
+	messages := &recordingMessageService{}
+	service.messageService = messages
+	service.turnHooks.storeRound = nil
+
+	handle, err := service.StartTurn(context.Background(), lifecycleDiscussCommand())
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, handle)
+	if len(messages.persisted) != 1 || messages.persisted[0].Metadata[messagepkg.HistoryErrorCodeMetadataKey] != string(apperror.CodeChatGPTNotConnected) {
+		t.Fatalf("expected durable public failure, got %#v", messages.persisted)
 	}
 }
 

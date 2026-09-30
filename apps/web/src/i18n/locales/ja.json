@@ -339,6 +339,19 @@
     },
     "video": {
       "job_outcome_unknown": "動画ジョブの状態を確認できませんでした。再生成する前に保存済みのジョブを確認してください。"
+    },
+    "chatgpt": {
+      "encryption_unavailable": "サーバーの認証情報暗号化キーを設定してから、ChatGPT に接続してください。",
+      "owner_required": "この接続を管理できるのは、ChatGPT に接続したユーザーだけです。",
+      "not_connected": "ChatGPT に接続されていません。サインインしてください。",
+      "authorization_invalid": "ChatGPT の認証を確認できませんでした。サインインをやり直してください。",
+      "usage_limit": "ChatGPT の利用上限に達しました。使用状況の設定を確認してから再試行してください。",
+      "not_eligible": "このアカウントまたはワークスペースでは、ChatGPT プランを利用できません。",
+      "capability_unsupported": "ChatGPT プランでは、この機能を利用できません。モデルまたはツールの設定を確認してください。",
+      "permission_required": "ChatGPT プランの利用権限がありません。アカウントと認証の権限を確認してください。",
+      "unavailable": "ChatGPT に一時的に接続できません。しばらくしてから再試行してください。",
+      "secure_transport_required": "ChatGPT の認証情報を転送する前に、リモートサーバーで HTTPS を使用してください。",
+      "authorization_cancelled": "ChatGPT のサインインをキャンセルしました。必要なときに再開してください。"
     }
   },
   "auth": {
@@ -1692,7 +1705,23 @@
       "connecting": "接続中"
     },
     "saveSuccess": "プロバイダー設定を保存しました",
-    "saveBeforeTest": "変更を保存してから接続をテストしてください。"
+    "saveBeforeTest": "変更を保存してから接続をテストしてください。",
+    "chatgpt": {
+      "sectionTitle": "ChatGPT プラン",
+      "account": "ChatGPT アカウント",
+      "signIn": "ChatGPT でサインイン",
+      "reconnect": "再度ログイン",
+      "needsRecovery": "接続を復旧する必要があります。リクエストを再試行するか、再度ログインしてください。",
+      "desktopRequired": "Memoh Desktop でこのサーバーに接続すると、ChatGPT でサインインできます。",
+      "connectDescription": "ChatGPT のプランで、このサーバーのネイティブ Agent を実行します。",
+      "awaitingSignIn": "ブラウザーでサインインを完了し、Memoh に戻ってください。",
+      "connected": "このサーバーに接続済みです。",
+      "usage": "プランの使用状況",
+      "sharedUsage": "ChatGPT のプランと上限を共有します。Memoh の上限は ChatGPT で管理できます。",
+      "permissionMissing": "サインイン済みです。プランの利用を許可すると、モデルを呼び出せます。",
+      "enableUsage": "プランの利用を許可",
+      "manageUsage": "ChatGPT で管理"
+    }
   },
   "providerConnect": {
     "title": "プロバイダーを追加",

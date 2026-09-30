@@ -9,6 +9,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/chatgptplan"
 	adapters "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
 )
@@ -21,6 +22,7 @@ const (
 
 // Config holds model resolution details for the memory LLM.
 type Config struct {
+	TokenSource           chatgptplan.TokenSource `json:"-"`
 	ModelID               string
 	BaseURL               string
 	APIKey                string `json:"-"`
@@ -48,6 +50,7 @@ func (c *Client) model() *sdk.Model {
 		ModelID:               c.cfg.ModelID,
 		ClientType:            c.cfg.ClientType,
 		APIKey:                c.cfg.APIKey,
+		TokenSource:           c.cfg.TokenSource,
 		BaseURL:               c.cfg.BaseURL,
 		ChatCompletionsCompat: c.cfg.ChatCompletionsCompat,
 	})

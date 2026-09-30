@@ -267,7 +267,7 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 
 	prompt := titleGenerationPrompt + userSnippet
 
-	authService := providers.NewService(nil, s.queries, "")
+	authService := s.providerCredentialsService()
 	authCtx := oauthctx.WithUserID(ctx, userID)
 	creds, err := authService.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
@@ -280,6 +280,7 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 		ClientType:            provider.ClientType,
 		APIKey:                creds.APIKey,
 		CodexAccountID:        creds.CodexAccountID,
+		TokenSource:           creds.TokenSource,
 		BaseURL:               providers.ProviderConfigString(provider, "base_url"),
 		ChatCompletionsCompat: providers.ProviderConfigString(provider, models.ChatCompletionsCompatConfigKey),
 	}

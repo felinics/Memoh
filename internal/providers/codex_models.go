@@ -11,34 +11,19 @@ import (
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/openaicatalog"
 	"github.com/felinics/memoh/internal/reasoning"
 )
 
 const (
-	codexDefaultBaseURL = "https://chatgpt.com/backend-api"
-	// The catalog endpoint uses the client version for model-availability gates.
-	// Use the stable protocol target instead of coupling discovery to Memoh's release version.
-	codexModelsClientVersion  = "1.0.0"
+	codexDefaultBaseURL       = "https://chatgpt.com/backend-api"
+	codexModelsClientVersion  = openaicatalog.ClientVersion
 	codexModelsResponseLimit  = 8 << 20
 	codexModelsErrorBodyLimit = 16 << 10
 )
 
 type codexModelsResponse struct {
-	Models []codexModelInfo `json:"models"`
-}
-
-type codexModelInfo struct {
-	Slug                     string                       `json:"slug"`
-	DisplayName              string                       `json:"display_name"`
-	Visibility               string                       `json:"visibility"`
-	SupportedReasoningLevels []codexReasoningEffortPreset `json:"supported_reasoning_levels"`
-	ContextWindow            *int                         `json:"context_window"`
-	MaxContextWindow         *int                         `json:"max_context_window"`
-	InputModalities          []string                     `json:"input_modalities"`
-}
-
-type codexReasoningEffortPreset struct {
-	Effort string `json:"effort"`
+	Models []openaicatalog.Model `json:"models"`
 }
 
 func (s *Service) fetchCodexRemoteModels(ctx context.Context, provider sqlc.Provider) ([]RemoteModel, error) {
@@ -98,8 +83,12 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 		return nil, fmt.Errorf("decode Codex models response: %w", err)
 	}
 
-	remoteModels := make([]RemoteModel, 0, len(catalog.Models))
-	for _, model := range catalog.Models {
+	return remoteModelsFromOpenAI(catalog.Models, models.ClientTypeOpenAICodex), nil
+}
+
+func remoteModelsFromOpenAI(catalog []openaicatalog.Model, clientType models.ClientType) []RemoteModel {
+	remoteModels := make([]RemoteModel, 0, len(catalog))
+	for _, model := range catalog {
 		modelID := strings.TrimSpace(model.Slug)
 		if modelID == "" || !strings.EqualFold(strings.TrimSpace(model.Visibility), "list") {
 			continue
@@ -133,21 +122,27 @@ func (s *Service) listCodexRemoteModels(ctx context.Context, baseURL string, cre
 			contextWindow = model.MaxContextWindow
 		}
 
+		var catalogOrder *int
+		if clientType == models.ClientTypeOpenAIChatGPT {
+			order := len(remoteModels)
+			catalogOrder = &order
+		}
 		remoteModels = append(remoteModels, RemoteModel{
 			ID:                modelID,
 			Name:              name,
 			DisplayName:       name,
 			Object:            "model",
-			OwnedBy:           "openai-codex",
+			OwnedBy:           string(clientType),
 			Type:              string(models.ModelTypeChat),
 			Compatibilities:   compatibilities,
 			ReasoningEfforts:  reasoningEfforts,
 			ThinkingMode:      thinkingMode,
 			ContextWindow:     contextWindow,
+			CatalogOrder:      catalogOrder,
 			CapabilitiesKnown: true,
 		})
 	}
-	return remoteModels, nil
+	return remoteModels
 }
 
 func containsFold(values []string, target string) bool {

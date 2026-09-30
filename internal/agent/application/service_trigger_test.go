@@ -12,11 +12,13 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/schedule"
 )
@@ -355,6 +357,36 @@ func TestConsumeTriggeredStreamStopsWhenProjectionRefused(t *testing.T) {
 	// The terminal event was never consumed, so nothing may be persisted.
 	if len(messages.persisted) != 0 {
 		t.Fatalf("persisted %d messages, want none after a refused projection", len(messages.persisted))
+	}
+}
+
+func TestConsumeTriggeredStreamPersistsFailureBeforeTerminal(t *testing.T) {
+	store := &recordingStepPersister{recordingMessageService: &recordingMessageService{}}
+	svc := newTriggerStreamService(store.recordingMessageService, nil)
+	svc.messageService = store
+	svc.publishTurnEvent = func(_ context.Context, _ sessionruntime.RunHandle, event native.StreamEvent) error {
+		if event.IsTerminal() && len(store.steps) != 1 {
+			t.Error("terminal event published before the failure step became durable")
+		}
+		return nil
+	}
+	req := triggerStreamRequest()
+	req.RunID = "run-1"
+	rc := resolvedContext{runConfig: native.RunConfig{ContextLifecycle: contextfrag.NewLifecycleHolder()}}
+	committer := &agentStepCommitter{service: svc, persister: store, ownerContext: context.Background(), req: req, rc: rc}
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventError, Code: string(apperror.CodeChatGPTNotConnected)}
+	events <- native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)}
+	close(events)
+	_, err := svc.consumeTriggeredStream(context.Background(), events, req, rc, sessionruntime.RunHandle{RunID: req.RunID}, committer, nil)
+	if apperror.CodeOf(err) != apperror.CodeChatGPTNotConnected {
+		t.Fatalf("error = %v", err)
+	}
+	if len(store.steps) != 1 || len(store.steps[0].Messages) != 2 {
+		t.Fatalf("expected one user + failure step, got %#v", store.steps)
+	}
+	if got := store.steps[0].Messages[1].Metadata[messagepkg.HistoryErrorCodeMetadataKey]; got != string(apperror.CodeChatGPTNotConnected) {
+		t.Fatalf("history error code = %v", got)
 	}
 }
 

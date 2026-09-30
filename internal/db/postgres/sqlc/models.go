@@ -514,6 +514,20 @@ type ChannelLinkCode struct {
 	TeamID                    pgtype.UUID        `json:"team_id"`
 }
 
+type ChatgptProviderSession struct {
+	TeamID           pgtype.UUID        `json:"team_id"`
+	ProviderID       pgtype.UUID        `json:"provider_id"`
+	OwnerUserID      pgtype.UUID        `json:"owner_user_id"`
+	EncryptedPayload []byte             `json:"encrypted_payload"`
+	EncryptionNonce  []byte             `json:"encryption_nonce"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChatgptRuntimeHost struct {
+	TeamID pgtype.UUID `json:"team_id"`
+	HostID pgtype.UUID `json:"host_id"`
+}
+
 type Connector struct {
 	TeamID       pgtype.UUID        `json:"team_id"`
 	BotID        pgtype.UUID        `json:"bot_id"`

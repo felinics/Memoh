@@ -1,17 +1,20 @@
 package models
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/chatgptplan"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -26,8 +29,9 @@ var (
 
 // Service provides CRUD operations for models.
 type Service struct {
-	queries dbstore.Queries
-	logger  *slog.Logger
+	planSessions *chatgptplan.SessionService
+	queries      dbstore.Queries
+	logger       *slog.Logger
 }
 
 // NewService creates a new models service.
@@ -37,6 +41,8 @@ func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 		logger:  log.With(slog.String("service", "models")),
 	}
 }
+
+func (s *Service) SetChatGPTSessions(sessions *chatgptplan.SessionService) { s.planSessions = sessions }
 
 // Create adds a new model to the database.
 func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, error) {
@@ -231,7 +237,7 @@ func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]Ge
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider: %w", err)
 	}
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToProviderModelList(dbModels), nil
 }
 
 // ListByProviderIDAndType returns models filtered by provider ID and type.
@@ -253,7 +259,24 @@ func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string
 	if err != nil {
 		return nil, fmt.Errorf("failed to list models by provider and type: %w", err)
 	}
-	return s.convertToGetResponseList(dbModels), nil
+	return s.convertToProviderModelList(dbModels), nil
+}
+
+func (s *Service) convertToProviderModelList(dbModels []sqlc.Model) []GetResponse {
+	result := s.convertToGetResponseList(dbModels)
+	slices.SortStableFunc(result, func(a, b GetResponse) int {
+		if a.Config.CatalogOrder == nil {
+			if b.Config.CatalogOrder == nil {
+				return 0
+			}
+			return 1
+		}
+		if b.Config.CatalogOrder == nil {
+			return -1
+		}
+		return cmp.Compare(*a.Config.CatalogOrder, *b.Config.CatalogOrder)
+	})
+	return result
 }
 
 // GetByProviderAndModelID retrieves a model by provider and model_id.
@@ -522,6 +545,7 @@ func IsValidClientType(clientType ClientType) bool {
 		ClientTypeAnthropicMessages,
 		ClientTypeGoogleGenerativeAI,
 		ClientTypeOpenAICodex,
+		ClientTypeOpenAIChatGPT,
 		ClientTypeGitHubCopilot,
 		ClientTypeEdgeSpeech,
 		ClientTypeOpenAISpeech,
@@ -571,7 +595,7 @@ func IsLLMClientType(clientType ClientType) bool {
 // inside their output reserve, so clients that ignore it are not eligible
 // summarizers.
 func EnforcesMaxOutputTokens(clientType ClientType) bool {
-	return clientType != ClientTypeOpenAICodex
+	return clientType != ClientTypeOpenAICodex && clientType != ClientTypeOpenAIChatGPT
 }
 
 // SelectMemoryModel selects a chat model for memory operations.

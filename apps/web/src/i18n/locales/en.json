@@ -342,6 +342,19 @@
     },
     "video": {
       "job_outcome_unknown": "The video job status could not be confirmed. Check the saved job before creating another video."
+    },
+    "chatgpt": {
+      "encryption_unavailable": "ChatGPT credential encryption is unavailable. Configure the server encryption key.",
+      "owner_required": "Only the user who connected ChatGPT can manage this connection.",
+      "not_connected": "ChatGPT is not connected. Sign in to continue.",
+      "authorization_invalid": "ChatGPT authorization could not be verified. Start sign-in again.",
+      "usage_limit": "ChatGPT usage limit reached. Check your usage settings before retrying.",
+      "not_eligible": "ChatGPT plan usage is unavailable for this account or workspace.",
+      "capability_unsupported": "This capability is unavailable with ChatGPT plan usage.",
+      "permission_required": "ChatGPT plan permission is missing. Check the account and sign-in permissions.",
+      "unavailable": "ChatGPT is temporarily unavailable. Try again later.",
+      "secure_transport_required": "Use HTTPS for a remote server before transferring ChatGPT credentials.",
+      "authorization_cancelled": "ChatGPT sign-in was cancelled. Start again when ready."
     }
   },
   "auth": {
@@ -1723,7 +1736,23 @@
       "connecting": "Connecting"
     },
     "saveSuccess": "Provider saved",
-    "saveBeforeTest": "Save changes before testing the connection."
+    "saveBeforeTest": "Save changes before testing the connection.",
+    "chatgpt": {
+      "sectionTitle": "ChatGPT plan",
+      "account": "ChatGPT account",
+      "signIn": "Sign in with ChatGPT",
+      "reconnect": "Sign in again",
+      "needsRecovery": "Connection needs recovery. Retry the request or sign in again.",
+      "desktopRequired": "Open this server in Memoh Desktop to sign in with ChatGPT.",
+      "connectDescription": "Use your ChatGPT subscription for this server’s native agents.",
+      "awaitingSignIn": "Complete sign-in in your browser, then return to Memoh.",
+      "connected": "Connected to this server.",
+      "usage": "Plan usage",
+      "sharedUsage": "Shares your ChatGPT plan limits. Manage Memoh’s limit in ChatGPT.",
+      "permissionMissing": "Signed in. Approve plan usage to enable model requests.",
+      "enableUsage": "Approve plan usage",
+      "manageUsage": "Manage in ChatGPT"
+    }
   },
   "providerConnect": {
     "title": "Add Provider",

@@ -3,10 +3,12 @@ import { computed, onBeforeUnmount, onMounted, provide } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { Toaster } from '@felinic/ui'
 import {
+  DesktopChatGPTKey,
   DesktopRuntimeKey,
   DesktopShellKey,
   DesktopUpdatesKey,
   DesktopWindowKey,
+  type DesktopChatGPTBridge,
   type DesktopRuntimeBridge,
   type DesktopUpdateBridge,
   type DesktopWindowBridge,
@@ -14,6 +16,10 @@ import {
 import MainSection from '@memohai/web/pages/main-section/index.vue'
 
 provide(DesktopShellKey, true)
+provide(DesktopChatGPTKey, {
+  connectChatGPT: window.api.desktop.connectChatGPT,
+  cancelChatGPT: window.api.desktop.cancelChatGPT,
+} satisfies DesktopChatGPTBridge)
 provide(DesktopWindowKey, {
   isFullScreen: window.api.desktop.isFullScreen,
   onFullScreenChanged: window.api.desktop.onFullScreenChanged,

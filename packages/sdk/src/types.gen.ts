@@ -1110,6 +1110,57 @@ export type ChannelaccessSetManagerRequest = {
     granted?: boolean;
 };
 
+export type ChatgptplanBeginRequest = {
+    redirect_uri?: string;
+};
+
+export type ChatgptplanBeginResponse = {
+    authorization_url?: string;
+    client_id?: string;
+    code_verifier?: string;
+    expires_at?: string;
+    state?: string;
+};
+
+export type ChatgptplanCompleteRequest = {
+    client_id?: string;
+    state?: string;
+    tokens?: ChatgptplanTokens;
+};
+
+export type ChatgptplanRegistrationRequest = {
+    client_id?: string;
+    state?: string;
+};
+
+export type ChatgptplanStatus = {
+    available?: boolean;
+    client_id?: string;
+    configured?: boolean;
+    email?: string;
+    expires_at?: string;
+    needs_recovery?: boolean;
+    owner_user_id?: string;
+    scope?: string;
+    usage_enabled?: boolean;
+};
+
+export type ChatgptplanTokens = {
+    /**
+     * #nosec G117 -- OAuth wire DTO; persistence is encrypted and responses never include it.
+     */
+    access_token?: string;
+    earliest_refresh_at?: Array<number>;
+    expires_in?: number;
+    id_token?: string;
+    /**
+     * #nosec G117 -- OAuth wire DTO; persistence is encrypted and responses never include it.
+     */
+    refresh_token?: string;
+    scope?: string;
+    token_type?: string;
+};
+
 export type CompactionListLogsResponse = {
     items?: Array<CompactionLog>;
     total_count?: number;
@@ -3401,6 +3452,7 @@ export type ModelsGetResponse = {
 
 export type ModelsModelConfig = {
     catalog_available?: boolean;
+    catalog_order?: number;
     compatibilities?: Array<string>;
     context_window?: number;
     description?: string;
@@ -15021,15 +15073,31 @@ export type PostModelsByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
     /**
      * Not Found
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Too Many Requests
+     */
+    429: ApperrorProblem;
+    /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostModelsByIdTestError = PostModelsByIdTestErrors[keyof PostModelsByIdTestErrors];
@@ -15478,6 +15546,197 @@ export type PutProvidersByIdResponses = {
 
 export type PutProvidersByIdResponse = PutProvidersByIdResponses[keyof PutProvidersByIdResponses];
 
+export type BeginChatGptAuthorizationData = {
+    /**
+     * Local callback
+     */
+    body: ChatgptplanBeginRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/chatgpt/authorize';
+};
+
+export type BeginChatGptAuthorizationErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type BeginChatGptAuthorizationError = BeginChatGptAuthorizationErrors[keyof BeginChatGptAuthorizationErrors];
+
+export type BeginChatGptAuthorizationResponses = {
+    /**
+     * OK
+     */
+    200: ChatgptplanBeginResponse;
+};
+
+export type BeginChatGptAuthorizationResponse = BeginChatGptAuthorizationResponses[keyof BeginChatGptAuthorizationResponses];
+
+export type CompleteChatGptAuthorizationData = {
+    /**
+     * Locally exchanged grant
+     */
+    body: ChatgptplanCompleteRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/chatgpt/complete';
+};
+
+export type CompleteChatGptAuthorizationErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type CompleteChatGptAuthorizationError = CompleteChatGptAuthorizationErrors[keyof CompleteChatGptAuthorizationErrors];
+
+export type CompleteChatGptAuthorizationResponses = {
+    /**
+     * OK
+     */
+    200: ChatgptplanStatus;
+};
+
+export type CompleteChatGptAuthorizationResponse = CompleteChatGptAuthorizationResponses[keyof CompleteChatGptAuthorizationResponses];
+
+export type RetainChatGptRegistrationData = {
+    /**
+     * Validated local callback
+     */
+    body: ChatgptplanRegistrationRequest;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/chatgpt/registration';
+};
+
+export type RetainChatGptRegistrationErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type RetainChatGptRegistrationError = RetainChatGptRegistrationErrors[keyof RetainChatGptRegistrationErrors];
+
+export type RetainChatGptRegistrationResponses = {
+    /**
+     * Registration retained
+     */
+    204: unknown;
+};
+
+export type GetChatGptAuthorizationStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/chatgpt/status';
+};
+
+export type GetChatGptAuthorizationStatusErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetChatGptAuthorizationStatusError = GetChatGptAuthorizationStatusErrors[keyof GetChatGptAuthorizationStatusErrors];
+
+export type GetChatGptAuthorizationStatusResponses = {
+    /**
+     * OK
+     */
+    200: ChatgptplanStatus;
+};
+
+export type GetChatGptAuthorizationStatusResponse = GetChatGptAuthorizationStatusResponses[keyof GetChatGptAuthorizationStatusResponses];
+
+export type RevokeChatGptAuthorizationData = {
+    body?: never;
+    path: {
+        /**
+         * Provider ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/providers/{id}/chatgpt/token';
+};
+
+export type RevokeChatGptAuthorizationErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type RevokeChatGptAuthorizationError = RevokeChatGptAuthorizationErrors[keyof RevokeChatGptAuthorizationErrors];
+
+export type RevokeChatGptAuthorizationResponses = {
+    /**
+     * Disconnected
+     */
+    204: unknown;
+};
+
 export type PostProvidersByIdImportModelsData = {
     /**
      * Explicit defaults for unknown custom chat models
@@ -15497,15 +15756,31 @@ export type PostProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
     /**
      * Not Found
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Too Many Requests
+     */
+    429: ApperrorProblem;
+    /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostProvidersByIdImportModelsError = PostProvidersByIdImportModelsErrors[keyof PostProvidersByIdImportModelsErrors];
@@ -15712,15 +15987,31 @@ export type PostProvidersByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
     /**
      * Not Found
      */
     404: HandlersErrorResponse;
     /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Too Many Requests
+     */
+    429: ApperrorProblem;
+    /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
 };
 
 export type PostProvidersByIdTestError = PostProvidersByIdTestErrors[keyof PostProvidersByIdTestErrors];

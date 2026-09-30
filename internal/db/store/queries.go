@@ -26,6 +26,12 @@ type HistoryTurn struct {
 // Queries is the transitional database interface implemented by sqlc-backed stores.
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
+	EnsureChatGPTRuntimeHost(context.Context) (pgtype.UUID, error)
+	EnsureChatGPTProviderSession(context.Context, dbsqlc.EnsureChatGPTProviderSessionParams) error
+	GetChatGPTProviderSession(context.Context, pgtype.UUID) (dbsqlc.ChatgptProviderSession, error)
+	LockChatGPTProviderSession(context.Context, pgtype.UUID) (dbsqlc.ChatgptProviderSession, error)
+	SaveChatGPTProviderSession(context.Context, dbsqlc.SaveChatGPTProviderSessionParams) error
+
 	SaveSessionRunResumeContext(context.Context, dbsqlc.SaveSessionRunResumeContextParams) (int64, error)
 	ListInterruptedSessionRuns(context.Context, pgtype.UUID) ([]dbsqlc.SessionRun, error)
 	RetireSupersededInterruptedSessionRuns(context.Context) (int64, error)

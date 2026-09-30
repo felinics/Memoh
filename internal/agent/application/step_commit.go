@@ -8,10 +8,13 @@ import (
 	"strings"
 	"sync"
 
+	sdk "github.com/felinics/twilight/sdk"
+
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/step"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -107,7 +110,7 @@ func (c *agentStepCommitter) bindContinuation(cfg *native.RunConfig) {
 		// carries whatever input the claim admitted, so the loop continues
 		// with the new input instead of restarting the run.
 		cfg.OnSteer = func(ctx context.Context, index int, record *step.Record) (native.StepDirective, error) {
-			return c.persist(ctx, index, record, stepSteered)
+			return c.persist(ctx, index, record, stepSteered, "")
 		}
 	}
 }
@@ -121,15 +124,15 @@ const (
 )
 
 func (c *agentStepCommitter) commit(ctx context.Context, stepIndex int, record *step.Record) (native.StepDirective, error) {
-	return c.persist(ctx, stepIndex, record, stepCompleted)
+	return c.persist(ctx, stepIndex, record, stepCompleted, "")
 }
 
 func (c *agentStepCommitter) interrupt(ctx context.Context, stepIndex int, record *step.Record) error {
-	_, err := c.persist(ctx, stepIndex, record, stepInterrupted)
+	_, err := c.persist(ctx, stepIndex, record, stepInterrupted, "")
 	return err
 }
 
-func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record *step.Record, mode stepCommitMode) (native.StepDirective, error) {
+func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record *step.Record, mode stepCommitMode, failureCode apperror.Code) (native.StepDirective, error) {
 	interrupted := mode != stepCompleted
 	if c == nil || record == nil {
 		return native.StepDirective{}, errors.New("agent step is missing")
@@ -166,11 +169,12 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 	// provider result: final handoff and queue reconciliation are keyed to the
 	// step, not to whether the provider emitted a message. Legacy/non-durable
 	// paths retain the old cheap no-op behavior.
-	if !hasAssistantOutput && mode != stepSteered && (c.queueStep == nil || interrupted) {
+	if !hasAssistantOutput && failureCode == "" && mode != stepSteered && (c.queueStep == nil || interrupted) {
 		c.nextStep++
 		return native.StepDirective{}, nil
 	}
-	if (hasAssistantOutput || mode == stepSteered) && stepIndex == 0 && !c.req.UserMessagePersisted && !c.req.ReusePersistedUserMessage {
+	firstTurnOutput := stepIndex == 0 || failureCode != "" && c.turnRequestMessageID == ""
+	if (hasAssistantOutput || failureCode != "" || mode == stepSteered) && firstTurnOutput && !c.req.UserMessagePersisted && !c.req.ReusePersistedUserMessage {
 		messages = prependTurnUserMessage(c.req, messages)
 	}
 	storeReq := c.req
@@ -178,15 +182,19 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 	// collector in every step would attach the same accumulated assets again.
 	storeReq.OutboundAssetCollector = nil
 	opts := storeRoundOptions{
-		AllowPendingToolCalls: record.Deferred != nil,
-		ContextLifecycle:      c.rc.runConfig.ContextLifecycle,
-		ReasoningTiming:       reasoningTiming,
+		AllowEmptyAssistantText: failureCode != "",
+		AllowPendingToolCalls:   record.Deferred != nil,
+		ContextLifecycle:        c.rc.runConfig.ContextLifecycle,
+		ReasoningTiming:         reasoningTiming,
 	}
 	if interrupted {
 		opts.MessageMetadataByIndex = make(map[int]map[string]any)
 		for i, message := range messages {
 			if strings.EqualFold(strings.TrimSpace(message.Role), "assistant") {
 				opts.MessageMetadataByIndex[i] = map[string]any{messagepkg.AgentStepInterruptedMetadataKey: true}
+				if failureCode != "" {
+					opts.MessageMetadataByIndex[i][messagepkg.HistoryErrorCodeMetadataKey] = string(failureCode)
+				}
 			}
 		}
 	}
@@ -355,7 +363,7 @@ func (c *agentStepCommitter) err() error {
 	return c.commitErr
 }
 
-func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error {
+func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int, failureCode apperror.Code) error {
 	if c == nil {
 		return nil
 	}
@@ -364,6 +372,17 @@ func (c *agentStepCommitter) finish(ctx context.Context, inputTokens int) error 
 		c.mu.Unlock()
 		return nil
 	}
+	// A failed first step has no SDK output to checkpoint. Give its public
+	// failure the same fenced history boundary as an interrupted step.
+	needsFailure := len(c.persisted) == 0 && c.commitErr == nil && failureCode != "" && !c.req.SkipHistoryTurn
+	stepIndex := c.nextStep
+	c.mu.Unlock()
+	if needsFailure {
+		if _, err := c.persist(ctx, stepIndex, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("")}}, stepInterrupted, failureCode); err != nil {
+			return err
+		}
+	}
+	c.mu.Lock()
 	persisted := append([]messagepkg.Message(nil), c.persisted...)
 	memoryPersisted := append([]messagepkg.Message(nil), c.memoryPersisted...)
 	messages := append([]ModelMessage(nil), c.messages...)

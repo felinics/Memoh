@@ -55,6 +55,8 @@ The canonical source of truth for the full PostgreSQL schema is `db/postgres/mig
 - `providers` — LLM provider configurations (name, base_url, api_key)
 - `provider_oauth_tokens` — Provider-level OAuth tokens
 - `user_provider_oauth_tokens` — Per-user provider OAuth tokens
+- `chatgpt_runtime_hosts` — Stable registration host identity for each team-owned Server runtime
+- `chatgpt_provider_sessions` — Owner-bound, encrypted ChatGPT app registration, tokens, and pending authorization state
 - `models` — Model definitions (chat/embedding/speech types, modalities, reasoning, vision, tool calling)
 - `model_variants` — Model variant definitions (weight, metadata)
 - `search_providers` — Search engine provider configurations

@@ -139,8 +139,8 @@ func provideExternalAgentCodexServerHandler(handler *handlers.ExternalAgentCodex
 	return handler
 }
 
-func provideProviderOAuthHandler(providersService *providers.Service) *handlers.ProviderOAuthHandler {
-	return handlers.NewProviderOAuthHandler(providersService)
+func provideProviderOAuthHandler(log *slog.Logger, providersService *providers.Service) *handlers.ProviderOAuthHandler {
+	return handlers.NewProviderOAuthHandler(log, providersService)
 }
 
 func provideWebHandler(channelManager *channel.Manager, channelStore *channel.Store, hub *local.RouteHub, botService *bots.Service, accountService *accounts.Service, sessionService *sessionpkg.Service, resolver *application.Service, sessionRuntime *sessionruntime.Manager, mediaService *media.Service, audioService *audiopkg.Service, settingsService *settings.Service, rc *boot.RuntimeConfig, commandHandler *command.Handler, containerdHandler *handlers.ContainerdHandler) *handlers.LocalChannelHandler {

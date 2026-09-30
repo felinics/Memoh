@@ -46,6 +46,7 @@ import (
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
+	"github.com/felinics/memoh/internal/providerfail"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/reasoning"
 	"github.com/felinics/memoh/internal/settings"
@@ -105,6 +106,7 @@ type compactionRunner interface {
 
 // Service orchestrates chat with the internal agent.
 type Service struct {
+	providerService         *providers.Service
 	activeTurns             activeTurnTracker
 	resumeSecret            string
 	resumeScopes            SessionResumeScopeProvider
@@ -846,7 +848,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	lifecycleCause = err
 	if err != nil {
 		if stepCommitter != nil {
-			_ = stepCommitter.finish(ctx, rc.estimatedTokens)
+			_ = stepCommitter.finish(ctx, rc.estimatedTokens, snapshotFailureCode(false, err))
 		}
 		return ChatResponse{}, err
 	}
@@ -858,7 +860,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 		if result.Usage != nil {
 			inputTokens = result.Usage.InputTokens
 		}
-		if err := stepCommitter.finish(ctx, inputTokens); err != nil {
+		if err := stepCommitter.finish(ctx, inputTokens, ""); err != nil {
 			lifecycleCause = err
 			return ChatResponse{}, err
 		}
@@ -935,11 +937,11 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 
-	authService := providers.NewService(nil, s.queries, "")
+	authService := s.providerCredentialsService()
 	authCtx := oauthctx.WithUserID(ctx, p.UserID)
 	creds, err := authService.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
-		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("resolve provider credentials: %w", err)
+		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, providerfail.ChatGPT(ctx, s.logger, fmt.Errorf("resolve provider credentials: %w", err))
 	}
 
 	baseURL := providers.ProviderConfigString(provider, "base_url")
@@ -959,6 +961,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ClientType:            provider.ClientType,
 		APIKey:                creds.APIKey,
 		CodexAccountID:        creds.CodexAccountID,
+		TokenSource:           creds.TokenSource,
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
 		HTTPClient:            modelHTTPClient,
@@ -1883,4 +1886,12 @@ func extractNativeImageParts(attachments []any) []sdk.ImagePart {
 		}
 	}
 	return parts
+}
+
+func (s *Service) SetProviderService(service *providers.Service) { s.providerService = service }
+func (s *Service) providerCredentialsService() *providers.Service {
+	if s.providerService != nil {
+		return s.providerService
+	}
+	return providers.NewService(nil, s.queries, "")
 }

@@ -186,5 +186,7 @@ func TestEnforcesMaxOutputTokens(t *testing.T) {
 	t.Parallel()
 
 	assert.False(t, models.EnforcesMaxOutputTokens(models.ClientTypeOpenAICodex))
+	assert.False(t, models.EnforcesMaxOutputTokens(models.ClientTypeOpenAIChatGPT))
+	assert.True(t, models.IsLLMClientType(models.ClientTypeOpenAIChatGPT))
 	assert.True(t, models.EnforcesMaxOutputTokens(models.ClientTypeOpenAIResponses))
 }

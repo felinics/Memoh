@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { createPinia } from 'pinia'
+import { PiniaColada } from '@pinia/colada'
 // 独立文件而非并入 provider-form.test.ts:那边的 SettingsSection mock 只渲染
 // default slot(测试按钮在 #footer 里,渲染不出来),而渲染全部 slot 会改变
 // 既有用例的按钮 DOM 顺序。这里自建一套渲染全 slot 的 mock,互不干扰。
@@ -26,6 +28,8 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('@memohai/sdk', () => ({
+  getChatGptAuthorizationStatus: vi.fn(),
+  revokeChatGptAuthorization: vi.fn(),
   deleteProvidersByIdOauthToken: vi.fn(),
   getProvidersByIdOauthAuthorize: vi.fn(),
   getProvidersByIdOauthStatus: vi.fn(),
@@ -110,6 +114,8 @@ describe('provider test connection states', () => {
       ensureProvider: vi.fn(),
       saveProvider: vi.fn(),
     })
+    app.use(createPinia())
+    app.use(PiniaColada)
     app.config.globalProperties.$t = translate
     app.mount(root)
     await flushPromises()

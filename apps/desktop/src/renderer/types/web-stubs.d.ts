@@ -255,6 +255,11 @@ declare module '@memohai/web/utils/timezones' {
 
 declare module '@memohai/web/lib/desktop-shell' {
   import type { InjectionKey } from 'vue'
+  export interface DesktopChatGPTBridge {
+    connectChatGPT(request: { providerId: string, token: string }): Promise<{ok: true} | {ok: false, code: string}>
+    cancelChatGPT(): Promise<void>
+  }
+  export const DesktopChatGPTKey: InjectionKey<DesktopChatGPTBridge | undefined>
   export const DesktopShellKey: InjectionKey<boolean>
   export type DesktopRuntimeStatus = 'disabled' | 'connecting' | 'connected' | 'disconnected' | 'stopped' | 'error'
   export interface DesktopRuntimeState {

@@ -277,19 +277,20 @@ type subagentModelResolver func(
 
 // SpawnProvider exposes managed subagent control tools.
 type SpawnProvider struct {
-	agent          SpawnAgent
-	settings       *settings.Service
-	models         *models.Service
-	queries        dbstore.Queries
-	sessionService agentSessionService
-	messageService messagepkg.Service
-	systemPromptFn func(sessionType string) string
-	bgManager      *background.Manager
-	hookService    *hooks.Service
-	admitter       SubagentAdmitter
-	modelResolver  subagentModelResolver
-	coord          *agentCoordinator
-	logger         *slog.Logger
+	providerService *providers.Service
+	agent           SpawnAgent
+	settings        *settings.Service
+	models          *models.Service
+	queries         dbstore.Queries
+	sessionService  agentSessionService
+	messageService  messagepkg.Service
+	systemPromptFn  func(sessionType string) string
+	bgManager       *background.Manager
+	hookService     *hooks.Service
+	admitter        SubagentAdmitter
+	modelResolver   subagentModelResolver
+	coord           *agentCoordinator
+	logger          *slog.Logger
 }
 
 func NewSpawnProvider(
@@ -1832,7 +1833,10 @@ func (p *SpawnProvider) resolveModel(
 	if requestedModelID != "" && modelUUID != "" && modelInfo.ModelID != requestedModelID {
 		return resolvedSubagentModel{}, fmt.Errorf("pinned model id changed from %q to %q", requestedModelID, modelInfo.ModelID)
 	}
-	authResolver := providers.NewService(nil, p.queries, "")
+	authResolver := p.providerService
+	if authResolver == nil {
+		authResolver = providers.NewService(nil, p.queries, "")
+	}
 	authCtx := oauthctx.WithUserID(ctx, strings.TrimSpace(session.UserID))
 	creds, err := authResolver.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
@@ -1857,6 +1861,7 @@ func (p *SpawnProvider) resolveModel(
 		ClientType:            provider.ClientType,
 		APIKey:                creds.APIKey,
 		CodexAccountID:        creds.CodexAccountID,
+		TokenSource:           creds.TokenSource,
 		BaseURL:               baseURL,
 		ChatCompletionsCompat: chatCompletionsCompat,
 		ReasoningConfig:       reasoningConfig,
@@ -1952,3 +1957,5 @@ type sendMessageArgs struct {
 type listAgentsArgs struct{}
 
 type listModelsArgs struct{}
+
+func (p *SpawnProvider) SetProviderService(service *providers.Service) { p.providerService = service }

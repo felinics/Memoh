@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/chatgptplan"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -24,6 +25,7 @@ import (
 
 // Service handles provider operations.
 type Service struct {
+	planSessions *chatgptplan.SessionService
 	queries      dbstore.Queries
 	logger       *slog.Logger
 	httpClient   *http.Client
@@ -48,6 +50,8 @@ func NewService(log *slog.Logger, queries dbstore.Queries, callbackURL string, t
 		templatesDir: dir,
 	}
 }
+
+func (s *Service) SetChatGPTSessions(sessions *chatgptplan.SessionService) { s.planSessions = sessions }
 
 // Create creates a new provider.
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
@@ -314,10 +318,13 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 		return TestResponse{}, err
 	}
 
-	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
+	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil, creds.TokenSource)
 
 	start := time.Now()
 	result := sdkProvider.Test(ctx)
+	if clientType == models.ClientTypeOpenAIChatGPT && result.Error != nil {
+		return TestResponse{}, result.Error
+	}
 	message := providerTestMessage(result)
 
 	switch result.Status {
@@ -397,6 +404,17 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 		return s.fetchGitHubCopilotModels(ctx, provider)
 	}
 
+	if clientType == models.ClientTypeOpenAIChatGPT {
+		creds, err := s.ResolveModelCredentials(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
+		catalog, err := chatgptplan.NewProvider(creds.APIKey, creds.TokenSource, models.NewProviderHTTPClient(probeTimeout)).ModelCatalog(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return remoteModelsFromOpenAI(catalog, clientType), nil
+	}
 	return s.fetchRemoteModelsViaSDK(ctx, provider)
 }
 
@@ -507,7 +525,7 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 		return nil, fmt.Errorf("resolve credentials: %w", err)
 	}
 
-	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
+	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil, creds.TokenSource)
 
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -775,10 +793,15 @@ func preserveMaskedConfigSecret(merged, existing, incoming map[string]any, key s
 // preserving backward compatibility for legacy stored configs.
 func normalizeProviderConfig(clientType string, cfg map[string]any) map[string]any {
 	result := cloneConfig(cfg)
-	if models.ClientType(clientType) == models.ClientTypeGitHubCopilot {
+	if models.ClientType(clientType) == models.ClientTypeGitHubCopilot || models.ClientType(clientType) == models.ClientTypeOpenAIChatGPT {
 		delete(result, "api_key")
 		delete(result, configOAuthClientSecretKey)
 	}
+	if models.ClientType(clientType) == models.ClientTypeOpenAIChatGPT {
+		result["base_url"] = chatgptplan.APIBaseURL
+		delete(result, "oauth_client_id")
+	}
+
 	return result
 }
 

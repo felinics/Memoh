@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felinics/memoh/internal/chatgptplan"
 	memohcopilot "github.com/felinics/memoh/internal/copilot"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/models"
@@ -19,6 +20,7 @@ const openAIAuthClaimPath = "https://api.openai.com/auth"
 type ModelCredentials struct {
 	APIKey         string //nolint:gosec // runtime credential material used to construct SDK providers
 	CodexAccountID string
+	TokenSource    chatgptplan.TokenSource
 }
 
 type OpenAICodexOAuthCredentials struct {
@@ -43,6 +45,12 @@ func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.Pro
 			return ModelCredentials{}, err
 		}
 		return ModelCredentials{APIKey: copilotToken}, nil
+
+	case models.ClientTypeOpenAIChatGPT:
+		if s.planSessions == nil {
+			return ModelCredentials{}, chatgptplan.ErrEncryptionUnavailable
+		}
+		return ModelCredentials{TokenSource: s.planSessions.TokenSource(provider.ID.String())}, nil
 
 	case models.ClientTypeOpenAICodex:
 		token, err := s.GetValidAccessToken(ctx, provider.ID.String())

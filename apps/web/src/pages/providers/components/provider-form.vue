@@ -69,7 +69,7 @@
         </FormField>
 
         <FormField
-          v-if="form.values.client_type !== 'github-copilot'"
+          v-if="!isChatGPT && form.values.client_type !== 'github-copilot'"
           v-slot="{ componentField, errorMessage }"
           name="base_url"
         >
@@ -239,11 +239,99 @@
       </template>
     </SettingsSection>
 
+    <SettingsSection
+      v-if="isChatGPT"
+      :title="$t('provider.chatgpt.sectionTitle')"
+    >
+      <SettingsRow
+        :label="planStatus?.configured ? planStatus.email || $t('provider.chatgpt.account') : $t('provider.chatgpt.account')"
+        :description="planDescription"
+        stack="sm"
+      >
+        <Button
+          v-if="planConnecting"
+          type="button"
+          variant="outline"
+          @click="cancelPlanAuthorization"
+        >
+          {{ $t('common.cancel') }}
+        </Button>
+        <div
+          v-else-if="planStatus?.configured"
+          class="flex flex-wrap items-center gap-2"
+        >
+          <Button
+            v-if="planBridge"
+            type="button"
+            variant="outline"
+            :disabled="planRevoking"
+            @click="connectPlanAuthorization"
+          >
+            {{ $t('provider.chatgpt.reconnect') }}
+          </Button>
+          <ConfirmPopover
+            :message="$t('provider.oauth.revokeConfirm')"
+            :cancel-text="$t('common.cancel')"
+            :confirm-text="$t('provider.oauth.revoke')"
+            :loading="planRevoking"
+            @confirm="revokePlanAuthorization"
+          >
+            <template #trigger>
+              <Button
+                type="button"
+                variant="destructive"
+                :loading="planRevoking"
+              >
+                {{ $t('provider.oauth.revoke') }}
+              </Button>
+            </template>
+          </ConfirmPopover>
+        </div>
+        <Button
+          v-else-if="planBridge"
+          type="button"
+          variant="outline"
+          :disabled="planStatus?.available === false || (!!provider?.id && planState.status === 'pending')"
+          @click="connectPlanAuthorization"
+        >
+          {{ $t('provider.chatgpt.signIn') }}
+        </Button>
+      </SettingsRow>
+      <SettingsRow
+        v-if="planStatus?.configured"
+        :label="$t('provider.chatgpt.usage')"
+        :description="planStatus.usage_enabled ? $t('provider.chatgpt.sharedUsage') : $t('provider.chatgpt.permissionMissing')"
+        stack="sm"
+      >
+        <Button
+          v-if="!planStatus.usage_enabled && planBridge"
+          type="button"
+          variant="outline"
+          :disabled="planConnecting"
+          @click="connectPlanAuthorization"
+        >
+          {{ $t('provider.chatgpt.enableUsage') }}
+        </Button>
+        <Button
+          v-else
+          type="button"
+          variant="outline"
+          as-child
+        >
+          <a
+            href="https://chatgpt.com/settings/usage"
+            target="_blank"
+            rel="noopener noreferrer"
+          >{{ $t('provider.chatgpt.manageUsage') }}</a>
+        </Button>
+      </SettingsRow>
+    </SettingsSection>
+
     <!-- OAuth 账号:设备码授权。结构镜像 profile/connected-accounts-section(同一
          形状的已重构参考):一行账号状态 + 行内动作,等待输码时才在卡片内追加
          居中的验证码块(倒计时 + 复制并打开),轮询在后台静默完成授权。 -->
     <SettingsSection
-      v-if="isManagedOAuthClientType(form.values.client_type)"
+      v-if="!isChatGPT && isManagedOAuthClientType(form.values.client_type)"
       :title="$t('provider.oauth.sectionTitle')"
       :class="{ 'mt-6': !isManagedOAuthProvider }"
     >
@@ -384,11 +472,16 @@ import {
   isManagedOAuthClientType,
   MANUAL_LLM_CLIENT_TYPE_LIST,
 } from '@/constants/client-types'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
+import { useQuery } from '@pinia/colada'
+import { DesktopChatGPTKey } from '@/lib/desktop-shell'
+import { sdkAuthQuery } from '@/lib/api-client'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import { useForm } from 'vee-validate'
 import {
+  getChatGptAuthorizationStatus,
+  revokeChatGptAuthorization,
   deleteProvidersByIdOauthToken,
   getProvidersByIdOauthAuthorize,
   getProvidersByIdOauthStatus,
@@ -510,10 +603,10 @@ async function runTest() {
     }
   } catch (err: unknown) {
     if (generation !== testGeneration) return
-    const message = err instanceof Error ? err.message : ''
-    testError.value = message ? formatTestError(message) : t('provider.testFailed')
+    testError.value = resolveApiErrorMessage(err, t('provider.testFailed'))
   } finally {
     testLoading.value = false
+    if (generation === testGeneration && isChatGPT.value) void refetchPlan()
   }
 }
 
@@ -573,7 +666,7 @@ const providerSchema = toTypedSchema(z.object({
       message: t('provider.apiKeyRequired'),
     })
   }
-  if (value.client_type !== 'github-copilot' && !value.base_url?.trim()) {
+  if (value.client_type !== 'github-copilot' && value.client_type !== 'openai-chatgpt' && !value.base_url?.trim()) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['base_url'],
@@ -754,8 +847,67 @@ function clearDevicePollTimer() {
   }
 }
 
+const planBridge = inject(DesktopChatGPTKey, undefined)
+const isChatGPT = computed(() => form.values.client_type === 'openai-chatgpt')
+let activePlanProviderId = ''
+const planConnecting = ref(false)
+const planRevoking = ref(false)
+const { state: planState, refetch: refetchPlan } = useQuery({
+  key: () => ['providers', props.provider?.id || '', 'chatgpt-status'],
+  enabled: () => isChatGPT.value && !!props.provider?.id,
+  query: async () => {
+    if (!props.provider?.id) return null
+    const { data } = await getChatGptAuthorizationStatus({ path: { id: props.provider.id }, throwOnError: true })
+    return data ?? null
+  },
+})
+const planStatus = computed(() => planState.value.data)
+const planDescription = computed(() => {
+  if (planConnecting.value) return t('provider.chatgpt.awaitingSignIn')
+  if (planStatus.value?.available === false) return t('errors.chatgpt.encryption_unavailable')
+  if (planState.value.status === 'error') return resolveApiErrorMessage(planState.value.error, t('provider.oauth.authorizeFailed'))
+  if (planStatus.value?.needs_recovery) return t('provider.chatgpt.needsRecovery')
+  if (!planBridge && !planStatus.value?.configured) return t('provider.chatgpt.desktopRequired')
+  return planStatus.value?.configured ? t('provider.chatgpt.connected') : t('provider.chatgpt.connectDescription')
+})
+async function connectPlanAuthorization() {
+  if (!planBridge || planConnecting.value) return
+  planConnecting.value = true
+  try {
+    const provider = props.provider?.id ? props.provider : await props.ensureProvider()
+    const token = sdkAuthQuery().token
+    if (!provider.id || !token) throw { code: 'chatgpt.authorization_invalid' }
+    activePlanProviderId = provider.id
+    const result = await planBridge.connectChatGPT({ providerId: provider.id, token })
+    if (!result.ok) {
+      if (result.code !== 'chatgpt.authorization_cancelled') throw result
+      return
+    }
+    await refetchPlan()
+    if (planStatus.value?.usage_enabled) {
+      try { await syncProviderModelCatalog(provider.id) } catch { toast.error(t('models.refreshFailed')) }
+    }
+    toast.success(t('provider.oauth.authorizeSuccess'))
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t('provider.oauth.authorizeFailed')))
+  } finally { planConnecting.value = false; activePlanProviderId = '' }
+}
+async function cancelPlanAuthorization() { await planBridge?.cancelChatGPT() }
+async function revokePlanAuthorization() {
+  if (!props.provider?.id || planRevoking.value) return
+  planRevoking.value = true
+  try {
+    await revokeChatGptAuthorization({ path: { id: props.provider.id }, throwOnError: true })
+    await refetchPlan()
+    toast.success(t('provider.oauth.revokeSuccess'))
+  } catch (error) { toast.error(resolveApiErrorMessage(error, t('provider.oauth.revokeFailed'))) }
+  finally { planRevoking.value = false }
+}
+watch(() => props.provider?.id, (id) => { if (planConnecting.value && activePlanProviderId && id !== activePlanProviderId) void planBridge?.cancelChatGPT() })
+onBeforeUnmount(() => { if (planConnecting.value) void planBridge?.cancelChatGPT() })
+
 async function fetchOAuthStatus(): Promise<ProvidersOAuthStatus | null> {
-  if (!props.provider?.id) return null
+  if (!props.provider?.id || isChatGPT.value) return null
   const generation = ++oauthStatusLoadGeneration
   oauthStatusLoading.value = true
   try {

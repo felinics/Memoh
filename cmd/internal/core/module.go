@@ -15,13 +15,13 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channelaccess"
 	"github.com/felinics/memoh/internal/chat/event"
+	"github.com/felinics/memoh/internal/chatgptplan"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/connectors"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/mcp"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
-	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthclients"
 	"github.com/felinics/memoh/internal/policy"
 	"github.com/felinics/memoh/internal/providertemplates"
@@ -91,7 +91,8 @@ func ServerModule() fx.Option {
 			provideMemoryLLM,
 			memprovider.NewService,
 			provideMemoryProviderRegistry,
-			models.NewService,
+			provideModelsService,
+			chatgptplan.NewSessionService,
 			agentcredential.NewService,
 			agentcredential.NewAuthorizationService,
 			provideACPRunner,
