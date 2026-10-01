@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 func (m *Manager) RunRef(ctx context.Context, botID, sessionID, runID string) (RunRef, bool, error) {
@@ -970,6 +971,13 @@ func newCommandResult(request Command, err error) Command {
 		result.ErrorCode = "payload_conflict"
 	default:
 		result.ErrorCode = "runtime_command_failed"
+		if code := apperror.CodeOf(err); code != "" {
+			if _, ok := apperror.Lookup(code); ok {
+				// A catalogued failure crosses as its code and catalog args, the
+				// way an RPC error envelope carries one; its cause stays here.
+				result.ErrorCode, result.ErrorArgs, result.Error = string(code), apperror.ArgsOf(err), string(code)
+			}
+		}
 	}
 	return result
 }
@@ -1203,6 +1211,11 @@ func commandResultError(result Command) error {
 	case "payload_conflict":
 		return fmt.Errorf("%w: %s", ErrCommandPayloadConflict, result.Error)
 	default:
+		if code := apperror.Code(result.ErrorCode); code != "" {
+			if _, ok := apperror.Lookup(code); ok {
+				return apperror.New(code, result.ErrorArgs)
+			}
+		}
 		return errors.New(result.Error)
 	}
 }

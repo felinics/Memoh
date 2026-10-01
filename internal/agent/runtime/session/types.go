@@ -400,6 +400,9 @@ type Command struct {
 	CreatedAt        time.Time       `json:"created_at"`
 	ExpiresAt        time.Time       `json:"expires_at,omitempty"`
 
+	// ErrorArgs are the catalog args of a failure whose ErrorCode is a catalog code.
+	ErrorArgs map[string]string `json:"error_args,omitempty"`
+
 	// StreamOutput is fixed at admission and travels to the owner with the command.
 	// It must not depend on subscriber liveness: disconnecting cannot change a run.
 	StreamOutput bool `json:"stream_output,omitempty"`
