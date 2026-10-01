@@ -162,9 +162,11 @@ func (s *Server) runtimeControlError(ctx context.Context, err error) error {
 	return s.mapError(ctx, "runtime control", err)
 }
 
+// runtimeControlClientError restores the apperror a runtime control failure
+// carries in the legacy prefix. mapClientError reads the error envelope.
 func runtimeControlClientError(err error) error {
 	if status.Code(err) == codes.FailedPrecondition && strings.HasPrefix(status.Convert(err).Message(), runtimeControlErrorPrefix) {
-		return apperror.New(apperror.Code(strings.TrimPrefix(status.Convert(err).Message(), runtimeControlErrorPrefix)), nil)
+		return rpc.Restored(apperror.New(apperror.Code(strings.TrimPrefix(status.Convert(err).Message(), runtimeControlErrorPrefix)), nil), err)
 	}
 	return mapClientError(err)
 }

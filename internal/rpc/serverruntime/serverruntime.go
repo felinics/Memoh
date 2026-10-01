@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/channel/inbound"
 	"github.com/felinics/memoh/internal/command"
@@ -91,16 +92,28 @@ func (c *Client) EnqueueFollowUp(ctx context.Context, input inbound.QueueCommand
 func (c *Client) queueCall(ctx context.Context, method string, input inbound.QueueCommandInput) error {
 	err := c.call(ctx, method, input, nil)
 	if code := queueCommandCode(err); code != "" {
-		return inbound.NewQueueCommandError(code)
+		return intrpc.Restored(inbound.NewQueueCommandError(code), intrpc.Received(err))
 	}
 	return err
 }
 
+// queueCommandCode reads the queue code of a failed queue call: the reason of
+// the error envelope, or else the text of the legacy encoding. Only the stable
+// queue vocabulary is accepted.
 func queueCommandCode(err error) string {
 	if err == nil {
 		return ""
 	}
+	if reason, ok := intrpc.ReasonOf(err); ok {
+		return inbound.NormalizeQueueCommandCode(reason)
+	}
 	return inbound.NormalizeQueueCommandCode(err.Error())
+}
+
+// queueStatus is the error envelope of a queue code. Every queue code is a
+// catalog code, so the envelope is that of the catalog error.
+func queueStatus(code string) error {
+	return intrpc.AppErrorStatus(apperror.New(apperror.Code(code), nil))
 }
 
 func (c *Client) ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skills.ResolvedSkill, error) {

@@ -238,18 +238,12 @@ func (s *Server) AdvancePlainTextUserInput(ctx context.Context, req *turnpb.Json
 // mapError maps a turn error to the status the client receives. A status that
 // does not carry the cause hands it to the RPC result line first.
 func (*Server) mapError(ctx context.Context, operation string, err error) error {
+	if entry, ok := turnReasons.Lookup(err); ok {
+		// The legacy encoding: the client tells the sentinels apart by code,
+		// and a deferred turn by its message.
+		return status.Error(entry.Code, entry.Message)
+	}
 	switch {
-	case errors.Is(err, turn.ErrSessionBusy):
-		return status.Error(codes.Aborted, "thread busy")
-	case errors.Is(err, turn.ErrDuplicateTurn):
-		return status.Error(codes.AlreadyExists, "duplicate turn")
-	case errors.Is(err, turn.ErrTurnDeferred):
-		// A deferred turn is an accepted admission result, not a failure.
-		// Preserve it across the process boundary so channel adapters can
-		// acknowledge the queued message.
-		return status.Error(codes.ResourceExhausted, turnDeferredStatusMessage)
-	case errors.Is(err, turn.ErrTeamNotServed):
-		return status.Error(codes.PermissionDenied, "team is not served")
 	case errors.Is(err, context.Canceled):
 		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, err))
 		return status.Error(codes.Canceled, "turn canceled")

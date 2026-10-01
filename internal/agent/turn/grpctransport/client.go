@@ -15,6 +15,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	"github.com/felinics/memoh/internal/rpc"
 )
 
 type Client struct {
@@ -237,22 +238,31 @@ func (h *runHandle) pump() {
 	}
 }
 
+// mapClientError restores the turn failure a status carries: first from the
+// error envelope, then from the legacy status codes. A restored failure keeps
+// the received status on its chain.
 func mapClientError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if restored := turnReasons.Decode(err); restored != nil {
+		return restored
+	}
+	if restored := rpc.DecodeAppError(err); restored != nil {
+		return restored
+	}
 	switch status.Code(err) {
 	case codes.Aborted:
-		return turn.ErrSessionBusy
+		return rpc.Restored(turn.ErrSessionBusy, err)
 	case codes.AlreadyExists:
-		return turn.ErrDuplicateTurn
+		return rpc.Restored(turn.ErrDuplicateTurn, err)
 	case codes.ResourceExhausted:
 		if status.Convert(err).Message() == turnDeferredStatusMessage {
-			return turn.ErrTurnDeferred
+			return rpc.Restored(turn.ErrTurnDeferred, err)
 		}
 		return err
 	case codes.PermissionDenied:
-		return turn.ErrTeamNotServed
+		return rpc.Restored(turn.ErrTeamNotServed, err)
 	case codes.Canceled:
 		return context.Canceled
 	case codes.DeadlineExceeded:
