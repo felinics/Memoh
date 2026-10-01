@@ -4683,6 +4683,13 @@ definitions:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
+      memory:
+        description: |-
+          Memory is usage of the memory LLM (extract / decide / compact), which
+          runs outside any session.
+        items:
+          $ref: '#/definitions/handlers.DailyTokenUsage'
+        type: array
       schedule:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
@@ -6681,6 +6688,11 @@ definitions:
           MemoryEnabled reports whether the bot uses Built-in Memory. It is derived
           from MemoryProviderID, which stays internal to the server.
         type: boolean
+      memory_llm_model_id:
+        description: |-
+          MemoryLLMModelID is the LLM behind memory extract / decide / compact.
+          Empty falls back to the chat model.
+        type: string
       overlay_config:
         additionalProperties: {}
         type: object
@@ -6805,6 +6817,8 @@ definitions:
         description: MemoryEnabled turns Built-in Memory on or off; nil keeps the
           current state.
         type: boolean
+      memory_llm_model_id:
+        type: string
       overlay_config:
         additionalProperties: {}
         type: object
@@ -14083,8 +14097,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, discuss, schedule, or acp_agent.
-          acp_agent filters by runtime.'
+      - description: 'Optional session type: chat, discuss, schedule, acp_agent, or
+          memory. acp_agent filters by runtime; memory selects memory LLM calls.'
         in: query
         name: session_type
         type: string
@@ -14132,8 +14146,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, discuss, schedule, or acp_agent.
-          acp_agent filters by runtime.'
+      - description: 'Optional session type: chat, discuss, schedule, acp_agent, or
+          memory. acp_agent filters by runtime; memory selects memory LLM calls.'
         in: query
         name: session_type
         type: string

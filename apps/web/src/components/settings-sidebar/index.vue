@@ -119,7 +119,6 @@ import {
   ChartNoAxesColumn,
   ChevronLeft,
   CircleUserRound,
-  Database,
   Globe,
   Info,
   Keyboard,
@@ -283,7 +282,6 @@ const navGroups = computed<NavGroup[]>(() => [
     label: t('sidebar.group.capabilities'),
     items: [
       { title: t('sidebar.providers'), name: 'providers', icon: Box },
-      { title: t('sidebar.memory'), name: 'memory', icon: Database },
       { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
       { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
       { title: t('sidebar.video'), name: 'video', icon: Video },

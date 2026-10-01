@@ -480,7 +480,6 @@
     "runtimes": "Computers",
     "providers": "Providers",
     "webSearch": "Web Search",
-    "memory": "Memory",
     "group": {
       "capabilities": "Models & Capabilities",
       "team": "Team",
@@ -1897,7 +1896,6 @@
     "graphTitle": "Memory Graph",
     "graphNodes": "Memories",
     "graphEdges": "Links",
-    "semanticIndexDescription": "Postgres deployments can use an embedding model with pgvector for semantic graph seeds. SQLite and Local stay graph-only.",
     "semanticEmbeddingModel": "Embedding Model",
     "semanticEmbeddingModelPlaceholder": "Select embedding model",
     "graphEmpty": "No memories yet — add some to see the graph."
@@ -3499,7 +3497,11 @@
       "ingestSuccess": "Ingested {n} memories from files",
       "ingestFailed": "Failed to ingest memories from files",
       "advanced": {
-        "entryTitle": "Index & sync",
+        "entryTitle": "Advanced",
+        "memoryModel": "Memory model",
+        "memoryModelDescription": "Model used to extract and organize memories.",
+        "memoryModelPlaceholder": "Follow chat model (default)",
+        "embeddingModelDescription": "Gives graph recall a semantic starting point. Shared by every bot in this team.",
         "syncAction": "Manual sync",
         "syncSuccess": "Sync completed: {fsCount} source entries, {restoredCount} restored, {storageCount} indexed.",
         "syncFailed": "Manual sync failed",
@@ -3719,6 +3721,7 @@
     "discuss": "Discuss",
     "acpAgent": "Agent",
     "schedule": "Schedule",
+    "memory": "Memory",
     "inputTokens": "Input Tokens",
     "outputTokens": "Output Tokens",
     "dateFrom": "From",

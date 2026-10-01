@@ -481,7 +481,6 @@
     "providers": "模型服务商",
     "settings": "设置",
     "webSearch": "搜索引擎",
-    "memory": "记忆管理",
     "group": {
       "capabilities": "模型与能力",
       "team": "团队",
@@ -1897,7 +1896,6 @@
     "graphTitle": "记忆图谱",
     "graphNodes": "记忆",
     "graphEdges": "关联",
-    "semanticIndexDescription": "Postgres 部署可用 Embedding 模型和 pgvector 为图谱召回提供语义起点。SQLite 和 Local 保持纯图谱。",
     "semanticEmbeddingModel": "Embedding 模型",
     "semanticEmbeddingModelPlaceholder": "选择 Embedding 模型",
     "graphEmpty": "还没有记忆——添加一些以查看图谱。"
@@ -3499,7 +3497,11 @@
       "ingestSuccess": "已从文件导入 {n} 条记忆",
       "ingestFailed": "从文件导入记忆失败",
       "advanced": {
-        "entryTitle": "索引与同步",
+        "entryTitle": "高级",
+        "memoryModel": "记忆模型",
+        "memoryModelDescription": "用于提取和整理记忆的模型。",
+        "memoryModelPlaceholder": "跟随对话模型（默认）",
+        "embeddingModelDescription": "为图谱召回提供语义起点。本团队所有 Bot 共用此设置。",
         "syncAction": "手动同步",
         "syncSuccess": "同步完成：源条目 {fsCount} 条，修复 {restoredCount} 条，索引现有 {storageCount} 条。",
         "syncFailed": "手动同步失败",
@@ -3719,6 +3721,7 @@
     "discuss": "讨论",
     "acpAgent": "Agent",
     "schedule": "定时任务",
+    "memory": "记忆",
     "inputTokens": "输入 Tokens",
     "outputTokens": "输出 Tokens",
     "dateFrom": "开始日期",

@@ -10347,7 +10347,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "description": "Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls.",
                         "name": "session_type",
                         "in": "query"
                     }
@@ -10420,7 +10420,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.",
+                        "description": "Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls.",
                         "name": "session_type",
                         "in": "query"
                     },
@@ -23644,6 +23644,13 @@ const docTemplate = `{
                         "$ref": "#/definitions/handlers.DailyTokenUsage"
                     }
                 },
+                "memory": {
+                    "description": "Memory is usage of the memory LLM (extract / decide / compact), which\nruns outside any session.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.DailyTokenUsage"
+                    }
+                },
                 "schedule": {
                     "type": "array",
                     "items": {
@@ -26413,6 +26420,10 @@ const docTemplate = `{
                     "description": "MemoryEnabled reports whether the bot uses Built-in Memory. It is derived\nfrom MemoryProviderID, which stays internal to the server.",
                     "type": "boolean"
                 },
+                "memory_llm_model_id": {
+                    "description": "MemoryLLMModelID is the LLM behind memory extract / decide / compact.\nEmpty falls back to the chat model.",
+                    "type": "string"
+                },
                 "overlay_config": {
                     "type": "object",
                     "additionalProperties": {}
@@ -26584,6 +26595,9 @@ const docTemplate = `{
                 "memory_enabled": {
                     "description": "MemoryEnabled turns Built-in Memory on or off; nil keeps the current state.",
                     "type": "boolean"
+                },
+                "memory_llm_model_id": {
+                    "type": "string"
                 },
                 "overlay_config": {
                     "type": "object",

@@ -2603,6 +2603,11 @@ export type HandlersTokenUsageResponse = {
     by_model?: Array<HandlersModelTokenUsage>;
     chat?: Array<HandlersDailyTokenUsage>;
     discuss?: Array<HandlersDailyTokenUsage>;
+    /**
+     * Memory is usage of the memory LLM (extract / decide / compact), which
+     * runs outside any session.
+     */
+    memory?: Array<HandlersDailyTokenUsage>;
     schedule?: Array<HandlersDailyTokenUsage>;
 };
 
@@ -3909,6 +3914,11 @@ export type SettingsSettings = {
      * from MemoryProviderID, which stays internal to the server.
      */
     memory_enabled?: boolean;
+    /**
+     * MemoryLLMModelID is the LLM behind memory extract / decide / compact.
+     * Empty falls back to the chat model.
+     */
+    memory_llm_model_id?: string;
     overlay_config?: {
         [key: string]: unknown;
     };
@@ -3980,6 +3990,7 @@ export type SettingsUpsertRequest = {
      * MemoryEnabled turns Built-in Memory on or off; nil keeps the current state.
      */
     memory_enabled?: boolean;
+    memory_llm_model_id?: string;
     overlay_config?: {
         [key: string]: unknown;
     };
@@ -12473,7 +12484,7 @@ export type GetBotsByBotIdTokenUsageData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.
+         * Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls.
          */
         session_type?: string;
     };
@@ -12528,7 +12539,7 @@ export type GetBotsByBotIdTokenUsageRecordsData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.
+         * Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls.
          */
         session_type?: string;
         /**

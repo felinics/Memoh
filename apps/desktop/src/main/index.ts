@@ -361,7 +361,6 @@ function openBotWorkspace(botId: string): void {
 const SETTINGS_TRAY_ITEMS: TraySettingsItem[] = [
   { label: 'Bots', target: '/settings/bots' },
   { label: 'Providers', target: '/settings/providers' },
-  { label: 'Memory', target: '/settings/memory' },
   { label: 'Web Search', target: '/settings/web-search' },
   { label: 'Voice', target: '/settings/voice' },
   { label: 'Supermarket', target: '/settings/supermarket' },

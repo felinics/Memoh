@@ -320,6 +320,17 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 			compactionModelUUID = modelID
 		}
 	}
+	memoryLLMModelUUID := pgtype.UUID{}
+	memoryLLMModelIDSet := req.MemoryLLMModelID != nil
+	if req.MemoryLLMModelID != nil {
+		if value := strings.TrimSpace(*req.MemoryLLMModelID); value != "" {
+			modelID, err := s.resolveModelUUID(ctx, value)
+			if err != nil {
+				return Settings{}, err
+			}
+			memoryLLMModelUUID = modelID
+		}
+	}
 	imageModelUUID := pgtype.UUID{}
 	imageModelIDSet := req.ImageModelID != nil
 	if req.ImageModelID != nil {
@@ -465,6 +476,8 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		ChatAcpProjectMode:         current.ChatACPProjectMode,
 		CompactionModelIDSet:       compactionModelIDSet,
 		CompactionModelID:          compactionModelUUID,
+		MemoryLlmModelIDSet:        memoryLLMModelIDSet,
+		MemoryLlmModelID:           memoryLLMModelUUID,
 		ImageModelID:               imageModelUUID,
 		ImageModelIDSet:            imageModelIDSet,
 		SearchProviderID:           searchProviderUUID,
@@ -701,6 +714,7 @@ func normalizeBotSettingsReadRow(row sqlc.GetSettingsByBotIDRow) Settings {
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
 		row.CompactionModelID,
+		row.MemoryLlmModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
 		row.FetchProviderID,
@@ -733,6 +747,7 @@ func normalizeBotSettingsWriteRow(row sqlc.UpsertBotSettingsRow) Settings {
 		row.ChatAcpProjectPath,
 		row.ChatAcpProjectMode,
 		row.CompactionModelID,
+		row.MemoryLlmModelID,
 		row.ImageModelID,
 		row.SearchProviderID,
 		row.FetchProviderID,
@@ -764,6 +779,7 @@ func normalizeBotSettingsFields(
 	chatACPProjectPath string,
 	chatACPProjectMode string,
 	compactionModelID pgtype.UUID,
+	memoryLLMModelID pgtype.UUID,
 	imageModelID pgtype.UUID,
 	searchProviderID pgtype.UUID,
 	fetchProviderID pgtype.UUID,
@@ -813,6 +829,9 @@ func normalizeBotSettingsFields(
 	}
 	if compactionModelID.Valid {
 		settings.CompactionModelID = uuid.UUID(compactionModelID.Bytes).String()
+	}
+	if memoryLLMModelID.Valid {
+		settings.MemoryLLMModelID = uuid.UUID(memoryLLMModelID.Bytes).String()
 	}
 	if imageModelID.Valid {
 		settings.ImageModelID = uuid.UUID(imageModelID.Bytes).String()

@@ -873,6 +873,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.TtsModelID = current.TtsModelID
 				eff.TranscriptionModelID = current.TranscriptionModelID
 				eff.CompactionModelID = current.CompactionModelID
+				eff.MemoryLLMModelID = current.MemoryLLMModelID
 				eff.DiscussProbeModelID = current.DiscussProbeModelID
 			}
 			if !importSettings {
@@ -941,6 +942,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		CompactionThreshold:     &compactionThreshold,
 		CompactionTargetPercent: &compactionTargetPercent,
 		CompactionModelID:       ptrString(modelID(eff.CompactionModelID, deps.models)),
+		MemoryLLMModelID:        ptrString(modelID(eff.MemoryLLMModelID, deps.models)),
 		DiscussProbeModelID:     modelID(eff.DiscussProbeModelID, deps.models),
 		PersistFullToolResults:  &persistFullToolResults,
 		ShowToolCallsInIM:       &showToolCalls,

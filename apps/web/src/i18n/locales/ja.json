@@ -477,7 +477,6 @@
     "runtimes": "コンピューター",
     "providers": "プロバイダー",
     "webSearch": "ウェブ検索",
-    "memory": "メモリ",
     "group": {
       "capabilities": "モデルと機能",
       "team": "チーム",
@@ -1866,7 +1865,6 @@
     "graphTitle": "メモリグラフ",
     "graphNodes": "記憶",
     "graphEdges": "リンク",
-    "semanticIndexDescription": "Postgres では Embedding Model と pgvector でグラフ想起のセマンティック起点を作れます。SQLite と Local はグラフのみです。",
     "semanticEmbeddingModel": "Embedding Model",
     "semanticEmbeddingModelPlaceholder": "Embedding Modelを選択",
     "graphEmpty": "記憶がまだありません — 追加するとグラフが表示されます。"
@@ -3498,7 +3496,11 @@
       "ingestSuccess": "{n} 件のメモリをファイルから取り込みました",
       "ingestFailed": "ファイルからのメモリ取り込みに失敗しました",
       "advanced": {
-        "entryTitle": "インデックスと同期",
+        "entryTitle": "詳細",
+        "memoryModel": "記憶Model",
+        "memoryModelDescription": "記憶の抽出と整理に使うModelです。",
+        "memoryModelPlaceholder": "チャットModelに従う (デフォルト)",
+        "embeddingModelDescription": "グラフ検索に意味的な起点を与えます。このチームのすべてのBotで共有されます。",
         "syncAction": "手動同期",
         "syncSuccess": "同期が完了しました: {fsCount} ソース エントリ、{restoredCount} が復元され、{storageCount} がインデックス付けされました。",
         "syncFailed": "手動同期に失敗しました",
@@ -3713,6 +3715,7 @@
     "discuss": "ディスカッション",
     "acpAgent": "Agent",
     "schedule": "スケジュール",
+    "memory": "記憶",
     "inputTokens": "入力トークン",
     "outputTokens": "出力トークン",
     "dateFrom": "から",

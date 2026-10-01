@@ -1,9 +1,11 @@
 <template>
-  <!-- Memory "Index & sync": one ActionCard row on the Memories tab opening a
-       dialog. The dialog body is a single row in the owner rhythm — backend
-       name + health on the left, the sync action on the right — same shape as
-       every other action row in the app. Index counts stay on Overview; path
-       details were dropped (copy discipline: the user already knows them). -->
+  <!-- Memory "Advanced": one ActionCard row on the Memories tab opening a
+       dialog. Memory works out of the box on the bot's chat model, so the
+       knobs a new user never needs to understand live here instead of on a
+       settings page: the memory model override, the team's embedding model,
+       and manual index sync. Each row follows the owner rhythm — label +
+       description on the left, the control on the right — and commits on
+       change. Index counts stay on Overview. -->
   <section class="mb-6">
     <ActionCard
       :title="$t('bots.memory.advanced.entryTitle')"
@@ -20,25 +22,70 @@
           <DialogTitle>{{ $t('bots.memory.advanced.entryTitle') }}</DialogTitle>
         </DialogHeader>
         <DialogBody>
-          <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
-            <div class="min-w-0">
-              <p class="text-sm font-medium text-foreground">
-                {{ $t('memory.builtinTitle') }}
-              </p>
-              <p class="mt-0.5 text-xs text-muted-foreground">
-                {{ syncDescription }}
-              </p>
+          <div class="flex flex-col gap-4">
+            <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-foreground">
+                  {{ $t('bots.memory.advanced.memoryModel') }}
+                </p>
+                <p class="mt-0.5 text-xs text-muted-foreground">
+                  {{ $t('bots.memory.advanced.memoryModelDescription') }}
+                </p>
+              </div>
+              <div class="w-52 shrink-0">
+                <ModelSelect
+                  v-model="memoryModelId"
+                  :models="models"
+                  :providers="providers"
+                  popover-align="end"
+                  model-type="chat"
+                  :placeholder="$t('bots.memory.advanced.memoryModelPlaceholder')"
+                  :none-label="$t('bots.memory.advanced.memoryModelPlaceholder')"
+                />
+              </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              class="shrink-0"
-              :disabled="!memoryStatus?.can_manual_sync"
-              :loading="syncLoading"
-              @click="handleSync"
-            >
-              {{ $t('bots.memory.advanced.syncAction') }}
-            </Button>
+
+            <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-foreground">
+                  {{ $t('memory.semanticEmbeddingModel') }}
+                </p>
+                <p class="mt-0.5 text-xs text-muted-foreground">
+                  {{ $t('bots.memory.advanced.embeddingModelDescription') }}
+                </p>
+              </div>
+              <div class="w-52 shrink-0">
+                <ModelSelect
+                  v-model="embeddingModelId"
+                  :models="models"
+                  :providers="providers"
+                  popover-align="end"
+                  model-type="embedding"
+                  :placeholder="$t('memory.semanticEmbeddingModelPlaceholder')"
+                />
+              </div>
+            </div>
+
+            <div class="flex min-h-[2.25rem] items-center justify-between gap-4">
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-foreground">
+                  {{ $t('memory.builtinTitle') }}
+                </p>
+                <p class="mt-0.5 text-xs text-muted-foreground">
+                  {{ syncDescription }}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                class="shrink-0"
+                :disabled="!memoryStatus?.can_manual_sync"
+                :loading="syncLoading"
+                @click="handleSync"
+              >
+                {{ $t('bots.memory.advanced.syncAction') }}
+              </Button>
+            </div>
           </div>
         </DialogBody>
       </DialogPanel>
@@ -47,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { SlidersHorizontal } from 'lucide-vue-next'
 import {
@@ -60,9 +107,20 @@ import {
   DialogTitle,
   toast,
 } from '@felinic/ui'
-import { postBotsByBotIdMemoryRebuild } from '@memohai/sdk'
+import { useQuery, useQueryCache } from '@pinia/colada'
+import {
+  getBotsByBotIdSettings,
+  getMemoryConfig,
+  getModels,
+  getProviders,
+  postBotsByBotIdMemoryRebuild,
+  putBotsByBotIdSettings,
+  putMemoryConfig,
+} from '@memohai/sdk'
 import type { AdaptersMemoryStatusResponse } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { useServerSyncedScalar } from '@/composables/use-server-synced-form'
+import ModelSelect from './model-select.vue'
 
 const props = defineProps<{
   botId: string
@@ -77,6 +135,98 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const dialogOpen = ref(false)
 const syncLoading = ref(false)
+const queryCache = useQueryCache()
+
+// The dialog's queries only run while it is open; the keys are shared with
+// the bot settings page and the model pickers so their caches stay one.
+const { data: settingsData } = useQuery({
+  key: () => ['bot-settings', props.botId],
+  query: async () => {
+    const { data } = await getBotsByBotIdSettings({ path: { bot_id: props.botId }, throwOnError: true })
+    return data
+  },
+  enabled: () => dialogOpen.value && !!props.botId,
+})
+
+const { data: memoryConfigData } = useQuery({
+  key: () => ['memory-config'],
+  query: async () => {
+    const { data } = await getMemoryConfig({ throwOnError: true })
+    return data
+  },
+  enabled: () => dialogOpen.value,
+})
+
+const { data: modelData } = useQuery({
+  key: () => ['models'],
+  query: async () => {
+    const { data } = await getModels({ throwOnError: true })
+    return data
+  },
+  enabled: () => dialogOpen.value,
+})
+
+const { data: providerData } = useQuery({
+  key: () => ['providers'],
+  query: async () => {
+    const { data } = await getProviders({ throwOnError: true })
+    return data
+  },
+  enabled: () => dialogOpen.value,
+})
+
+const models = computed(() => modelData.value ?? [])
+const providers = computed(() => providerData.value ?? [])
+
+// Empty means "follow the chat model" — the server resolves it, so the
+// picker never has to mirror the chat model's value.
+const memoryModelId = ref('')
+const embeddingModelId = ref('')
+
+useServerSyncedScalar(memoryModelId, {
+  source: () => settingsData.value,
+  identity: settings => (settings === undefined ? 'loading' : props.botId),
+  server: settings => settings?.memory_llm_model_id ?? '',
+})
+
+// The embedding model belongs to the team's built-in memory, not this bot;
+// the row's description says so.
+useServerSyncedScalar(embeddingModelId, {
+  source: () => memoryConfigData.value,
+  identity: config => (config === undefined ? 'loading' : 'builtin'),
+  server: config => config?.embedding_model_id ?? '',
+})
+
+watch(memoryModelId, async (value, previous) => {
+  if (settingsData.value === undefined || value === (settingsData.value.memory_llm_model_id ?? '')) return
+  try {
+    await putBotsByBotIdSettings({
+      path: { bot_id: props.botId },
+      body: { memory_llm_model_id: value },
+      throwOnError: true,
+    })
+    toast.success(t('memory.saveSuccess'))
+    void queryCache.invalidateQueries({ key: ['bot-settings', props.botId] })
+  } catch (error) {
+    memoryModelId.value = previous
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  }
+})
+
+watch(embeddingModelId, async (value, previous) => {
+  if (memoryConfigData.value === undefined || value === (memoryConfigData.value.embedding_model_id ?? '')) return
+  try {
+    await putMemoryConfig({
+      body: { embedding_model_id: value },
+      throwOnError: true,
+    })
+    toast.success(t('memory.saveSuccess'))
+    void queryCache.invalidateQueries({ key: ['memory-config'] })
+  } catch (error) {
+    embeddingModelId.value = previous
+    toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  }
+})
 
 const syncDescription = computed(() => {
   if (props.statusLoading) return t('common.loading')

@@ -90,6 +90,7 @@ type Queries interface {
 	CountSessionEvents(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	NextSessionEventCursor(ctx context.Context) (int64, error)
 	CountTokenUsageRecords(ctx context.Context, arg dbsqlc.CountTokenUsageRecordsParams) (int64, error)
+	CreateMemoryUsage(ctx context.Context, arg dbsqlc.CreateMemoryUsageParams) error
 	CreateAccount(ctx context.Context, arg dbsqlc.CreateAccountParams) (dbsqlc.CreateAccountRow, error)
 	CreateBotAgent(ctx context.Context, arg dbsqlc.CreateBotAgentParams) (dbsqlc.BotAgent, error)
 	CreateBot(ctx context.Context, arg dbsqlc.CreateBotParams) (dbsqlc.CreateBotRow, error)
@@ -291,6 +292,8 @@ type Queries interface {
 	GetStorageProviderByName(ctx context.Context, name string) (dbsqlc.StorageProvider, error)
 	GetTokenUsageByDayAndType(ctx context.Context, arg dbsqlc.GetTokenUsageByDayAndTypeParams) ([]dbsqlc.GetTokenUsageByDayAndTypeRow, error)
 	GetTokenUsageByModel(ctx context.Context, arg dbsqlc.GetTokenUsageByModelParams) ([]dbsqlc.GetTokenUsageByModelRow, error)
+	GetMemoryTokenUsageByDay(ctx context.Context, arg dbsqlc.GetMemoryTokenUsageByDayParams) ([]dbsqlc.GetMemoryTokenUsageByDayRow, error)
+	GetMemoryTokenUsageByModel(ctx context.Context, arg dbsqlc.GetMemoryTokenUsageByModelParams) ([]dbsqlc.GetMemoryTokenUsageByModelRow, error)
 	GetToolApprovalRequest(ctx context.Context, id pgtype.UUID) (dbsqlc.ToolApprovalRequest, error)
 	ListPendingToolApprovalsByRun(ctx context.Context, runID pgtype.UUID) ([]dbsqlc.ToolApprovalRequest, error)
 	ListToolApprovalsByRun(ctx context.Context, runID pgtype.UUID) ([]dbsqlc.ToolApprovalRequest, error)

@@ -40,19 +40,22 @@ type Settings struct {
 	Timezone             string `json:"timezone"`
 	// ReasoningEffort is the single on/off source for reasoning:
 	// models.ReasoningEffortDisable means no reasoning, any other value is a tier.
-	ReasoningEffort         string             `json:"reasoning_effort"`
-	CompactionEnabled       bool               `json:"compaction_enabled"`
-	CompactionThreshold     int                `json:"compaction_threshold"`
-	CompactionTargetPercent *int               `json:"compaction_target_percent" extensions:"x-nullable"`
-	CompactionModelID       string             `json:"compaction_model_id,omitempty"`
-	DiscussProbeModelID     string             `json:"discuss_probe_model_id,omitempty"`
-	PersistFullToolResults  bool               `json:"persist_full_tool_results"`
-	ShowToolCallsInIM       bool               `json:"show_tool_calls_in_im"`
-	ToolApprovalConfig      ToolApprovalConfig `json:"tool_approval_config"`
-	DisplayEnabled          bool               `json:"display_enabled"`
-	OverlayEnabled          bool               `json:"overlay_enabled"`
-	OverlayProvider         string             `json:"overlay_provider,omitempty"`
-	OverlayConfig           map[string]any     `json:"overlay_config,omitempty"`
+	ReasoningEffort         string `json:"reasoning_effort"`
+	CompactionEnabled       bool   `json:"compaction_enabled"`
+	CompactionThreshold     int    `json:"compaction_threshold"`
+	CompactionTargetPercent *int   `json:"compaction_target_percent" extensions:"x-nullable"`
+	CompactionModelID       string `json:"compaction_model_id,omitempty"`
+	// MemoryLLMModelID is the LLM behind memory extract / decide / compact.
+	// Empty falls back to the chat model.
+	MemoryLLMModelID       string             `json:"memory_llm_model_id,omitempty"`
+	DiscussProbeModelID    string             `json:"discuss_probe_model_id,omitempty"`
+	PersistFullToolResults bool               `json:"persist_full_tool_results"`
+	ShowToolCallsInIM      bool               `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     ToolApprovalConfig `json:"tool_approval_config"`
+	DisplayEnabled         bool               `json:"display_enabled"`
+	OverlayEnabled         bool               `json:"overlay_enabled"`
+	OverlayProvider        string             `json:"overlay_provider,omitempty"`
+	OverlayConfig          map[string]any     `json:"overlay_config,omitempty"`
 }
 
 type UpsertRequest struct {
@@ -83,6 +86,7 @@ type UpsertRequest struct {
 	CompactionThreshold     *int                `json:"compaction_threshold,omitempty"`
 	CompactionTargetPercent *int                `json:"compaction_target_percent,omitempty"`
 	CompactionModelID       *string             `json:"compaction_model_id,omitempty"`
+	MemoryLLMModelID        *string             `json:"memory_llm_model_id,omitempty"`
 	DiscussProbeModelID     string              `json:"discuss_probe_model_id,omitempty"`
 	PersistFullToolResults  *bool               `json:"persist_full_tool_results,omitempty"`
 	ShowToolCallsInIM       *bool               `json:"show_tool_calls_in_im,omitempty"`

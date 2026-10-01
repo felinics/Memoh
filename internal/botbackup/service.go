@@ -433,6 +433,7 @@ func (s *Service) collectDependencies(ctx context.Context, botID string, cfg set
 		cfg.TtsModelID,
 		cfg.TranscriptionModelID,
 		cfg.CompactionModelID,
+		cfg.MemoryLLMModelID,
 		cfg.DiscussProbeModelID,
 	})
 	models := make([]modelpkg.GetResponse, 0, len(modelIDs))

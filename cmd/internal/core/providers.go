@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
 	"golang.org/x/crypto/bcrypt"
@@ -65,6 +66,7 @@ import (
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/db"
 	pgvectordb "github.com/felinics/memoh/internal/db/pgvector"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	displaypkg "github.com/felinics/memoh/internal/display"
@@ -1413,13 +1415,18 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		return nil, errors.New("models service not configured")
 	}
 
+	// Preference order: the bot's memory model, then its chat model, so a bot
+	// with only a chat model configured gets working memory without any extra
+	// setup. SelectMemoryModelForBot falls back to any enabled chat model when
+	// the chosen one is unusable.
 	chatModelID := ""
 	if c.settingsService != nil && strings.TrimSpace(botID) != "" {
 		if botSettings, err := c.settingsService.GetBot(ctx, botID); err == nil {
-			if id := strings.TrimSpace(botSettings.CompactionModelID); id != "" {
-				chatModelID = id
-			} else if id := strings.TrimSpace(botSettings.ChatModelID); id != "" {
-				chatModelID = id
+			for _, id := range []string{botSettings.MemoryLLMModelID, botSettings.ChatModelID} {
+				if id = strings.TrimSpace(id); id != "" {
+					chatModelID = id
+					break
+				}
 			}
 		}
 	}
@@ -1436,7 +1443,35 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		ChatCompletionsCompat: providers.ProviderConfigString(memoryProvider, models.ChatCompletionsCompatConfigKey),
 		Timeout:               c.timeout,
 		PromptCacheTTL:        providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
+		OnUsage: func(ctx context.Context, operation string, usage sdk.Usage) {
+			c.recordUsage(ctx, botID, memoryModel.ID, operation, usage)
+		},
 	}), nil
+}
+
+// recordUsage writes one memory LLM call to bot_memory_usage. A failed write
+// is logged and dropped: losing a usage row must not fail memory formation.
+func (c *lazyLLMClient) recordUsage(ctx context.Context, botID, modelID, operation string, usage sdk.Usage) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return
+	}
+	payload, err := json.Marshal(usage)
+	if err != nil {
+		return
+	}
+	// The call's own context may already be at its deadline; the row still
+	// describes tokens that were spent.
+	ctx = context.WithoutCancel(ctx)
+	if err := c.queries.CreateMemoryUsage(ctx, dbsqlc.CreateMemoryUsageParams{
+		BotID:     pgBotID,
+		ModelID:   db.ParseUUIDOrEmpty(modelID),
+		Operation: operation,
+		Usage:     payload,
+	}); err != nil && c.logger != nil {
+		c.logger.WarnContext(ctx, "record memory usage failed",
+			slog.String("bot_id", botID), slog.String("operation", operation), slog.Any("error", err))
+	}
 }
 
 type skillLoaderAdapter struct {

@@ -23,7 +23,7 @@
     </PopoverTrigger>
     <PopoverContent
       menu
-      align="start"
+      :align="popoverAlign ?? 'start'"
       class="min-w-[var(--reka-popover-trigger-width)] w-80 p-0"
     >
       <div :class="menuChromeClass">
@@ -63,6 +63,9 @@ const props = defineProps<{
   hoverLighten?: boolean
   placeholder?: string
   noneLabel?: string
+  // Rows that right-align the trigger pass 'end' so the wider menu grows
+  // toward the row's label instead of past the container edge.
+  popoverAlign?: 'start' | 'center' | 'end'
   showReasoning?: boolean
   // Runtime-supplied tiers, forwarded to ModelOptions. Callers whose efforts do
   // not come from the model's own capabilities (ACP agents report their own)
