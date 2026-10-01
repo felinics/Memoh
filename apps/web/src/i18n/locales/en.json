@@ -2683,8 +2683,12 @@
         "directoryTarget": "Sessions will work in {path} — created if it doesn’t exist yet",
         "browseFailed": "Couldn’t load folders",
         "browseRetry": "Retry",
+        "browseEmpty": "No folders inside",
+        "browseForbidden": "This computer doesn’t allow reading this folder",
+        "browseUnreachable": "Couldn’t reach this computer. Check that it’s connected, then retry",
         "path": "Directory path",
-        "remotePathHelp": "Absolute path on that computer. It must already exist.",
+        "remotePathHelp": "Pick a folder below or type an absolute path. It must already exist.",
+        "remoteOffline": "{name} isn’t connected. Connect it to choose a folder there.",
         "remotePathPlaceholder": "/Users/you/code/project"
       }
     },
