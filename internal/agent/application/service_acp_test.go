@@ -68,7 +68,7 @@ func TestStreamACPAgentWSPromptBytesMatchQuery(t *testing.T) {
 	}
 	resolver.SetACPSessionPool(pool)
 
-	if err := resolver.StreamChatWS(context.Background(), ChatRequest{
+	if _, err := resolver.StreamChatWS(context.Background(), ChatRequest{
 		BotID:    "bot-1",
 		ThreadID: "session-1",
 		Query:    "  inspect the app  ",
@@ -144,7 +144,7 @@ func TestStreamACPAgentWSPersistsMinimalCompletedLifecycle(t *testing.T) {
 	lifecycles := &recordingContextLifecycleStore{}
 	service := newACPLifecycleService(t, pool, messages, lifecycles)
 
-	err := service.streamACPAgentWS(context.Background(), ChatRequest{
+	_, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 		BotID:    lifecycleTestBotID,
 		ThreadID: lifecycleTestSessionID,
 		RunID:    lifecycleTestRunID,
@@ -185,7 +185,7 @@ func TestStreamACPAgentWSMintsRunIdentityAtDirectBoundary(t *testing.T) {
 	lifecycles := &recordingContextLifecycleStore{}
 	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
 
-	if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+	if _, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 		BotID:    lifecycleTestBotID,
 		ThreadID: lifecycleTestSessionID,
 		Query:    "inspect",
@@ -205,7 +205,7 @@ func TestStreamACPAgentWSProviderFailurePersistsFailedLifecycle(t *testing.T) {
 	lifecycles := &recordingContextLifecycleStore{}
 	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
 
-	if err := service.streamACPAgentWS(context.Background(), ChatRequest{
+	if _, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 		BotID:    lifecycleTestBotID,
 		ThreadID: lifecycleTestSessionID,
 		RunID:    lifecycleTestRunID,
@@ -236,12 +236,12 @@ func TestStreamACPAgentWSExplicitAbortPersistsAbortedLifecycle(t *testing.T) {
 	abortCh := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- service.streamACPAgentWS(context.Background(), ChatRequest{
+		done <- ignoreOutcome(service.streamACPAgentWS(context.Background(), ChatRequest{
 			BotID:    lifecycleTestBotID,
 			ThreadID: lifecycleTestSessionID,
 			RunID:    lifecycleTestRunID,
 			Query:    "inspect",
-		}, make(chan WSStreamEvent, 8), abortCh)
+		}, make(chan WSStreamEvent, 8), abortCh))
 	}()
 	select {
 	case <-started:
@@ -267,7 +267,7 @@ func TestStreamACPAgentWSTransformedConfigFailurePersistsStableCode(t *testing.T
 	lifecycles := &recordingContextLifecycleStore{}
 	service := newACPLifecycleService(t, pool, &recordingMessageService{}, lifecycles)
 
-	err := service.streamACPAgentWS(context.Background(), ChatRequest{
+	_, err := service.streamACPAgentWS(context.Background(), ChatRequest{
 		BotID:    lifecycleTestBotID,
 		ThreadID: lifecycleTestSessionID,
 		RunID:    lifecycleTestRunID,
@@ -322,7 +322,7 @@ func TestStreamChatWSRoutesACPRuntimeSessionToACPPool(t *testing.T) {
 	resolver.SetACPSessionPool(pool)
 
 	eventCh := make(chan WSStreamEvent, 8)
-	if err := resolver.StreamChatWS(
+	if _, err := resolver.StreamChatWS(
 		context.Background(),
 		ChatRequest{
 			BotID:           "bot-1",
@@ -440,7 +440,7 @@ func TestStreamChatWSRejectsACPBotMismatchBeforePersistence(t *testing.T) {
 	}
 	resolver.SetACPSessionPool(pool)
 
-	err := resolver.StreamChatWS(
+	_, err := resolver.StreamChatWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    "bot-1",
@@ -630,7 +630,7 @@ func TestStreamACPAgentWSRechecksRuntimeOwnerWorkspaceExecBeforePrompt(t *testin
 	}
 	resolver.SetACPSessionPool(pool)
 
-	err := resolver.streamACPAgentWS(
+	_, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    "bot-1",
@@ -790,7 +790,7 @@ func TestStreamChatWSPersistsACPUserInputProjectionOnceBeforePromptReturns(t *te
 	}
 	resolver.SetACPSessionPool(pool)
 
-	if err := resolver.StreamChatWS(
+	if _, err := resolver.StreamChatWS(
 		context.Background(),
 		ChatRequest{
 			BotID:          "bot-1",
@@ -943,7 +943,7 @@ func TestStreamChatWSPersistsACPSubmittedUserInputResult(t *testing.T) {
 	}
 	resolver.SetACPSessionPool(pool)
 
-	if err := resolver.StreamChatWS(
+	if _, err := resolver.StreamChatWS(
 		context.Background(),
 		ChatRequest{
 			BotID:          "bot-1",
@@ -1086,7 +1086,7 @@ func TestStreamChatWSPersistsACPApprovalProjectionOnce(t *testing.T) {
 	}
 	resolver.SetACPSessionPool(pool)
 
-	if err := resolver.StreamChatWS(
+	if _, err := resolver.StreamChatWS(
 		context.Background(),
 		ChatRequest{
 			BotID:          "bot-1",
@@ -1167,7 +1167,7 @@ func TestStreamACPAgentWSRequestsAutoTitle(t *testing.T) {
 	}
 	resolver.SetACPSessionPool(pool)
 
-	if err := resolver.streamACPAgentWS(
+	if _, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    "bot-1",
@@ -1229,7 +1229,7 @@ func TestStreamACPAgentWSPropagatesContextBudgetDefaults(t *testing.T) {
 		logger: slog.New(slog.DiscardHandler),
 	}
 
-	if err := resolver.streamACPAgentWS(
+	if _, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    storeRoundBotID,
@@ -1607,7 +1607,7 @@ func TestStreamACPAgentWSFailurePersistsRoundAndSkipsMemory(t *testing.T) {
 	resolver.SetACPSessionPool(pool)
 
 	eventCh := make(chan WSStreamEvent, 8)
-	if err := resolver.streamACPAgentWS(
+	if _, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    storeRoundBotID,
@@ -1683,7 +1683,7 @@ func TestStreamACPAgentWSUserStopKeepsPartialOutputWithoutFailureOrMemory(t *tes
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	eventCh := make(chan WSStreamEvent, 8)
-	if err := resolver.streamACPAgentWS(ctx, ChatRequest{
+	if _, err := resolver.streamACPAgentWS(ctx, ChatRequest{
 		BotID: storeRoundBotID, ThreadID: "session-1", Query: "inspect",
 	}, eventCh, make(chan struct{})); err != nil {
 		t.Fatalf("streamACPAgentWS() error = %v", err)
@@ -1745,7 +1745,7 @@ func TestStreamACPAgentWSStopRacingCompletionPersistsAsAbort(t *testing.T) {
 	abortCh := make(chan struct{})
 	close(abortCh)
 	eventCh := make(chan WSStreamEvent, 8)
-	if err := resolver.streamACPAgentWS(ctx, ChatRequest{
+	if _, err := resolver.streamACPAgentWS(ctx, ChatRequest{
 		BotID: storeRoundBotID, ThreadID: "session-1", Query: "inspect",
 	}, eventCh, abortCh); err != nil {
 		t.Fatalf("streamACPAgentWS() error = %v", err)
@@ -1788,7 +1788,7 @@ func TestStreamACPAgentWSFeedbackErrorSkipsPersistence(t *testing.T) {
 	resolver := newACPLifecycleService(t, pool, messages, lifecycles)
 
 	eventCh := make(chan WSStreamEvent, 8)
-	err := resolver.streamACPAgentWS(
+	_, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    lifecycleTestBotID,
@@ -1841,7 +1841,7 @@ func TestStreamACPAgentWSImageCapabilityErrorUsesStructuredFeedback(t *testing.T
 	}
 	resolver.SetACPSessionPool(&recordingACPPrompter{err: acpclient.ErrImagePromptUnsupported})
 
-	err := resolver.streamACPAgentWS(
+	_, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    "bot-1",
@@ -1913,7 +1913,7 @@ func TestStreamACPAgentWSSuccessStoresMemory(t *testing.T) {
 	}
 	resolver.SetACPSessionPool(pool)
 
-	if err := resolver.streamACPAgentWS(
+	if _, err := resolver.streamACPAgentWS(
 		context.Background(),
 		ChatRequest{
 			BotID:    storeRoundBotID,
@@ -2564,7 +2564,7 @@ func TestACPDecisionAuthorityRequiresLiveWorkspaceExec(t *testing.T) {
 
 // streamACPAgentWS preserves the pre-unification test entry: it runs the
 // unified runtime flow through an ACP driver over the service's pool.
-func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+func (s *Service) streamACPAgentWS(ctx context.Context, req ChatRequest, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) (RunOutcome, error) {
 	return s.streamRuntimeWS(ctx, acpagent.NewDriver(s.acpPool), req, eventCh, abortCh)
 }
 

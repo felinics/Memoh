@@ -264,7 +264,7 @@ func TestStreamChatWSResultRejectsTurnReplacementForACP(t *testing.T) {
 	preflightCalled := false
 	postPersistCalled := false
 
-	_, err := resolver.streamChatWSResultWithHooks(
+	_, _, err := resolver.streamChatWSResultWithHooks(
 		context.Background(),
 		ChatRequest{BotID: "bot-1", ThreadID: "session-1"},
 		make(chan WSStreamEvent, 1),

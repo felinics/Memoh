@@ -581,8 +581,8 @@ func (f *fakeTriggeredAdmitter) Admit(_ context.Context, input sessionruntime.Ad
 	}, nil
 }
 
-func (*fakeTriggeredAdmitter) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) error {
-	return nil
+func (*fakeTriggeredAdmitter) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) (sessionruntime.TerminalRun, error) {
+	return sessionruntime.TerminalRun{}, nil
 }
 
 func TestAdmitTriggeredRunInjectsAdmissionView(t *testing.T) {

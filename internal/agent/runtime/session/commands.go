@@ -373,7 +373,7 @@ func (m *Manager) abortLocal(ctx context.Context, ctrl *runControl) (bool, error
 		// own FinishRun records the abort AFTER the driver actually returns,
 		// so the ledger's terminal state is a truthful "driver stopped"
 		// signal for deletion barriers on any instance.
-		if err := m.FinishRun(context.WithoutCancel(ctx), ctrl.handle(), RunStatusAborted, ""); err != nil {
+		if _, err := m.FinishRun(context.WithoutCancel(ctx), ctrl.handle(), RunStatusAborted, ""); err != nil {
 			return false, err
 		}
 	}
@@ -477,7 +477,8 @@ func (m *Manager) abortClaimedAdmission(ctx context.Context, ctrl *runControl) e
 		ctrl.cancel()
 	}
 	ctrl.markReady()
-	return m.FinishRun(ctx, ctrl.handle(), RunStatusAborted, "")
+	_, err = m.FinishRun(ctx, ctrl.handle(), RunStatusAborted, "")
+	return err
 }
 
 // RouteDecisionResponse is the single decision entry point for WebSocket, HTTP,

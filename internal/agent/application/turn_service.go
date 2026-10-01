@@ -139,7 +139,7 @@ type runHandle struct {
 	failed            atomic.Bool
 	streamErr         error
 	terminalPublished bool
-	finishRun         func(status string, cause error)
+	finishRun         func(RunOutcome)
 	publishAgentEvent func(context.Context, native.StreamEvent) error
 }
 
@@ -199,26 +199,26 @@ func (h *runHandle) finish() {
 		return
 	}
 	if h.streamErr != nil {
-		h.finishRun(sessionruntime.RunStatusErrored, h.streamErr)
+		h.finishRun(failedRunOutcome(h.streamErr))
 		return
 	}
 	// Once the terminal event is in the runtime projection, that projection is
 	// authoritative. A consumer disconnect while forwarding the same terminal
 	// event must not rewrite a completed, aborted, or parked run as aborted.
 	if h.terminalPublished {
-		h.finishRun("", nil)
+		h.finishRun(RunOutcome{})
 		return
 	}
 	// Canceled with nothing on the error channel means someone stopped this run
 	// — /stop, a routed abort, or a lost owner lease — rather than it breaking.
 	if h.failed.Load() {
-		h.finishRun(sessionruntime.RunStatusAborted, nil)
+		h.finishRun(RunOutcome{Status: sessionruntime.RunStatusAborted})
 		return
 	}
 	// An unnamed clean end lets the runtime preserve waiting_decision or derive
 	// completed from its event projection. Naming completion here would collapse
 	// a deferred decision into a terminal run.
-	h.finishRun("", nil)
+	h.finishRun(RunOutcome{})
 }
 
 func (h *runHandle) recordStreamFailure(err error) bool {

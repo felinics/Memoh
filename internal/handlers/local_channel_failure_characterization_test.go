@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/application"
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
@@ -97,7 +98,7 @@ func (r failureCharRun) forward(t *testing.T, events ...native.StreamEvent) {
 }
 
 func (r failureCharRun) finish(runErr error) {
-	r.handler.finishWSRun(context.Background(), wsRunAdmission{RunID: r.admission.RunID, Handle: r.admission.Handle}, runErr)
+	r.handler.finishWSRun(context.Background(), wsRunAdmission{RunID: r.admission.RunID, Handle: r.admission.Handle}, wsRunOutcome(application.RunOutcome{}, runErr))
 }
 
 // frames drains every frame written to the initiating socket.
@@ -225,12 +226,12 @@ func TestCharacterizeWSPlainRunnerError_CurrentBehavior(t *testing.T) {
 	}
 }
 
-// Scenario 1 and 10 with a catalogued runner error.
+// Scenario 1 and 10 with a catalogued runner error (X1).
 //
-// Current behavior: the socket frame puts the code only in feedback.code, while
-// finishWSRun passes the code as the finish MESSAGE, so session_runs records
-// runtime_run_failed with the real code in error_message.
-func TestCharacterizeWSCodedRunnerError_CurrentBehavior(t *testing.T) {
+// Current behavior: the socket frame puts the code only in feedback.code.
+// session_runs records the runner's code in error_code and no message; the run
+// view carries the same code and no error text.
+func TestCharacterizeWSCodedRunnerError(t *testing.T) {
 	t.Parallel()
 	r := newFailureCharRun(t)
 	runErr := apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("dial unix: no such file"), nil)
@@ -249,10 +250,27 @@ func TestCharacterizeWSCodedRunnerError_CurrentBehavior(t *testing.T) {
 	if frame["type"] != "error" || feedback["code"] != "workspace.unreachable" || frame["message"] != feedback["detail"] {
 		t.Fatalf("frame = %#v", frame)
 	}
-	if got, want := r.ledgerColumns(t), [3]string{"failed", "runtime_run_failed", "workspace.unreachable"}; got != want {
+	if got, want := r.ledgerColumns(t), [3]string{"failed", "workspace.unreachable", ""}; got != want {
 		t.Fatalf("session_runs = %q, want %q", got, want)
 	}
-	if got, want := r.runView(t), [3]string{"errored", "runtime_run_failed", "workspace.unreachable"}; got != want {
+	if got, want := r.runView(t), [3]string{"errored", "workspace.unreachable", ""}; got != want {
+		t.Fatalf("run view = %q, want %q", got, want)
+	}
+}
+
+// Scenario 6: an External Agent configuration failure (X6). The runner returns
+// the driver's feedback error before any round ran.
+//
+// Current behavior: session_runs and the run view record the feedback code.
+func TestCharacterizeWSFeedbackRunnerError(t *testing.T) {
+	t.Parallel()
+	r := newFailureCharRun(t)
+	r.finish(agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "", 409, "", "The agent is not configured.", nil))
+
+	if got, want := r.ledgerColumns(t), [3]string{"failed", "acp_agent_not_configured", ""}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+	if got, want := r.runView(t), [3]string{"errored", "acp_agent_not_configured", ""}; got != want {
 		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }
@@ -353,5 +371,65 @@ func TestCharacterizeSSEErrorEventHasNoCode_CurrentBehavior(t *testing.T) {
 	}
 	if want := `{"type":"error","error":"` + providerOverloadedDetail + `"}`; string(data) != want {
 		t.Fatalf("sse event = %s, want %s", data, want)
+	}
+}
+
+// A runner that delivered its failure in the stream returns no error; the
+// outcome it reports is what the terminal write records. An error the runner
+// returns still takes precedence, and a bare cancellation is left unnamed.
+func TestWSRunOutcomeCarriesDeliveredFailure(t *testing.T) {
+	t.Parallel()
+	delivered := application.RunOutcome{
+		Status: sessionruntime.RunStatusErrored,
+		Cause:  apperror.New(apperror.CodeAgentProviderRateLimited, nil),
+	}
+	if got := wsRunOutcome(delivered, nil); got != delivered {
+		t.Fatalf("wsRunOutcome(delivered, nil) = %+v, want the delivered outcome", got)
+	}
+	// A failure the stream delivered names the run even when the runner then
+	// returns an error of its own; that error is only a diagnostic.
+	runErr := apperror.New(apperror.CodeWorkspaceUnreachable, nil)
+	if got := wsRunOutcome(delivered, runErr); got != delivered {
+		t.Fatalf("wsRunOutcome(delivered, err) = %+v, want the delivered outcome", got)
+	}
+	if got := wsRunOutcome(application.RunOutcome{}, runErr); got.ErrorCode() != "workspace.unreachable" {
+		t.Fatalf("wsRunOutcome(none, err) code = %q, want the returned error's", got.ErrorCode())
+	}
+	if got := wsRunOutcome(delivered, context.Canceled); got != (application.RunOutcome{}) {
+		t.Fatalf("wsRunOutcome(delivered, canceled) = %+v, want unnamed", got)
+	}
+
+	// Without a proposal (the terminal event never reached the manager), the
+	// delivered outcome alone names the failure.
+	r := newFailureCharRun(t)
+	r.handler.finishWSRun(context.Background(), wsRunAdmission{RunID: r.admission.RunID, Handle: r.admission.Handle}, wsRunOutcome(delivered, nil))
+	if got, want := r.ledgerColumns(t), [3]string{"failed", "agent.provider_rate_limited", ""}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+}
+
+// Path A on the WebSocket path: the stream delivered a coded failure, and the
+// runner then returned an error of its own, for example because replacing the
+// retried turn in history failed. The run records the delivered failure's code;
+// the later error does not rename it.
+func TestCharacterizeWSPersistFailureAfterDeliveredFailure(t *testing.T) {
+	t.Parallel()
+	r := newFailureCharRun(t)
+	r.forward(t,
+		native.StreamEvent{Type: native.EventAgentStart},
+		native.StreamEvent{Type: native.EventError, Code: "agent.provider_overloaded", Error: providerOverloadedDetail},
+	)
+	delivered := application.RunOutcome{
+		Status: sessionruntime.RunStatusErrored,
+		Cause:  apperror.New(apperror.CodeAgentProviderOverloaded, nil),
+	}
+	r.handler.finishWSRun(context.Background(), wsRunAdmission{RunID: r.admission.RunID, Handle: r.admission.Handle},
+		wsRunOutcome(delivered, errors.New("replace history turn: boom")))
+
+	if got, want := r.ledgerColumns(t), [3]string{"failed", "agent.provider_overloaded", ""}; got != want {
+		t.Fatalf("session_runs = %q, want %q", got, want)
+	}
+	if got, want := r.runView(t), [3]string{"errored", "agent.provider_overloaded", providerOverloadedDetail}; got != want {
+		t.Fatalf("run view = %q, want %q", got, want)
 	}
 }

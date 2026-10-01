@@ -286,7 +286,7 @@ func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlR
 		}
 		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(runCtx), terminalWriteTimeout)
 		defer finishCancel()
-		if err := s.sessionRuntime.FinishRunWithErrorCode(finishCtx, handle, status, string(apperror.CodeOf(publicRuntimeControlError(resultErr)))); err != nil {
+		if _, err := s.sessionRuntime.FinishRunWithErrorCode(finishCtx, handle, status, string(apperror.CodeOf(publicRuntimeControlError(resultErr)))); err != nil {
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()

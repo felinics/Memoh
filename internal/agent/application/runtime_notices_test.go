@@ -59,7 +59,7 @@ func TestRuntimeNoticesSurviveTerminalAndHistory(t *testing.T) {
 					return result, nil
 				}}
 				ch := make(chan WSStreamEvent, 64)
-				if err := service.streamRuntimeWS(ctx, driver, ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: lifecycleTestRunID, Query: "test"}, ch, make(chan struct{})); err != nil {
+				if _, err := service.streamRuntimeWS(ctx, driver, ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: lifecycleTestRunID, Query: "test"}, ch, make(chan struct{})); err != nil {
 					t.Fatal(err)
 				}
 				if len(messages.deleted) != 0 {

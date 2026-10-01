@@ -88,11 +88,11 @@ func (a *scriptedAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInput
 	}, nil
 }
 
-func (a *scriptedAdmitter) FinishRunWithErrorCode(_ context.Context, handle sessionruntime.RunHandle, status, message string) error {
+func (a *scriptedAdmitter) FinishRunWithErrorCode(_ context.Context, handle sessionruntime.RunHandle, status, message string) (sessionruntime.TerminalRun, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.finishes = append(a.finishes, recordedFinish{handle: handle, status: status, message: message})
-	return nil
+	return sessionruntime.TerminalRun{}, nil
 }
 
 func (*scriptedAdmitter) MarkInlineDecisionRun(string, string, string) {}

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/testutil/sessionledger"
 )
@@ -70,12 +72,19 @@ type proposalRecordingLedger struct {
 	*sessionledger.Store
 	mu        sync.Mutex
 	proposals [][2]string
+	// failFirst makes the first proposal write fail, as a transient database
+	// error would, so the terminal event defers the outcome to finish.
+	failFirst bool
 }
 
 func (l *proposalRecordingLedger) PrepareFinish(ctx context.Context, params ledger.PrepareFinishParams) (ledger.Run, bool, error) {
 	l.mu.Lock()
 	l.proposals = append(l.proposals, [2]string{string(params.State), params.ErrorCode})
+	failFirst := l.failFirst && len(l.proposals) == 1
 	l.mu.Unlock()
+	if failFirst {
+		return ledger.Run{}, false, errors.New("proposal write temporarily unavailable")
+	}
 	return l.Store.PrepareFinish(ctx, params)
 }
 
@@ -120,7 +129,11 @@ type turnRun struct {
 // manager and an in-memory ledger that records every finish proposal.
 func runNativeTurn(t *testing.T, fixture directLifecycleFixture) turnRun {
 	t.Helper()
-	runs := &proposalRecordingLedger{Store: sessionledger.New()}
+	return runNativeTurnWith(t, fixture, &proposalRecordingLedger{Store: sessionledger.New()})
+}
+
+func runNativeTurnWith(t *testing.T, fixture directLifecycleFixture, runs *proposalRecordingLedger) turnRun {
+	t.Helper()
 	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
 		OwnerID: "owner-retry-turn", OwnerLeaseTTL: time.Minute, Ledger: runs, Fence: abortAlignmentFence{},
 	})
@@ -209,8 +222,57 @@ func TestStreamChatRetryFailureReportsError(t *testing.T) {
 	if len(got.errCodes) != 1 || got.errCodes[0] == "" {
 		t.Fatalf("turn error codes = %q, want exactly one coded error", got.errCodes)
 	}
-	if got.ledger[0] != "failed" {
-		t.Fatalf("session_runs = %q, want failed", got.ledger)
+	// X3: the run records the same first failure the turn port reports, not
+	// the last stream error.
+	if want := [3]string{"failed", got.errCodes[0], ""}; got.ledger != want {
+		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
+	}
+}
+
+// A WebSocket stream whose retry does not recover delivers the failure in the
+// stream and returns no error; its outcome still names the failure for the
+// terminal write, with the code of the first error.
+func TestStreamChatWSRetryFailureReportsOutcome(t *testing.T) {
+	fixture, _ := newScriptedFailureFixture(t, http.StatusServiceUnavailable, http.StatusBadRequest)
+	eventCh := make(chan WSStreamEvent)
+	var payloads []json.RawMessage
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for event := range eventCh {
+			payloads = append(payloads, event)
+		}
+	}()
+	_, outcome, err := fixture.service.streamChatWSResultWithHooks(context.Background(), ChatRequest{
+		BotID:                lifecycleTestBotID,
+		ChatID:               lifecycleTestBotID,
+		ThreadID:             lifecycleTestSessionID,
+		Query:                directLifecyclePrompt,
+		UserMessagePersisted: true,
+	}, eventCh, make(chan struct{}), nil, nil)
+	close(eventCh)
+	<-drained
+
+	if err != nil {
+		t.Fatalf("WS turn error = %v, want the failure delivered in the stream", err)
+	}
+	assertOrdered(t, eventTypes(t, payloads), "error", "retry", "error", "agent_abort")
+	var first, terminal struct{ Type, Code string }
+	for _, payload := range payloads {
+		var event struct{ Type, Code string }
+		_ = json.Unmarshal(payload, &event)
+		if event.Type == "error" && first.Type == "" {
+			first = event
+		}
+		if event.Type == "agent_abort" {
+			terminal = event
+		}
+	}
+	if outcome.Status != sessionruntime.RunStatusErrored || outcome.ErrorCode() != first.Code || first.Code == "" {
+		t.Fatalf("outcome = %q / %q, want errored with the first error's code %q", outcome.Status, outcome.ErrorCode(), first.Code)
+	}
+	if terminal.Code != first.Code {
+		t.Fatalf("agent_abort code = %q, want %q", terminal.Code, first.Code)
 	}
 }
 
@@ -227,7 +289,7 @@ func TestStreamChatWSRetrySuccessReportsNoError_X4(t *testing.T) {
 			payloads = append(payloads, event)
 		}
 	}()
-	_, err := fixture.service.streamChatWSResultWithHooks(context.Background(), ChatRequest{
+	_, _, err := fixture.service.streamChatWSResultWithHooks(context.Background(), ChatRequest{
 		BotID:                lifecycleTestBotID,
 		ChatID:               lifecycleTestBotID,
 		ThreadID:             lifecycleTestSessionID,
@@ -260,5 +322,174 @@ func assertOrdered(t *testing.T, got []string, want ...string) {
 	}
 	if i != len(want) {
 		t.Fatalf("event types = %q, want %q in order", got, want)
+	}
+}
+
+// A WebSocket stream that delivered a failure and then failed to persist the
+// turn returns the persistence error for the caller to report, but its outcome
+// still names the delivered failure: the run's code is named once, when the
+// failure is first declared.
+func TestStreamChatWSPersistFailureAfterDeliveredFailureKeepsItsCode(t *testing.T) {
+	fixture, _ := newScriptedFailureFixture(t, http.StatusServiceUnavailable, http.StatusBadRequest)
+	eventCh := make(chan WSStreamEvent)
+	var payloads []json.RawMessage
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for event := range eventCh {
+			payloads = append(payloads, event)
+		}
+	}()
+	persistErr := errors.New("replace history turn: boom")
+	_, outcome, err := fixture.service.streamChatWSResultWithHooks(context.Background(), ChatRequest{
+		BotID:                lifecycleTestBotID,
+		ChatID:               lifecycleTestBotID,
+		ThreadID:             lifecycleTestSessionID,
+		Query:                directLifecyclePrompt,
+		UserMessagePersisted: true,
+	}, eventCh, make(chan struct{}), nil, func(context.Context, []messagepkg.Message) error {
+		return persistErr
+	})
+	close(eventCh)
+	<-drained
+
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("WS turn error = %v, want the persistence failure", err)
+	}
+	var first struct{ Type, Code string }
+	for _, payload := range payloads {
+		if err := json.Unmarshal(payload, &first); err == nil && first.Type == "error" {
+			break
+		}
+		first.Type, first.Code = "", ""
+	}
+	if first.Code == "" {
+		t.Fatalf("no coded error event in %q", eventTypes(t, payloads))
+	}
+	if outcome.Status != sessionruntime.RunStatusErrored || outcome.ErrorCode() != first.Code {
+		t.Fatalf("outcome = %q / %q, want errored with the delivered code %q", outcome.Status, outcome.ErrorCode(), first.Code)
+	}
+}
+
+// A WebSocket stream whose persistence fails without an earlier stream failure
+// has no delivered outcome; the persistence error names the run.
+func TestStreamChatWSPersistFailureWithoutDeliveredFailureHasNoOutcome(t *testing.T) {
+	fixture := newDirectLifecycleFixture(t, directLifecycleModelSuccess)
+	eventCh := make(chan WSStreamEvent)
+	go func() {
+		for range eventCh {
+		}
+	}()
+	persistErr := errors.New("replace history turn: boom")
+	_, outcome, err := fixture.service.streamChatWSResultWithHooks(context.Background(), ChatRequest{
+		BotID:                lifecycleTestBotID,
+		ChatID:               lifecycleTestBotID,
+		ThreadID:             lifecycleTestSessionID,
+		Query:                directLifecyclePrompt,
+		UserMessagePersisted: true,
+	}, eventCh, make(chan struct{}), nil, func(context.Context, []messagepkg.Message) error {
+		return persistErr
+	})
+	close(eventCh)
+
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("WS turn error = %v, want the persistence failure", err)
+	}
+	if outcome != (RunOutcome{}) {
+		t.Fatalf("outcome = %+v, want none", outcome)
+	}
+}
+
+// failedRunOutcome prefers a failure the stream delivered before the error it
+// is given, and the wrapped error still reads and unwraps as that error.
+func TestFailedRunOutcomePrefersDeliveredFailure(t *testing.T) {
+	delivered := RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: apperror.New(apperror.CodeAgentProviderOverloaded, nil)}
+	commitErr := errors.New("commit agent step: boom")
+	wrapped := withDeliveredOutcome(commitErr, delivered)
+	if wrapped.Error() != commitErr.Error() || !errors.Is(wrapped, commitErr) || apperror.CodeOf(wrapped) != "" {
+		t.Fatalf("wrapped error = %v (code %q), want it to read as %v", wrapped, apperror.CodeOf(wrapped), commitErr)
+	}
+	if got := failedRunOutcome(wrapped); got.ErrorCode() != string(apperror.CodeAgentProviderOverloaded) {
+		t.Fatalf("failedRunOutcome(wrapped) code = %q", got.ErrorCode())
+	}
+	if got := failedRunOutcome(commitErr); got.Status != sessionruntime.RunStatusErrored || !errors.Is(got.Cause, commitErr) {
+		t.Fatalf("failedRunOutcome(plain) = %+v", got)
+	}
+	var wrappedAgain *deliveredFailureError
+	if plain := withDeliveredOutcome(commitErr, RunOutcome{}); errors.As(plain, &wrappedAgain) || !errors.Is(plain, commitErr) {
+		t.Fatal("an error without a delivered failure must be returned unchanged")
+	}
+}
+
+// Path A on the turn port: StreamChat reports a step commit failure after the
+// stream delivered a coded failure. The run's terminal write records the
+// delivered failure's code, while the caller is still told about the commit
+// failure.
+func TestTurnFinishAfterDeliveredFailureKeepsItsCode(t *testing.T) {
+	delivered := RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: apperror.New(apperror.CodeAgentProviderOverloaded, nil)}
+	var got RunOutcome
+	h := &runHandle{
+		streamErr: withDeliveredOutcome(errors.New("commit agent step: boom"), delivered),
+		finishRun: func(outcome RunOutcome) { got = outcome },
+	}
+	h.finish()
+	if got.Status != sessionruntime.RunStatusErrored || got.ErrorCode() != string(apperror.CodeAgentProviderOverloaded) {
+		t.Fatalf("terminal outcome = %q / %q, want errored with the delivered code", got.Status, got.ErrorCode())
+	}
+}
+
+// A stream error that a retry recovered from is not a delivered failure: when
+// persisting the recovered turn then fails, the persistence error names the
+// run.
+func TestStreamChatWSPersistFailureAfterRecoveredRetryHasNoOutcome(t *testing.T) {
+	fixture, _ := newScriptedFailureFixture(t, http.StatusServiceUnavailable)
+	eventCh := make(chan WSStreamEvent)
+	var payloads []json.RawMessage
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for event := range eventCh {
+			payloads = append(payloads, event)
+		}
+	}()
+	persistErr := errors.New("replace history turn: boom")
+	_, outcome, err := fixture.service.streamChatWSResultWithHooks(context.Background(), ChatRequest{
+		BotID:                lifecycleTestBotID,
+		ChatID:               lifecycleTestBotID,
+		ThreadID:             lifecycleTestSessionID,
+		Query:                directLifecyclePrompt,
+		UserMessagePersisted: true,
+	}, eventCh, make(chan struct{}), nil, func(context.Context, []messagepkg.Message) error {
+		return persistErr
+	})
+	close(eventCh)
+	<-drained
+
+	assertOrdered(t, eventTypes(t, payloads), "error", "retry")
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("WS turn error = %v, want the persistence failure", err)
+	}
+	if outcome != (RunOutcome{}) {
+		t.Fatalf("outcome = %+v, want none after a recovered retry", outcome)
+	}
+}
+
+// When the terminal event's proposal write fails, the run's outcome is deferred
+// to finish. The turn port's finish already holds the delivered failure, so the
+// row still records the code the caller was told about.
+func TestStreamChatDeferredProposalFinishKeepsDeliveredCode(t *testing.T) {
+	fixture, _ := newScriptedFailureFixture(t, http.StatusServiceUnavailable, http.StatusBadRequest)
+	runs := &proposalRecordingLedger{Store: sessionledger.New(), failFirst: true}
+	got := runNativeTurnWith(t, fixture, runs)
+
+	assertOrdered(t, got.types, "error", "retry", "error", "agent_abort")
+	if len(got.errCodes) != 1 || got.errCodes[0] == "" {
+		t.Fatalf("turn error codes = %q, want exactly one coded error", got.errCodes)
+	}
+	if len(got.proposals) != 2 || got.proposals[1] != [2]string{"failed", got.errCodes[0]} {
+		t.Fatalf("finish proposals = %q, want the deferred one from finish with %q", got.proposals, got.errCodes[0])
+	}
+	if want := [3]string{"failed", got.errCodes[0], ""}; got.ledger != want {
+		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
 	}
 }

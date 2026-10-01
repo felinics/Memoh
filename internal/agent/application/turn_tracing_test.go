@@ -86,7 +86,7 @@ func TestTurnSpanCoversTheTurnNotItsSetup(t *testing.T) {
 	inTurn := make(chan struct{})
 	release := make(chan struct{})
 	go func() {
-		_, _ = service.streamChatWSResultWithHooks(context.Background(),
+		_, _, _ = service.streamChatWSResultWithHooks(context.Background(),
 			ChatRequest{BotID: "b", ThreadID: "s"}, nil, nil,
 			func(context.Context) error {
 				close(inTurn)
@@ -169,7 +169,7 @@ func TestTurnSpanCoversTheWebSocketEntryPoint(t *testing.T) {
 	recorder := recordTurnSpans(t)
 	service := newTracingTestService()
 
-	if _, err := service.streamChatWSResultWithHooks(context.Background(),
+	if _, _, err := service.streamChatWSResultWithHooks(context.Background(),
 		ChatRequest{BotID: "b", ThreadID: "s"}, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected this harness to fail the turn")
 	}

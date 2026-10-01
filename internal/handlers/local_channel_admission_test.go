@@ -30,9 +30,9 @@ const (
 
 // wsTerminalWrite is one release of the session's active slot.
 type wsTerminalWrite struct {
-	handle  sessionruntime.RunHandle
-	status  string
-	message string
+	handle    sessionruntime.RunHandle
+	status    string
+	errorCode string
 }
 
 // stubWSTurnAdmitter stands in for the session runtime manager. The handler
@@ -89,12 +89,12 @@ func (a *stubWSTurnAdmitter) Admit(_ context.Context, in sessionruntime.AdmitInp
 	return a.admission, nil
 }
 
-func (a *stubWSTurnAdmitter) FinishRun(_ context.Context, handle sessionruntime.RunHandle, status, message string) error {
+func (a *stubWSTurnAdmitter) FinishRunWithErrorCode(_ context.Context, handle sessionruntime.RunHandle, status, errorCode string) (sessionruntime.TerminalRun, error) {
 	select {
-	case a.terminal <- wsTerminalWrite{handle: handle, status: status, message: message}:
+	case a.terminal <- wsTerminalWrite{handle: handle, status: status, errorCode: errorCode}:
 	default:
 	}
-	return nil
+	return sessionruntime.TerminalRun{}, nil
 }
 
 func (a *stubWSTurnAdmitter) submissions() []sessionruntime.AdmitInput {
@@ -509,10 +509,10 @@ func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name        string
-		runErr      error
-		wantStatus  string
-		wantMessage string
+		name       string
+		runErr     error
+		wantStatus string
+		wantCode   string
 	}{
 		{name: "clean return leaves the outcome to the manager", wantStatus: ""},
 		{
@@ -521,10 +521,10 @@ func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
 			wantStatus: "",
 		},
 		{
-			name:        "errored",
-			runErr:      apperror.New(apperror.CodeSessionBusy, nil),
-			wantStatus:  sessionruntime.RunStatusErrored,
-			wantMessage: string(apperror.CodeSessionBusy),
+			name:       "errored",
+			runErr:     apperror.New(apperror.CodeSessionBusy, nil),
+			wantStatus: sessionruntime.RunStatusErrored,
+			wantCode:   string(apperror.CodeSessionBusy),
 		},
 		{
 			name:       "errored without a catalog code",
@@ -536,11 +536,11 @@ func TestFinishWSRunReleasesTheSlotUnderTheAdmittedToken(t *testing.T) {
 		handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
 		admitted := startedWSAdmission()
 
-		handler.finishWSRun(context.Background(), wsRunAdmission{RunID: admitted.RunID, Handle: admitted.Handle}, tc.runErr)
+		handler.finishWSRun(context.Background(), wsRunAdmission{RunID: admitted.RunID, Handle: admitted.Handle}, wsRunOutcome(application.RunOutcome{}, tc.runErr))
 
 		write := runtime.awaitTerminalWrite(t)
-		if write.status != tc.wantStatus || write.message != tc.wantMessage {
-			t.Fatalf("%s: terminal write = %+v, want %s %q", tc.name, write, tc.wantStatus, tc.wantMessage)
+		if write.status != tc.wantStatus || write.errorCode != tc.wantCode {
+			t.Fatalf("%s: terminal write = %+v, want %s %q", tc.name, write, tc.wantStatus, tc.wantCode)
 		}
 		if write.handle.FencingToken != admitted.Handle.FencingToken || write.handle.RunID != admitted.RunID {
 			t.Fatalf("%s: terminal write handle = %+v, want the admitted one", tc.name, write.handle)
@@ -557,7 +557,7 @@ func TestFinishWSRunSkipsRunsThisProcessDoesNotOwn(t *testing.T) {
 	runtime := newStubWSTurnAdmitter()
 	handler := &LocalChannelHandler{logger: slog.Default(), sessionRuntime: runtime}
 
-	handler.finishWSRun(context.Background(), wsRunAdmission{RunID: "run-1"}, nil)
+	handler.finishWSRun(context.Background(), wsRunAdmission{RunID: "run-1"}, wsRunOutcome(application.RunOutcome{}, nil))
 
 	select {
 	case write := <-runtime.terminal:
@@ -594,7 +594,7 @@ func TestFinishWSRunPersistsPreContextFailureAfterFencedFinish(t *testing.T) {
 	handler.finishWSRun(
 		context.Background(),
 		wsRunAdmission{RunID: admitted.RunID, Handle: admitted.Handle},
-		runErr,
+		wsRunOutcome(application.RunOutcome{}, runErr),
 	)
 
 	write := runtime.awaitTerminalWrite(t)
@@ -638,8 +638,8 @@ func TestStartWSStreamPublishesAdmittedTurnAndReleasesTheSession(t *testing.T) {
 
 	ref, started := handler.startWSStream(ctx, ctx, writer, wsAdmissionBotID, wsAdmissionTestRef(), "test", wsAdmissionTestSubmission(), nil,
 		nil,
-		func(context.Context, wsTurnRef, wsAdmittedTurn, chan<- application.WSStreamEvent, <-chan struct{}) error {
-			return nil
+		func(context.Context, wsTurnRef, wsAdmittedTurn, chan<- application.WSStreamEvent, <-chan struct{}) (application.RunOutcome, error) {
+			return application.RunOutcome{}, nil
 		})
 	if !started || ref.RunID != "run-1" {
 		t.Fatalf("stream started = %v, ref = %+v, want the admitted run", started, ref)

@@ -102,7 +102,7 @@ type runtimeControlReader interface {
 // snapshot or command routing that belongs to the runtime protocol instead.
 type wsTurnAdmitter interface {
 	Admit(ctx context.Context, in sessionruntime.AdmitInput) (sessionruntime.Admission, error)
-	FinishRun(ctx context.Context, handle sessionruntime.RunHandle, status, message string) error
+	FinishRunWithErrorCode(ctx context.Context, handle sessionruntime.RunHandle, status, errorCode string) (sessionruntime.TerminalRun, error)
 }
 
 // NewLocalChannelHandler creates a local channel handler.
@@ -1448,7 +1448,10 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 // because ref is how the *client* names the turn, while this is how the
 // *database* does: the same value would otherwise have to be threaded through
 // every send site that only cares about the client's name for it.
-type wsStreamRunner func(ctx context.Context, ref wsTurnRef, turn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error
+//
+// The runner returns the error the caller still has to report, and the outcome
+// of a failure it already delivered in the stream.
+type wsStreamRunner func(ctx context.Context, ref wsTurnRef, turn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error)
 
 type wsRunAdmissionBuilder func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error)
 
@@ -1575,6 +1578,37 @@ func (h *LocalChannelHandler) admitWSTurn(ctx context.Context, writer *wsWriter,
 	}, true
 }
 
+// wsRunOutcome is what this process knows about how a run it executed ended.
+//
+// It reports only what it actually knows, which is whether the run failed: it
+// holds the error. It does not know why an execution it was told to stop was
+// stopped. Every abort now arrives as a routed control, which unblocks the
+// runner and cancels its context, so the owner sees either a clean return or a
+// bare cancellation and neither says "aborted".
+//
+// Anything that is not a failure is therefore left unnamed, and the manager
+// resolves it from the intent already recorded against the run. Reporting a
+// clean return as `completed` is what made a routed abort finalize as a
+// successful turn (SR-CTL-001); a cancellation reported as `errored` blames the
+// symptom.
+//
+// A runner may have failed in the stream before it returned: its outcome names
+// that failure, which it has already delivered to the client. That failure is
+// the run's outcome even when the runner returns an error after it, such as a
+// failure to persist the turn; the returned error is only a diagnostic.
+func wsRunOutcome(delivered application.RunOutcome, runErr error) application.RunOutcome {
+	if runErr == nil {
+		return delivered
+	}
+	if errors.Is(runErr, context.Canceled) {
+		return application.RunOutcome{}
+	}
+	if delivered.Status == sessionruntime.RunStatusErrored && delivered.ErrorCode() != "" {
+		return delivered
+	}
+	return application.RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: runErr}
+}
+
 // finishWSRun writes the run's terminal state under the token this process was
 // admitted with. It is the release of the session's single active slot: without
 // it the durable row stays active and the next submission is told the session is
@@ -1582,35 +1616,20 @@ func (h *LocalChannelHandler) admitWSTurn(ctx context.Context, writer *wsWriter,
 //
 // Only the stable error code reaches the run's published state. The underlying
 // error is a private diagnostic and stays in the log.
-func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAdmission, runErr error) {
+func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAdmission, outcome application.RunOutcome) {
 	if h.sessionRuntime == nil || admission.Handle.FencingToken <= 0 {
 		return
 	}
-	// This process reports only what it actually knows, which is whether the run
-	// failed: it holds the error. It does not know why an execution it was told
-	// to stop was stopped. Every abort now arrives as a routed control, which
-	// unblocks the runner and cancels its context, so the owner sees either a
-	// clean return or a bare cancellation and neither says "aborted".
-	//
-	// Anything that is not a failure is therefore left unnamed, and the manager
-	// resolves it from the intent already recorded against the run. Reporting a
-	// clean return as `completed` is what made a routed abort finalize as a
-	// successful turn (SR-CTL-001); a cancellation reported as `errored` blames
-	// the symptom.
-	status, message := "", ""
-	if runErr != nil && !errors.Is(runErr, context.Canceled) {
-		status = sessionruntime.RunStatusErrored
-		message = string(apperror.CodeOf(runErr))
-	}
-	switch err := h.sessionRuntime.FinishRun(ctx, admission.Handle, status, message); {
+	failed := outcome.Status == sessionruntime.RunStatusErrored
+	switch _, err := h.sessionRuntime.FinishRunWithErrorCode(ctx, admission.Handle, outcome.Status, outcome.ErrorCode()); {
 	case err == nil:
-		if h.agentService != nil && runErr != nil && !errors.Is(runErr, context.Canceled) {
+		if h.agentService != nil && failed {
 			h.agentService.EnsureTerminalContextLifecycle(
 				ctx,
 				admission.RunID,
 				admission.Handle.BotID,
 				admission.Handle.SessionID,
-				runErr,
+				outcome.Cause,
 			)
 		}
 	case errors.Is(err, sessionruntime.ErrRunOwnershipLost):
@@ -1622,7 +1641,7 @@ func (h *LocalChannelHandler) finishWSRun(ctx context.Context, admission wsRunAd
 		h.logger.ErrorContext(ctx, "finish runtime run failed",
 			slog.Any("error", err),
 			slog.String("run_id", admission.RunID),
-			slog.String("status", status))
+			slog.String("status", outcome.Status))
 	}
 }
 
@@ -1728,7 +1747,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 	releaseCompaction := h.agentService.DeferSessionCompaction(botID, ref.SessionID, ref.RunID)
 	go func() {
 		defer streamCancel()
-		err := func() error {
+		delivered, err := func() (application.RunOutcome, error) {
 			if onFinish != nil {
 				defer onFinish()
 			}
@@ -1745,7 +1764,7 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 		// The terminal write outlives the connection: a client that disappears
 		// mid-turn must still free the session, and baseCtx is already gone by
 		// the time an aborted run returns.
-		h.finishWSRun(context.WithoutCancel(baseCtx), admission, err)
+		h.finishWSRun(context.WithoutCancel(baseCtx), admission, wsRunOutcome(delivered, err))
 		if err != nil && connCtx.Err() == nil {
 			privateErr := err
 			if cause := apperror.CauseOf(err); cause != nil {
@@ -2387,7 +2406,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				messageAdmission.attachmentsPrepared = true
 			}
 			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws stream error", submission, messageAdmission.build, releaseActiveWSTurn,
-				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
+				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
 					req := application.ChatRequest{
 						OnModelPreferenceSettled: func() {
 							writer.SendJSON(wsOutboundEvent{
@@ -2506,7 +2525,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				},
 			}
 			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws retry stream error", retrySubmission, retryAdmission.build, nil,
-				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
+				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
 					input := retryInput
 					input.RunID = runRef.RunID
 					input.TurnID = admittedTurn.TurnID
@@ -2609,7 +2628,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				attachments: chatAttachments,
 			}
 			h.startWSStream(streamBaseCtx, connCtx, writer, botID, ref, "ws edit stream error", editSubmission, editAdmission.build, nil,
-				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) error {
+				func(ctx context.Context, runRef wsTurnRef, admittedTurn wsAdmittedTurn, eventCh chan<- application.WSStreamEvent, abortCh <-chan struct{}) (application.RunOutcome, error) {
 					input := editInput
 					input.RunID = runRef.RunID
 					input.TurnID = admittedTurn.TurnID

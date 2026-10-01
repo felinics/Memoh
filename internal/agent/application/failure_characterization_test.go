@@ -20,6 +20,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
@@ -287,7 +288,8 @@ func assertStrings(t *testing.T, what string, got, want []string) {
 // publishes its giving-up EventError and ends with agent_abort.
 //
 // Current behavior: the turn port reports no error (the IM discuss runner only
-// learns of the failure from the error event), and no history is written.
+// learns of the failure from the error event), and no history is written. The
+// terminal event carries the run's failure code.
 func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	got := runDiscussCharacterization(t,
@@ -301,7 +303,7 @@ func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 		`{"type":"agent_start"}`,
 		`{"type":"retry","attempt":1,"maxAttempt":3,"retryError":"api error 503"}`,
 		`{"type":"error","code":"agent.provider_overloaded","error":"` + charOverloadedDetail + `"}`,
-		`{"type":"agent_abort","messages":[]}`,
+		`{"type":"agent_abort","messages":[],"code":"agent.provider_overloaded"}`,
 	})
 	assertStrings(t, "turn errors", got.errs, nil)
 	if want := [3]string{"failed", "agent.provider_overloaded", ""}; got.ledger != want {
@@ -312,6 +314,26 @@ func TestCharacterizeDiscussRetriesExhausted_CurrentBehavior(t *testing.T) {
 	}
 	if got.stores != 0 {
 		t.Fatalf("history rounds stored = %d, current behavior stores none", got.stores)
+	}
+}
+
+// X3 on the discuss path: the attempts fail with different classes. The run
+// records the first failure, the same one the lifecycle and history record,
+// not the last stream error the live view saw.
+func TestCharacterizeDiscussMixedFailureClassesRecordFirst(t *testing.T) {
+	t.Parallel()
+	got := runDiscussCharacterization(t,
+		native.StreamEvent{Type: native.EventAgentStart},
+		native.StreamEvent{Type: native.EventError, Error: "api error 429: rate limited"},
+		native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "api error 429"},
+		native.StreamEvent{Type: native.EventError, Error: charExhaustedText},
+		native.StreamEvent{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)},
+	)
+	if want := [3]string{"failed", "agent.provider_rate_limited", ""}; got.ledger != want {
+		t.Fatalf("session_runs = %q, want %q", got.ledger, want)
+	}
+	if want := [3]string{"errored", "agent.provider_rate_limited", charOverloadedDetail}; got.view != want {
+		t.Fatalf("run view = %q, want %q", got.view, want)
 	}
 }
 
@@ -359,10 +381,11 @@ func TestCharacterizeDiscussFailureWithoutTerminalEvent(t *testing.T) {
 	}
 }
 
-// Scenario 10 through turnRunFinisher: whatever the cause, only its apperror
+// Scenario 10 through turnRunFinisher: whatever the cause, only its catalogued
 // code reaches the runtime.
 //
-// Current behavior: a cause without a code finishes as runtime_run_failed.
+// Current behavior: a cause without a code finishes as runtime_run_failed; an
+// External Agent feedback cause finishes with the feedback code.
 func TestCharacterizeTurnRunFinisherCodes_CurrentBehavior(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -373,6 +396,7 @@ func TestCharacterizeTurnRunFinisherCodes_CurrentBehavior(t *testing.T) {
 	}{
 		{"plain cause", sessionruntime.RunStatusErrored, errors.New("SECRET adapter crashed"), [3]string{"failed", "runtime_run_failed", ""}},
 		{"coded cause", sessionruntime.RunStatusErrored, apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("dial"), nil), [3]string{"failed", "workspace.unreachable", ""}},
+		{"feedback cause", sessionruntime.RunStatusErrored, agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "", 409, "", "not configured", nil), [3]string{"failed", "acp_agent_not_configured", ""}},
 		{"errored without cause", sessionruntime.RunStatusErrored, nil, [3]string{"failed", "runtime_run_failed", ""}},
 		{"aborted", sessionruntime.RunStatusAborted, context.Canceled, [3]string{"aborted", "", ""}},
 	} {
@@ -396,7 +420,53 @@ func TestCharacterizeTurnRunFinisherCodes_CurrentBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatalf("admit: %v", err)
 			}
-			service.turnRunFinisher(context.Background(), admission)(tc.status, tc.cause)
+			service.turnRunFinisher(context.Background(), admission)(RunOutcome{Status: tc.status, Cause: tc.cause})
+			run, err := runs.Get(context.Background(), admission.RunID)
+			if err != nil {
+				t.Fatalf("load run: %v", err)
+			}
+			if got := [3]string{string(run.State), run.ErrorCode, run.ErrorMessage}; got != tc.want {
+				t.Fatalf("session_runs = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Scenario 7 (X7): a decision continuation that fails after the run resumed.
+//
+// Current behavior: session_runs records the cause's catalogued code in
+// error_code and no message; a cause without one finishes as
+// runtime_run_failed.
+func TestCharacterizeDecisionContinuationFailureColumns(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		cause error
+		want  [3]string
+	}{
+		{"coded cause", apperror.Wrap(apperror.CodeSessionHistoryInconsistent, errors.New("SECRET"), nil), [3]string{"failed", "session_runtime.history_inconsistent", ""}},
+		{"plain cause", errors.New("SECRET continuation failed"), [3]string{"failed", "runtime_run_failed", ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runs := sessionledger.New()
+			manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+				OwnerID: "owner-continuation", OwnerLeaseTTL: time.Minute, Ledger: runs, Fence: abortAlignmentFence{},
+			})
+			t.Cleanup(func() { _ = manager.Close() })
+			admission, err := manager.Admit(context.Background(), sessionruntime.AdmitInput{
+				BotID: "bot-1", SessionID: "session-1", InvocationID: "invocation-continuation", Payload: []byte(`{}`),
+				Execution: sessionruntime.Execution{
+					Admission: func(context.Context, sessionruntime.RunHandle) (sessionruntime.RunAdmissionView, error) {
+						return sessionruntime.RunAdmissionView{}, nil
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("admit: %v", err)
+			}
+			service := &Service{decisionRuntime: manager, logger: slog.New(slog.DiscardHandler)}
+			service.finishRuntimeDecision(context.Background(), admission.Handle, tc.cause)
 			run, err := runs.Get(context.Background(), admission.RunID)
 			if err != nil {
 				t.Fatalf("load run: %v", err)

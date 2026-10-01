@@ -1199,7 +1199,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 				m.removeLocalControl(runID, ctrl)
 				renewErr = ErrRunOwnershipLost
 			} else {
-				_ = m.FinishRun(context.WithoutCancel(ctx), handle, RunStatusErrored, renewErr.Error())
+				_, _ = m.FinishRun(context.WithoutCancel(ctx), handle, RunStatusErrored, renewErr.Error())
 			}
 			return RunHandle{}, Cursor{}, fmt.Errorf("confirm runtime owner lease: %w", renewErr)
 		}
@@ -1224,7 +1224,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 			status = RunStatusAborted
 			message = ""
 		}
-		_ = m.FinishRun(context.WithoutCancel(ctx), handle, status, message)
+		_, _ = m.FinishRun(context.WithoutCancel(ctx), handle, status, message)
 		return RunHandle{}, Cursor{}, err
 	}
 	if m.isClosed() {
@@ -1236,7 +1236,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 	admission, err = normalizeRunAdmission(admission)
 	if err != nil {
 		ctrl.markReady()
-		_ = m.FinishRun(context.WithoutCancel(ctx), handle, RunStatusErrored, err.Error())
+		_, _ = m.FinishRun(context.WithoutCancel(ctx), handle, RunStatusErrored, err.Error())
 		return RunHandle{}, Cursor{}, err
 	}
 	activated, changed, err := m.updateActiveAndPublish(context.WithoutCancel(ctx), handle, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
@@ -1287,7 +1287,7 @@ func (m *Manager) startRun(ctx context.Context, start runStart) (RunHandle, Curs
 			status = RunStatusAborted
 			message = ""
 		}
-		_ = m.FinishRun(context.WithoutCancel(ctx), handle, status, message)
+		_, _ = m.FinishRun(context.WithoutCancel(ctx), handle, status, message)
 		return RunHandle{}, Cursor{}, err
 	}
 	if !ctrl.completeAdmissionForAbort() {
@@ -1338,23 +1338,28 @@ func (m *Manager) MarkInlineDecisionRun(botID, sessionID, runID string) {
 	m.localControlForScope(botID, sessionID, runID).markInlineDecisions()
 }
 
-func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, message string) error {
+// FinishRun ends the run as its owner. The returned TerminalRun is the ledger's
+// terminal row when this call reached one, and is zero otherwise: a parked
+// decision, a run without a durable row, or an owner that lost the run before
+// the ledger answered.
+func (m *Manager) FinishRun(ctx context.Context, handle RunHandle, status, message string) (TerminalRun, error) {
 	return m.finishRun(ctx, handle, status, "", message)
 }
 
 // FinishRunWithErrorCode records a stable public failure code without treating
 // that code as a display message or persisting private provider diagnostics.
-func (m *Manager) FinishRunWithErrorCode(ctx context.Context, handle RunHandle, status, errorCode string) error {
+// It returns what FinishRun returns.
+func (m *Manager) FinishRunWithErrorCode(ctx context.Context, handle RunHandle, status, errorCode string) (TerminalRun, error) {
 	return m.finishRun(ctx, handle, status, errorCode, "")
 }
 
-func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, errorCode, message string) error {
+func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, errorCode, message string) (TerminalRun, error) {
 	if m == nil || m.backend == nil {
-		return nil
+		return TerminalRun{}, nil
 	}
 	handle = handle.normalized()
 	if !handle.valid() {
-		return ErrRunOwnershipLost
+		return TerminalRun{}, ErrRunOwnershipLost
 	}
 	ctrl := m.localControlForHandle(handle)
 	if ctrl != nil && handle.FencingToken <= 0 {
@@ -1363,7 +1368,7 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	if strings.TrimSpace(status) == "" && strings.TrimSpace(errorCode) == "" && strings.TrimSpace(message) == "" {
 		snapshot, ok, err := m.backend.Load(ctx, handle.key())
 		if err != nil {
-			return err
+			return TerminalRun{}, err
 		}
 		if ok && runMatchesHandle(snapshot.CurrentRunView, handle) &&
 			strings.EqualFold(snapshot.CurrentRunView.Status, RunStatusWaitingDecision) &&
@@ -1374,7 +1379,7 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 			// Inline runtimes never park on return, including when their
 			// decision's terminal notification did not reach this manager.
 			ctrl.markDecisionReady()
-			return nil
+			return TerminalRun{}, nil
 		}
 	}
 	if ctrl != nil {
@@ -1390,20 +1395,15 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 			// "nothing to decide" — the run would be durably successful precisely
 			// because the process that could not finish it said so last.
 			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
-			return ErrRunOwnershipLost
+			return TerminalRun{}, ErrRunOwnershipLost
 		}
 	}
 	errorCode = strings.TrimSpace(errorCode)
 	finishMessage := strings.TrimSpace(message)
 	status = m.resolveTerminalStatus(ctx, handle, status, errorCode, finishMessage)
-	if errorCode == "" && strings.EqualFold(status, RunStatusErrored) {
-		if snapshot, ok, loadErr := m.backend.Load(ctx, handle.key()); loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) {
-			errorCode = strings.TrimSpace(snapshot.CurrentRunView.ErrorCode)
-		}
-		if errorCode == "" {
-			errorCode = runErrorRunFailed
-		}
-	}
+	// Name the code before the first attempt, so that a durable finish retry
+	// writes the value this attempt would have written.
+	errorCode = ledgerFailureCode(terminalLedgerState(status, errorCode, finishMessage), errorCode)
 	prepared, err := m.prepareLedgerFinish(
 		ctx,
 		handle,
@@ -1414,18 +1414,20 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	)
 	if err != nil {
 		if errors.Is(err, ErrRunOwnershipLost) && prepared.State.Terminal() {
-			m.reconcileAndObserveTerminalRun(ctx, terminalRunFromLedger(prepared))
+			terminal := terminalRunFromLedger(prepared)
+			m.reconcileAndObserveTerminalRun(ctx, terminal)
 			m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
+			return terminal, err
 		} else if !errors.Is(err, ErrRunOwnershipLost) && !errors.Is(err, errInvalidOwnerTerminalState) {
 			m.scheduleDurableFinishRetry(context.WithoutCancel(ctx), ctrl, status, errorCode, finishMessage)
 		}
-		return err
+		return TerminalRun{}, err
 	}
 	if prepared.State == ledger.StateWaitingDecision {
 		if ctrl != nil {
 			ctrl.markDecisionReady()
 		}
-		return nil
+		return TerminalRun{}, nil
 	}
 	if prepared.State == ledger.StateFinishing {
 		status = liveRunStatus(prepared.ProposedState)
@@ -1442,7 +1444,7 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	if finalizeDecisions != nil {
 		if err := finalizeDecisions(ctx, handle); err != nil {
 			m.scheduleDurableFinishRetry(context.WithoutCancel(ctx), ctrl, status, errorCode, finishMessage)
-			return fmt.Errorf("finalize runtime decisions: %w", err)
+			return TerminalRun{}, fmt.Errorf("finalize runtime decisions: %w", err)
 		}
 	}
 	terminal, err := m.finalizeLedgerRun(ctx, handle, status, errorCode, finishMessage)
@@ -1463,21 +1465,21 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 		// durable transition; if ownership is lost, expiry hands the prepared
 		// proposal to the reaper. The terminal newer-fence case above is the
 		// exception: no reaping remains.
-		return err
+		return terminal, err
 	}
 	changed, err := m.finishRunState(ctx, handle, status, errorCode, finishMessage)
 	if err == nil || changed {
 		m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
-		return err
+		return terminal, err
 	}
 	if errors.Is(err, ErrRunOwnershipLost) {
 		snapshot, ok, loadErr := m.backend.Load(context.WithoutCancel(ctx), handle.key())
 		if loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
 			m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
-			return nil
+			return terminal, nil
 		}
 		m.forgetLocalControlForHandle(context.WithoutCancel(ctx), handle)
-		return err
+		return terminal, err
 	}
 	if ctrl != nil && m.localControlForHandle(handle) == ctrl {
 		retryCtx := context.WithoutCancel(ctx)
@@ -1485,7 +1487,7 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 			go m.retryFinishRun(retryCtx, ctrl, status, errorCode, finishMessage)
 		})
 	}
-	return err
+	return terminal, err
 }
 
 func (m *Manager) scheduleDurableFinishRetry(
@@ -1530,7 +1532,7 @@ func (m *Manager) retryDurableFinish(
 		if m.localControlForHandle(ctrl.handle()) != ctrl {
 			return
 		}
-		err := m.finishRun(retryCtx, ctrl.handle(), status, errorCode, message)
+		_, err := m.finishRun(retryCtx, ctrl.handle(), status, errorCode, message)
 		if err == nil {
 			return
 		}
@@ -1719,16 +1721,18 @@ func (m *Manager) prepareAgentTerminalEvent(
 	if strings.EqualFold(run.Status, RunStatusWaitingDecision) && ctrl.canParkForDecision() {
 		return agentTerminalProposal{}, nil
 	}
+	// A terminal event that carries a code names the failure its owner
+	// classified; the live view's code is only the last stream error it saw.
+	errorCode := strings.TrimSpace(event.Code)
+	if errorCode == "" {
+		errorCode = strings.TrimSpace(run.ErrorCode)
+	}
 	status := RunStatusCompleted
 	switch {
-	case strings.TrimSpace(run.ErrorCode) != "", strings.TrimSpace(run.Error) != "":
+	case errorCode != "", strings.TrimSpace(run.Error) != "":
 		status = RunStatusErrored
 	case strings.EqualFold(run.Status, RunStatusAborting), event.Type == native.EventAgentAbort:
 		status = RunStatusAborted
-	}
-	errorCode := strings.TrimSpace(run.ErrorCode)
-	if status == RunStatusErrored && errorCode == "" {
-		errorCode = runErrorRunFailed
 	}
 	prepared, err := m.prepareLedgerFinish(
 		ctx,

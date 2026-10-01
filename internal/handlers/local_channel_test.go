@@ -581,8 +581,8 @@ func (*testWSDecisionRuntime) Admit(context.Context, sessionruntime.AdmitInput) 
 	return sessionruntime.Admission{}, errors.New("unexpected admission")
 }
 
-func (*testWSDecisionRuntime) FinishRun(context.Context, sessionruntime.RunHandle, string, string) error {
-	return nil
+func (*testWSDecisionRuntime) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) (sessionruntime.TerminalRun, error) {
+	return sessionruntime.TerminalRun{}, nil
 }
 
 func (*testWSDecisionRuntime) AbortControl(context.Context, string, string, string, string) (bool, error) {

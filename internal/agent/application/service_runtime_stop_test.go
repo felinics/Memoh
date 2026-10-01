@@ -29,12 +29,12 @@ func TestUserStopDuringDriverSetupKeepsTheUserMessage(t *testing.T) {
 	abortCh := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- service.streamRuntimeWS(context.Background(), driver, ChatRequest{
+		done <- ignoreOutcome(service.streamRuntimeWS(context.Background(), driver, ChatRequest{
 			BotID:    lifecycleTestBotID,
 			ThreadID: lifecycleTestSessionID,
 			RunID:    lifecycleTestRunID,
 			Query:    "inspect",
-		}, make(chan WSStreamEvent, 8), abortCh)
+		}, make(chan WSStreamEvent, 8), abortCh))
 	}()
 	select {
 	case <-driver.started:
@@ -56,4 +56,9 @@ func TestUserStopDuringDriverSetupKeepsTheUserMessage(t *testing.T) {
 	if len(messages.persisted) == 0 || messages.persisted[0].Role != "user" {
 		t.Fatalf("persisted = %+v, want the user message kept", messages.persisted)
 	}
+}
+
+// ignoreOutcome keeps the error of a WebSocket stream call.
+func ignoreOutcome(_ RunOutcome, err error) error {
+	return err
 }

@@ -133,7 +133,7 @@ func TestParkDoesNotFinalizeDecisions(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -233,7 +233,7 @@ func TestInlineFinishReconcilesClosedDecisionsAndRetriesPublication(t *testing.T
 				}
 				return service.finalizeRuntimeDecisions(ctx, h)
 			})
-			err := manager.FinishRun(t.Context(), handle, "", "")
+			_, err := manager.FinishRun(t.Context(), handle, "", "")
 			if failPublish && !errors.Is(err, backend.err) {
 				t.Fatalf("publication failure not propagated: %v", err)
 			}

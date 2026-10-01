@@ -227,7 +227,7 @@ func TestCharacterizeFinishRunWithCodeAsMessage_CurrentBehavior(t *testing.T) {
 	f := newAdmitFixture(t)
 	admission := admitRunning(t, f, "inv-ws-code-as-message")
 
-	if err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, "agent.response_interrupted"); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, "agent.response_interrupted"); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{
@@ -247,7 +247,7 @@ func TestCharacterizeFinishRunErroredWithoutCodeOrMessage(t *testing.T) {
 	f := newAdmitFixture(t)
 	admission := admitRunning(t, f, "inv-ws-plain")
 
-	if err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, ""); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, ""); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{
@@ -260,8 +260,10 @@ func TestCharacterizeFinishRunErroredWithoutCodeOrMessage(t *testing.T) {
 }
 
 // Scenario 2/3: the stream published EventError with a catalog code before the
-// owner finished. Both finish entry points take the code from the live run.
-func TestCharacterizeFinishTakesCodeFromLiveEventError(t *testing.T) {
+// owner finished, and no terminal event proposed the outcome. The finish call
+// names the code: finishing errored without one records runtime_run_failed,
+// not the code the live run last saw.
+func TestCharacterizeFinishCodeComesFromCaller(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name   string
@@ -273,27 +275,30 @@ func TestCharacterizeFinishTakesCodeFromLiveEventError(t *testing.T) {
 			// turnRunFinisher shape: FinishRunWithErrorCode(errored, CodeOf(cause)="").
 			name: "finish with empty error code",
 			finish: func(m *Manager, h RunHandle) error {
-				return m.FinishRunWithErrorCode(context.Background(), h, RunStatusErrored, "")
+				_, err := m.FinishRunWithErrorCode(context.Background(), h, RunStatusErrored, "")
+				return err
 			},
-			want: terminalColumns{State: ledger.StateFailed, ErrorCode: "agent.provider_overloaded"},
+			want: terminalColumns{State: ledger.StateFailed, ErrorCode: "runtime_run_failed"},
 			// Current behavior: the live view keeps the event's public detail as
 			// its error text while the ledger row has no message.
-			view: liveRunView{Status: "errored", ErrorCode: "agent.provider_overloaded", Error: "The model provider is overloaded."},
+			view: liveRunView{Status: "errored", ErrorCode: "runtime_run_failed", Error: "The model provider is overloaded."},
 		},
 		{
 			// finishWSRun shape: FinishRun(errored, CodeOf(cause)).
 			name: "finish with code as message",
 			finish: func(m *Manager, h RunHandle) error {
-				return m.FinishRun(context.Background(), h, RunStatusErrored, "agent.provider_overloaded")
+				_, err := m.FinishRun(context.Background(), h, RunStatusErrored, "agent.provider_overloaded")
+				return err
 			},
-			want: terminalColumns{State: ledger.StateFailed, ErrorCode: "agent.provider_overloaded", ErrorMessage: "agent.provider_overloaded"},
-			view: liveRunView{Status: "errored", ErrorCode: "agent.provider_overloaded", Error: "agent.provider_overloaded"},
+			want: terminalColumns{State: ledger.StateFailed, ErrorCode: "runtime_run_failed", ErrorMessage: "agent.provider_overloaded"},
+			view: liveRunView{Status: "errored", ErrorCode: "runtime_run_failed", Error: "agent.provider_overloaded"},
 		},
 		{
 			// A different explicit code wins over the live one.
 			name: "finish with explicit code",
 			finish: func(m *Manager, h RunHandle) error {
-				return m.FinishRunWithErrorCode(context.Background(), h, RunStatusErrored, "agent.response_interrupted")
+				_, err := m.FinishRunWithErrorCode(context.Background(), h, RunStatusErrored, "agent.response_interrupted")
+				return err
 			},
 			want: terminalColumns{State: ledger.StateFailed, ErrorCode: "agent.response_interrupted"},
 			view: liveRunView{Status: "errored", ErrorCode: "agent.response_interrupted", Error: "The model provider is overloaded."},
@@ -368,7 +373,7 @@ func TestCharacterizeAgentEndAfterEventErrorColumns(t *testing.T) {
 					run.State, run.ProposedState, run.ProposedErrorCode, run.ProposedErrorMessage, tc.want)
 			}
 			// The owner's clean return (FinishRun with nothing) finalizes the proposal.
-			if err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+			if _, err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
 				t.Fatalf("finish run: %v", err)
 			}
 			assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), tc.want)
@@ -391,14 +396,15 @@ func TestCharacterizeRetryClearsLiveErrorBeforeCompletion(t *testing.T) {
 		t.Fatalf("run view after retry = %+v, want no error", view)
 	}
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventAgentEnd})
-	if err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{State: ledger.StateCompleted})
 }
 
 // Scenario 3: a retry that runs out of attempts publishes its own final
-// EventError, which is what the durable row records.
+// EventError. Without a terminal event the durable row records only what the
+// finish call names, so an errored finish without a code is runtime_run_failed.
 func TestCharacterizeRetryThenTerminalEventErrorColumns(t *testing.T) {
 	t.Parallel()
 	f := newAdmitFixture(t)
@@ -408,7 +414,59 @@ func TestCharacterizeRetryThenTerminalEventErrorColumns(t *testing.T) {
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{
 		Type: native.EventError, Code: "agent.provider_overloaded", Error: "The model provider is overloaded.",
 	})
-	if err := f.manager.FinishRunWithErrorCode(context.Background(), admission.Handle, RunStatusErrored, ""); err != nil {
+	if _, err := f.manager.FinishRunWithErrorCode(context.Background(), admission.Handle, RunStatusErrored, ""); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{
+		State: ledger.StateFailed, ErrorCode: "runtime_run_failed",
+	})
+}
+
+// Scenario 3: when the terminal event proposed the outcome, the proposal wins
+// over a finish call that names no code or a different one.
+func TestCharacterizeTerminalProposalWinsOverFinishCode(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		code string
+	}{
+		{name: "finish without code"},
+		{name: "finish with another code", code: "agent.response_interrupted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := newAdmitFixture(t)
+			admission := admitRunning(t, f, "inv-proposal-wins")
+			handleEvent(t, f.manager, admission.Handle, native.StreamEvent{
+				Type: native.EventError, Code: "agent.provider_overloaded", Error: "The model provider is overloaded.",
+			})
+			handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventAgentAbort})
+			if _, err := f.manager.FinishRunWithErrorCode(context.Background(), admission.Handle, RunStatusErrored, tc.code); err != nil {
+				t.Fatalf("finish run: %v", err)
+			}
+			assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{
+				State: ledger.StateFailed, ErrorCode: "agent.provider_overloaded",
+			})
+		})
+	}
+}
+
+// Scenario 3: when the terminal event's proposal write fails, the outcome is
+// deferred to finish, and the finish call's code is what the row records.
+func TestCharacterizeDeferredProposalTakesFinishCode(t *testing.T) {
+	t.Parallel()
+	f := newAdmitFixture(t)
+	admission := admitRunning(t, f, "inv-deferred-proposal")
+	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{
+		Type: native.EventError, Code: "agent.provider_overloaded", Error: "The model provider is overloaded.",
+	})
+	f.runs.SetPrepareErr(errors.New("proposal write temporarily unavailable"))
+	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventAgentAbort})
+	if got := f.runs.State(admission.RunID); got != ledger.StateRunning {
+		t.Fatalf("ledger after deferred proposal = %q, want running", got)
+	}
+	f.runs.SetPrepareErr(nil)
+	if _, err := f.manager.FinishRunWithErrorCode(context.Background(), admission.Handle, RunStatusErrored, "agent.provider_overloaded"); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{
@@ -442,7 +500,7 @@ func TestCharacterizeAbortingRunFinishesAborted(t *testing.T) {
 	f := newAdmitFixture(t)
 	admission := admitRunning(t, f, "inv-aborting")
 	handleEvent(t, f.manager, admission.Handle, native.StreamEvent{Type: native.EventAgentAbort})
-	if err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := f.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	assertColumns(t, ledgerColumns(t, f.runs, admission.RunID), terminalColumns{State: ledger.StateAborted})
@@ -525,7 +583,7 @@ func TestCharacterizeOwnerFinishAfterOwnershipLossWritesNothing(t *testing.T) {
 	}
 	ctrl.revokeOwnership(ErrRunOwnershipLost)
 
-	err := f.manager.FinishRunWithErrorCode(context.Background(), admission.Handle, RunStatusErrored, "agent.response_interrupted")
+	_, err := f.manager.FinishRunWithErrorCode(context.Background(), admission.Handle, RunStatusErrored, "agent.response_interrupted")
 	if !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("finish error = %v, want ErrRunOwnershipLost", err)
 	}

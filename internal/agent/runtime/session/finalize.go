@@ -17,6 +17,18 @@ var errInvalidOwnerTerminalState = errors.New("session runtime: invalid owner te
 // value; it is registered in the apperror catalog under the same value.
 const runErrorRunFailed = "runtime_run_failed"
 
+// ledgerFailureCode is the error code a terminal write persists. A failed run
+// always carries one: when its owner named none, it is runErrorRunFailed. Both
+// durable entry points apply it, because a proposal is kept as written and the
+// finalize write cannot fill in a code the proposal left empty.
+func ledgerFailureCode(state ledger.State, errorCode string) string {
+	errorCode = strings.TrimSpace(errorCode)
+	if state == ledger.StateFailed && errorCode == "" {
+		return runErrorRunFailed
+	}
+	return errorCode
+}
+
 // prepareLedgerFinish makes the proposed owner outcome durable while the run
 // remains active. The reaper may later pass StateLost to Finalize, but the
 // ledger resolves a prepared run to this proposal instead. That is the crash
@@ -35,11 +47,12 @@ func (m *Manager) prepareLedgerFinish(
 	if state == ledger.StateLost || !state.Terminal() {
 		return ledger.Run{}, fmt.Errorf("%w: %q", errInvalidOwnerTerminalState, state)
 	}
+	errorCode = ledgerFailureCode(state, errorCode)
 	if m.runs == nil || handle.FencingToken <= 0 {
 		return ledger.Run{
 			State:                ledger.StateFinishing,
 			ProposedState:        state,
-			ProposedErrorCode:    strings.TrimSpace(errorCode),
+			ProposedErrorCode:    errorCode,
 			ProposedErrorMessage: strings.TrimSpace(message),
 		}, nil
 	}
@@ -91,10 +104,7 @@ func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, statu
 		return TerminalRun{}, nil
 	}
 	state := terminalLedgerState(status, errorCode, message)
-	errorCode = strings.TrimSpace(errorCode)
-	if state == ledger.StateFailed && errorCode == "" {
-		errorCode = runErrorRunFailed
-	}
+	errorCode = ledgerFailureCode(state, errorCode)
 	run, applied, err := m.runs.Finalize(ctx, ledger.FinalizeParams{
 		RunID:        handle.RunID,
 		FencingToken: handle.FencingToken,

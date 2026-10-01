@@ -501,7 +501,7 @@ func (s *Service) continueRuntimeDecision(
 		return
 	}
 	if lifecycleDeferred {
-		_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
+		_, _ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
 		return
 	}
 	s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
@@ -592,7 +592,7 @@ func (s *Service) persistRuntimeDecisionLifecycle(
 }
 
 func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionruntime.RunHandle, cause error) {
-	status, message := runtimeDecisionTerminal(ctx, cause)
+	outcome := runtimeDecisionTerminal(ctx, cause)
 	lifecycleCtx := frozenContextCause(ctx)
 	minimal := minimalContextLifecycleSnapshot()
 	staged := s.stageContextLifecycleCandidate(
@@ -604,7 +604,7 @@ func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionrunti
 		cause,
 		contextLifecycleCandidateMinimal,
 	)
-	if err := s.decisionRuntime.FinishRun(context.WithoutCancel(nonNilContext(ctx)), handle, status, message); err == nil && !staged {
+	if _, err := s.decisionRuntime.FinishRunWithErrorCode(context.WithoutCancel(nonNilContext(ctx)), handle, outcome.Status, outcome.ErrorCode()); err == nil && !staged {
 		s.EnsureTerminalContextLifecycle(
 			lifecycleCtx,
 			handle.RunID,
@@ -627,12 +627,15 @@ func frozenContextCause(ctx context.Context) context.Context {
 	return frozen
 }
 
-func runtimeDecisionTerminal(ctx context.Context, cause error) (string, string) {
+// runtimeDecisionTerminal is the outcome a decision continuation reports: a
+// failure unless the continuation was explicitly canceled, in which case the
+// session runtime resolves it from the abort intent recorded against the run.
+func runtimeDecisionTerminal(ctx context.Context, cause error) RunOutcome {
 	explicitlyCanceled := ctx != nil &&
 		errors.Is(cause, context.Canceled) &&
 		errors.Is(context.Cause(ctx), context.Canceled)
 	if cause != nil && !explicitlyCanceled {
-		return sessionruntime.RunStatusErrored, string(apperror.CodeOf(cause))
+		return RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: cause}
 	}
-	return "", ""
+	return RunOutcome{}
 }

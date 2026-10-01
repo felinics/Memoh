@@ -74,7 +74,7 @@ func newWaitingDecisionRuntime(t *testing.T, backends ...sessionruntime.Backend)
 	}); err != nil {
 		t.Fatalf("park runtime decision: %v", err)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
 		t.Fatalf("mark deferred producer ready: %v", err)
 	}
 	return manager, handle
@@ -112,7 +112,7 @@ func TestRuntimeDecisionTerminalDoesNotExposePrivateErrors(t *testing.T) {
 		contextCause error
 		cause        error
 		status       string
-		message      string
+		code         string
 	}{
 		{name: "success"},
 		{
@@ -137,10 +137,10 @@ func TestRuntimeDecisionTerminalDoesNotExposePrivateErrors(t *testing.T) {
 			status: sessionruntime.RunStatusErrored,
 		},
 		{
-			name:    "stable application error",
-			cause:   apperror.New(apperror.CodeSessionHistoryInconsistent, nil),
-			status:  sessionruntime.RunStatusErrored,
-			message: string(apperror.CodeSessionHistoryInconsistent),
+			name:   "stable application error",
+			cause:  apperror.New(apperror.CodeSessionHistoryInconsistent, nil),
+			status: sessionruntime.RunStatusErrored,
+			code:   string(apperror.CodeSessionHistoryInconsistent),
 		},
 	}
 	for _, tt := range tests {
@@ -151,9 +151,9 @@ func TestRuntimeDecisionTerminalDoesNotExposePrivateErrors(t *testing.T) {
 				ctx, cancel = context.WithCancelCause(ctx)
 				cancel(tt.contextCause)
 			}
-			status, message := runtimeDecisionTerminal(ctx, tt.cause)
-			if status != tt.status || message != tt.message {
-				t.Fatalf("runtimeDecisionTerminal() = (%q, %q), want (%q, %q)", status, message, tt.status, tt.message)
+			outcome := runtimeDecisionTerminal(ctx, tt.cause)
+			if outcome.Status != tt.status || outcome.ErrorCode() != tt.code {
+				t.Fatalf("runtimeDecisionTerminal() = (%q, %q), want (%q, %q)", outcome.Status, outcome.ErrorCode(), tt.status, tt.code)
 			}
 		})
 	}
@@ -193,7 +193,7 @@ func TestContinueRuntimeDecisionDoesNotParkProviderCancellation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("park runtime decision: %v", err)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
 		t.Fatalf("mark deferred producer ready: %v", err)
 	}
 
@@ -255,7 +255,7 @@ func TestContinueRuntimeDecisionCancelsContinuationAfterPublicationFailure(t *te
 	}); err != nil {
 		t.Fatalf("park runtime decision: %v", err)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
 		t.Fatalf("mark deferred producer ready: %v", err)
 	}
 

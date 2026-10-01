@@ -994,7 +994,7 @@ func runManagerAbortAcknowledgesReservedRunBeforeTerminalCompletion(t *testing.T
 	if err := receiveTestResult(t, "aborted run admission", startErr); err == nil {
 		t.Fatal("start run unexpectedly activated after abort")
 	}
-	if err := manager.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	snapshot, err = manager.Snapshot(context.Background(), testBotID, testSessionID)
@@ -1066,7 +1066,7 @@ func runManagerDoesNotRetryFinishAfterOwnershipLoss(t *testing.T, suite distribu
 	}
 	_ = manager.stopLeaseRenewalContext(context.Background(), manager.localControl("stream-expired-finish"))
 	time.Sleep(leaseTTL + leaseTTL/2)
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, "stream-expired-finish"), RunStatusCompleted, ""); !errors.Is(err, ErrRunOwnershipLost) {
+	if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, "stream-expired-finish"), RunStatusCompleted, ""); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("finish expired run error = %v, want ErrRunOwnershipLost", err)
 	}
 	if manager.localControl("stream-expired-finish") != nil {
@@ -1322,7 +1322,7 @@ func runRuntimeManagerScopesIdenticalRunIDsContract(t *testing.T, suite runtimeB
 	}
 	for _, sessionID := range []string{"session-scope-a", "session-scope-b"} {
 		handle := requireRunHandle(t, manager, testBotID, sessionID, runID)
-		if err := manager.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
+		if _, err := manager.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
 			t.Fatalf("finish %s: %v", sessionID, err)
 		}
 	}
@@ -1413,7 +1413,7 @@ func runRuntimeManagerFencesDelayedOwnerMutationsContract(t *testing.T, suite ru
 	if err != nil {
 		t.Fatalf("start first generation: %v", err)
 	}
-	if err := manager.FinishRun(context.Background(), oldHandle, RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), oldHandle, RunStatusCompleted, ""); err != nil {
 		t.Fatalf("finish first generation: %v", err)
 	}
 	newAbort := make(chan struct{}, 1)
@@ -1439,7 +1439,7 @@ func runRuntimeManagerFencesDelayedOwnerMutationsContract(t *testing.T, suite ru
 	if _, err := manager.HandleAgentEvent(context.Background(), oldHandle, native.StreamEvent{Type: native.EventTextDelta, Delta: "late output"}); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("late event error = %v, want ErrRunOwnershipLost", err)
 	}
-	if err := manager.FinishRun(context.Background(), oldHandle, RunStatusErrored, "late finish"); !errors.Is(err, ErrRunOwnershipLost) {
+	if _, err := manager.FinishRun(context.Background(), oldHandle, RunStatusErrored, "late finish"); !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("late finish error = %v, want ErrRunOwnershipLost", err)
 	}
 	if manager.localControlForHandle(newHandle) == nil {
@@ -1651,7 +1651,7 @@ func runRuntimeManagerSkipsHappyPathTerminalReconciliation(t *testing.T, suite d
 		t.Fatalf("admit run: %v", err)
 	}
 	loadsBeforeFinish := backend.loads.Load()
-	if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	if got := backend.loads.Load(); got != loadsBeforeFinish {
@@ -1710,7 +1710,7 @@ func runRuntimeManagerHandsExhaustedDurableFinishToReaper(t *testing.T, suite di
 				}
 				runs.SetFinalizeErr(transient)
 			}
-			if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
+			if _, err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
 				t.Fatal("FinishRun() error = nil, want initial durable failure")
 			}
 
@@ -1869,7 +1869,7 @@ func runRuntimeManagerAcknowledgesAbortAfterRunReplacement(t *testing.T, suite d
 	}
 	receiveTestResult(t, "abort result polling", loadStarted)
 
-	if err := owner.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
+	if _, err := owner.FinishRun(context.Background(), handle, RunStatusAborted, ""); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	replacement, err := owner.StartRunHandle(
@@ -2137,7 +2137,7 @@ func runRuntimeManagerScopesRunRefCleanupToGeneration(t *testing.T, suite distri
 	if err != nil || !ok {
 		t.Fatalf("load first generation ref = ok:%v err:%v", ok, err)
 	}
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted, ""); err != nil {
 		t.Fatalf("finish first generation: %v", err)
 	}
 	if err := manager.StartRun(context.Background(), testBotID, testSessionID, runID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
@@ -2186,7 +2186,7 @@ func runRuntimeManagerRejectsDelayedOldGenerationCommand(t *testing.T, suite dis
 	if err != nil || !ok {
 		t.Fatalf("load first generation ref = ok:%v err:%v", ok, err)
 	}
-	if err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted, ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), requireRunHandle(t, manager, testBotID, testSessionID, runID), RunStatusCompleted, ""); err != nil {
 		t.Fatalf("finish first generation: %v", err)
 	}
 	newAbort := make(chan struct{}, 1)
@@ -2365,7 +2365,7 @@ func runRuntimeManagerKeepsHookAuthorityForUserAbort(t *testing.T, suite distrib
 		t.Fatalf("user abort revoked terminal hook authority: %v", context.Cause(authorityCtx))
 	default:
 	}
-	if err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted, ""); err != nil {
+	if _, err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted, ""); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	select {
@@ -2437,7 +2437,7 @@ func runRuntimeManagerRetriesTerminalUpdateBeforeDroppingOwnerRoute(t *testing.T
 	firstHandle := requireRunHandle(t, manager, testBotID, testSessionID, "stream-finish-retry")
 
 	backend.failing.Store(true)
-	if err := manager.FinishRun(context.Background(), firstHandle, RunStatusErrored, "stream failed"); err == nil {
+	if _, err := manager.FinishRun(context.Background(), firstHandle, RunStatusErrored, "stream failed"); err == nil {
 		t.Fatal("terminal update unexpectedly succeeded")
 	}
 	if manager.localControlForHandle(firstHandle) == nil {
@@ -2459,7 +2459,7 @@ func runRuntimeManagerRetriesTerminalUpdateBeforeDroppingOwnerRoute(t *testing.T
 		_, ok, err := manager.RunRef(context.Background(), testBotID, testSessionID, "stream-finish-retry")
 		if err == nil && !ok && manager.localControlForHandle(firstHandle) == nil {
 			secondHandle := requireRunHandle(t, manager, testBotID, secondSessionID, "stream-finish-retry")
-			if err := manager.FinishRun(context.Background(), secondHandle, RunStatusCompleted, ""); err != nil {
+			if _, err := manager.FinishRun(context.Background(), secondHandle, RunStatusCompleted, ""); err != nil {
 				t.Fatalf("finish duplicate-id run: %v", err)
 			}
 			return
@@ -2933,7 +2933,7 @@ func runRuntimeManagerRoutesAbortAcrossManagersContract(t *testing.T, suite dist
 	if snapshot.CurrentRunView.Error != "" {
 		t.Fatalf("abort error = %q, want empty", snapshot.CurrentRunView.Error)
 	}
-	if err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted, ""); err != nil {
+	if _, err := owner.FinishRun(context.Background(), requireRunHandle(t, owner, testBotID, testSessionID, testRunID), RunStatusAborted, ""); err != nil {
 		t.Fatalf("finish aborted run: %v", err)
 	}
 	snapshot, err := owner.Snapshot(context.Background(), testBotID, testSessionID)
@@ -3061,7 +3061,8 @@ func runRuntimeManagerAcknowledgesAppliedResponseAfterFinish(t *testing.T, suite
 	}
 	handle := requireRunHandle(t, owner, testBotID, testSessionID, testRunID)
 	owner.SetCommandHandler(func(ctx context.Context, _ Command) error {
-		return owner.FinishRun(context.WithoutCancel(ctx), handle, RunStatusCompleted, "")
+		_, err := owner.FinishRun(context.WithoutCancel(ctx), handle, RunStatusCompleted, "")
+		return err
 	})
 	if _, err := owner.HandleAgentEvent(context.Background(), handle, native.StreamEvent{
 		Type: native.EventToolApprovalRequest, ToolName: "exec", ToolCallID: "call-applied",
@@ -3144,7 +3145,7 @@ func runRuntimeManagerCancelsActiveResponseOnFinish(t *testing.T, suite distribu
 		dispatchDone <- dispatchResult{handled: handled, err: err}
 	}()
 	receiveTestResult(t, "active response handler start", handlerStarted)
-	if err := owner.FinishRun(context.Background(), handle, RunStatusCompleted, ""); err != nil {
+	if _, err := owner.FinishRun(context.Background(), handle, RunStatusCompleted, ""); err != nil {
 		t.Fatalf("finish run with active response: %v", err)
 	}
 	if err := receiveTestResult(t, "active response handler cancellation", handlerCanceled); !errors.Is(err, context.Canceled) {
@@ -3914,7 +3915,7 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterAbortContract(t *testing.T, 
 	}); err != nil {
 		t.Fatalf("handle abort terminal event: %v", err)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
 		t.Fatalf("finish errored run: %v", err)
 	}
 
@@ -3981,7 +3982,7 @@ func runRuntimeManagerKeepsErroredStreamErroredAfterEndContract(t *testing.T, su
 		prepared.CurrentRunView.ProposedTerminalStatus != RunStatusErrored {
 		t.Fatalf("prepared run = %#v, want finishing -> errored", prepared.CurrentRunView)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
 		t.Fatalf("finish errored run: %v", err)
 	}
 
@@ -4031,7 +4032,7 @@ func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite r
 		prepared.CurrentRunView.ProposedTerminalStatus != RunStatusCompleted {
 		t.Fatalf("prepared run = %#v, want finishing -> completed", prepared.CurrentRunView)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
 		t.Fatalf("finish recovered run: %v", err)
 	}
 

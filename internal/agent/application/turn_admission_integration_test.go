@@ -73,7 +73,7 @@ func TestAdmitTurnRunRequestUserTurnReachesSubscriber(t *testing.T) {
 		// the fixture rows themselves cascade away with the bot.
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 10*time.Second)
 		defer cancel()
-		_ = manager.FinishRun(ctx, admission.Handle, sessionruntime.RunStatusCompleted, "")
+		_, _ = manager.FinishRun(ctx, admission.Handle, sessionruntime.RunStatusCompleted, "")
 	})
 
 	sub, err := manager.Subscribe(ctx, botID, sessionID)

@@ -70,7 +70,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		// than retried here.
 		return schedule.TriggerResult{}, err
 	}
-	defer func() { finish(triggeredRunTerminal{cause: err}) }()
+	defer func() { finish(RunOutcome{Cause: err}) }()
 	ctx = runCtx
 
 	// Runtime sessions (ACP, codex, claude-code) must never silently degrade

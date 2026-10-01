@@ -25,7 +25,7 @@ func TestFinishRunObservesAuthoritativeLedgerTerminal(t *testing.T) {
 		observed = append(observed, run)
 	})
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, "provider.unavailable"); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, "provider.unavailable"); err != nil {
 		t.Fatal(err)
 	}
 	if len(observed) != 1 {
@@ -52,7 +52,7 @@ func TestFinishRunWithErrorCodePersistsStableCodeWithoutDiagnostic(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if err := fixture.manager.FinishRunWithErrorCode(
+	if _, err := fixture.manager.FinishRunWithErrorCode(
 		context.Background(), admission.Handle, RunStatusErrored, "agent.response_timeout",
 	); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestFinishRunRetriesTransientDurableFailuresWhileRetainingOwnership(t *test
 				fixture.runs.SetFinalizeErr(transient)
 			}
 
-			err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, "")
+			_, err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, "")
 			if err == nil || !strings.Contains(err.Error(), transient.Error()) {
 				t.Fatalf("first finish error = %v, want transient durable failure", err)
 			}
@@ -123,7 +123,7 @@ func TestFinishRunStopsDurableRetryAfterBudget(t *testing.T) {
 	}
 	fixture.runs.SetPrepareErr(errors.New("database remains unavailable"))
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
 		t.Fatal("FinishRun() error = nil, want initial durable failure")
 	}
 	deadline := time.Now().Add(time.Second)
@@ -179,7 +179,7 @@ func TestMemoryRuntimeReaperConvergesExhaustedDurableFinish(t *testing.T) {
 				}
 				runs.SetFinalizeErr(transient)
 			}
-			if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
+			if _, err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
 				t.Fatal("FinishRun() error = nil, want initial durable failure")
 			}
 
@@ -218,7 +218,7 @@ func TestFinishRunRejectsOwnerProposedLostWithoutRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusLost, "owner guessed it was lost")
+	_, err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusLost, "owner guessed it was lost")
 	if !errors.Is(err, errInvalidOwnerTerminalState) {
 		t.Fatalf("FinishRun() error = %v, want errInvalidOwnerTerminalState", err)
 	}
@@ -255,7 +255,7 @@ func TestAgentTerminalProposalFailureDefersOutcomeToFinish(t *testing.T) {
 	}
 
 	fixture.runs.SetPrepareErr(nil)
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
 		t.Fatalf("FinishRun() after recovery: %v", err)
 	}
 	if got := fixture.runs.State(admission.RunID); got != ledger.StateCompleted {
@@ -279,7 +279,7 @@ func TestUnnamedFinishCarriesProjectedStableErrorCodeToLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	writes := fixture.runs.TerminalWrites()
@@ -305,7 +305,7 @@ func TestFinishRunReplaysAlreadyTerminalLedgerOutcome(t *testing.T) {
 		observed = append(observed, run)
 	})
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(observed) != 1 || observed[0].State != string(ledger.StateCompleted) {
@@ -336,7 +336,7 @@ func TestAgentTerminalEventReplaysMatchingTerminalLedgerOutcome(t *testing.T) {
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusFinishing || snapshot.CurrentRunView.ProposedTerminalStatus != RunStatusCompleted {
 		t.Fatalf("live run after terminal replay = %#v, want finishing/completed", snapshot.CurrentRunView)
 	}
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
 		t.Fatalf("FinishRun() after terminal replay = %v", err)
 	}
 }
@@ -393,7 +393,7 @@ func TestFinishRunObservesTerminalNewerFenceButRejectsStaleOwner(t *testing.T) {
 		observed = append(observed, run)
 	})
 
-	err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, "")
+	_, err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, "")
 	if !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("FinishRun() error = %v, want ErrRunOwnershipLost", err)
 	}
@@ -428,7 +428,7 @@ func TestFinishRunDoesNotObserveWaitingDecision(t *testing.T) {
 		observed = append(observed, run)
 	})
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(observed) != 0 {
