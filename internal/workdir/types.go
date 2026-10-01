@@ -32,6 +32,7 @@ var (
 	ErrInvalidPath          = errors.New("invalid workdir path")
 	ErrPathNotFound         = errors.New("workdir path does not exist")
 	ErrPathNotDirectory     = errors.New("workdir path is not a directory")
+	ErrPathForbidden        = errors.New("workdir path is not readable")
 	ErrDuplicatePath        = errors.New("a workdir for this directory already exists")
 	ErrGitBusy              = errors.New("an agent is using this Git working directory")
 	ErrGitBranchUnavailable = errors.New("local Git branch is unavailable")
@@ -73,6 +74,23 @@ type UpdateRequest struct {
 
 type WorkdirsResponse struct {
 	Workdirs []Workdir `json:"workdirs"`
+}
+
+// Directory is one child directory offered while choosing a workdir path.
+// Path is absolute and already joined for the target's OS, so clients never
+// guess the separator.
+type Directory struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// DirectoriesResponse lists the child directories of Path on one workspace
+// target. Path is the normalized directory that was listed; with an empty
+// request path it is the target's default directory.
+type DirectoriesResponse struct {
+	WorkspaceTargetID string      `json:"workspace_target_id"`
+	Path              string      `json:"path"`
+	Directories       []Directory `json:"directories"`
 }
 
 // Resolved is the per-session resolution of a workdir binding: which target

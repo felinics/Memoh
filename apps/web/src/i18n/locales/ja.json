@@ -2678,8 +2678,12 @@
         "directoryTarget": "セッションは {path} で作業します（存在しない場合は作成されます）",
         "browseFailed": "フォルダを読み込めませんでした",
         "browseRetry": "再試行",
+        "browseEmpty": "フォルダはありません",
+        "browseForbidden": "このコンピューターではこのフォルダを読み取れません",
+        "browseUnreachable": "このコンピューターに接続できません。接続を確認して再試行してください",
         "path": "ディレクトリパス",
-        "remotePathHelp": "そのコンピューター上の絶対パス。すでに存在している必要があります。",
+        "remotePathHelp": "下のフォルダを選ぶか、絶対パスを入力してください。すでに存在している必要があります。",
+        "remoteOffline": "{name} は接続されていません。接続するとフォルダを選択できます。",
         "remotePathPlaceholder": "/Users/you/code/project"
       }
     },

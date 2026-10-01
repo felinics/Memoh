@@ -47,8 +47,9 @@
              and the directory is created when it doesn't exist yet. The tree is
              the Explorer's, not a menu: choosing where a folder lives is the
              same act as reading the workspace, so it reads the same (see
-             file-manager/tree-row). Remote computers cannot be browsed yet;
-             there the path is typed and must already exist. -->
+             file-manager/tree-row). A connected computer has no name/directory
+             coupling: the path is the folder's, typed or picked from the same
+             tree, and it must already exist. -->
         <FieldStack
           v-if="targetIsNative"
           :label="t('bots.folders.form.parent')"
@@ -56,7 +57,7 @@
         >
           <DirectoryPicker
             :bot-id="botId"
-            :root-label="nativeRootLabel"
+            :root-label="selectedTargetName"
             :selected-path="nativeSelectedPath"
             @select="selectDirectory"
           />
@@ -65,13 +66,28 @@
           v-else
           :label="t('bots.folders.form.path')"
           for="folder-path"
-          :help="t('bots.folders.form.remotePathHelp')"
+          :help="remotePathHelp"
         >
-          <Input
-            id="folder-path"
-            v-model="remotePath"
-            :placeholder="t('bots.folders.form.remotePathPlaceholder')"
-          />
+          <div class="flex flex-col gap-2">
+            <Input
+              id="folder-path"
+              v-model="remotePath"
+              :placeholder="t('bots.folders.form.remotePathPlaceholder')"
+            />
+            <!-- Keyed by target: switching computers rebuilds the tree, so a
+                 listing still in flight for the previous one has nowhere to
+                 land. Rooted at the computer's workspace base (its home);
+                 anything outside it is still one typed path away. -->
+            <DirectoryPicker
+              v-if="selectedTargetOnline"
+              :key="targetId"
+              :bot-id="botId"
+              :target-id="targetId"
+              :root-label="selectedTargetName"
+              :selected-path="remotePath.trim()"
+              @select="remotePath = $event"
+            />
+          </div>
         </FieldStack>
       </FormStack>
     </template>
@@ -136,10 +152,21 @@ const name = ref('')
 const targetId = ref('native')
 const remotePath = ref('')
 
-const targetIsNative = computed(() => {
-  const target = selectableTargets.value.find(item => item.target_id === targetId.value)
-  return !target || target.kind !== 'remote'
-})
+const selectedTarget = computed(() => (
+  selectableTargets.value.find(item => item.target_id === targetId.value)
+))
+
+const targetIsNative = computed(() => selectedTarget.value?.kind !== 'remote')
+
+// A computer that is not connected can neither be browsed nor validate a path,
+// so the tree gives way to a line saying so and Create waits for it.
+const selectedTargetOnline = computed(() => selectedTarget.value?.online !== false)
+
+const remotePathHelp = computed(() => (
+  selectedTargetOnline.value
+    ? t('bots.folders.form.remotePathHelp')
+    : t('bots.folders.form.remoteOffline', { name: selectedTargetName.value })
+))
 
 // On the native workspace the name doubles as the directory segment, so it has
 // to be one: a name carrying a separator (or a dot segment) would silently land
@@ -164,16 +191,16 @@ const nativePathHelp = computed(() => (
     : t('bots.folders.form.parentHelp', { path: browsePath.value })
 ))
 
-// The root row is the workspace surface itself, not a directory named "data".
-const nativeRootLabel = computed(() => {
-  const target = selectableTargets.value.find(item => item.target_id === targetId.value)
-  return target ? targetDisplayName(target) : t('bots.folders.targetNative')
-})
+// The root row is the surface itself — the Cloud Computer rather than a
+// directory named "data", a connected computer rather than its home path.
+const selectedTargetName = computed(() => (
+  selectedTarget.value ? targetDisplayName(selectedTarget.value) : t('bots.folders.targetNative')
+))
 
 const canSubmit = computed(() => {
   if (!name.value.trim()) return false
   if (targetIsNative.value) return nameIsDirectorySegment.value
-  return !!remotePath.value.trim()
+  return selectedTargetOnline.value && !!remotePath.value.trim()
 })
 
 async function handleCreate() {
@@ -234,6 +261,12 @@ function selectDirectory(path: string) {
   browsePath.value = parentPath(path)
   name.value = path.slice(path.lastIndexOf('/') + 1)
 }
+
+// A path belongs to one computer; carrying it to another would quietly point
+// the folder at whatever happens to live at the same path there.
+watch(targetId, () => {
+  remotePath.value = ''
+})
 
 // Every open starts from a clean form. The picker is unmounted while the dialog
 // is closed, so it re-roots itself from this reset on the next open.

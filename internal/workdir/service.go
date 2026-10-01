@@ -77,6 +77,95 @@ func (s *Service) Create(ctx context.Context, botID, userID string, req CreateRe
 	return toWorkdir(record), nil
 }
 
+// Directories lists the child directories of rawPath on a workspace target,
+// so a workdir path can be picked instead of typed. An empty rawPath starts at
+// the target's default directory. It goes through the same target resolution
+// and path normalization as Create, so whatever it offers, Create accepts.
+// Hidden directories are included; hiding them is a presentation choice.
+func (s *Service) Directories(ctx context.Context, botID, targetID, rawPath string) (DirectoriesResponse, error) {
+	if s == nil || s.targets == nil {
+		return DirectoriesResponse{}, errors.New("workdir service not configured")
+	}
+	targetID = strings.TrimSpace(targetID)
+	if targetID == "" {
+		targetID = workspace.WorkspaceTargetNative
+	}
+	resolved, err := s.targets.ResolveWorkspaceTarget(ctx, botID, targetID)
+	if err != nil {
+		return DirectoriesResponse{}, err
+	}
+	if resolved.Client == nil {
+		return DirectoriesResponse{}, fmt.Errorf("%w: workspace target is not reachable", bridge.ErrUnavailable)
+	}
+	raw := strings.TrimSpace(rawPath)
+	if raw == "" {
+		raw = defaultBrowsePath(resolved)
+	}
+	dir, err := normalizeWorkdirPath(raw, resolved)
+	if err != nil {
+		return DirectoriesResponse{}, err
+	}
+	entries, err := resolved.Client.ListDirAll(ctx, dir, false)
+	if err != nil {
+		switch {
+		case errors.Is(err, bridge.ErrNotFound):
+			return DirectoriesResponse{}, fmt.Errorf("%w: %s", ErrPathNotFound, dir)
+		case errors.Is(err, bridge.ErrBadRequest):
+			return DirectoriesResponse{}, fmt.Errorf("%w: %s", ErrPathNotDirectory, dir)
+		case errors.Is(err, bridge.ErrForbidden):
+			return DirectoriesResponse{}, fmt.Errorf("%w: %s", ErrPathForbidden, dir)
+		}
+		return DirectoriesResponse{}, fmt.Errorf("list workdir directories: %w", err)
+	}
+	windows := resolved.Kind == TargetKindRemote && isWindowsOS(resolved.Info.OS)
+	directories := make([]Directory, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.GetIsDir() {
+			continue
+		}
+		name := entryName(entry.GetPath())
+		if name == "" || name == "." || name == ".." {
+			continue
+		}
+		directories = append(directories, Directory{Name: name, Path: joinTargetPath(dir, name, windows)})
+	}
+	return DirectoriesResponse{
+		WorkspaceTargetID: resolved.TargetID,
+		Path:              dir,
+		Directories:       directories,
+	}, nil
+}
+
+// defaultBrowsePath is where browsing starts on a target: the data mount on
+// the native workspace, the runtime's reported workspace base on a remote one.
+func defaultBrowsePath(target workspace.ResolvedWorkspaceTarget) string {
+	if target.Kind != TargetKindRemote {
+		return vpath.DataMount
+	}
+	if base := strings.TrimSpace(target.Info.DefaultWorkDir); base != "" {
+		return base
+	}
+	return "/"
+}
+
+// entryName takes the last segment of a listed entry. Bridges report bare
+// names for a flat listing, but a remote runtime may send a full host path
+// with either separator.
+func entryName(entryPath string) string {
+	trimmed := strings.TrimRight(entryPath, `/\`)
+	if i := strings.LastIndexAny(trimmed, `/\`); i >= 0 {
+		return trimmed[i+1:]
+	}
+	return trimmed
+}
+
+func joinTargetPath(dir, name string, windows bool) string {
+	if windows {
+		return strings.TrimSuffix(dir, `\`) + `\` + name
+	}
+	return path.Join(dir, name)
+}
+
 func (s *Service) List(ctx context.Context, botID string, includeArchived bool) ([]Workdir, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("workdir service not configured")
