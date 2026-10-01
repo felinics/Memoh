@@ -348,3 +348,16 @@ func upsertUIMessage(messages []chatview.UIMessage, incoming chatview.UIMessage)
 	}
 	return append(messages, incoming)
 }
+
+func messagesBeforeRetryFloor(messages []chatview.UIMessage, floor int) []chatview.UIMessage {
+	if floor <= 0 || len(messages) == 0 {
+		return nil
+	}
+	protected := make([]chatview.UIMessage, 0, len(messages))
+	for _, message := range messages {
+		if message.ID < floor {
+			protected = append(protected, message)
+		}
+	}
+	return protected
+}

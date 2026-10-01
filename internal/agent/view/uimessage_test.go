@@ -761,6 +761,68 @@ func TestUIMessageStreamConverterUserInputRequest(t *testing.T) {
 	}
 }
 
+func TestUIMessageStreamConverterRetryKeepsCheckpointedDecisionPrefix(t *testing.T) {
+	converter := NewUIMessageStreamConverter()
+	leading := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "Before the question."})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "text_end"})
+	decision := converter.HandleEvent(UIMessageStreamEvent{
+		Type:        "user_input_request",
+		ToolName:    "ask_user",
+		ToolCallID:  "call-ask",
+		UserInputID: "input-1",
+		Status:      "pending",
+	})
+	converter.CheckpointRetryBoundary()
+
+	failed := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "discard this attempt"})
+	converter.HandleEvent(UIMessageStreamEvent{Type: "retry"})
+	answered := converter.HandleEvent(UIMessageStreamEvent{
+		Type:        "user_input_request",
+		ToolName:    "ask_user",
+		ToolCallID:  "call-ask",
+		UserInputID: "input-1",
+		Status:      "submitted",
+	})
+	after := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "surviving attempt"})
+
+	if len(leading) != 1 || len(decision) != 1 || len(failed) != 1 || len(answered) != 1 || len(after) != 1 {
+		t.Fatalf("unexpected converter outputs: leading=%#v decision=%#v failed=%#v answered=%#v after=%#v", leading, decision, failed, answered, after)
+	}
+	if answered[0].ID != decision[0].ID || answered[0].UserInput == nil || answered[0].UserInput.Status != "submitted" {
+		t.Fatalf("answered decision = %#v, want in-place update of %#v", answered[0], decision[0])
+	}
+	if after[0].ID <= failed[0].ID || after[0].ID <= decision[0].ID {
+		t.Fatalf("surviving block id = %d, want newer than failed=%d and decision=%d", after[0].ID, failed[0].ID, decision[0].ID)
+	}
+}
+
+func TestUIMessageStreamConverterRestoresWaitingDecisionIDs(t *testing.T) {
+	converter := NewUIMessageStreamConverterFromMessages([]UIMessage{
+		{ID: 3, Type: UIMessageText, Content: "Before the question."},
+		{ID: 7, Type: UIMessageTool, Name: "ask_user", ToolCallID: "call-ask", UserInput: &UIUserInput{
+			UserInputID: "input-1", Status: "pending", CanRespond: true,
+		}},
+	})
+
+	answered := converter.HandleEvent(UIMessageStreamEvent{
+		Type:        "user_input_request",
+		ToolName:    "ask_user",
+		ToolCallID:  "call-ask",
+		UserInputID: "input-1",
+		Status:      "submitted",
+	})
+	after := converter.HandleEvent(UIMessageStreamEvent{Type: "text_delta", Delta: "After recovery."})
+	if len(answered) != 1 || answered[0].ID != 7 {
+		t.Fatalf("restored decision update = %#v, want id 7", answered)
+	}
+	if len(after) != 1 || after[0].ID != 8 {
+		t.Fatalf("post-recovery block = %#v, want id 8", after)
+	}
+	if converter.RetryMessageFloor() != 8 {
+		t.Fatalf("retry floor = %d, want 8", converter.RetryMessageFloor())
+	}
+}
+
 func TestConvertModelMessagesToUIAssistantMessagesIncludesUserInputMetadata(t *testing.T) {
 	messages := ConvertModelMessagesToUIAssistantMessages([]turn.ModelMessage{{
 		Role: "assistant",

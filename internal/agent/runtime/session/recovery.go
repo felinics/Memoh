@@ -226,6 +226,9 @@ func (m *Manager) reserveRecoveredWaitingDecision(ctx context.Context, run ledge
 		}
 		return err
 	}
+	if snapshot.CurrentRunView != nil {
+		ctrl.converter = chatview.NewUIMessageStreamConverterFromMessages(snapshot.CurrentRunView.Messages)
+	}
 	ctrl.markReady()
 	// The previous producer is gone, so this owner has no local terminal write
 	// to wait for before reconstructing and continuing the durable decision.

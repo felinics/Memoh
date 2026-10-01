@@ -1275,6 +1275,10 @@ func runCommonRuntimeManagerContract(t *testing.T, suite runtimeBackendContractS
 		t.Parallel()
 		runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t, suite)
 	})
+	t.Run("preserves a submitted decision prefix across provider retry", func(t *testing.T) {
+		t.Parallel()
+		runRuntimeManagerPreservesDecisionPrefixAcrossRetryContract(t, suite)
+	})
 	t.Run("fences delayed owner mutations after stream id reuse", func(t *testing.T) {
 		t.Parallel()
 		runRuntimeManagerFencesDelayedOwnerMutationsContract(t, suite)
@@ -4044,6 +4048,80 @@ func runRuntimeManagerClearsRetriedErrorOnCleanEndContract(t *testing.T, suite r
 	}
 	if snapshot.CurrentRunView.Error != "" {
 		t.Fatalf("error = %q, want the retried failure cleared", snapshot.CurrentRunView.Error)
+	}
+}
+
+func runRuntimeManagerPreservesDecisionPrefixAcrossRetryContract(t *testing.T, suite runtimeBackendContractSuite) {
+	t.Helper()
+
+	manager := testRuntimeManager(t, suite.newBackend(t), "owner-decision-retry")
+	sub, err := manager.Subscribe(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Close()
+	if err := manager.StartRun(context.Background(), testBotID, testSessionID, testRunID, make(chan struct{}, 1), func() {}, make(chan turn.InjectMessage, 1)); err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	handle := requireRunHandle(t, manager, testBotID, testSessionID, testRunID)
+	decisionMetadata := map[string]any{
+		"ui_payload": map[string]any{
+			"version": 2,
+			"questions": []any{map[string]any{
+				"id": "q1", "text": "Continue?", "kind": "single_select",
+			}},
+		},
+	}
+	events := []native.StreamEvent{
+		{Type: native.EventAgentStart},
+		{Type: native.EventTextDelta, Delta: "Before the question."},
+		{Type: native.EventTextEnd},
+		{Type: native.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-ask", UserInputID: "input-1", Status: "pending", Metadata: decisionMetadata},
+		{Type: native.EventUserInputRequest, ToolName: "ask_user", ToolCallID: "call-ask", UserInputID: "input-1", Status: "submitted", Metadata: map[string]any{
+			"ui_payload": decisionMetadata["ui_payload"],
+			"answers":    []any{map[string]any{"question_id": "q1", "text": "yes"}},
+		}},
+		{Type: native.EventAgentStart},
+		{Type: native.EventTextDelta, Delta: "discard this failed continuation"},
+		{Type: native.EventError, Error: "provider hung up"},
+		{Type: native.EventRetry, Attempt: 1, MaxAttempt: 3, RetryError: "provider hung up"},
+	}
+	for _, event := range events {
+		if _, err := manager.HandleAgentEvent(context.Background(), handle, event); err != nil {
+			t.Fatalf("handle event %s: %v", event.Type, err)
+		}
+	}
+
+	snapshot, err := manager.Snapshot(context.Background(), testBotID, testSessionID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snapshot.CurrentRunView == nil {
+		t.Fatal("current run view is missing")
+	}
+	messages := snapshot.CurrentRunView.Messages
+	if len(messages) != 2 {
+		t.Fatalf("messages after retry = %#v, want leading text and answered decision", messages)
+	}
+	assertRuntimeBlock(t, messages, chatview.UIMessageText, "", "Before the question.")
+	assertRuntimeBlock(t, messages, chatview.UIMessageTool, "call-ask", "")
+	for _, message := range messages {
+		if message.Content == "discard this failed continuation" {
+			t.Fatalf("failed attempt survived retry: %#v", messages)
+		}
+		if message.ToolCallID == "call-ask" && (message.UserInput == nil || message.UserInput.Status != "submitted") {
+			t.Fatalf("decision answer was not preserved: %#v", message)
+		}
+	}
+	if snapshot.CurrentRunView.Error != "" {
+		t.Fatalf("retry error = %q, want cleared", snapshot.CurrentRunView.Error)
+	}
+
+	retryEvent := waitRuntimeEvent(t, sub.C, func(event Event) bool {
+		return event.Type == EventRuntimeDelta && event.Delta != nil && event.Delta.ResetMessages
+	})
+	if len(retryEvent.Delta.MessageUpserts) != 2 {
+		t.Fatalf("retry delta = %#v, want reset plus protected prefix", retryEvent.Delta)
 	}
 }
 
