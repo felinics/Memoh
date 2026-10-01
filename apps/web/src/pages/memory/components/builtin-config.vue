@@ -9,7 +9,6 @@
         :label="$t('memory.semanticEmbeddingModel')"
         :description="$t('memory.semanticIndexDescription')"
         stack="sm"
-        align="start"
       >
         <div class="w-full sm:w-64">
           <ModelSelect
