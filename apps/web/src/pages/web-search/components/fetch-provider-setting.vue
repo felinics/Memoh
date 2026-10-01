@@ -94,6 +94,12 @@
             <template v-else-if="form.values.provider === 'cloudflare_markdown'">
               <CloudflareMarkdownSettings v-model="configProxy" />
             </template>
+            <template v-else-if="form.values.provider === 'firecrawl'">
+              <FirecrawlSettings
+                v-model="configProxy"
+                mode="scrape"
+              />
+            </template>
             <div
               v-else-if="form.values.provider"
               class="px-4 py-3 text-xs text-muted-foreground"
@@ -132,6 +138,7 @@ import {
 import LoadingButton from '@/components/loading-button/index.vue'
 import JinaReaderSettings from './jina-reader-settings.vue'
 import CloudflareMarkdownSettings from './cloudflare-markdown-settings.vue'
+import FirecrawlSettings from './firecrawl-settings.vue'
 import { Trash2 } from 'lucide-vue-next'
 import SearchProviderLogo from '@/components/search-provider-logo/index.vue'
 import { computed, inject, ref, watch } from 'vue'

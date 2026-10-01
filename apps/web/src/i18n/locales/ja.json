@@ -1753,6 +1753,7 @@
       "bing": "ビング",
       "google": "グーグル",
       "tavily": "タヴィリー",
+      "firecrawl": "Firecrawl",
       "sogou": "そごう",
       "serper": "サーペル",
       "searxng": "SearXNG",
@@ -1765,7 +1766,8 @@
     "fetchProviderNames": {
       "native": "ネイティブ取得",
       "jina": "Jina Reader",
-      "cloudflare_markdown": "Cloudflare Markdown"
+      "cloudflare_markdown": "Cloudflare Markdown",
+      "firecrawl": "Firecrawl"
     }
   },
   "memory": {

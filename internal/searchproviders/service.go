@@ -149,6 +149,34 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 			},
 		},
 		{
+			Provider:    string(ProviderFirecrawl),
+			DisplayName: "Firecrawl",
+			ConfigSchema: ProviderConfigSchema{
+				Fields: map[string]ProviderFieldSchema{
+					"api_key": {
+						Type:        "secret",
+						Title:       "API Key",
+						Description: "Firecrawl API key",
+						Required:    true,
+					},
+					"base_url": {
+						Type:        "string",
+						Title:       "Base URL",
+						Description: "Firecrawl Search API URL",
+						Required:    false,
+						Example:     "https://api.firecrawl.dev/v2/search",
+					},
+					"timeout_seconds": {
+						Type:        "number",
+						Title:       "Timeout (seconds)",
+						Description: "HTTP timeout in seconds",
+						Required:    false,
+						Example:     15,
+					},
+				},
+			},
+		},
+		{
 			Provider:    string(ProviderSogou),
 			DisplayName: "Sogou",
 			ConfigSchema: ProviderConfigSchema{
@@ -549,6 +577,7 @@ var defaultProviders = []struct {
 	{ProviderBing, "Bing"},
 	{ProviderGoogle, "Google"},
 	{ProviderTavily, "Tavily"},
+	{ProviderFirecrawl, "Firecrawl"},
 	{ProviderSogou, "Sogou"},
 	{ProviderSerper, "Serper"},
 	{ProviderSearXNG, "SearXNG"},
@@ -596,6 +625,7 @@ func isValidProviderName(name ProviderName) bool {
 	switch name {
 	case ProviderBrave, ProviderBing, ProviderGoogle,
 		ProviderTavily,
+		ProviderFirecrawl,
 		ProviderSogou,
 		ProviderSerper,
 		ProviderSearXNG,

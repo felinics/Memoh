@@ -87,6 +87,9 @@
             <template v-else-if="form.values.provider === 'tavily'">
               <TavilySettings v-model="configProxy" />
             </template>
+            <template v-else-if="form.values.provider === 'firecrawl'">
+              <FirecrawlSettings v-model="configProxy" />
+            </template>
             <template v-else-if="form.values.provider === 'sogou'">
               <SogouSettings v-model="configProxy" />
             </template>
@@ -147,6 +150,7 @@ import BraveSettings from './brave-settings.vue'
 import BingSettings from './bing-settings.vue'
 import GoogleSettings from './google-settings.vue'
 import TavilySettings from './tavily-settings.vue'
+import FirecrawlSettings from './firecrawl-settings.vue'
 import SogouSettings from './sogou-settings.vue'
 import SerperSettings from './serper-settings.vue'
 import SearxngSettings from './searxng-settings.vue'

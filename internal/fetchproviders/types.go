@@ -8,6 +8,7 @@ const (
 	ProviderNative             ProviderName = "native"
 	ProviderJina               ProviderName = "jina"
 	ProviderCloudflareMarkdown ProviderName = "cloudflare_markdown"
+	ProviderFirecrawl          ProviderName = "firecrawl"
 )
 
 type ProviderConfigSchema struct {

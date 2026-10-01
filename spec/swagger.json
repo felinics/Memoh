@@ -21358,12 +21358,14 @@
             "enum": [
                 "native",
                 "jina",
-                "cloudflare_markdown"
+                "cloudflare_markdown",
+                "firecrawl"
             ],
             "x-enum-varnames": [
                 "ProviderNative",
                 "ProviderJina",
-                "ProviderCloudflareMarkdown"
+                "ProviderCloudflareMarkdown",
+                "ProviderFirecrawl"
             ]
         },
         "fetchproviders.UpdateRequest": {
@@ -26548,6 +26550,7 @@
                 "bing",
                 "google",
                 "tavily",
+                "firecrawl",
                 "sogou",
                 "serper",
                 "searxng",
@@ -26562,6 +26565,7 @@
                 "ProviderBing",
                 "ProviderGoogle",
                 "ProviderTavily",
+                "ProviderFirecrawl",
                 "ProviderSogou",
                 "ProviderSerper",
                 "ProviderSearXNG",
