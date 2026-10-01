@@ -307,10 +307,13 @@ const editInfo = inject<Ref<ModelsGetResponse | null>>('openModelState', ref(nul
 
 // The server sends no reasoning control at all for an always-thinking model
 // (reasoning.ResolveConfig), so an effort picker there would have no effect.
-const alwaysThinking = computed(() => editInfo.value?.config?.thinking_mode === 'always')
+// Snapshotted on open: editInfo is cleared on close, while the exit animation
+// is still rendering the form.
+const alwaysThinking = ref(false)
+const storedEfforts = ref<string[]>([])
 
 function effortsToSave(): string[] {
-  if (alwaysThinking.value) return editInfo.value?.config?.reasoning_efforts ?? []
+  if (alwaysThinking.value) return storedEfforts.value
   const selected = selectedEfforts.value
   const isDefault = selected.length === DEFAULT_EFFORTS.length
     && DEFAULT_EFFORTS.every(effort => selected.includes(effort))
@@ -430,10 +433,15 @@ async function addModel() {
 
 watch(open, async () => {
   if (!open.value) {
-    title.value = 'title'
+    // Keep the mode until the next open: the dialog is still playing its exit
+    // animation here, and flipping it now flashes "Add model" on an edit dialog.
     editInfo.value = null
     return
   }
+
+  // Openers set the edit state together with opening; the built-in trigger
+  // opens without it, which means add. Runs before render, so no stale frame.
+  if (!editInfo.value) title.value = 'title'
 
   await nextTick()
 
@@ -452,6 +460,8 @@ watch(open, async () => {
       },
     })
     selectedCompat.value = config?.compatibilities ?? []
+    alwaysThinking.value = config?.thinking_mode === 'always'
+    storedEfforts.value = [...(config?.reasoning_efforts ?? [])]
     storedEffortsDeclared.value = !!config?.reasoning_efforts?.length
     selectedEfforts.value = config?.reasoning_efforts?.length
       ? [...config.reasoning_efforts]
@@ -468,6 +478,8 @@ watch(open, async () => {
       },
     })
     selectedCompat.value = []
+    alwaysThinking.value = false
+    storedEfforts.value = []
     storedEffortsDeclared.value = false
     selectedEfforts.value = [...DEFAULT_EFFORTS]
   }
