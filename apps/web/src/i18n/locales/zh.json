@@ -2752,8 +2752,12 @@
         "directoryTarget": "会话将在 {path} 中工作；目录不存在时会自动创建",
         "browseFailed": "无法加载文件夹",
         "browseRetry": "重试",
+        "browseEmpty": "没有子文件夹",
+        "browseForbidden": "这台电脑不允许读取该文件夹",
+        "browseUnreachable": "无法连接这台电脑，请确认已连接后重试",
         "path": "目录路径",
-        "remotePathHelp": "该电脑上的绝对路径，目录必须已经存在。",
+        "remotePathHelp": "在下方选择文件夹，或输入绝对路径。目录必须已经存在。",
+        "remoteOffline": "{name}未连接。连接后才能在这台电脑上选择文件夹。",
         "remotePathPlaceholder": "/Users/you/code/project"
       }
     },
