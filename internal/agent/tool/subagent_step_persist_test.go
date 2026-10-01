@@ -15,6 +15,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -197,6 +198,7 @@ func TestSubagentDoesNotRetryAfterPersistedStep(t *testing.T) {
 		!strings.Contains(errText, "send a follow-up message to continue") {
 		t.Fatalf("error does not tell the parent how to continue: %q", errText)
 	}
+	assertCatalogFailure(t, result, apperror.CodeAgentResponseTimeout, ErrWatchdogTimedOut.Error())
 }
 
 // TestSubagentStillRetriesBeforeAnyPersistedStep: a watchdog timeout with no
@@ -239,11 +241,12 @@ func TestSubagentStillRetriesBeforeAnyPersistedStep(t *testing.T) {
 
 // TestSubagentDoesNotRetryProviderFailure: the native runtime inside the
 // attempt already retried the provider, so a provider failure that reaches the
-// spawn provider ends the run after one attempt.
+// spawn provider ends the run after one attempt. The parent model reads the
+// code the run failed with, as the spawn adapter names it.
 func TestSubagentDoesNotRetryProviderFailure(t *testing.T) {
 	t.Parallel()
 
-	providerErr := errors.New("mid-stream retry: all 5 attempts failed (last: api error 529)")
+	providerErr := apperror.Wrap(apperror.CodeAgentProviderOverloaded, errors.New("mid-stream retry: all 5 attempts failed (last: api error 529)"), nil)
 	agent := &mockSpawnAgent{
 		generateFunc: func(_ context.Context, cfg SpawnRunConfig, _ func()) (*SpawnResult, error) {
 			if cfg.ResolveAttempt == nil || cfg.ResolveAttempt(providerErr) != SpawnAttemptFailure {
@@ -266,8 +269,20 @@ func TestSubagentDoesNotRetryProviderFailure(t *testing.T) {
 	if result["status"] != string(background.TaskFailed) {
 		t.Fatalf("status = %v, want failed", result["status"])
 	}
-	if result["error"] != providerErr.Error() {
-		t.Fatalf("error = %v, want %q", result["error"], providerErr.Error())
+	assertCatalogFailure(t, result, apperror.CodeAgentProviderOverloaded, "api error 529")
+}
+
+// assertCatalogFailure checks that a failed task hands the parent model the
+// catalog code and its fixed detail, and none of the failure's own text.
+func assertCatalogFailure(t *testing.T, result map[string]any, code apperror.Code, raw string) {
+	t.Helper()
+	definition, ok := apperror.Lookup(code)
+	if !ok {
+		t.Fatalf("code %q is not in the catalog", code)
+	}
+	errText, _ := result["error"].(string)
+	if result["code"] != string(code) || !strings.HasPrefix(errText, definition.Detail) || strings.Contains(errText, raw) {
+		t.Fatalf("result code/error = %v/%q, want %s with its detail and without %q", result["code"], errText, code, raw)
 	}
 }
 

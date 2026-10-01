@@ -178,8 +178,8 @@ func (rejectingSpawnProvider) DoStream(context.Context, sdk.Request) (<-chan sdk
 }
 
 // A spawned run that fails on the provider's answer records the provider's
-// code in its session, live and durable, and the spawn provider still gets
-// the provider's own error.
+// code in its session, live and durable, and the spawn provider gets the same
+// code with the provider's own error in its chain.
 func TestSpawnProviderFailureNamesTheSessionRun(t *testing.T) {
 	runs := newAbortAlignmentLedger()
 	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
@@ -204,6 +204,7 @@ func TestSpawnProviderFailureNamesTheSessionRun(t *testing.T) {
 	}
 	adapter := native.NewSpawnAdapter(native.New(native.Deps{}))
 	adapter.SetRunObserverFactory(service.SubagentRunObserver)
+	adapter.SetFailureTranslator(service.SubagentFailure)
 	result, runErr := adapter.GenerateWithWatchdog(runCtx, tools.SpawnRunConfig{
 		RunID: admission.RunID,
 		Model: &sdk.Model{ID: "rejecting-model", Provider: rejectingSpawnProvider{}, Type: sdk.ModelTypeChat},
@@ -215,8 +216,11 @@ func TestSpawnProviderFailureNamesTheSessionRun(t *testing.T) {
 		},
 	}, func() {})
 	var apiErr *sdk.APIError
-	if !errors.As(runErr, &apiErr) || apiErr.Kind != sdk.KindAuthentication {
-		t.Fatalf("spawn error = %v, want the provider's failure", runErr)
+	if got := apperror.CodeOf(runErr); got != apperror.CodeAgentProviderAuthFailed {
+		t.Fatalf("spawn error code = %q, want the provider's code", got)
+	}
+	if !errors.As(apperror.CauseOf(runErr), &apiErr) || apiErr.Kind != sdk.KindAuthentication {
+		t.Fatalf("spawn error cause = %v, want the provider's failure", apperror.CauseOf(runErr))
 	}
 	finish(tools.SubagentTerminal{
 		Cause:            runErr,

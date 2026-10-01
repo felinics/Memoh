@@ -55,6 +55,7 @@ type SpawnAdapter struct {
 	agent       *Agent
 	stepCommit  SpawnStepCommitFactory
 	runObserver SpawnRunObserverFactory
+	failure     func(StreamEvent) error
 }
 
 // NewSpawnAdapter creates a SpawnAdapter from the given Agent.
@@ -70,6 +71,25 @@ func (s *SpawnAdapter) SetStepCommitFactory(f SpawnStepCommitFactory) {
 // SetRunObserverFactory installs live event publishing for spawned runs.
 func (s *SpawnAdapter) SetRunObserverFactory(f SpawnRunObserverFactory) {
 	s.runObserver = f
+}
+
+// SetFailureTranslator installs the error a spawned attempt reports for the
+// error event it ended with. The application names that failure as it names
+// any native run's, so the spawn provider reads the code the run failed with.
+// Without one the attempt reports the event's cause.
+func (s *SpawnAdapter) SetFailureTranslator(f func(StreamEvent) error) {
+	s.failure = f
+}
+
+// attemptFailure is the error a spawned attempt reports for the error event
+// it ended with.
+func (s *SpawnAdapter) attemptFailure(event StreamEvent) error {
+	if s.failure != nil {
+		if err := s.failure(event); err != nil {
+			return err
+		}
+	}
+	return event.Cause
 }
 
 // installStepCommit resolves the step-commit callback for this run and wires
@@ -243,7 +263,7 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 	var allText strings.Builder
 	var finalMessages []sdk.Message
 	var totalUsage sdk.Usage
-	var lastErr error
+	var lastFailure *StreamEvent
 	completed := false
 	var abortEvent *StreamEvent
 	var endEvent *StreamEvent
@@ -277,7 +297,8 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		case EventTextDelta:
 			allText.WriteString(evt.Delta)
 		case EventError:
-			lastErr = evt.Cause
+			failure := evt
+			lastFailure = &failure
 		case EventAgentEnd, EventAgentAbort:
 			completed = evt.Type == EventAgentEnd
 			if completed {
@@ -306,12 +327,14 @@ func (s *SpawnAdapter) GenerateWithWatchdog(ctx context.Context, cfg tools.Spawn
 		}
 	}
 	// A stream that errored without reaching a clean end is a failed attempt,
-	// not a short answer: the error it ended with is the attempt's error, with
-	// the runtime's whole chain, so the caller sees the provider's own failure.
-	// A failure the run recovered from never reaches here; the stream retried
-	// it without reporting it.
+	// not a short answer: the error it ended with is the attempt's error, named
+	// as the run names it and keeping the runtime's whole chain, so the caller
+	// sees the provider's own failure. A failure the run recovered from never
+	// reaches here; the stream retried it without reporting it.
 	if runErr == nil && !completed {
-		runErr = lastErr
+		if lastFailure != nil {
+			runErr = s.attemptFailure(*lastFailure)
+		}
 		if runErr == nil {
 			runErr = errSpawnAgentAborted
 		}

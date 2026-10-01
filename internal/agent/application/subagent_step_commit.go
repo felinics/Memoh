@@ -193,6 +193,13 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, reco
 	return nil
 }
 
+// SubagentFailure is the error a spawned attempt that ended with event reports
+// to the spawn provider: the run's public failure, named as for any native run,
+// with the event's cause in its chain.
+func (*Service) SubagentFailure(event native.StreamEvent) error {
+	return agentStreamFailure(event)
+}
+
 // SubagentRunObserver returns a per-event publisher that feeds one spawned
 // agent run's stream into the session runtime, or nil when there is nothing to
 // publish to — no runtime configured, or a context without an admitted handle.

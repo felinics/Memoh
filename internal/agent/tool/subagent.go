@@ -20,6 +20,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -432,6 +433,7 @@ type agentRunResult struct {
 	Status           string                         `json:"status"`
 	Message          string                         `json:"message,omitempty"`
 	Text             string                         `json:"text,omitempty"`
+	Code             string                         `json:"code,omitempty"`
 	Error            string                         `json:"error,omitempty"`
 	QueuePosition    int                            `json:"queue_position,omitempty"`
 	QueueRemaining   int                            `json:"queue_remaining,omitempty"`
@@ -889,8 +891,7 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 			Fork:      next.config.Forked,
 			Status:    string(background.TaskFailed),
 			Message:   next.message,
-			Error:     err.Error(),
-		})
+		}.failed(err))
 		return
 	}
 	if !ok {
@@ -927,15 +928,13 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		req.config.ProviderName,
 	)
 	if err != nil {
-		res.Error = fmt.Sprintf("resolve pinned subagent model: %v", err)
-		res.Cause = err
+		res.fail(err)
 		res.Status = string(background.TaskFailed)
 		return res
 	}
 	req.runtime = runtime
 	if err := p.runSubagentHook(ctx, hooks.EventSubagentStart, req, res); err != nil {
-		res.Error = err.Error()
-		res.Cause = err
+		res.fail(err)
 		res.Status = string(background.TaskFailed)
 		return res
 	}
@@ -955,8 +954,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	if req.config.Forked {
 		parentMessages, loadErr := p.loadAgentForkContext(context.WithoutCancel(ctx), req.agentSessionID)
 		if loadErr != nil {
-			res.Error = fmt.Sprintf("load fork context: %v", loadErr)
-			res.Cause = loadErr
+			res.fail(loadErr)
 			res.Status = string(background.TaskFailed)
 			return res
 		}
@@ -1035,7 +1033,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			case <-timer.C:
 			case <-ctx.Done():
 				timer.Stop()
-				res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+				res.Error = "parent cancelled"
 				res.Cause = context.Cause(ctx)
 				res.AttemptResolved = true
 				res.AttemptOutcome = SpawnAttemptFailure
@@ -1098,8 +1096,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 				if persistErr := p.persistMessages(context.WithoutCancel(ctx), req, genResult, !req.messagePersisted); persistErr != nil {
 					res.AttemptResolved = true
 					res.AttemptOutcome = SpawnAttemptFailure
-					res.Error = persistErr.Error()
-					res.Cause = persistErr
+					res.fail(persistErr)
 					return res
 				}
 				genResult.Persisted = true
@@ -1111,7 +1108,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 				if cause == nil {
 					cause = context.Canceled
 				}
-				res.Error = fmt.Sprintf("parent cancelled: %v", cause)
+				res.Error = "parent cancelled"
 				res.Cause = cause
 				return res
 			}
@@ -1120,8 +1117,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 				if cause == nil {
 					cause = errors.New("agent run failed")
 				}
-				res.Error = cause.Error()
-				res.Cause = cause
+				res.fail(cause)
 				return res
 			}
 			res.Text = genResult.Text
@@ -1150,24 +1146,59 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			if cause == nil {
 				cause = context.Canceled
 			}
-			res.Error = fmt.Sprintf("parent cancelled: %v", cause)
+			res.Error = "parent cancelled"
 			res.Cause = cause
 			return res
 		}
 		if stepPersisted.Load() {
-			res.Error = fmt.Sprintf("%v (progress from this attempt is saved; send a follow-up message to continue)", err)
+			res.fail(err)
+			res.Error += " (progress from this attempt is saved; send a follow-up message to continue)"
 			return res
 		}
 		if errors.Is(err, ErrWatchdogTimedOut) && attempt == subagentMaxRetries {
 			break
 		}
-		res.Error = err.Error()
-		res.Cause = err
+		res.fail(err)
 		return res
 	}
-	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
-	res.Cause = lastErr
+	res.fail(lastErr)
 	return res
+}
+
+// fail records err as the task's failure. The parent model reads only the
+// catalog code and its fixed detail; err itself stays on the result for the
+// task's terminal record.
+func (r *agentRunResult) fail(err error) {
+	public, _ := apperror.PublicFrom(apperror.New(subagentFailureCode(err), nil), "")
+	r.Code = string(public.Code)
+	r.Error = public.Detail
+	r.Cause = err
+}
+
+// failed is r with err recorded as its failure.
+func (r agentRunResult) failed(err error) agentRunResult {
+	r.fail(err)
+	return r
+}
+
+// subagentFailureCode names a task failure: the catalog code err carries, the
+// code of a timeout or context sentinel, or runtime_run_failed for the
+// runtime's own failure. A failure the spawned run ended with carries the code
+// the application named it with, so a provider failure reads as it would for
+// the run itself.
+func subagentFailureCode(err error) apperror.Code {
+	if _, ok := apperror.Lookup(apperror.CodeOf(err)); ok {
+		return apperror.CodeOf(err)
+	}
+	switch {
+	case errors.Is(err, ErrWatchdogTimedOut):
+		return apperror.CodeAgentResponseTimeout
+	case errors.Is(err, contextfrag.ErrProtectedContextOverflow):
+		return apperror.CodeContextProtectedOverflow
+	case errors.Is(err, contextfrag.ErrBudgetUnsatisfied):
+		return apperror.CodeContextBudgetUnsatisfied
+	}
+	return apperror.CodeRuntimeRunFailed
 }
 
 // subagentAttemptDisposition restarts an attempt only when the subagent
@@ -1492,6 +1523,9 @@ func agentResultMap(res agentRunResult) map[string]any {
 	}
 	if res.Text != "" {
 		out["text"] = res.Text
+	}
+	if res.Code != "" {
+		out["code"] = res.Code
 	}
 	if res.Error != "" {
 		out["error"] = res.Error

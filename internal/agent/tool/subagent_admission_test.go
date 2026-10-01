@@ -16,6 +16,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/background"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 // fakeSubagentAdmitter stands in for the durable admission gate, and it
@@ -498,10 +499,10 @@ func TestAgentAdmissionFailureRecordsItsCause(t *testing.T) {
 			p, _, _, _ := newAgentControlProviderWithAdmitter(t, &fakeSpawnAgent{}, &fakeSubagentAdmitter{reject: tc.reject})
 			p.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 
-			_ = mustExecuteAgentTool(t, p, SessionContext{BotID: "bot1", SessionID: "parent1"}, "spawn_agent", map[string]any{
+			result := asMap(t, mustExecuteAgentTool(t, p, SessionContext{BotID: "bot1", SessionID: "parent1"}, "spawn_agent", map[string]any{
 				"id":   "worker",
 				"task": "audit the ledger",
-			})
+			}))
 
 			recorded := strings.Contains(logs.String(), `"msg":"agent task admission failed"`)
 			if recorded != tc.wantRecord {
@@ -509,6 +510,9 @@ func TestAgentAdmissionFailureRecordsItsCause(t *testing.T) {
 			}
 			if tc.wantRecord && !strings.Contains(logs.String(), "SECRET fence is stale") {
 				t.Fatalf("records = %s, want the cause", logs.String())
+			}
+			if tc.wantRecord {
+				assertCatalogFailure(t, result, apperror.CodeRuntimeRunFailed, "SECRET")
 			}
 		})
 	}

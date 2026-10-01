@@ -567,6 +567,9 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 			// terminal-snapshot behavior on its own.
 			adapter.SetStepCommitFactory(agentService.SubagentStepCommit)
 			adapter.SetRunObserverFactory(agentService.SubagentRunObserver)
+			// The parent model reads a spawned run's failure by the code the
+			// run itself failed with.
+			adapter.SetFailureTranslator(agentService.SubagentFailure)
 			sp.SetAgent(adapter)
 			sp.SetMessageService(msgService)
 			sp.SetSystemPromptFunc(native.SpawnSystemPrompt)
