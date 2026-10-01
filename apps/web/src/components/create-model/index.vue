@@ -157,6 +157,37 @@
             </div>
           </FieldStack>
 
+          <!-- Supported efforts (chat + reasoning only). Hand-added models get
+               no catalog fill, so this is the only place a BYOK user can say
+               which tiers the model accepts and whether it can be turned off. -->
+          <FieldStack
+            v-if="selectedType === 'chat' && selectedCompat.includes('reasoning')"
+            :label="$t('models.reasoningEfforts')"
+          >
+            <Select
+              v-model="selectedEfforts"
+              multiple
+            >
+              <SelectTrigger
+                class="w-full"
+                :aria-label="$t('models.reasoningEfforts')"
+              >
+                <SelectValue :placeholder="$t('models.reasoningEffortsPlaceholder')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem
+                    v-for="effort in DECLARABLE_EFFORTS"
+                    :key="effort"
+                    :value="effort"
+                  >
+                    {{ $t(EFFORT_LABELS[effort] ?? effort) }}
+                  </SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </FieldStack>
+
           <!-- Context Window (optional) -->
           <FormField
             v-if="selectedType === 'chat'"
@@ -214,7 +245,8 @@ import { useI18n } from 'vue-i18n'
 import { FieldStack, FormDialogShell } from '@felinic/ui'
 import { COMPATIBILITY_OPTIONS } from '@/constants/compatibilities'
 import { useDialogMutation } from '@/composables/useDialogMutation'
-import { buildModelConfig } from './model-config'
+import { buildModelConfig, DECLARABLE_EFFORTS } from './model-config'
+import { EFFORT_LABELS } from '@/pages/bots/components/reasoning-effort'
 
 interface ModelTypeOption {
   value: string
@@ -222,6 +254,10 @@ interface ModelTypeOption {
 }
 
 const selectedCompat = ref<string[]>([])
+// The server serves an undeclared effort list as low/medium/high, so that is
+// what the picker starts from: leaving it untouched keeps the old behavior.
+const DEFAULT_EFFORTS = ['low', 'medium', 'high']
+const selectedEfforts = ref<string[]>([...DEFAULT_EFFORTS])
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
@@ -338,6 +374,7 @@ async function addModel() {
     dimensions: dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
     contextWindow: form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined),
     compatibilities: selectedCompat.value,
+    reasoningEfforts: selectedEfforts.value,
     existing: isEdit ? fallback!.config : undefined,
   })
 
@@ -398,6 +435,9 @@ watch(open, async () => {
       },
     })
     selectedCompat.value = config?.compatibilities ?? []
+    selectedEfforts.value = config?.reasoning_efforts?.length
+      ? [...config.reasoning_efforts]
+      : [...DEFAULT_EFFORTS]
   } else {
     form.resetForm({
       values: {
@@ -410,6 +450,7 @@ watch(open, async () => {
       },
     })
     selectedCompat.value = []
+    selectedEfforts.value = [...DEFAULT_EFFORTS]
   }
 }, {
   immediate: true,

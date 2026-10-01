@@ -1629,6 +1629,8 @@
     },
     "contextWindow": "上下文窗口",
     "contextWindowPlaceholder": "例如 128000",
+    "reasoningEfforts": "支持的推理强度",
+    "reasoningEffortsPlaceholder": "选择推理强度",
     "contextWindowMin": "上下文窗口需大于 0",
     "testModel": "测试模型",
     "enable": "启用模型",

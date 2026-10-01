@@ -1629,6 +1629,8 @@
     },
     "contextWindow": "Context Window",
     "contextWindowPlaceholder": "e.g. 128000",
+    "reasoningEfforts": "Supported efforts",
+    "reasoningEffortsPlaceholder": "Select efforts",
     "contextWindowMin": "Context window must be greater than 0",
     "testModel": "Test Model",
     "enable": "Enable model",
