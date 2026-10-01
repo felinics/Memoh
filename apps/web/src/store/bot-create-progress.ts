@@ -16,6 +16,7 @@ import {
   pushBotCreateTerminalLine,
   type BotCreateTerminalLine,
 } from '@/composables/api/botCreateTerminal'
+import { markOnboardingCompleted } from '@/composables/useOnboarding'
 import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
@@ -352,7 +353,16 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       grantsApplied = true
       await applyGrants(botId, lastOptions.grants, message => { setupError.value = message })
     }
-    return await applySetup(recovering)
+    const result = await applySetup(recovering)
+    // The setup that onboarding asked for lives only in this tab. Once it has
+    // all been applied, a user who leaves before the final step must not be
+    // sent back through the wizard on the next sign-in. A Bot left mid-setup
+    // stays incomplete on purpose: Step4 adopts it and the final step then
+    // reports what is still missing.
+    if (lastOptions.onboarding && status.value === 'ready' && !setupError.value) {
+      void markOnboardingCompleted().catch(() => {})
+    }
+    return result
   }
 
   // Relays a workspace provisioning stream (create or container retry) into

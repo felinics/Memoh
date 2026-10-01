@@ -11,6 +11,7 @@ export {}
 
 declare module '@memohai/web/router-guards/onboarding' {
   export function ensureOnboarding(): Promise<boolean>
+  export function hasOnboardingInProgress(): boolean
 }
 
 declare module '@memohai/web/routes' {
