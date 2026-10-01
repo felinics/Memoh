@@ -547,6 +547,9 @@ func TestPrepareOutboundMessage_PersistedContentHash(t *testing.T) {
 	if att.Kind != PreparedAttachmentUpload {
 		t.Fatalf("expected upload for persisted hash, got %s", att.Kind)
 	}
+	if att.RawMD5 != asset.RawMD5 {
+		t.Fatalf("prepared raw MD5 = %q, want %q", att.RawMD5, asset.RawMD5)
+	}
 	logical := prepared.Message.Message.Attachments[0]
 	if logical.ContentHash != asset.ContentHash {
 		t.Fatalf("content hash mismatch: got %q, want %q", logical.ContentHash, asset.ContentHash)

@@ -23,6 +23,7 @@ type PreparedAttachment struct {
 	Name      string
 	Mime      string
 	Size      int64
+	RawMD5    string
 	// Open must return a fresh reader each time so retries are safe.
 	Open func(ctx context.Context) (io.ReadCloser, error)
 }

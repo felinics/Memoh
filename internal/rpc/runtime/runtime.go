@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/rpc/runtimepb"
 )
 
@@ -56,15 +58,29 @@ type grpcStatusError interface {
 
 type Server struct {
 	runtimepb.UnimplementedRuntimeServiceServer
-	logger   *slog.Logger
-	handlers map[string]Handler
+	logger      *slog.Logger
+	handlers    map[string]Handler
+	attachments AttachmentService
 }
 
-func NewServer(log *slog.Logger, handlers map[string]Handler) *Server {
+type AttachmentService interface {
+	Resolve(context.Context, string, string) (media.Asset, error)
+	IngestContainerFile(context.Context, string, string) (media.Asset, error)
+	Open(context.Context, string, string) (io.ReadCloser, media.Asset, error)
+}
+
+func NewServer(log *slog.Logger, handlers map[string]Handler, attachments ...AttachmentService) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{logger: log.With(slog.String("component", "runtime_rpc")), handlers: handlers}
+	var attachmentService AttachmentService
+	if len(attachments) > 0 {
+		attachmentService = attachments[0]
+	}
+	return &Server{
+		logger: log.With(slog.String("component", "runtime_rpc")), handlers: handlers,
+		attachments: attachmentService,
+	}
 }
 
 func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtimepb.CallResponse, error) {
@@ -133,4 +149,79 @@ func (c *Client) Call(ctx context.Context, method string, input, output any) err
 		return nil
 	}
 	return json.Unmarshal(resp.GetPayload(), output)
+}
+
+func (c *Client) ResolveAttachment(ctx context.Context, botID, contentHash, containerPath string) (media.Asset, error) {
+	resp, err := c.client.ResolveAttachment(ctx, &runtimepb.ResolveAttachmentRequest{
+		BotId: botID, ContentHash: contentHash, ContainerPath: containerPath,
+	})
+	if err != nil {
+		return media.Asset{}, attachmentClientError(err)
+	}
+	return media.Asset{
+		BotID: resp.GetBotId(), ContentHash: resp.GetContentHash(), Mime: resp.GetMime(),
+		SizeBytes: resp.GetSizeBytes(), StorageKey: resp.GetStorageKey(), RawMD5: resp.GetRawMd5(),
+	}, nil
+}
+
+func (c *Client) OpenAttachment(ctx context.Context, botID, contentHash string) (io.ReadCloser, error) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := c.client.ReadAttachment(streamCtx, &runtimepb.ReadAttachmentRequest{
+		BotId: botID, ContentHash: contentHash,
+	})
+	if err != nil {
+		cancel()
+		return nil, attachmentClientError(err)
+	}
+	return &attachmentStreamReader{stream: stream, cancel: cancel}, nil
+}
+
+type attachmentStreamReader struct {
+	stream runtimepb.RuntimeService_ReadAttachmentClient
+	cancel context.CancelFunc
+	data   []byte
+	done   bool
+}
+
+func (r *attachmentStreamReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	for len(r.data) == 0 && !r.done {
+		chunk, err := r.stream.Recv()
+		if err != nil {
+			r.done = true
+			if errors.Is(err, io.EOF) {
+				return 0, io.EOF
+			}
+			return 0, attachmentClientError(err)
+		}
+		r.data = chunk.GetData()
+	}
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func (r *attachmentStreamReader) Close() error {
+	r.cancel()
+	return nil
+}
+
+func attachmentClientError(err error) error {
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded:
+		return errors.Join(ErrUnavailable, err)
+	case codes.Unauthenticated:
+		return errors.Join(ErrUnavailable, ErrUnauthenticated, err)
+	case codes.NotFound:
+		return media.ErrAssetNotFound
+	case codes.ResourceExhausted:
+		return media.ErrAssetTooLarge
+	default:
+		return err
+	}
 }

@@ -5,6 +5,7 @@ package weixin
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,6 +16,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/felinics/memoh/internal/media"
 )
 
 // encryptAESECB encrypts plaintext with AES-128-ECB and PKCS7 padding.
@@ -183,23 +186,47 @@ func fetchURL(u string) ([]byte, error) {
 // uploadToCDN encrypts and uploads bytes to the WeChat CDN, returning the download param.
 // upload is the getuploadurl response; its UploadFullURL wins over UploadParam.
 func uploadToCDN(cdnBaseURL string, upload *GetUploadURLResponse, filekey string, plaintext, aesKey []byte) (string, error) {
-	ciphertext, err := encryptAESECB(plaintext, aesKey)
-	if err != nil {
-		return "", fmt.Errorf("cdn encrypt: %w", err)
+	return uploadToCDNReader(context.Background(), cdnBaseURL, upload, filekey, bytes.NewReader(plaintext), int64(len(plaintext)), aesKey)
+}
+
+func uploadToCDNReader(ctx context.Context, cdnBaseURL string, upload *GetUploadURLResponse, filekey string, plaintext io.Reader, plaintextSize int64, aesKey []byte) (string, error) {
+	if plaintextSize < 0 || plaintextSize > media.MaxAssetBytes {
+		return "", media.ErrAssetTooLarge
 	}
 	u, err := resolveCDNURL(upload.UploadFullURL, func() string { return buildCDNUploadURL(cdnBaseURL, upload.UploadParam, filekey) })
 	if err != nil {
 		return "", err
 	}
+	pipeReader, pipeWriter := io.Pipe()
+	producerDone := make(chan error, 1)
+	go func() {
+		err := encryptAESECBStream(pipeWriter, plaintext, aesKey)
+		_ = pipeWriter.CloseWithError(err)
+		producerDone <- err
+	}()
 
-	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(ciphertext)) //nolint:noctx
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, pipeReader)
 	if err != nil {
+		_ = pipeReader.CloseWithError(err)
+		<-producerDone
 		return "", err
 	}
+	req.ContentLength = int64(aesECBPaddedSize(int(plaintextSize)))
 	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req) //nolint:mnd,gosec // CDN URL from admin config
+	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req) //nolint:mnd,gosec // CDN URL from admin config
 	if err != nil {
+		_ = pipeReader.CloseWithError(err)
+	}
+	producerErr := <-producerDone
+	if err != nil {
+		if producerErr != nil {
+			return "", fmt.Errorf("cdn upload: %w", errors.Join(err, producerErr))
+		}
 		return "", fmt.Errorf("cdn upload: %w", err)
+	}
+	if producerErr != nil {
+		_ = resp.Body.Close()
+		return "", fmt.Errorf("cdn encrypt: %w", producerErr)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -211,4 +238,51 @@ func uploadToCDN(cdnBaseURL string, upload *GetUploadURLResponse, filekey string
 		return "", errors.New("cdn upload: missing x-encrypted-param header")
 	}
 	return downloadParam, nil
+}
+
+func encryptAESECBStream(dst io.Writer, src io.Reader, key []byte) error {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+	blockSize := block.BlockSize()
+	plain := make([]byte, 64*1024)
+	ciphertext := make([]byte, len(plain)+blockSize)
+	for {
+		n, readErr := io.ReadFull(src, plain)
+		fullLen := n - n%blockSize
+		for offset := 0; offset < fullLen; offset += blockSize {
+			block.Encrypt(ciphertext[offset:offset+blockSize], plain[offset:offset+blockSize])
+		}
+		if fullLen > 0 {
+			if err := writeAll(dst, ciphertext[:fullLen]); err != nil {
+				return err
+			}
+		}
+		if readErr == nil {
+			continue
+		}
+		if !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+			return readErr
+		}
+		padded := pkcs7Pad(plain[fullLen:n], blockSize)
+		for offset := 0; offset < len(padded); offset += blockSize {
+			block.Encrypt(ciphertext[offset:offset+blockSize], padded[offset:offset+blockSize])
+		}
+		return writeAll(dst, ciphertext[:len(padded)])
+	}
+}
+
+func writeAll(dst io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := dst.Write(data)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		data = data[n:]
+	}
+	return nil
 }

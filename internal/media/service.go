@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"crypto/md5" //nolint:gosec // compatibility digest required by the Weixin upload protocol
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -50,7 +51,7 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (Asset, error) 
 	if maxBytes <= 0 {
 		maxBytes = MaxAssetBytes
 	}
-	contentHash, sizeBytes, tempFile, err := spoolAndHashWithLimit(input.Reader, maxBytes)
+	contentHash, rawMD5, sizeBytes, tempFile, err := spoolAndHashWithLimit(input.Reader, maxBytes)
 	if err != nil {
 		return Asset{}, fmt.Errorf("read input: %w", err)
 	}
@@ -75,6 +76,7 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (Asset, error) 
 			Mime:        mime,
 			SizeBytes:   sizeBytes,
 			StorageKey:  storageKey,
+			RawMD5:      rawMD5,
 		}, nil
 	}
 
@@ -88,6 +90,7 @@ func (s *Service) Ingest(ctx context.Context, input IngestInput) (Asset, error) 
 		Mime:        mime,
 		SizeBytes:   sizeBytes,
 		StorageKey:  storageKey,
+		RawMD5:      rawMD5,
 	}, nil
 }
 
@@ -335,18 +338,18 @@ func coalesce(values ...string) string {
 	return ""
 }
 
-// spoolAndHashWithLimit streams reader into a temp file while computing its SHA-256.
+// spoolAndHashWithLimit streams reader into a temp file while computing its SHA-256 and MD5.
 // Returns the open file sought to the beginning; caller must close and remove it.
-func spoolAndHashWithLimit(reader io.Reader, maxBytes int64) (contentHash string, size int64, f *os.File, err error) {
+func spoolAndHashWithLimit(reader io.Reader, maxBytes int64) (contentHash, rawMD5 string, size int64, f *os.File, err error) {
 	if reader == nil {
-		return "", 0, nil, errors.New("reader is required")
+		return "", "", 0, nil, errors.New("reader is required")
 	}
 	if maxBytes <= 0 {
-		return "", 0, nil, errors.New("max bytes must be greater than 0")
+		return "", "", 0, nil, errors.New("max bytes must be greater than 0")
 	}
 	tmp, createErr := os.CreateTemp("", "memoh-media-*")
 	if createErr != nil {
-		return "", 0, nil, fmt.Errorf("create temp file: %w", createErr)
+		return "", "", 0, nil, fmt.Errorf("create temp file: %w", createErr)
 	}
 	cleanup := func() {
 		_ = tmp.Close()
@@ -354,23 +357,24 @@ func spoolAndHashWithLimit(reader io.Reader, maxBytes int64) (contentHash string
 	}
 
 	hasher := sha256.New()
+	md5Hasher := md5.New() //nolint:gosec // compatibility digest required by the Weixin upload protocol
 	limited := &io.LimitedReader{R: reader, N: maxBytes + 1}
-	written, copyErr := io.Copy(io.MultiWriter(tmp, hasher), limited)
+	written, copyErr := io.Copy(io.MultiWriter(tmp, hasher, md5Hasher), limited)
 	if copyErr != nil {
 		cleanup()
-		return "", 0, nil, fmt.Errorf("copy to temp file: %w", copyErr)
+		return "", "", 0, nil, fmt.Errorf("copy to temp file: %w", copyErr)
 	}
 	if written > maxBytes {
 		cleanup()
-		return "", 0, nil, fmt.Errorf("%w: max %d bytes", ErrAssetTooLarge, maxBytes)
+		return "", "", 0, nil, fmt.Errorf("%w: max %d bytes", ErrAssetTooLarge, maxBytes)
 	}
 	if written == 0 {
 		cleanup()
-		return "", 0, nil, errors.New("asset payload is empty")
+		return "", "", 0, nil, errors.New("asset payload is empty")
 	}
 	if _, seekErr := tmp.Seek(0, io.SeekStart); seekErr != nil {
 		cleanup()
-		return "", 0, nil, fmt.Errorf("seek temp file: %w", seekErr)
+		return "", "", 0, nil, fmt.Errorf("seek temp file: %w", seekErr)
 	}
-	return hex.EncodeToString(hasher.Sum(nil)), written, tmp, nil
+	return hex.EncodeToString(hasher.Sum(nil)), hex.EncodeToString(md5Hasher.Sum(nil)), written, tmp, nil
 }

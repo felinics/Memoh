@@ -3,6 +3,8 @@ package weixin
 import (
 	"bytes"
 	"context"
+	"crypto/md5" //nolint:gosec // compatibility digest required by the Weixin upload protocol
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/media"
 )
 
 // Type is the channel type identifier for WeChat.
@@ -306,6 +309,14 @@ func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConf
 			caption = text
 		}
 
+		size, rawMD5 := att.Size, strings.TrimSpace(att.RawMD5)
+		if rawMD5 == "" {
+			var err error
+			size, rawMD5, err = hashPreparedAttachment(ctx, att)
+			if err != nil {
+				return fmt.Errorf("weixin: prepare attachment digest: %w", err)
+			}
+		}
 		r, err := openAttachment(ctx, att)
 		if err != nil {
 			return fmt.Errorf("weixin: open attachment: %w", err)
@@ -313,17 +324,13 @@ func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConf
 
 		switch att.Logical.Type {
 		case channel.AttachmentImage, channel.AttachmentGIF:
-			if err := sendImageFromReader(ctx, a.client, cfg, target, contextToken, caption, r, a.logger); err != nil {
+			if err := sendImageFromReader(ctx, a.client, cfg, target, contextToken, caption, r, size, rawMD5, a.logger); err != nil {
 				_ = r.Close()
 				return err
 			}
 		case channel.AttachmentVideo:
-			data, readErr := io.ReadAll(r)
-			_ = r.Close()
-			if readErr != nil {
-				return fmt.Errorf("weixin: read video: %w", readErr)
-			}
-			if err := sendMediaBytes(ctx, a.client, cfg, target, contextToken, caption, data, UploadMediaVideo, ItemTypeVideo, a.logger); err != nil {
+			if err := sendMediaFromReader(ctx, a.client, cfg, target, contextToken, caption, "", r, size, rawMD5, UploadMediaVideo, ItemTypeVideo, a.logger); err != nil {
+				_ = r.Close()
 				return err
 			}
 		default:
@@ -331,7 +338,7 @@ func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConf
 			if name == "" {
 				name = "file"
 			}
-			if err := sendFileFromReader(ctx, a.client, cfg, target, contextToken, caption, name, r, a.logger); err != nil {
+			if err := sendFileFromReader(ctx, a.client, cfg, target, contextToken, caption, name, r, size, rawMD5, a.logger); err != nil {
 				_ = r.Close()
 				return err
 			}
@@ -340,6 +347,24 @@ func (a *WeixinAdapter) sendWithAttachments(ctx context.Context, cfg adapterConf
 	}
 
 	return nil
+}
+
+func hashPreparedAttachment(ctx context.Context, att channel.PreparedAttachment) (int64, string, error) {
+	reader, err := openAttachment(ctx, att)
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() { _ = reader.Close() }()
+	hasher := md5.New() //nolint:gosec // compatibility digest required by the Weixin upload protocol
+	limited := &io.LimitedReader{R: reader, N: media.MaxAssetBytes + 1}
+	size, err := io.Copy(hasher, limited)
+	if err != nil {
+		return 0, "", err
+	}
+	if size > media.MaxAssetBytes {
+		return 0, "", media.ErrAssetTooLarge
+	}
+	return size, hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func openAttachment(ctx context.Context, att channel.PreparedAttachment) (io.ReadCloser, error) {
