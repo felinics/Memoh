@@ -669,7 +669,7 @@ watch(
   },
 )
 
-const onSubmit = form.handleSubmit(async (value) => {
+function buildPayload(value: ProviderFormValues): Record<string, unknown> {
   const config: Record<string, unknown> = {}
   if (value.base_url && value.base_url.trim() !== '') {
     config.base_url = value.base_url.trim()
@@ -681,7 +681,7 @@ const onSubmit = form.handleSubmit(async (value) => {
     config.prompt_cache_ttl = normalizeCacheTtl(value.prompt_cache_ttl)
   }
   const payload: Record<string, unknown> = {
-    name: value.name.trim(),
+    name: value.name?.trim() ?? '',
     client_type: value.client_type,
     config,
   }
@@ -695,6 +695,20 @@ const onSubmit = form.handleSubmit(async (value) => {
     payload.metadata = metadata
   }
   if (isDraft.value) payload.enable = props.provider?.enable ?? true
+  return payload
+}
+
+// A template draft can be materialized from outside the form (adding a model).
+// It must be created from what is on screen, not from the template defaults,
+// or unsaved edits are dropped when the form re-syncs to the new provider.
+// Validation is skipped on purpose: a model can be added before the API key.
+defineExpose({
+  draftPayload: () => buildPayload(form.values),
+})
+
+const onSubmit = form.handleSubmit(async (value) => {
+  const payload = buildPayload(value)
+  const config = payload.config as Record<string, unknown>
 
   try {
     await props.saveProvider(payload)

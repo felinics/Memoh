@@ -51,6 +51,7 @@
       </section>
 
       <ProviderForm
+        ref="providerForm"
         :provider="curProvider"
         :edit-loading="editLoading"
         :ensure-provider="ensureOAuthProvider"
@@ -79,7 +80,7 @@ import { avatarInitials } from '@/composables/useAvatarInitials'
 
 import ProviderForm from './components/provider-form.vue'
 import ModelList from './components/model-list.vue'
-import { computed, provide, reactive, ref, toRef, watch } from 'vue'
+import { computed, provide, reactive, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
   deleteModelsById,
@@ -239,12 +240,27 @@ async function ensureOAuthProvider(): Promise<ProvidersGetResponse> {
   }, provider.enable !== false, false)
 }
 
-// Adding a model to a template draft creates the provider first. Models are
-// not imported here: without an API key the endpoint cannot be listed.
+const providerForm = useTemplateRef('providerForm')
+
+// Adding a model to a template draft creates the provider first, from the
+// form's current (possibly unsaved) values. Models are not imported here:
+// without an API key the endpoint cannot be listed.
 async function ensureProviderId(): Promise<string> {
-  const provider = await ensureOAuthProvider()
-  if (!provider.id) throw new Error('provider creation returned no id')
-  return provider.id
+  const provider = curProvider.value
+  if (!provider) throw new Error('provider is missing')
+  if (provider.id) return provider.id
+
+  const created = await materializeProvider(
+    providerForm.value?.draftPayload() ?? {
+      name: provider.name,
+      config: provider.config ?? {},
+      metadata: provider.metadata ?? {},
+    },
+    provider.enable !== false,
+    false,
+  )
+  if (!created.id) throw new Error('provider creation returned no id')
+  return created.id
 }
 
 async function handleToggleEnable(value: boolean) {
