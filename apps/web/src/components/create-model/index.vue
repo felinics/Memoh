@@ -161,7 +161,7 @@
                no catalog fill, so this is the only place a BYOK user can say
                which tiers the model accepts and whether it can be turned off. -->
           <FieldStack
-            v-if="selectedType === 'chat' && selectedCompat.includes('reasoning')"
+            v-if="selectedType === 'chat' && selectedCompat.includes('reasoning') && !alwaysThinking"
             :label="$t('models.reasoningEfforts')"
           >
             <Select
@@ -258,6 +258,10 @@ const selectedCompat = ref<string[]>([])
 // what the picker starts from: leaving it untouched keeps the old behavior.
 const DEFAULT_EFFORTS = ['low', 'medium', 'high']
 const selectedEfforts = ref<string[]>([...DEFAULT_EFFORTS])
+// Whether the model being edited already declared an effort list. Without one,
+// an untouched default selection is saved as "still undeclared" rather than
+// pinning low/medium/high onto a row the user never configured.
+const storedEffortsDeclared = ref(false)
 const { t } = useI18n()
 const { run } = useDialogMutation()
 
@@ -300,6 +304,19 @@ const selectedType = computed(() => form.values.type || props.defaultType)
 const open = inject<Ref<boolean>>('openModel', ref(false))
 const title = inject<Ref<'edit' | 'title'>>('openModelTitle', ref('title'))
 const editInfo = inject<Ref<ModelsGetResponse | null>>('openModelState', ref(null))
+
+// The server sends no reasoning control at all for an always-thinking model
+// (reasoning.ResolveConfig), so an effort picker there would have no effect.
+const alwaysThinking = computed(() => editInfo.value?.config?.thinking_mode === 'always')
+
+function effortsToSave(): string[] {
+  if (alwaysThinking.value) return editInfo.value?.config?.reasoning_efforts ?? []
+  const selected = selectedEfforts.value
+  const isDefault = selected.length === DEFAULT_EFFORTS.length
+    && DEFAULT_EFFORTS.every(effort => selected.includes(effort))
+  if (!storedEffortsDeclared.value && isDefault) return []
+  return selected
+}
 
 const canSubmit = computed(() => {
   if (title.value === 'edit') return true
@@ -374,7 +391,7 @@ async function addModel() {
     dimensions: dimensions ?? (isEdit ? fallback!.config?.dimensions : undefined),
     contextWindow: form.values.context_window ?? (isEdit ? fallback!.config?.context_window : undefined),
     compatibilities: selectedCompat.value,
-    reasoningEfforts: selectedEfforts.value,
+    reasoningEfforts: effortsToSave(),
     existing: isEdit ? fallback!.config : undefined,
   })
 
@@ -435,6 +452,7 @@ watch(open, async () => {
       },
     })
     selectedCompat.value = config?.compatibilities ?? []
+    storedEffortsDeclared.value = !!config?.reasoning_efforts?.length
     selectedEfforts.value = config?.reasoning_efforts?.length
       ? [...config.reasoning_efforts]
       : [...DEFAULT_EFFORTS]
@@ -450,6 +468,7 @@ watch(open, async () => {
       },
     })
     selectedCompat.value = []
+    storedEffortsDeclared.value = false
     selectedEfforts.value = [...DEFAULT_EFFORTS]
   }
 }, {
