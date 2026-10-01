@@ -313,7 +313,8 @@ const listReadBatchEntries = 256
 
 func listDirStatusError(operation string, err error) error {
 	code := codes.Internal
-	if errors.Is(err, fs.ErrNotExist) {
+	// Listing a file reports ENOTDIR: the requested directory does not exist.
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		code = codes.NotFound
 	} else if errors.Is(err, fs.ErrPermission) {
 		code = codes.PermissionDenied

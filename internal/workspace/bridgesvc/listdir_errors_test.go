@@ -29,6 +29,16 @@ func TestListDirClassifiesFilesystemErrors(t *testing.T) {
 					t.Fatalf("ListDir = %v, want NotFound", err)
 				}
 			})
+			t.Run("file path", func(t *testing.T) {
+				path := filepath.Join(root, "file.txt")
+				if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, err := srv.ListDir(context.Background(), &pb.ListDirRequest{Path: path, Recursive: recursive})
+				if status.Code(err) != codes.NotFound {
+					t.Fatalf("ListDir = %v, want NotFound", err)
+				}
+			})
 			t.Run("permission denied", func(t *testing.T) {
 				if os.Geteuid() == 0 {
 					t.Skip("root can read directories with mode 000")
