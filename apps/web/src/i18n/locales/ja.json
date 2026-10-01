@@ -1575,6 +1575,7 @@
     "emptyTitle": "モデルはまだありません",
     "emptyDescription": "手動で追加するか、このプロバイダーから完全なリストをインポートします。",
     "managedEmptyDescription": "認証を完了してから、管理対象の Model カタログを更新してください。",
+    "draftEmptyDescription": "手動で追加するか、API キーを入力してこのプロバイダーから完全なリストをインポートします。",
     "clientType": "クライアントの種類",
     "clientTypePlaceholder": "クライアントの種類を選択してください",
     "typeRequired": "種類を選択してください",

@@ -62,7 +62,7 @@
         :models="providerModels"
         :managed="isManagedModelCatalogClientType(curProvider?.client_type)"
         :client-type="curProvider?.client_type"
-        :preview="!curProvider?.id"
+        :ensure-provider-id="curProvider?.id ? undefined : ensureProviderId"
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
         @delete="deleteModel"
@@ -93,7 +93,6 @@ import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } 
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { isManagedModelCatalogClientType } from '@/constants/client-types'
-import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
@@ -122,10 +121,6 @@ const emit = defineEmits<{
   materialized: [provider: ProvidersGetResponse]
 }>()
 const curProviderId = computed(() => curProvider.value?.id)
-const curProviderTemplateId = computed(() => curProviderId.value
-  ? undefined
-  : curProvider.value?.provider_template_id)
-const { models: templateModels } = useProviderTemplateModels(curProviderTemplateId)
 const enableLoading = ref(false)
 const { t } = useI18n()
 
@@ -244,6 +239,14 @@ async function ensureOAuthProvider(): Promise<ProvidersGetResponse> {
   }, provider.enable !== false, false)
 }
 
+// Adding a model to a template draft creates the provider first. Models are
+// not imported here: without an API key the endpoint cannot be listed.
+async function ensureProviderId(): Promise<string> {
+  const provider = await ensureOAuthProvider()
+  if (!provider.id) throw new Error('provider creation returned no id')
+  return provider.id
+}
+
 async function handleToggleEnable(value: boolean) {
   if (!curProvider.value) return
 
@@ -301,16 +304,10 @@ const { data: modelDataList } = useQuery({
   enabled: () => !!curProviderId.value,
 })
 
-const providerModels = computed<ModelsGetResponse[]>(() => {
-  if (curProviderId.value) return modelDataList.value ?? []
-  return templateModels.value.map(model => ({
-    model_id: model.model_id,
-    name: model.name,
-    type: model.type as ModelsGetResponse['type'],
-    config: model.config as ModelsGetResponse['config'],
-    enable: true,
-  }))
-})
+// A template draft has no models of its own. The template catalog only
+// enriches imported models, so listing it here would show models that vanish
+// as soon as the provider is created.
+const providerModels = computed<ModelsGetResponse[]>(() => modelDataList.value ?? [])
 
 watch(curProvider, () => {
   queryCache.invalidateQueries({ key: ['provider-models'] })

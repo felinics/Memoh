@@ -235,7 +235,10 @@ const formSchema = toTypedSchema(z.object({
 }))
 
 const props = withDefaults(defineProps<{
-  id: string
+  id?: string
+  // Resolves the provider on submit when `id` is not known yet (a template
+  // draft); cancelling the dialog therefore never creates a provider.
+  ensureProviderId?: () => Promise<string>
   typeOptions?: ModelTypeOption[]
   defaultType?: string
   hideType?: boolean
@@ -344,7 +347,6 @@ async function addModel() {
   const payload: Record<string, unknown> = {
     type,
     model_id,
-    provider_id: props.id,
     config,
   }
 
@@ -358,12 +360,17 @@ async function addModel() {
     () => {
       if (isEdit) {
         const modelUUID = fallback?.id
+        const data = { ...payload, provider_id: props.id ?? fallback!.provider_id } as ModelsUpdateRequest
         if (modelUUID) {
-          return updateModel({ id: modelUUID, data: payload as ModelsUpdateRequest })
+          return updateModel({ id: modelUUID, data })
         }
-        return updateModelByLegacyModelID({ modelId: fallback!.model_id, data: payload as ModelsUpdateRequest })
+        return updateModelByLegacyModelID({ modelId: fallback!.model_id, data })
       }
-      return createModel(payload)
+      return (async () => {
+        const providerId = props.id ?? await props.ensureProviderId?.()
+        if (!providerId) throw new Error('provider is missing')
+        return createModel({ ...payload, provider_id: providerId })
+      })()
     },
     {
       fallbackMessage: t('common.saveFailed'),

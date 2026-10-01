@@ -1606,6 +1606,7 @@
     "emptyTitle": "暂无模型",
     "emptyDescription": "手动添加，或从该服务商导入完整列表。",
     "managedEmptyDescription": "请先完成授权，再刷新托管模型目录。",
+    "draftEmptyDescription": "手动添加，或填写 API 密钥后从该服务商导入完整列表。",
     "clientType": "客户端类型",
     "clientTypePlaceholder": "选择客户端类型",
     "typeRequired": "请选择类型",

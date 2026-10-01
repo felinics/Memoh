@@ -1606,6 +1606,7 @@
     "emptyTitle": "No models yet",
     "emptyDescription": "Add one manually, or import the full list from this provider.",
     "managedEmptyDescription": "Authorize the provider, then refresh the managed model catalog.",
+    "draftEmptyDescription": "Add one manually, or enter an API key to import the full list from this provider.",
     "clientType": "Client Type",
     "clientTypePlaceholder": "Select client type",
     "typeRequired": "Type is required",
