@@ -448,6 +448,9 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 		Resize:   &pb.TerminalResize{Cols: cols, Rows: rows},
 		CleanEnv: opts.CleanEnv,
 		UnsetEnv: opts.UnsetEnv,
+		// A terminal has no command deadline; the stream's lifetime bounds
+		// the shell. Without this the bridge applies its default PTY timeout.
+		TimeoutSeconds: -1,
 	})
 	if err != nil {
 		cancel()

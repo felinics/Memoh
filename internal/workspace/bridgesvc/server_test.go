@@ -133,6 +133,69 @@ func TestExecPTYStartsWithCancellationConfigured(t *testing.T) {
 	}
 }
 
+// A negative timeout means the PTY has no deadline; ending the stream is
+// what kills the shell.
+func TestExecPTYNegativeTimeoutCancelsProcessOnStreamClose(t *testing.T) {
+	stream := newCancelOnStdoutExecStream()
+	srv := New(Options{DefaultWorkDir: "/tmp", AllowHostAbsolute: true})
+
+	start := time.Now()
+	err := srv.execPTY(stream, &pb.ExecInput{
+		Command:        "printf PTY_OK; sleep 5",
+		WorkDir:        "/tmp",
+		TimeoutSeconds: -1,
+	})
+	if err != nil {
+		t.Fatalf("execPTY returned error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("execPTY took %s after stream cancellation, want quick process cancellation", elapsed)
+	}
+
+	var exitCode int32
+	stdout := collectStdout(stream.outputs)
+	for _, output := range stream.outputs {
+		if output.GetStream() == pb.ExecOutput_EXIT {
+			exitCode = output.GetExitCode()
+		}
+	}
+	if !strings.Contains(stdout, "PTY_OK") {
+		t.Fatalf("stdout = %q, want PTY_OK", stdout)
+	}
+	if exitCode == 0 {
+		t.Fatalf("exit code = %d, want non-zero after cancellation", exitCode)
+	}
+}
+
+// A positive timeout still bounds the PTY.
+func TestExecPTYPositiveTimeoutKillsProcess(t *testing.T) {
+	stream := newCancelOnStdoutExecStream()
+	srv := New(Options{DefaultWorkDir: "/tmp", AllowHostAbsolute: true})
+
+	start := time.Now()
+	err := srv.execPTY(stream, &pb.ExecInput{
+		Command:        "sleep 5",
+		WorkDir:        "/tmp",
+		TimeoutSeconds: 1,
+	})
+	if err != nil {
+		t.Fatalf("execPTY returned error: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("execPTY took %s, want the 1s timeout to kill the shell", elapsed)
+	}
+
+	var exitCode int32 = -999
+	for _, output := range stream.outputs {
+		if output.GetStream() == pb.ExecOutput_EXIT {
+			exitCode = output.GetExitCode()
+		}
+	}
+	if exitCode == 0 {
+		t.Fatalf("exit code = %d, want non-zero after the timeout", exitCode)
+	}
+}
+
 func TestPTYCancellationDoesNotPreconfigureProcessGroup(t *testing.T) {
 	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-c", "true") //nolint:gosec // G204: test fixture executing a known shell snippet.
 	configurePTYCommandCancellation(cmd)

@@ -1973,6 +1973,69 @@ const docTemplate = `{
                 }
             }
         },
+        "/bots/{bot_id}/agents/{id}/codex/usage": {
+            "get": {
+                "description": "Available to anyone who can chat with the Bot, so the composer",
+                "tags": [
+                    "external-agents"
+                ],
+                "summary": "Get the Codex usage limits of the Agent's ChatGPT account",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bot ID",
+                        "name": "bot_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Bot Agent ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/externalagent.CodexUsageResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    }
+                }
+            }
+        },
         "/bots/{bot_id}/agents/{id}/credential": {
             "get": {
                 "tags": [
@@ -21435,6 +21498,43 @@ const docTemplate = `{
                         "error",
                         "unknown"
                     ]
+                }
+            }
+        },
+        "externalagent.CodexUsageResponse": {
+            "type": "object",
+            "required": [
+                "limit_reached",
+                "windows"
+            ],
+            "properties": {
+                "limit_reached": {
+                    "type": "boolean"
+                },
+                "windows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/externalagent.CodexUsageWindow"
+                    }
+                }
+            }
+        },
+        "externalagent.CodexUsageWindow": {
+            "type": "object",
+            "required": [
+                "used_percent",
+                "window_minutes"
+            ],
+            "properties": {
+                "resets_at": {
+                    "type": "string"
+                },
+                "used_percent": {
+                    "type": "integer"
+                },
+                "window_minutes": {
+                    "description": "WindowMinutes is 0 when the backend does not report the window length.",
+                    "type": "integer"
                 }
             }
         },

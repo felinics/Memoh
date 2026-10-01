@@ -499,10 +499,18 @@ func (s *Server) execPTY(stream pb.ContainerService_ExecServer, firstMsg *pb.Exe
 	workDir := s.resolveExecWorkDir(firstMsg.GetWorkDir())
 
 	timeout := int(firstMsg.GetTimeoutSeconds())
-	if timeout <= 0 {
-		timeout = defaultPTYTimeout
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout < 0 {
+		// Interactive terminals outlive any deadline; the stream's lifetime
+		// is the bound, as with a negative timeout on execPipe.
+		ctx, cancel = context.WithCancel(stream.Context())
+	} else {
+		if timeout == 0 {
+			timeout = defaultPTYTimeout
+		}
+		ctx, cancel = context.WithTimeout(stream.Context(), time.Duration(timeout)*time.Second)
 	}
-	ctx, cancel := context.WithTimeout(stream.Context(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
 	var cmd *exec.Cmd

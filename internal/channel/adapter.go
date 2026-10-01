@@ -92,8 +92,10 @@ type Descriptor struct {
 	// OwnerOnly marks channels that no third party can ever reach (e.g.
 	// personal-assistant channels living inside the activator's own
 	// account). Every sender on these channels is treated as the operator:
-	// the chat ACL gate allows their traffic, and write-gated slash
-	// commands run without /link.
+	// an unlinked sender resolves to the bot owner's account (so gates keyed
+	// on the account principal, such as workspace exec and external runtimes,
+	// see the owner), and the gates keyed on the channel identity instead —
+	// chat ACL and write-gated slash commands — skip their /link requirement.
 	OwnerOnly        bool
 	Capabilities     ChannelCapabilities
 	OutboundPolicy   OutboundPolicy

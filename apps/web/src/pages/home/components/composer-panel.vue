@@ -6,8 +6,14 @@
         :key="section.kind"
         :class="index > 0 ? 'mt-2 border-t border-border-soft pt-2' : ''"
       >
+        <ComposerPanelUsage
+          v-if="section.kind === 'usage'"
+          :exhausted="section.notice.exhausted"
+          :message="section.notice.message"
+          @dismiss="emit('dismissUsage')"
+        />
         <ComposerPanelError
-          v-if="section.kind === 'error'"
+          v-else-if="section.kind === 'error'"
           :message="section.message"
         />
         <ComposerPanelCommand
@@ -64,8 +70,9 @@
 //   always hugs whichever box currently owns the slot.
 //
 // House rules for the stack tier:
-// - Section order is fixed: error (most transient) → command result →
-//   approvals (hugging the box, the most actionable). All active sections
+// - Section order is fixed: account usage (ambient, lasts until the limit
+//   window resets) → error (most transient) → command result → approvals
+//   (hugging the box, the most actionable). All active sections
 //   show at once; within approvals the queue is FIFO, ONE at a time — the
 //   frame never jumps, resolving the head cross-fades the next one in place
 //   while AutoHeight tweens any height difference.
@@ -81,6 +88,7 @@ import ComposerPanelApproval from './composer-panel-approval.vue'
 import ComposerPanelCommand from './composer-panel-command.vue'
 import ComposerPanelError from './composer-panel-error.vue'
 import ComposerPanelCompaction from './composer-panel-compaction.vue'
+import ComposerPanelUsage from './composer-panel-usage.vue'
 import type { PendingApprovalItem } from '../composables/usePendingApprovals'
 import type { CommandActionListItem } from '@/composables/api/useChat'
 
@@ -94,7 +102,13 @@ interface CommandPanelData {
   items: CommandActionListItem[]
 }
 
+interface UsageNotice {
+  exhausted: boolean
+  message: string
+}
+
 type PanelSection =
+  | { kind: 'usage', notice: UsageNotice }
   | { kind: 'error', message: string }
   | { kind: 'command', panel: CommandPanelData }
   | { kind: 'approval' }
@@ -105,17 +119,20 @@ const props = defineProps<{
   commandPanel: CommandPanelData | null
   errorMessage: string
   compacting?: boolean
+  usageNotice?: UsageNotice | null
 }>()
 
 const emit = defineEmits<{
   (e: 'selectCommandItem', item: CommandActionListItem): void
   (e: 'dismissCommand'): void
+  (e: 'dismissUsage'): void
 }>()
 
 const approvalHead = computed(() => props.approvals[0] ?? null)
 
 const sections = computed<PanelSection[]>(() => {
   const list: PanelSection[] = []
+  if (props.usageNotice) list.push({ kind: 'usage', notice: props.usageNotice })
   if (props.errorMessage) list.push({ kind: 'error', message: props.errorMessage })
   if (props.commandPanel) list.push({ kind: 'command', panel: props.commandPanel })
   if (props.compacting) list.push({ kind: 'compaction' })

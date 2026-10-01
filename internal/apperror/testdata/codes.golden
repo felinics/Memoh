@@ -36,6 +36,8 @@ agent_credential.reauthorization_required	409
 agent_credential.request_invalid	400
 agent_credential.revoked	409
 agent_credential.runtime_busy	409
+agent_credential.usage_auth_expired	409
+agent_credential.usage_unavailable	502
 app.busy	409
 app.not_found	404
 app.operation_failed	500

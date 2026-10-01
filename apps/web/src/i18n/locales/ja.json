@@ -273,7 +273,9 @@
       "reauthorization_required": "この Agent アカウントを再接続してから使用してください。",
       "encryption_unavailable": "この Server では Agent アカウントの保存が設定されていません。",
       "runtime_busy": "現在の応答が完了してから Agent アカウントを切り替えてください。",
-      "materialization_failed": "Agent アカウントを準備できませんでした。もう一度お試しください。"
+      "materialization_failed": "Agent アカウントを準備できませんでした。もう一度お試しください。",
+      "usage_auth_expired": "アカウントのサインインが期限切れです。次の会話のあとに自動で更新されます。それでも利用上限を表示できない場合は、アカウントを再接続してください。",
+      "usage_unavailable": "利用上限を取得できませんでした。しばらくしてからもう一度お試しください。"
     },
     "session": {
       "model_preference_conflict": "モデルの選択が別の場所で更新されました。再読み込みするか、メッセージを送信して現在の選択を適用してください。"
@@ -1328,6 +1330,13 @@
     "compactNow": "今すぐコンパクトに",
     "compactSuccess": "コンテキストの圧縮が完了しました",
     "compactingContext": "コンテキストを圧縮中…",
+    "codexUsage": {
+      "warning": "{window}：{percent}% 使用済み・{time}にリセット",
+      "warningNoReset": "{window}：{percent}% 使用済み",
+      "exhausted": "{window}に達しました・{time}にリセット",
+      "exhaustedNoReset": "{window}に達しました",
+      "dismiss": "閉じる"
+    },
     "compactFailed": "コンテキストの圧縮に失敗しました",
     "sessionStreaming": "生成中",
     "slash": {
@@ -1580,7 +1589,7 @@
     "description": "モデルの説明",
     "descriptionPlaceholder": "モデルの用途や特徴を簡潔に入力",
     "dimensions": "寸法",
-    "dimensionsPlaceholder": "例: 1536",
+    "dimensionsPlaceholder": "空欄にすると自動検出します",
     "dimensionsMin": "次元数は 0 より大きい値にしてください",
     "compatibilities": "互換性",
     "compatibility": {
@@ -2501,6 +2510,18 @@
       "codexDeviceHint": "認証ページを開き、このワンタイムコードを入力してください。表示された OpenAI の認証ページ以外には入力しないでください。Memoh が認証を自動で完了します。",
       "codexLoginSuccess": "Codex を ChatGPT アカウントに接続しました",
       "codexLoginFailed": "Codex アカウントを認証できませんでした。もう一度お試しください。",
+      "usage": {
+        "window": {
+          "weekly": "週間上限",
+          "days": "{count} 日間の上限",
+          "hours": "{count} 時間の上限",
+          "minutes": "{count} 分間の上限",
+          "unknown": "利用上限"
+        },
+        "resets": "{time}にリセット",
+        "exhausted": "上限に達しました・{time}にリセット",
+        "exhaustedNoReset": "上限に達しました"
+      },
       "modelsLoadFailed": "Agent のモデルを読み込めませんでした。Agent の設定を確認して、もう一度お試しください。",
       "openSettings": "Agent の設定を開く",
       "dependencyChecking": "依存関係を確認中…",
@@ -4108,6 +4129,7 @@
       },
       "empty": "記録はありません。",
       "unknown": "未取得",
+      "resets": "{time}にリセット",
       "details": "JSON を表示"
     }
   },

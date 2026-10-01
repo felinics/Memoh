@@ -177,6 +177,8 @@ const (
 	CodeAgentCredentialEncryptionUnavailable   Code = "agent_credential.encryption_unavailable"   //nolint:gosec // Stable public error code.
 	CodeAgentCredentialRuntimeBusy             Code = "agent_credential.runtime_busy"             //nolint:gosec // Stable public error code.
 	CodeAgentCredentialMaterializationFailed   Code = "agent_credential.materialization_failed"   //nolint:gosec // Stable public error code.
+	CodeAgentCredentialUsageAuthExpired        Code = "agent_credential.usage_auth_expired"       //nolint:gosec // Stable public error code.
+	CodeAgentCredentialUsageUnavailable        Code = "agent_credential.usage_unavailable"        //nolint:gosec // Stable public error code.
 )
 
 // Definition is the single catalog entry for a public error contract.
@@ -231,6 +233,14 @@ var catalog = map[Code]Definition{
 	CodeAgentCredentialMaterializationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Agent credential could not be prepared for this runtime.",
+	},
+	CodeAgentCredentialUsageAuthExpired: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The account sign-in has expired. It renews after the next conversation; if usage still cannot load, connect the account again.",
+	},
+	CodeAgentCredentialUsageUnavailable: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "Usage limits could not be loaded right now. Try again later.",
 	},
 	CodeBotNameTaken: {
 		HTTPStatus:  http.StatusConflict,

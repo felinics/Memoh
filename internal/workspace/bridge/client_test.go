@@ -518,6 +518,45 @@ func TestExecStreamCloseCancelsServerContext(t *testing.T) {
 	}
 }
 
+// The interactive terminal must not inherit the bridge's default PTY
+// deadline; only the stream's lifetime bounds the shell.
+func TestExecStreamPTYRequestsNoDeadline(t *testing.T) {
+	server := &execInputCaptureServer{first: make(chan *pb.ExecInput, 1)}
+	client := newTestClient(t, server)
+	stream, err := client.ExecStreamPTY(context.Background(), "/bin/sh", "/data", 80, 24)
+	if err != nil {
+		t.Fatalf("ExecStreamPTY returned error: %v", err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	select {
+	case msg := <-server.first:
+		if !msg.GetPty() {
+			t.Fatal("pty = false, want true")
+		}
+		if msg.GetTimeoutSeconds() != -1 {
+			t.Fatalf("timeout_seconds = %d, want -1", msg.GetTimeoutSeconds())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("server stream did not receive exec config")
+	}
+}
+
+type execInputCaptureServer struct {
+	pb.UnimplementedContainerServiceServer
+	first chan *pb.ExecInput
+}
+
+func (s *execInputCaptureServer) Exec(stream pb.ContainerService_ExecServer) error {
+	msg, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	s.first <- msg
+	<-stream.Context().Done()
+	return stream.Context().Err()
+}
+
 func TestClientWithOutgoingMetadataScopesUnaryAndStreamingWithoutOwningConnection(t *testing.T) {
 	server := &metadataCaptureTestServer{
 		unary: make(chan metadata.MD, 2), stream: make(chan metadata.MD, 1),
