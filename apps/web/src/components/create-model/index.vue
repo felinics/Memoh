@@ -165,8 +165,9 @@
             :label="$t('models.reasoningEfforts')"
           >
             <Select
-              v-model="selectedEfforts"
+              :model-value="selectedEfforts"
               multiple
+              @update:model-value="onEffortsUpdate"
             >
               <SelectTrigger
                 class="w-full"
@@ -311,6 +312,14 @@ const editInfo = inject<Ref<ModelsGetResponse | null>>('openModelState', ref(nul
 // is still rendering the form.
 const alwaysThinking = ref(false)
 const storedEfforts = ref<string[]>([])
+
+// An empty list is not a declaration the server can honour: it reads as
+// "unknown" and serves low/medium/high, so a picker showing nothing selected
+// would contradict what the chat picker then offers. Keep at least one.
+function onEffortsUpdate(value: unknown) {
+  const next = Array.isArray(value) ? value.map(String) : []
+  if (next.length) selectedEfforts.value = next
+}
 
 function effortsToSave(): string[] {
   if (alwaysThinking.value) return storedEfforts.value
