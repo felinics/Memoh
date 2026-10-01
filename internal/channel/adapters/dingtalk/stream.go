@@ -102,6 +102,9 @@ func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.Prepare
 		s.final = &channel.PreparedMessage{
 			Message: channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text},
 		}
+		// The error replaces the answer; the attachments buffered for it
+		// must not go out with the error.
+		s.attachments = nil
 		s.mu.Unlock()
 		return s.flush(ctx)
 	}

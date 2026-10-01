@@ -2,6 +2,11 @@ package dingtalk
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,5 +152,58 @@ func TestOpenStreamUsesSourceMessageIDAsReply(t *testing.T) {
 	}
 	if dtStream.reply == nil || dtStream.reply.MessageID != "source-1" || dtStream.reply.Target != "user:alice" {
 		t.Fatalf("unexpected reply: %#v", dtStream.reply)
+	}
+}
+
+// An error replaces the answer: the attachments buffered for it are not sent
+// with the error, nor by a later Close.
+func TestOutboundStreamErrorDropsBufferedAnswer(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		bodies []string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(raw))
+		mu.Unlock()
+	}))
+	t.Cleanup(server.Close)
+
+	adapter := NewDingTalkAdapter(nil)
+	cfg := channel.ChannelConfig{ID: "cfg-1"}
+	adapter.rememberWebhook(cfg.ID, "source-1", sessionWebhookContext{
+		SessionWebhook: server.URL,
+		ExpiredTime:    time.Now().Add(time.Minute).UnixMilli(),
+	})
+	stream, err := adapter.OpenStream(context.Background(), cfg, "user:alice", channel.StreamOptions{SourceMessageID: "source-1"})
+	if err != nil {
+		t.Fatalf("OpenStream: %v", err)
+	}
+	events := []channel.PreparedStreamEvent{
+		{Type: channel.StreamEventDelta, Delta: "draft answer"},
+		{Type: channel.StreamEventAttachment, Attachments: []channel.PreparedAttachment{{
+			Kind:    channel.PreparedAttachmentPublicURL,
+			Logical: channel.Attachment{Type: channel.AttachmentImage, URL: "https://example.com/previous.png"},
+		}}},
+		{Type: channel.StreamEventError, Error: "The workspace is unreachable."},
+	}
+	var pushErr error
+	for _, event := range events {
+		pushErr = stream.Push(context.Background(), event)
+	}
+	if got := stream.(*dingtalkOutboundStream).snapshotPrepared(); len(got.Attachments) != 0 || len(got.Message.Attachments) != 0 {
+		t.Fatalf("error reply carries the buffered attachments: %+v", got)
+	}
+	if pushErr != nil {
+		t.Fatalf("Push error: %v", pushErr)
+	}
+	if err := stream.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "The workspace is unreachable.") || strings.Contains(bodies[0], "previous.png") {
+		t.Fatalf("sent = %q, want only the error reply", bodies)
 	}
 }
