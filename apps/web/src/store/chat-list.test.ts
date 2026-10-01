@@ -122,6 +122,11 @@ const h = {
   abortedWSRuns: [] as string[],
   lastRunId: '',
   lastSessionId: '',
+  // Mirrors the server: a message without session_id creates a session and
+  // announces it with session_created before run_accepted. Tests that drive
+  // session_created themselves turn this off.
+  inbandSessionId: 'session-1',
+  manualSessionCreation: false,
   wsRunSeq: 0,
   runtimeBySession: new Map<string, {
     epoch: string
@@ -267,6 +272,8 @@ beforeEach(() => {
     h.sessionsActivityHandler = null
     h.lastRunId = ''
     h.lastSessionId = ''
+    h.inbandSessionId = 'session-1'
+    h.manualSessionCreation = false
     h.wsRunSeq = 0
     h.runtimeBySession = new Map()
     h.sentWSMessages = []
@@ -417,6 +424,7 @@ beforeEach(() => {
           session_id?: string
           message_id?: string
           text?: string
+          workdir_id?: string
         }) => {
           if (message.type === 'runtime_subscribe') {
             if (message.session_id) emitRuntimeSnapshot(onStreamEvent, message.session_id)
@@ -500,6 +508,15 @@ beforeEach(() => {
           // The server names the run and announces it before any turn output,
           // so every later event is addressed by run_id.
           const invocationId = message.invocation_id ?? ''
+          if (message.type === 'message' && !h.lastSessionId && invocationId && !h.manualSessionCreation) {
+            h.lastSessionId = h.inbandSessionId
+            onStreamEvent({
+              type: 'session_created',
+              invocation_id: invocationId,
+              session_id: h.lastSessionId,
+              workdir_id: message.workdir_id,
+            })
+          }
           h.lastRunId = invocationId ? `run-${++h.wsRunSeq}` : ''
           h.wsRunIds.push(h.lastRunId)
           if (h.lastRunId) {
@@ -753,7 +770,7 @@ describe('chat-list store', () => {
       await expect(sending).resolves.toMatchObject({ ok: true, messageSent: true })
     })
 
-  it('projects startup failures identically while returning them to the composer', async () => {
+  it('rolls a first send that fails at startup back to its composer', async () => {
       const store = useChatStore()
       const onBeforeTurnAppend = vi.fn()
       const onBeforeMessageSend = vi.fn()
@@ -773,21 +790,22 @@ describe('chat-list store', () => {
         error: 'model failed',
         restoreInput: 'hello',
       })
-      expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
-      expect(store.messages[1]).toMatchObject({
-        role: 'assistant',
-        streaming: false,
-        messages: [{ type: 'error', content: 'model failed' }],
-      })
+      // The session the message created in-band is deleted and the draft is
+      // empty again, with no first send left in flight.
+      expect(api.deleteSession).toHaveBeenCalledWith('bot-1', 'session-1')
+      expect(store.sessionId).toBeNull()
+      expect(store.messages).toEqual([])
+      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toBeUndefined()
       expect(store.startupSendFailure).toMatchObject({
         botId: 'bot-1',
-        sessionId: 'session-1',
+        sessionId: '',
         error: 'model failed',
         restoreInput: 'hello',
       })
+      // The turn is appended while the target is still the draft.
       expect(onBeforeTurnAppend).toHaveBeenCalledWith(expect.objectContaining({
         botId: 'bot-1',
-        sessionId: expect.any(String),
+        sessionId: null,
       }))
       expect(onBeforeMessageSend).toHaveBeenCalledOnce()
       expect(onTurnAppendAborted).toHaveBeenCalledOnce()
@@ -798,16 +816,23 @@ describe('chat-list store', () => {
     })
 
   it('uses structured API feedback for startup send failures', async () => {
-      api.createSession.mockRejectedValueOnce({
-        body: {
-          i18n_key: 'chat.externalAgent.agentNotConfigured',
-          message: 'raw backend message',
-        },
-      })
+      // A draft's first message creates its session in-band; here the server
+      // refuses to create it, so no session_created ever arrives.
+      h.manualSessionCreation = true
+      h.sendUpdates = []
       const store = useChatStore()
 
       await store.selectBot('bot-1')
-      const result = await store.sendMessage('hello')
+      const sending = store.sendMessage('hello')
+      await flushPromises()
+      expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      h.streamHandler?.({
+        type: 'error',
+        invocation_id: wsInvocationId(0),
+        message: 'raw backend message',
+        feedback: { i18n_key: 'chat.externalAgent.agentNotConfigured' },
+      })
+      const result = await sending
 
       expect(result).toMatchObject({
         ok: false,
@@ -815,7 +840,13 @@ describe('chat-list store', () => {
         error: 'External agent setup is incomplete for this bot.',
         restoreInput: 'hello',
       })
+      // The failed first send is undone: the draft is empty again, no first
+      // send is left in flight, and the composer gets the input back.
+      expect(store.messages).toEqual([])
+      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toBeUndefined()
+      expect(api.deleteSession).not.toHaveBeenCalled()
       expect(store.startupSendFailure).toMatchObject({
+        sessionId: '',
         error: 'External agent setup is incomplete for this bot.',
         restoreInput: 'hello',
       })
@@ -3473,6 +3504,7 @@ describe('chat-list store', () => {
     })
 
   it('blocks a second deferred draft send while the first stream is still unbound', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
 
@@ -3504,6 +3536,7 @@ describe('chat-list store', () => {
     })
 
   it('aborts a deferred draft stream before session_created binds it', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
 
@@ -3584,6 +3617,12 @@ describe('chat-list store', () => {
       store.abort()
       expect(h.abortedWSRuns).toEqual([])
 
+      // A first send creates its session in-band, named before the run.
+      h.streamHandler?.({
+        type: 'session_created',
+        invocation_id: invocationId,
+        session_id: 'session-1',
+      })
       h.streamHandler?.({
         type: 'run_accepted',
         run_id: 'run-late',
@@ -3593,9 +3632,14 @@ describe('chat-list store', () => {
         epoch: 'epoch-session-1',
         seq: 1,
       })
-
-      await expect(sending).resolves.toMatchObject({ ok: false })
       expect(h.abortedWSRuns).toEqual(['run-late'])
+
+      // Before the run had a name, the stop could not fail the send locally
+      // without orphaning the run the server was about to start; the send
+      // ends when the server reports the run aborted.
+      emitRuntimeSnapshot(h.streamHandler!, 'session-1')
+      emitRuntimeTo(h.streamHandler ?? undefined, { kind: 'run', status: 'aborted' }, 'session-1', 'run-late')
+      await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
     })
 
   it('fails a rejected submission with the code the server refused it by', async () => {
@@ -3627,6 +3671,7 @@ describe('chat-list store', () => {
     })
 
   it('keeps the first created-session correlation when a stream receives a conflicting duplicate', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
 
@@ -3651,6 +3696,7 @@ describe('chat-list store', () => {
     })
 
   it('does not select a late session_created event after the user switches sessions', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
         id: sessionID,
@@ -3685,6 +3731,7 @@ describe('chat-list store', () => {
     })
 
   it('deletes a deferred draft session when requested skill preflight fails after session_created', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
       const requestedSkill = { name: 'alpha' }
@@ -3758,6 +3805,7 @@ describe('chat-list store', () => {
     })
 
   it('keeps the current session when deferred draft failure arrives after a session switch', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
         id: sessionID,
@@ -3803,6 +3851,7 @@ describe('chat-list store', () => {
     })
 
   it('keeps deferred draft websocket errors scoped away from the switched session', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
         id: sessionID,
@@ -4921,45 +4970,13 @@ describe('chat-list store', () => {
       expect(store.pendingExternalAgentStateFor(targetB)).toMatchObject({ metadata: { acp_agent_id: 'claude' } })
     })
 
-  it('does not let a late native Draft creation steal focus from another Draft', async () => {
-      const creation = deferred<{
-        id: string
-        bot_id: string
-        title: string
-        type: string
-      }>()
-      api.createSession.mockReturnValueOnce(creation.promise)
-      const store = useChatStore()
-      await store.selectBot('bot-1')
-      const targetA = { botId: 'bot-1', sessionId: null, viewId: 'chat:draft-a' }
-      const targetB = { botId: 'bot-1', sessionId: null, viewId: 'chat:draft-b' }
-      store.bindChatView(targetA.viewId, targetA, true)
-      store.bindChatView(targetB.viewId, targetB, true)
-      store.focusChatView(targetA.viewId)
-
-      const sending = store.sendMessage('from A', undefined, { target: targetA })
-      await flushPromises()
-      store.focusChatView(targetB.viewId)
-      store.selectDraft({ explicitSelection: true })
-      creation.resolve({ id: 'session-a', bot_id: 'bot-1', title: '', type: 'chat' })
-      await sending
-
-      expect(store.sessionId).toBeNull()
-      expect(store.chatView({ ...targetA, sessionId: 'session-a' }).sessionId).toBe('session-a')
-      expect(store.chatView(targetB).kind).toBe('draft')
-      expect(store.userSentInSession).toMatchObject({ id: 'session-a', viewId: targetA.viewId })
-    })
-
   it('drops a late Draft creation result after the authenticated scope resets', async () => {
       const windowTarget = new EventTarget()
       vi.stubGlobal('window', windowTarget)
-      const creation = deferred<{
-        id: string
-        bot_id: string
-        title: string
-        type: string
-      }>()
-      api.createSession.mockReturnValueOnce(creation.promise)
+      // The first message creates its session in-band; hold session_created
+      // back so the scope resets while creation is still in flight.
+      h.manualSessionCreation = true
+      h.sendUpdates = []
       const store = useChatStore()
       await store.selectBot('bot-1')
       const target = { botId: 'bot-1', sessionId: null, viewId: 'chat:draft-a' }
@@ -4971,7 +4988,7 @@ describe('chat-list store', () => {
       windowTarget.dispatchEvent(new CustomEvent(AUTH_SESSION_CLEARED_EVENT, {
         detail: { reason: 'logout' },
       }))
-      creation.resolve({ id: 'old-session', bot_id: 'bot-1', title: '', type: 'chat' })
+      h.streamHandler?.({ type: 'session_created', invocation_id: wsInvocationId(0), session_id: 'old-session' })
 
       await expect(sending).resolves.toMatchObject({ ok: false })
       expect(store.sessions).toEqual([])
@@ -5043,6 +5060,7 @@ describe('chat-list store', () => {
     })
 
   it('does not let a late session_created event steal focus from another Draft', async () => {
+      h.manualSessionCreation = true
       h.sendUpdates = []
       const store = useChatStore()
       await store.selectBot('bot-1')

@@ -8,10 +8,8 @@ import {
 } from 'vue'
 import { useScroll } from '@vueuse/core'
 import type { ChatMessage } from '@/store/chat-list'
-import { animateTurnEntrance } from './turn-entrance'
+import { animateTurnEntrance, TURN_MOTION_MAX_DISTANCE_PX } from './turn-entrance'
 import { nativeScrollTo } from './native-scroll'
-
-const TURN_ENTRANCE_MAX_DISTANCE_PX = 80
 
 // "At the bottom" is a threshold, not a pixel-perfect landing: sub-pixel
 // rounding, the last line growing mid-stream, and fractional zoom all leave a
@@ -247,11 +245,12 @@ export function useChatScroll(options: UseChatScrollOptions) {
     pinAnchorId = anchorId ?? lastUserMessage()?.id ?? null
     // Arm only — do NOT clear / set reserves here.
     //
-    // sendMessage pushes the optimistic user turn only after several awaits
-    // (command parse, session setup, …). Anything we mutate now paints one
-    // Vue flush BEFORE that turn exists: a positional or "clear previous
-    // blank now" edit either hits the wrong container or shrinks scrollHeight
-    // under a bottom-parked viewport (zero-frame jerk). The full handover
+    // The store calls this immediately before it appends the optimistic user
+    // turn, but the turn is only in the DOM after Vue's next patch, and a
+    // slash command or an External Agent session can still await before the
+    // store gets here. A positional or "clear previous blank now" edit made
+    // now either hits the wrong container or shrinks scrollHeight under a
+    // bottom-parked viewport (zero-frame jerk). The full handover
     // (collapseReserveKeepingView → new min-height → latest-turn translation) runs in
     // tryApplyPin on the first mutation where the NEW prompt is in the DOM.
 
@@ -449,7 +448,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const promptTop = containerTop + promptOffsetInTurn - target
     // The viewport already covers the travel distance; keep the turn entrance local.
     const fromY = Math.max(0, Math.min(
-      TURN_ENTRANCE_MAX_DISTANCE_PX,
+      TURN_MOTION_MAX_DISTANCE_PX,
       el.clientHeight - below - promptEl.offsetHeight - promptTop,
       container.offsetHeight - promptEl.offsetHeight,
     ))

@@ -5,11 +5,13 @@ import { CHAT_SEND_MOTION } from './turn-entrance'
 export function useComposerPlacementMotion(
   element: Ref<HTMLElement | null>,
   isWelcome: Ref<boolean>,
-  // The FLIP is only honest on the send path, where the pane's layout is
-  // otherwise stable. Navigation (welcome → sidebar session) swaps the whole
-  // pane in the same flush; gliding the composer over the already-arrived
-  // content reads as a stray ghost, so callers gate those flips out.
-  allow: () => boolean = () => true,
+  // The FLIP is only honest when the pane's layout is otherwise stable: a
+  // first send leaving welcome. Navigation (welcome <-> a sidebar session)
+  // swaps the whole pane in the same flush; gliding the composer over the
+  // already-arrived content reads as a stray ghost, so callers gate those
+  // flips out. Returning to welcome never animates: it lands with the rest
+  // of the welcome layout, which appears in that same flush.
+  allowLeaveWelcome: () => boolean = () => true,
 ) {
   let cancel: (() => void) | undefined
   let revision = 0
@@ -18,10 +20,10 @@ export function useComposerPlacementMotion(
     cancel?.()
     cancel = undefined
   }
-  watch(isWelcome, async (welcome, wasWelcome) => {
+  watch(isWelcome, async (welcome) => {
     reset()
     const el = element.value
-    if (welcome || !wasWelcome || !el || !allow()
+    if (welcome || !el || !allowLeaveWelcome()
       || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
     const attempt = revision
     // Measure before Vue changes the welcome layout, then invert the movement.
@@ -30,7 +32,11 @@ export function useComposerPlacementMotion(
     await nextTick()
     if (revision !== attempt || element.value !== el) return
     const after = el.getBoundingClientRect()
-    const x = before.left - after.left
+    // Welcome and docked widths differ and the width change is not animated,
+    // so aligning left edges would throw the box sideways by half the width
+    // difference and slide it back diagonally. Aligning centres keeps the
+    // travel vertical; only the placement's optical nudge moves sideways.
+    const x = (before.left + before.width / 2) - (after.left + after.width / 2)
     const y = before.top - after.top
     if (!x && !y) return
     const previousTransform = el.style.transform

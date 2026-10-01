@@ -21,6 +21,10 @@ export function sendFailedMessage() {
   return localizedMessages().chat.sendFailed
 }
 
+export function workdirMismatchMessage() {
+  return localizedMessages().chat.sendWorkdirUnsupported
+}
+
 export function commandErrorMessage(code: string) {
   const errors = localizedMessages().chat.slash.errorMessages as Record<string, string>
   return errors[code] || errors.generic || 'Slash command failed.'

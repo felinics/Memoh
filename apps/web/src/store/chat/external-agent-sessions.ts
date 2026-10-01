@@ -243,58 +243,31 @@ export function createExternalAgentSessions(deps: ExternalAgentSessionDeps) {
     return updated
   }
 
+  // Creates the session a pending External Agent draft sends into. Native
+  // drafts never come here: their first message creates the session in-band
+  // (see send.ts), so the message path owns their workdir and model pair.
   async function ensureChatViewSession(
     target: ChatViewTarget,
     firstPrompt?: string,
-    // First-send picker pair (issue #879): forwarded into the createSession
-    // body so the row is born with it (P9′). Callers pass it only when the
-    // pair has an explicit source; external-agent sessions never receive it
-    // (their pair lives in runtime_metadata instead).
-    pair?: { modelId?: string, reasoningEffort?: string },
   ): Promise<ChatViewTarget> {
     if (target.sessionId) return target
+    const pendingExternalAgent = deps.pendingExternalAgentStateFor(target)
+    if (!pendingExternalAgent) {
+      throw new StreamFailureError('Session not selected', 'startup')
+    }
     if (deps.isDraftCreationActive(target)) {
       throw new StreamFailureError('Session creation is already in progress', 'startup')
     }
     deps.beginDraftCreation(target)
     try {
-      const pendingExternalAgent = deps.pendingExternalAgentStateFor(target)
-      if (pendingExternalAgent) {
-        const { session: created } = await createForTarget({
-          ...pendingExternalAgent.input,
-          runtimeId: pendingExternalAgent.runtimeId,
-        }, target)
-        if (firstPrompt?.trim() && !created.title?.trim()) {
-          created.title = provisionalSessionTitle(firstPrompt)
-          deps.upsertSession(created)
-          deps.rememberSession(created)
-        }
-        return { ...target, sessionId: created.id }
-      }
-
-      const generation = deps.userScopeGeneration()
-      const workdirId = deps.draftWorkdirIdFor(target.botId, { externalAgent: false })
-      const created = await createSession(target.botId, {
-        workdirId: workdirId || undefined,
-        preferredChatModelId: pair?.modelId,
-        preferredReasoningEffort: pair?.reasoningEffort,
-      })
-      if (
-        generation !== deps.userScopeGeneration()
-        || (deps.currentBotId.value ?? '').trim() !== target.botId
-      ) {
-        const error = new Error('Chat scope changed during Session creation')
-        error.name = 'AbortError'
-        throw error
-      }
-      if (firstPrompt?.trim()) created.title = provisionalSessionTitle(firstPrompt)
-      deps.upsertSession(created)
-      deps.rememberSession(created)
-      deps.promoteDraftView(target, created.id)
-      if (deps.isFocusedTarget(target)) {
-        deps.sessionId.value = created.id
-        deps.explicitSessionSelection.value = true
-        deps.draftIntent.value = false
+      const { session: created } = await createForTarget({
+        ...pendingExternalAgent.input,
+        runtimeId: pendingExternalAgent.runtimeId,
+      }, target)
+      if (firstPrompt?.trim() && !created.title?.trim()) {
+        created.title = provisionalSessionTitle(firstPrompt)
+        deps.upsertSession(created)
+        deps.rememberSession(created)
       }
       return { ...target, sessionId: created.id }
     } finally {

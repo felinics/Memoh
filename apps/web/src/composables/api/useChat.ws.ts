@@ -27,6 +27,10 @@ export type WSClientMessage =
       invocation_id: string
       session_id?: string
       composer_scope?: string
+      /** Only meaningful without session_id: the workdir the server binds the
+       *  session it creates for this message to. Ignored on an existing
+       *  session, whose workdir binding is immutable. */
+      workdir_id?: string
       text?: string
       attachments?: ChatAttachment[]
       requested_skills?: RequestedSkillRequest[]
