@@ -1369,3 +1369,5 @@ tags.cncf.io/container-device-interface v1.1.0 h1:RnxNhxF1JOu6CJUVpetTYvrXHdxw9j
 tags.cncf.io/container-device-interface v1.1.0/go.mod h1:76Oj0Yqp9FwTx/pySDc8Bxjpg+VqXfDb50cKAXVJ34Q=
 tags.cncf.io/container-device-interface/specs-go v1.1.0 h1:QRZVeAceQM+zTZe12eyfuJuuzp524EKYwhmvLd+h+yQ=
 tags.cncf.io/container-device-interface/specs-go v1.1.0/go.mod h1:u86hoFWqnh3hWz3esofRFKbI261bUlvUfLKGrDhJkgQ=
+github.com/ChrAlpha/memoh-twilight-ai v0.0.0-20260930110148-fb5b5c8219b9 h1:PN8wq3UPP9Bb75enRd91rlt3cHjKwDhvMHRm/5+HH8E=
+github.com/ChrAlpha/memoh-twilight-ai v0.0.0-20260930110148-fb5b5c8219b9/go.mod h1:8U7YKU0im7BTJxlatQgSAilEiGuyAJCTr83Cz/gjdk8=

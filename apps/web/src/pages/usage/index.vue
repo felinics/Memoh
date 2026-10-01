@@ -116,6 +116,12 @@
               :value="formatNumber(summary.totalReasoningTokens)"
             />
           </div>
+          <p
+            v-if="!summary.cacheReadReported"
+            class="px-2 text-xs text-muted-foreground"
+          >
+            {{ $t('usage.cacheUsageUnavailable') }}
+          </p>
         </section>
 
         <template v-if="hasData">
@@ -141,6 +147,15 @@
                 </SelectContent>
               </Select>
             </template>
+            <p class="px-4 pt-4 text-caption text-muted-foreground">
+              {{ $t('usage.modelDistributionScope') }}
+            </p>
+            <p
+              v-if="byModelData.some(model => !model.model_id)"
+              class="px-4 pt-2 text-caption text-muted-foreground"
+            >
+              {{ $t('usage.unknownModelExplanation') }}
+            </p>
             <VChart
               :key="modelChartType"
               class="p-4"
@@ -159,7 +174,10 @@
             />
           </SettingsSection>
 
-          <SettingsSection :title="$t('usage.cacheBreakdown')">
+          <SettingsSection
+            v-if="summary.cacheReadReported"
+            :title="$t('usage.cacheBreakdown')"
+          >
             <VChart
               class="p-4"
               style="height: 300px; width: 100%"
@@ -168,7 +186,10 @@
             />
           </SettingsSection>
 
-          <SettingsSection :title="$t('usage.cacheHitRate')">
+          <SettingsSection
+            v-if="summary.cacheReadReported"
+            :title="$t('usage.cacheHitRate')"
+          >
             <VChart
               class="p-4"
               style="height: 300px; width: 100%"
@@ -355,6 +376,7 @@ import BotSelect from '@/components/bot-select/index.vue'
 import { useChatSelectionStore } from '@/store/chat-selection'
 import type { HandlersDailyTokenUsage, HandlersModelTokenUsage, HandlersTokenUsageRecord } from '@memohai/sdk'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
+import { cacheHitRate, cacheReadReported, formatCacheHitRate } from './cache-usage'
 import { formatDateTimeShort } from '@/utils/date-time'
 
 use([CanvasRenderer, LineChart, BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
@@ -654,23 +676,24 @@ const summary = computed(() => {
   const maps = dayMaps.value
   let totalInput = 0
   let totalOutput = 0
-  let totalCacheRead = 0
   let totalReasoning = 0
+  const cacheRows: HandlersDailyTokenUsage[] = []
   for (const day of days) {
     for (const tp of types) {
       const r = maps[tp].get(day)
       if (!r) continue
+      cacheRows.push(r)
       totalInput += r.input_tokens ?? 0
       totalOutput += r.output_tokens ?? 0
-      totalCacheRead += r.cache_read_tokens ?? 0
       totalReasoning += r.reasoning_tokens ?? 0
     }
   }
-  const rate = totalInput > 0 ? ((totalCacheRead / totalInput) * 100).toFixed(1) + '%' : '-'
+  const rate = formatCacheHitRate(cacheHitRate(cacheRows))
   return {
     totalInputTokens: totalInput,
     totalOutputTokens: totalOutput,
     avgCacheHitRate: rate,
+    cacheReadReported: cacheRows.length > 0 && cacheRows.every(cacheReadReported),
     totalReasoningTokens: totalReasoning,
   }
 })
@@ -982,7 +1005,7 @@ const cacheHitRateOption = computed(() => {
   }
   return {
     textStyle: { fontFamily: c.fontFamily },
-    tooltip: { trigger: 'axis' as const, ...tooltipSurface(c.fontFamily), formatter: axisTooltipFormatter((v: number) => `${v.toFixed(1)}%`) },
+    tooltip: { trigger: 'axis' as const, ...tooltipSurface(c.fontFamily), formatter: axisTooltipFormatter(formatCacheHitRate) },
     grid: { left: 8, right: 8, top: 14, bottom: 24, containLabel: true },
     xAxis: {
       type: 'category' as const,
@@ -1009,7 +1032,7 @@ const cacheHitRateOption = computed(() => {
         data: days.map(d => {
           const totalInput = sumField(d, 'input_tokens')
           const cacheRead = sumField(d, 'cache_read_tokens')
-          return totalInput > 0 ? parseFloat(((cacheRead / totalInput) * 100).toFixed(1)) : 0
+          return totalInput > 0 ? cacheRead / totalInput * 100 : 0
         }),
       },
     ],

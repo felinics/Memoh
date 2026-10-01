@@ -43,11 +43,12 @@ func (h *TokenUsageHandler) Register(e *echo.Echo) {
 
 // DailyTokenUsage represents aggregated token usage for a single day.
 type DailyTokenUsage struct {
-	Day             string `json:"day"`
-	InputTokens     int64  `json:"input_tokens"`
-	OutputTokens    int64  `json:"output_tokens"`
-	CacheReadTokens int64  `json:"cache_read_tokens"`
-	ReasoningTokens int64  `json:"reasoning_tokens"`
+	Day                     string `json:"day"`
+	InputTokens             int64  `json:"input_tokens"`
+	OutputTokens            int64  `json:"output_tokens"`
+	CacheReadTokens         int64  `json:"cache_read_tokens"`
+	CacheReadTokensReported bool   `json:"cache_read_tokens_reported"`
+	ReasoningTokens         int64  `json:"reasoning_tokens"`
 }
 
 // ModelTokenUsage represents aggregated token usage for a single model.
@@ -71,19 +72,20 @@ type TokenUsageResponse struct {
 
 // TokenUsageRecord represents a single LLM call (one assistant message row) with its token usage.
 type TokenUsageRecord struct {
-	ID              string `json:"id"`
-	CreatedAt       string `json:"created_at"`
-	SessionID       string `json:"session_id"`
-	SessionType     string `json:"session_type"`
-	Harness         string `json:"harness"`
-	ModelID         string `json:"model_id"`
-	ModelSlug       string `json:"model_slug"`
-	ModelName       string `json:"model_name"`
-	ProviderName    string `json:"provider_name"`
-	InputTokens     int64  `json:"input_tokens"`
-	OutputTokens    int64  `json:"output_tokens"`
-	CacheReadTokens int64  `json:"cache_read_tokens"`
-	ReasoningTokens int64  `json:"reasoning_tokens"`
+	ID                      string `json:"id"`
+	CreatedAt               string `json:"created_at"`
+	SessionID               string `json:"session_id"`
+	SessionType             string `json:"session_type"`
+	Harness                 string `json:"harness"`
+	ModelID                 string `json:"model_id"`
+	ModelSlug               string `json:"model_slug"`
+	ModelName               string `json:"model_name"`
+	ProviderName            string `json:"provider_name"`
+	InputTokens             int64  `json:"input_tokens"`
+	OutputTokens            int64  `json:"output_tokens"`
+	CacheReadTokens         int64  `json:"cache_read_tokens"`
+	CacheReadTokensReported bool   `json:"cache_read_tokens_reported"`
+	ReasoningTokens         int64  `json:"reasoning_tokens"`
 }
 
 // TokenUsageRecordsResponse is the response body for GET /bots/:bot_id/token-usage/records.
@@ -192,11 +194,12 @@ func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UU
 
 	for _, r := range rows {
 		d := DailyTokenUsage{
-			Day:             formatPgDate(r.Day),
-			InputTokens:     r.InputTokens,
-			OutputTokens:    r.OutputTokens,
-			CacheReadTokens: r.CacheReadTokens,
-			ReasoningTokens: r.ReasoningTokens,
+			Day:                     formatPgDate(r.Day),
+			InputTokens:             r.InputTokens,
+			OutputTokens:            r.OutputTokens,
+			CacheReadTokens:         r.CacheReadTokens,
+			CacheReadTokensReported: r.CacheReadTokensReported,
+			ReasoningTokens:         r.ReasoningTokens,
 		}
 		switch r.SessionType {
 		case session.TypeDiscuss:
@@ -368,19 +371,20 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	items := make([]TokenUsageRecord, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, TokenUsageRecord{
-			ID:              formatOptionalUUID(r.ID),
-			CreatedAt:       formatPgTime(r.CreatedAt),
-			SessionID:       formatOptionalUUID(r.SessionID),
-			SessionType:     r.SessionType,
-			Harness:         r.Harness,
-			ModelID:         formatOptionalUUID(r.ModelID),
-			ModelSlug:       r.ModelSlug,
-			ModelName:       r.ModelName,
-			ProviderName:    r.ProviderName,
-			InputTokens:     r.InputTokens,
-			OutputTokens:    r.OutputTokens,
-			CacheReadTokens: r.CacheReadTokens,
-			ReasoningTokens: r.ReasoningTokens,
+			ID:                      formatOptionalUUID(r.ID),
+			CreatedAt:               formatPgTime(r.CreatedAt),
+			SessionID:               formatOptionalUUID(r.SessionID),
+			SessionType:             r.SessionType,
+			Harness:                 r.Harness,
+			ModelID:                 formatOptionalUUID(r.ModelID),
+			ModelSlug:               r.ModelSlug,
+			ModelName:               r.ModelName,
+			ProviderName:            r.ProviderName,
+			InputTokens:             r.InputTokens,
+			OutputTokens:            r.OutputTokens,
+			CacheReadTokens:         r.CacheReadTokens,
+			CacheReadTokensReported: r.CacheReadTokensReported,
+			ReasoningTokens:         r.ReasoningTokens,
 		})
 	}
 

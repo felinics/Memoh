@@ -3754,7 +3754,10 @@
     "colHarness": "Harness",
     "unknown": "Unknown",
     "colInputTokens": "Input",
-    "colOutputTokens": "Output"
+    "colOutputTokens": "Output",
+    "cacheUsageUnavailable": "Cache usage cannot be confirmed for some or all records.",
+    "modelDistributionScope": "This chart shows all models in the selected time range.",
+    "unknownModelExplanation": "The model for these records cannot be confirmed. They are excluded when you filter by a specific model."
   },
   "supermarket": {
     "title": "Supermarket",

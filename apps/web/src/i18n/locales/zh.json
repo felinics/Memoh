@@ -3754,7 +3754,10 @@
     "colHarness": "Harness",
     "unknown": "未知",
     "colInputTokens": "输入",
-    "colOutputTokens": "输出"
+    "colOutputTokens": "输出",
+    "cacheUsageUnavailable": "部分或全部记录的缓存用量不可确认。",
+    "modelDistributionScope": "此图展示所选时间范围内全部模型的用量。",
+    "unknownModelExplanation": "这些记录的模型无法确认，筛选具体模型时不会计入该模型的统计。"
   },
   "supermarket": {
     "title": "市场",

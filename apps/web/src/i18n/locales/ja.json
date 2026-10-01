@@ -3748,7 +3748,10 @@
     "colHarness": "Harness",
     "unknown": "不明",
     "colInputTokens": "入力",
-    "colOutputTokens": "出力"
+    "colOutputTokens": "出力",
+    "cacheUsageUnavailable": "一部またはすべての記録でキャッシュ使用量を確認できません。",
+    "modelDistributionScope": "このグラフは選択した期間の全モデルの使用量を表示します。",
+    "unknownModelExplanation": "これらの記録のモデルは確認できません。特定のモデルで絞り込む場合、そのモデルの統計には含まれません。"
   },
   "supermarket": {
     "title": "マーケットプレイス",

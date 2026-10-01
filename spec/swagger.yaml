@@ -3735,6 +3735,8 @@ definitions:
     properties:
       cache_read_tokens:
         type: integer
+      cache_read_tokens_reported:
+        type: boolean
       day:
         type: string
       input_tokens:
@@ -4721,6 +4723,8 @@ definitions:
     properties:
       cache_read_tokens:
         type: integer
+      cache_read_tokens_reported:
+        type: boolean
       created_at:
         type: string
       harness:

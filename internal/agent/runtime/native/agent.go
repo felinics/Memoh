@@ -523,20 +523,12 @@ func recordContextCacheUsage(ledger *contextfrag.MutationLedger, stepIndex int, 
 }
 
 func aggregateStepUsage(steps []step.Record) sdk.Usage {
-	var total sdk.Usage
-	for _, record := range steps {
-		total.InputTokens += record.Result.Usage.InputTokens
-		total.OutputTokens += record.Result.Usage.OutputTokens
-		total.TotalTokens += record.Result.Usage.TotalTokens
-		total.ReasoningTokens += record.Result.Usage.ReasoningTokens
-		total.CachedInputTokens += record.Result.Usage.CachedInputTokens
-		total.InputTokenDetails.NoCacheTokens += record.Result.Usage.InputTokenDetails.NoCacheTokens
-		total.InputTokenDetails.CacheReadTokens += record.Result.Usage.InputTokenDetails.CacheReadTokens
-		total.InputTokenDetails.CacheWriteTokens += record.Result.Usage.InputTokenDetails.CacheWriteTokens
-		total.InputTokenDetails.CacheWrite5mTokens += record.Result.Usage.InputTokenDetails.CacheWrite5mTokens
-		total.InputTokenDetails.CacheWrite1hTokens += record.Result.Usage.InputTokenDetails.CacheWrite1hTokens
-		total.OutputTokenDetails.TextTokens += record.Result.Usage.OutputTokenDetails.TextTokens
-		total.OutputTokenDetails.ReasoningTokens += record.Result.Usage.OutputTokenDetails.ReasoningTokens
+	if len(steps) == 0 {
+		return sdk.Usage{}
+	}
+	total := steps[0].Result.Usage
+	for _, record := range steps[1:] {
+		total = total.Add(record.Result.Usage)
 	}
 	return total
 }

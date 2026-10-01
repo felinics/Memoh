@@ -741,12 +741,27 @@ func promptUsageFromACP(usage *acp.Usage) *sdk.Usage {
 		OutputTokens: usage.OutputTokens,
 		TotalTokens:  usage.TotalTokens,
 	}
+	read, write := 0, 0
 	if usage.CachedReadTokens != nil {
-		out.CachedInputTokens = *usage.CachedReadTokens
-		out.InputTokenDetails.CacheReadTokens = *usage.CachedReadTokens
+		read = *usage.CachedReadTokens
 	}
 	if usage.CachedWriteTokens != nil {
-		out.InputTokenDetails.CacheWriteTokens = *usage.CachedWriteTokens
+		write = *usage.CachedWriteTokens
+	}
+	// ACP leaves it to the agent whether inputTokens includes cache tokens;
+	// claude-agent-acp reports them beside it and counts them in totalTokens.
+	// Only a total that fits one accounting tells which one the agent used.
+	known := read+write == 0 || usage.TotalTokens == usage.InputTokens+usage.OutputTokens && usage.InputTokens >= read+write
+	if read+write > 0 && usage.TotalTokens == usage.InputTokens+usage.OutputTokens+read+write {
+		out.InputTokens += read + write
+		known = true
+	}
+	out.CacheReadTokensReported = known && usage.CachedReadTokens != nil
+	out.CachedInputTokens = read
+	out.InputTokenDetails.CacheReadTokens = read
+	out.InputTokenDetails.CacheWriteTokens = write
+	if known {
+		out.InputTokenDetails.NoCacheTokens = out.InputTokens - read - write
 	}
 	if usage.ThoughtTokens != nil {
 		out.ReasoningTokens = *usage.ThoughtTokens

@@ -22443,6 +22443,9 @@ const docTemplate = `{
                 "cache_read_tokens": {
                     "type": "integer"
                 },
+                "cache_read_tokens_reported": {
+                    "type": "boolean"
+                },
                 "day": {
                     "type": "string"
                 },
@@ -23899,6 +23902,9 @@ const docTemplate = `{
             "properties": {
                 "cache_read_tokens": {
                     "type": "integer"
+                },
+                "cache_read_tokens_reported": {
+                    "type": "boolean"
                 },
                 "created_at": {
                     "type": "string"
