@@ -3,19 +3,17 @@
     <div class="space-y-4 sm:space-y-6">
       <!-- Identity card mirrors the search provider detail, while Native keeps
            its managed/non-destructive behavior. -->
-      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
-        <span class="flex size-9 shrink-0 items-center justify-center">
+      <ProviderIdentityCard
+        :name="curProvider?.name"
+        media="bare"
+      >
+        <template #media>
           <SearchProviderLogo
             :provider="curProvider?.provider || ''"
             size="md"
           />
-        </span>
-        <div class="min-w-0 flex-1">
-          <h2 class="truncate text-sm font-semibold">
-            {{ curProvider?.name }}
-          </h2>
-        </div>
-        <div class="ml-auto flex items-center gap-2">
+        </template>
+        <template #actions>
           <ConfirmPopover
             v-if="!isNative && curProvider?.id"
             :message="$t('webSearch.deleteFetchConfirm')"
@@ -43,8 +41,8 @@
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
-        </div>
-      </section>
+        </template>
+      </ProviderIdentityCard>
 
       <SettingsSection
         :title="$t('provider.configurationTitle')"
@@ -122,6 +120,7 @@
 </template>
 
 <script setup lang="ts">
+import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
 import {
   Input,
   Button,

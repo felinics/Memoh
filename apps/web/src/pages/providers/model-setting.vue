@@ -1,8 +1,10 @@
 <template>
   <SettingsShell width="narrow">
     <div class="space-y-4 sm:space-y-6">
-      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
-        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+      <ProviderIdentityCard
+        :name="curProvider?.name"
+      >
+        <template #media>
           <ProviderIcon
             v-if="curProvider?.icon"
             :icon="curProvider.icon"
@@ -14,13 +16,8 @@
           >
             {{ avatarInitials(curProvider?.name, '?') }}
           </span>
-        </span>
-        <div class="min-w-0 flex-1">
-          <h4 class="scroll-m-20 tracking-tight truncate">
-            {{ curProvider?.name }}
-          </h4>
-        </div>
-        <div class="ml-auto flex items-center gap-2">
+        </template>
+        <template #actions>
           <ConfirmPopover
             v-if="curProvider?.id"
             :message="$t('provider.deleteConfirm')"
@@ -47,8 +44,8 @@
             :aria-label="$t('provider.enable')"
             @update:model-value="handleToggleEnable"
           />
-        </div>
-      </section>
+        </template>
+      </ProviderIdentityCard>
 
       <ProviderForm
         ref="providerForm"
@@ -73,6 +70,7 @@
 </template>
 
 <script setup lang="ts">
+import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
 import { Button, ConfirmPopover, SettingsShell, Switch } from '@felinic/ui'
 import { Trash2 } from 'lucide-vue-next'
 import ProviderIcon from '@/components/provider-icon/index.vue'

@@ -1,8 +1,10 @@
 <template>
   <SettingsShell width="narrow">
     <div class="space-y-4 sm:space-y-6">
-      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
-        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+      <ProviderIdentityCard
+        :name="curProvider?.name"
+      >
+        <template #media>
           <ProviderIcon
             v-if="curProvider?.icon"
             :icon="curProvider.icon"
@@ -14,13 +16,8 @@
           >
             {{ getInitials(curProvider?.name) }}
           </span>
-        </span>
-        <div class="min-w-0 flex-1">
-          <h2 class="truncate text-sm font-semibold">
-            {{ curProvider?.name }}
-          </h2>
-        </div>
-        <div class="ml-auto flex shrink-0 items-center gap-2">
+        </template>
+        <template #actions>
           <span class="text-xs text-muted-foreground">
             {{ $t('common.enable') }}
           </span>
@@ -30,8 +27,8 @@
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
-        </div>
-      </section>
+        </template>
+      </ProviderIdentityCard>
 
       <form @submit.prevent="handleSaveProvider">
         <SettingsSection
@@ -149,7 +146,7 @@
           </div>
         </div>
 
-        <div class="overflow-hidden rounded-[var(--radius-menu-shell)] border border-border bg-card">
+        <SurfaceCard padding="none">
           <div
             v-if="providerModels.length === 0"
             class="px-4 py-10 text-center text-xs text-muted-foreground"
@@ -168,7 +165,7 @@
               @click="openModelEditor(model)"
             />
           </template>
-        </div>
+        </SurfaceCard>
       </section>
 
       <Dialog v-model:open="modelDialogOpen">
@@ -232,6 +229,7 @@
 </template>
 
 <script setup lang="ts">
+import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
 import {
   Button,
   Dialog,
@@ -252,7 +250,7 @@ import {
 } from '@felinic/ui'
 import { computed, inject, reactive, ref } from 'vue'
 import { useServerSyncedRecord, useServerSyncedScalar } from '@/composables/use-server-synced-form'
-import { FieldStack, FormStack, ModelListRow, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
+import { FieldStack, FormStack, ModelListRow, SettingsRow, SettingsSection, SettingsShell, SurfaceCard, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { getVideoProvidersById, getVideoProvidersByIdModels, getVideoProvidersMeta, postProvidersFromTemplate, postVideoProvidersByIdImportModels, putProvidersById, putVideoModelsById } from '@memohai/sdk'
