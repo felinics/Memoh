@@ -171,7 +171,7 @@ type AppUpdateRequest struct {
 type AppRemovalPreviewDependency struct {
 	ID     string `json:"id"`
 	Action string `json:"action" enums:"remove,keep"`
-	Reason string `json:"reason,omitempty" enums:"shared,image,absent"`
+	Reason string `json:"reason,omitempty" enums:"shared,image,absent,required"`
 }
 
 // AppRemovalPreviewConnector says what removing an App does to one

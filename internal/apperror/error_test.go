@@ -265,6 +265,7 @@ func TestWorkspaceDependencyErrorCatalog(t *testing.T) {
 		CodeWorkspaceDependencyActionUnsupported:   http.StatusUnprocessableEntity,
 		CodeWorkspaceDependencyPlatformUnsupported: http.StatusUnprocessableEntity,
 		CodeWorkspaceDependencyBusy:                http.StatusConflict,
+		CodeWorkspaceDependencyRequired:            http.StatusConflict,
 		CodeWorkspaceDependencyWorkspaceNotRunning: http.StatusConflict,
 		CodeWorkspaceDependencyWorkspaceMissing:    http.StatusConflict,
 

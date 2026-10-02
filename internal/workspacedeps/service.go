@@ -804,6 +804,9 @@ func (s *Service) Install(ctx context.Context, botID, depID, version string, sin
 	if op.dep.Retired {
 		return OperationResult{}, ErrDependencyNotFound
 	}
+	if err := s.ensureRequires(ctx, op, sink); err != nil {
+		return OperationResult{}, err
+	}
 	return s.provision(ctx, op, catalog.ActionInstall, StatusInstalling, sink)
 }
 
@@ -819,6 +822,9 @@ func (s *Service) Update(ctx context.Context, botID, depID, version string, sink
 		return OperationResult{}, err
 	}
 	defer op.release()
+	if err := s.ensureRequires(ctx, op, sink); err != nil {
+		return OperationResult{}, err
+	}
 	return s.provision(ctx, op, catalog.ActionUpdate, StatusUpdating, sink)
 }
 
@@ -835,6 +841,9 @@ func (s *Service) Reinstall(ctx context.Context, botID, depID, version string, s
 		return OperationResult{}, err
 	}
 	defer op.release()
+	if err := s.ensureRequires(ctx, op, sink); err != nil {
+		return OperationResult{}, err
+	}
 	return s.provision(ctx, op, catalog.ActionReinstall, StatusInstalling, sink)
 }
 
@@ -851,6 +860,9 @@ func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink)
 		return OperationResult{}, err
 	}
 	defer op.release()
+	if err := s.checkNotRequired(ctx, op); err != nil {
+		return OperationResult{}, err
+	}
 	script, ok := op.catalog.Script(op.dep.ID, catalog.ActionRemove)
 	if !ok {
 		return OperationResult{}, fmt.Errorf("%w: %s has no remove script", ErrActionUnsupported, op.dep.ID)
@@ -1104,6 +1116,12 @@ func (s *Service) begin(ctx context.Context, botID, depID, version string, requi
 	if err != nil {
 		return nil, err
 	}
+	return s.beginWith(ctx, cat, botID, depID, version, requirePlatform)
+}
+
+// beginWith is begin with the catalog already resolved. Prerequisites use it
+// so they resolve against the catalog their dependent was prepared with.
+func (s *Service) beginWith(ctx context.Context, cat *catalog.Catalog, botID, depID, version string, requirePlatform bool) (*operation, error) {
 	dep, ok := cat.Get(strings.TrimSpace(depID))
 	if !ok {
 		return nil, ErrDependencyNotFound

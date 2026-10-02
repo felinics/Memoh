@@ -84,6 +84,8 @@ type WorkspaceDependencyItem struct {
 	Icon   string `json:"icon,omitempty"`
 	// Provides lists the commands the dependency makes available.
 	Provides []string `json:"provides"`
+	// Requires lists the dependency IDs installed first when missing.
+	Requires []string `json:"requires,omitempty"`
 	// PlatformSupported is false when the probed workspace platform is not
 	// listed by the catalog manifest; PlatformReason then says why.
 	PlatformSupported bool   `json:"platform_supported"`
@@ -139,6 +141,8 @@ type WorkspaceDependencyCatalogItem struct {
 	Description  string                                    `json:"description"`
 	IconURL      string                                    `json:"icon_url,omitempty"`
 	Translations map[string]WorkspaceDependencyTranslation `json:"translations,omitempty"`
+	// Requires lists the dependency IDs installed first when missing.
+	Requires []string `json:"requires,omitempty"`
 }
 
 type WorkspaceDependencyCatalogResponse struct {
@@ -167,6 +171,7 @@ func (h *ContainerdHandler) ListWorkspaceDependencyCatalog(c echo.Context) error
 		items = append(items, WorkspaceDependencyCatalogItem{
 			ID: dep.ID, Name: dep.Name, Description: dep.Description,
 			IconURL: dependencyIconURL(dep), Translations: dependencyTranslations(dep),
+			Requires: append([]string(nil), dep.Requires...),
 		})
 	}
 	return c.JSON(http.StatusOK, WorkspaceDependencyCatalogResponse{Items: items, CatalogStale: view.Stale})
@@ -857,6 +862,13 @@ func workspaceDependencyError(err error) error {
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyPlatformUnsupported, err, nil)
 	case errors.Is(err, workspacedeps.ErrBusy):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyBusy, err, nil)
+	case errors.Is(err, workspacedeps.ErrRequired):
+		var required *workspacedeps.RequiredError
+		args := map[string]string{}
+		if errors.As(err, &required) {
+			args["dependents"] = strings.Join(required.Dependents, ",")
+		}
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyRequired, err, args)
 	case errors.Is(err, workspacedeps.ErrWorkspaceNotRunning):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyWorkspaceNotRunning, err, nil)
 	case errors.Is(err, workspacedeps.ErrWorkspaceMissing):
@@ -978,6 +990,7 @@ func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) Workspa
 		Source:            string(dep.Source),
 		Icon:              dep.Icon,
 		Provides:          append([]string{}, dep.Provides...),
+		Requires:          append([]string(nil), dep.Requires...),
 		PlatformSupported: entry.PlatformSupported,
 		Status:            string(entry.Status),
 		InstalledVersion:  entry.InstalledVersion,

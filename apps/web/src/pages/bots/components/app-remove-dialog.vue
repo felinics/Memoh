@@ -58,6 +58,8 @@ function reasonLabel(reason?: string): string {
       return t('apps.remove.reason.image')
     case 'absent':
       return t('apps.remove.reason.absent')
+    case 'required':
+      return t('apps.remove.reason.required')
     default:
       return ''
   }

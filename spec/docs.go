@@ -21756,7 +21756,8 @@ const docTemplate = `{
                     "enum": [
                         "shared",
                         "image",
-                        "absent"
+                        "absent",
+                        "required"
                     ]
                 }
             }
@@ -24098,6 +24099,13 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "requires": {
+                    "description": "Requires lists the dependency IDs installed first when missing.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "translations": {
                     "type": "object",
                     "additionalProperties": {
@@ -24233,6 +24241,13 @@ const docTemplate = `{
                 },
                 "registry_id": {
                     "type": "string"
+                },
+                "requires": {
+                    "description": "Requires lists the dependency IDs installed first when missing.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "retired": {
                     "type": "boolean"

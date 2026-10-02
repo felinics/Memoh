@@ -3268,6 +3268,7 @@ definitions:
         - shared
         - image
         - absent
+        - required
         type: string
     type: object
   handlers.AppRemovalPreviewResponse:
@@ -4857,6 +4858,11 @@ definitions:
         type: string
       name:
         type: string
+      requires:
+        description: Requires lists the dependency IDs installed first when missing.
+        items:
+          type: string
+        type: array
       translations:
         additionalProperties:
           $ref: '#/definitions/handlers.WorkspaceDependencyTranslation'
@@ -4971,6 +4977,11 @@ definitions:
         type: array
       registry_id:
         type: string
+      requires:
+        description: Requires lists the dependency IDs installed first when missing.
+        items:
+          type: string
+        type: array
       retired:
         type: boolean
       source:

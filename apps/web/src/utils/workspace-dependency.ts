@@ -309,3 +309,30 @@ export function dependencyMenuActions(
   if (scripted) items.push({ ...viewScript, separatorBefore: items.length > 0 })
   return items
 }
+
+/**
+ * Everything `rootIds` transitively require, prerequisites first, in the
+ * order the Server installs them. Roots themselves are left out; unknown ids
+ * contribute no requires.
+ */
+export function prerequisiteOrder(rootIds: string[], requiresOf: (id: string) => string[] | undefined): string[] {
+  const roots = new Set(rootIds)
+  const seen = new Set<string>()
+  const order: string[] = []
+  const visit = (id: string) => {
+    if (seen.has(id)) return
+    seen.add(id)
+    for (const required of requiresOf(id) ?? []) visit(required)
+    if (!roots.has(id)) order.push(id)
+  }
+  rootIds.forEach(visit)
+  return order
+}
+
+/** Prerequisites of `item` the workspace lacks; installing it installs these first. */
+export function missingPrerequisites(item: DependencyItem, items: DependencyItem[]): DependencyItem[] {
+  const byId = new Map(items.map(entry => [entry.id ?? '', entry]))
+  return prerequisiteOrder([item.id ?? ''], id => byId.get(id)?.requires)
+    .map(id => byId.get(id) ?? { id, name: id } as DependencyItem)
+    .filter(entry => entry.status !== 'installed')
+}

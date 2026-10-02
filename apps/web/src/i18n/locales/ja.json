@@ -233,6 +233,7 @@
       "action_unsupported": "この依存関係ではこの操作を利用できません。",
       "platform_unsupported": "この Workspace のプラットフォームでは利用できません。",
       "busy": "この依存関係で別の操作が進行中です。しばらくしてからもう一度お試しください。",
+      "required": "{dependents} がまだこの依存関係を必要としています。先にそちらを削除してください。",
       "workspace_not_running": "Workspace が起動していません。先に起動してください。",
       "workspace_missing": "Workspace がまだ作成されていません。先に作成してください。",
       "rollback_unavailable": "ロールバックできる以前のバージョンがありません。",
@@ -2676,6 +2677,7 @@
         "updateTitle": "{name} を更新",
         "updateDescription": "現在は {from} です。新しいバージョンを先にインストールし、成功した場合のみ切り替えます。失敗しても現在のバージョンには影響せず、後からロールバックできます。",
         "installDescription": "Workspace に {name} をダウンロードしてインストールします。",
+        "prerequisites": "不足している前提依存関係を先にインストールします：{names}。",
         "reinstallDescription": "Workspace に {name} を再ダウンロードしてインストールします。",
         "dependency": "依存関係",
         "installPath": "インストール先",
@@ -3812,6 +3814,7 @@
     "revision": "リビジョン",
     "installPreview": "インストールすると",
     "installPreviewDependency": "未インストールならワークスペースにインストールします",
+    "installPreviewPrerequisite": "{by} に必要です。未インストールなら先にインストールします",
     "installPreviewConnector": "インストール中に認証",
     "installPreviewConnectorOptional": "後で認証できます（任意）",
     "viewAll": "すべて表示",
@@ -4038,7 +4041,8 @@
       "reason": {
         "shared": "他のアプリが使用中",
         "image": "ワークスペースイメージに同梱",
-        "absent": "未インストール"
+        "absent": "未インストール",
+        "required": "インストール済みの他のツールが必要としています"
       }
     },
     "progress": {
