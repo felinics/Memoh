@@ -274,7 +274,7 @@ Chat routes register **null stub components** in the router. The real UI (`MainS
 | `/settings/bots/:botName` | bot-detail | `bots/detail.vue` | Bot detail with tabs |
 | `/settings/providers` | providers | `providers/index.vue` | LLM provider & model management |
 | `/settings/web-search` | web-search | `web-search/index.vue` | Web search provider management |
-| `/settings/memory` | memory | `memory/index.vue` | Built-in Memory settings |
+| `/settings/memory` | — | redirect | Legacy alias → `bots` (memory settings moved to the bot Memories tab's Advanced dialog) |
 | `/settings/voice` | voice | `voice/index.vue` | TTS + transcription providers |
 | `/settings/speech` | — | redirect | Legacy alias → `voice` |
 | `/settings/transcription` | — | redirect | Legacy alias → `voice` |

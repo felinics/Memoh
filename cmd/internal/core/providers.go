@@ -1435,6 +1435,16 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 	if err != nil {
 		return nil, err
 	}
+	// The configured model was disabled or deleted, so memory silently moved
+	// to another chat model; leave a trace for whoever wonders why usage
+	// shows a model nobody picked.
+	if chatModelID != "" && memoryModel.ID != chatModelID && memoryModel.ModelID != chatModelID && c.logger != nil {
+		c.logger.WarnContext(ctx, "configured memory model unusable; falling back",
+			slog.String("bot_id", botID),
+			slog.String("configured_model_id", chatModelID),
+			slog.String("fallback_model_id", memoryModel.ID),
+		)
+	}
 	return memllm.New(memllm.Config{
 		ModelID:               memoryModel.ModelID,
 		BaseURL:               strings.TrimRight(providers.ProviderConfigString(memoryProvider, "base_url"), "/"),

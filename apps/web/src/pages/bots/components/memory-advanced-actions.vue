@@ -4,8 +4,10 @@
        knobs a new user never needs to understand live here instead of on a
        settings page: the memory model override, the team's embedding model,
        and manual index sync. Each row follows the owner rhythm — label +
-       description on the left, the control on the right — and commits on
-       change. Index counts stay on Overview. -->
+       description on the left, the control on the right. The memory model
+       commits on change; the embedding model waits for an explicit Save
+       because each save re-instantiates the team's memory provider. Index
+       counts stay on Overview. -->
   <section class="mb-6">
     <ActionCard
       :title="$t('bots.memory.advanced.entryTitle')"
@@ -54,15 +56,25 @@
                   {{ $t('bots.memory.advanced.embeddingModelDescription') }}
                 </p>
               </div>
-              <div class="w-52 shrink-0">
-                <ModelSelect
-                  v-model="embeddingModelId"
-                  :models="models"
-                  :providers="providers"
-                  popover-align="end"
-                  model-type="embedding"
-                  :placeholder="$t('memory.semanticEmbeddingModelPlaceholder')"
-                />
+              <div class="flex shrink-0 items-center gap-2">
+                <Button
+                  v-if="embeddingDirty"
+                  size="sm"
+                  :loading="embeddingSaving"
+                  @click="saveEmbeddingModel"
+                >
+                  {{ $t('common.save') }}
+                </Button>
+                <div class="w-52">
+                  <ModelSelect
+                    v-model="embeddingModelId"
+                    :models="models"
+                    :providers="providers"
+                    popover-align="end"
+                    model-type="embedding"
+                    :placeholder="$t('memory.semanticEmbeddingModelPlaceholder')"
+                  />
+                </div>
               </div>
             </div>
 
@@ -197,36 +209,54 @@ useServerSyncedScalar(embeddingModelId, {
   server: config => config?.embedding_model_id ?? '',
 })
 
-watch(memoryModelId, async (value, previous) => {
-  if (settingsData.value === undefined || value === (settingsData.value.memory_llm_model_id ?? '')) return
+// Picks commit one at a time in pick order, so the server ends on the last
+// pick even if the user changes it again mid-request. A failed save restores
+// the last value the server confirmed — not the pick before it, which a
+// newer successful save may already have replaced.
+let memoryModelSaves = Promise.resolve()
+watch(memoryModelId, (value) => {
+  memoryModelSaves = memoryModelSaves.then(() => saveMemoryModel(value))
+})
+
+async function saveMemoryModel(value: string) {
+  const confirmed = settingsData.value?.memory_llm_model_id ?? ''
+  if (settingsData.value === undefined || value === confirmed) return
   try {
-    await putBotsByBotIdSettings({
+    const { data } = await putBotsByBotIdSettings({
       path: { bot_id: props.botId },
       body: { memory_llm_model_id: value },
       throwOnError: true,
     })
+    queryCache.setQueryData(['bot-settings', props.botId], data)
     toast.success(t('memory.saveSuccess'))
-    void queryCache.invalidateQueries({ key: ['bot-settings', props.botId] })
   } catch (error) {
-    memoryModelId.value = previous
+    // Only roll back when no newer pick is queued behind this one.
+    if (memoryModelId.value === value) memoryModelId.value = confirmed
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
   }
-})
+}
 
-watch(embeddingModelId, async (value, previous) => {
-  if (memoryConfigData.value === undefined || value === (memoryConfigData.value.embedding_model_id ?? '')) return
+const embeddingSaving = ref(false)
+const embeddingDirty = computed(() =>
+  memoryConfigData.value !== undefined
+  && embeddingModelId.value !== (memoryConfigData.value.embedding_model_id ?? ''),
+)
+
+async function saveEmbeddingModel() {
+  embeddingSaving.value = true
   try {
-    await putMemoryConfig({
-      body: { embedding_model_id: value },
+    const { data } = await putMemoryConfig({
+      body: { embedding_model_id: embeddingModelId.value },
       throwOnError: true,
     })
+    queryCache.setQueryData(['memory-config'], data)
     toast.success(t('memory.saveSuccess'))
-    void queryCache.invalidateQueries({ key: ['memory-config'] })
   } catch (error) {
-    embeddingModelId.value = previous
     toast.error(resolveApiErrorMessage(error, t('common.saveFailed')))
+  } finally {
+    embeddingSaving.value = false
   }
-})
+}
 
 const syncDescription = computed(() => {
   if (props.statusLoading) return t('common.loading')

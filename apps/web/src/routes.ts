@@ -225,6 +225,12 @@ export function createAppRoutes(platform: 'web' | 'desktop'): RouteRecordRaw[] {
           path: 'transcription',
           redirect: { name: 'voice' },
         },
+        // The Memory page was removed — its settings now live in each bot's
+        // Memories tab — so old links and desktop deep links land on Bots.
+        {
+          path: 'memory',
+          redirect: { name: 'bots' },
+        },
         {
           name: 'usage',
           path: 'usage',
