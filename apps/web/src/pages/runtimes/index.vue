@@ -283,8 +283,8 @@
         </DialogFooter>
       </form>
 
-      <!-- Same permissions step as the connect stepper, but every bot starts
-           off: this computer exposes the user's own home folder and shell. -->
+      <!-- Same permissions step as the connect stepper: every Bot was granted
+           before this step opens, and the user only trims. -->
       <template v-else-if="desktopRuntimeRegistered?.id">
         <DialogHeader class="pr-8">
           <DialogTitle class="break-words">
@@ -375,7 +375,7 @@ const {
 
 const { grants } = useComputerAccessGrants()
 const { grantBots } = useComputerAccessActions()
-const { data: botsData } = useQuery(getBotsQuery())
+const { data: botsData, refetch: refetchBots } = useQuery(getBotsQuery())
 const botAccessTotal = computed(() => botsData.value?.items?.length ?? 0)
 
 function accessCount(runtime: UserruntimeRuntime): number {
@@ -471,7 +471,10 @@ watch(desktopRuntimeRegistered, async (runtime) => {
   desktopRuntimeGrantingId.value = runtimeId
   // The submit button keeps spinning until the grants finish, so the access
   // step opens with every switch already on.
-  const botIds = (botsData.value?.items ?? []).flatMap(bot => (bot.id ? [bot.id] : []))
+  // The bot list may still be loading on a fresh page; wait for it so the
+  // defaults really cover every Bot.
+  const bots = botsData.value ?? (await refetchBots()).data
+  const botIds = (bots?.items ?? []).flatMap(bot => (bot.id ? [bot.id] : []))
   const failures = await grantBots(runtimeId, botIds)
   if (failures.length > 0) toast.error(t('computerAccess.updateFailed'))
   // Closing the dialog meanwhile clears the granting id; stay closed then.
@@ -588,13 +591,6 @@ async function toggleDesktopRuntime(enabled: boolean): Promise<void> {
     desktopRuntimeDialogOpen.value = true
     return
   }
-  // Desktop builds without pause support can only turn this computer off by
-  // removing it.
-  if (!bridge.setRuntimePaused) {
-    if (!enabled) await removeDesktopRuntime()
-    return
-  }
-
   desktopRuntimeSaving.value = true
   try {
     desktopRuntimeState.value = await bridge.setRuntimePaused(!enabled)

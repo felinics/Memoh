@@ -25,9 +25,7 @@ export interface DesktopRuntimeState {
 export interface DesktopRuntimeBridge {
   runtimeState(): Promise<DesktopRuntimeState>
   configureRuntime(config: { runtimeId: string, name: string, key: string, teamId?: string } | null): Promise<DesktopRuntimeState>
-  // Optional: Desktop builds before pause support only expose configureRuntime,
-  // so callers fall back to removing the computer when turning it off.
-  setRuntimePaused?(paused: boolean): Promise<DesktopRuntimeState>
+  setRuntimePaused(paused: boolean): Promise<DesktopRuntimeState>
   onRuntimeStateChanged(listener: (state: DesktopRuntimeState) => void): () => void
 }
 

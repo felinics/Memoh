@@ -100,8 +100,9 @@ export class DesktopRemoteRuntimeManager {
       let stored: StoredRuntimeConfig
       try {
         stored = parseStoredConfig(await readFile(this.options.configPath, 'utf8'))
-      } catch {
-        throw new Error('this computer is not set up')
+      } catch (error) {
+        if (nodeErrorCode(error) === 'ENOENT') throw new Error('this computer is not set up')
+        throw new Error('this computer\'s saved connection could not be read', { cause: error })
       }
       if (Boolean(stored.paused) !== paused) {
         await writeStoredConfig(this.options.configPath, { ...stored, paused: paused || undefined })
@@ -133,9 +134,6 @@ export class DesktopRemoteRuntimeManager {
 
     this.configuredRuntimeID = stored.runtimeId
     this.configuredRuntimeName = normalizedRuntimeName(stored.runtimeName, this.state.deviceName)
-    if (stored.paused) {
-      return this.updateState({ enabled: true, runtimeId: stored.runtimeId, status: 'stopped' })
-    }
     let currentServerUrl: string
     try {
       currentServerUrl = normalizeDesktopServerUrl(this.options.currentServerUrl())
@@ -154,6 +152,11 @@ export class DesktopRemoteRuntimeManager {
         status: 'error',
         error: 'This computer is connected to a different server',
       })
+    }
+    // Checked after the server match so a computer paused against another
+    // server still reports the mismatch instead of looking merely paused.
+    if (stored.paused) {
+      return this.updateState({ enabled: true, runtimeId: stored.runtimeId, status: 'stopped' })
     }
     if (!this.options.encryption.isAvailable()) {
       return this.updateState({
