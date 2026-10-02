@@ -3,7 +3,7 @@
     v-if="shiki.loading.value"
     class="flex items-center gap-1.5 text-xs text-muted-foreground"
   >
-    <LoaderCircle class="size-3 animate-spin" />
+    <Spinner class="size-3" />
   </div>
   <!-- The rows are rebuilt from shiki's <pre class="shiki"> output, so the
        design system's dark-mode override (.dark .shiki span) would no longer
@@ -44,7 +44,7 @@
 
 <script setup lang="ts">
 import { watch } from 'vue'
-import { LoaderCircle } from 'lucide-vue-next'
+import { Spinner } from '@felinic/ui'
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter'
 
 // Read-only diff panel shared by the edit and write tool details. The server
