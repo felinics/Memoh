@@ -38,10 +38,34 @@
         <SettingsRow
           v-else-if="desktopRuntimeState"
           stack="sm"
-          :label="desktopRuntimeLabel"
-          :description="desktopRuntimeDescription"
         >
-          <div class="flex items-center gap-3">
+          <!-- Bot access sits beside the name, as in the Other computers rows,
+               so the trailing controls leave the description room for one line. -->
+          <template #content>
+            <p class="flex min-w-0 items-center gap-2">
+              <span class="truncate text-control font-medium text-foreground">{{ desktopRuntimeLabel }}</span>
+              <template v-if="desktopRuntimeRegistered">
+                <Badge
+                  v-if="accessCount(desktopRuntimeRegistered) > 0"
+                  variant="secondary"
+                  size="sm"
+                  class="shrink-0"
+                >
+                  {{ t('runtimes.botAccess', { count: accessCount(desktopRuntimeRegistered), total: botAccessTotal }) }}
+                </Badge>
+                <span
+                  v-else
+                  class="shrink-0 text-xs text-muted-foreground"
+                >
+                  {{ t('runtimes.noBotAccess') }}
+                </span>
+              </template>
+            </p>
+            <p class="mt-0.5 text-body text-muted-foreground">
+              {{ desktopRuntimeDescription }}
+            </p>
+          </template>
+          <div class="flex items-center gap-2">
             <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span
                 class="size-1.5 rounded-full"
@@ -49,9 +73,42 @@
               />
               {{ desktopRuntimeStatusLabel }}
             </span>
+            <Button
+              v-if="desktopRuntimeRegistered"
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="t('runtimes.manageAccess')"
+              :title="t('runtimes.manageAccess')"
+              @click="openAccessDialog(desktopRuntimeRegistered)"
+            >
+              <Settings class="size-4" />
+            </Button>
+            <ConfirmPopover
+              v-if="desktopRuntimeState.enabled"
+              :title="t('runtimes.revokeTitle')"
+              :message="desktopRuntimeRemoveMessage"
+              :cancel-text="t('common.cancel')"
+              :confirm-text="t('runtimes.revoke')"
+              variant="destructive"
+              @confirm="removeDesktopRuntime"
+            >
+              <template #trigger>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :disabled="desktopRuntimeSaving"
+                  :aria-label="t('runtimes.revoke')"
+                >
+                  <Trash2 class="size-4" />
+                </Button>
+              </template>
+            </ConfirmPopover>
+            <!-- Not disabled while saving: Desktop reports the new state within
+                 milliseconds, so disabling only flashes a dimmed switch and a
+                 not-allowed cursor. Clicks in that window are ignored by
+                 toggleDesktopRuntime, and Desktop serializes the operations. -->
             <Switch
-              :model-value="desktopRuntimeState.enabled"
-              :disabled="desktopRuntimeSaving"
+              :model-value="desktopRuntimeActive"
               :aria-label="t('runtimes.thisComputer.allow')"
               @update:model-value="toggleDesktopRuntime"
             />
@@ -173,8 +230,16 @@
   </PageShell>
 
   <Dialog v-model:open="desktopRuntimeDialogOpen">
-    <DialogContent>
-      <form @submit.prevent="enableDesktopRuntime">
+    <DialogPanel
+      :width="desktopRuntimeStep === 'name' ? 'lg' : 'xl'"
+      footer
+    >
+      <!-- `contents` keeps header / body / footer as the panel's grid rows. -->
+      <form
+        v-if="desktopRuntimeStep === 'name'"
+        class="contents"
+        @submit.prevent="submitDesktopRuntimeName"
+      >
         <DialogHeader>
           <DialogTitle>{{ t('runtimes.thisComputer.dialogTitle') }}</DialogTitle>
           <DialogDescription>
@@ -182,15 +247,12 @@
           </DialogDescription>
         </DialogHeader>
 
-        <FormStack class="mt-4">
+        <FormStack>
           <FormField
             v-slot="{ componentField }"
             name="name"
           >
-            <FieldStack
-              :label="t('runtimes.connectDialog.name')"
-              :help="t('runtimes.thisComputer.nameHelp')"
-            >
+            <FieldStack :label="t('runtimes.connectDialog.name')">
               <FormControl>
                 <Input
                   v-bind="componentField"
@@ -203,7 +265,7 @@
           </FormField>
         </FormStack>
 
-        <DialogFooter class="mt-4">
+        <DialogFooter>
           <Button
             type="button"
             variant="outline"
@@ -214,13 +276,36 @@
           </Button>
           <Button
             type="submit"
-            :loading="desktopRuntimeSaving"
+            :loading="desktopRuntimeSaving || !!desktopRuntimeAwaitingId || !!desktopRuntimeGrantingId"
           >
             {{ t('runtimes.thisComputer.confirm') }}
           </Button>
         </DialogFooter>
       </form>
-    </DialogContent>
+
+      <!-- Same permissions step as the connect stepper, but every bot starts
+           off: this computer exposes the user's own home folder and shell. -->
+      <template v-else-if="desktopRuntimeRegistered?.id">
+        <DialogHeader class="pr-8">
+          <DialogTitle class="break-words">
+            {{ desktopRuntimeName }}
+          </DialogTitle>
+          <DialogDescription>
+            {{ t('computerAccess.subtitleRuntime') }}
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogBody>
+          <ComputerAccessList :runtime="{ id: desktopRuntimeRegistered.id, name: desktopRuntimeName }" />
+        </DialogBody>
+
+        <DialogFooter>
+          <Button @click="desktopRuntimeDialogOpen = false">
+            {{ t('computerConnect.finish') }}
+          </Button>
+        </DialogFooter>
+      </template>
+    </DialogPanel>
   </Dialog>
 
   <ConnectComputerDialog
@@ -253,10 +338,11 @@ import {
   Badge,
   Button,
   Dialog,
-  DialogContent,
+  DialogBody,
   DialogDescription,
   DialogFooter,
   DialogHeader,
+  DialogPanel,
   DialogTitle,
   FormControl,
   FormField,
@@ -268,8 +354,9 @@ import { Plus, Trash2 } from 'lucide-vue-next'
 import { SettingsIcon as Settings } from '@memohai/icon/ui'
 import { ConfirmPopover, FieldStack, FormStack, InlineLoadingRow, PageShell, SettingsRow, SettingsSection } from '@felinic/ui'
 import BotComputerAccessDialog from '@/components/computer/bot-computer-access-dialog.vue'
+import ComputerAccessList from '@/components/computer/computer-access-list.vue'
 import ConnectComputerDialog from '@/components/computer/connect-computer-dialog.vue'
-import { useAccountRuntimes, useComputerAccessGrants } from '@/components/computer/use-computer-access'
+import { useAccountRuntimes, useComputerAccessActions, useComputerAccessGrants } from '@/components/computer/use-computer-access'
 import {
   DesktopRuntimeKey,
   type DesktopRuntimeState,
@@ -287,6 +374,7 @@ const {
 } = useAccountRuntimes()
 
 const { grants } = useComputerAccessGrants()
+const { grantBots } = useComputerAccessActions()
 const { data: botsData } = useQuery(getBotsQuery())
 const botAccessTotal = computed(() => botsData.value?.items?.length ?? 0)
 
@@ -323,10 +411,75 @@ const desktopRuntimeLoading = ref(!!desktopRuntimeBridge)
 const desktopRuntimeLoadFailed = ref(false)
 const desktopRuntimeSaving = ref(false)
 const desktopRuntimeDialogOpen = ref(false)
+// Removing clears the bridge's runtimeId before the server revoke and refetch
+// finish; until then the old credential is still listed and must not flash
+// under Other computers.
+const retiringDesktopRuntimeId = ref('')
 const runtimeItems = computed(() => (runtimes.value ?? []).filter(runtime => (
-  !desktopRuntimeState.value?.runtimeId
-  || runtime.id !== desktopRuntimeState.value.runtimeId
+  runtime.id !== desktopRuntimeState.value?.runtimeId
+  && runtime.id !== retiringDesktopRuntimeId.value
 )))
+
+// The server lists a credential only once its first ready connection
+// activates it, and grants require that activation, so the access controls for
+// this computer appear only when it is in the account list.
+const desktopRuntimeRegistered = computed(() => {
+  const state = desktopRuntimeState.value
+  if (!state?.enabled || !state.runtimeId) return undefined
+  return (runtimes.value ?? []).find(runtime => runtime.id === state.runtimeId)
+})
+
+// Enabling this computer continues, in the same dialog, to the bot
+// permissions step once the desktop daemon's first connection activates the
+// credential. As in the connect stepper, every bot starts granted and the
+// user only trims.
+const desktopRuntimeStep = ref<'name' | 'access'>('name')
+const desktopRuntimeAwaitingId = ref('')
+// Set while the default grants run; the polling above has stopped by then, so
+// repeated runtime list updates cannot start the grants twice.
+const desktopRuntimeGrantingId = ref('')
+
+// Poll while waiting instead of relying on the page's visibility-gated
+// refresh: the daemon reports "connected" slightly before the server commits
+// the activation, and the window may be in the background meanwhile.
+watch(desktopRuntimeAwaitingId, (id, _previous, onCleanup) => {
+  if (!id) return
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => {
+    stopped = true
+    clearTimeout(timer)
+  })
+  async function poll(): Promise<void> {
+    await refetchRuntimes()
+    if (!stopped) timer = setTimeout(() => { void poll() }, 1000)
+  }
+  void poll()
+})
+watch(() => desktopRuntimeState.value?.status, (status) => {
+  if (!desktopRuntimeAwaitingId.value) return
+  if (status === 'error' || status === 'disabled') {
+    // The card shows the connection error; there is nothing to grant yet.
+    desktopRuntimeAwaitingId.value = ''
+    desktopRuntimeDialogOpen.value = false
+  }
+})
+watch(desktopRuntimeRegistered, async (runtime) => {
+  const runtimeId = runtime?.id
+  if (!runtimeId || runtimeId !== desktopRuntimeAwaitingId.value) return
+  desktopRuntimeAwaitingId.value = ''
+  desktopRuntimeGrantingId.value = runtimeId
+  // The submit button keeps spinning until the grants finish, so the access
+  // step opens with every switch already on.
+  const botIds = (botsData.value?.items ?? []).flatMap(bot => (bot.id ? [bot.id] : []))
+  const failures = await grantBots(runtimeId, botIds)
+  if (failures.length > 0) toast.error(t('computerAccess.updateFailed'))
+  // Closing the dialog meanwhile clears the granting id; stay closed then.
+  if (desktopRuntimeGrantingId.value !== runtimeId) return
+  desktopRuntimeGrantingId.value = ''
+  desktopRuntimeStep.value = 'access'
+  desktopRuntimeDialogOpen.value = true
+})
 
 const desktopRuntimeName = computed(() => {
   const state = desktopRuntimeState.value
@@ -336,6 +489,12 @@ const desktopRuntimeName = computed(() => {
   return registered?.name || state.deviceName || t('runtimes.thisComputer.fallbackName')
 })
 
+// Paused keeps the credential and Bot grants; only the session is stopped.
+// Desktop reports a paused computer as enabled with status "stopped".
+const desktopRuntimeActive = computed(() => (
+  !!desktopRuntimeState.value?.enabled && desktopRuntimeState.value.status !== 'stopped'
+))
+
 const desktopRuntimeLabel = computed(() => (
   desktopRuntimeState.value?.enabled
     ? desktopRuntimeName.value
@@ -344,9 +503,11 @@ const desktopRuntimeLabel = computed(() => (
 
 const desktopRuntimeDescription = computed(() => (
   desktopRuntimeState.value?.error
-  || (desktopRuntimeState.value?.enabled
-    ? t('runtimes.thisComputer.enabledDescription', { name: desktopRuntimeName.value })
-    : t('runtimes.thisComputer.description'))
+  || (!desktopRuntimeState.value?.enabled
+    ? t('runtimes.thisComputer.description')
+    : desktopRuntimeActive.value
+      ? t('runtimes.thisComputer.enabledDescription')
+      : t('runtimes.thisComputer.pausedDescription'))
 ))
 
 const desktopRuntimeStatusLabel = computed(() => {
@@ -418,34 +579,70 @@ async function loadDesktopRuntimeState(): Promise<void> {
 async function toggleDesktopRuntime(enabled: boolean): Promise<void> {
   const bridge = desktopRuntimeBridge
   const current = desktopRuntimeState.value
-  if (!bridge || !current || desktopRuntimeSaving.value || enabled === current.enabled) return
+  if (!bridge || !current || desktopRuntimeSaving.value || enabled === desktopRuntimeActive.value) return
 
-  if (enabled) {
+  // Only a computer that was never set up (or was removed) needs a name and
+  // fresh Bot permissions; a paused one resumes with everything it had.
+  if (enabled && !current.enabled) {
     connectForm.resetForm({ values: { name: current.deviceName } })
     desktopRuntimeDialogOpen.value = true
     return
   }
+  // Desktop builds without pause support can only turn this computer off by
+  // removing it.
+  if (!bridge.setRuntimePaused) {
+    if (!enabled) await removeDesktopRuntime()
+    return
+  }
+
+  desktopRuntimeSaving.value = true
+  try {
+    desktopRuntimeState.value = await bridge.setRuntimePaused(!enabled)
+  } catch (error) {
+    toast.error(resolveApiErrorMessage(error, t(enabled
+      ? 'runtimes.thisComputer.enableFailed'
+      : 'runtimes.thisComputer.disableFailed')))
+  } finally {
+    desktopRuntimeSaving.value = false
+  }
+}
+
+// Removing deletes the stored credential and revokes it on the server, which
+// also drops every Bot's access to this computer.
+async function removeDesktopRuntime(): Promise<void> {
+  const bridge = desktopRuntimeBridge
+  const current = desktopRuntimeState.value
+  if (!bridge || !current || desktopRuntimeSaving.value) return
 
   desktopRuntimeSaving.value = true
   const runtimeId = current.runtimeId
+  retiringDesktopRuntimeId.value = runtimeId ?? ''
   try {
     desktopRuntimeState.value = await bridge.configureRuntime(null)
     if (runtimeId) {
       await revokeRuntimeCredential(runtimeId)
     }
   } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('runtimes.thisComputer.disableFailed')))
+    toast.error(resolveApiErrorMessage(error, t('runtimes.revokeFailed')))
   } finally {
-    void refetchRuntimes()
+    await refetchRuntimes()
+    retiringDesktopRuntimeId.value = ''
     desktopRuntimeSaving.value = false
   }
 }
 
-const enableDesktopRuntime = connectForm.handleSubmit(async (values) => {
+const desktopRuntimeRemoveMessage = computed(() => {
+  const registered = desktopRuntimeRegistered.value
+  if (registered) return revokeMessage(registered)
+  return t('runtimes.revokeDescription', { name: desktopRuntimeName.value })
+})
+
+const submitDesktopRuntimeName = connectForm.handleSubmit(values => enableDesktopRuntime(values.name.trim()))
+
+async function enableDesktopRuntime(name: string): Promise<void> {
   const bridge = desktopRuntimeBridge
   if (!bridge || desktopRuntimeSaving.value) return
 
-  const name = values.name.trim()
   let created: UserruntimeRuntime | undefined
   desktopRuntimeSaving.value = true
   try {
@@ -453,6 +650,9 @@ const enableDesktopRuntime = connectForm.handleSubmit(async (values) => {
     if (!created.id || !created.key) {
       throw new UserFacingError(t('runtimes.thisComputer.invalidCredential'))
     }
+    // Armed before the bridge call: the daemon can connect and a poll can list
+    // the runtime before configureRuntime resolves.
+    desktopRuntimeAwaitingId.value = created.id
     desktopRuntimeState.value = await bridge.configureRuntime({
       runtimeId: created.id,
       name,
@@ -460,9 +660,9 @@ const enableDesktopRuntime = connectForm.handleSubmit(async (values) => {
       teamId: created.team_id?.trim() || undefined,
     })
     created = undefined
-    desktopRuntimeDialogOpen.value = false
     void refetchRuntimes()
   } catch (error) {
+    desktopRuntimeAwaitingId.value = ''
     if (created?.id) {
       try {
         await revokeRuntimeCredential(created.id)
@@ -476,7 +676,7 @@ const enableDesktopRuntime = connectForm.handleSubmit(async (values) => {
   } finally {
     desktopRuntimeSaving.value = false
   }
-})
+}
 
 // One click creates the credential and the stepper takes over (command →
 // connected → permissions). The computer adopts its machine hostname on
@@ -530,6 +730,11 @@ watch(connectDialogOpen, (open) => {
 
 watch(desktopRuntimeDialogOpen, (open) => {
   if (open) return
+  // Closing while still waiting keeps this computer enabled; its permissions
+  // stay reachable from the card's gear once it connects.
+  desktopRuntimeAwaitingId.value = ''
+  desktopRuntimeGrantingId.value = ''
+  desktopRuntimeStep.value = 'name'
   connectForm.resetForm({ values: { name: '' } })
 })
 

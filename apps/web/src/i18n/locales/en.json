@@ -535,11 +535,11 @@
       "title": "This computer",
       "allow": "Let Bots use this computer",
       "description": "Turn this on to name and connect this computer. You can then add it to individual Bots.",
-      "enabledDescription": "{name} is the name shown in Bot settings, approvals, and chat history. Only Bots you add it to can access files in your home folder and run commands as you.",
+      "enabledDescription": "Only Bots you allow can access your home folder and run commands as you.",
+      "pausedDescription": "Paused. Bots can’t use this computer for now; their access is kept.",
       "fallbackName": "Memoh Desktop",
       "dialogTitle": "Make this computer available",
-      "dialogDescription": "Choose the name that will identify this computer everywhere you use Memoh.",
-      "nameHelp": "Use a name you will recognize in Bot settings, approvals, and chat history.",
+      "dialogDescription": "This name appears in Bot settings, approvals, and chat history.",
       "confirm": "Make available",
       "loading": "Loading this computer...",
       "loadFailed": "Couldn’t read this computer’s connection",
@@ -552,7 +552,7 @@
         "connecting": "Connecting",
         "connected": "Ready",
         "disconnected": "Reconnecting",
-        "stopped": "Unavailable",
+        "stopped": "Paused",
         "error": "Needs attention"
       }
     },

@@ -535,11 +535,11 @@
       "title": "这台电脑",
       "allow": "允许 Bot 使用这台电脑",
       "description": "打开后需要给这台电脑命名并建立连接，然后才能将它添加给各个 Bot。",
-      "enabledDescription": "{name} 是这台电脑在 Bot 设置、审批和聊天记录中显示的名称。只有添加了它的 Bot 才能访问你主目录下的文件，并以当前用户身份执行命令。",
+      "enabledDescription": "只有你允许的 Bot 才能访问你的主目录，并以你的身份执行命令。",
+      "pausedDescription": "已暂停。Bot 暂时无法使用这台电脑，已授予的访问权会保留。",
       "fallbackName": "Memoh Desktop",
       "dialogTitle": "允许使用这台电脑",
-      "dialogDescription": "给这台电脑起一个固定名称，以后在任何设备上使用 Memoh 时都会显示这个名称。",
-      "nameHelp": "请填写一个在 Bot 设置、审批和聊天记录中都容易辨认的名称。",
+      "dialogDescription": "这个名称会显示在 Bot 设置、审批和聊天记录中。",
       "confirm": "允许使用",
       "loading": "正在读取这台电脑...",
       "loadFailed": "无法读取这台电脑的连接状态",
@@ -552,7 +552,7 @@
         "connecting": "连接中",
         "connected": "可用",
         "disconnected": "正在重连",
-        "stopped": "不可用",
+        "stopped": "已暂停",
         "error": "需要处理"
       }
     },

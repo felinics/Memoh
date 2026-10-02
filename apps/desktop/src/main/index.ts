@@ -441,7 +441,9 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
 function desktopRuntimeTrayLabel(): string {
   const state = remoteRuntimeManager?.runtimeState()
   if (!state?.enabled) return 'Computer access: Off'
-  const label = state.status.charAt(0).toUpperCase() + state.status.slice(1)
+  // A stopped session with a stored credential is a computer the user paused.
+  const status = state.status === 'stopped' ? 'paused' : state.status
+  const label = status.charAt(0).toUpperCase() + status.slice(1)
   return `${state.runtimeName || 'Computer access'}: ${label}`
 }
 
@@ -716,6 +718,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:configure-runtime', (event, config: unknown) => {
     assertTrustedRenderer(event)
     return requireRemoteRuntimeManager().configure(normalizeDesktopRuntimeConfig(config))
+  })
+  ipcMain.handle('desktop:set-runtime-paused', (event, paused: unknown) => {
+    assertTrustedRenderer(event)
+    if (typeof paused !== 'boolean') throw new Error('paused must be a boolean')
+    return requireRemoteRuntimeManager().setPaused(paused)
   })
   ipcMain.handle('desktop:set-menu-accelerators', async (event, rawPayload: unknown) => {
     assertTrustedRenderer(event)

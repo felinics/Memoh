@@ -532,11 +532,11 @@
       "title": "このコンピューター",
       "allow": "Bot にこのコンピューターの使用を許可",
       "description": "オンにすると、このコンピューターに名前を付けて接続し、各 Bot に追加できるようになります。",
-      "enabledDescription": "{name} は Bot の設定、承認、チャット履歴に表示される名前です。追加した Bot だけが、ホームフォルダー内のファイルにアクセスし、現在のユーザーとしてコマンドを実行できます。",
+      "enabledDescription": "許可した Bot だけが、ホームフォルダーにアクセスし、あなたとしてコマンドを実行できます。",
+      "pausedDescription": "一時停止中です。Bot は今は使用できませんが、付与したアクセス権は保持されます。",
       "fallbackName": "Memoh Desktop",
       "dialogTitle": "このコンピューターを使用可能にする",
-      "dialogDescription": "どの端末から Memoh を使っても識別できる、固定の名前を付けてください。",
-      "nameHelp": "Bot の設定、承認、チャット履歴で識別しやすい名前を入力してください。",
+      "dialogDescription": "この名前は Bot の設定、承認、チャット履歴に表示されます。",
       "confirm": "使用可能にする",
       "loading": "このコンピューターを読み込んでいます...",
       "loadFailed": "このコンピューターの接続状態を読み込めませんでした",
@@ -549,7 +549,7 @@
         "connecting": "接続中",
         "connected": "利用可能",
         "disconnected": "再接続中",
-        "stopped": "利用不可",
+        "stopped": "一時停止中",
         "error": "確認が必要"
       }
     },

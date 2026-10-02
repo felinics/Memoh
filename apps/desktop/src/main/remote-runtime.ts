@@ -26,6 +26,10 @@ interface StoredRuntimeConfig {
   serverUrl: string
   teamId?: string
   encryptedKey: string
+  // Paused keeps the credential (and therefore the server-side Bot grants)
+  // while no session runs. It survives restarts so a paused computer stays
+  // unreachable until the user resumes it.
+  paused?: boolean
 }
 
 export interface RuntimeEncryption {
@@ -86,82 +90,104 @@ export class DesktopRemoteRuntimeManager {
   }
 
   restore(): Promise<DesktopRuntimeState> {
-    return this.enqueue(async () => {
-      await this.stopActiveSession()
+    return this.enqueue(() => this.restoreStored())
+  }
 
-      let stored: StoredRuntimeConfig | undefined
+  // Pausing stops the session without touching the credential, unlike
+  // configure(null), which deletes it and lets the caller revoke the runtime.
+  setPaused(paused: boolean): Promise<DesktopRuntimeState> {
+    return this.enqueue(async () => {
+      let stored: StoredRuntimeConfig
       try {
         stored = parseStoredConfig(await readFile(this.options.configPath, 'utf8'))
-      } catch (error) {
-        if (nodeErrorCode(error) === 'ENOENT') {
-          this.configuredRuntimeID = undefined
-          this.configuredRuntimeName = undefined
-          return this.updateState({ enabled: false, status: 'disabled' })
-        }
+      } catch {
+        throw new Error('this computer is not set up')
+      }
+      if (Boolean(stored.paused) !== paused) {
+        await writeStoredConfig(this.options.configPath, { ...stored, paused: paused || undefined })
+      }
+      return this.restoreStored()
+    })
+  }
+
+  private async restoreStored(): Promise<DesktopRuntimeState> {
+    await this.stopActiveSession()
+
+    let stored: StoredRuntimeConfig | undefined
+    try {
+      stored = parseStoredConfig(await readFile(this.options.configPath, 'utf8'))
+    } catch (error) {
+      if (nodeErrorCode(error) === 'ENOENT') {
         this.configuredRuntimeID = undefined
         this.configuredRuntimeName = undefined
-        return this.updateState({
-          enabled: true,
-          status: 'error',
-          error: 'This computer\'s saved connection could not be read',
-        })
+        return this.updateState({ enabled: false, status: 'disabled' })
       }
+      this.configuredRuntimeID = undefined
+      this.configuredRuntimeName = undefined
+      return this.updateState({
+        enabled: true,
+        status: 'error',
+        error: 'This computer\'s saved connection could not be read',
+      })
+    }
 
-      this.configuredRuntimeID = stored.runtimeId
-      this.configuredRuntimeName = normalizedRuntimeName(stored.runtimeName, this.state.deviceName)
-      let currentServerUrl: string
-      try {
-        currentServerUrl = normalizeDesktopServerUrl(this.options.currentServerUrl())
-      } catch {
-        return this.updateState({
-          enabled: true,
-          runtimeId: stored.runtimeId,
-          status: 'error',
-          error: 'The current server URL is invalid',
-        })
-      }
-      if (normalizeDesktopServerUrl(stored.serverUrl) !== currentServerUrl) {
-        return this.updateState({
-          enabled: true,
-          runtimeId: stored.runtimeId,
-          status: 'error',
-          error: 'This computer is connected to a different server',
-        })
-      }
-      if (!this.options.encryption.isAvailable()) {
-        return this.updateState({
-          enabled: true,
-          runtimeId: stored.runtimeId,
-          status: 'error',
-          error: 'Secure storage is unavailable on this computer',
-        })
-      }
+    this.configuredRuntimeID = stored.runtimeId
+    this.configuredRuntimeName = normalizedRuntimeName(stored.runtimeName, this.state.deviceName)
+    if (stored.paused) {
+      return this.updateState({ enabled: true, runtimeId: stored.runtimeId, status: 'stopped' })
+    }
+    let currentServerUrl: string
+    try {
+      currentServerUrl = normalizeDesktopServerUrl(this.options.currentServerUrl())
+    } catch {
+      return this.updateState({
+        enabled: true,
+        runtimeId: stored.runtimeId,
+        status: 'error',
+        error: 'The current server URL is invalid',
+      })
+    }
+    if (normalizeDesktopServerUrl(stored.serverUrl) !== currentServerUrl) {
+      return this.updateState({
+        enabled: true,
+        runtimeId: stored.runtimeId,
+        status: 'error',
+        error: 'This computer is connected to a different server',
+      })
+    }
+    if (!this.options.encryption.isAvailable()) {
+      return this.updateState({
+        enabled: true,
+        runtimeId: stored.runtimeId,
+        status: 'error',
+        error: 'Secure storage is unavailable on this computer',
+      })
+    }
 
-      let key: string
-      try {
-        key = this.options.encryption.decrypt(decodeEncryptedKey(stored.encryptedKey))
-        validateRuntimeKey(key)
-      } catch {
-        return this.updateState({
-          enabled: true,
-          runtimeId: stored.runtimeId,
-          status: 'error',
-          error: 'This computer\'s saved connection could not be unlocked',
-        })
-      }
+    let key: string
+    try {
+      key = this.options.encryption.decrypt(decodeEncryptedKey(stored.encryptedKey))
+      validateRuntimeKey(key)
+    } catch {
+      return this.updateState({
+        enabled: true,
+        runtimeId: stored.runtimeId,
+        status: 'error',
+        error: 'This computer\'s saved connection could not be unlocked',
+      })
+    }
 
-      try {
-        this.startSession(stored.runtimeId, currentServerUrl, key, stored.teamId)
-      } catch (error) {
-        return this.updateState({
-          enabled: true,
-          runtimeId: stored.runtimeId,
-          status: 'error',
-          error: sanitizeError(error, key),
-        })
-      }
-      return this.runtimeState()
-    })
+    try {
+      this.startSession(stored.runtimeId, currentServerUrl, key, stored.teamId)
+    } catch (error) {
+      return this.updateState({
+        enabled: true,
+        runtimeId: stored.runtimeId,
+        status: 'error',
+        error: sanitizeError(error, key),
+      })
+    }
+    return this.runtimeState()
   }
 
   configure(config: DesktopRuntimeConfig | null): Promise<DesktopRuntimeState> {
@@ -361,6 +387,7 @@ function parseStoredConfig(raw: string): StoredRuntimeConfig {
     serverUrl,
     teamId,
     encryptedKey: parsed.encryptedKey,
+    paused: parsed.paused === true || undefined,
   }
 }
 
