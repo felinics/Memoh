@@ -3728,7 +3728,7 @@
     "colBot": "Bot",
     "colModel": "モデル",
     "colProvider": "モデルプロバイダー",
-    "colHarness": "Harness",
+    "colHarness": "実行元",
     "unknown": "不明",
     "colInputTokens": "入力",
     "colOutputTokens": "出力"

@@ -3734,7 +3734,7 @@
     "colBot": "Bot",
     "colModel": "模型",
     "colProvider": "模型供应商",
-    "colHarness": "Harness",
+    "colHarness": "来源",
     "unknown": "未知",
     "colInputTokens": "输入",
     "colOutputTokens": "输出"
