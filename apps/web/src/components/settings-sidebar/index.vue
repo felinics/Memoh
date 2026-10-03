@@ -107,22 +107,21 @@
 </template>
 
 <script setup lang="ts">
-import { ComputerIcon } from '@memohai/icon/ui'
+import { ComputerIcon, ShortcutIcon } from '@memohai/icon/ui'
 import { computed, inject, onBeforeUnmount, ref, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
+  Blocks,
   Box,
-  ChartNoAxesColumn,
   ChevronLeft,
   CircleUserRound,
+  Gauge,
   Info,
-  Keyboard,
   MousePointer2,
-  Store,
-  Users,
+  UsersRound,
 } from 'lucide-vue-next'
 import AppearanceIcon from './appearance-icon.vue'
 import { NavItem } from '@felinic/ui'
@@ -260,31 +259,26 @@ function filterItems(items: NavItem[]): NavItem[] {
   })
 }
 
-// Bot management and app discovery lead without a group label. Shared resources,
-// team administration, and personal settings follow; empty groups are hidden
-// after filtering.
+// Bots lead, followed by what they run on (providers, computers) and app
+// discovery, all without a group label: two resource items are too few to
+// earn a heading of their own. Team administration and personal settings
+// follow; empty groups are hidden after filtering.
 const navGroups = computed<NavGroup[]>(() => [
   {
     key: 'workspace',
     items: [
       { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
-      { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
-    ],
-  },
-  {
-    key: 'resources',
-    label: t('sidebar.group.resources'),
-    items: [
-      { title: t('sidebar.runtimes'), name: 'runtimes', icon: ComputerIcon },
       { title: t('sidebar.providers'), name: 'providers', icon: Box },
+      { title: t('sidebar.runtimes'), name: 'runtimes', icon: ComputerIcon },
+      { title: t('sidebar.supermarket'), name: 'supermarket', icon: Blocks },
     ],
   },
   {
     key: 'team',
     label: t('sidebar.group.team'),
     items: [
-      { title: t('sidebar.people'), name: 'people', icon: Users, adminOnly: true },
-      { title: t('sidebar.usage'), name: 'usage', icon: ChartNoAxesColumn },
+      { title: t('sidebar.people'), name: 'people', icon: UsersRound, adminOnly: true },
+      { title: t('sidebar.usage'), name: 'usage', icon: Gauge },
     ],
   },
   {
@@ -293,7 +287,7 @@ const navGroups = computed<NavGroup[]>(() => [
     items: [
       { title: t('sidebar.profile'), name: 'profile', icon: CircleUserRound },
       { title: t('sidebar.appearance'), name: 'appearance', icon: AppearanceIcon },
-      { title: t('sidebar.keyboard'), name: 'keyboard', icon: Keyboard },
+      { title: t('sidebar.keyboard'), name: 'keyboard', icon: ShortcutIcon },
       { title: t('sidebar.about'), name: 'about', icon: Info },
     ],
   },

@@ -481,7 +481,6 @@
     "providers": "Providers",
     "webSearch": "Web Search",
     "group": {
-      "resources": "Resources",
       "team": "Team",
       "personal": "Personal"
     },
