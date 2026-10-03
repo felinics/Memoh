@@ -483,7 +483,7 @@ func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client
 			return current, stop, nil
 		}
 		lastErr = errs.WrapDependency(err, "")
-		if ctx.Err() != nil || !isClosingBridgeClientError(err) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
+		if ctx.Err() != nil || !errors.Is(err, bridge.ErrUnavailable) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
 			return current, nil, lastErr
 		}
 		_ = current.Close()
@@ -497,16 +497,6 @@ func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client
 		current = next
 	}
 	return current, nil, lastErr
-}
-
-func isClosingBridgeClientError(err error) bool {
-	if err == nil {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "client connection is closing") ||
-		strings.Contains(lower, "transport is closing") ||
-		strings.Contains(lower, "use of closed network connection")
 }
 
 func sleepContext(ctx context.Context, d time.Duration) error {

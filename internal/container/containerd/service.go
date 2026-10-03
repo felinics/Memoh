@@ -927,6 +927,9 @@ func mapContainerdErr(err error) error {
 	if errdefs.IsAlreadyExists(err) {
 		return errors.Join(ErrAlreadyExists, err)
 	}
+	if errdefs.IsUnavailable(err) {
+		return errors.Join(ErrUnavailable, ErrRuntime, err)
+	}
 	return errors.Join(ErrRuntime, err)
 }
 

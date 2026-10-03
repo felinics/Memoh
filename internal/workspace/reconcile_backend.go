@@ -3,9 +3,11 @@ package workspace
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"strings"
+	"syscall"
 
 	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/config"
@@ -151,26 +153,28 @@ func stepError(phase string, err error, retryable bool) error {
 }
 
 // isTransient classifies runtime errors that a later attempt may not see
-// again: timeouts, network errors, and control-plane conflicts such as an
-// operation still in flight on the Cloud builtin backend.
+// again: timeouts, network errors, an unreachable runtime, and control-plane
+// conflicts such as an operation still in flight on the Cloud builtin backend.
 func isTransient(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, ctr.ErrConflict) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	for _, marker := range []string{"timeout", "timed out", "connection refused", "connection reset", "temporarily unavailable", "eof", "no such host", "tls handshake"} {
-		if strings.Contains(msg, marker) {
+	for _, target := range []error{
+		context.DeadlineExceeded,
+		context.Canceled,
+		ctr.ErrConflict,
+		ctr.ErrUnavailable,
+		io.EOF,
+		io.ErrUnexpectedEOF,
+		syscall.ECONNREFUSED,
+		syscall.ECONNRESET,
+	} {
+		if errors.Is(err, target) {
 			return true
 		}
 	}
-	return false
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 func toProgressEvent(ev ContainerSetupEvent) botworkspace.ProgressEvent {

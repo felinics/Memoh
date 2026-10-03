@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -944,28 +943,18 @@ func mapDockerErr(err error) error {
 	if errdefs.IsNotFound(err) {
 		return errors.Join(containerapi.ErrNotFound, err)
 	}
-	if errdefs.IsAlreadyExists(err) || isDockerConflict(err) {
+	// The Docker client classifies a 409 answer as errdefs.ErrConflict; a
+	// container name already in use is answered with 409.
+	if errdefs.IsAlreadyExists(err) || errdefs.IsConflict(err) {
 		return errors.Join(containerapi.ErrAlreadyExists, err)
 	}
 	if client.IsErrConnectionFailed(err) {
-		return errors.Join(containerapi.ErrRuntime, fmt.Errorf("docker daemon unavailable: %w", err))
+		return errors.Join(containerapi.ErrUnavailable, containerapi.ErrRuntime, fmt.Errorf("docker daemon unavailable: %w", err))
+	}
+	if errdefs.IsUnavailable(err) {
+		return errors.Join(containerapi.ErrUnavailable, containerapi.ErrRuntime, err)
 	}
 	return errors.Join(containerapi.ErrRuntime, err)
-}
-
-type statusCoder interface {
-	StatusCode() int
-}
-
-func isDockerConflict(err error) bool {
-	var statusErr statusCoder
-	if errors.As(err, &statusErr) && statusErr.StatusCode() == http.StatusConflict {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "conflict") ||
-		strings.Contains(msg, "already exists") ||
-		strings.Contains(msg, "is already in use")
 }
 
 func dockerSignalName(sig syscall.Signal) string {
