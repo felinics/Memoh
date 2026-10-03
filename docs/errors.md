@@ -167,8 +167,11 @@ moderation refusal would be the one `client` code. The codes an external
 agent runtime reports about its own failure declare `dependency` for the same
 reason. A code that some producers raise for this process's own failures,
 such as `external_runtime.unavailable`, declares nothing and is attributed by
-its chain. A guard test in `internal/apperror` lists every declaration and
-fails when a code under `agent.provider_` or `agent.response_` declares none.
+its chain. `workspace.unreachable` is one: the workspace bridge client marks
+an unreachable workspace runtime with `errs.WrapDependency`, and a failure to
+look up the target in this process stays `server`. A guard test in
+`internal/apperror` lists every declaration and fails when a code under
+`agent.provider_` or `agent.response_` declares none.
 
 | Code | Fault |
 | --- | --- |

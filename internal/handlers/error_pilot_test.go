@@ -2,12 +2,16 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/botworkspace"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -43,14 +47,45 @@ func TestUpdateBotHTTPErrorMapsNameConflictToStableCode(t *testing.T) {
 	}
 }
 
+// bridgeUnavailable is the error the bridge client returns when the
+// workspace runtime cannot be reached.
+func bridgeUnavailable() error {
+	return errs.WrapDependency(fmt.Errorf("%w: connection refused", bridge.ErrUnavailable), "")
+}
+
 func TestFSHTTPErrorKeepsUnavailableCausePrivate(t *testing.T) {
-	cause := errors.Join(bridge.ErrUnavailable, errors.New("connection refused"))
+	cause := bridgeUnavailable()
 	err := fsHTTPError(cause)
 	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceUnreachable {
 		t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceUnreachable)
 	}
 	if got := apperror.CauseOf(err); !errors.Is(got, bridge.ErrUnavailable) {
 		t.Fatalf("cause = %v, want bridge unavailable", got)
+	}
+	if got := errs.FaultOf(err); got != errs.FaultDependency {
+		t.Fatalf("fault = %q, want dependency", got)
+	}
+}
+
+func TestFSHTTPErrorReturnsUnexpectedCause(t *testing.T) {
+	cause := errors.New("grpc Internal: open /data/a.txt: input/output error")
+	err := fsHTTPError(cause)
+	var httpErr *echo.HTTPError
+	if errors.As(err, &httpErr) || !errors.Is(err, cause) {
+		t.Fatalf("error = %v, want the cause without an HTTP status", err)
+	}
+	if got := errs.FaultOf(err); got != errs.FaultServer {
+		t.Fatalf("fault = %q, want server", got)
+	}
+}
+
+func TestWorkspaceDependencyErrorAttributesUnreachableToDependency(t *testing.T) {
+	err := workspaceDependencyError(bridgeUnavailable())
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceUnreachable {
+		t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceUnreachable)
+	}
+	if got := errs.FaultOf(err); got != errs.FaultDependency {
+		t.Fatalf("fault = %q, want dependency", got)
 	}
 }
 

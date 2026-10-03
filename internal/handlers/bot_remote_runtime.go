@@ -16,6 +16,7 @@ import (
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/userruntime"
 	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 type botRemoteRuntimeService interface {
@@ -281,6 +282,8 @@ func workspaceTargetHTTPError(err error) error {
 		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
 		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	case errors.Is(err, bridge.ErrUnavailable):
+		return workspaceUnavailableError(err)
 	default:
 		return errs.Wrap(err, "workspace target request")
 	}

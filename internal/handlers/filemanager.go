@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -271,7 +272,7 @@ func fsHTTPError(err error) error {
 	case errors.Is(err, bridge.ErrUnavailable):
 		return workspaceUnavailableError(err)
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "workspace file request")
 	}
 }
 
