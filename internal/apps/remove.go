@@ -16,9 +16,10 @@ const (
 	RemovalActionDisconnect = "disconnect"
 	RemovalActionNone       = "none"
 
-	RemovalReasonShared = "shared"
-	RemovalReasonImage  = "image"
-	RemovalReasonAbsent = "absent"
+	RemovalReasonShared   = "shared"
+	RemovalReasonImage    = "image"
+	RemovalReasonAbsent   = "absent"
+	RemovalReasonRequired = "required"
 )
 
 // RemovalPreviewDependency says what removing the App does to one
@@ -93,6 +94,14 @@ func (s *Service) plan(ctx context.Context, inst Installation, prepareWorkspace 
 			item.Action, item.Reason = RemovalActionKeep, RemovalReasonAbsent
 		case entry.Observed.Source != workspacedeps.SourceManaged:
 			item.Action, item.Reason = RemovalActionKeep, RemovalReasonImage
+		default:
+			required, err := s.requiredByDependencies(ctx, inst.BotID, ref.DependencyID)
+			if err != nil {
+				return RemovalPreview{}, fail("inspect dependencies before removal", err)
+			}
+			if required {
+				item.Action, item.Reason = RemovalActionKeep, RemovalReasonRequired
+			}
 		}
 		preview.Dependencies = append(preview.Dependencies, item)
 	}
@@ -167,6 +176,16 @@ func (s *Service) orphanedRequired(ctx context.Context, inst Installation, botRe
 		}
 	}
 	return result, nil
+}
+
+// requiredByDependencies reports whether other installed dependencies still
+// require depID. Those keep it in the workspace like another App's reference.
+func (s *Service) requiredByDependencies(ctx context.Context, botID, depID string) (bool, error) {
+	if s.dependencies == nil {
+		return false, nil
+	}
+	dependents, err := s.dependencies.Dependents(ctx, botID, depID)
+	return len(dependents) > 0, err
 }
 
 func referencedByOthers(refs []BotDependencyRef, dependencyID, installationID string) bool {

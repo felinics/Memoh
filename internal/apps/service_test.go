@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -383,6 +384,40 @@ func (f *fakeDeps) Remove(_ context.Context, _, depID string, _ workspacedeps.Lo
 	f.removed = append(f.removed, depID)
 	delete(f.present, depID)
 	return workspacedeps.OperationResult{DependencyID: depID}, nil
+}
+
+// InstallOrder expands requires from the entries' manifests, prerequisites
+// first, the way the real catalog does.
+func (f *fakeDeps) InstallOrder(_ context.Context, depIDs []string) ([]string, error) {
+	seen := map[string]bool{}
+	var order []string
+	var visit func(id string)
+	visit = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		for _, required := range f.present[id].Dependency.Requires {
+			visit(required)
+		}
+		order = append(order, id)
+	}
+	for _, id := range depIDs {
+		visit(id)
+	}
+	return order, nil
+}
+
+// Dependents lists present managed entries whose requires name depID.
+func (f *fakeDeps) Dependents(_ context.Context, _, depID string) ([]string, error) {
+	var dependents []string
+	for id, entry := range f.present {
+		if id != depID && entry.Observed.Present && entry.Observed.Source == workspacedeps.SourceManaged && slices.Contains(entry.Dependency.Requires, depID) {
+			dependents = append(dependents, id)
+		}
+	}
+	slices.Sort(dependents)
+	return dependents, nil
 }
 
 type fakeConnectors struct {

@@ -79,7 +79,8 @@ export function isAppStreamEvent(value: unknown): value is AppStreamEvent {
     case 'step':
       return typeof event.kind === 'string' && typeof event.id === 'string'
     case 'log':
-      return (event.stream === 'stdout' || event.stream === 'stderr') && typeof event.data === 'string'
+      // The Server omits an empty line's data.
+      return (event.stream === 'stdout' || event.stream === 'stderr') && optionalString(event.data)
     case 'step_done':
       return typeof event.kind === 'string' && typeof event.id === 'string' && typeof event.status === 'string'
         && optionalString(event.version) && optionalString(event.message)
@@ -161,7 +162,8 @@ export async function* streamAppOperation(
 
   for await (const event of result.stream as AsyncGenerator<unknown, void, unknown>) {
     if (!isAppStreamEvent(event)) throw new Error(INVALID_EVENT)
-    yield event.type === 'error' ? localizeSSEErrorEvent(event) : event
+    if (event.type === 'log') yield { ...event, data: event.data ?? '' }
+    else yield event.type === 'error' ? localizeSSEErrorEvent(event) : event
   }
 
   if (streamError) {

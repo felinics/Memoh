@@ -210,6 +210,7 @@
       :open="confirm.open"
       :mode="confirm.mode"
       :item="confirm.item"
+      :prerequisites="confirmPrerequisites"
       @update:open="(value) => { confirm.open = value }"
       @confirm="onDependencyConfirmed"
     />
@@ -309,6 +310,7 @@ import {
   fetchDependencyScript,
   invalidateBotDependencies,
   rollbackDependency,
+  useBotDependenciesQuery,
   type DependencyItem,
   type DependencyOperationAction,
   type DependencyWorkspaceState,
@@ -328,6 +330,7 @@ import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   dependencyAllows,
   formatDependencyVersion,
+  missingPrerequisites,
   type DependencyConfirmMode,
   type DependencyMenuAction,
   type DependencyPrimaryAction,
@@ -655,6 +658,13 @@ const confirm = reactive<{
   operation: DependencyOperationAction
   definitionRevision: string
 }>({ open: false, mode: 'update', item: null, operation: 'update', definitionRevision: '' })
+
+// The full list includes prerequisites no App references directly.
+const { data: botDependencies } = useBotDependenciesQuery(botIdRef, undefined, () => confirm.open)
+const confirmPrerequisites = computed(() => {
+  if (!confirm.item || !botDependencies.value) return []
+  return missingPrerequisites(confirm.item, botDependencies.value.items ?? []).map(entry => dependencyName(entry))
+})
 
 function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operation: DependencyOperationAction) {
   confirm.item = item

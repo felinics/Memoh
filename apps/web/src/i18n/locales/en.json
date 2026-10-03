@@ -236,6 +236,7 @@
       "action_unsupported": "This action isn't available for the dependency.",
       "platform_unsupported": "Not available on this workspace platform.",
       "busy": "Another operation on this dependency is in progress.",
+      "required": "Still needed by {dependents}. Remove those first.",
       "workspace_not_running": "The workspace isn't running. Start it first.",
       "workspace_missing": "The workspace hasn't been created yet.",
       "rollback_unavailable": "No previous version to roll back to.",
@@ -2652,6 +2653,7 @@
         "updateTitle": "Update {name}",
         "updateDescription": "Currently {from}. The new version installs first and switches over only on success; the current one stays untouched on failure, and you can roll back afterwards.",
         "installDescription": "Downloads and installs {name} into the workspace.",
+        "prerequisites": "Installs missing prerequisites first: {names}.",
         "reinstallDescription": "Downloads and reinstalls {name} in the workspace.",
         "dependency": "Dependency",
         "installPath": "Install location",
@@ -3795,6 +3797,7 @@
     "revision": "Revision",
     "installPreview": "Installing will",
     "installPreviewDependency": "install into the workspace if missing",
+    "installPreviewPrerequisite": "required by {by}, installed first if missing",
     "installPreviewConnector": "authorize during installation",
     "installPreviewConnectorOptional": "can be authorized later (optional)",
     "viewAll": "View all",
@@ -4021,7 +4024,8 @@
       "reason": {
         "shared": "used by another App",
         "image": "shipped with the workspace image",
-        "absent": "not installed"
+        "absent": "not installed",
+        "required": "needed by other installed tools"
       }
     },
     "progress": {

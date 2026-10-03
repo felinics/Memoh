@@ -640,6 +640,7 @@
       "action_unsupported": "This action isn't available for the dependency.",
       "platform_unsupported": "Not available on this workspace platform.",
       "busy": "Another operation on this dependency is in progress.",
+      "required": "Still needed by {dependents}. Remove those first.",
       "workspace_not_running": "The workspace isn't running. Start it first.",
       "workspace_missing": "The workspace hasn't been created yet.",
       "rollback_unavailable": "No previous version to roll back to.",

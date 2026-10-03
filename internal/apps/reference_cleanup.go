@@ -69,6 +69,14 @@ func (s *Service) pruneReferences(ctx context.Context, inst Installation, releas
 		case entry.Observed.Source != workspacedeps.SourceManaged:
 			step.Error = RemovalReasonImage
 		default:
+			required, err := s.requiredByDependencies(ctx, inst.BotID, ref.DependencyID)
+			if err != nil {
+				return record(step, fail("inspect dependencies before cleanup", err))
+			}
+			if required {
+				step.Error = RemovalReasonRequired
+				break
+			}
 			sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: ref.DependencyID})
 			if _, err := s.dependencies.Remove(ctx, inst.BotID, ref.DependencyID, logSink(sink, KindDependency, ref.DependencyID)); err != nil {
 				return record(step, fail("remove dependency "+ref.DependencyID, err))

@@ -1768,7 +1768,7 @@ export type HandlersAppRemovalPreviewConnector = {
 export type HandlersAppRemovalPreviewDependency = {
     action?: 'remove' | 'keep';
     id?: string;
-    reason?: 'shared' | 'image' | 'absent';
+    reason?: 'shared' | 'image' | 'absent' | 'required';
 };
 
 export type HandlersAppRemovalPreviewResponse = {
@@ -2662,6 +2662,10 @@ export type HandlersWorkspaceDependencyCatalogItem = {
     icon_url?: string;
     id?: string;
     name?: string;
+    /**
+     * Requires lists the dependency IDs installed first when missing.
+     */
+    requires?: Array<string>;
     translations?: {
         [key: string]: HandlersWorkspaceDependencyTranslation;
     };
@@ -2746,6 +2750,10 @@ export type HandlersWorkspaceDependencyItem = {
      */
     provides?: Array<string>;
     registry_id?: string;
+    /**
+     * Requires lists the dependency IDs installed first when missing.
+     */
+    requires?: Array<string>;
     retired?: boolean;
     /**
      * Source is image for dependencies shipped with the workspace image and

@@ -21419,7 +21419,8 @@
                     "enum": [
                         "shared",
                         "image",
-                        "absent"
+                        "absent",
+                        "required"
                     ]
                 }
             }
@@ -23768,6 +23769,13 @@
                 "name": {
                     "type": "string"
                 },
+                "requires": {
+                    "description": "Requires lists the dependency IDs installed first when missing.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "translations": {
                     "type": "object",
                     "additionalProperties": {
@@ -23903,6 +23911,13 @@
                 },
                 "registry_id": {
                     "type": "string"
+                },
+                "requires": {
+                    "description": "Requires lists the dependency IDs installed first when missing.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "retired": {
                     "type": "boolean"

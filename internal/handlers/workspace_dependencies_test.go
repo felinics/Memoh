@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -940,6 +941,10 @@ func TestWorkspaceDependencyErrorMapping(t *testing.T) {
 		if got := apperror.CodeOf(workspaceDependencyError(wrapped)); got != want {
 			t.Errorf("%v -> %q, want %q", sentinel, got, want)
 		}
+	}
+	required := workspaceDependencyError(fmt.Errorf("remove: %w", &workspacedeps.RequiredError{DependencyID: "micromamba", Dependents: []string{"pandoc", "poppler"}}))
+	if apperror.CodeOf(required) != apperror.CodeWorkspaceDependencyRequired || apperror.ArgsOf(required)["dependents"] != "pandoc,poppler" {
+		t.Errorf("required error mapped to %q %v", apperror.CodeOf(required), apperror.ArgsOf(required))
 	}
 	if workspaceDependencyError(nil) != nil {
 		t.Error("nil must map to nil")

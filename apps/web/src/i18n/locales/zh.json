@@ -236,6 +236,7 @@
       "action_unsupported": "该依赖不支持此操作。",
       "platform_unsupported": "当前工作区平台不支持该依赖。",
       "busy": "该依赖正在进行其他操作，请稍后再试。",
+      "required": "{dependents} 仍依赖它，请先移除这些依赖。",
       "workspace_not_running": "工作区未运行，请先启动。",
       "workspace_missing": "尚未创建工作区，请先创建。",
       "rollback_unavailable": "没有可回滚的旧版本。",
@@ -2652,6 +2653,7 @@
         "updateTitle": "更新 {name}",
         "updateDescription": "当前 {from}。新版本安装完成后才切换；失败不影响当前版本，成功后可回滚。",
         "installDescription": "将在工作区中下载并安装 {name}。",
+        "prerequisites": "将先安装缺失的前置依赖：{names}。",
         "reinstallDescription": "在工作区中重新下载并安装 {name}。",
         "dependency": "依赖",
         "installPath": "安装位置",
@@ -3795,6 +3797,7 @@
     "revision": "版本修订",
     "installPreview": "安装将会",
     "installPreviewDependency": "缺失时安装到工作区",
+    "installPreviewPrerequisite": "{by} 需要，缺失时先安装",
     "installPreviewConnector": "安装时授权",
     "installPreviewConnectorOptional": "可稍后授权（可选）",
     "viewAll": "查看全部",
@@ -4021,7 +4024,8 @@
       "reason": {
         "shared": "被其他应用使用",
         "image": "随工作区镜像自带",
-        "absent": "未安装"
+        "absent": "未安装",
+        "required": "其他已安装的工具仍需要它"
       }
     },
     "progress": {
