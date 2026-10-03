@@ -52,6 +52,8 @@ export const ComputerIcon = withUiStroke(createLucideIcon('Computer', [
 // use, so the Personal group reads as one family instead of one wide keyboard.
 // The arrowhead is a touch shorter and heavier than the shaft so it reads as
 // the point of the glyph at 16px instead of a second, equal-weight corner.
+// Its stroke-width is fixed in viewBox units, so the 1.75 : 2 ratio holds at
+// every size only while callers leave absoluteStrokeWidth off (none use it).
 export const ShortcutIcon = withUiStroke(createLucideIcon('Shortcut', [
   ['circle', { cx: '12', cy: '12', r: '10' }],
   ['path', { d: 'M8.75 15.25 15.25 8.75' }],

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // ProviderScopeTabs — the scope rail inside the Providers settings page
-// (Models / Web Search / Voice / Video / Email). Pure v-model: it does NOT
+// (Models / Web Search / Voice / Video). Pure v-model: it does NOT
 // navigate; the container (pages/providers/index.vue) owns the ?tab= query,
 // so the rail stays mounted across scope switches and the underline indicator
 // keeps its slide animation (a route-jump implementation remounted the rail
@@ -19,7 +19,7 @@ const { t } = useI18n()
   <!-- Underline rail = scope navigation, not a value switch (same rule as the
        bot access tabs). pl-1 cancels the trigger's own px-1 so the first tab's
        text lands on the content rail. No overflow-x-auto: it pins a visible
-       horizontal scrollbar under macOS "always show scrollbars", and the five
+       horizontal scrollbar under macOS "always show scrollbars", and the four
        short labels fit even on a phone. -->
   <Tabs
     :model-value="modelValue"

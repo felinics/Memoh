@@ -198,12 +198,12 @@ src/
 │   │       ├── dependency-script-dialog.vue # Preview of the exact script a dependency action runs
 │   │       ├── dependency-rollback-dialog.vue # Confirm rolling a dependency back to its previous version
 │   │       └── weixin-qr-login.vue          # WeChat QR login
-│   ├── providers/             #   LLM provider & model management
-│   ├── web-search/            #   Web search provider management
-│   ├── memory/                #   Built-in Memory settings (embedding model)
+│   ├── providers/             #   Providers page: scope rail (Models / Web Search / Voice / Video); models-panel.vue = LLM providers & models
+│   ├── web-search/            #   Web Search scope panel (rendered inside Providers)
 │   ├── speech/                #   Legacy TTS page (redirects to voice)
 │   ├── transcription/         #   Legacy transcription page (redirects to voice)
-│   ├── voice/                 #   TTS + transcription provider management
+│   ├── voice/                 #   Voice scope panel: TTS + transcription providers (rendered inside Providers)
+│   ├── video/                 #   Video scope panel (rendered inside Providers)
 │   ├── people/                #   User management (admin only)
 │   ├── onboarding/            #   First-run setup wizard
 │   ├── dev/components/        #   Dev-only component wall (see § Dev Component Wall)
@@ -272,12 +272,13 @@ Chat routes register **null stub components** in the router. The real UI (`MainS
 | `/settings/bots/new` | bot-new | `bots/new.vue` | Create bot flow |
 | `/settings/bots/new/progress` | bot-create-progress | `bots/new-progress.vue` | Bot creation progress (SSE) |
 | `/settings/bots/:botName` | bot-detail | `bots/detail.vue` | Bot detail with tabs |
-| `/settings/providers` | providers | `providers/index.vue` | LLM provider & model management |
-| `/settings/web-search` | web-search | `web-search/index.vue` | Web search provider management |
+| `/settings/providers` | providers | `providers/index.vue` | Provider family; `?tab=` selects models / web-search / voice / video |
+| `/settings/web-search` | web-search | redirect | Legacy alias → `providers?tab=web-search` (query and hash kept) |
 | `/settings/memory` | — | redirect | Legacy alias → `bots` (memory settings moved to the bot Memories tab's Advanced dialog) |
-| `/settings/voice` | voice | `voice/index.vue` | TTS + transcription providers |
-| `/settings/speech` | — | redirect | Legacy alias → `voice` |
-| `/settings/transcription` | — | redirect | Legacy alias → `voice` |
+| `/settings/voice` | voice | redirect | Legacy alias → `providers?tab=voice` |
+| `/settings/video` | video | redirect | Legacy alias → `providers?tab=video` |
+| `/settings/speech` | — | redirect | Legacy alias → `providers?tab=voice` |
+| `/settings/transcription` | — | redirect | Legacy alias → `providers?tab=voice` |
 | `/settings/supermarket` | supermarket | `supermarket/index.vue` | Template/skill marketplace |
 | `/settings/supermarket/category/:categoryId` | supermarket-category | `supermarket/category.vue` | App category |
 | `/settings/supermarket/:registryId/:appId` | supermarket-app-detail | `supermarket/app-detail.vue` | App detail |
