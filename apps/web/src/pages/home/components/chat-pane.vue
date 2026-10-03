@@ -439,21 +439,22 @@
               ref="dockEl"
               :approvals="pendingApprovals"
               :command-panel="composerCommandPanel"
-              :error-message="goalSubmissionBlocked ? goalExecutionBlockedReason : runtimeModeUnavailableReason || composerError"
+              :error-message="composerPanelError"
               :pending-user-input="pendingUserInput"
               :compacting="isCompactingSession"
               :usage-notice="composerUsageNotice"
               @select-command-item="selectCommandResultItem"
               @dismiss-command="clearCurrentCommandEvent"
               @dismiss-usage="dismissCodexUsageNotice"
+              @dismiss-error="dismissComposerPanelError"
               @reveal-composer="handleDockRevealComposer"
             >
               <CodexGoalBar
-                v-if="runtimeControls.goal.value || runtimeGoalError"
+                v-if="runtimeControls.goal.value || visibleRuntimeGoalError"
                 :key="runtimeModeScope"
                 class="mx-3 mb-2"
                 :goal="runtimeControls.goal.value"
-                :error="runtimeGoalError"
+                :error="visibleRuntimeGoalError"
                 :disabled="goalControlsDisabled"
                 :resume-disabled="goalResumeDisabled"
                 :resume-disabled-reason="goalExecutionBlockedReason"
@@ -461,6 +462,7 @@
                 @pause="controlGoal('pause')"
                 @clear="controlGoal('clear')"
                 @resume="controlGoal('resume')"
+                @dismiss-error="dismissedRuntimeGoalError = runtimeGoalError"
               />
               <!-- The composer is ALWAYS a two-row card (textarea on top,
                    controls below) — no pill↔multiline morph: a fixed rounded-2xl
@@ -469,7 +471,7 @@
                    Docked (non-welcome) state compresses and quiets: no min
                    height + tighter padding (p-2.5) + a shorter textarea row
                    (min-h-10) pull the two rows together — the centered welcome
-                   card keeps the full presence (min-h-28, p-3); docked it sits
+                   card keeps the full presence (min-h-28, wider --composer-pad); docked it sits
                    under the conversation and should read lighter, with the edge
                    softened to --border-soft (.chat-composer-docked, style.css).
                    Mobile radius is DERIVED from the control circles inside:
@@ -482,9 +484,9 @@
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge @container/composer relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text max-md:rounded-3xl max-md:p-2.5"
+                class="chat-composer-edge @container/composer relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text p-(--composer-pad) max-md:rounded-3xl"
                 :class="[
-                  isWelcome ? 'min-h-28 p-3' : 'p-2.5 chat-composer-docked',
+                  isWelcome ? 'min-h-28' : 'chat-composer-docked',
                   voiceInputState !== 'idle' ? 'chat-composer-voice' : '',
                 ]"
                 @click="handleComposerClick"
@@ -2586,6 +2588,32 @@ const unavailableRuntimeModes = computed(() => composerModelCatalog.value.unavai
 const runtimeModeUnavailableReason = computed(() => unavailableRuntimeModes.value.includes(currentRuntimeModeId.value)
   ? t('chat.runtimeModeModelUnavailable')
   : '')
+// What the dock's error line shows. Standing reasons (goal blocked by plan
+// mode, runtime mode without a usable model) win over the transient
+// composerError, matching their precedence before dismissal existed.
+const rawComposerPanelError = computed(() => goalSubmissionBlocked.value
+  ? goalExecutionBlockedReason.value
+  : runtimeModeUnavailableReason.value || composerError.value)
+// Every error line can be dismissed, standing reasons included: a user who
+// already understands the reason should not be forced to keep reading it.
+// Dismissal hides that exact message only — a different message, or the same
+// one returning after it went away, shows again. The underlying state (and
+// the send button's disabled state) is untouched.
+const dismissedComposerPanelError = ref('')
+const composerPanelError = computed(() => rawComposerPanelError.value === dismissedComposerPanelError.value ? '' : rawComposerPanelError.value)
+watch(rawComposerPanelError, (message) => {
+  if (!message) dismissedComposerPanelError.value = ''
+})
+function dismissComposerPanelError() {
+  dismissedComposerPanelError.value = rawComposerPanelError.value
+  // A transient error is consumed outright; a standing reason only gets hidden.
+  if (composerError.value === dismissedComposerPanelError.value) composerError.value = ''
+}
+const dismissedRuntimeGoalError = ref('')
+const visibleRuntimeGoalError = computed(() => runtimeGoalError.value === dismissedRuntimeGoalError.value ? '' : runtimeGoalError.value)
+watch(runtimeGoalError, (message) => {
+  if (!message) dismissedRuntimeGoalError.value = ''
+})
 const composerModelProviders = computed(() => composerModelCatalog.value.providers)
 
 // "Default" alone tells the user nothing — resolve what it actually means:

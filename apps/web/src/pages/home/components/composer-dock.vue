@@ -1,5 +1,5 @@
 <template>
-  <section>
+  <section class="chat-composer-dock">
     <Transition
       enter-active-class="transition-all duration-150 ease-out"
       enter-from-class="opacity-0 translate-y-1"
@@ -20,6 +20,7 @@
         @select-command-item="emit('selectCommandItem', $event)"
         @dismiss-command="emit('dismissCommand')"
         @dismiss-usage="emit('dismissUsage')"
+        @dismiss-error="emit('dismissError')"
       />
     </Transition>
     <ChatUserInputForm
@@ -102,6 +103,7 @@ const emit = defineEmits<{
   (e: 'selectCommandItem', item: CommandActionListItem): void
   (e: 'dismissCommand'): void
   (e: 'dismissUsage'): void
+  (e: 'dismissError'): void
   (e: 'revealComposer', opts: { focus?: boolean }): void
 }>()
 

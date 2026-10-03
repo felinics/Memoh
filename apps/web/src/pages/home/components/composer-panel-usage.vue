@@ -1,32 +1,17 @@
 <template>
-  <div
-    class="flex items-center gap-2 px-1.5 py-1"
-    :class="exhausted ? 'text-destructive' : 'text-muted-foreground'"
-  >
-    <CircleAlert
-      v-if="exhausted"
-      class="size-3.5 shrink-0"
-    />
-    <span class="min-w-0 flex-1 break-words text-body">{{ message }}</span>
-    <Button
-      v-if="!exhausted"
-      type="button"
-      variant="ghost"
-      size="icon-sm"
-      :aria-label="$t('chat.codexUsage.dismiss')"
-      @click="emit('dismiss')"
-    >
-      <X class="size-3.5" />
-    </Button>
-  </div>
+  <CalloutBanner
+    :tone="exhausted ? 'destructive' : 'warning'"
+    :description="message"
+    :dismiss-label="exhausted ? undefined : $t('chat.codexUsage.dismiss')"
+    @dismiss="emit('dismiss')"
+  />
 </template>
 
 <script setup lang="ts">
-// The account usage line inside the composer panel. A nearing-limit warning
+// The account usage notice stacked above the composer. A nearing-limit warning
 // can be dismissed; a reached limit cannot, since every send fails until the
 // window resets.
-import { Button } from '@felinic/ui'
-import { CircleAlert, X } from 'lucide-vue-next'
+import { CalloutBanner } from '@felinic/ui'
 
 defineProps<{
   exhausted: boolean

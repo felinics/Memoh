@@ -11,13 +11,12 @@
     </template>
 
     <div class="space-y-8">
-      <Alert
+      <CalloutBanner
         v-if="loadError"
-        variant="destructive"
-      >
-        <AlertTitle>{{ t('people.loadFailed') }}</AlertTitle>
-        <AlertDescription>{{ loadError }}</AlertDescription>
-      </Alert>
+        tone="destructive"
+        :title="t('people.loadFailed')"
+        :description="loadError"
+      />
 
       <section class="space-y-2.5">
         <h2 class="px-2 text-label font-medium text-muted-foreground">
@@ -279,12 +278,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ConfirmPopover, FieldStack, FormStack, PageShell, toast } from '@felinic/ui'
+import { CalloutBanner, ConfirmPopover, FieldStack, FormStack, PageShell, toast } from '@felinic/ui'
 import { Trash2, UserPlus } from 'lucide-vue-next'
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
   Avatar,
   AvatarFallback,
   AvatarImage,
