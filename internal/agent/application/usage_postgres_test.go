@@ -36,6 +36,19 @@ func usageTokensOf(u sdk.Usage) usageTokens {
 	}
 }
 
+func sumUsageTokens(all []usageTokens) usageTokens {
+	var sum usageTokens
+	for _, u := range all {
+		sum.input += u.input
+		sum.output += u.output
+		sum.total += u.total
+		sum.noCache += u.noCache
+		sum.cacheRead += u.cacheRead
+		sum.cacheWrite += u.cacheWrite
+	}
+	return sum
+}
+
 func anthropicUsageResponse(stream bool, usage string, outputTokens int, toolCall bool) string {
 	content := `{"type":"text","text":"ok"}`
 	stopReason := "end_turn"
@@ -69,9 +82,145 @@ func openAIResponsesUsageResponse(stream bool) string {
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":" + response + "}\n\n"
 }
 
-// Drives each provider's real wire usage through the native runtime into
-// history, then reads it back through the queries behind the session panel,
-// /status, /context, and the usage page.
+type providerUsageTurn struct {
+	clientType models.ClientType
+	stream     bool
+	respond    func(stream bool, call int) string
+}
+
+// run drives one native turn against the provider's real wire format and
+// persists its messages the way history stores them, returning the usage of
+// each stored assistant message.
+func (p providerUsageTurn) run(t *testing.T, ctx context.Context, messages *messagepkg.DBService, botID, sessionID string) []usageTokens {
+	t.Helper()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if p.stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+		}
+		_, _ = fmt.Fprint(w, p.respond(p.stream, int(calls.Add(1))))
+	}))
+	defer server.Close()
+
+	model := models.NewSDKChatModel(models.SDKModelConfig{ModelID: "usage-test", ClientType: string(p.clientType), APIKey: "fixture", BaseURL: server.URL})
+	agent := native.New(native.Deps{})
+	config := native.RunConfig{Model: model, Messages: []sdk.Message{sdk.UserMessage("hi")}}
+	var output []sdk.Message
+	var turnUsage sdk.Usage
+	if p.stream {
+		for ev := range agent.Stream(ctx, config) {
+			switch ev.Type {
+			case native.EventAgentAbort:
+				t.Fatalf("native abort: %+v", ev)
+			case native.EventAgentEnd:
+				if err := json.Unmarshal(ev.Messages, &output); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(ev.Usage, &turnUsage); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	} else {
+		result, err := agent.Generate(ctx, config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output = result.Messages
+		turnUsage = *result.Usage
+	}
+
+	var stored []usageTokens
+	for _, msg := range messageconv.SDKMessagesToModelMessages(output) {
+		saved, err := messages.Persist(ctx, messagepkg.PersistInput{BotID: botID, SessionID: sessionID, Role: msg.Role, Content: msg.Content, Usage: msg.Usage, RuntimeType: "model"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if saved.Role != "assistant" {
+			continue
+		}
+		var usage sdk.Usage
+		if err := json.Unmarshal(saved.Usage, &usage); err != nil {
+			t.Fatal(err)
+		}
+		if usage.CachedInputTokens != usage.InputTokenDetails.CacheReadTokens {
+			t.Fatalf("cached input = %d, cache read = %d", usage.CachedInputTokens, usage.InputTokenDetails.CacheReadTokens)
+		}
+		stored = append(stored, usageTokensOf(usage))
+	}
+	if int(calls.Load()) != len(stored) {
+		t.Fatalf("model calls = %d, stored assistant messages = %d", calls.Load(), len(stored))
+	}
+	if got, want := usageTokensOf(turnUsage), sumUsageTokens(stored); got != want {
+		t.Fatalf("turn usage = %+v, stored sum = %+v", got, want)
+	}
+	return stored
+}
+
+func newProviderUsageFixture(t *testing.T, ctx context.Context) (*dbsqlc.Queries, *messagepkg.DBService, string, string) {
+	t.Helper()
+	pool := openTurnAdmissionPostgres(t, ctx)
+	botID, sessionID := createTurnAdmissionFixture(t, ctx, pool)
+	queries := dbsqlc.New(pool)
+	return queries, messagepkg.NewService(nil, postgresstore.NewQueriesWithPool(pool, queries)), botID, sessionID
+}
+
+// assertProviderUsageQueries reads stored usage back through the queries
+// behind the session panel, /status, /context, and the usage page.
+func assertProviderUsageQueries(t *testing.T, ctx context.Context, queries *dbsqlc.Queries, botIDText, sessionIDText string, stored []usageTokens) {
+	t.Helper()
+	want := sumUsageTokens(stored)
+	sessionID, _ := dbpkg.ParseUUID(sessionIDText)
+	botID, _ := dbpkg.ParseUUID(botIDText)
+	from := pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}
+	to := pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true}
+
+	stats, err := queries.GetSessionCacheStats(ctx, sessionID)
+	if err != nil || stats.TotalInputTokens != int64(want.input) || stats.CacheReadTokens != int64(want.cacheRead) {
+		t.Fatalf("session cache stats = %+v, err = %v, want input %d read %d", stats, err, want.input, want.cacheRead)
+	}
+	latest, err := queries.GetLatestAssistantUsage(ctx, sessionID)
+	if last := stored[len(stored)-1].input; err != nil || latest != int64(last) {
+		t.Fatalf("latest assistant input = %d, err = %v, want %d", latest, err, last)
+	}
+	records, err := queries.ListTokenUsageRecords(ctx, dbsqlc.ListTokenUsageRecordsParams{BotID: botID, FromTime: from, ToTime: to, PageLimit: 10})
+	if err != nil || len(records) != len(stored) {
+		t.Fatalf("records = %+v, err = %v", records, err)
+	}
+	var recordInput, recordRead int64
+	for _, r := range records {
+		recordInput += r.InputTokens
+		recordRead += r.CacheReadTokens
+	}
+	if recordInput != int64(want.input) || recordRead != int64(want.cacheRead) {
+		t.Fatalf("records input %d read %d, want %d %d", recordInput, recordRead, want.input, want.cacheRead)
+	}
+	days, err := queries.GetTokenUsageByDayAndType(ctx, dbsqlc.GetTokenUsageByDayAndTypeParams{BotID: botID, FromTime: from, ToTime: to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dayInput, dayRead int64
+	for _, d := range days {
+		dayInput += d.InputTokens
+		dayRead += d.CacheReadTokens
+	}
+	if dayInput != int64(want.input) || dayRead != int64(want.cacheRead) {
+		t.Fatalf("daily usage = %+v, want input %d read %d", days, want.input, want.cacheRead)
+	}
+	byModel, err := queries.GetTokenUsageByModel(ctx, dbsqlc.GetTokenUsageByModelParams{BotID: botID, FromTime: from, ToTime: to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var modelInput int64
+	for _, m := range byModel {
+		modelInput += m.InputTokens
+	}
+	if modelInput != int64(want.input) {
+		t.Fatalf("model usage = %+v, want input %d", byModel, want.input)
+	}
+}
+
 func TestPostgresProviderUsageSurvivesPersistence(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -113,120 +262,53 @@ func TestPostgresProviderUsageSurvivesPersistence(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				defer cancel()
-				pool := openTurnAdmissionPostgres(t, ctx)
-				botIDText, sessionIDText := createTurnAdmissionFixture(t, ctx, pool)
-				queries := dbsqlc.New(pool)
-				messages := messagepkg.NewService(nil, postgresstore.NewQueriesWithPool(pool, queries))
-
-				var calls atomic.Int32
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					w.Header().Set("Content-Type", "application/json")
-					if stream {
-						w.Header().Set("Content-Type", "text/event-stream")
-					}
-					_, _ = fmt.Fprint(w, tc.respond(stream, int(calls.Add(1))))
-				}))
-				defer server.Close()
-
-				model := models.NewSDKChatModel(models.SDKModelConfig{ModelID: "usage-test", ClientType: string(tc.clientType), APIKey: "fixture", BaseURL: server.URL})
-				agent := native.New(native.Deps{})
-				config := native.RunConfig{Model: model, Messages: []sdk.Message{sdk.UserMessage("hi")}}
-				var output []sdk.Message
-				var turnUsage sdk.Usage
-				if stream {
-					for ev := range agent.Stream(ctx, config) {
-						switch ev.Type {
-						case native.EventAgentAbort:
-							t.Fatalf("native abort: %+v", ev)
-						case native.EventAgentEnd:
-							if err := json.Unmarshal(ev.Messages, &output); err != nil {
-								t.Fatal(err)
-							}
-							if err := json.Unmarshal(ev.Usage, &turnUsage); err != nil {
-								t.Fatal(err)
-							}
-						}
-					}
-				} else {
-					result, err := agent.Generate(ctx, config)
-					if err != nil {
-						t.Fatal(err)
-					}
-					output = result.Messages
-					turnUsage = *result.Usage
-				}
-				if int(calls.Load()) != len(tc.messages) {
-					t.Fatalf("model calls = %d, want %d", calls.Load(), len(tc.messages))
-				}
-
-				var wantTurn usageTokens
-				for _, m := range tc.messages {
-					wantTurn.input += m.input
-					wantTurn.output += m.output
-					wantTurn.total += m.total
-					wantTurn.noCache += m.noCache
-					wantTurn.cacheRead += m.cacheRead
-					wantTurn.cacheWrite += m.cacheWrite
-				}
-				if got := usageTokensOf(turnUsage); got != wantTurn {
-					t.Fatalf("turn usage = %+v, want %+v", got, wantTurn)
-				}
-
-				var stored []usageTokens
-				for _, msg := range messageconv.SDKMessagesToModelMessages(output) {
-					saved, err := messages.Persist(ctx, messagepkg.PersistInput{BotID: botIDText, SessionID: sessionIDText, Role: msg.Role, Content: msg.Content, Usage: msg.Usage, RuntimeType: "model"})
-					if err != nil {
-						t.Fatal(err)
-					}
-					if saved.Role != "assistant" {
-						continue
-					}
-					var usage sdk.Usage
-					if err := json.Unmarshal(saved.Usage, &usage); err != nil {
-						t.Fatal(err)
-					}
-					if usage.CachedInputTokens != usage.InputTokenDetails.CacheReadTokens {
-						t.Fatalf("cached input = %d, cache read = %d", usage.CachedInputTokens, usage.InputTokenDetails.CacheReadTokens)
-					}
-					stored = append(stored, usageTokensOf(usage))
-				}
+				queries, messages, botID, sessionID := newProviderUsageFixture(t, ctx)
+				stored := providerUsageTurn{clientType: tc.clientType, stream: stream, respond: tc.respond}.run(t, ctx, messages, botID, sessionID)
 				if fmt.Sprint(stored) != fmt.Sprint(tc.messages) {
 					t.Fatalf("stored assistant usage = %+v, want %+v", stored, tc.messages)
 				}
-
-				sessionID, _ := dbpkg.ParseUUID(sessionIDText)
-				botID, _ := dbpkg.ParseUUID(botIDText)
-				from := pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}
-				to := pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true}
-				stats, err := queries.GetSessionCacheStats(ctx, sessionID)
-				if err != nil || stats.TotalInputTokens != int64(wantTurn.input) || stats.CacheReadTokens != int64(wantTurn.cacheRead) {
-					t.Fatalf("session cache stats = %+v, err = %v, want input %d read %d", stats, err, wantTurn.input, wantTurn.cacheRead)
-				}
-				latest, err := queries.GetLatestAssistantUsage(ctx, sessionID)
-				if want := tc.messages[len(tc.messages)-1].input; err != nil || latest != int64(want) {
-					t.Fatalf("latest assistant input = %d, err = %v, want %d", latest, err, want)
-				}
-				records, err := queries.ListTokenUsageRecords(ctx, dbsqlc.ListTokenUsageRecordsParams{BotID: botID, FromTime: from, ToTime: to, PageLimit: 10})
-				if err != nil || len(records) != len(tc.messages) {
-					t.Fatalf("records = %+v, err = %v", records, err)
-				}
-				var recordInput, recordRead int64
-				for _, r := range records {
-					recordInput += r.InputTokens
-					recordRead += r.CacheReadTokens
-				}
-				if recordInput != int64(wantTurn.input) || recordRead != int64(wantTurn.cacheRead) {
-					t.Fatalf("records input %d read %d, want %d %d", recordInput, recordRead, wantTurn.input, wantTurn.cacheRead)
-				}
-				days, err := queries.GetTokenUsageByDayAndType(ctx, dbsqlc.GetTokenUsageByDayAndTypeParams{BotID: botID, FromTime: from, ToTime: to})
-				if err != nil || len(days) != 1 || days[0].InputTokens != int64(wantTurn.input) || days[0].CacheReadTokens != int64(wantTurn.cacheRead) {
-					t.Fatalf("daily usage = %+v, err = %v", days, err)
-				}
-				byModel, err := queries.GetTokenUsageByModel(ctx, dbsqlc.GetTokenUsageByModelParams{BotID: botID, FromTime: from, ToTime: to})
-				if err != nil || len(byModel) != 1 || byModel[0].InputTokens != int64(wantTurn.input) {
-					t.Fatalf("model usage = %+v, err = %v", byModel, err)
-				}
+				assertProviderUsageQueries(t, ctx, queries, botID, sessionID, stored)
 			})
 		}
+	}
+}
+
+// One session mixing providers must aggregate to the weighted hit rate. The
+// first turn carries the #1374 sample ratio, which reads as 1028.1% when the
+// Anthropic input omits its cache.
+func TestPostgresProviderUsageMixesProvidersInOneSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	queries, messages, botID, sessionID := newProviderUsageFixture(t, ctx)
+	turns := []providerUsageTurn{
+		{clientType: models.ClientTypeAnthropicMessages, stream: true, respond: func(stream bool, _ int) string {
+			return anthropicUsageResponse(stream, `"input_tokens":21969,"cache_read_input_tokens":225856,"cache_creation_input_tokens":0`, 42, false)
+		}},
+		{clientType: models.ClientTypeOpenAIResponses, respond: func(stream bool, _ int) string { return openAIResponsesUsageResponse(stream) }},
+		{clientType: models.ClientTypeAnthropicMessages, respond: func(stream bool, _ int) string {
+			return anthropicUsageResponse(stream, `"input_tokens":10,"cache_read_input_tokens":200,"cache_creation_input_tokens":100`, 5, false)
+		}},
+	}
+	var stored []usageTokens
+	for _, turn := range turns {
+		stored = append(stored, turn.run(t, ctx, messages, botID, sessionID)...)
+	}
+	want := []usageTokens{
+		{input: 247825, output: 42, total: 247867, noCache: 21969, cacheRead: 225856},
+		{input: 310, output: 5, total: 315, noCache: 110, cacheRead: 200},
+		{input: 310, output: 5, total: 315, noCache: 10, cacheRead: 200, cacheWrite: 100},
+	}
+	if fmt.Sprint(stored) != fmt.Sprint(want) {
+		t.Fatalf("stored assistant usage = %+v, want %+v", stored, want)
+	}
+	assertProviderUsageQueries(t, ctx, queries, botID, sessionID, stored)
+
+	sessionUUID, _ := dbpkg.ParseUUID(sessionID)
+	stats, err := queries.GetSessionCacheStats(ctx, sessionUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rate := fmt.Sprintf("%.1f%%", float64(stats.CacheReadTokens)/float64(stats.TotalInputTokens)*100); rate != "91.1%" {
+		t.Fatalf("session cache hit rate = %s, want 91.1%%", rate)
 	}
 }
