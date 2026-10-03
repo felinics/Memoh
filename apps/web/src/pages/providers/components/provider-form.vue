@@ -689,6 +689,13 @@ function buildPayload(value: ProviderFormValues): Record<string, unknown> {
 // Validation is skipped on purpose: a model can be added before the API key.
 defineExpose({
   draftPayload: () => buildPayload(form.values),
+  // Whether the draft on screen can list the endpoint's models: a key was
+  // typed, or the preset needs none. OAuth types have no token before the
+  // provider exists, so they never can.
+  canListModels: () => {
+    if (isManagedOAuthClientType(form.values.client_type)) return false
+    return !presetRequiresApiKey() || Boolean(form.values.api_key?.trim())
+  },
 })
 
 const onSubmit = form.handleSubmit(async (value) => {

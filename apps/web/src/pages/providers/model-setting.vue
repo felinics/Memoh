@@ -275,11 +275,19 @@ async function handleToggleEnable(value: boolean) {
   enableLoading.value = true
   try {
     if (!curProviderId.value) {
-      await materializeProvider({
-        name: curProvider.value.name,
-        config: curProvider.value.config ?? {},
-        metadata: curProvider.value.metadata ?? {},
-      }, value)
+      // Enabling a template draft creates it from what is on screen. Without
+      // credentials the model list cannot be fetched, so importing would only
+      // fail; the user imports after adding a key.
+      const form = providerForm.value
+      await materializeProvider(
+        form?.draftPayload() ?? {
+          name: curProvider.value.name,
+          config: curProvider.value.config ?? {},
+          metadata: curProvider.value.metadata ?? {},
+        },
+        value,
+        form?.canListModels() ?? false,
+      )
       return
     }
     await putProvidersById({
