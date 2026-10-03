@@ -354,8 +354,14 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 			code := slashErrorCode(err)
 			if code == "" {
 				code = slash.CodeRequestedSkillNotRuntimeUsable
+				// The generic code does not carry the cause, and the request is
+				// answered, so this is where the cause is recorded.
+				result := errlog.Event(ctx, "skill.list", err, errlog.Options{})
+				h.logger.LogAttrs(ctx, result.Level, "skill catalog failed", append([]slog.Attr{
+					slog.String("bot_id", botID),
+				}, result.Attrs()...)...)
 			}
-			slashErr := slash.Error{Code: code, Msg: err.Error()}
+			slashErr := slash.Error{Code: code}
 			return nil, &slashErr
 		}
 		items := make([]CommandActionListItem, 0, len(catalog))
@@ -1231,8 +1237,9 @@ func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID
 // session" for a caller who cannot read the session at all, which is a
 // cross-session existence oracle even though no write follows it.
 //
-// The storage error is deliberately not returned: it names rows, and the
-// caller only needs to know that the id did not resolve. The cause is logged.
+// The storage error is not sent: it names rows, and the caller only needs to
+// know that the id did not resolve. It is the internal error of the 404, so the
+// request's result record reports it.
 // Both refusals are the client's: a missing id is a bad request and an id that
 // names no turn is not found.
 //
@@ -1248,11 +1255,7 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	}
 	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
 	if err != nil {
-		h.logger.WarnContext(ctx, "resolve deprecated message_id failed",
-			slog.String("session_id", sessionID),
-			slog.Any("error", err),
-		)
-		return "", echo.NewHTTPError(http.StatusNotFound, "message_id does not name a turn in this session")
+		return "", echo.NewHTTPError(http.StatusNotFound, "message_id does not name a turn in this session").WithInternal(err)
 	}
 	return resolved, nil
 }

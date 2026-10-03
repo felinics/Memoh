@@ -32,6 +32,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimekind"
@@ -583,9 +584,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		var outMsg channel.Message
 		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "command execution failed", slog.Any("error", err))
-			}
+			p.recordCommandFailure(ctx, msg, identity, err)
 			outMsg = plainTextMessage(friendlyOps(loc, "ops.verb.completeCommand"), caps)
 		} else {
 			outMsg = renderResult(result, RenderContext{Caps: caps, T: loc})
@@ -1698,6 +1697,19 @@ func channelSlashAliases(msg channel.InboundMessage, identity InboundIdentity) [
 		out = append(out, alias)
 	}
 	return out
+}
+
+// recordCommandFailure records the cause of a command call that failed. The
+// reply carries only the generic copy and the message is answered, so this is
+// where the cause is recorded.
+func (p *ChannelInboundProcessor) recordCommandFailure(ctx context.Context, msg channel.InboundMessage, identity InboundIdentity, err error) {
+	if p.logger == nil {
+		return
+	}
+	result := errlog.Event(ctx, "channel.command", err, errlog.Options{})
+	p.logger.LogAttrs(ctx, result.Level, "command failed", append([]slog.Attr{
+		slog.String("bot_id", strings.TrimSpace(identity.BotID)), slog.String("channel", msg.Channel.String()),
+	}, result.Attrs()...)...)
 }
 
 func (p *ChannelInboundProcessor) sendSlashError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, code string) error {
@@ -4980,9 +4992,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		SessionID:         sessionID,
 	})
 	if execErr != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "execute /status command failed", slog.Any("error", execErr))
-		}
+		p.recordCommandFailure(ctx, msg, identity, execErr)
 		reply = friendlyOps(loc, "ops.verb.loadStatus")
 	}
 

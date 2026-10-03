@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"unicode"
 
 	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/agent/context/compaction"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/models"
@@ -511,7 +514,7 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 	if sub.ResultHandler != nil {
 		res, handlerErr := safeExecuteResult(sub.ResultHandler, cc)
 		if handlerErr != nil {
-			return &Result{Text: h.friendlyCommandError(cc.L, parsed.Resource, handlerErr)}, nil
+			return &Result{Text: h.failureReply(ctx, cc.L, strings.TrimSpace(parsed.Resource), handlerErr)}, nil
 		}
 		if res == nil {
 			res = &Result{}
@@ -521,20 +524,35 @@ func (h *Handler) ExecuteResult(ctx context.Context, input ExecuteInput) (res *R
 
 	text, handlerErr := safeExecute(sub.Handler, cc)
 	if handlerErr != nil {
-		return &Result{Text: h.friendlyCommandError(cc.L, parsed.Resource, handlerErr)}, nil
+		return &Result{Text: h.failureReply(ctx, cc.L, strings.TrimSpace(parsed.Resource), handlerErr)}, nil
 	}
 	return &Result{Text: text}, nil
 }
 
-// friendlyCommandError converts a service/handler error into user-facing text.
-// Clean domain errors (e.g. `schedule "x" not found`, `model "x" is ambiguous`)
-// are surfaced sentence-cased, with a discovery pointer appended for not-found
-// cases. Errors that look like infra/transport leaks (raw Go wrap chains,
-// "dial tcp", IPs, deadlines, SQL/driver text) are replaced with a generic
-// retry line so internals never reach chat.
-func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err error) string {
-	if err == nil {
-		return ""
+// replyError is a handler's answer to input it cannot act on: a name that
+// matches no model or schedule, a missing argument. The reply is its copy,
+// which carries any pointer to the matching list command. It is not a
+// failure, so nothing is recorded for it.
+type replyError struct {
+	key  string
+	args map[string]any
+}
+
+func (e *replyError) Error() string { return "command reply: " + e.key }
+
+func newReplyError(key string, args map[string]any) error {
+	return &replyError{key: key, args: args}
+}
+
+// failureReply is the reply for a handler error. Its own text is never shown:
+// a replyError or a known settings sentinel gets its command copy, an error
+// with a public code gets that code's channel copy, and any other error gets
+// the generic copy for the command. The error is answered here, so a cause
+// that is a failure of this process is recorded here as an event.
+func (h *Handler) failureReply(ctx context.Context, t *i18n.Localizer, resource string, err error) string {
+	var reply *replyError
+	if errors.As(err, &reply) {
+		return t.T(reply.key, reply.args)
 	}
 	var invalidReasoning *settings.InvalidReasoningEffortError
 	if errors.As(err, &invalidReasoning) {
@@ -543,29 +561,28 @@ func (h *Handler) friendlyCommandError(t *i18n.Localizer, resource string, err e
 			"levels": strings.Join(reasoningChoicesFor(invalidReasoning.Options), ", "),
 		})
 	}
+	if errs.FaultOf(err) != errs.FaultClient {
+		h.recordFailure(ctx, resource, err)
+	}
 	if errors.Is(err, settings.ErrReasoningOptionsUnavailable) {
 		return t.T("cmd.reasoning.unavailable")
 	}
-	msg := strings.TrimSpace(err.Error())
-	res := strings.TrimSpace(resource)
-	if msg != "" && !looksLikeInternalError(msg) {
-		out := capitalizeFirst(msg)
-		if !endsWithTerminalPunct(out) {
-			out += "."
-		}
-		if res != "" && strings.Contains(strings.ToLower(msg), "not found") {
-			out += t.T("cmd.error.runToSeeList", map[string]any{"command": CmdRef(res + " list")})
-		}
-		return out
+	if text, ok := channel.ErrorCodeText(t, apperror.CodeOf(err), apperror.ArgsOf(err)); ok {
+		return text
 	}
-	// Sanitized path: keep the raw error in logs, show the user a clean retry line.
-	if h.logger != nil {
-		h.logger.Warn("command failed", slog.String("resource", res), slog.Any("error", err))
-	}
-	if res == "" {
+	if resource == "" {
 		return t.T("cmd.error.genericNoResource")
 	}
-	return t.T("cmd.error.generic", map[string]any{"command": CmdRef(res)})
+	return t.T("cmd.error.generic", map[string]any{"command": CmdRef(resource)})
+}
+
+func (h *Handler) recordFailure(ctx context.Context, resource string, err error) {
+	if h.logger == nil {
+		return
+	}
+	result := errlog.Event(ctx, "command.execute", err, errlog.Options{})
+	h.logger.LogAttrs(ctx, result.Level, "command failed",
+		append([]slog.Attr{slog.String("resource", resource)}, result.Attrs()...)...)
 }
 
 // normalizeLanguageShorthand rewrites the "/language <lang>" shorthand into the
@@ -578,59 +595,6 @@ func normalizeLanguageShorthand(resource string, parsed *ParsedCommand) {
 		parsed.Args = append([]string{parsed.Action}, parsed.Args...)
 		parsed.Action = "set"
 	}
-}
-
-// looksLikeInternalError reports whether an error message carries infra/transport
-// internals that must not reach chat (Go wrap chains, network/SQL/TLS details).
-// It keys on content markers only — a length cap was removed because legitimate
-// domain messages (e.g. an ambiguous-model list of provider-qualified IDs) can
-// be long, and capping by length wrongly replaced them with a dead retry line.
-//
-// Markers are conservative. "sql:" (with colon) catches database/sql / pq
-// wrap chains without flagging model names that happen to contain "sql"
-// (e.g. "sqlcoder"). "failed to " is the canonical Go wrap idiom; legitimate
-// domain messages can also begin with it ("failed to find …"), so the
-// false-positive test in handler_test pins the trade-off and the visible
-// fallback ("please try again") is still recoverable.
-func looksLikeInternalError(msg string) bool {
-	lower := strings.ToLower(msg)
-	markers := []string{
-		"failed to ", "dial tcp", "connection refused", "context deadline",
-		"i/o timeout", "no such host", "pq:", "sql:", "x509",
-		"panic:", "goroutine", "invalid memory", "nil pointer",
-	}
-	for _, m := range markers {
-		if strings.Contains(lower, m) {
-			return true
-		}
-	}
-	return false
-}
-
-// capitalizeFirst upper-cases the first rune of s, leaving the rest untouched.
-func capitalizeFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	r := []rune(s)
-	r[0] = unicode.ToUpper(r[0])
-	return string(r)
-}
-
-// endsWithTerminalPunct reports whether s already ends in sentence-final
-// punctuation (ASCII or CJK). friendlyCommandError uses it so it never tacks an
-// ASCII "." onto an already-terminated string — e.g. a zh message ending in the
-// ideographic full stop "。" would otherwise become "…。.".
-func endsWithTerminalPunct(s string) bool {
-	r := []rune(strings.TrimSpace(s))
-	if len(r) == 0 {
-		return false
-	}
-	switch r[len(r)-1] {
-	case '.', '!', '?', '。', '！', '？', '…':
-		return true
-	}
-	return false
 }
 
 // chatACLAllows reports whether the bot's chat ACL permits this caller. With no

@@ -244,5 +244,5 @@ func (h *Handler) findScheduleByName(cc CommandContext, name string) (schedule.S
 			return item, nil
 		}
 	}
-	return schedule.Schedule{}, fmt.Errorf("%s", cc.T("cmd.schedule.notFound", map[string]any{"name": fmt.Sprintf("%q", name), "command": CmdRef("schedule list")}))
+	return schedule.Schedule{}, newReplyError("cmd.schedule.notFound", map[string]any{"name": fmt.Sprintf("%q", name), "command": CmdRef("schedule list")})
 }
