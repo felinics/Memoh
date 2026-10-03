@@ -1,26 +1,27 @@
 <template>
   <CalloutBanner
-    bare
-    size="sm"
     tone="destructive"
     :description="message"
-    class="px-(--composer-text-inset) py-1"
-  >
-    <template #icon>
-      <AlertGlyph class="size-3.5" />
-    </template>
-  </CalloutBanner>
+    :dismiss-label="$t('chat.slash.dismiss')"
+    @dismiss="emit('dismiss')"
+  />
 </template>
 
 <script setup lang="ts">
 // One error line inside the composer panel (send / model-switch / agent-switch
-// failures). `bare` because the panel's capsule already provides the surface;
-// the --composer-text-inset indent puts the icon on the composer's text
-// column, shared with the sibling panel sections.
+// failures, and standing "this mode can't run" reasons). The page-level
+// destructive banner — solid fill, no border — standing on its own above the
+// composer; several notices stack upward, never wrapped in a shared shell. Every error line is
+// dismissible — even a standing reason the user already understands should
+// not be forced to stay on screen; the host decides what dismissing means for
+// its source.
 import { CalloutBanner } from '@felinic/ui'
-import AlertGlyph from '@/components/alert-glyph/index.vue'
 
 defineProps<{
   message: string
+}>()
+
+const emit = defineEmits<{
+  (e: 'dismiss'): void
 }>()
 </script>

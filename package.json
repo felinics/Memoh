@@ -51,6 +51,9 @@
       "ignoreMissing": [
         "@algolia/client-search"
       ]
+    },
+    "overrides": {
+      "@memohai/icon": "workspace:*"
     }
   }
 }

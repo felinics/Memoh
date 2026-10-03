@@ -8,11 +8,11 @@ import {
   Progress,
 } from '@felinic/ui'
 import { toast } from '@felinic/ui'
+import { ErrorIcon } from '@memohai/icon/ui'
 import { CircleAlert, Inbox } from 'lucide-vue-next'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
-import AlertGlyph from '@/components/alert-glyph/index.vue'
 import ComposerPanel from '@/pages/home/components/composer-panel.vue'
 
 // Fire a burst so the stack reads as a quiet, fully-readable column — newest on
@@ -51,7 +51,7 @@ const commandErrorPanel = {
   text: 'Unknown model "claude-x". Run /model to list available models.',
   items: [],
 }
-const rawChatError = 'upstream 429: rate limit exceeded for organization org_7Hq2 (retry after 38s)'
+const rawChatError = 'Upstream 429: rate limit exceeded for organization org_7Hq2 (retry after 38s)'
 </script>
 
 <template>
@@ -71,7 +71,7 @@ const rawChatError = 'upstream 429: rate limit exceeded for organization org_7Hq
               v-for="tone in noticeTones"
               :key="tone"
               :tone="tone"
-              :title="`${tone} notice`"
+              :title="`${tone.charAt(0).toUpperCase()}${tone.slice(1)} notice`"
               description="A sentence that explains what happened and what to do next."
             />
           </div>
@@ -147,14 +147,14 @@ const rawChatError = 'upstream 429: rate limit exceeded for organization org_7Hq
       </Specimen>
 
       <Specimen
-        label="error glyph — staging <AlertGlyph> vs lucide CircleAlert"
-        note="12 / 14 / 16px, top row staging glyph, bottom row lucide; staging until signed off, then moves to the icon layer"
+        label="error glyph — <ErrorIcon> (@memohai/icon/ui) vs lucide CircleAlert"
+        note="12 / 14 / 16px, top row the error glyph every destructive notice and field error uses, bottom row the lucide original it replaced"
       >
         <div class="flex flex-col gap-3 text-destructive">
           <div class="flex items-center gap-4">
-            <AlertGlyph class="size-3" />
-            <AlertGlyph class="size-3.5" />
-            <AlertGlyph class="size-4" />
+            <ErrorIcon class="size-3" />
+            <ErrorIcon class="size-3.5" />
+            <ErrorIcon class="size-4" />
           </div>
           <div class="flex items-center gap-4">
             <CircleAlert class="size-3" />
