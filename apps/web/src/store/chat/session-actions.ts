@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue'
 import { toast } from '@felinic/ui'
+import { getBotsByBotIdSessionsBySessionId } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import {
   deleteSession,
@@ -107,13 +108,19 @@ export function createSessionActions(deps: {
 
   async function removeSession(
     sessionId: string,
-    options: { fallbackMode?: SidebarSessionMode } = {},
+    options: { fallbackMode?: SidebarSessionMode; botId?: string } = {},
   ) {
     const sid = sessionId.trim()
     if (!sid) return
-    const botId = deps.currentBotId.value ?? ''
+    const botId = options.botId ?? deps.currentBotId.value ?? ''
     if (!botId) throw new Error('Bot not selected')
+    const generation = deps.userScopeGeneration()
     await deleteSession(botId, sid)
+    if (generation !== deps.userScopeGeneration()) return
+    applyDeletedSession(botId, sid, options.fallbackMode)
+  }
+
+  function applyDeletedSession(botId: string, sid: string, fallbackMode: SidebarSessionMode = 'recent') {
     deps.abort({ botId, sessionId: sid, viewId: deps.focusedViewId.value })
     deps.markSessionDeleted(botId, sid)
     recordDeleted(botId, sid)
@@ -123,9 +130,7 @@ export function createSessionActions(deps: {
     deps.clearRuntimeStatus(botId, sid)
     deps.removeSessionFromList(sid)
     if (deps.sessionId.value !== sid) return
-    const next = deps.fallbackSessionAfterDelete(
-      options.fallbackMode ?? 'recent',
-    )
+    const next = deps.fallbackSessionAfterDelete(fallbackMode)
     if (!next) {
       deps.sessionId.value = null
       deps.explicitSessionSelection.value = false
@@ -137,6 +142,52 @@ export function createSessionActions(deps: {
     deps.explicitSessionSelection.value = false
     deps.draftIntent.value = false
     deps.switchActiveSession(next.id, sid)
+  }
+
+  async function removeSessions(sessionIds: string[]) {
+    const botId = deps.currentBotId.value ?? ''
+    if (!botId) return null
+    const generation = deps.userScopeGeneration()
+    const ids = [...new Set(sessionIds)]
+    // Keep the currently open chat until last to avoid opening a succession
+    // of fallback chats that are themselves about to be deleted.
+    ids.sort((a, b) => Number(a === deps.sessionId.value) - Number(b === deps.sessionId.value))
+    const failedIds: string[] = []
+    // ponytail: sequential requests; use bounded concurrency if large selections become slow.
+    for (const id of ids) {
+      if (generation !== deps.userScopeGeneration()) return null
+      try {
+        await removeSession(id, { botId })
+      } catch {
+        failedIds.push(id)
+      }
+    }
+    if (generation !== deps.userScopeGeneration()) return null
+    await deps.refreshSessionsList(botId)
+    if (generation !== deps.userScopeGeneration()) return null
+    const remainingIds: string[] = []
+    for (const id of failedIds) {
+      if (generation !== deps.userScopeGeneration()) return null
+      try {
+        const { data, response } = await getBotsByBotIdSessionsBySessionId({
+          path: { bot_id: botId, session_id: id },
+          throwOnError: false,
+        })
+        if (generation !== deps.userScopeGeneration()) return null
+        // This endpoint still uses legacy Echo errors without stable codes.
+        // A delete can tombstone the chat before runtime shutdown fails; a
+        // subsequent 404 removes the stale row but does not erase the error.
+        if (response?.status === 404) {
+          applyDeletedSession(botId, id)
+          continue
+        }
+        if (data && deps.currentBotId.value === botId) deps.upsertSession(data as SessionSummary)
+      } catch {
+        // Outcome is unknown; retain the selection for an explicit retry.
+      }
+      remainingIds.push(id)
+    }
+    return { failedIds: remainingIds, failed: failedIds.length, total: ids.length }
   }
 
   async function renameSession(sessionId: string, title: string) {
@@ -220,6 +271,7 @@ export function createSessionActions(deps: {
     forkedSessionRequested,
     cleanupFailedDeferredSession,
     removeSession,
+    removeSessions,
     renameSession,
     forkTurn,
     reset: () => {

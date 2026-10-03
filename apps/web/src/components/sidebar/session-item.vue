@@ -1,6 +1,9 @@
 <template>
   <ContextMenu>
-    <ContextMenuTrigger as-child>
+    <ContextMenuTrigger
+      as-child
+      :disabled="selecting"
+    >
       <!-- active: mirrors the hover fill so a touch press (incl. the hold that
            opens the context menu) gives visible feedback — touch has no hover,
            and without this the long-press felt dead until the menu appeared.
@@ -12,19 +15,28 @@
            visually collapses the moment the pointer moves onto the menu. -->
       <div
         ref="rowEl"
-        role="button"
-        tabindex="0"
-        class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        :role="selecting ? 'group' : 'button'"
+        :tabindex="selecting ? -1 : 0"
+        class="group relative flex select-none items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         :class="rowClass"
-        :data-ui-selected="isActive ? '' : undefined"
+        :data-ui-selected="!selecting && isActive ? '' : undefined"
         :data-menu-open="menuOpen || undefined"
         :title="hoverTitle"
         @mouseenter="syncHovered"
         @mouseleave="syncHovered"
-        @click="$emit('select', session)"
-        @keydown.enter.prevent="$emit('select', session)"
-        @keydown.space.prevent="$emit('select', session)"
+        @click="handleSelect"
+        @keydown.enter.self.prevent="handleSelect"
+        @keydown.space.self.prevent="handleSelect"
       >
+        <Checkbox
+          v-if="selecting"
+          class="mr-2"
+          :model-value="selection?.selectedIds.value.has(session.id)"
+          :disabled="selection?.locked.value"
+          :aria-label="hoverTitle"
+          @click.stop
+          @update:model-value="selection?.toggle(session.id)"
+        />
         <!-- Native session rows stay text-only. Agent rows carry the agent icon
              and schedule runs a yellow clock, because the unified Recents list
              mixes model chats, external-agent chats, and schedule runs. -->
@@ -86,12 +98,12 @@
              full box and center. -->
         <div
           class="relative ml-1.5 flex h-6 shrink-0 items-center justify-end transition-[width] duration-150"
-          :class="streaming || menuOpen ? 'w-6' : 'w-0 group-hover:w-6 group-data-[menu-open=true]:w-6'"
+          :class="streaming || menuOpen ? 'w-6' : selecting ? 'w-0' : 'w-0 group-hover:w-6 group-data-[menu-open=true]:w-6'"
         >
           <div
             v-if="streaming"
-            class="flex h-6 w-6 items-center justify-center transition-opacity duration-150 group-hover:opacity-0"
-            :class="menuOpen ? 'opacity-0' : 'opacity-100'"
+            class="flex h-6 w-6 items-center justify-center transition-opacity duration-150"
+            :class="selecting ? 'opacity-100' : menuOpen ? 'opacity-0' : 'opacity-100 group-hover:opacity-0'"
           >
             <LoaderCircle
               class="size-3 animate-spin text-muted-foreground"
@@ -99,7 +111,10 @@
             />
           </div>
 
-          <DropdownMenu v-model:open="menuOpen">
+          <DropdownMenu
+            v-if="!selecting"
+            v-model:open="menuOpen"
+          >
             <DropdownMenuTrigger as-child>
               <!-- Plain button (not <Button variant="ghost">): the ghost chip color
                    (--btn-ghost-hover) is the same gray as the row's own hover, so the
@@ -170,12 +185,13 @@
 
 <script setup lang="ts">
 import { externalAgentDisplayName, externalAgentIcon } from '@/utils/external-agent'
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { Clock, LoaderCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { OpenInTabIcon } from '@memohai/icon/ui'
 import type { SessionSummary } from '@/composables/api/useChat'
 import {
+  Checkbox,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -190,6 +206,7 @@ import { sessionAgentProvider } from '@/utils/bot-agent'
 import { splitScriptRuns } from '@/utils/script-runs'
 import { isAgentRuntimeType, normalizedRuntimeType, normalizedSessionMode, routeConversationLabel } from '@/store/chat-list.utils'
 import MarqueeText from './marquee-text.vue'
+import { sessionSelectionKey } from './use-session-selection'
 
 const props = defineProps<{
   session: SessionSummary
@@ -197,7 +214,7 @@ const props = defineProps<{
   streaming?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   select: [session: SessionSummary]
   openNewTab: [session: SessionSummary]
   rename: [session: SessionSummary]
@@ -205,6 +222,14 @@ defineEmits<{
 }>()
 
 const { t } = useI18n()
+const selection = inject(sessionSelectionKey, null)
+selection?.registerRow(() => props.session)
+const selecting = computed(() => selection?.active.value ?? false)
+
+function handleSelect() {
+  if (selecting.value) selection?.toggle(props.session.id)
+  else emit('select', props.session)
+}
 
 const menuOpen = ref(false)
 const rowEl = ref<HTMLElement>()
@@ -228,10 +253,10 @@ const syncHovered = () => { hovered.value = rowEl.value?.matches(':hover') ?? fa
 // so :hover is gone from the row and hover-keyed effects snapped off mid-read).
 // Active rows are excluded: they already carry the stronger selected fill, and
 // layering hover gray on it reads as a flicker.
-const rowEmphasized = computed(() => !props.isActive && (hovered.value || menuOpen.value))
+const rowEmphasized = computed(() => (!props.isActive || selecting.value) && (hovered.value || menuOpen.value))
 
 const rowClass = computed(() => {
-  if (props.isActive) return ''
+  if (props.isActive && !selecting.value) return ''
   // :active fill is a SEPARATE contract from rowEmphasized, kept from the
   // pre-marquee hover:/active: pair: it gives touch users press feedback
   // (incl. the long-press that opens the context menu) where :hover never

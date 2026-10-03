@@ -31,7 +31,7 @@
     <!-- Cursor-paginated rows render as a plain list; load-more still uses a
          bottom sentinel, now observed against the shared scrollport. -->
     <div
-      v-show="!sectionCollapsed"
+      v-if="!sectionCollapsed"
       class="px-2"
     >
       <div
