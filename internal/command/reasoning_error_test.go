@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/settings"
 )
 
-func TestFriendlyCommandErrorLocalizesReasoningPolicyErrors(t *testing.T) {
+func TestFailureReplyLocalizesReasoningPolicyErrors(t *testing.T) {
 	t.Parallel()
 
 	handler := &Handler{}
@@ -23,13 +24,13 @@ func TestFriendlyCommandErrorLocalizesReasoningPolicyErrors(t *testing.T) {
 			DefaultEffort: reasoning.EffortLow,
 		},
 	}
-	if got, want := handler.friendlyCommandError(i18n.New("en"), "settings", invalid),
+	if got, want := handler.failureReply(context.Background(), i18n.New("en"), "settings", invalid),
 		`Unknown level "xhigh" — available levels: off, low, high.`; got != want {
 		t.Fatalf("invalid effort message = %q, want %q", got, want)
 	}
 
 	unavailable := errors.Join(settings.ErrReasoningOptionsUnavailable, errors.New("SECRET provider diagnostic"))
-	got := handler.friendlyCommandError(i18n.New("en"), "settings", unavailable)
+	got := handler.failureReply(context.Background(), i18n.New("en"), "settings", unavailable)
 	if want := "Reasoning isn't available right now."; got != want {
 		t.Fatalf("unavailable message = %q, want %q", got, want)
 	}
