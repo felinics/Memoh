@@ -13,6 +13,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/mcp"
 )
 
@@ -224,6 +225,20 @@ func (h *MCPHandler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// mcpProbeFailedMessage is the message a failed probe answers and stores. The
+// agent tool stores the same text for its own probes.
+const mcpProbeFailedMessage = "Connection probe failed."
+
+// probeFailureResponse answers a failed probe without the cause's text.
+func probeFailureResponse(err error) ProbeResponse {
+	return ProbeResponse{
+		Status:       "error",
+		Tools:        []mcp.ToolDescriptor{},
+		Error:        mcpProbeFailedMessage,
+		AuthRequired: errors.Is(err, errMCPUnauthorized),
+	}
+}
+
 // ProbeResponse is the response for a probe operation.
 type ProbeResponse struct {
 	Status       string               `json:"status"`
@@ -287,12 +302,14 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 
 	resp := ProbeResponse{}
 	if probeErr != nil {
-		resp.Status = "error"
-		resp.Error = probeErr.Error()
-		resp.Tools = []mcp.ToolDescriptor{}
-		authRequired := strings.Contains(probeErr.Error(), "401") || strings.Contains(strings.ToLower(probeErr.Error()), "unauthorized")
-		resp.AuthRequired = authRequired
-		_ = h.service.UpdateProbeResult(ctx, botID, id, "error", []mcp.ToolDescriptor{}, probeErr.Error())
+		// The response and the stored status carry a fixed message; this
+		// event is where the cause is kept.
+		result := errlog.Event(ctx, "mcp.probe", probeErr, errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "mcp probe failed", append([]slog.Attr{
+			slog.String("bot_id", botID), slog.String("connection_id", id), slog.String("type", conn.Type),
+		}, result.Attrs()...)...)
+		resp = probeFailureResponse(probeErr)
+		_ = h.service.UpdateProbeResult(ctx, botID, id, "error", []mcp.ToolDescriptor{}, mcpProbeFailedMessage)
 	} else {
 		resp.Status = "connected"
 		if tools == nil {

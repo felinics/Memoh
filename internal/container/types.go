@@ -12,6 +12,9 @@ var (
 	ErrAlreadyExists   = errors.New("already exists")
 	ErrConflict        = errors.New("conflict")
 	ErrRuntime         = errors.New("runtime operation failed")
+	// ErrUnavailable reports that the runtime, or a service it called, could
+	// not be reached or refused the call for now. A later attempt may succeed.
+	ErrUnavailable = errors.New("runtime unavailable")
 )
 
 func IsNotFound(err error) bool {
