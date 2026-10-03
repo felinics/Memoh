@@ -37,7 +37,7 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg channel.ChannelCo
 
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid feishu channel config").WithInternal(err)
 	}
 	if feishuCfg.InboundMode != inboundModeWebhook {
 		return echo.NewHTTPError(http.StatusBadRequest, "feishu inbound_mode is not webhook")
@@ -45,7 +45,7 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg channel.ChannelCo
 
 	payload, err := io.ReadAll(io.LimitReader(r.Body, webhookMaxBodyBytes+1))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
+		return echo.NewHTTPError(http.StatusBadRequest, "read feishu webhook body").WithInternal(err)
 	}
 	if int64(len(payload)) > webhookMaxBodyBytes {
 		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, fmt.Sprintf("payload too large: max %d bytes", webhookMaxBodyBytes))
@@ -89,12 +89,12 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg channel.ChannelCo
 func inspectWebhookRequest(ctx context.Context, eventDispatcher *dispatcher.EventDispatcher, req *http.Request, payload []byte) (larkevent.EventFuzzy, error) {
 	plainPayload, err := parseWebhookPayload(ctx, eventDispatcher, req, payload)
 	if err != nil {
-		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid feishu webhook payload: %v", err))
+		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, "invalid feishu webhook payload").WithInternal(err)
 	}
 
 	var fuzzy larkevent.EventFuzzy
 	if err := json.Unmarshal([]byte(plainPayload), &fuzzy); err != nil {
-		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("invalid feishu webhook payload: %v", err))
+		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, "invalid feishu webhook payload").WithInternal(err)
 	}
 	return fuzzy, nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/line/line-bot-sdk-go/v8/linebot/webhook"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -38,12 +39,8 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg channel.ChannelConfig, 
 	}
 	creds, err := parseConfigForUse(cfg.Credentials)
 	if err != nil {
-		a.logWarn("line webhook credentials invalid",
-			slog.String("config_id", cfg.ID),
-			slog.String("bot_id", cfg.BotID),
-			slog.String("reason", "credentials_invalid"),
-		)
-		return a.httpError(http.StatusInternalServerError, "line channel not configured")
+		return a.httpError(http.StatusInternalServerError, "line channel not configured").
+			WithInternal(errs.Wrap(err, "parse line credentials", slog.String("config_id", cfg.ID), slog.String("bot_id", cfg.BotID)))
 	}
 	var body []byte
 	if r.Body != nil {
@@ -53,12 +50,8 @@ func (a *Adapter) HandleWebhook(ctx context.Context, cfg channel.ChannelConfig, 
 			if errors.Is(err, media.ErrAssetTooLarge) {
 				return a.httpError(http.StatusRequestEntityTooLarge, "payload too large")
 			}
-			a.logWarn("line webhook body read failed",
-				slog.String("config_id", cfg.ID),
-				slog.String("bot_id", cfg.BotID),
-				slog.String("reason", "read_failed"),
-			)
-			return a.httpError(http.StatusInternalServerError, "failed to read request body")
+			return a.httpError(http.StatusInternalServerError, "failed to read request body").
+				WithInternal(errs.Wrap(err, "read line webhook body", slog.String("config_id", cfg.ID), slog.String("bot_id", cfg.BotID)))
 		}
 	}
 	if !webhook.ValidateSignature(creds.ChannelSecret, r.Header.Get("x-line-signature"), body) {

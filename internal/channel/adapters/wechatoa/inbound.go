@@ -16,6 +16,8 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Request, w http.ResponseWriter) error {
@@ -61,7 +63,7 @@ func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Reques
 func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityVerifier, mode string, cfg channel.ChannelConfig, handler channel.InboundHandler, r *http.Request, w http.ResponseWriter) error {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "read body failed")
+		return echo.NewHTTPError(http.StatusBadRequest, "read body failed").WithInternal(err)
 	}
 	defer func() { _ = r.Body.Close() }()
 
@@ -77,14 +79,18 @@ func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityV
 
 	var payload wechatEnvelope
 	if err := xml.Unmarshal([]byte(messageXML), &payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid xml payload")
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid xml payload").WithInternal(err)
 	}
 	if handler != nil {
 		msg, ok := buildInboundMessage(payload)
 		if ok {
 			msg.BotID = cfg.BotID
+			// WeChat is answered success either way, so a message that could
+			// not be queued is dropped here and this event is its record.
 			if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-				a.logger.WarnContext(ctx, "handle inbound failed", slog.Any("error", err))
+				dropped := errs.Wrap(err, "enqueue wechatoa inbound", slog.String("config_id", cfg.ID), slog.String("bot_id", cfg.BotID))
+				result := errlog.Event(ctx, "channel.wechatoa.enqueue_inbound", dropped, errlog.Options{})
+				a.logger.LogAttrs(ctx, result.Level, "wechatoa inbound dropped", result.Attrs()...)
 			}
 		}
 	}
