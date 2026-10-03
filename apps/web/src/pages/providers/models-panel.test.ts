@@ -113,6 +113,7 @@ vi.mock('@/components/add-provider/index.vue', () => ({
   },
 }))
 vi.mock('@/components/provider-icon/index.vue', () => ({ default: () => h('span') }))
+vi.mock('@/components/backend-card-grid-skeleton/index.vue', () => ({ default: () => h('div', { 'data-slot': 'skeleton' }) }))
 vi.mock('./model-setting.vue', () => ({
   default: {
     props: ['provider'],
@@ -136,21 +137,22 @@ vi.mock('./model-setting.vue', () => ({
   },
 }))
 
-let ProviderPage: Component
+let ModelsPanel: Component
 
 async function mountPage() {
   const root = document.createElement('div')
   document.body.append(root)
-  const app = createApp(ProviderPage)
+  // The container page owns the search box; the panel only receives its query.
+  const app = createApp(ModelsPanel, { searchQuery: '' })
   app.mount(root)
   await nextTick()
   return { app, root }
 }
 
-describe('provider route state', () => {
+describe('models panel route state', () => {
   beforeEach(async () => {
     vi.resetModules()
-    ProviderPage = (await import('./index.vue')).default
+    ModelsPanel = (await import('./models-panel.vue')).default
     mocks.providerData.value = [
       { id: 'provider-one', name: 'One', enable: true },
       { id: 'provider-two', name: 'Two', enable: true },

@@ -47,6 +47,19 @@ export const ComputerIcon = withUiStroke(createLucideIcon('Computer', [
   ['path', { d: 'M9 20.1h6M12 16.5v3.6' }],
 ]))
 
+// Keyboard shortcuts as "a shortcut": an arrow that goes straight there,
+// inside the same r=10 circle the settings nav's Account / Appearance / About
+// use, so the Personal group reads as one family instead of one wide keyboard.
+// The arrowhead is a touch shorter and heavier than the shaft so it reads as
+// the point of the glyph at 16px instead of a second, equal-weight corner.
+// Its stroke-width is fixed in viewBox units, so the 1.75 : 2 ratio holds at
+// every size only while callers leave absoluteStrokeWidth off (none use it).
+export const ShortcutIcon = withUiStroke(createLucideIcon('Shortcut', [
+  ['circle', { cx: '12', cy: '12', r: '10' }],
+  ['path', { d: 'M8.75 15.25 15.25 8.75' }],
+  ['path', { 'd': 'M10.5 8.75h4.75v4.75', 'stroke-width': '2' }],
+]))
+
 export const TerminalIcon = withUiStroke(Terminal)
 export const BrowserIcon = withUiStroke(Globe)
 export const SplitRightIcon = withUiStroke(Columns2)

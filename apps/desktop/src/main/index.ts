@@ -358,18 +358,26 @@ function openBotWorkspace(botId: string): void {
   dispatchRendererNavigate(window, target)
 }
 
-const SETTINGS_TRAY_ITEMS: TraySettingsItem[] = [
-  { label: 'Bots', target: '/settings/bots' },
-  { label: 'Providers', target: '/settings/providers' },
-  { label: 'Web Search', target: '/settings/web-search' },
-  { label: 'Voice', target: '/settings/voice' },
-  { label: 'Supermarket', target: '/settings/supermarket' },
-  { label: 'Usage', target: '/settings/usage' },
-  { label: 'Members', target: '/settings/people' },
-  { label: 'Appearance', target: '/settings/appearance' },
-  { label: 'Keyboard', target: '/settings/keyboard' },
-  { label: 'Profile', target: '/settings/profile' },
-  { label: 'About', target: '/settings/about' },
+// Mirrors the settings sidebar (apps/web settings-sidebar): same order, labels
+// and groups, one separator per group. Web Search / Voice / Video are tabs of
+// Providers now, so they get no entry of their own.
+const SETTINGS_TRAY_GROUPS: TraySettingsItem[][] = [
+  [
+    { label: 'Bots', target: '/settings/bots' },
+    { label: 'Providers', target: '/settings/providers' },
+    { label: 'Computers', target: '/settings/runtimes' },
+    { label: 'Supermarket', target: '/settings/supermarket' },
+  ],
+  [
+    { label: 'Members', target: '/settings/people' },
+    { label: 'Usage', target: '/settings/usage' },
+  ],
+  [
+    { label: 'Account', target: '/settings/profile' },
+    { label: 'Appearance', target: '/settings/appearance' },
+    { label: 'Keyboard Shortcuts', target: '/settings/keyboard' },
+    { label: 'About', target: '/settings/about' },
+  ],
 ]
 
 function openSettingsRoute(target?: string): void {
@@ -415,11 +423,13 @@ function buildTrayMenu(bots: TrayBot[] = []): Electron.Menu {
           label: 'All Settings',
           click: () => openSettingsRoute('/settings'),
         },
-        { type: 'separator' },
-        ...SETTINGS_TRAY_ITEMS.map((item) => ({
-          label: item.label,
-          click: () => openSettingsRoute(item.target),
-        })),
+        ...SETTINGS_TRAY_GROUPS.flatMap((group): MenuItemConstructorOptions[] => [
+          { type: 'separator' },
+          ...group.map((item) => ({
+            label: item.label,
+            click: () => openSettingsRoute(item.target),
+          })),
+        ]),
       ],
     },
     { type: 'separator' },

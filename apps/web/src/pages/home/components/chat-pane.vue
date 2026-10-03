@@ -3424,7 +3424,8 @@ function voiceFileExtension(mimeType: string): string {
 function openTranscriptionSettings() {
   const botName = currentBot.value?.name || currentBot.value?.id || currentBotId.value
   if (!botName) {
-    void router.push({ name: 'voice' })
+    // Voice is a scope of the Providers settings page now (no flat route).
+    void router.push({ name: 'providers', query: { tab: 'voice' } })
     return
   }
   void router.push({
