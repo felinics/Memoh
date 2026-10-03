@@ -19,10 +19,10 @@
         <AlertDescription>{{ loadError }}</AlertDescription>
       </Alert>
 
-      <section class="space-y-2.5">
-        <h2 class="px-2 text-label font-medium text-muted-foreground">
-          {{ membersTitle }}
-        </h2>
+      <SectionGroup
+        :title="membersTitle"
+        tone="muted"
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -148,7 +148,7 @@
             </TableRow>
           </TableBody>
         </Table>
-      </section>
+      </SectionGroup>
     </div>
 
     <Dialog v-model:open="createDialogOpen">
@@ -279,7 +279,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ConfirmPopover, FieldStack, FormStack, PageShell, toast } from '@felinic/ui'
+import { ConfirmPopover, FieldStack, FormStack, PageShell, toast, SectionGroup } from '@felinic/ui'
 import { Trash2, UserPlus } from 'lucide-vue-next'
 import {
   Alert,
