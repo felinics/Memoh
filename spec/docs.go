@@ -4519,7 +4519,7 @@ const docTemplate = `{
         },
         "/bots/{bot_id}/container/fs/mkdir": {
             "post": {
-                "description": "Creates a directory (and parents) at the given workspace path",
+                "description": "Creates a directory (and parents) at the given workspace path. workspace_target_id selects an explicit target; when omitted, the Bot's Primary target is used.",
                 "tags": [
                     "containerd"
                 ],
@@ -4557,6 +4557,12 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/apperror.Problem"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/apperror.Problem"
                         }
@@ -22343,6 +22349,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "path": {
+                    "type": "string"
+                },
+                "workspace_target_id": {
+                    "description": "WorkspaceTargetID overrides the Bot's Primary target for this request.",
                     "type": "string"
                 }
             }

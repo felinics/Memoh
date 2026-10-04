@@ -2098,6 +2098,10 @@ export type HandlersFsListResponse = {
 
 export type HandlersFsMkdirRequest = {
     path?: string;
+    /**
+     * WorkspaceTargetID overrides the Bot's Primary target for this request.
+     */
+    workspace_target_id?: string;
 };
 
 export type HandlersFsReadResponse = {
@@ -7937,6 +7941,10 @@ export type PostBotsByBotIdContainerFsMkdirErrors = {
      * Forbidden
      */
     403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */

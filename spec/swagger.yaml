@@ -3711,6 +3711,10 @@ definitions:
     properties:
       path:
         type: string
+      workspace_target_id:
+        description: WorkspaceTargetID overrides the Bot's Primary target for this
+          request.
+        type: string
     type: object
   handlers.FSReadResponse:
     properties:
@@ -10243,7 +10247,9 @@ paths:
       - containerd
   /bots/{bot_id}/container/fs/mkdir:
     post:
-      description: Creates a directory (and parents) at the given workspace path
+      description: Creates a directory (and parents) at the given workspace path.
+        workspace_target_id selects an explicit target; when omitted, the Bot's Primary
+        target is used.
       parameters:
       - description: Bot ID
         in: path
@@ -10267,6 +10273,10 @@ paths:
             $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
           schema:
             $ref: '#/definitions/apperror.Problem'
         "500":

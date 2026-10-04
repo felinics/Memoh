@@ -205,24 +205,28 @@ const canSubmit = computed(() => {
 
 async function handleCreate() {
   if (!canSubmit.value || creating.value) return
+  // Both requests belong to the same submission, even if the form or bot
+  // changes while directory creation is in flight.
+  const botId = props.botId
+  const native = targetIsNative.value
+  const input = {
+    name: name.value.trim(),
+    path: native ? nativeTargetPath.value : remotePath.value.trim(),
+    workspaceTargetId: targetId.value,
+  }
   creating.value = true
   try {
-    const path = targetIsNative.value ? nativeTargetPath.value : remotePath.value.trim()
     // Mkdir is MkdirAll server-side, so an existing directory is a no-op and
     // the workdir binds to it unchanged.
-    if (targetIsNative.value) {
+    if (native) {
       await postBotsByBotIdContainerFsMkdir({
-        path: { bot_id: props.botId },
-        body: { path },
+        path: { bot_id: botId },
+        body: { path: input.path, workspace_target_id: input.workspaceTargetId },
         throwOnError: true,
       })
     }
-    await createWorkdir(props.botId, {
-      name: name.value.trim(),
-      path,
-      workspaceTargetId: targetId.value,
-    })
-    await workdirsStore.refreshWorkdirs(props.botId)
+    await createWorkdir(botId, input)
+    await workdirsStore.refreshWorkdirs(botId)
     open.value = false
     toast.success(t('bots.folders.created'))
     emit('created')

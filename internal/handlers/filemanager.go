@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -62,6 +63,8 @@ type FSWriteRequest struct {
 // FSMkdirRequest is the body for creating a directory.
 type FSMkdirRequest struct {
 	Path string `json:"path"`
+	// WorkspaceTargetID overrides the Bot's Primary target for this request.
+	WorkspaceTargetID string `json:"workspace_target_id,omitempty"`
 }
 
 // FSDeleteRequest is the body for deleting a file or directory.
@@ -764,13 +767,14 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 
 // FSMkdir godoc
 // @Summary Create a directory
-// @Description Creates a directory (and parents) at the given workspace path
+// @Description Creates a directory (and parents) at the given workspace path. workspace_target_id selects an explicit target; when omitted, the Bot's Primary target is used.
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSMkdirRequest true "Mkdir request"
 // @Success 200 {object} fsOpResponse
 // @Failure 400 {object} apperror.Problem
 // @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/fs/mkdir [post].
@@ -793,8 +797,15 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
+	targetID := strings.TrimSpace(req.WorkspaceTargetID)
+	if targetID != "" {
+		ctx = bridge.WithWorkspaceTarget(ctx, targetID)
+	}
 	client, err := h.getGRPCClient(ctx, botID)
 	if err != nil {
+		if targetID != "" && errors.Is(err, workspace.ErrWorkspaceTargetNotFound) {
+			return workspaceTargetHTTPError(err)
+		}
 		return workspaceUnavailableError(err)
 	}
 

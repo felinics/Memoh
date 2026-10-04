@@ -1342,7 +1342,7 @@ export const getBotsByBotIdContainerFsListQuery = defineQueryOptions<Options<Get
 /**
  * Create a directory
  *
- * Creates a directory (and parents) at the given workspace path
+ * Creates a directory (and parents) at the given workspace path. workspace_target_id selects an explicit target; when omitted, the Bot's Primary target is used.
  */
 export const postBotsByBotIdContainerFsMkdirMutation = (options?: Partial<Options<PostBotsByBotIdContainerFsMkdirData>>): UseMutationOptions<PostBotsByBotIdContainerFsMkdirResponse, Options<PostBotsByBotIdContainerFsMkdirData>, PostBotsByBotIdContainerFsMkdirError> => ({
     mutation: async (vars) => {

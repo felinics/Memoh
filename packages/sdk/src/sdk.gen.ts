@@ -776,7 +776,7 @@ export const getBotsByBotIdContainerFsList = <ThrowOnError extends boolean = fal
 /**
  * Create a directory
  *
- * Creates a directory (and parents) at the given workspace path
+ * Creates a directory (and parents) at the given workspace path. workspace_target_id selects an explicit target; when omitted, the Bot's Primary target is used.
  */
 export const postBotsByBotIdContainerFsMkdir = <ThrowOnError extends boolean = false>(options: Options<PostBotsByBotIdContainerFsMkdirData, ThrowOnError>): RequestResult<PostBotsByBotIdContainerFsMkdirResponses, PostBotsByBotIdContainerFsMkdirErrors, ThrowOnError> => (options.client ?? client).post<PostBotsByBotIdContainerFsMkdirResponses, PostBotsByBotIdContainerFsMkdirErrors, ThrowOnError>({
     url: '/bots/{bot_id}/container/fs/mkdir',
