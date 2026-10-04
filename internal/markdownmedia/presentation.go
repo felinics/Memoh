@@ -16,6 +16,10 @@ type presentationEdit struct {
 // Visit emits ordered prose and archived references. Reference definitions are
 // expanded before splitting, since individual IM messages cannot share them.
 func Visit(source string, bindings []Binding, prose func(string), media func(Binding)) {
+	visit(source, bindings, prose, media, false)
+}
+
+func visit(source string, bindings []Binding, prose func(string), media func(Binding), preserveMediaLinks bool) {
 	if len(bindings) == 0 {
 		prose(source)
 		return
@@ -47,6 +51,26 @@ func Visit(source string, bindings []Binding, prose func(string), media func(Bin
 		}
 		label := strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]").Replace(nodeLabel(n, data))
 		target := strings.NewReplacer("<", "%3C", ">", "%3E").Replace(string(link.Destination))
+		containsMedia := false
+		for _, binding := range bindings {
+			if binding.Start > start.(int) && binding.End < end.(int) {
+				containsMedia = true
+				break
+			}
+		}
+		if containsMedia {
+			// A Web image can retain its enclosing link. Separate IM messages
+			// cannot, so deliver the image followed by a standalone link.
+			labelEnd, _ := n.AttributeString("media-label-end")
+			if preserveMediaLinks {
+				edits = append(edits, presentationEdit{start: labelEnd.(int), end: end.(int), text: "](<" + target + ">)"})
+			} else {
+				edits = append(edits,
+					presentationEdit{start: start.(int), end: start.(int) + 1},
+					presentationEdit{start: labelEnd.(int), end: end.(int), text: " [" + label + "](<" + target + ">)"})
+			}
+			return ast.WalkSkipChildren, nil
+		}
 		edits = append(edits, presentationEdit{start: start.(int), end: end.(int), text: "[" + label + "](<" + target + ">)"})
 		return ast.WalkSkipChildren, nil
 	})

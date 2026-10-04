@@ -47,3 +47,41 @@ func TestPresentationExpandsSharedDefinitionsBeforeSplitting(t *testing.T) {
 		t.Fatalf("presentation=%q", got)
 	}
 }
+
+func TestLinkedImagePreservesArchivedImageAndDestination(t *testing.T) {
+	source := "before [![preview](/data/a.png)](https://example.com) after"
+	refs := Parse(source)
+	if len(refs) != 1 {
+		t.Fatalf("refs=%+v", refs)
+	}
+	bindings := []Binding{{Reference: refs[0]}}
+	rendered := Render(source, bindings, func(Binding) string { return "![preview](/archived/image)" })
+	if rendered != "before [![preview](/archived/image)](<https://example.com>) after" {
+		t.Fatalf("rendered=%q", rendered)
+	}
+	var prose strings.Builder
+	mediaCount := 0
+	Visit(source, bindings, func(text string) { prose.WriteString(text) }, func(Binding) { mediaCount++ })
+	if mediaCount != 1 || prose.String() != "before  [preview](<https://example.com>) after" {
+		t.Fatalf("media=%d prose=%q", mediaCount, prose.String())
+	}
+}
+
+func TestReferenceLinkContainingImageRetainsLabelAndDestination(t *testing.T) {
+	source := "before [**open** ![preview](/data/a.png) here][site] after\n\n[site]: https://example.com\n"
+	refs := Parse(source)
+	if len(refs) != 1 {
+		t.Fatalf("refs=%+v", refs)
+	}
+	bindings := []Binding{{Reference: refs[0]}}
+	rendered := Render(source, bindings, func(Binding) string { return "![preview](/archived/image)" })
+	if !strings.Contains(rendered, "[**open** ![preview](/archived/image) here](<https://example.com>)") || strings.Contains(rendered, "[site]") || strings.Contains(rendered, "/data/") {
+		t.Fatalf("rendered=%q", rendered)
+	}
+	var prose strings.Builder
+	images := 0
+	Visit(source, bindings, func(text string) { prose.WriteString(text) }, func(Binding) { images++ })
+	if images != 1 || !strings.Contains(prose.String(), "before **open** ") || !strings.Contains(prose.String(), " here [open preview here](<https://example.com>) after") {
+		t.Fatalf("images=%d prose=%q", images, prose.String())
+	}
+}

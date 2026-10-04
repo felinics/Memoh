@@ -309,7 +309,16 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 			modelMessage := decodePersistedModelMessage(raw)
 			toolCalls := extractPersistedToolCalls(&modelMessage)
 			text := extractPersistedMessageText(raw, &modelMessage)
-			text = markdownmedia.Render(text, markdownmedia.Bindings(raw.Metadata), func(b markdownmedia.Binding) string {
+			bindings := markdownmedia.Bindings(raw.Metadata)
+			if len(bindings) > 0 {
+				// Binding offsets belong to the publication source, before tag
+				// removal or whitespace normalization changes its byte positions.
+				text, _ = raw.Metadata["markdown_media_source"].(string)
+				if text == "" {
+					text = modelMessage.textContent()
+				}
+			}
+			text = markdownmedia.Render(text, bindings, func(b markdownmedia.Binding) string {
 				label := strings.NewReplacer("[", "\\[", "]", "\\]").Replace(b.Label)
 				target := markdownmedia.AssetURL(b)
 				if b.ErrorCode != "" {
@@ -321,6 +330,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 				}
 				return prefix + "[" + label + "](" + target + ")"
 			})
+			text = strings.TrimSpace(stripPersistedAgentTags(text))
 			reasonings := extractPersistedReasoning(&modelMessage)
 			attachments := uiAttachmentsFromMessageAssets(raw)
 

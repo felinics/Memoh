@@ -66,11 +66,13 @@ func storedText(raw json.RawMessage) string {
 	}
 	var parts []json.RawMessage
 	if json.Unmarshal(raw, &parts) == nil {
-		var result strings.Builder
+		var texts []string
 		for _, part := range parts {
-			result.WriteString(storedText(part))
+			if text := strings.TrimSpace(storedText(part)); text != "" {
+				texts = append(texts, text)
+			}
 		}
-		return result.String()
+		return strings.Join(texts, "\n")
 	}
 	var node struct {
 		Type    string          `json:"type"`

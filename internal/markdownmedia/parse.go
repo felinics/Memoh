@@ -118,6 +118,7 @@ func (p *positionedLinks) Parse(parent ast.Node, reader text.Reader, pc parser.C
 	n := p.InlineParser.Parse(parent, reader, pc)
 	if n != nil {
 		n.SetAttributeString("media-start", start)
+		n.SetAttributeString("media-label-end", pos.Start)
 		_, end := reader.Position()
 		n.SetAttributeString("media-end", end.Start)
 	}

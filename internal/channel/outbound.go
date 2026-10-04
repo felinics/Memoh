@@ -208,30 +208,7 @@ func buildOutboundMessages(msg OutboundMessage, policy OutboundPolicy) ([]Outbou
 
 func buildOutboundMessagesWithCaps(msg OutboundMessage, policy OutboundPolicy, caps ChannelCapabilities, hasCaps bool) ([]OutboundMessage, error) {
 	if parts, expanded := expandMarkdownMessage(msg); expanded {
-		var result []OutboundMessage
-		for _, part := range parts {
-			if hasCaps && len(part.Message.Attachments) > 0 {
-				if !caps.Attachments {
-					locale, _ := part.Message.Metadata["locale"].(string)
-					part.Message.Text = i18n.New(locale).T("media.reference_unavailable")
-					part.Message.Attachments = nil
-				} else if !caps.Media {
-					for i := range part.Message.Attachments {
-						part.Message.Attachments[i].Type = AttachmentFile
-						if part.Message.Attachments[i].Metadata == nil {
-							part.Message.Attachments[i].Metadata = map[string]any{}
-						}
-						part.Message.Attachments[i].Metadata["send_as_file"] = true
-					}
-				}
-			}
-			chunks, err := buildOutboundMessagesWithCaps(part, policy, caps, hasCaps)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, chunks...)
-		}
-		return result, nil
+		return buildExpandedMarkdownMessages(parts, policy, caps, hasCaps)
 	}
 
 	if msg.Message.IsEmpty() {
@@ -326,6 +303,36 @@ func buildOutboundMessagesWithCaps(msg OutboundMessage, policy OutboundPolicy, c
 		return append(textMessages, attachmentMessages...), nil
 	}
 	return append(attachmentMessages, textMessages...), nil
+}
+
+func buildExpandedMarkdownMessages(parts []OutboundMessage, policy OutboundPolicy, caps ChannelCapabilities, hasCaps bool) ([]OutboundMessage, error) {
+	var result []OutboundMessage
+	for _, part := range parts {
+		if part.Message.IsEmpty() {
+			continue
+		}
+		if hasCaps && len(part.Message.Attachments) > 0 {
+			if !caps.Attachments {
+				locale, _ := part.Message.Metadata["locale"].(string)
+				part.Message.Text = i18n.New(locale).T("media.reference_unavailable")
+				part.Message.Attachments = nil
+			} else if !caps.Media {
+				for i := range part.Message.Attachments {
+					part.Message.Attachments[i].Type = AttachmentFile
+					if part.Message.Attachments[i].Metadata == nil {
+						part.Message.Attachments[i].Metadata = map[string]any{}
+					}
+					part.Message.Attachments[i].Metadata["send_as_file"] = true
+				}
+			}
+		}
+		chunks, err := buildOutboundMessagesWithCaps(part, policy, caps, hasCaps)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, chunks...)
+	}
+	return result, nil
 }
 
 func coerceOversizedRichPartsForChunking(msg Message, policy OutboundPolicy, caps ChannelCapabilities) Message {
@@ -809,6 +816,7 @@ type managerOutboundStream struct {
 	reopen              func(ctx context.Context) (PreparedOutboundStream, error)
 	deltaRunes          int
 	deltaText           strings.Builder
+	forwardedText       strings.Builder
 	splitCount          int
 	markdownText        strings.Builder
 	markdownPending     bool
@@ -817,7 +825,14 @@ type managerOutboundStream struct {
 	markdownFinalNext   int
 }
 
-func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) error {
+func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) (err error) {
+	defer func() {
+		if event.Type == StreamEventFinal && err == nil {
+			s.forwardedText.Reset()
+			s.markdownText.Reset()
+			s.markdownPending = false
+		}
+	}()
 	if s.manager == nil || s.stream == nil {
 		return errors.New("stream is not configured")
 	}
@@ -861,7 +876,7 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 		final.Message = resolveMarkdownMessage(ctx, s.manager.attachmentStore, s.config, final.Message)
 		if len(markdownmedia.Bindings(final.Message.Metadata)) > 0 && s.send != nil {
 			caps, hasCaps := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target)
-			parts, err := buildOutboundMessagesWithCaps(OutboundMessage{Target: s.target, Message: final.Message}, s.policy, caps, hasCaps)
+			parts, err := s.prepareMarkdownFinal(final.Message, caps, hasCaps)
 			if err != nil {
 				return err
 			}
@@ -965,6 +980,14 @@ const streamSplitSoftRatio = 4
 // the soft and hard limits it looks for natural break points (sentence ends,
 // line breaks) so messages don't get cut mid-sentence.
 func (s *managerOutboundStream) pushDelta(ctx context.Context, event StreamEvent) error {
+	if err := s.pushDeltaWithChunking(ctx, event); err != nil {
+		return err
+	}
+	s.forwardedText.WriteString(event.Delta)
+	return nil
+}
+
+func (s *managerOutboundStream) pushDeltaWithChunking(ctx context.Context, event StreamEvent) error {
 	policy := s.policy
 	if policy.TextChunkLimit <= 0 || s.reopen == nil {
 		s.deltaRunes += runeLen(event.Delta)
@@ -1352,6 +1375,29 @@ func sleepWithContext(ctx context.Context, d time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+func (s *managerOutboundStream) prepareMarkdownFinal(msg Message, caps ChannelCapabilities, hasCaps bool) ([]OutboundMessage, error) {
+	outbound := OutboundMessage{Target: s.target, Message: msg}
+	if s.splitCount == 0 {
+		return buildOutboundMessagesWithCaps(outbound, s.policy, caps, hasCaps)
+	}
+	expanded, _ := expandMarkdownMessage(outbound)
+	if len(expanded) == 0 || len(expanded[0].Message.Attachments) > 0 {
+		return buildOutboundMessagesWithCaps(outbound, s.policy, caps, hasCaps)
+	}
+	// Finalize the adapter's buffer, then send only prose that was withheld
+	// while waiting for a complete reference. Do this before ordinary chunking
+	// so already streamed prose cannot reappear in later chunks.
+	buffer := expanded[0]
+	buffer.Message.Text = ""
+	buffer.Message.Actions = nil
+	expanded[0].Message.Text = strings.TrimPrefix(expanded[0].Message.Text, s.forwardedText.String())
+	parts, err := buildExpandedMarkdownMessages(expanded, s.policy, caps, hasCaps)
+	if err != nil {
+		return nil, err
+	}
+	return append([]OutboundMessage{buffer}, parts...), nil
 }
 
 // Keep progress across a retried final event so already acknowledged parts are

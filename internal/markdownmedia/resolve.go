@@ -156,7 +156,7 @@ func Bindings(metadata map[string]any) []Binding {
 // Render replaces only validated source ranges, preserving all other Markdown.
 func Render(source string, bindings []Binding, replace func(Binding) string) string {
 	var out strings.Builder
-	Visit(source, bindings, func(value string) { out.WriteString(value) }, func(b Binding) { out.WriteString(replace(b)) })
+	visit(source, bindings, func(value string) { out.WriteString(value) }, func(b Binding) { out.WriteString(replace(b)) }, true)
 	return out.String()
 }
 

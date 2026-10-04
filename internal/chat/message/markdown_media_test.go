@@ -46,3 +46,18 @@ func TestPrivateAndInterruptedTextDoesNotArchive(t *testing.T) {
 		_ = s.prepareMarkdownMedia(context.Background(), input)
 	}
 }
+
+func TestMarkdownPublicationJoinsVisibleTextParts(t *testing.T) {
+	source := "Introduction\n[report](/data/report.txt)"
+	s := &DBService{resolveMarkdownMedia: func(_ context.Context, botID, text string) []markdownmedia.Binding {
+		if text != source {
+			t.Fatalf("source=%q", text)
+		}
+		return []markdownmedia.Binding{{Reference: markdownmedia.Parse(text)[0], Asset: media.Asset{BotID: botID, ContentHash: "hash"}}}
+	}}
+	input := PersistInput{BotID: "bot", Role: "assistant", SessionMode: "chat", Content: json.RawMessage(`{"role":"assistant","content":[{"type":"text","text":" Introduction "},{"type":"reasoning","text":"private"},{"type":"text","text":"[report](/data/report.txt)"}]}`)}
+	prepared := s.prepareMarkdownMedia(context.Background(), input)
+	if prepared.Metadata["markdown_media_source"] != source || len(prepared.Assets) != 1 {
+		t.Fatalf("prepared=%+v", prepared)
+	}
+}

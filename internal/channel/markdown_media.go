@@ -53,7 +53,11 @@ func expandMarkdownMessage(msg OutboundMessage) ([]OutboundMessage, bool) {
 		part.Text = value
 		result = append(result, OutboundMessage{Target: msg.Target, Message: part})
 	}
-	seen := map[string]bool{}
+	type deliveryKey struct {
+		hash  string
+		image bool
+	}
+	seen := map[deliveryKey]bool{}
 	markdownmedia.Visit(msg.Message.Text, bindings, appendText, func(binding markdownmedia.Binding) {
 		if binding.ErrorCode != "" {
 			locale, _ := base.Metadata["locale"].(string)
@@ -61,10 +65,11 @@ func expandMarkdownMessage(msg OutboundMessage) ([]OutboundMessage, bool) {
 			return
 		}
 		asset := binding.Asset
-		if seen[asset.ContentHash] {
+		key := deliveryKey{hash: asset.ContentHash, image: binding.Image}
+		if seen[key] {
 			return
 		}
-		seen[asset.ContentHash] = true
+		seen[key] = true
 		kind := AttachmentFile
 		if binding.Image {
 			kind = AttachmentImage
