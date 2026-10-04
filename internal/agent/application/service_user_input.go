@@ -353,6 +353,10 @@ func (s *Service) storeUserInputResultAndContinue(
 	if err != nil {
 		return err
 	}
+	requestMessageID, err := s.continuationTurnRequestMessageID(ctx, req.SessionID, runHandle)
+	if err != nil {
+		return err
+	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeReq := ChatRequest{
 		RunID:                   runID,
@@ -364,9 +368,10 @@ func (s *Service) storeUserInputResultAndContinue(
 		ReplyTarget:             req.ReplyTarget,
 		ConversationType:        req.ConversationType,
 		UserMessagePersisted:    true,
+		PersistedUserMessageID:  requestMessageID,
 		// This write contains only the ask_user tool result. There is no new
-		// user history message to extract, so memory work must not attempt to
-		// resolve an empty PersistedUserMessageID.
+		// user history message to extract, so memory work must not schedule a
+		// second user-message extraction.
 		SkipMemoryExtraction: true,
 		WorkspaceTargetID:    req.WorkspaceTargetID,
 		WorkspaceTarget:      target,
@@ -401,6 +406,10 @@ func (s *Service) continueUserInputSession(
 		return err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
+	requestMessageID, err := s.continuationTurnRequestMessageID(ctx, req.SessionID, runHandle)
+	if err != nil {
+		return err
+	}
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
@@ -424,9 +433,10 @@ func (s *Service) continueUserInputSession(
 		ReplyTarget:             req.ReplyTarget,
 		ConversationType:        req.ConversationType,
 		UserMessagePersisted:    true,
+		PersistedUserMessageID:  requestMessageID,
 		// The user's answer is already represented by the persisted tool
 		// result above; the resumed invocation must not schedule a second
-		// user-message memory extraction with an empty message id.
+		// user-message memory extraction.
 		SkipMemoryExtraction: true,
 		WorkspaceTargetID:    req.WorkspaceTargetID,
 		WorkspaceTarget:      workspaceTargetFromRunConfig(resolved.RunConfig),

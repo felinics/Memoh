@@ -1376,6 +1376,25 @@ func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID stri
 	return msgs, nil
 }
 
+func (s *DBService) GetVisibleHistoryTurnRequestMessageIDByTurn(ctx context.Context, sessionID string, turnID string) (string, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return "", err
+	}
+	pgTurnID, err := dbpkg.ParseUUID(turnID)
+	if err != nil {
+		return "", err
+	}
+	turn, err := s.queries.GetHistoryTurnByID(ctx, sqlc.GetHistoryTurnByIDParams{
+		SessionID: pgSessionID,
+		OldTurnID: pgTurnID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return uuidString(turn.RequestMessageID), nil
+}
+
 func (s *DBService) GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {

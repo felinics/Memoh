@@ -421,6 +421,10 @@ func (s *Service) storeToolResultAndContinue(
 	if err != nil {
 		return err
 	}
+	requestMessageID, err := s.continuationTurnRequestMessageID(ctx, approval.SessionID, runHandle)
+	if err != nil {
+		return err
+	}
 	modelMessages := sdkMessagesToModelMessages([]sdk.Message{sdk.ToolMessage(result)})
 	storeOpts := storeRoundOptions{AllowPendingToolCalls: true}
 	// UI-only payloads stripped from the tool output (e.g. the edit diff) ride
@@ -438,6 +442,7 @@ func (s *Service) storeToolResultAndContinue(
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+		PersistedUserMessageID:  requestMessageID,
 		WorkspaceTargetID:       approval.WorkspaceTargetID,
 	}
 	storeReq.WorkspaceTarget = target
@@ -471,6 +476,10 @@ func (s *Service) continueToolApprovalSession(
 		return err
 	}
 	resolved.RunConfig.RunID = runIDForChatRequest(runID)
+	requestMessageID, err := s.continuationTurnRequestMessageID(ctx, approval.SessionID, runHandle)
+	if err != nil {
+		return err
+	}
 
 	cfg, err := s.prepareContinuationRunConfig(
 		ctx,
@@ -494,6 +503,7 @@ func (s *Service) continueToolApprovalSession(
 		ReplyTarget:             approval.ReplyTarget,
 		ConversationType:        approval.ConversationType,
 		UserMessagePersisted:    true,
+		PersistedUserMessageID:  requestMessageID,
 		WorkspaceTargetID:       approval.WorkspaceTargetID,
 		WorkspaceTarget:         workspaceTargetFromRunConfig(resolved.RunConfig),
 	}
