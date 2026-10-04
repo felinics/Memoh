@@ -302,6 +302,20 @@ docker compose up -d        # Start all services
 Production deploy services are `postgres`, `pgvector`, `migrate`, `server`, `channel`, and `web`.
 Optional profile: `webhook-tunnel` (cloudflared for channels behind NAT). Desktop connects to Memoh Cloud or this hosted server instead of running its own server.
 
+### Uploading PR Screenshots
+
+- **Always upload screenshots with GitHub CLI `--attach`. Never manually upload them through the GitHub website, and never add or commit screenshot files to the repository to host PR evidence.** Keep captures outside the checkout and attach them directly to the relevant PR.
+- Use a current official `gh` release that supports `--attach`. If the installed version does not expose it in `gh pr edit --help`, update GitHub CLI; do not fall back to browser uploads or repository files.
+- To supplement an existing PR without replacing its body, run:
+
+  ```bash
+  gh pr edit <pr-number> --repo <owner/repo> \
+    --attach '/absolute/path/screenshot.jpg#What this screenshot demonstrates'
+  ```
+
+- Repeat `--attach` for multiple images. When updating the description with `--body-file`, preserve its existing content and required template sections. Markdown references to the attached local files are rewritten to GitHub attachment URLs. A PR comment can use the same upload flow with `gh pr comment <pr-number> --body-file <file> --attach <image>`.
+- After uploading, read the PR body or comment back with `gh`, confirm every image uses a GitHub attachment URL rather than a local path, and verify that the attachments load. Explain what each screenshot demonstrates and keep Agent verification separate from Human QA.
+
 ### Pull Request QA Status
 
 Most PR descriptions in this repository are written by AI agents, and an agent must never silently stand in for human verification. Every PR body must disclose its QA state:
