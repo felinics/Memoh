@@ -40,42 +40,12 @@ func (m *Manager) recoverWaitingDecision(ctx context.Context, candidate LeaseCan
 		}
 		return false, err
 	}
-	if run.State != ledger.StateWaitingDecision {
+	if run.State != ledger.StateWaitingDecision || !run.AbortRequestedAt.IsZero() {
 		return false, nil
 	}
-	targets, err := decisions.PendingRuntimeDecisions(ctx, run.RunID)
-	if err != nil {
+	preserved, err := pendingRecoverableDecisions(ctx, decisions, run)
+	if err != nil || len(preserved) == 0 {
 		return false, err
-	}
-	if len(targets) == 0 {
-		return false, nil
-	}
-	// Only a native parked run is worth reclaiming: its decision
-	// continuation is rebuilt from the database by the answering pipeline.
-	// An inline waiter run (codex, claude, ACP gateway tools) blocked its
-	// turn inside the dead owner's process; preserving its decisions would
-	// fake a resumable run whose answers have nowhere to go. Declining here
-	// lets the reaper's default path mark the run lost — answers then land
-	// on the honest CanRespond=false cancellation.
-	for _, target := range targets {
-		if target.InlineDecision || runtimekind.UsesDecisionWaiter(target.SessionRuntime) {
-			return false, nil
-		}
-	}
-	preserved := make([]runtimefence.PreservedDecision, 0, len(targets))
-	for i, target := range targets {
-		target = target.normalized()
-		targets[i] = target
-		if !target.runtimeOwned() || target.RunID != run.RunID || target.TurnID != run.TurnID ||
-			target.BotID != run.BotID || target.SessionID != run.SessionID ||
-			target.FencingToken != run.FencingToken {
-			return false, ErrCommandTargetMismatch
-		}
-		decisionKind, kindErr := recoveryDecisionKind(target.Type)
-		if kindErr != nil {
-			return false, kindErr
-		}
-		preserved = append(preserved, runtimefence.PreservedDecision{Kind: decisionKind, ID: target.ID})
 	}
 
 	ref, live, err := m.distributed.LoadRunRef(ctx, Key{BotID: run.BotID, SessionID: run.SessionID}, run.RunID)
@@ -123,6 +93,47 @@ func (m *Manager) recoverWaitingDecision(ctx context.Context, candidate LeaseCan
 		return false, err
 	}
 	return true, nil
+}
+
+// pendingRecoverableDecisions is shared by graceful handoff and lease recovery
+// so shutdown cannot preserve a decision that a successor cannot continue.
+func pendingRecoverableDecisions(ctx context.Context, decisions DecisionStore, run ledger.Run) ([]runtimefence.PreservedDecision, error) {
+	targets, err := decisions.PendingRuntimeDecisions(ctx, run.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	// Only a native parked run is worth reclaiming: its decision
+	// continuation is rebuilt from the database by the answering pipeline.
+	// An inline waiter run (codex, claude, ACP gateway tools) blocked its
+	// turn inside the dead owner's process; preserving its decisions would
+	// fake a resumable run whose answers have nowhere to go. Declining here
+	// lets the reaper's default path mark the run lost — answers then land
+	// on the honest CanRespond=false cancellation.
+	for _, target := range targets {
+		if target.InlineDecision || runtimekind.UsesDecisionWaiter(target.SessionRuntime) {
+			return nil, nil
+		}
+	}
+	preserved := make([]runtimefence.PreservedDecision, 0, len(targets))
+	for i, target := range targets {
+		target = target.normalized()
+		targets[i] = target
+		if !target.runtimeOwned() || target.RunID != run.RunID || target.TurnID != run.TurnID ||
+			target.BotID != run.BotID || target.SessionID != run.SessionID ||
+			target.FencingToken != run.FencingToken {
+			return nil, ErrCommandTargetMismatch
+		}
+		decisionKind, kindErr := recoveryDecisionKind(target.Type)
+		if kindErr != nil {
+			return nil, kindErr
+		}
+		preserved = append(preserved, runtimefence.PreservedDecision{Kind: decisionKind, ID: target.ID})
+	}
+
+	return preserved, nil
 }
 
 func recoveryDecisionKind(commandType string) (string, error) {

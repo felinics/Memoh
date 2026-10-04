@@ -122,6 +122,9 @@ type runControl struct {
 	decisionMu        sync.Mutex
 	decisionReady     chan struct{}
 	decisionReadyOnce sync.Once
+
+	// Registered before a decision commits; drained when shutdown classifies waits.
+	decisionContinuations atomic.Int64
 	// stepMu guards the step cursor: the highest durable step index whose
 	// step_end marker this run has consumed into the live projection. Queue
 	// steer anchoring waits on it so the anchor never precedes output that the
@@ -872,7 +875,7 @@ func (m *Manager) CloseContext(ctx context.Context) error {
 		return nil
 	}
 	if m.closeCh != nil {
-		m.closeOnce.Do(func() { close(m.closeCh) })
+		m.closeAdmission()
 	}
 	shutdownCtx := context.WithoutCancel(ctx)
 	m.shutdownOnce.Do(func() {
@@ -1362,6 +1365,9 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 		return TerminalRun{}, ErrRunOwnershipLost
 	}
 	ctrl := m.localControlForHandle(handle)
+	if ctrl == nil && m.isClosed() {
+		return TerminalRun{}, ErrRunOwnershipLost
+	}
 	if ctrl != nil && handle.FencingToken <= 0 {
 		handle.FencingToken = ctrl.fencingToken
 	}

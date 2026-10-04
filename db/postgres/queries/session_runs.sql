@@ -185,6 +185,7 @@ SET owner_id = sqlc.arg(owner_id),
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND state = 'waiting_decision'
+  AND abort_requested_at IS NULL
   AND fencing_token = sqlc.arg(previous_fencing_token)
   AND fencing_token < sqlc.arg(new_fencing_token)
 RETURNING *;
@@ -224,6 +225,7 @@ WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND fencing_token = sqlc.arg(fencing_token)
   AND state IN ('accepted', 'running', 'waiting_decision', 'finishing')
+  AND (sqlc.narg(expected_state)::text IS NULL OR state = sqlc.narg(expected_state)::text)
 RETURNING *;
 
 -- name: PrepareSessionRunFinish :one

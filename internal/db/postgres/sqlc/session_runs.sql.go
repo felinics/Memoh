@@ -248,15 +248,17 @@ WHERE team_id = public.memoh_current_team_id()
   AND run_id = $4
   AND fencing_token = $5
   AND state IN ('accepted', 'running', 'waiting_decision', 'finishing')
+  AND ($6::text IS NULL OR state = $6::text)
 RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
 `
 
 type FinalizeSessionRunParams struct {
-	State        string      `json:"state"`
-	ErrorCode    pgtype.Text `json:"error_code"`
-	ErrorMessage pgtype.Text `json:"error_message"`
-	RunID        pgtype.UUID `json:"run_id"`
-	FencingToken int64       `json:"fencing_token"`
+	State         string      `json:"state"`
+	ErrorCode     pgtype.Text `json:"error_code"`
+	ErrorMessage  pgtype.Text `json:"error_message"`
+	RunID         pgtype.UUID `json:"run_id"`
+	FencingToken  int64       `json:"fencing_token"`
+	ExpectedState pgtype.Text `json:"expected_state"`
 }
 
 // Fenced idempotent terminal write, shared by the owner (completed / aborted /
@@ -269,6 +271,7 @@ func (q *Queries) FinalizeSessionRun(ctx context.Context, arg FinalizeSessionRun
 		arg.ErrorMessage,
 		arg.RunID,
 		arg.FencingToken,
+		arg.ExpectedState,
 	)
 	var i SessionRun
 	err := row.Scan(
@@ -952,6 +955,7 @@ SET owner_id = $1,
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = $4
   AND state = 'waiting_decision'
+  AND abort_requested_at IS NULL
   AND fencing_token = $5
   AND fencing_token < $2
 RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at

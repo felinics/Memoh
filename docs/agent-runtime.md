@@ -164,8 +164,48 @@ Server shutdown closes admission and records `session_runtime.interrupted` on
 running session runs before canceling producers or stopping HTTP, RPC, schedules,
 external runtimes and workspaces. The existing `lost` terminal state carries this
 specific reason; no schema migration is needed. Completed finish proposals and
-explicit user aborts retain their authoritative outcomes. Waiting decisions keep
-their existing recovery semantics and are not converted into automatic answers.
+explicit user aborts retain their authoritative outcomes. With a distributed live backend, native parked decisions remain
+`waiting_decision`. After the producer has
+committed its assistant tool call, shutdown advances the run, session and every
+pending decision to a new persistence fence in one transaction, then revokes
+local execution. It leaves the old Redis lease index in place as the recovery
+pointer. Once the lease expires, the existing reaper reserves a fresh owner;
+failed reservations retain that pointer for retry. No answer is synthesized.
+Decision commands cannot begin after shutdown closes admission. A previously
+accepted native answer is allowed to leave the waiting phase before shutdown
+classifies its continuation as running work. A state CAS prevents a running-row
+snapshot from terminalizing a decision that parked concurrently.
+
+Codex, Claude Code and ACP inline waiters still depend on the exiting process;
+they are not preserved as resumable native decisions. Expired requests, explicit
+abort, reset, deleted sessions and newer persistence owners must not be revived.
+Transient database/runtime-classification failures retain the recovery pointer
+instead of canceling decisions. This does not guarantee recovery of a producer
+whose tool-call persistence failed or exceeded the shutdown budget.
+
+The continuation keeps its original durable turn and request message ID. A
+response retry uses the existing control-ID deduplication contract; tests cover
+shutdown, a fresh manager's lease recovery, the answer and duplicate submission.
+
+**First upgrade and rollback:** the old executable still runs the shutdown hook
+on the first rollout, so deploying this fix cannot protect waits already ended
+by that executable. Drain those waits before upgrading, or use a separately
+approved recovery procedure with authoritative pending decisions, no newer turn,
+and tenant-scoped checks. Do not revive historical `lost` rows automatically.
+Rolling back reintroduces the old shutdown behavior on the next exit; drain
+pending native waits before rollback. No schema migration is required.
+
+Local browser verification used the documented development stack with Redis,
+a synthetic model and one active Server. The original decision remained visible
+after SIGTERM and a fresh owner resumed the same run and turn after the user
+submitted the answer. The original user message was not duplicated. Evidence:
+[before shutdown](images/decision-handoff/01-waiting-before-restart.png),
+[after restart](images/decision-handoff/02-waiting-after-restart.png), and
+[after answering](images/decision-handoff/03-completed-after-answer.png).
+The separate-containerd two-Server fixture could not complete a continuation on
+the peer because its workspace bridge was unavailable; this is not a passed
+multi-node workspace acceptance test. Hosted deployments still need their
+shared workspace integration verified after downstream synchronization.
 
 At turn start, the server saves a versioned resume context in `session_runs.input_json`.
 It preserves the original query, identity, execution location, model selection and
