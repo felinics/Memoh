@@ -198,10 +198,7 @@ pending native waits before rollback. No schema migration is required.
 Local browser verification used the documented development stack with Redis,
 a synthetic model and one active Server. The original decision remained visible
 after SIGTERM and a fresh owner resumed the same run and turn after the user
-submitted the answer. The original user message was not duplicated. Evidence:
-[before shutdown](images/decision-handoff/01-waiting-before-restart.png),
-[after restart](images/decision-handoff/02-waiting-after-restart.png), and
-[after answering](images/decision-handoff/03-completed-after-answer.png).
+submitted the answer. The original user message was not duplicated.
 The separate-containerd two-Server fixture could not complete a continuation on
 the peer because its workspace bridge was unavailable; this is not a passed
 multi-node workspace acceptance test. Hosted deployments still need their
