@@ -1,0 +1,62 @@
+[
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-7047fe2aec",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-12e2f874d2",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-1417d58b00",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-e496516029",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-03a0119ffc",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "omitted target preserves Primary behavior",
+    "mkdir_status": 200,
+    "remote_directory_status": 200,
+    "native_directory_status": 400
+  },
+  {
+    "case": "invalid target fails without fallback",
+    "status": 404,
+    "body": {
+      "message": "workspace target not found"
+    }
+  },
+  {
+    "case": "target bound to another Bot is rejected",
+    "status": 404,
+    "body": {
+      "message": "workspace target not found"
+    }
+  }
+]

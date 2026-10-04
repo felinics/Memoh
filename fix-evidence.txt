@@ -1,0 +1,35 @@
+PR #1438 selected workspace target regression validation
+Source commit: 208fc35c0ccc1e86aac3a011b21e146fa43edde3
+Environment: isolated dev stack; PostgreSQL 18; real native containerd workspace;
+             current PR packages/runtime as a non-root Linux remote computer.
+Web: http://localhost:50082
+API: http://localhost:50080
+
+Before: remote Primary + native new directory failed 5/5 with mkdir 200 and workdir 400;
+        directories were created on the remote computer.
+After: 5/5 explicit native mkdir + workdir creation returned 200/201;
+       native directories existed and remote directories remained absent.
+       Repeated mkdir for each existing path returned 200 without a remote copy.
+       Omitting workspace_target_id still uses Primary.
+       Invalid target and a target bound to another Bot return 404 without writes.
+
+Real UI: create native new folder, bind an existing native directory, browse/select
+and create a remote Folder, and create a native Folder in Chinese dark mode at 640px.
+API readback confirmed each UI-created Folder's target kind, target ID and path.
+All UI-created native paths were absent on the remote computer.
+
+Automated validation:
+- 4 Vue submission regression tests passed (explicit target, snapshot during pending
+  mkdir, remote creation without mkdir, failure stops registration).
+- FSMkdir handler tests passed (native vs Primary filesystem, explicit remote,
+  omitted target, invalid target without fallback).
+- go test -race ./internal/workdir/... ./internal/handlers/... ./internal/workspace/... passed.
+- golangci-lint v2.10.1 (CI pinned version) for handlers passed.
+- Repository commit checks passed: staged ESLint, Go lint and Go tests for handlers/spec.
+- mise run sdk-generate and SDK typecheck passed.
+- Web typecheck: 439 baseline diagnostics, 439 fixed diagnostics; no normalized delta.
+- UI contract guard: unchanged baseline violations in tool-call-diff-panel.vue.
+
+This is Agent QA, not Human QA. No real Windows/macOS remote device or Desktop client
+was verified on the fix. Full remote CI status is reported separately.
+Screenshots prove UI states; API and directory readback prove target correctness.
