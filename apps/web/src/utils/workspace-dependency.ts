@@ -336,3 +336,18 @@ export function missingPrerequisites(item: DependencyItem, items: DependencyItem
     .map(id => byId.get(id) ?? { id, name: id } as DependencyItem)
     .filter(entry => entry.status !== 'installed')
 }
+
+/**
+ * Definition revisions of everything `item` transitively requires, as the
+ * confirmation shows them. The Server installs a missing prerequisite only at
+ * the revision sent here and asks for a new review otherwise.
+ */
+export function prerequisiteRevisions(item: DependencyItem, items: DependencyItem[]): Record<string, string> {
+  const byId = new Map(items.map(entry => [entry.id ?? '', entry]))
+  const revisions: Record<string, string> = {}
+  for (const id of prerequisiteOrder([item.id ?? ''], other => byId.get(other)?.requires)) {
+    const revision = byId.get(id)?.definition_revision
+    if (revision) revisions[id] = revision
+  }
+  return revisions
+}

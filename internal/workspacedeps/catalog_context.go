@@ -17,9 +17,32 @@ func (s *Service) FreezeCatalog(ctx context.Context) (context.Context, []catalog
 }
 
 type (
-	catalogContextKey  struct{}
-	revisionContextKey struct{}
+	catalogContextKey      struct{}
+	revisionContextKey     struct{}
+	prerequisiteContextKey struct{}
 )
+
+// WithPrerequisiteRevisions binds a confirmed operation to the prerequisite
+// revisions its preview showed, keyed by dependency id. A missing
+// prerequisite then installs only from its confirmed revision; one without a
+// confirmed revision, or confirmed at another revision, refuses the operation
+// with ErrPrerequisitesChanged. Prerequisites present in the workspace need no
+// entry. Without this binding prerequisites resolve against the operation's
+// catalog, which a caller may have frozen for its own review.
+func WithPrerequisiteRevisions(ctx context.Context, revisions map[string]string) context.Context {
+	confirmed := make(map[string]string, len(revisions))
+	for id, revision := range revisions {
+		confirmed[id] = revision
+	}
+	return context.WithValue(ctx, prerequisiteContextKey{}, confirmed)
+}
+
+// PrerequisiteRevisions returns the confirmed prerequisite revisions bound to
+// ctx; ok is false when the operation carries no confirmation.
+func PrerequisiteRevisions(ctx context.Context) (map[string]string, bool) {
+	revisions, ok := ctx.Value(prerequisiteContextKey{}).(map[string]string)
+	return revisions, ok
+}
 
 // WithDefinitionRevision binds a user's prepared operation to the immutable
 // revision returned by catalog metadata or an optional script preview. Empty

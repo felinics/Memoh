@@ -24134,6 +24134,13 @@ const docTemplate = `{
                 "definition_revision": {
                     "type": "string"
                 },
+                "prerequisite_revisions": {
+                    "description": "PrerequisiteRevisions are the definition revisions the confirmation\nshowed for the dependency's prerequisites, keyed by dependency id. When\npresent, a missing prerequisite installs only from its confirmed\nrevision; one without an entry refuses the operation with\nworkspace_dependency.prerequisites_changed. Omitted, prerequisites\nresolve when the operation starts, like an omitted definition_revision.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "session_id": {
                     "description": "SessionID optionally routes operation progress to its originating conversation.",
                     "type": "string"

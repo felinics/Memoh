@@ -215,6 +215,13 @@ type WorkspaceDependencyInstallRequest struct {
 	// catalog script resolves, or the manifest pin when the dependency has
 	// one. The version recorded afterwards is the one the script reports.
 	Version string `json:"version,omitempty"`
+	// PrerequisiteRevisions are the definition revisions the confirmation
+	// showed for the dependency's prerequisites, keyed by dependency id. When
+	// present, a missing prerequisite installs only from its confirmed
+	// revision; one without an entry refuses the operation with
+	// workspace_dependency.prerequisites_changed. Omitted, prerequisites
+	// resolve when the operation starts, like an omitted definition_revision.
+	PrerequisiteRevisions map[string]string `json:"prerequisite_revisions,omitempty"`
 }
 
 // WorkspaceDependencyPreflightResponse reports whether the requested
@@ -609,6 +616,9 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 		return workspaceDependencyError(err)
 	}
 	ctx = workspacedeps.WithDefinitionRevision(ctx, preview.Revision)
+	if request.PrerequisiteRevisions != nil {
+		ctx = workspacedeps.WithPrerequisiteRevisions(ctx, request.PrerequisiteRevisions)
+	}
 	if validator, ok := svc.(interface {
 		ValidateOperationSession(context.Context, string, string) error
 	}); ok {
@@ -805,6 +815,11 @@ func workspaceDependencyOperationRequest(c echo.Context, action catalog.Action) 
 	if req.DefinitionRevision != "" && !catalog.ValidRevision(req.DefinitionRevision) {
 		return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
+	for id, revision := range req.PrerequisiteRevisions {
+		if len(id) > 80 || !workspaceDependencyIDPattern.MatchString(id) || !catalog.ValidRevision(revision) {
+			return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
+		}
+	}
 	if action == catalog.ActionRemove {
 		req.Version = ""
 	}
@@ -862,6 +877,8 @@ func workspaceDependencyError(err error) error {
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyPlatformUnsupported, err, nil)
 	case errors.Is(err, workspacedeps.ErrBusy):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyBusy, err, nil)
+	case errors.Is(err, workspacedeps.ErrPrerequisitesChanged):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyPrerequisitesChanged, err, nil)
 	case errors.Is(err, workspacedeps.ErrRequired):
 		var required *workspacedeps.RequiredError
 		args := map[string]string{}

@@ -1093,3 +1093,41 @@ func TestWorkspaceDependencyCatalogUnavailable(t *testing.T) {
 	err := h.ListWorkspaceDependencyCatalog(e.NewContext(httptest.NewRequest(http.MethodGet, "/workspace-dependencies", nil), httptest.NewRecorder()))
 	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyCatalogUnavailable)
 }
+
+func TestWorkspaceDependencyInstallCarriesConfirmedPrerequisites(t *testing.T) {
+	revision := strings.Repeat("c", 64)
+	var got map[string]string
+	var pinned bool
+	svc := &fakeWorkspaceDependencyService{
+		deps:    depsTestCatalog(),
+		preview: workspacedeps.ScriptPreview{Revision: strings.Repeat("a", 64)},
+		beforeRun: func(ctx context.Context) {
+			got, pinned = workspacedeps.PrerequisiteRevisions(ctx)
+		},
+	}
+	h := newDepsTestHandler("admin", svc)
+	body := WorkspaceDependencyInstallRequest{PrerequisiteRevisions: map[string]string{"node": revision}}
+	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex", body: body}).invoke(t, h.InstallWorkspaceDependency); err != nil {
+		t.Fatal(err)
+	}
+	if !pinned || got["node"] != revision || len(got) != 1 {
+		t.Fatalf("confirmed prerequisites = %v (pinned %v)", got, pinned)
+	}
+
+	// Without the field, prerequisites resolve when the operation starts.
+	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex"}).invoke(t, h.InstallWorkspaceDependency); err != nil {
+		t.Fatal(err)
+	}
+	if pinned {
+		t.Fatal("an omitted field must not pin prerequisites")
+	}
+
+	invalid := WorkspaceDependencyInstallRequest{PrerequisiteRevisions: map[string]string{"node": "not-a-revision"}}
+	_, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/install", depID: "codex", body: invalid}).invoke(t, h.InstallWorkspaceDependency)
+	if apperror.CodeOf(err) != apperror.CodeWorkspaceDependencyRequestInvalid {
+		t.Fatalf("invalid revision error = %v", err)
+	}
+	if code := apperror.CodeOf(workspaceDependencyError(fmt.Errorf("x: %w", workspacedeps.ErrPrerequisitesChanged))); code != apperror.CodeWorkspaceDependencyPrerequisitesChanged {
+		t.Fatalf("prerequisites changed mapped to %q", code)
+	}
+}

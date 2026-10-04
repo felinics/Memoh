@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
 
@@ -63,11 +65,19 @@ func newRequiresFixture(t *testing.T) *serviceFixture {
 	f.svc.catalog = f.cat
 	f.setRun(func(spec RunSpec) (Result, error) {
 		if spec.Action == catalog.ActionRemove {
+			f.absent(spec.DepID)
 			return Result{}, nil
 		}
-		return f.installResult(spec.DepID, "1.0.0"), nil
+		return f.installed(spec.DepID), nil
 	})
 	return f
+}
+
+// installed reports a successful install and makes the copy discoverable,
+// as the workspace would after the script ran.
+func (f *serviceFixture) installed(depID string) Result {
+	f.present(depID, SourceManaged, "1.0.0", nil)
+	return f.installResult(depID, "1.0.0")
 }
 
 func runOrder(f *serviceFixture) []string {
@@ -163,7 +173,7 @@ func TestInstallStopsWhenPrerequisiteFails(t *testing.T) {
 		if spec.DepID == "mid" {
 			return Result{}, errors.New("mid install failed")
 		}
-		return f.installResult(spec.DepID, "1.0.0"), nil
+		return f.installed(spec.DepID), nil
 	})
 
 	_, err := f.svc.Install(f.ctx(), testBot, "top", "", nil)
@@ -260,4 +270,109 @@ func TestInstallReusesPresentPrerequisitesFromProviderCatalog(t *testing.T) {
 	if got, want := runOrder(f), []string{"install:mid", "install:top"}; !slices.Equal(got, want) {
 		t.Fatalf("runs = %v, want %v", got, want)
 	}
+}
+
+// A prerequisite runs the revision the user confirmed even after a newer
+// one is published, and one the preview never showed refuses the operation.
+func TestInstallRunsConfirmedPrerequisiteRevision(t *testing.T) {
+	provider, _, server := providerFixture(t)
+	f := newServiceFixture(t)
+	f.svc.provider, f.svc.catalog = provider, catalog.Empty()
+	f.setRun(func(spec RunSpec) (Result, error) { return f.installed(spec.DepID), nil })
+	before, err := f.svc.operationCatalog(f.ctx(), "node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed := before.MustGet("node").Revision
+	server.updateScript(t, "node", "# published after the preview\n")
+
+	if _, err := f.svc.Install(WithPrerequisiteRevisions(f.ctx(), map[string]string{}), testBot, "codex", "", nil); !errors.Is(err, ErrPrerequisitesChanged) {
+		t.Fatalf("unconfirmed prerequisite error = %v, want ErrPrerequisitesChanged", err)
+	}
+	if runs := runOrder(f); len(runs) != 0 {
+		t.Fatalf("runs = %v, want none before confirmation", runs)
+	}
+
+	ctx := WithPrerequisiteRevisions(f.ctx(), map[string]string{"node": confirmed})
+	if _, err := f.svc.Install(ctx, testBot, "codex", "", nil); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	specs := f.runSpecs()
+	if got := runOrder(f); !slices.Equal(got, []string{"install:node", "install:codex"}) {
+		t.Fatalf("runs = %v", got)
+	}
+	if strings.Contains(specs[0].Script, "published after the preview") {
+		t.Fatal("prerequisite ran the newer revision instead of the confirmed one")
+	}
+	if rec, _ := f.store.get(f.key("node")); rec.DefinitionRevision != confirmed {
+		t.Errorf("node recorded revision %q, want confirmed %q", rec.DefinitionRevision, confirmed)
+	}
+}
+
+func TestDependentsKeepFailedAndRemovingCopies(t *testing.T) {
+	f := newRequiresFixture(t)
+	digest := f.cat.MustGet("mid").ManifestDigest
+	for _, status := range []Status{StatusFailed, StatusRemoving} {
+		f.store.seed(Installation{BotID: testBot, DependencyID: "mid", Source: InstallationSourceManaged, Status: status, ManifestDigest: digest})
+		dependents, err := f.svc.Dependents(f.ctx(), testBot, "base")
+		if err != nil || !slices.Equal(dependents, []string{"mid"}) {
+			t.Errorf("%s copy: Dependents(base) = %v, %v; want [mid]", status, dependents, err)
+		}
+	}
+}
+
+// The dependent claims its record before re-checking its prerequisites, and
+// a removal claims its own before looking for dependents, so whichever comes
+// second backs off.
+func TestClaimsSerializeInstallAgainstPrerequisiteRemoval(t *testing.T) {
+	t.Run("removal claimed first", func(t *testing.T) {
+		f := newRequiresFixture(t)
+		f.present("base", SourceManaged, "1.0.0", nil)
+		f.store.seed(Installation{BotID: testBot, DependencyID: "base", Source: InstallationSourceManaged, Status: StatusRemoving, ManifestDigest: f.cat.MustGet("base").ManifestDigest, OperationID: strings.Repeat("a", 32)})
+
+		if _, err := f.svc.Install(f.ctx(), testBot, "mid", "", nil); !errors.Is(err, ErrBusy) {
+			t.Fatalf("Install error = %v, want ErrBusy", err)
+		}
+		if runs := runOrder(f); len(runs) != 0 {
+			t.Errorf("runs = %v, want none", runs)
+		}
+		if _, ok := f.store.get(f.key("mid")); ok {
+			t.Error("refused install left its claim behind")
+		}
+	})
+	t.Run("dependent claimed first", func(t *testing.T) {
+		f := newRequiresFixture(t)
+		f.store.seed(Installation{BotID: testBot, DependencyID: "base", Source: InstallationSourceManaged, Status: StatusInstalled, ManifestDigest: f.cat.MustGet("base").ManifestDigest})
+		f.store.seed(Installation{BotID: testBot, DependencyID: "mid", Source: InstallationSourceManaged, Status: StatusInstalling, OperationID: strings.Repeat("b", 32)})
+		f.present("base", SourceManaged, "1.0.0", nil)
+
+		if _, err := f.svc.Remove(f.ctx(), testBot, "base", nil); !errors.Is(err, ErrRequired) {
+			t.Fatalf("Remove error = %v, want ErrRequired", err)
+		}
+		if rec, _ := f.store.get(f.key("base")); rec.Status != StatusInstalled {
+			t.Errorf("refused removal left base %s, want its record restored", rec.Status)
+		}
+	})
+	t.Run("prerequisite removed before the claim", func(t *testing.T) {
+		f := newRequiresFixture(t)
+		f.present("base", SourceManaged, "1.0.0", nil)
+		removed := false
+		discover := f.svc.discover
+		f.svc.discover = func(ctx context.Context, client *bridge.Client, cat *catalog.Catalog, dataRoot string, ids []string, platform Platform) (map[string]Observed, error) {
+			observed, err := discover(ctx, client, cat, dataRoot, ids, platform)
+			if !removed && slices.Contains(ids, "base") {
+				// ensureRequires saw base; it disappears before mid claims.
+				removed = true
+				f.absent("base")
+			}
+			return observed, err
+		}
+
+		if _, err := f.svc.Install(f.ctx(), testBot, "mid", "", nil); !errors.Is(err, ErrBusy) {
+			t.Fatalf("Install error = %v, want ErrBusy", err)
+		}
+		if runs := runOrder(f); len(runs) != 0 {
+			t.Errorf("runs = %v, want mid not to run without base", runs)
+		}
+	})
 }

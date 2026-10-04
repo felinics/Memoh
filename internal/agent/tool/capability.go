@@ -386,29 +386,48 @@ func validAppIdentity(args map[string]any) bool {
 
 // Keep revisions visible in the review while retaining the exact immutable
 // catalog in process across the wait. No script is executed during preparation.
-func (p *CapabilityProvider) freeze(ctx context.Context, ids []string) (context.Context, map[string]string, error) {
-	revisions := map[string]string{}
+// Prerequisites the dependencies require are installed from the same frozen
+// catalog when missing, so the review lists their revisions too.
+func (p *CapabilityProvider) freeze(ctx context.Context, ids []string) (context.Context, map[string]string, map[string]string, error) {
+	revisions, prerequisites := map[string]string{}, map[string]string{}
 	if len(ids) == 0 {
-		return ctx, revisions, nil
+		return ctx, revisions, prerequisites, nil
 	}
 	if p.opts.FreezeDependencies == nil {
-		return ctx, nil, errors.New("dependencies unavailable")
+		return ctx, nil, nil, errors.New("dependencies unavailable")
 	}
 	frozen, items, err := p.opts.FreezeDependencies(ctx)
 	if err != nil {
-		return ctx, nil, err
+		return ctx, nil, nil, err
 	}
-	for _, id := range ids {
-		for _, dep := range items {
-			if dep.ID == id && !dep.Retired {
-				revisions[id] = dep.Revision
+	byID := make(map[string]catalog.Dependency, len(items))
+	for _, dep := range items {
+		byID[dep.ID] = dep
+	}
+	var visit func(id string) error
+	visit = func(id string) error {
+		dep, ok := byID[id]
+		if !ok || dep.Retired {
+			return errors.New("dependency unavailable")
+		}
+		for _, required := range dep.Requires {
+			if _, seen := prerequisites[required]; seen || slices.Contains(ids, required) {
+				continue
+			}
+			prerequisites[required] = byID[required].Revision
+			if err := visit(required); err != nil {
+				return err
 			}
 		}
-		if revisions[id] == "" {
-			return ctx, nil, errors.New("dependency unavailable")
-		}
+		return nil
 	}
-	return frozen, revisions, nil
+	for _, id := range ids {
+		if err := visit(id); err != nil {
+			return ctx, nil, nil, err
+		}
+		revisions[id] = byID[id].Revision
+	}
+	return frozen, revisions, prerequisites, nil
 }
 
 func (p *CapabilityProvider) manageApp(ctx *toolexec.ToolExecContext, session SessionContext, args map[string]any) (any, error) {
@@ -487,13 +506,14 @@ func (p *CapabilityProvider) manageApp(ctx *toolexec.ToolExecContext, session Se
 		if err != nil {
 			return nil, err
 		}
-		var revisions map[string]string
-		frozen, revisions, err = p.freeze(ctx.Context, release.Dependencies)
+		var revisions, prerequisites map[string]string
+		frozen, revisions, prerequisites, err = p.freeze(ctx.Context, release.Dependencies)
 		if err != nil {
 			return nil, err
 		}
 		prepared["revision"] = release.Revision
 		prepared["dependencies"] = revisions
+		prepared["prerequisites"] = prerequisites
 		prepared["connectors"] = release.Connectors
 	}
 	if action == "uninstall" {

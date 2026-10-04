@@ -13,6 +13,7 @@ import {
   formatDependencyVersion,
   missingPrerequisites,
   prerequisiteOrder,
+  prerequisiteRevisions,
   sortDependencies,
 } from './workspace-dependency'
 
@@ -353,5 +354,14 @@ describe('prerequisites', () => {
       item({ id: 'python', status: 'installed' }),
     ]
     expect(missingPrerequisites(items[0]!, items).map(entry => entry.id)).toEqual(['micromamba'])
+  })
+
+  it('confirms the revision of every prerequisite the dialog showed', () => {
+    const items = [
+      item({ id: 'pandoc', definition_revision: 'r-pandoc', requires: requires.pandoc }),
+      item({ id: 'micromamba', definition_revision: 'r-mamba', requires: requires.micromamba }),
+      item({ id: 'python', status: 'installed', definition_revision: 'r-python' }),
+    ]
+    expect(prerequisiteRevisions(items[0]!, items)).toEqual({ python: 'r-python', micromamba: 'r-mamba' })
   })
 })

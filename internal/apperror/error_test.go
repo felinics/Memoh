@@ -260,14 +260,15 @@ func TestContextBudgetErrorsHaveStableCatalogContracts(t *testing.T) {
 
 func TestWorkspaceDependencyErrorCatalog(t *testing.T) {
 	cases := map[Code]int{
-		CodeWorkspaceDependencyNotFound:            http.StatusNotFound,
-		CodeWorkspaceDependencyRequestInvalid:      http.StatusBadRequest,
-		CodeWorkspaceDependencyActionUnsupported:   http.StatusUnprocessableEntity,
-		CodeWorkspaceDependencyPlatformUnsupported: http.StatusUnprocessableEntity,
-		CodeWorkspaceDependencyBusy:                http.StatusConflict,
-		CodeWorkspaceDependencyRequired:            http.StatusConflict,
-		CodeWorkspaceDependencyWorkspaceNotRunning: http.StatusConflict,
-		CodeWorkspaceDependencyWorkspaceMissing:    http.StatusConflict,
+		CodeWorkspaceDependencyNotFound:             http.StatusNotFound,
+		CodeWorkspaceDependencyRequestInvalid:       http.StatusBadRequest,
+		CodeWorkspaceDependencyActionUnsupported:    http.StatusUnprocessableEntity,
+		CodeWorkspaceDependencyPlatformUnsupported:  http.StatusUnprocessableEntity,
+		CodeWorkspaceDependencyBusy:                 http.StatusConflict,
+		CodeWorkspaceDependencyRequired:             http.StatusConflict,
+		CodeWorkspaceDependencyPrerequisitesChanged: http.StatusConflict,
+		CodeWorkspaceDependencyWorkspaceNotRunning:  http.StatusConflict,
+		CodeWorkspaceDependencyWorkspaceMissing:     http.StatusConflict,
 
 		CodeWorkspaceDependencyRollbackUnavailable: http.StatusConflict,
 		CodeWorkspaceDependencyOperationFailed:     http.StatusInternalServerError,

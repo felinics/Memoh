@@ -4881,6 +4881,17 @@ definitions:
     properties:
       definition_revision:
         type: string
+      prerequisite_revisions:
+        additionalProperties:
+          type: string
+        description: |-
+          PrerequisiteRevisions are the definition revisions the confirmation
+          showed for the dependency's prerequisites, keyed by dependency id. When
+          present, a missing prerequisite installs only from its confirmed
+          revision; one without an entry refuses the operation with
+          workspace_dependency.prerequisites_changed. Omitted, prerequisites
+          resolve when the operation starts, like an omitted definition_revision.
+        type: object
       session_id:
         description: SessionID optionally routes operation progress to its originating
           conversation.

@@ -43,6 +43,8 @@ import {
 
 export interface DependencyOperation {
   definitionRevision: string
+  /** Prerequisite revisions the confirmation showed. Replayed by retry. */
+  prerequisiteRevisions?: Record<string, string>
   /** `operationKey(botId, depId)`. */
   key: string
   botId: string
@@ -62,6 +64,7 @@ export interface DependencyOperation {
 
 export interface StartDependencyOperationInput {
   definitionRevision?: string
+  prerequisiteRevisions?: Record<string, string>
   botId: string
 
   /** Source conversation for authorized operation notifications only. */
@@ -257,7 +260,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
         operation.botId,
         operation.item.id ?? '',
         operation.action,
-        { version: operation.version, definitionRevision: operation.definitionRevision || undefined, sessionId: operation.sessionId, signal },
+        { version: operation.version, definitionRevision: operation.definitionRevision || undefined, prerequisiteRevisions: operation.prerequisiteRevisions, sessionId: operation.sessionId, signal },
       )
       for await (const event of stream) {
         if (signal.aborted) return
@@ -342,6 +345,7 @@ export const useDependencyOperationsStore = defineStore('dependency-operations',
       action: input.action,
       version: input.version?.trim() ?? '',
       definitionRevision: input.definitionRevision?.trim() || input.item.definition_revision?.trim() || '',
+      prerequisiteRevisions: input.prerequisiteRevisions,
       status: 'running',
       lines: [],
       error: '',

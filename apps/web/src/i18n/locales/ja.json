@@ -234,6 +234,7 @@
       "platform_unsupported": "この Workspace のプラットフォームでは利用できません。",
       "busy": "この依存関係で別の操作が進行中です。しばらくしてからもう一度お試しください。",
       "required": "{dependents} がまだこの依存関係を必要としています。先にそちらを削除してください。",
+      "prerequisites_changed": "確認後に、この依存関係が必要とする前提依存関係が変更されました。操作をもう一度確認してください。",
       "workspace_not_running": "Workspace が起動していません。先に起動してください。",
       "workspace_missing": "Workspace がまだ作成されていません。先に作成してください。",
       "rollback_unavailable": "ロールバックできる以前のバージョンがありません。",

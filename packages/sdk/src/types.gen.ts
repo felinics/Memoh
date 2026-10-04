@@ -2726,6 +2726,17 @@ export type HandlersWorkspaceDependencyCatalogResponse = {
 export type HandlersWorkspaceDependencyInstallRequest = {
     definition_revision?: string;
     /**
+     * PrerequisiteRevisions are the definition revisions the confirmation
+     * showed for the dependency's prerequisites, keyed by dependency id. When
+     * present, a missing prerequisite installs only from its confirmed
+     * revision; one without an entry refuses the operation with
+     * workspace_dependency.prerequisites_changed. Omitted, prerequisites
+     * resolve when the operation starts, like an omitted definition_revision.
+     */
+    prerequisite_revisions?: {
+        [key: string]: string;
+    };
+    /**
      * SessionID optionally routes operation progress to its originating conversation.
      */
     session_id?: string;

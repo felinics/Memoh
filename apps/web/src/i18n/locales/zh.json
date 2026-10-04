@@ -237,6 +237,7 @@
       "platform_unsupported": "当前工作区平台不支持该依赖。",
       "busy": "该依赖正在进行其他操作，请稍后再试。",
       "required": "{dependents} 仍依赖它，请先移除这些依赖。",
+      "prerequisites_changed": "确认后，它所需的前置依赖发生了变化，请重新确认此操作。",
       "workspace_not_running": "工作区未运行，请先启动。",
       "workspace_missing": "尚未创建工作区，请先创建。",
       "rollback_unavailable": "没有可回滚的旧版本。",

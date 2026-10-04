@@ -3,6 +3,7 @@ package apps
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,6 +42,7 @@ func TestInstallRunsPrerequisitesAsStepsWithoutReferencingThem(t *testing.T) {
 	for _, ref := range refs {
 		ids = append(ids, ref.DependencyID)
 	}
+	slices.Sort(ids)
 	if strings.Join(ids, ",") != "pandoc,poppler" {
 		t.Fatalf("dependency refs = %v, want only the App's direct dependencies", ids)
 	}

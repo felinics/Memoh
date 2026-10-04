@@ -860,15 +860,18 @@ func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink)
 		return OperationResult{}, err
 	}
 	defer op.release()
-	if err := s.checkNotRequired(ctx, op); err != nil {
-		return OperationResult{}, err
-	}
 	script, ok := op.catalog.Script(op.dep.ID, catalog.ActionRemove)
 	if !ok {
 		return OperationResult{}, fmt.Errorf("%w: %s has no remove script", ErrActionUnsupported, op.dep.ID)
 	}
 	previous := s.readStateBestEffort(ctx, op)
 	if err := s.markInProgress(ctx, op, StatusRemoving); err != nil {
+		return OperationResult{}, err
+	}
+	// Checked after the claim, so a dependent claiming concurrently either
+	// shows up here or sees this removal in verifyRequires.
+	if err := s.checkNotRequired(ctx, op); err != nil {
+		s.restore(ctx, op)
 		return OperationResult{}, err
 	}
 	if _, err := s.runScript(ctx, op, catalog.ActionRemove, script, "", stateVersion(previous), 0, sink); err != nil {
@@ -1101,6 +1104,9 @@ type operation struct {
 	receipt     *OperationReceipt
 	operationID string
 	finalizing  bool
+	// requires is the catalog op's prerequisites resolved against, set by
+	// ensureRequires; verifyRequires re-checks them after the claim.
+	requires *catalog.Catalog
 }
 
 // begin validates the dependency, takes the in-memory lock, makes sure the
@@ -1227,6 +1233,10 @@ func (s *Service) provision(ctx context.Context, op *operation, action catalog.A
 	}
 	previous := s.readStateBestEffort(ctx, op)
 	if err := s.markInProgress(ctx, op, status); err != nil {
+		return OperationResult{}, err
+	}
+	if err := s.verifyRequires(ctx, op); err != nil {
+		s.restore(ctx, op)
 		return OperationResult{}, err
 	}
 	result, err := s.runScript(ctx, op, action, script, op.version, stateVersion(previous), 0, sink)

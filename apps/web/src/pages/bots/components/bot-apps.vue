@@ -331,6 +331,7 @@ import {
   dependencyAllows,
   formatDependencyVersion,
   missingPrerequisites,
+  prerequisiteRevisions,
   type DependencyConfirmMode,
   type DependencyMenuAction,
   type DependencyPrimaryAction,
@@ -677,7 +678,10 @@ function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operatio
 function onDependencyConfirmed(version: string) {
   const item = confirm.item
   confirm.open = false
-  if (item) startDependency(item, confirm.operation, { version, definitionRevision: confirm.definitionRevision })
+  // Bind the prerequisites the dialog showed; before the list loads that is
+  // none, and the Server asks for a new review if one turns out missing.
+  const prerequisites = item ? prerequisiteRevisions(item, botDependencies.value?.items ?? []) : {}
+  if (item) startDependency(item, confirm.operation, { version, definitionRevision: confirm.definitionRevision, prerequisiteRevisions: prerequisites })
 }
 
 function onDependencyPrimary(item: DependencyItem, action: DependencyPrimaryAction) {
