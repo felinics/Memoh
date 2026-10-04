@@ -7,20 +7,17 @@
 
            data-menu-open is the ROW-EMPHASIZED contract: while the dropdown is
            open the cursor is over the portaled menu, so :hover is gone from
-           the row — everything that keyed off hover (row fill, actions slot,
+           the row — everything that keyed off hover (row fill, actions button,
            marquee scroll) must also key off this attribute, or the row
            visually collapses the moment the pointer moves onto the menu. -->
       <div
-        ref="rowEl"
+        data-slot="sidebar-session-row"
         role="button"
         tabindex="0"
-        class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        :class="rowClass"
+        class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         :data-ui-selected="isActive ? '' : undefined"
         :data-menu-open="menuOpen || undefined"
         :title="hoverTitle"
-        @mouseenter="syncHovered"
-        @mouseleave="syncHovered"
         @click="$emit('select', session)"
         @keydown.enter.prevent="$emit('select', session)"
         @keydown.space.prevent="$emit('select', session)"
@@ -65,28 +62,12 @@
           >{{ run.text }}</span>
         </MarqueeText>
 
-        <!-- Trailing slot: spinner and the actions button share one 24px right
-             slot so they sit at the same center and never both show at once. The
-             slot reserves its width IN FLOW whenever anything can be visible in
-             it — streaming or row emphasis (hover, or the dropdown being open —
-             keyed off data-menu-open on the row so the slot stays reserved while
-             the cursor is over the portaled menu) — so the title's display area
-             always ends before the icon zone instead of letting the icon float
-             over the text. Keyboard focus alone does NOT widen it (deliberate):
-             closing the dropdown refocuses its trigger inside the row, and a
-             focus-keyed rule would pin the slot open after an Esc close,
-             over-truncating the title. Idle rows keep w-0 (no dead gutter); the
-             width transition lets the title re-truncate smoothly as the slot
-             grows, and the actions button fades in over the same beat as the
-             spinner fades out. The button is ABSOLUTELY anchored to the slot's
-             right edge, never an in-flow flex child: a shrink-0 button beside
-             the 24px spinner out-competes it for flex width inside the fixed
-             w-6 slot and crushes the spinner's box to zero, off-centering the
-             loader. Sole in-flow child while streaming, the spinner keeps its
-             full box and center. -->
+        <!-- Reserve the actions slot even at rest so crossing rows never
+             resizes the title or retriggers its ResizeObserver. Spinner and
+             actions share one center; the absolute button cannot squeeze the
+             spinner's in-flow box. Only their opacity changes on hover. -->
         <div
-          class="relative ml-1.5 flex h-6 shrink-0 items-center justify-end transition-[width] duration-150"
-          :class="streaming || menuOpen ? 'w-6' : 'w-0 group-hover:w-6 group-data-[menu-open=true]:w-6'"
+          class="relative ml-1.5 flex h-6 w-6 shrink-0 items-center justify-end"
         >
           <div
             v-if="streaming"
@@ -207,41 +188,6 @@ defineEmits<{
 const { t } = useI18n()
 
 const menuOpen = ref(false)
-const rowEl = ref<HTMLElement>()
-// Pure-CSS :hover re-read as state, so the rowEmphasized computed can consume
-// it (a computed can't match selectors directly). Note the dual channel: only
-// the row FILL flows through this JS predicate; the slot width, actions button
-// and marquee trigger key straight off CSS .group:hover. The channels diverge
-// transiently when the row slides under a STATIONARY cursor (list reorder,
-// folder expand/collapse): no mouseenter fires, so the fill lags one cursor
-// move while the CSS effects apply immediately — cosmetic, self-heals.
-const hovered = ref(false)
-const syncHovered = () => { hovered.value = rowEl.value?.matches(':hover') ?? false }
-
-// Row emphasis = hover OR open dropdown, as ONE predicate feeding the row fill
-// class, the data-menu-open attribute, and (via it) the trailing slot width and
-// the marquee's scroll trigger. One source of truth means the fill, the 24px
-// slot, and the scrolling can never disagree about which state the row is in —
-// previously three independent CSS :hover rules did, and each disagreement was
-// a separate bug report ("slot didn't restore"; "row collapsed while the menu
-// was open" — with the dropdown open the cursor sits over the PORTALED menu,
-// so :hover is gone from the row and hover-keyed effects snapped off mid-read).
-// Active rows are excluded: they already carry the stronger selected fill, and
-// layering hover gray on it reads as a flicker.
-const rowEmphasized = computed(() => !props.isActive && (hovered.value || menuOpen.value))
-
-const rowClass = computed(() => {
-  if (props.isActive) return ''
-  // :active fill is a SEPARATE contract from rowEmphasized, kept from the
-  // pre-marquee hover:/active: pair: it gives touch users press feedback
-  // (incl. the long-press that opens the context menu) where :hover never
-  // fires. It must not widen the slot or start the marquee — pressing is
-  // not emphasis — so it stays out of the predicate on purpose.
-  return [
-    'active:bg-[color:var(--sidebar-hover)]',
-    rowEmphasized.value ? 'bg-[color:var(--sidebar-hover)]' : '',
-  ]
-})
 
 function routeMeta(): Record<string, unknown> {
   return props.session.route_metadata ?? {}

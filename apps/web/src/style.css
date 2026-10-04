@@ -455,6 +455,14 @@
 }
 .sidebar-cjk { font-weight: var(--chat-cjk-body); }
 
+@layer components {
+  /* Pointer feedback is immediate and stays lit over the portaled dropdown.
+     Selected rows keep the shared selected fill, including on touch press. */
+  [data-slot="sidebar-session-row"]:not([data-ui-selected]):is(:hover, :active, [data-menu-open='true']) {
+    background-color: var(--sidebar-hover);
+  }
+}
+
 @layer base {
   :root {
     /* 1rem on :root resolves to the browser's default font size, so when the
