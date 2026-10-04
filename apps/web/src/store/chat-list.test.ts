@@ -4810,6 +4810,55 @@ describe('chat-list store', () => {
       expect(store.sessionId).toBe('session-1')
     })
 
+  it('deletes a batch one session at a time, the open session last', async () => {
+      api.fetchSessions.mockResolvedValueOnce({
+        items: [
+          { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+          { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+          { id: 'session-3', bot_id: 'bot-1', title: 'C', type: 'chat' },
+        ],
+        nextCursor: null,
+      })
+      const store = useChatStore()
+      await store.selectBot('bot-1')
+      await flushPromises()
+      expect(store.sessionId).toBe('session-1')
+
+      api.deleteSession.mockResolvedValue(undefined)
+      const result = await store.removeSessions(['session-1', 'session-3', 'session-3'])
+
+      expect(api.deleteSession.mock.calls).toEqual([
+        ['bot-1', 'session-3'],
+        ['bot-1', 'session-1'],
+      ])
+      expect(result.failed).toEqual([])
+      expect(store.sessions.map(session => session.id)).toEqual(['session-2'])
+      expect(store.sessionId).toBe('session-2')
+    })
+
+  it('keeps going past a failed delete and reports what failed', async () => {
+      api.fetchSessions.mockResolvedValueOnce({
+        items: [
+          { id: 'session-1', bot_id: 'bot-1', title: 'A', type: 'chat' },
+          { id: 'session-2', bot_id: 'bot-1', title: 'B', type: 'chat' },
+          { id: 'session-3', bot_id: 'bot-1', title: 'C', type: 'chat' },
+        ],
+        nextCursor: null,
+      })
+      const store = useChatStore()
+      await store.selectBot('bot-1')
+      await flushPromises()
+
+      const forbidden = new Error('forbidden')
+      api.deleteSession
+        .mockRejectedValueOnce(forbidden)
+        .mockResolvedValueOnce(undefined)
+      const result = await store.removeSessions(['session-2', 'session-3'])
+
+      expect(result).toEqual({ failed: ['session-2'], error: forbidden })
+      expect(store.sessions.map(session => session.id)).toEqual(['session-1', 'session-2'])
+    })
+
   it('aborts a deleted Session stream and ignores its late events in the focused Session', async () => {
       h.sendUpdates = [runtime.started]
       api.fetchSessions.mockResolvedValueOnce({

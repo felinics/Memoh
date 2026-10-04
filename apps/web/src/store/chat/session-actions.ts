@@ -139,6 +139,33 @@ export function createSessionActions(deps: {
     deps.switchActiveSession(next.id, sid)
   }
 
+  // One delete at a time on purpose: deletedSession is a latest-value signal
+  // that workspace-tabs watches to close tabs, so deletes resolving in the
+  // same tick would coalesce and leave a deleted session's tab open.
+  async function removeSessions(sessionIds: string[]) {
+    const botId = (deps.currentBotId.value ?? '').trim()
+    if (!botId) throw new Error('Bot not selected')
+    const activeId = deps.sessionId.value
+    // The open session goes last, so its fallback is picked from sessions
+    // that survive rather than one that is about to be deleted.
+    const ids = [...new Set(sessionIds.map(id => id.trim()).filter(Boolean))]
+      .sort((a, b) => Number(a === activeId) - Number(b === activeId))
+    const failed: string[] = []
+    let error: unknown
+    for (const id of ids) {
+      // removeSession resolves the bot at call time; never aim the rest of
+      // the batch at a bot the user switched to.
+      if ((deps.currentBotId.value ?? '').trim() !== botId) break
+      try {
+        await removeSession(id)
+      } catch (cause) {
+        failed.push(id)
+        error ??= cause
+      }
+    }
+    return { failed, error }
+  }
+
   async function renameSession(sessionId: string, title: string) {
     const sid = sessionId.trim()
     const nextTitle = title.trim()
@@ -220,6 +247,7 @@ export function createSessionActions(deps: {
     forkedSessionRequested,
     cleanupFailedDeferredSession,
     removeSession,
+    removeSessions,
     renameSession,
     forkTurn,
     reset: () => {
