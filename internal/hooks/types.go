@@ -339,7 +339,7 @@ func (c *Config) validate() error {
 			if _, err := parseTimeout(action.Timeout); err != nil {
 				return fmt.Errorf("hook %q action timeout: %w", h.Name, err)
 			}
-			switch normalizeOnError(action.OnError) {
+			switch action.OnError {
 			case OnErrorIgnore, OnErrorFail, OnErrorBlock:
 			default:
 				return fmt.Errorf("hook %q action on_error must be ignore, fail, or block", h.Name)

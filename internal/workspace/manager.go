@@ -338,27 +338,27 @@ func (m *Manager) ResolveWorkspaceTarget(ctx context.Context, botID, targetID st
 				primary = true
 			}
 		}
+		target := ResolvedWorkspaceTarget{TargetID: WorkspaceTargetNative, Kind: WorkspaceTargetNative, Name: "Server Workspace", Primary: primary}
 		client, err := m.nativeMCPClient(ctx, botID)
 		if err != nil {
+			if IsNotReady(err) {
+				return target, fmt.Errorf("%w: %w", ErrCapabilityUnavailable, err)
+			}
 			return ResolvedWorkspaceTarget{}, err
 		}
 		info, err := m.nativeWorkspaceInfo(ctx, botID)
 		if err != nil {
+			if IsNotReady(err) {
+				return target, fmt.Errorf("%w: %w", ErrCapabilityUnavailable, err)
+			}
 			return ResolvedWorkspaceTarget{}, err
 		}
 		approval, err := m.nativeToolApprovalConfig(ctx, botID)
 		if err != nil {
-			return ResolvedWorkspaceTarget{}, err
+			return target, err
 		}
-		return ResolvedWorkspaceTarget{
-			TargetID: WorkspaceTargetNative,
-			Kind:     WorkspaceTargetNative,
-			Name:     "Server Workspace",
-			Primary:  primary,
-			Client:   client,
-			Info:     info,
-			Approval: approval,
-		}, nil
+		target.Client, target.Info, target.Approval = client, info, approval
+		return target, nil
 	}
 	if _, ok := canonicalWorkspaceUUID(targetID); !ok || m.remote == nil {
 		return ResolvedWorkspaceTarget{}, ErrWorkspaceTargetNotFound
@@ -458,7 +458,7 @@ func (m *Manager) nativeToolApprovalConfig(ctx context.Context, botID string) (s
 	}
 	if len(row.ToolApprovalConfig) > 0 {
 		if err := json.Unmarshal(row.ToolApprovalConfig, &config); err != nil {
-			return settings.ToolApprovalConfig{}, err
+			return settings.ToolApprovalConfig{}, fmt.Errorf("%w: %w", ErrCapabilityUnavailable, err)
 		}
 	}
 	return settings.NormalizeToolApprovalConfig(config), nil

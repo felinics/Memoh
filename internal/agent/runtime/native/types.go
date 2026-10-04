@@ -210,12 +210,15 @@ type RunConfig struct {
 	// the current user message. Images stay in InlineImages, which also feeds
 	// the context-frag view; these parts are materialized by prepareRunConfig
 	// only.
-	InlineAttachments []sdk.MessagePart
-	Identity          SessionContext
-	Bot               BotInfo
-	Skills            []SkillEntry
-	LoopDetection     LoopDetectionConfig
-	Retry             RetryConfig
+	InlineAttachments    []sdk.MessagePart
+	Identity             SessionContext
+	Bot                  BotInfo
+	Skills               []SkillEntry
+	LoadNotices          []string
+	HooksLoadNotice      string
+	WorkspaceUnavailable bool
+	LoopDetection        LoopDetectionConfig
+	Retry                RetryConfig
 	// StepIndexOffset lets an application-owned continuation of the same run
 	// keep durable step indexes monotonic when the step loop is restarted
 	// after a parked decision.
@@ -295,8 +298,9 @@ type (
 
 // SystemFile is a file loaded from the bot container for prompt generation.
 type SystemFile struct {
-	Filename string
-	Content  string
+	Filename   string
+	Content    string
+	LoadStatus string
 }
 
 func mustMarshal(v any) json.RawMessage {

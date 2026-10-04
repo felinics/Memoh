@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -25,10 +26,13 @@ func NewFSClient(provider bridge.Provider, botID string, now func() time.Time) *
 }
 
 // ReadText reads a text file from the container, returning its content as a string.
-// Returns an empty string if the file does not exist or cannot be read.
+// Missing files and unavailable workspaces return distinct errors.
 func (f *FSClient) ReadText(ctx context.Context, path string) (string, error) {
+	if bridge.WorkspaceUnavailableFromContext(ctx) {
+		return "", bridge.ErrUnavailable
+	}
 	if f.provider == nil {
-		return "", nil
+		return "", bridge.ErrUnavailable
 	}
 	client, err := f.provider.MCPClient(ctx, f.botID)
 	if err != nil {
@@ -37,6 +41,9 @@ func (f *FSClient) ReadText(ctx context.Context, path string) (string, error) {
 	resp, err := client.ReadFile(ctx, path, 0, 0)
 	if err != nil {
 		return "", err
+	}
+	if resp.GetBinary() {
+		return "", bridge.ErrBadRequest
 	}
 	return resp.GetContent(), nil
 }
@@ -49,6 +56,8 @@ func (f *FSClient) ReadTextSafe(ctx context.Context, path string) string {
 
 // LoadSystemFiles loads the standard set of system files from the bot container.
 func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
+	ctx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+	defer cancel()
 	home := "/data"
 	filenames := []string{
 		"AGENTS.md",
@@ -58,10 +67,15 @@ func (f *FSClient) LoadSystemFiles(ctx context.Context) []SystemFile {
 
 	files := make([]SystemFile, len(filenames))
 	for i, name := range filenames {
-		content := f.ReadTextSafe(ctx, home+"/"+name)
+		content, err := f.ReadText(ctx, home+"/"+name)
 		files[i] = SystemFile{
 			Filename: name,
 			Content:  strings.TrimSpace(content),
+		}
+		if errors.Is(err, bridge.ErrNotFound) {
+			files[i].LoadStatus = "missing"
+		} else if err != nil {
+			files[i].LoadStatus = "unavailable"
 		}
 	}
 	return files

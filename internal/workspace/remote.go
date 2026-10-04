@@ -273,23 +273,24 @@ func (s *RemoteWorkspaceService) ResolveMount(ctx context.Context, botID, target
 }
 
 func (s *RemoteWorkspaceService) resolveRecord(record dbstore.BotRemoteRuntimeBindingRecord) (ResolvedWorkspaceTarget, error) {
+	target := ResolvedWorkspaceTarget{TargetID: record.ID, Kind: WorkspaceTargetRemote, Name: record.RuntimeName, Primary: record.IsPrimary}
 	client, connection, err := s.clientForRecord(record)
 	if err != nil {
+		if errors.Is(err, ErrRemoteRuntimeOffline) {
+			return target, fmt.Errorf("%w: %w", ErrCapabilityUnavailable, err)
+		}
 		return ResolvedWorkspaceTarget{}, err
 	}
-	return ResolvedWorkspaceTarget{
-		TargetID: record.ID,
-		Kind:     WorkspaceTargetRemote,
-		Name:     record.RuntimeName,
-		Primary:  record.IsPrimary,
-		Client:   client,
-		Info: bridge.WorkspaceInfo{
-			Backend:        bridge.WorkspaceBackendRemote,
-			OS:             connection.Info.OS,
-			DefaultWorkDir: connection.Info.WorkspaceBase,
-		},
-		Approval: toolApprovalConfig(record.ToolApproval),
-	}, nil
+	target.Client = client
+	target.Info = bridge.WorkspaceInfo{Backend: bridge.WorkspaceBackendRemote, OS: connection.Info.OS, DefaultWorkDir: connection.Info.WorkspaceBase}
+	if len(record.ToolApproval) > 0 {
+		var approval settings.ToolApprovalConfig
+		if err := json.Unmarshal(record.ToolApproval, &approval); err != nil {
+			return target, fmt.Errorf("%w: %w", ErrCapabilityUnavailable, err)
+		}
+	}
+	target.Approval = toolApprovalConfig(record.ToolApproval)
+	return target, nil
 }
 
 func (s *RemoteWorkspaceService) ResolvePrimary(ctx context.Context, botID string) (ResolvedWorkspaceTarget, bool, error) {

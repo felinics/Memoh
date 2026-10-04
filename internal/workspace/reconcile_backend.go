@@ -110,9 +110,9 @@ func (m *Manager) provisionWorkspace(ctx context.Context, botID, imageOverride s
 		return stepError(botworkspace.PhaseBridge, err, true)
 	}
 	if err := m.InitializeNativeWorkspace(ctx, botID); err != nil {
-		m.logger.ErrorContext(ctx, "provision: workspace initialization failed", slog.String("bot_id", botID), slog.Any("error", err))
-		// A template that cannot be written will not fix itself.
-		return stepError(botworkspace.PhaseBootstrap, err, !errors.Is(err, ErrWorkspaceTemplateBootstrapFailed))
+		// The bridge is already ready. Auxiliary templates must not turn a
+		// usable runtime into a failed provisioning job.
+		m.recordReconcileSetupFailure(ctx, botID, "auxiliary_bootstrap", err)
 	}
 	if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
 		m.logger.WarnContext(ctx, "provision: remember workspace image failed", slog.String("bot_id", botID), slog.String("image", image), slog.Any("error", err))
