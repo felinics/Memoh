@@ -1,0 +1,24 @@
+[
+  {
+    "id": "cee2b738-cb7e-4c66-abbf-c98014dca2c7",
+    "bot_id": "c13d7789-b6d8-4740-a33d-18f6f4a3c290",
+    "name": "ui-native-rebased",
+    "target_kind": "native",
+    "workspace_target_id": "native",
+    "path": "/data/ui-native-rebased",
+    "created_by_user_id": "bf8960ff-7c54-40be-b5bc-1ffbb2a33042",
+    "created_at": "2026-10-04T23:26:10.023042Z",
+    "updated_at": "2026-10-04T23:26:10.023042Z"
+  },
+  {
+    "id": "2ae1c8e8-c9cf-4199-bb97-d6586efbb038",
+    "bot_id": "c13d7789-b6d8-4740-a33d-18f6f4a3c290",
+    "name": "ui-remote-rebased",
+    "target_kind": "remote",
+    "workspace_target_id": "82b09984-b1c1-496c-b0e9-f2b5f03d29d5",
+    "path": "/qa/remote/code/website",
+    "created_by_user_id": "bf8960ff-7c54-40be-b5bc-1ffbb2a33042",
+    "created_at": "2026-10-04T23:26:55.187714Z",
+    "updated_at": "2026-10-04T23:26:55.187714Z"
+  }
+]

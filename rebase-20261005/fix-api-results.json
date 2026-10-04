@@ -1,0 +1,61 @@
+[
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-a918d90da2",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-87cfcace62",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-688e3cd264",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-56191c81fb",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "remote primary, explicit native mkdir",
+    "name": "fixed-aa7b8c9982",
+    "mkdir_status": 200,
+    "create_workdir_status": 201,
+    "native_directory_status": 200,
+    "remote_directory_status": 400
+  },
+  {
+    "case": "omitted target preserves Primary behavior",
+    "mkdir_status": 200,
+    "remote_directory_status": 200,
+    "native_directory_status": 400
+  },
+  {
+    "case": "invalid target fails without fallback",
+    "status": 404,
+    "body": {
+      "type": "urn:memoh:error:http.not_found",
+      "status": 404,
+      "detail": "The requested resource was not found.",
+      "code": "http.not_found",
+      "args": {},
+      "fault": "client",
+      "request_id": "bfRmaZgbPtzNXZkeuYXSaqmaByQCKHpn"
+    }
+  }
+]

@@ -1,0 +1,77 @@
+[
+  {
+    "case": "default",
+    "status": 200,
+    "body": {
+      "workspace_target_id": "82b09984-b1c1-496c-b0e9-f2b5f03d29d5",
+      "path": "/qa/remote",
+      "directories": [
+        {
+          "name": "code",
+          "path": "/qa/remote/code"
+        },
+        {
+          "name": "empty",
+          "path": "/qa/remote/empty"
+        },
+        {
+          "name": "legacy-6ee16d2084",
+          "path": "/qa/remote/legacy-6ee16d2084"
+        },
+        {
+          "name": "private",
+          "path": "/qa/remote/private"
+        }
+      ]
+    }
+  },
+  {
+    "case": "nested",
+    "status": 200,
+    "body": {
+      "workspace_target_id": "82b09984-b1c1-496c-b0e9-f2b5f03d29d5",
+      "path": "/qa/remote/code",
+      "directories": [
+        {
+          "name": "website",
+          "path": "/qa/remote/code/website"
+        }
+      ]
+    }
+  },
+  {
+    "case": "empty",
+    "status": 200,
+    "body": {
+      "workspace_target_id": "82b09984-b1c1-496c-b0e9-f2b5f03d29d5",
+      "path": "/qa/remote/empty",
+      "directories": []
+    }
+  },
+  {
+    "case": "forbidden",
+    "status": 403,
+    "body": {
+      "type": "urn:memoh:error:http.forbidden",
+      "status": 403,
+      "detail": "You do not have permission to perform this action.",
+      "code": "http.forbidden",
+      "args": {},
+      "fault": "client",
+      "request_id": "KzWPdDEHHDwrcBgRsPbDsRyKnoUkTOyK"
+    }
+  },
+  {
+    "case": "missing",
+    "status": 400,
+    "body": {
+      "type": "urn:memoh:error:http.bad_request",
+      "status": 400,
+      "detail": "The request is invalid.",
+      "code": "http.bad_request",
+      "args": {},
+      "fault": "client",
+      "request_id": "zGCxkhjKBBcJxrZfSckQznWyqAtVIFHL"
+    }
+  }
+]

@@ -1,0 +1,23 @@
+PR1438 rebase acceptance
+Head: 340b8dc9ee4515ef1b485df56c74d3068ba7694f
+Base: b56f1551cd8dc9418917b389808f2ba14de372fc
+Preserved two commits: remote directory picker and explicit target mkdir fix.
+Resolved generated SDK/Swagger conflicts by regenerating from handler annotations.
+Updated new handlers to main's one-argument error translators and apperror.Problem schemas.
+
+Passed: go test ./...; focused go test -race for workdir/handlers/workspace;
+golangci-lint 2.10.1 for handlers/workdir; changed-file ESLint;
+4 Vue regression tests; mise run sdk-generate and SDK typecheck; UI contract guard.
+Web typecheck: main 448 errors, branch 448 errors; no normalized delta.
+
+Real stack at localhost:50082 / localhost:50080:
+Current source server, PostgreSQL 18 with migrations through 162,
+real native containerd workspace, rebuilt current-source non-root Linux runtime.
+Remote Primary + explicit native mkdir/create passed 5/5 (200/201); native paths
+existed and remote counterparts stayed missing. Repeated mkdir did not create
+remote copies. Omitted target still follows Primary; unknown target fails 404.
+Directory query default/nested/empty returned 200, unreadable 403, missing 400.
+Real Chinese dark UI: native Folder created; remote tree selection and Folder
+registration succeeded. API readback confirmed target IDs, kinds and paths.
+
+Agent QA, not Human QA. Windows/macOS remote devices and Desktop were not retested.
