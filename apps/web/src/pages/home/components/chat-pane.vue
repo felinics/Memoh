@@ -43,9 +43,11 @@
               </div>
 
               <!-- A session with a live run but no messages yet (a subagent
-                   that has not produced output) reads as starting, not empty. -->
+                   that has not produced output) reads as starting, not empty.
+                   A first send waiting on welcome already shows its spinner
+                   on the send button. -->
               <div
-                v-if="messages.length === 0 && !loadingChats && !loadingMessages && streaming"
+                v-if="messages.length === 0 && !loadingChats && !loadingMessages && streaming && !isWelcome"
                 class="flex items-center justify-center min-h-75"
               >
                 <Spinner class="size-3.5" />
@@ -621,7 +623,7 @@
                   v-model="inputText"
                   rows="1"
                   :placeholder="composerPlaceholder"
-                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages"
+                  :disabled="!currentBotId || activeChatReadOnly || loadingMessages || firstSendAwaiting"
                   class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] text-foreground outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="isWelcome ? 'min-h-12' : 'min-h-10'"
                   @keydown="handleComposerKeydown"
@@ -894,7 +896,7 @@
                         :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel || goalSubmissionBlocked || !!runtimeModeUnavailableReason)"
                         :title="goalSubmissionBlocked ? goalExecutionBlockedReason : undefined"
                         :class="runtimeModeChanging && !streaming && showSend && !!currentBotId && !activeChatReadOnly && !loadingMessages && !composerAgentConfigPending && !composerHasNoModel ? 'disabled:opacity-100' : undefined"
-                        :aria-busy="firstSendStopPending || undefined"
+                        :aria-busy="sendButtonBusy || undefined"
                         :aria-label="streaming && showSend ? $t(composerQueueCommand?.mode === 'steer' ? 'chat.queue.enqueueSteer' : 'chat.queue.enqueueFollowUp') : (streaming ? 'Stop generating response' : 'Send message')"
                         class="size-full"
                         @click="handleSendButton"
@@ -911,7 +913,7 @@
                             stroke-linecap="round"
                             stroke-linejoin="round"
                             class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                            :class="streaming ? 'opacity-0' : 'opacity-100'"
+                            :class="streaming || sendButtonBusy ? 'opacity-0' : 'opacity-100'"
                           >
                             <path d="M12 19 V5.75" />
                             <path d="M6.5 10.5 L12 5 L17.5 10.5" />
@@ -920,7 +922,7 @@
                             viewBox="0 0 24 24"
                             fill="currentColor"
                             class="col-start-1 row-start-1 size-4 max-md:size-4.5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                            :class="streaming && !firstSendStopPending ? 'opacity-100' : 'opacity-0'"
+                            :class="streaming && !sendButtonBusy ? 'opacity-100' : 'opacity-0'"
                           >
                             <rect
                               x="4"
@@ -930,10 +932,10 @@
                               rx="3"
                             />
                           </svg>
-                          <!-- Stop pressed before the server named the run:
-                               the run is still being stopped. -->
+                          <!-- A first send the server has not confirmed yet,
+                               or a stop waiting for the server to end the run. -->
                           <Spinner
-                            v-if="firstSendStopPending"
+                            v-if="sendButtonBusy"
                             class="col-start-1 row-start-1 size-4 max-md:size-4.5"
                           />
                         </span>
@@ -1445,25 +1447,32 @@ const hasRenderedSession = computed(() =>
   !!(paneTarget.value.sessionId || activeChatTarget.value.sessionId || '').trim(),
 )
 // The first message sent from this pane's draft, from Enter until it is an
-// ordinary session (or rolled back). The store owns the phase; the pane only
-// reads it. It is keyed by the pane's view id, so it outlives the draft ->
-// session repoint.
+// ordinary session (or failed). The store owns the phase; the pane only reads
+// it. It is keyed by the pane's view id, so it outlives the draft -> session
+// repoint.
 const firstSendEntry = computed(() => chatStore.firstSendFor(paneTarget.value))
 const firstSendPhase = computed(() => firstSendEntry.value?.phase ?? 'idle')
 const firstSendStopPending = computed(() => firstSendEntry.value?.stopRequested === true)
+// From Enter on a draft until the server confirms the send. The pane stays on
+// welcome with the input in a locked composer. draftSendStarting covers the
+// part before the store has registered the send (attachment encoding, an
+// External Agent's REST session creation).
+const draftSendStarting = ref(false)
+const firstSendAwaiting = computed(() =>
+  draftSendStarting.value || (!!firstSendEntry.value && !firstSendEntry.value.revealed))
+const sendButtonBusy = computed(() => firstSendAwaiting.value || firstSendStopPending.value)
 // A draft whose first message is in flight is committed to its setup (the
 // folder travels with that message), even before a session id exists.
-const draftSetupEditable = computed(() => !hasRenderedSession.value && firstSendPhase.value === 'idle')
+const draftSetupEditable = computed(() => !hasRenderedSession.value && firstSendPhase.value === 'idle' && !draftSendStarting.value)
 
 // A fresh, writable chat opens with the composer centred and a greeting above
 // it. Read-only sessions (system / synced channel threads) hide the composer
-// entirely, so they never reach this state. While a first send is in flight
-// the pane is a chat whatever the session id says: the turn is on screen from
-// Enter, before the server names the session. A rolled-back first send is
-// welcome again as soon as the store has undone it.
+// entirely, so they never reach this state. A first send stays on welcome
+// until the server confirms it; from then on the pane is a chat even before
+// a turn has rendered (a skill activation appends none of its own).
 const isWelcome = computed(() => {
   if (!currentBotId.value || activeChatReadOnly.value || loadingChats.value) return false
-  if (firstSendPhase.value !== 'idle') return false
+  if (firstSendEntry.value?.revealed) return false
   return !hasRenderedSession.value && messages.value.length === 0
 })
 
@@ -1478,11 +1487,10 @@ const isWelcome = computed(() => {
 // from the first frame, so this gate never engages on session routes.
 const composerPlacementPending = computed(() => loadingChats.value && !hasRenderedSession.value)
 const composerPlacementEl = useTemplateRef<HTMLElement>('composerPlacementEl')
-// Only a first send moves the composer, out of welcome when it starts. Any
-// other flip is navigation, and the composer just lands with the rest of the
-// pane. A rollback also lands: the store undoes the send in one step, so the
-// welcome layout, the restored input and the error appear together.
-useComposerPlacementMotion(composerPlacementEl, isWelcome, () => firstSendPhase.value !== 'idle')
+// Only a first send moves the composer, out of welcome when the server
+// confirms it, together with the turns appearing. Any other flip is
+// navigation, and the composer just lands with the rest of the pane.
+useComposerPlacementMotion(composerPlacementEl, isWelcome, () => !!firstSendEntry.value?.revealed)
 
 // Rotate the greeting per fresh chat so the entry point feels alive rather than
 // a fixed banner; the pick stays stable while a single welcome screen is shown
@@ -1511,8 +1519,8 @@ const welcomeGreeting = computed(() => {
   return t(WELCOME_GREETING_KEYS[welcomeGreetingIndex.value] ?? WELCOME_GREETING_KEYS[0])
 })
 watch([isWelcome, currentBotId, () => activeSession.value?.id], ([welcome]) => {
-  // A rolled-back first send returns to the same welcome the user left,
-  // greeting included: its failure is still waiting to hand the input back.
+  // A first send that failed before confirmation never left this welcome, so
+  // the greeting stays: its failure is still on screen with the input.
   if (welcome && !startupSendFailure.value) welcomeGreetingIndex.value = pickWelcomeGreetingIndex()
 })
 
@@ -4133,10 +4141,22 @@ async function handleSend() {
   const sentWorkspaceTargetId = sendWorkspaceTargetId.value
   const preserveDirectDraftSelection = activeUsesDirectRuntime.value && !sentContext.target.sessionId
   composerError.value = ''
-  inputText.value = ''
-  saveInputDraft(sentDraftKey, '')
-  pendingFiles.value = []
-  requestedSkills.value = []
+  // A draft's first send keeps its input on screen, locked, until the server
+  // confirms it (onBeforeTurnAppend); a failure then leaves it where it is.
+  const holdsInput = !sentContext.target.sessionId
+  const clearSentInput = () => {
+    saveInputDraft(sentDraftKey, '')
+    if (holdsInput && !matchesChatPaneSendContext(
+      sentContext,
+      paneTarget.value,
+      inputDraftKey.value || 'chat',
+    )) return
+    inputText.value = ''
+    pendingFiles.value = []
+    requestedSkills.value = []
+  }
+  if (holdsInput) draftSendStarting.value = true
+  else clearSentInput()
 
   let attachments: ChatAttachment[] | undefined
   try {
@@ -4145,6 +4165,7 @@ async function handleSend() {
     }
   } catch (error) {
     pairSend.releaseReads()
+    draftSendStarting.value = false
     if (!matchesChatPaneSendContext(
       sentContext,
       paneTarget.value,
@@ -4172,6 +4193,10 @@ async function handleSend() {
     onBeforeMessageSend: () => pairSend.begin(),
     onModelPreferenceSettled: () => pairSend.finish(false),
     onBeforeTurnAppend: (target) => {
+      if (holdsInput) {
+        clearSentInput()
+        draftSendStarting.value = false
+      }
       if (goalSend && goalDraftScope.value === sentGoalScope) goalDraftScope.value = ''
       if (preserveDirectDraftSelection) {
         void nextTick(() => { directDraftPromotionPending = false })
@@ -4188,6 +4213,7 @@ async function handleSend() {
       rollbackPin = null
     },
   }).finally(() => {
+    draftSendStarting.value = false
     directDraftPromotionPending = false
     pairSend.finish(false)
     pairSend.releaseReads()
@@ -4221,8 +4247,9 @@ async function handleSend() {
 }
 
 function handleSendButton() {
-  // A stop already sent waits for the server to end the run.
-  if (firstSendStopPending.value) return
+  // A first send waits for the server to confirm it; a stop already sent
+  // waits for the server to end the run.
+  if (sendButtonBusy.value) return
   if (streaming.value && !showSend.value) {
     chatStore.abort(paneTarget.value)
     return

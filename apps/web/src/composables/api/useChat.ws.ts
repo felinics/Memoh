@@ -126,6 +126,8 @@ function acknowledgedRequestKey(event: UIStreamEvent): string {
 export interface ChatWebSocket {
   send: (msg: WSClientMessage) => void
   abort: (runId: string, sessionId: string, controlId: string) => void
+  // Drops a reliable request so a reconnect does not resend it.
+  forget: (invocationId: string) => void
   close: () => void
   readonly connected: boolean
   onOpen: (() => void) | null
@@ -183,6 +185,10 @@ export function connectWebSocket(
         session_id: sid,
         control_id: cid,
       })
+    },
+    forget(invocationId: string) {
+      const id = invocationId.trim()
+      if (id) pendingReliableRequests.delete(`invocation:${id}`)
     },
     close() {
       closed = true

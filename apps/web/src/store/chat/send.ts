@@ -154,7 +154,7 @@ export interface ChatSendDeps {
   rememberStartupSendFailure: (failure: Omit<StartupSendFailure, 'id'>) => void
   // The workdir a native draft is bound to; sent with its first message.
   draftWorkdirIdFor: (botId: string) => string
-  firstSend: Pick<FirstSendTracker, 'begin' | 'admit' | 'finish'>
+  firstSend: Pick<FirstSendTracker, 'begin' | 'admit' | 'reveal' | 'finish' | 'isRevealed' | 'sessionIdFor'>
   sendFailedMessage: () => string
   updateForkAnchorForReplacedMessage: (
     sessionId: string,
@@ -296,9 +296,11 @@ export function createChatSend(deps: ChatSendDeps) {
 
     // A draft's first message creates its session in-band: the server creates
     // the session for a message without session_id and names it with
-    // session_created before run_accepted. Nothing waits on the network before
-    // the turn is on screen. External Agent sessions need runtime setup the
-    // message path does not do, so they still create over REST first.
+    // session_created before run_accepted. The turns are held until
+    // run_accepted (see first-send.ts), so the draft only becomes a chat once
+    // the server has taken the send. External Agent sessions need runtime
+    // setup the message path does not do, so they still create over REST
+    // first, and that creation is their confirmation.
     const inband = wasDraft && !isExternalAgent
     try {
       options.onBeforeMessageSend?.()
@@ -330,25 +332,32 @@ export function createChatSend(deps: ChatSendDeps) {
       // The workdir the draft is bound to travels with the message, because
       // the server now creates the session. The binding is fixed at creation.
       const workdirId = inband ? deps.draftWorkdirIdFor(botId).trim() : ''
-      assistantTurn = transcript.createOptimisticAssistantTurn(sendInvocationId)
-      if (wasDraft) {
-        // Started in the same synchronous step as the append below, so the
-        // pane leaves welcome in the same frame the turn appears. A REST-created
-        // session is already named, so that send starts admitted.
-        deps.firstSend.begin(viewTarget, sendInvocationId, workdirId, assistantTurn)
-        if (!inband) deps.firstSend.admit(sendInvocationId, targetSessionId)
-        firstSendStarted = true
+      const replyTurn = transcript.createOptimisticAssistantTurn(sendInvocationId)
+      assistantTurn = replyTurn
+      const appendTurns = () => {
+        turnAppendStarted = true
+        options.onBeforeTurnAppend?.({ ...viewTarget })
+        if (!serverSkillActivation) {
+          userTurn = transcript.createOptimisticUserTurn(
+            trimmed,
+            attachments,
+            sendInvocationId,
+          )
+          transcript.appendToView(userTurn, replyTurn)
+        }
       }
-
-      turnAppendStarted = true
-      options.onBeforeTurnAppend?.({ ...viewTarget })
-      if (!serverSkillActivation) {
-        userTurn = transcript.createOptimisticUserTurn(
-          trimmed,
-          attachments,
-          sendInvocationId,
-        )
-        transcript.appendToView(userTurn, assistantTurn)
+      if (wasDraft) {
+        // A REST-created session is already named, so that send starts
+        // admitted and is revealed at once; an in-band one waits for
+        // run_accepted, which reveals it before promoting the draft.
+        deps.firstSend.begin(viewTarget, sendInvocationId, workdirId, appendTurns)
+        firstSendStarted = true
+        if (!inband) {
+          deps.firstSend.admit(sendInvocationId, targetSessionId)
+          deps.firstSend.reveal(sendInvocationId)
+        }
+      } else {
+        appendTurns()
       }
 
       if (!deps.ensureWebSocket(botId)) {
@@ -396,33 +405,29 @@ export function createChatSend(deps: ChatSendDeps) {
       const isCommandError = failure instanceof CommandStreamError
       const reason = resolveApiErrorMessage(error, failure.message || deps.sendFailedMessage())
       const errorCode = parseMemohError(error)?.code
-      const stage: SendMessageStage = failure instanceof StreamFailureError
+      // A first send the server never confirmed showed nothing: the pane is
+      // still on welcome with the input in the composer. Once revealed it is an
+      // ordinary session, and its failure stays in the history.
+      const held = firstSendStarted && !deps.firstSend.isRevealed(sendInvocationId)
+      const revealedFirstSend = firstSendStarted && !held
+      const reportedStage: SendMessageStage = failure instanceof StreamFailureError
         ? failure.stage
         : (assistantTurn ? failureStage(assistantTurn, false, false) : 'startup')
+      const stage: SendMessageStage = held
+        ? 'startup'
+        : (revealedFirstSend ? 'stream' : reportedStage)
       const createdSessionId = sendInvocationId
         ? deps.createdSessionIdForInvocation(sendInvocationId)
+          || deps.firstSend.sessionIdFor(sendInvocationId)
         : ''
       const botId = sendBotId || viewTarget.botId || deps.currentBotId.value || ''
       const targetSessionId = sendSessionId || createdSessionId
-      // A first send that failed before the reply started is undone as a
-      // whole: the session it created is deleted and the draft returns to the
-      // state before Enter. A stop is not a failure, unless the send was torn
-      // down before any session existed (bot switch, sign-out), which would
-      // otherwise strand the turn in a draft that can never receive it.
-      const rollBack = firstSendStarted
-        && stage === 'startup'
-        && (!isAbort || !targetSessionId)
 
-      if (rollBack) {
+      if (held) {
+        // The server created a session but refused the run (or the socket
+        // dropped in between). Nothing shows it yet, so it is deleted quietly.
         if (targetSessionId) {
-          // Removes the session view, tombstones the session and resets the
-          // pane to a fresh draft with the same view id. Only the server-side
-          // delete is awaited inside; the local teardown is synchronous, so
-          // the rollback does not wait for that round trip.
           void deps.cleanupFailedDeferredSession(botId, targetSessionId, composerScope)
-        }
-        for (const turn of [userTurn, assistantTurn]) {
-          if (turn) deps.removeTurnFromSession(botId, '', turn)
         }
         deps.firstSend.finish(sendInvocationId)
       } else {
@@ -437,20 +442,20 @@ export function createChatSend(deps: ChatSendDeps) {
 
       if (sendInvocationId) deps.discardAssistantStream(sendInvocationId)
       if (sendInvocationId) deps.forgetCreatedSession(sendInvocationId)
-      if (stage === 'startup' && turnAppendStarted && (rollBack || !isAbort)) {
+      if (stage === 'startup' && turnAppendStarted && !isAbort) {
         options.onTurnAppendAborted?.()
       }
 
-      if (isAbort && !rollBack) return { ok: false, stage: 'stream', error: reason, errorCode }
+      if (isAbort && !held) return { ok: false, stage: 'stream', error: reason, errorCode }
       if (stage === 'startup') {
         const currentBotId = (deps.currentBotId.value ?? '').trim()
         const currentSessionId = (deps.sessionId.value ?? '').trim()
-        // A rolled-back first send is restored to its draft composer, which
-        // the failure is keyed to; the pane applies it only while it still
-        // shows that draft. A failure on an existing session is restored only
-        // while that session is still the active one. Command errors there
-        // are already on screen in the command panel.
-        const restorable = rollBack
+        // A held first send is restored to its draft composer, which the
+        // failure is keyed to; the pane applies it only while it still shows
+        // that draft. A failure on an existing session is restored only while
+        // that session is still the active one. Command errors there are
+        // already on screen in the command panel.
+        const restorable = held
           ? currentBotId === botId
           : currentBotId === botId
             && !isCommandError
@@ -458,7 +463,7 @@ export function createChatSend(deps: ChatSendDeps) {
         if (options.restoreDraftOnFailure !== false && restorable) {
           deps.rememberStartupSendFailure({
             botId,
-            sessionId: rollBack ? '' : targetSessionId,
+            sessionId: held ? '' : targetSessionId,
             composerScope,
             error: reason,
             restoreInput: text,

@@ -313,7 +313,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
 
   // Per-session chat title fallback (syncChatTitles overlays the server title
   // once known). Draft tabs (no session) are system-titled, and so is a first
-  // send's tab until its reply starts (see isSessionTentative).
+  // send's tab until the server confirms the send (see isSessionTentative).
   function chatTitleFallbackFor(sid: string | null): string {
     if (!sid || chatStore.isSessionTentative(sid)) return defaultChatTitle()
     const session = chatStore.knownSessionSummary(sid)
@@ -2098,7 +2098,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // id:title:conversation-name digest so it fires on title changes AND on
   // channel route (group/peer name) changes, not on every sidebar reorder.
   // Tentativeness is part of the key so a first send's tab takes the session
-  // title when its reply starts.
+  // title once the server confirms the send.
   watch(
     () => chatStore.knownSessions.map(s => `${s.id}:${s.title ?? ''}:${(s.route_metadata?.conversation_name as string) ?? ''}:${chatStore.isSessionTentative(s.id) ? 1 : 0}`).sort().join('|'),
     () => syncChatTitles(),

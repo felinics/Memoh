@@ -1076,7 +1076,9 @@ describe('chat-list store', () => {
       await store.selectBot('bot-1')
       const sending = store.sendMessage('hello')
       await flushPromises()
-      expect(store.messages.map(turn => turn.role)).toEqual(['user', 'assistant'])
+      // Nothing of the send is shown before the server confirms it.
+      expect(store.messages).toEqual([])
+      expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toMatchObject({ revealed: false })
       h.streamHandler?.({
         type: 'error',
         invocation_id: wsInvocationId(0),
@@ -1091,8 +1093,8 @@ describe('chat-list store', () => {
         error: 'External agent setup is incomplete for this bot.',
         restoreInput: 'hello',
       })
-      // The failed first send is undone: the draft is empty again, no first
-      // send is left in flight, and the composer gets the input back.
+      // The failed first send never left the draft: it is still empty, no
+      // first send is left in flight, and the failure carries the input.
       expect(store.messages).toEqual([])
       expect(store.firstSendFor({ botId: 'bot-1', viewId: 'chat' })).toBeUndefined()
       expect(api.deleteSession).not.toHaveBeenCalled()
@@ -4012,6 +4014,8 @@ describe('chat-list store', () => {
   it('deletes a deferred draft session when requested skill preflight fails after session_created', async () => {
       h.manualSessionCreation = true
       h.sendUpdates = []
+      // The server refuses requested skills before it accepts a run.
+      h.acceptRuns = false
       const store = useChatStore()
       const requestedSkill = { name: 'alpha' }
       const attachment = {
@@ -4031,7 +4035,9 @@ describe('chat-list store', () => {
 
       h.streamHandler?.({ type: 'session_created', invocation_id: invocationId, session_id: 'created-session' })
       await flushPromises()
-      expect(store.sessionId).toBe('created-session')
+      // The run is not accepted yet, so the pane is still the draft.
+      expect(store.sessionId).toBeNull()
+      expect(store.messages).toHaveLength(0)
 
       h.streamHandler?.({
         type: 'command_error',
@@ -4084,6 +4090,8 @@ describe('chat-list store', () => {
   it('keeps the current session when deferred draft failure arrives after a session switch', async () => {
       h.manualSessionCreation = true
       h.sendUpdates = []
+      // The server refuses requested skills before it accepts a run.
+      h.acceptRuns = false
       api.fetchSession.mockImplementation(async (_botId: string, sessionID: string) => ({
         id: sessionID,
         bot_id: 'bot-1',

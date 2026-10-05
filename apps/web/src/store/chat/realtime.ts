@@ -38,6 +38,7 @@ export interface ChatRealtimeCallbacks {
     change: RuntimeProjectionChange,
   ) => void
   onBotSessionsActivityEvent: (botId: string, event: BotSessionActivityEvent) => void
+  onWebSocketClosed?: (botId: string) => void
   // Coverage requires the server's ready frame, including runtime admission
   // invalidation support. Legacy servers and disconnected streams stay
   // conservative even when REST history requests continue to succeed.
@@ -127,6 +128,7 @@ export function createChatRealtimeController(
       socket.onClose = () => {
         if (generation !== webSocketGeneration || activeWebSocketBotId !== bid) return
         runtimeClient.onDisconnected()
+        callbacks.onWebSocketClosed?.(bid)
       }
       activeWebSocket = socket
       if (socket.connected) runtimeClient.onConnected()
@@ -152,6 +154,11 @@ export function createChatRealtimeController(
     if (!ensureWebSocket(botId)) return false
     activeWebSocket!.send(message)
     return true
+  }
+
+  function forgetWebSocketRequest(botId: string, invocationId: string) {
+    if (activeWebSocketBotId !== botId.trim()) return
+    activeWebSocket?.forget(invocationId)
   }
 
   function abortWebSocketRun(
@@ -289,6 +296,7 @@ export function createChatRealtimeController(
     stopWebSocket,
     ensureWebSocket,
     sendWebSocketMessage,
+    forgetWebSocketRequest,
     abortWebSocketRun,
     startSessionRuntime,
     stopSessionRuntime,

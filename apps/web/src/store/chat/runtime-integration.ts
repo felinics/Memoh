@@ -94,6 +94,7 @@ export interface RuntimeIntegrationDeps {
     turn: ChatMessage,
   ) => void
   sendFailedMessage: () => string
+  connectionLostMessage: () => string
   touchSessionInList: (sessionId: string, updatedAt?: string) => void
 }
 
@@ -126,7 +127,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     // server that predates in-band workdir binding omits the field and
     // creates an unbound session; treat any mismatch as a startup failure.
     // The stop is replayed once run_accepted names the run, and send.ts
-    // deletes the session and rolls the draft back.
+    // deletes the session; the draft never showed the send.
     const requestedWorkdirId = deps.firstSend.requestedWorkdirFor(event.invocation_id)
     if (requestedWorkdirId && (event.workdir_id ?? '').trim() !== requestedWorkdirId) {
       if (pending) {
@@ -138,12 +139,46 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       }
       return
     }
-    deps.firstSend.admit(event.invocation_id, sessionId)
+    const workdirId = (event.workdir_id ?? '').trim()
+    deps.firstSend.admit(event.invocation_id, sessionId, workdirId)
     const deferredAbort = deferredAbortByInvocation.get(event.invocation_id)
     if (deferredAbort) {
       deferredAbortByInvocation.delete(event.invocation_id)
       sendAbortControl(deferredAbort.runId, deferredAbort.botId, sessionId)
     }
+    // A held first send stays a draft until run_accepted reveals it; the
+    // server can still refuse the run after creating the session.
+    if (deps.firstSend.isAwaitingConfirmation(event.invocation_id)) {
+      revealConfirmedFirstSend(event.invocation_id, botId)
+      return
+    }
+    promoteCreatedSession(event.invocation_id, botId, sessionId, workdirId, originalSessionId)
+  }
+
+  // The server took a held first send once it has both named the session
+  // and accepted the run (normally session_created, then run_accepted). Its
+  // turns go on screen in the draft, then the draft becomes the session, in
+  // one step.
+  function revealConfirmedFirstSend(invocationId: string, sourceBotId: string) {
+    const entry = deps.firstSend.entryForInvocation(invocationId)
+    if (!entry || entry.revealed || !entry.sessionId || entry.phase !== 'streaming') return
+    const held = deps.assistantStreams.getAssistantStream(invocationId)
+    const botId = (held?.botId || sourceBotId || deps.currentBotId.value || '').trim()
+    if (!botId || !deps.firstSend.reveal(invocationId)) return
+    // A first send leaves a draft, which has no session selected.
+    promoteCreatedSession(invocationId, botId, entry.sessionId, entry.workdirId, '')
+  }
+
+  // Turns the draft the send came from into the session the server created:
+  // the view moves, the sidebar row appears and the pane selects it.
+  function promoteCreatedSession(
+    invocationId: string,
+    botId: string,
+    sessionId: string,
+    workdirId: string,
+    originalSessionId: string,
+  ) {
+    const pending = deps.assistantStreams.getAssistantStream(invocationId)
     const viewId = pending?.viewId?.trim() || deps.focusedViewId.value
     const promoted = deps.promoteDraftView({
       botId,
@@ -163,7 +198,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         runtime_type: 'model',
         title: provisionalSessionTitle(promoted.transcript.latestOptimisticUserText()),
         // Places the row in its folder rather than Recents.
-        workdir_id: (event.workdir_id ?? '').trim() || undefined,
+        workdir_id: workdirId || undefined,
         created_at: now,
         updated_at: now,
       })
@@ -219,6 +254,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         turnId,
       )
       deps.firstSend.advance(event.invocation_id, 'streaming')
+      revealConfirmedFirstSend(event.invocation_id, sourceBotId)
       const sessionId = event.session_id.trim()
       const botId = (
         accepted?.botId
@@ -227,8 +263,8 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         || ''
       ).trim()
       if (sessionId && botId) {
-        // A send that already ended locally (a stop, or a rolled-back first
-        // send whose session was deleted) must not recreate a view for it.
+        // A send that already ended locally (a stop, or a failed first send
+        // whose session was deleted) must not recreate a view for it.
         const view = deps.assistantStreams.getAssistantStream(event.invocation_id)
           ? deps.chatViews.getOrCreate({
               botId,
@@ -554,6 +590,23 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     deps.chatViews.prune()
   }
 
+  // A socket that closes before a held first send is confirmed fails it: the
+  // reliable request would otherwise wait for a reconnect indefinitely while
+  // the pane shows a locked composer. Its queued resend is dropped, so a later
+  // reconnect cannot start the run the user was told failed.
+  function handleWebSocketClosed(botId: string) {
+    const bid = botId.trim()
+    for (const invocationId of deps.firstSend.awaitingConfirmationIds()) {
+      const pending = deps.assistantStreams.getAssistantStream(invocationId)
+      if (!pending || pending.botId.trim() !== bid) continue
+      deps.realtime.forgetWebSocketRequest(bid, invocationId)
+      deps.assistantStreams.rejectAssistantStream(
+        invocationId,
+        new StreamFailureError(deps.connectionLostMessage(), 'startup'),
+      )
+    }
+  }
+
   function abortAllAssistantStreams() {
     const abortError = new Error('aborted')
     abortError.name = 'AbortError'
@@ -565,6 +618,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     handleWebSocketEvent,
     handleProjection,
     prepareSessionRuntime,
+    handleWebSocketClosed,
     abort,
     abortAllAssistantStreams,
   }
