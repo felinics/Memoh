@@ -19,7 +19,8 @@ import { homedir, hostname } from 'node:os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
-import { acceleratorForCommand, appKeyboardCommands, matchesMenuAccelerator, type AppKeyboardCommand } from '../shared/keyboard-commands'
+import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
+import { attachMenuShortcutOwnership } from './menu-shortcuts'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
 import { macWindowChromeOptions } from './window-chrome'
@@ -69,7 +70,7 @@ type TraySettingsItem = {
 }
 
 let chatWindow: BrowserWindow | null = null
-let keyboardCapture = false
+let menuShortcuts: ReturnType<typeof attachMenuShortcutOwnership> | null = null
 let appTray: Tray | null = null
 let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
@@ -523,19 +524,11 @@ function createChatWindow(): BrowserWindow {
     },
   })
   if (process.platform === 'win32') window.setMenuBarVisibility(false)
-  keyboardCapture = false
-  window.webContents.on('before-input-event', (_event, input) => {
-    const key = { key: input.key, code: input.code, ctrlKey: input.control, metaKey: input.meta, altKey: input.alt, shiftKey: input.shift }
-    const platform = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux'
-    const command = appKeyboardCommands.closeCurrentWorkspaceTab
-    window.webContents.setIgnoreMenuShortcuts(keyboardCapture || input.isAutoRepeat || input.isComposing
-      || matchesMenuAccelerator(key, effectiveMenuAccelerator(command), platform))
-  })
-  window.webContents.on('did-start-navigation', (event) => {
-    if (!event.isMainFrame || event.isSameDocument) return
-    keyboardCapture = false
-    window.webContents.setIgnoreMenuShortcuts(false)
-  })
+  menuShortcuts = attachMenuShortcutOwnership(
+    window.webContents,
+    () => effectiveMenuAccelerator(appKeyboardCommands.closeCurrentWorkspaceTab),
+    process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux',
+  )
   attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
   // macOS hides the traffic lights in fullscreen — the renderer drops its
@@ -749,9 +742,7 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('window:ignore-menu-shortcuts', (event, ignore: unknown) => {
     assertTrustedRenderer(event)
-    if (event.sender !== chatWindow?.webContents || typeof ignore !== 'boolean') return
-    keyboardCapture = ignore
-    event.sender.setIgnoreMenuShortcuts(ignore)
+    menuShortcuts?.setCapture(event.sender, ignore)
   })
   ipcMain.handle('desktop:set-menu-accelerators', async (event, rawPayload: unknown) => {
     assertTrustedRenderer(event)
