@@ -694,7 +694,8 @@
         "title": "Edit shortcut",
         "prompt": "Press a key combination…",
         "resetDefault": "Reset to default",
-        "reservedError": "This combination is reserved by the browser or OS.",
+        "reservedError": "This combination is reserved by the browser, the OS or the app menu.",
+        "editingError": "This combination is used for text editing (copy, paste, undo…).",
         "noModifierError": "This shortcut needs a Cmd/Ctrl or Alt modifier so it doesn't fire while typing.",
         "sameScopeError": "This combination is already used by {command}.",
         "crossScopeWarn": "Also used by {command} (only active in a different context)."

@@ -129,6 +129,14 @@ describe('keyComboFromEvent', () => {
       .toEqual({ mod: true, alt: true, shift: true, key: ']' })
   })
 
+  it('on mac rejects Option without Command when it produces a character or dead key', () => {
+    expect(keyComboFromEvent({ key: 'Dead', code: 'KeyN', ctrlKey: false, metaKey: false, altKey: true, shiftKey: false }, true)).toBeNull()
+    expect(keyComboFromEvent({ key: 'å', code: 'KeyA', ctrlKey: false, metaKey: false, altKey: true, shiftKey: false }, true)).toBeNull()
+    expect(keyComboFromEvent({ key: 'Á', code: 'KeyY', ctrlKey: false, metaKey: false, altKey: true, shiftKey: true }, true)).toBeNull()
+    expect(keyComboFromEvent({ key: 'ArrowLeft', code: 'ArrowLeft', ctrlKey: false, metaKey: false, altKey: true, shiftKey: false }, true))
+      .toEqual({ mod: false, alt: true, shift: false, key: 'ArrowLeft' })
+  })
+
   it('keeps the produced character for Ctrl+Alt outside macOS', () => {
     expect(keyComboFromEvent({ key: 'ń', code: 'KeyN', ctrlKey: true, metaKey: false, altKey: true, shiftKey: false }, false))
       .toEqual({ mod: true, alt: true, shift: false, key: 'ń' })

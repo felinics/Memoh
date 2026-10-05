@@ -77,3 +77,22 @@ it('releases capture when a cached settings page deactivates and returns with th
   await nextTick()
   expect(setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false)
 })
+
+it('explains and blocks a text editing combo before accepting a free one', async () => {
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp({ setup: () => () => h(KeyCaptureDialog, {
+    open: true, command: appKeyboardCommands.newTerminal, i18nKey: 'newTerminal',
+  }) }).use(createPinia()).use(i18n)
+  app.mount(host)
+  await nextTick()
+  const save = () => [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Save')!
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true }))
+  await nextTick()
+  expect(document.body.textContent).toContain(i18n.global.t('settings.keyboard.dialog.editingError'))
+  expect(save().disabled).toBe(true)
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, altKey: true, bubbles: true, cancelable: true }))
+  await nextTick()
+  expect(document.body.textContent).not.toContain(i18n.global.t('settings.keyboard.dialog.editingError'))
+  expect(save().disabled).toBe(false)
+})

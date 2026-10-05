@@ -104,6 +104,7 @@ export function keyComboFromEvent(event: KeyboardEventLike, isMac: boolean): Par
   // match every literal 's' keypress in any input. Reject the capture so the
   // user picks a Cmd/Alt/Shift-based combo instead.
   if (isMac && event.ctrlKey) return null
+  if (isMac && event.altKey && !event.metaKey && (event.key.length === 1 || event.key === 'Dead')) return null
   return {
     mod: isMac ? event.metaKey : event.ctrlKey,
     alt: event.altKey,

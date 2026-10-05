@@ -100,16 +100,12 @@ const collidedLabel = computed(() => {
   return t(`settings.keyboard.commands.${binding.i18nKey}.label`)
 })
 
-const isBlockingConflict = computed(() =>
-  conflict.value.kind === 'reserved'
-  || conflict.value.kind === 'same-scope'
-  || conflict.value.kind === 'no-modifier',
-)
+const isBlockingConflict = computed(() => conflict.value.kind !== 'none' && conflict.value.kind !== 'cross-scope')
 
 function handleSave() {
   if (!props.command || !captured.value) return
   const result = store.setBinding(props.command, formatKeyCombo(captured.value))
-  if (result.kind === 'invalid' || result.kind === 'reserved' || result.kind === 'same-scope') return
+  if (result.kind !== 'none' && result.kind !== 'cross-scope') return
   emit('update:open', false)
 }
 
@@ -161,6 +157,12 @@ function handleCancel() {
           class="text-destructive"
         >
           {{ t('settings.keyboard.dialog.reservedError') }}
+        </div>
+        <div
+          v-else-if="conflict.kind === 'editing'"
+          class="text-destructive"
+        >
+          {{ t('settings.keyboard.dialog.editingError') }}
         </div>
         <div
           v-else-if="conflict.kind === 'no-modifier'"

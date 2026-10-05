@@ -691,7 +691,8 @@
         "title": "ショートカットを編集",
         "prompt": "新しい組み合わせを押してください…",
         "resetDefault": "デフォルトに戻す",
-        "reservedError": "この組み合わせはブラウザまたは OS に予約されています。",
+        "reservedError": "この組み合わせはブラウザ、OS、またはアプリのメニューに予約されています。",
+        "editingError": "この組み合わせはテキスト編集（コピー、貼り付け、取り消しなど）に使われます。",
         "noModifierError": "このショートカットには Cmd/Ctrl または Alt 修飾キーが必要です（通常入力で誤発火しないように）。",
         "sameScopeError": "このキーの組み合わせは {command} で使用されています。",
         "crossScopeWarn": "{command} でも使用されています（異なるコンテキストでのみ有効）。"

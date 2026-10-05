@@ -248,6 +248,13 @@ export const keyboardBindings: KeyboardBinding[] = [
  */
 export const RESERVED_BROWSER_COMBOS = new Set<string>(['w', 'q', 't', 'n'])
 
+export const RESERVED_APP_MENU_COMBOS = [
+  'Mod+r', 'Mod+Shift+r', 'Mod+m', 'Mod+h', 'Mod+Alt+h', 'Mod+0',
+  'Mod+=', 'Mod+Plus', 'Mod+Shift+Plus', 'Mod+-', 'Mod+Shift+i', 'Mod+Alt+i',
+]
+
+export const TEXT_EDITING_COMBOS = ['Mod+c', 'Mod+v', 'Mod+x', 'Mod+z', 'Mod+Shift+z', 'Mod+a']
+
 /** The effective key for a platform: a per-platform override, else the base key. */
 export function resolveBindingKey(
   binding: { key: string; mac?: string; win?: string; linux?: string },

@@ -3,7 +3,9 @@ import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
 import {
   keyboardBindings,
+  RESERVED_APP_MENU_COMBOS,
   RESERVED_BROWSER_COMBOS,
+  TEXT_EDITING_COMBOS,
   type KeyboardBinding,
 } from '@/lib/keyboard-bindings'
 import {
@@ -15,12 +17,15 @@ import {
 } from '@/lib/keyboard-combo'
 import type { AppKeyboardCommand } from '@/lib/keyboard-commands'
 
-export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'invalid' | 'no-modifier'
+export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'editing' | 'invalid' | 'no-modifier'
 
 export interface ConflictResult {
   kind: ConflictKind
   collidesWith?: AppKeyboardCommand
 }
+
+const appMenuCombos = RESERVED_APP_MENU_COMBOS.map(combo => parseKeyCombo(combo)!)
+const textEditingCombos = TEXT_EDITING_COMBOS.map(combo => parseKeyCombo(combo)!)
 
 function isReservedCombo(combo: ParsedKeyCombo): boolean {
   return combo.mod && !combo.alt && !combo.shift && RESERVED_BROWSER_COMBOS.has(combo.key.toLowerCase())
@@ -75,7 +80,8 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
   }
 
   function detectConflict(command: AppKeyboardCommand, combo: ParsedKeyCombo): ConflictResult {
-    if (isReservedCombo(combo)) return { kind: 'reserved' }
+    if (isReservedCombo(combo) || appMenuCombos.some(reserved => keyCombosEqual(reserved, combo))) return { kind: 'reserved' }
+    if (textEditingCombos.some(editing => keyCombosEqual(editing, combo))) return { kind: 'editing' }
     const ownBinding = keyboardBindings.find(b => b.command === command)
     if (!ownBinding) return { kind: 'none' }
     // Global shortcuts dispatch from a window-level listener that does not skip
@@ -113,7 +119,7 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     const parsed = parseKeyCombo(combo)
     if (!parsed) return { kind: 'invalid' }
     const conflict = detectConflict(command, parsed)
-    if (conflict.kind === 'same-scope' || conflict.kind === 'reserved' || conflict.kind === 'no-modifier') return conflict
+    if (conflict.kind !== 'none' && conflict.kind !== 'cross-scope') return conflict
     overrides.value = { ...overrides.value, [command]: formatKeyCombo(parsed) }
     return conflict
   }

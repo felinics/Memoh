@@ -59,6 +59,30 @@ describe('useKeyboardShortcutsStore', () => {
     expect(store.isOverridden(appKeyboardCommands.saveActiveFile)).toBe(false)
   })
 
+  it('blocks text editing combos so copy, paste and undo keep working in inputs', () => {
+    const store = useKeyboardShortcutsStore()
+    for (const combo of ['Mod+c', 'Mod+v', 'Mod+x', 'Mod+z', 'Mod+Shift+z', 'Mod+a']) {
+      expect(store.setBinding(appKeyboardCommands.newTerminal, combo).kind, combo).toBe('editing')
+    }
+    expect(store.isOverridden(appKeyboardCommands.newTerminal)).toBe(false)
+  })
+
+  it('blocks combos owned by the desktop app menu', () => {
+    const store = useKeyboardShortcutsStore()
+    for (const combo of ['Mod+r', 'Mod+Shift+r', 'Mod+m', 'Mod+h', 'Mod+Alt+h', 'Mod+0', 'Mod+=', 'Mod+Plus', 'Mod+Shift+Plus', 'Mod+-', 'Mod+Shift+i', 'Mod+Alt+i']) {
+      expect(store.setBinding(appKeyboardCommands.newTerminal, combo).kind, combo).toBe('reserved')
+    }
+    expect(store.isOverridden(appKeyboardCommands.newTerminal)).toBe(false)
+  })
+
+  it('ships defaults that pass the same checks as a user rebind', () => {
+    const store = useKeyboardShortcutsStore()
+    for (const binding of store.effectiveBindings) {
+      const expected = binding.browser === 'passthrough' ? 'reserved' : 'none'
+      expect(store.detectConflict(binding.command, comboFromBinding(binding)).kind, binding.command).toBe(expected)
+    }
+  })
+
   it('reserved check ignores combos that include extra modifiers (Mod+Shift+W is fine)', () => {
     const store = useKeyboardShortcutsStore()
     expect(store.detectConflictFromString(appKeyboardCommands.saveActiveFile, 'Mod+Shift+w').kind).toBe('none')
