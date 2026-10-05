@@ -265,3 +265,19 @@ func TestCodexCacheWriteStaysInsideInput(t *testing.T) {
 		t.Fatalf("usage = %+v", usage)
 	}
 }
+
+// The status view names the thread's cumulative count for what it is; the
+// context measurement comes from the session's observation, not from here.
+func TestCodexStatusNamesThreadTotal(t *testing.T) {
+	status := (&Driver{}).cachedStatus(external.PromptInput{RuntimeMetadata: map[string]any{
+		metadataThreadIDKey: "thread", "codex_thread_total_tokens": int64(4560), "codex_context_window": int64(258400),
+	}})
+	if status["thread_total_tokens"] != int64(4560) {
+		t.Fatalf("status = %#v", status)
+	}
+	for _, key := range []string{"tokens", "context_window", "context_tokens"} {
+		if _, ok := status[key]; ok {
+			t.Fatalf("status reports %q: %#v", key, status)
+		}
+	}
+}

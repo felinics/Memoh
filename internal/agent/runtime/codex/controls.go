@@ -151,7 +151,6 @@ func (d *Driver) cachedStatus(input external.PromptInput) map[string]any {
 	threadID := metadataString(input.RuntimeMetadata, metadataThreadIDKey)
 	var state any
 	tokens := input.RuntimeMetadata["codex_thread_total_tokens"]
-	window := input.RuntimeMetadata["codex_context_window"]
 	var limits any
 	if d.servers != nil {
 		if resource := d.servers.peek(serverKey(input.BotID, input.BotAgentID)); resource != nil {
@@ -160,9 +159,8 @@ func (d *Driver) cachedStatus(input external.PromptInput) map[string]any {
 			if status, ok := srv.threadStatus[threadID]; ok {
 				state = status.Tag
 			}
-			if usage, ok := srv.threadUsage[threadID]; ok {
-				tokens = usage.Total.TotalTokens
-				window = usage.ModelContextWindow
+			if total, ok := srv.usageCursors[threadID]; ok {
+				tokens = total.TotalTokens
 			}
 			if srv.rateLimits != nil {
 				limits = srv.rateLimits
@@ -170,7 +168,7 @@ func (d *Driver) cachedStatus(input external.PromptInput) map[string]any {
 			srv.mu.Unlock()
 		}
 	}
-	return map[string]any{"thread_id": threadID, "status": state, "tokens": tokens, "context_window": window, "limits": limits}
+	return map[string]any{"thread_id": threadID, "status": state, "thread_total_tokens": tokens, "limits": limits}
 }
 
 func (s *appServer) cacheControlNotification(decoded any) {
@@ -187,11 +185,6 @@ func (s *appServer) cacheControlNotification(decoded any) {
 			s.threadStatus = map[string]protocol.ThreadStatus{}
 		}
 		s.threadStatus[value.ThreadID] = value.Status
-	case *protocol.ThreadTokenUsageUpdatedNotification:
-		if s.threadUsage == nil {
-			s.threadUsage = map[string]protocol.ThreadTokenUsage{}
-		}
-		s.threadUsage[value.ThreadID] = value.TokenUsage
 	case *protocol.TurnStartedNotification:
 		if s.activeTurns == nil {
 			s.activeTurns = map[string]string{}

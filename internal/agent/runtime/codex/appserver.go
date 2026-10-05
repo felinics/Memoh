@@ -54,7 +54,6 @@ type appServer struct {
 	toolLookup   func(context.Context, string) bool
 	authReady    bool
 	threadStatus map[string]protocol.ThreadStatus
-	threadUsage  map[string]protocol.ThreadTokenUsage
 	// usageCursors and activeTurns classify token usage notifications per
 	// native thread (see classifyTokenUsage).
 	usageCursors map[string]protocol.TokenUsageBreakdown

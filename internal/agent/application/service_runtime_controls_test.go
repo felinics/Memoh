@@ -21,9 +21,10 @@ import (
 
 type controlQueries struct {
 	dbstore.Queries
-	row    sqlc.BotSession
-	writes int
-	stale  bool
+	row     sqlc.BotSession
+	writes  int
+	stale   bool
+	context sqlc.GetLatestContextUsageRow
 }
 
 func (*controlQueries) SupportsTransactions() bool                                     { return true }
@@ -167,5 +168,52 @@ func TestPlanModePersistsWithoutReplacingPermission(t *testing.T) {
 		if metadata["permission_mode"] != "yolo" || metadata["collaboration_mode"] != mode || metadata["keep"] != "value" || q.writes != 1 || driver.mode != "" {
 			t.Fatalf("mode isolation: %s", q.row.RuntimeMetadata)
 		}
+	}
+}
+
+type statusControlDriver struct {
+	controlDriver
+}
+
+func (*statusControlDriver) ReadCommand(_ context.Context, input external.PromptInput) (external.CommandResult, error) {
+	return external.CommandResult{Data: map[string]any{"command": input.Command, "thread_total_tokens": 4560}, Notice: "last_observed"}, nil
+}
+
+func (q *controlQueries) GetLatestContextUsage(context.Context, pgtype.UUID) (sqlc.GetLatestContextUsageRow, error) {
+	return q.context, nil
+}
+
+// The runtime's status view carries the same context observation as /context;
+// an unknown one stays unknown instead of falling back to a total.
+func TestRuntimeStatusCarriesContextObservation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command string
+		context string
+		want    map[string]any
+	}{
+		{"known", "status", `{"used_tokens":1810,"context_window":258400,"source":"codex_last_request"}`, map[string]any{"command": "status", "thread_total_tokens": 4560, "context_tokens": int64(1810), "context_window": int64(258400)}},
+		{"known without window", "status", `{"used_tokens":1810}`, map[string]any{"command": "status", "thread_total_tokens": 4560, "context_tokens": int64(1810), "context_window": nil}},
+		{"unknown", "status", ``, map[string]any{"command": "status", "thread_total_tokens": 4560, "context_tokens": nil, "context_window": nil}},
+		{"other read command", "inspect", `{"used_tokens":1810}`, map[string]any{"command": "inspect", "thread_total_tokens": 4560}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, q, _, _, req := runtimeControlFixture(t)
+			driver := &statusControlDriver{controlDriver{commands: []external.Command{{Name: "status", Kind: external.CommandRead}, {Name: "inspect", Kind: external.CommandRead}}}}
+			svc.externalDrivers = map[string]external.Driver{"codex": driver}
+			svc.queries = q
+			q.context = sqlc.GetLatestContextUsageRow{SessionRuntimeType: "codex", MessageRuntimeType: "codex", Usage: []byte(`{"inputTokens":3600}`)}
+			if tc.context != "" {
+				q.context.ContextUsage = []byte(tc.context)
+			}
+			req.Command = tc.command
+			result, err := svc.ExecuteRuntimeCommand(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(result.Data, tc.want) {
+				t.Fatalf("status = %#v, want %#v", result.Data, tc.want)
+			}
+		})
 	}
 }

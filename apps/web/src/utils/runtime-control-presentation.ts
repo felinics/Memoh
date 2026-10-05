@@ -66,7 +66,7 @@ function commandSummary(command: string, data: unknown, t: Translate, locale: st
         }
       }
     }
-    fields(status, ['session_id', 'thread_id', 'model', 'permission_mode', 'status', 'tokens', 'context_window', 'limits'])
+    fields(status, ['session_id', 'thread_id', 'model', 'permission_mode', 'status', 'thread_total_tokens', 'context_tokens', 'context_window', 'limits'])
     const usage = record(status.usage)
     if (usage) fields(usage, ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'])
     const limits = record(status.limits)
