@@ -90,6 +90,9 @@ continuations use the same phase-aware application watchdog:
   remain supervised; explicit cancellation and runtime ownership loss still win.
 - Managed subagents have a ten-minute progress watchdog, with no implicit total
   duration. Detachment preserves an explicit ancestor execution deadline.
+- Context budget recovery before the first native model call pauses the model
+  watchdog while its synchronous compaction runs; the model window restarts
+  when recovery returns. Cancellation and execution budgets still apply.
 
 Schedules expose `max_run_seconds` (default 3600, range 300–86400), independently
 of the selected runtime. Every fire uses its existing log UUID for turn admission,
