@@ -110,10 +110,11 @@ ORDER BY session_id, run_id;
 
 -- name: GetLatestSessionRun :one
 -- The latest run, reported only while it belongs to the session's current
--- runtime generation. Clearing history, deleting the session and every other
--- runtime reset move bot_sessions.runtime_fencing_token past the token of each
--- run claimed before them; a run the reset ended itself carries history_reset.
+-- runtime generation. Clearing history and deleting the session move
+-- bot_sessions.runtime_fencing_token past the token of every run claimed
+-- before them, and a run a history reset ended itself carries history_reset.
 -- Such a run has nothing left to report, and no older run stands in for it.
+-- A run never claimed has no token to compare and is still reported.
 SELECT *
 FROM session_runs run
 WHERE run.team_id = public.memoh_current_team_id()
