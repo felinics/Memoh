@@ -20,6 +20,8 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 )
 
+// handleVerifyRequest answers WeChat's URL verification. The protocol body is
+// written here; a rejection is then returned so the access record carries it.
 func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Request, w http.ResponseWriter) error {
 	query := r.URL.Query()
 	timestamp := strings.TrimSpace(query.Get("timestamp"))
@@ -27,23 +29,17 @@ func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Reques
 	signature := strings.TrimSpace(query.Get("signature"))
 	echostr := strings.TrimSpace(query.Get("echostr"))
 	if timestamp == "" || nonce == "" || signature == "" || echostr == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte("invalid verify query"))
-		return nil
+		return rejectVerify(w, http.StatusBadRequest, "invalid verify query", nil)
 	}
 	if mode == encryptionModeSafe || mode == encryptionModeCompat {
 		msgSig := strings.TrimSpace(query.Get("msg_signature"))
 		if msgSig != "" {
 			if !verifier.verifyMessageSignature(msgSig, timestamp, nonce, echostr) {
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte("invalid signature"))
-				return nil
+				return rejectVerify(w, http.StatusForbidden, "invalid signature", nil)
 			}
 			plain, err := verifier.decrypt(echostr)
 			if err != nil {
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte("decrypt echostr failed"))
-				return nil
+				return rejectVerify(w, http.StatusForbidden, "decrypt echostr failed", err)
 			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(plain)) //nolint:gosec // WeChat requires echoing the decrypted verification string verbatim.
@@ -51,13 +47,23 @@ func handleVerifyRequest(verifier *securityVerifier, mode string, r *http.Reques
 		}
 	}
 	if !verifier.verifyURLSignature(signature, timestamp, nonce) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte("invalid signature"))
-		return nil
+		return rejectVerify(w, http.StatusForbidden, "invalid signature", nil)
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(echostr)) //nolint:gosec // WeChat requires echoing the verification string verbatim.
 	return nil
+}
+
+// rejectVerify writes the plain-text rejection WeChat expects and returns the
+// same answer as an error for the access record.
+func rejectVerify(w http.ResponseWriter, status int, message string, cause error) error {
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(message))
+	answer := echo.NewHTTPError(status, message)
+	if cause != nil {
+		return answer.WithInternal(cause)
+	}
+	return answer
 }
 
 func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityVerifier, mode string, cfg channel.ChannelConfig, handler channel.InboundHandler, r *http.Request, w http.ResponseWriter) error {
@@ -69,12 +75,9 @@ func (a *WeChatOAAdapter) handleInbound(ctx context.Context, verifier *securityV
 
 	messageXML, err := decodeInboundXML(verifier, mode, r, raw)
 	if err != nil {
-		if a.logger != nil {
-			a.logger.WarnContext(ctx, "decode wechatoa inbound failed", slog.Any("error", err))
-		}
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte("forbidden"))
-		return nil
+		return echo.NewHTTPError(http.StatusForbidden, "forbidden").WithInternal(err)
 	}
 
 	var payload wechatEnvelope

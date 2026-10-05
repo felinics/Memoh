@@ -90,3 +90,53 @@ func TestHandleWebhookInvalidXMLKeepsCause(t *testing.T) {
 		t.Fatalf("HTTPError = %d %v internal=%v, want 400 invalid xml payload with its cause", httpErr.Code, httpErr.Message, httpErr.Internal)
 	}
 }
+
+func TestHandleWebhookUndecodableInboundReturnsForbiddenWithCause(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodPost, "/channels/wechatoa/webhook/cfg-1?timestamp=1700000000&nonce=nonce-1&signature=forged", strings.NewReader(testWechatTextXML))
+	rec := httptest.NewRecorder()
+	err := NewWeChatOAAdapter(slog.New(slog.DiscardHandler)).HandleWebhook(context.Background(), plainWechatConfig(), nil, req, rec)
+
+	if rec.Code != http.StatusForbidden || rec.Body.String() != "forbidden" {
+		t.Fatalf("response = %d %q, want 403 forbidden", rec.Code, rec.Body.String())
+	}
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("error = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != http.StatusForbidden || httpErr.Internal == nil || !strings.Contains(httpErr.Internal.Error(), "invalid url signature") {
+		t.Fatalf("HTTPError = %d internal=%v, want 403 with the decode cause", httpErr.Code, httpErr.Internal)
+	}
+}
+
+func TestHandleWebhookVerifyRejectionReturnsTheAnswerItWrote(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		query  string
+		status int
+		body   string
+	}{
+		{name: "missing query", query: "timestamp=1700000000", status: http.StatusBadRequest, body: "invalid verify query"},
+		{name: "forged signature", query: "timestamp=1700000000&nonce=nonce-1&signature=forged&echostr=echo", status: http.StatusForbidden, body: "invalid signature"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(http.MethodGet, "/channels/wechatoa/webhook/cfg-1?"+tc.query, nil)
+			rec := httptest.NewRecorder()
+			err := NewWeChatOAAdapter(slog.New(slog.DiscardHandler)).HandleWebhook(context.Background(), plainWechatConfig(), nil, req, rec)
+
+			if rec.Code != tc.status || rec.Body.String() != tc.body {
+				t.Fatalf("response = %d %q, want %d %q", rec.Code, rec.Body.String(), tc.status, tc.body)
+			}
+			var httpErr *echo.HTTPError
+			if !errors.As(err, &httpErr) || httpErr.Code != tc.status || httpErr.Message != tc.body {
+				t.Fatalf("error = %#v, want HTTPError %d %q", err, tc.status, tc.body)
+			}
+		})
+	}
+}

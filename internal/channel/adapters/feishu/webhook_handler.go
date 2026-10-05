@@ -14,6 +14,7 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const webhookMaxBodyBytes int64 = 1 << 20 // 1 MiB
@@ -63,6 +64,19 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg channel.ChannelCo
 	if challengeResp := buildWebhookChallengeResponse(webhookReq); challengeResp != nil {
 		return writeEventResponse(w, challengeResp)
 	}
+	eventReq := &larkevent.EventReq{
+		Header:     r.Header,
+		Body:       payload,
+		RequestURI: r.RequestURI,
+	}
+	// Verify here so a forged callback is a 401 with its cause; the SDK would
+	// answer 500 with the reason in the body.
+	if err := eventDispatcher.VerifySign(ctx, eventReq); err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid feishu webhook signature").WithInternal(err)
+	}
+	eventDispatcher.SkipSignVerify = true
+
+	var handlerErr error
 	eventDispatcher.OnP2MessageReceiveV1(func(_ context.Context, event *larkim.P2MessageReceiveV1) error {
 		msg := extractFeishuInbound(event, botOpenID, a.logger)
 		if strings.TrimSpace(msg.Message.PlainText()) == "" && len(msg.Message.Attachments) == 0 {
@@ -71,17 +85,22 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg channel.ChannelCo
 		a.enrichSenderProfile(ctx, cfg, event, &msg)
 		a.enrichQuotedMessage(ctx, cfg, &msg, botOpenID)
 		msg.BotID = cfg.BotID
-		return handler(ctx, cfg, msg)
+		handlerErr = handler(ctx, cfg, msg)
+		return handlerErr
 	})
 
-	resp := eventDispatcher.Handle(ctx, &larkevent.EventReq{
-		Header:     r.Header,
-		Body:       payload,
-		RequestURI: r.RequestURI,
-	})
+	resp := eventDispatcher.Handle(ctx, eventReq)
+	// The SDK writes err.Error() into its 500 body, so its error responses are
+	// never sent; the error goes back to the caller instead.
+	if handlerErr != nil {
+		return handlerErr
+	}
 	if resp == nil {
 		w.WriteHeader(http.StatusOK)
 		return nil
+	}
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return errs.New("feishu event dispatch failed")
 	}
 	return writeEventResponse(w, resp)
 }
