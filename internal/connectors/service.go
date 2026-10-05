@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var (
@@ -483,5 +484,5 @@ func upstreamError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("%w: %w", ErrUpstreamUnavailable, err)
+	return errs.WrapDependencyWithDepth(1, fmt.Errorf("%w: %w", ErrUpstreamUnavailable, err), "")
 }
