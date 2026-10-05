@@ -60,7 +60,7 @@ describe('keyboard bindings table', () => {
 
 describe('toElectronAccelerator', () => {
   it('maps mod to CmdOrCtrl so one string aligns across platforms', () => {
-    expect(toElectronAccelerator({ command: appKeyboardCommands.closeCurrentWorkspaceTab, key: 'w', mod: true, desktop: 'menu', browser: 'passthrough' })).toBe('CmdOrCtrl+W')
+    expect(toElectronAccelerator({ key: 'w', mod: true })).toBe('CmdOrCtrl+W')
   })
 
   it('encodes a literal plus key for the native accelerator parser', () => {
