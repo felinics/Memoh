@@ -171,7 +171,10 @@ func TestDiscussProviderBudgetRecoveryRecomposesBeforeProviderDispatch(t *testin
 	if len(runtime.finishes) != 1 || runtime.finishes[0].status != "" || runtime.finishes[0].message != "" {
 		t.Fatalf("runtime finishes = %#v, want a clean recompose finish", runtime.finishes)
 	}
-	assertDeferredLifecycleRow(t, lifecycles.creates, handle.RunID(), contextLifecycleStatusCompleted, "")
+	snapshot := assertDeferredLifecycleRow(t, lifecycles.creates, handle.RunID(), contextLifecycleStatusCompleted, "")
+	if snapshot.BudgetPlan != nil || snapshot.Counts.Fragments != 0 {
+		t.Fatalf("recompose recorded the rejected preflight as its context: plan=%+v counts=%+v", snapshot.BudgetPlan, snapshot.Counts)
+	}
 }
 
 func TestDiscussProviderBudgetRecoveryKeepsUnresolvedOverflowFailClosed(t *testing.T) {
