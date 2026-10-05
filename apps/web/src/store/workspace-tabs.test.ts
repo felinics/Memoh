@@ -2528,6 +2528,25 @@ describe('workspace layout store', () => {
       expect(written['bot-1'].layout).toEqual(storedLayout)
     })
 
+    it('opens mobile navigation for sidebar shortcuts it can show and ignores Supermarket', async () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+      const registry = createKeyboardCommandRegistry()
+      const unregister = registerWorkbenchCommands(registry, store)
+
+      registry.dispatch(appKeyboardCommands.showSchedule)
+      expect(store.sidebarView).toBe('schedule')
+      expect(store.mobileNavOpen).toBe(true)
+      store.closeMobileNav()
+      registry.dispatch(appKeyboardCommands.showSupermarket)
+      expect(store.sidebarView).toBe('schedule')
+      expect(store.mobileNavOpen).toBe(false)
+      unregister()
+    })
+
     it('keeps programmatic opens inside the single group instead of splitting', async () => {
       mobileBreakpoint.setMobile(true)
       const store = useWorkspaceTabsStore()

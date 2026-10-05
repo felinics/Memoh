@@ -3,6 +3,7 @@ import type { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 
 export function registerWorkbenchCommands(registry: KeyboardCommandRegistry, store: ReturnType<typeof useWorkspaceTabsStore>): () => void {
   const sidebar = (view: 'sessions' | 'files' | 'schedule' | 'supermarket') => {
+    if (view === 'supermarket' && store.isMobile) return
     store.selectSidebarView(view)
     if (store.isMobile) store.openMobileNav()
   }
