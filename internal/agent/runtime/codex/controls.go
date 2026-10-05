@@ -192,6 +192,15 @@ func (s *appServer) cacheControlNotification(decoded any) {
 			s.threadUsage = map[string]protocol.ThreadTokenUsage{}
 		}
 		s.threadUsage[value.ThreadID] = value.TokenUsage
+	case *protocol.TurnStartedNotification:
+		if s.activeTurns == nil {
+			s.activeTurns = map[string]string{}
+		}
+		s.activeTurns[value.ThreadID] = value.Turn.ID
+	case *protocol.TurnCompletedNotification:
+		if s.activeTurns[value.ThreadID] == value.Turn.ID {
+			delete(s.activeTurns, value.ThreadID)
+		}
 	case *protocol.AccountRateLimitsUpdatedNotification:
 		snapshot := value.RateLimits
 		s.rateLimits = &snapshot

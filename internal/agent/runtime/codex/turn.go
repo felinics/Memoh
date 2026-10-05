@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	sdk "github.com/felinics/twilight/sdk"
-
 	"github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
@@ -45,20 +43,20 @@ type turnState struct {
 
 	done chan struct{}
 
-	mu            sync.Mutex
-	turnID        string
-	followsGoal   bool
-	goalStarting  bool
-	goalActive    bool
-	steers        map[string]*pendingSteer
-	events        []event.StreamEvent
-	finalText     string
-	usage         *sdk.Usage
-	threadTotals  *protocol.TokenUsageBreakdown
-	contextWindow *int64
-	turn          *protocol.Turn
-	turnErr       *protocol.TurnError
-	toolNames     map[string]string // item id → emitted tool name
+	mu           sync.Mutex
+	turnID       string
+	followsGoal  bool
+	goalStarting bool
+	goalActive   bool
+	steers       map[string]*pendingSteer
+	events       []event.StreamEvent
+	finalText    string
+	usage        *requestTotals
+	threadTotals *protocol.TokenUsageBreakdown
+	context      *external.ContextUsage
+	turn         *protocol.Turn
+	turnErr      *protocol.TurnError
+	toolNames    map[string]string // item id → emitted tool name
 	// inflight tracks decision goroutines by server-request id so a
 	// serverRequest/resolved notification can withdraw them.
 	inflight map[string]context.CancelFunc
@@ -243,26 +241,6 @@ func (t *turnState) handleNotification(decoded any) {
 			return
 		}
 		t.emit(event.StreamEvent{Type: event.ToolCallProgress, ToolCallID: params.ItemID, ToolName: t.toolName(params.ItemID), Progress: params.Delta})
-	case *protocol.ThreadTokenUsageUpdatedNotification:
-		if !t.acceptsTurn(params.TurnID) {
-			return
-		}
-		// `last` is the most recent model request's usage and the turn spans
-		// several requests, so the turn total is the running sum of `last`.
-		t.mu.Lock()
-		if t.usage == nil {
-			t.usage = &sdk.Usage{}
-		}
-		last := params.TokenUsage.Last
-		t.usage.InputTokens += int(last.InputTokens)
-		t.usage.OutputTokens += int(last.OutputTokens)
-		t.usage.TotalTokens += int(last.TotalTokens)
-		t.usage.ReasoningTokens += int(last.ReasoningOutputTokens)
-		t.usage.CachedInputTokens += int(last.CachedInputTokens)
-		totals := params.TokenUsage.Total
-		t.threadTotals = &totals
-		t.contextWindow = params.TokenUsage.ModelContextWindow
-		t.mu.Unlock()
 	case *protocol.TurnCompletedNotification:
 		if !t.acceptsTurn(params.Turn.ID) {
 			return
@@ -667,17 +645,15 @@ func (t *turnState) result() (external.PromptResult, error) {
 		Text:          t.finalText,
 	}
 	if t.usage != nil {
-		usage := *t.usage
-		out.Usage = &usage
+		out.Usage = t.usage.sdkUsage()
+	}
+	if t.context != nil {
+		observed := *t.context
+		out.Context = &observed
 	}
 	if t.threadTotals != nil {
-		out.RuntimeMetadata = map[string]any{}
-		// Context-occupancy data for the session UI: the thread's cumulative
-		// token count against its model context window.
-		out.RuntimeMetadata["codex_thread_total_tokens"] = t.threadTotals.TotalTokens
-		if t.contextWindow != nil {
-			out.RuntimeMetadata["codex_context_window"] = *t.contextWindow
-		}
+		// The thread's cumulative token count, for the runtime status view.
+		out.RuntimeMetadata = map[string]any{"codex_thread_total_tokens": t.threadTotals.TotalTokens}
 	}
 
 	var turnErr *protocol.TurnError

@@ -55,6 +55,10 @@ type appServer struct {
 	authReady    bool
 	threadStatus map[string]protocol.ThreadStatus
 	threadUsage  map[string]protocol.ThreadTokenUsage
+	// usageCursors and activeTurns classify token usage notifications per
+	// native thread (see classifyTokenUsage).
+	usageCursors map[string]protocol.TokenUsageBreakdown
+	activeTurns  map[string]string
 	rateLimits   *protocol.RateLimitSnapshot
 	// toolMounts holds each thread's live gateway route (see tools.go).
 	toolMounts map[string]*toolmount.Mount
@@ -337,6 +341,13 @@ func (s *appServer) HandleNotification(ctx context.Context, note *protocol.Inbou
 	threadID := notificationThreadID(decoded)
 	if threadID == "" {
 		s.handleGlobalNotification(note.Method, decoded)
+		return
+	}
+	if usage, ok := decoded.(*protocol.ThreadTokenUsageUpdatedNotification); ok {
+		kind := s.classifyTokenUsage(usage)
+		if turn := s.turnForThread(threadID); turn != nil {
+			turn.observeTokenUsage(usage, kind)
+		}
 		return
 	}
 	if turn := s.turnForThread(threadID); turn != nil {
