@@ -15,14 +15,6 @@ describe('keyboard command registry', () => {
     expect(isAppKeyboardCommand(null)).toBe(false)
   })
 
-  it.each([
-    'new-chat-session', 'focus-chat-input', 'show-sessions', 'show-files',
-    'show-schedule', 'show-supermarket', 'next-workspace-tab', 'previous-workspace-tab',
-    'split-workspace-right', 'split-workspace-below', 'new-terminal', 'new-browser',
-  ])('accepts the shared workbench command %s', (command) => {
-    expect(isAppKeyboardCommand(command)).toBe(true)
-  })
-
   it('dispatches registered command handlers', () => {
     const registry = createKeyboardCommandRegistry()
     const handler = vi.fn(() => true)

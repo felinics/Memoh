@@ -242,10 +242,15 @@ describe('macOS Command+Option shortcuts', () => {
   it('leaves AltGr text on Windows and Linux to the focused input', () => {
     for (const platform of ['win', 'linux'] as const) {
       const registry = createRegistry(true)
-      const event = { ...createKeyboardEventLike({ key: 'ń', ctrlKey: true, altKey: true }), code: 'KeyN' }
+      const event = {
+        ...createKeyboardEventLike({ key: 'ó' }),
+        code: 'KeyO',
+        getModifierState: (key: string) => key === 'AltGraph',
+      }
 
-      expect(handleBrowserKeyboardShortcut(event, registry, defaults, platform)).toBe(false)
+      expect(handleBrowserKeyboardShortcut(event, registry, [{ command: appKeyboardCommands.mediaLightboxNext, key: 'ó' }], platform)).toBe(false)
       expect(registry.dispatch).not.toHaveBeenCalled()
+      expect(event.preventDefault).not.toHaveBeenCalled()
     }
   })
 })

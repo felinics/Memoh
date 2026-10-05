@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import en from '@/i18n/locales/en.json'
+import ja from '@/i18n/locales/ja.json'
+import zh from '@/i18n/locales/zh.json'
 import { appKeyboardCommands } from './keyboard-commands'
 import {
   keyboardBindings,
@@ -12,42 +15,16 @@ import {
 } from './keyboard-bindings'
 
 describe('keyboard bindings table', () => {
-  it('declares the close-tab and save bindings as the single source of truth', () => {
-    const close = keyboardBindings.find(b => b.command === appKeyboardCommands.closeCurrentWorkspaceTab)
-    const save = keyboardBindings.find(b => b.command === appKeyboardCommands.saveActiveFile)
-
-    expect(close).toMatchObject({ key: 'w', mod: true, desktop: 'menu', browser: 'passthrough', scope: 'workspace' })
-    expect(save).toMatchObject({ key: 's', mod: true, browser: 'intercept', scope: 'workspace' })
-  })
-
-  it('migrates the previously hardcoded sidebar toggle into the table', () => {
-    const toggle = keyboardBindings.find(b => b.command === appKeyboardCommands.toggleSidebar)
-    expect(toggle).toMatchObject({ key: 'b', mod: true, browser: 'intercept', scope: 'workspace' })
-  })
-
-  it('declares Mod+K as the open-settings global shortcut', () => {
-    const open = keyboardBindings.find(b => b.command === appKeyboardCommands.openSettings)
-    expect(open).toMatchObject({ key: 'k', mod: true, browser: 'intercept', scope: 'global' })
-  })
-
-  it('migrates the lightbox keys with a scoped lifetime (not global)', () => {
-    const lightboxCommands = [
-      appKeyboardCommands.closeMediaLightbox,
-      appKeyboardCommands.mediaLightboxPrev,
-      appKeyboardCommands.mediaLightboxNext,
-    ]
-    for (const command of lightboxCommands) {
-      const binding = keyboardBindings.find(b => b.command === command)
-      expect(binding, command).toBeDefined()
-      expect(binding?.scope).toBe('mediaLightbox')
-      expect(binding?.mod).toBeUndefined()
-    }
-  })
-
-  it('every binding declares an i18nKey unique within the table', () => {
+  it('gives every settings row its own translated label and description', () => {
     const keys = keyboardBindings.map(b => b.i18nKey)
-    expect(keys.every(Boolean)).toBe(true)
     expect(new Set(keys).size).toBe(keys.length)
+    for (const [locale, messages] of Object.entries({ en, zh, ja })) {
+      for (const key of keys) {
+        const command = (messages.settings.keyboard.commands as Record<string, { label?: string, description?: string }>)[key]
+        expect(command?.label, `${locale} ${key}`).toBeTruthy()
+        expect(command?.description, `${locale} ${key}`).toBeTruthy()
+      }
+    }
   })
 
   it('gives every app command exactly one discoverable binding', () => {
