@@ -61,6 +61,9 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 	chatCompletionsCompat := ResolveChatCompletionsCompat(cfg.BaseURL, cfg.ChatCompletionsCompat)
 
 	switch ClientType(cfg.ClientType) {
+	case ClientTypeOpenCodeGo:
+		return newOpenCodeGoModel(cfg)
+
 	case ClientTypeOpenAICompletions:
 		opts := []openaicompletions.Option{
 			openaicompletions.WithAPIKey(cfg.APIKey),
@@ -185,14 +188,14 @@ func appendChatCompletionsCompat(
 	}
 }
 
-// ApplyReasoningToRequest sets Request.ReasoningEffort from cfg when
-// ReasoningEffortParam reports a value. It only ever sets an effort string
-// (output_config.effort for Anthropic, reasoning.effort for OpenAI); the
-// adaptive thinking flag is set at provider construction time in
-// NewSDKChatModel, and no token budgets are sent.
+// ApplyReasoningToRequest translates the resolved decision into the provider
+// effort and, for OpenCode Go, the catalog-declared thinking control.
 func ApplyReasoningToRequest(req *sdk.Request, cfg SDKModelConfig) {
 	if req == nil {
 		return
+	}
+	if cfg.ClientType == string(ClientTypeOpenCodeGo) {
+		applyOpenCodeGoThinking(req, cfg)
 	}
 	if effort, ok := ReasoningEffortParam(cfg); ok {
 		req.ReasoningEffort = &effort
@@ -206,6 +209,9 @@ func ReasoningEffortParam(cfg SDKModelConfig) (string, bool) {
 	rc := cfg.ReasoningConfig
 	if rc == nil {
 		return "", false
+	}
+	if cfg.ClientType == string(ClientTypeOpenCodeGo) {
+		return openCodeGoEffortParam(cfg)
 	}
 	ct := ClientType(cfg.ClientType)
 

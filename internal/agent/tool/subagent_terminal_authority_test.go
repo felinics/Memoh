@@ -102,7 +102,7 @@ func TestSpawnedResolvedTerminalSurvivesLateBackgroundStop(t *testing.T) {
 			name:       "failed",
 			err:        errors.New("provider failed before cancellation"),
 			wantStatus: background.TaskFailed,
-			wantError:  "provider failed before cancellation",
+			wantError:  "The response could not be completed. Please try again.",
 		},
 	}
 	for _, tc := range tests {

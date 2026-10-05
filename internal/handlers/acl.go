@@ -50,9 +50,9 @@ func (h *ACLHandler) Register(e *echo.Echo) {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} acl.ListRulesResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/rules [get].
 func (h *ACLHandler) ListRules(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -73,9 +73,9 @@ func (h *ACLHandler) ListRules(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body acl.CreateRuleRequest true "Rule payload"
 // @Success 201 {object} acl.Rule
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/rules [post].
 func (h *ACLHandler) CreateRule(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
@@ -101,9 +101,9 @@ func (h *ACLHandler) CreateRule(c echo.Context) error {
 // @Param rule_id path string true "Rule ID"
 // @Param payload body acl.UpdateRuleRequest true "Rule payload"
 // @Success 200 {object} acl.Rule
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/rules/{rule_id} [put].
 func (h *ACLHandler) UpdateRule(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
@@ -131,9 +131,9 @@ func (h *ACLHandler) UpdateRule(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param rule_id path string true "Rule ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/rules/{rule_id} [delete].
 func (h *ACLHandler) DeleteRule(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
@@ -155,9 +155,9 @@ func (h *ACLHandler) DeleteRule(c echo.Context) error {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} acl.DefaultEffectResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/default-effect [get].
 func (h *ACLHandler) GetDefaultEffect(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -178,9 +178,9 @@ func (h *ACLHandler) GetDefaultEffect(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body acl.DefaultEffectResponse true "Default effect payload"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/default-effect [put].
 func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -208,9 +208,9 @@ func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
 // @Param q query string false "Search query"
 // @Param limit query int false "Max results"
 // @Success 200 {object} acl.ChannelIdentityCandidateListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/channel-identities [get].
 func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
@@ -240,9 +240,9 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param channel_identity_id path string true "Channel Identity ID"
 // @Success 200 {object} acl.ObservedConversationCandidateListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/channel-identities/{channel_identity_id}/conversations [get].
 func (h *ACLHandler) ListObservedConversations(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -267,9 +267,9 @@ func (h *ACLHandler) ListObservedConversations(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param channel_type path string true "Channel type (e.g. telegram, discord)"
 // @Success 200 {object} acl.ObservedConversationCandidateListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/acl/channel-types/{channel_type}/conversations [get].
 func (h *ACLHandler) ListObservedConversationsByChannelType(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)

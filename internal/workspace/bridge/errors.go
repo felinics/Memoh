@@ -7,6 +7,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var (
@@ -17,7 +19,9 @@ var (
 )
 
 // mapError converts a gRPC status error into a domain error.
-// Non-gRPC errors pass through unchanged.
+// Non-gRPC errors pass through unchanged. ErrUnavailable is marked as the
+// workspace runtime's failure, so a public error that wraps it is
+// attributed to a dependency.
 func mapError(err error) error {
 	if err == nil {
 		return nil
@@ -35,15 +39,19 @@ func mapError(err error) error {
 	case codes.PermissionDenied:
 		return fmt.Errorf("%w: %s", ErrForbidden, msg)
 	case codes.Unavailable, codes.Aborted:
-		return fmt.Errorf("%w: %s", ErrUnavailable, msg)
+		return unavailable(msg)
 	case codes.Canceled:
 		if isConnectionClosingMessage(msg) {
-			return fmt.Errorf("%w: %s", ErrUnavailable, msg)
+			return unavailable(msg)
 		}
 		return fmt.Errorf("grpc %s: %s", s.Code(), msg)
 	default:
 		return fmt.Errorf("grpc %s: %s", s.Code(), msg)
 	}
+}
+
+func unavailable(msg string) error {
+	return errs.WrapDependency(fmt.Errorf("%w: %s", ErrUnavailable, msg), "")
 }
 
 func isConnectionClosingMessage(msg string) bool {

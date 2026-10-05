@@ -304,3 +304,16 @@ func TestResolveSubagentReasoningPropagatesSettingsError(t *testing.T) {
 		t.Fatalf("resolveSubagentReasoning error = %v, want %v", err, wantErr)
 	}
 }
+
+func TestSubagentOpenCodeGoReasoningKeepsProviderPolicy(t *testing.T) {
+	provider := &SpawnProvider{}
+	for id, effort := range map[string]string{"gpt-6-luna": "max", "gpt-5.6-luna": "max", "glm-5.3": "max", "qwen3.8-flash": "xhigh"} {
+		model := models.GetResponse{Model: models.Model{ModelID: id, Config: models.ModelConfig{
+			ThinkingMode: reasoning.ModeToggle, ReasoningEfforts: []string{"low", "medium", effort},
+		}}}
+		cfg, err := provider.resolveSubagentReasoning(context.Background(), SessionContext{ReasoningRequestedEffort: effort}, model, string(models.ClientTypeOpenCodeGo))
+		if err != nil || cfg == nil || cfg.Effort != effort || cfg.Adaptive {
+			t.Fatalf("%s: %+v, %v", id, cfg, err)
+		}
+	}
+}

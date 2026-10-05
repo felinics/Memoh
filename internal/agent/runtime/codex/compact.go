@@ -2,12 +2,12 @@ package codex
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var _ external.Compactor = (*Driver)(nil)
@@ -64,7 +64,7 @@ func awaitCompaction(ctx context.Context, connection *conn, turn *turnState, pro
 		cancelOperation()
 		return nil, ctx.Err()
 	case <-processDone:
-		return nil, errors.New("codex app-server exited during compaction")
+		return nil, errs.NewDependency("codex app-server exited during compaction")
 	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

@@ -28,7 +28,18 @@ type Config struct {
 	ChatCompletionsCompat string
 	Timeout               time.Duration
 	PromptCacheTTL        string
+	// OnUsage, when set, receives the token usage of every successful call.
+	// Memory calls never produce a chat message, so this is the only place
+	// their cost becomes visible.
+	OnUsage func(ctx context.Context, operation string, usage sdk.Usage)
 }
+
+// Operation names reported to Config.OnUsage.
+const (
+	OperationExtract = "extract"
+	OperationDecide  = "decide"
+	OperationCompact = "compact"
+)
 
 // Client implements adapters.LLM using the Twilight AI SDK.
 type Client struct {
@@ -53,16 +64,20 @@ func (c *Client) model() *sdk.Model {
 	})
 }
 
-func (c *Client) generate(ctx context.Context, systemPrompt, userText string) (sdk.ModelResult, error) {
+func (c *Client) generate(ctx context.Context, operation, systemPrompt, userText string) (sdk.ModelResult, error) {
 	model := c.model()
 	system, messages, _ := models.ApplyPromptCache(
 		model, c.cfg.PromptCacheTTL,
 		systemPrompt, []sdk.Message{sdk.UserMessage(userText)}, nil,
 	)
-	return model.Generate(ctx, sdk.Request{
+	result, err := model.Generate(ctx, sdk.Request{
 		System:   system,
 		Messages: messages,
 	})
+	if err == nil && c.cfg.OnUsage != nil {
+		c.cfg.OnUsage(ctx, operation, result.Usage)
+	}
+	return result, err
 }
 
 func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adapters.ExtractResponse, error) {
@@ -100,7 +115,7 @@ func (c *Client) Extract(ctx context.Context, req adapters.ExtractRequest) (adap
 	}
 	systemPrompt := strings.ReplaceAll(memoryExtractPrompt, "{{today}}", now.Format("2006-01-02"))
 
-	result, err := c.generate(ctx, systemPrompt, transcript)
+	result, err := c.generate(ctx, OperationExtract, systemPrompt, transcript)
 	if err != nil {
 		return adapters.ExtractResponse{}, fmt.Errorf("extract: %w", err)
 	}
@@ -135,7 +150,7 @@ func (c *Client) Decide(ctx context.Context, req adapters.DecideRequest) (adapte
 
 	userMessage := buildUpdateUserMessage(req.Candidates, req.Facts)
 
-	result, err := c.generate(ctx, memoryUpdatePrompt, userMessage)
+	result, err := c.generate(ctx, OperationDecide, memoryUpdatePrompt, userMessage)
 	if err != nil {
 		return adapters.DecideResponse{}, fmt.Errorf("decide: %w", err)
 	}
@@ -162,7 +177,7 @@ func (c *Client) Compact(ctx context.Context, req adapters.CompactRequest) (adap
 	if err != nil {
 		return adapters.CompactResponse{}, fmt.Errorf("compact: marshal input: %w", err)
 	}
-	result, err := c.generate(ctx, compactSystemPrompt, string(payload))
+	result, err := c.generate(ctx, OperationCompact, compactSystemPrompt, string(payload))
 	if err != nil {
 		return adapters.CompactResponse{}, fmt.Errorf("compact: %w", err)
 	}

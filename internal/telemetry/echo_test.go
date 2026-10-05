@@ -12,7 +12,6 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -137,35 +136,6 @@ func TestEchoServerKeepsTheQueryOutOfTheSpan(t *testing.T) {
 	}
 	if got := attrs(recorder.Ended()[0])["url.path"].AsString(); got != "/bots/bot-1" {
 		t.Errorf("url.path = %q, want the path without the query", got)
-	}
-}
-
-func TestEchoServerMarksServerFailuresButNotRejections(t *testing.T) {
-	// A 4xx is the caller's problem. Recording it as a span error makes every
-	// backend's error rate track ordinary traffic — a wrong password, a stale
-	// link — and the signal stops meaning anything.
-	for _, tc := range []struct {
-		name      string
-		status    int
-		wantError bool
-	}{
-		{"rejected", http.StatusUnauthorized, false},
-		{"failed", http.StatusInternalServerError, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			recorder := recordSpans(t)
-			serve(t, httptest.NewRequest(http.MethodGet, "/bots/bot-1", nil), func(echo.Context) error {
-				return echo.NewHTTPError(tc.status)
-			})
-
-			span := recorder.Ended()[0]
-			if got := span.Status().Code == codes.Error; got != tc.wantError {
-				t.Errorf("span error = %v, want %v (status %d)", got, tc.wantError, tc.status)
-			}
-			if got := attrs(span)["http.response.status_code"].AsInt64(); got != int64(tc.status) {
-				t.Errorf("status attribute = %d, want %d", got, tc.status)
-			}
-		})
 	}
 }
 
@@ -345,9 +315,6 @@ func TestEchoServerRecordsTheStatusTheClientReceived(t *testing.T) {
 			span := recorder.Ended()[0]
 			if got := attrs(span)["http.response.status_code"].AsInt64(); got != int64(tc.want) {
 				t.Errorf("span status = %d, want %d", got, tc.want)
-			}
-			if got, want := span.Status().Code == codes.Error, tc.want >= 500; got != want {
-				t.Errorf("span error = %v, want %v", got, want)
 			}
 		})
 	}

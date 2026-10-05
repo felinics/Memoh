@@ -169,6 +169,8 @@ type fakeVideoProvider struct {
 	cancelCh     chan struct{}
 }
 
+func (*fakeVideoProvider) Name() string { return "fake-video" }
+
 func (*fakeVideoProvider) ListModels(context.Context) ([]*sdk.VideoModel, error) {
 	return nil, nil
 }

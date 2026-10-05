@@ -17,6 +17,7 @@ const llmProviders: string[] = [
   ...withVariants('acp', []),
   ...withVariants('memoh', ['color']),
   ...withVariants('openai', []),
+  ...withVariants('opencode-go', []),
   ...withVariants('anthropic', []),
   ...withVariants('google', ['color', 'brand-color']),
   ...withVariants('deepseek', ['color']),

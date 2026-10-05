@@ -20,7 +20,7 @@ require (
 	github.com/felinics/acgo v0.0.0-20260829152557-fc78bf271ef8
 	github.com/felinics/connect-it/sdk/go v0.1.1-0.20260829153217-0dcd18de667d
 	github.com/felinics/dingtalk-stream-sdk-go v0.0.0-20260829152622-ce4b7ea674a5
-	github.com/felinics/twilight v0.6.1-0.20260926071655-22d89a43c2d7
+	github.com/felinics/twilight v0.7.2-0.20261002230120-f6d0ce1a0e8c
 	github.com/go-ego/gse v1.0.2
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -204,7 +204,7 @@ require (
 	golang.org/x/sync v0.22.0
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5
 	gotest.tools/v3 v3.5.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect

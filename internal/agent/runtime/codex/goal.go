@@ -10,6 +10,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var _ external.GoalProvider = (*Driver)(nil)
@@ -118,7 +119,7 @@ func (s *appServer) setGoalStatus(ctx context.Context, threadID string, status p
 func startGoalTurn(ctx context.Context, srv *appServer, input external.PromptInput, params protocol.TurnStartParams, response *protocol.TurnStartResponse) error {
 	objective := strings.TrimSpace(input.CommandArgs)
 	if objective == "" {
-		return errors.New("goal objective is empty")
+		return errs.New("goal objective is empty")
 	}
 	request := protocol.ThreadGoalSetParams{ThreadID: params.ThreadID}
 	paused := protocol.ThreadGoalStatusPaused

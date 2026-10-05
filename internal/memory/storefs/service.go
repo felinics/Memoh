@@ -14,11 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/felinics/memoh/internal/config"
 	memslug "github.com/felinics/memoh/internal/memory/slug"
+	"github.com/felinics/memoh/internal/textutil"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -1003,8 +1005,8 @@ func formatMemoryOverviewMDWithPaths(items []MemoryItem, relPaths map[string]str
 			continue
 		}
 		body = strings.Join(strings.Fields(body), " ")
-		if len(body) > 400 {
-			body = strings.TrimSpace(body[:400]) + "..."
+		if utf8.RuneCountInString(body) > 400 {
+			body = strings.TrimSpace(textutil.TruncateRunes(body, 400)) + "..."
 		}
 		b.WriteString(strconv.Itoa(i + 1))
 		title := firstNonEmpty(plan.Title, created, id)
@@ -1254,8 +1256,8 @@ func conceptTitle(item MemoryItem) string {
 		body = strings.TrimSpace(body[:idx])
 	}
 	body = strings.Join(strings.Fields(body), " ")
-	if len(body) > 80 {
-		body = strings.TrimSpace(body[:80]) + "..."
+	if utf8.RuneCountInString(body) > 80 {
+		body = strings.TrimSpace(textutil.TruncateRunes(body, 80)) + "..."
 	}
 	return body
 }

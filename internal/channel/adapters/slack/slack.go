@@ -17,7 +17,6 @@ import (
 	"github.com/slack-go/slack/socketmode"
 
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -511,14 +510,12 @@ func (a *SlackAdapter) handleMessageEvent(
 			slog.String("config_id", cfg.ID),
 			slog.String("chat_type", chatType),
 			slog.String("user_id", ev.User),
-			slog.String("text", common.SummarizeText(text)),
 		)
 	}
 
 	go func() {
-		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 	}()
 }
 
@@ -592,14 +589,12 @@ func (a *SlackAdapter) handleAppMentionEvent(
 		a.logger.InfoContext(ctx, "app mention received",
 			slog.String("config_id", cfg.ID),
 			slog.String("user_id", ev.User),
-			slog.String("text", common.SummarizeText(text)),
 		)
 	}
 
 	go func() {
-		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 	}()
 }
 

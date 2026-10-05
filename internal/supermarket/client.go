@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var (
@@ -127,7 +129,7 @@ func (c *Client) get(
 	}
 	resp, err := client.Do(req) //nolint:gosec // Client pins requests and redirects to configured Supermarket origin.
 	if err != nil {
-		return nil, err
+		return nil, errs.WrapDependency(err, "")
 	}
 	if resp.Request == nil || !sameOrigin(resp.Request.URL, c.base) {
 		_ = resp.Body.Close()

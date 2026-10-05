@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -18,8 +17,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
 	"github.com/felinics/memoh/internal/agentcredential"
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -140,7 +139,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	if err := external.RequireContainerWorkspace(workspaceInfo, RuntimeType); err != nil {
 		return external.ModelCatalog{}, err
 	}
-	// A missing dependency returns as agent_dependency_missing feedback; it
+	// A missing dependency returns as external.DependencyMissingError; it
 	// must not be re-wrapped into a generic runtime error.
 	launcher, err := d.resolveLauncher(ctx, botID)
 	if err != nil {
@@ -167,7 +166,7 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 	}
 	var response initializeResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return external.ModelCatalog{}, fmt.Errorf("decode claude initialize response: %w", err)
+		return external.ModelCatalog{}, errs.WrapDependency(err, "decode claude initialize response")
 	}
 	catalog := modelCatalogFromInitialize(cfg.Model, response)
 	if request.ResolveDefaults {
@@ -286,25 +285,25 @@ func modelCatalogFromInitialize(configuredModel string, response initializeRespo
 func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
 	cfg, err := d.resolveAgentConfig(ctx, input.BotID, input.BotAgentID)
 	if err != nil {
-		if apperror.CodeOf(err) != "" {
+		if external.IsFailure(err) {
 			return external.PromptResult{}, err
 		}
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return external.PromptResult{}, external.Unavailable(err)
 	}
 	client, err := d.bridges.MCPClient(ctx, input.BotID)
 	if err != nil {
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return external.PromptResult{}, external.Unavailable(err)
 	}
 	workspaceInfo, err := d.bridges.WorkspaceInfo(ctx, input.BotID)
 	if err != nil {
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return external.PromptResult{}, external.Unavailable(err)
 	}
 	if err := external.RequireContainerWorkspace(workspaceInfo, RuntimeType); err != nil {
 		return external.PromptResult{}, err
 	}
 	// Resolve the CLI copy before any session or tool work: a missing
-	// dependency ends the turn here with agent_dependency_missing feedback,
-	// already in its final user-facing shape.
+	// dependency ends the turn here with external.DependencyMissingError,
+	// which the application translates.
 	launcher, err := d.resolveLauncher(ctx, input.BotID)
 	if err != nil {
 		return external.PromptResult{}, err
@@ -325,7 +324,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	defer cancelMount()
 	mcpConfig, toolsMount, err := d.mountTurnTools(mountCtx, client, workspaceInfo, input)
 	if err != nil {
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return external.PromptResult{}, external.Unavailable(err)
 	}
 	defer toolsMount.Stop()
 	args := cliArgs(cfg, input, storedSessionID, mcpConfig)
@@ -335,7 +334,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	// interrupt handshake below.
 	proc, err := startCLI(context.WithoutCancel(ctx), client, workDir, args, env, launcher.Path)
 	if err != nil {
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return external.PromptResult{}, external.Unavailable(err)
 	}
 	defer func() { _ = proc.Close() }()
 
@@ -350,11 +349,11 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	// Do not send input until the CLI has accepted the host control contract.
 	initialized, err := turn.callControl(ctx, "initialize", nil)
 	if err != nil {
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return external.PromptResult{}, external.Unavailable(err)
 	}
 	var capabilities initializeResponse
 	if err := json.Unmarshal(initialized, &capabilities); err != nil {
-		return external.PromptResult{}, err
+		return external.PromptResult{}, errs.WrapDependency(err, "")
 	}
 	turn.mu.Lock()
 	turn.runtimeMetadata["claude_commands"] = capabilities.Commands
@@ -366,7 +365,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		} else if !slices.ContainsFunc(available, func(command initializeCommand) bool { return command.Name == input.Command }) {
 			skills, err := turn.reloadSkillNames(ctx)
 			if err != nil {
-				return external.PromptResult{}, apperror.Wrap(apperror.CodeRuntimeControlFailed, err, nil)
+				return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
 			}
 			available = claudeTurnCommands(capabilities.Commands, skills)
 		}
@@ -381,9 +380,9 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	}
 	if err := turn.configureModes(ctx, cfg, capabilities.Models); err != nil {
 		if errors.Is(err, external.ErrModeUnavailable) {
-			return external.PromptResult{}, apperror.Wrap(apperror.CodeRuntimeControlModeUnavailable, err, nil)
+			return external.PromptResult{}, external.Fail(external.FailureModeUnavailable, err)
 		}
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeRuntimeControlFailed, err, nil)
+		return external.PromptResult{}, external.Fail(external.FailureControlFailed, err)
 	}
 
 	content := buildUserContent(input)
@@ -392,7 +391,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 		return external.PromptResult{}, err
 	}
 	if err := turn.writeLine(line); err != nil {
-		return external.PromptResult{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable, err, map[string]string{"runtime": RuntimeType})
+		return external.PromptResult{}, external.Unavailable(err)
 	}
 	stopSteering := turn.startSteering(ctx)
 	defer stopSteering()
@@ -458,9 +457,9 @@ func (d *Driver) ensureResumableSession(ctx context.Context, client transcriptFS
 		slog.String("bot_id", input.BotID), slog.String("session_id", input.ThreadID))
 	if input.Sink != nil {
 		input.Sink.EmitStreamEvent(event.StreamEvent{
-			Type:  event.RuntimeNotice,
-			Code:  string(apperror.CodeRuntimeNativeHistoryLost),
-			Delta: "Claude Code could not resume this conversation's session and started a new one. It does not remember the earlier messages shown here.",
+			Type:       event.RuntimeNotice,
+			NoticeKind: event.NoticeNativeHistoryLost,
+			Delta:      "Claude Code could not resume this conversation's session and started a new one. It does not remember the earlier messages shown here.",
 		})
 	}
 	return ""

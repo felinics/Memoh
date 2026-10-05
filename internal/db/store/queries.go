@@ -27,6 +27,8 @@ type HistoryTurn struct {
 // Domain-specific stores should replace this broad interface module by module.
 type Queries interface {
 	SaveSessionRunResumeContext(context.Context, dbsqlc.SaveSessionRunResumeContextParams) (int64, error)
+	AcceptSessionRunDecisionContinuation(context.Context, dbsqlc.AcceptSessionRunDecisionContinuationParams) (dbsqlc.SessionRun, error)
+	MarkSessionRunDecisionExecuting(context.Context, dbsqlc.MarkSessionRunDecisionExecutingParams) (int64, error)
 	ListInterruptedSessionRuns(context.Context, pgtype.UUID) ([]dbsqlc.SessionRun, error)
 	RetireSupersededInterruptedSessionRuns(context.Context) (int64, error)
 	RetireInterruptedSessionRun(context.Context, pgtype.UUID) (int64, error)
@@ -90,6 +92,7 @@ type Queries interface {
 	CountSessionEvents(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	NextSessionEventCursor(ctx context.Context) (int64, error)
 	CountTokenUsageRecords(ctx context.Context, arg dbsqlc.CountTokenUsageRecordsParams) (int64, error)
+	CreateMemoryUsage(ctx context.Context, arg dbsqlc.CreateMemoryUsageParams) error
 	CreateAccount(ctx context.Context, arg dbsqlc.CreateAccountParams) (dbsqlc.CreateAccountRow, error)
 	CreateBotAgent(ctx context.Context, arg dbsqlc.CreateBotAgentParams) (dbsqlc.BotAgent, error)
 	CreateBot(ctx context.Context, arg dbsqlc.CreateBotParams) (dbsqlc.CreateBotRow, error)
@@ -180,7 +183,6 @@ type Queries interface {
 	DeleteMCPConnection(ctx context.Context, arg dbsqlc.DeleteMCPConnectionParams) error
 	DeleteConnector(ctx context.Context, arg dbsqlc.DeleteConnectorParams) error
 	DeleteMCPOAuthToken(ctx context.Context, connectionID pgtype.UUID) error
-	DeleteMemoryProvider(ctx context.Context, id pgtype.UUID) error
 	DeleteMessageAssets(ctx context.Context, messageID pgtype.UUID) error
 	ClearHistoryByBot(ctx context.Context, botID pgtype.UUID) error
 	DeleteMessagesByIDs(ctx context.Context, ids []pgtype.UUID) error
@@ -241,7 +243,7 @@ type Queries interface {
 	GetCompactionLogByID(ctx context.Context, id pgtype.UUID) (dbsqlc.BotHistoryMessageCompact, error)
 	GetContainerByBotID(ctx context.Context, botID pgtype.UUID) (dbsqlc.Container, error)
 	GetBotWorkspaceResourceLimits(ctx context.Context, botID pgtype.UUID) (dbsqlc.BotWorkspaceResourceLimit, error)
-	GetDefaultMemoryProvider(ctx context.Context) (dbsqlc.MemoryProvider, error)
+	GetBuiltinMemoryProvider(ctx context.Context) (dbsqlc.MemoryProvider, error)
 	GetFetchProviderByID(ctx context.Context, id pgtype.UUID) (dbsqlc.FetchProvider, error)
 	GetFetchProviderByName(ctx context.Context, name string) (dbsqlc.FetchProvider, error)
 	GetContextLifecycleByRunID(ctx context.Context, runID pgtype.UUID) (dbsqlc.GetContextLifecycleByRunIDRow, error)
@@ -292,6 +294,8 @@ type Queries interface {
 	GetStorageProviderByName(ctx context.Context, name string) (dbsqlc.StorageProvider, error)
 	GetTokenUsageByDayAndType(ctx context.Context, arg dbsqlc.GetTokenUsageByDayAndTypeParams) ([]dbsqlc.GetTokenUsageByDayAndTypeRow, error)
 	GetTokenUsageByModel(ctx context.Context, arg dbsqlc.GetTokenUsageByModelParams) ([]dbsqlc.GetTokenUsageByModelRow, error)
+	GetMemoryTokenUsageByDay(ctx context.Context, arg dbsqlc.GetMemoryTokenUsageByDayParams) ([]dbsqlc.GetMemoryTokenUsageByDayRow, error)
+	GetMemoryTokenUsageByModel(ctx context.Context, arg dbsqlc.GetMemoryTokenUsageByModelParams) ([]dbsqlc.GetMemoryTokenUsageByModelRow, error)
 	GetToolApprovalRequest(ctx context.Context, id pgtype.UUID) (dbsqlc.ToolApprovalRequest, error)
 	ListPendingToolApprovalsByRun(ctx context.Context, runID pgtype.UUID) ([]dbsqlc.ToolApprovalRequest, error)
 	ListToolApprovalsByRun(ctx context.Context, runID pgtype.UUID) ([]dbsqlc.ToolApprovalRequest, error)

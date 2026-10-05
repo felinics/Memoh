@@ -8,6 +8,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -17,16 +19,34 @@ func TestWorkspaceTargetHTTPError(t *testing.T) {
 		err  error
 		code int
 	}{
-		"invalid mode":       {workspace.ErrInvalidWorkspaceToolApprovalMode, http.StatusBadRequest},
-		"unusable runtime":   {workspace.ErrRemoteRuntimeNotUsable, http.StatusNotFound},
-		"missing target":     {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
-		"owner mismatch":     {workspace.ErrRemoteRuntimeOwnerMismatch, http.StatusConflict},
-		"client too old":     {workspace.ErrRemoteRuntimeClientUpdateNeeded, http.StatusConflict},
-		"unexpected failure": {errors.New("boom"), http.StatusInternalServerError},
+		"invalid mode":          {workspace.ErrInvalidWorkspaceToolApprovalMode, http.StatusBadRequest},
+		"unusable runtime":      {workspace.ErrRemoteRuntimeNotUsable, http.StatusNotFound},
+		"missing target":        {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
+		"owner mismatch":        {workspace.ErrRemoteRuntimeOwnerMismatch, http.StatusConflict},
+		"client too old":        {workspace.ErrRemoteRuntimeClientUpdateNeeded, http.StatusConflict},
+		"workspace unreachable": {bridgeUnavailable(), http.StatusServiceUnavailable},
+		"unexpected failure":    {errors.New("boom"), 0},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := workspaceTargetHTTPError(nil, tc.err)
+			err := workspaceTargetHTTPError(tc.err)
 			var httpErr *echo.HTTPError
+			if tc.code == http.StatusServiceUnavailable {
+				if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceUnreachable {
+					t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceUnreachable)
+				}
+				if got := errs.FaultOf(err); got != errs.FaultDependency {
+					t.Fatalf("fault = %q, want dependency", got)
+				}
+				return
+			}
+			if tc.code == 0 {
+				// An unexpected failure is returned with its cause for the
+				// boundary to answer as internal and record.
+				if errors.As(err, &httpErr) || !errors.Is(err, tc.err) {
+					t.Fatalf("error = %v, want the cause without an HTTP status", err)
+				}
+				return
+			}
 			if !errors.As(err, &httpErr) || httpErr.Code != tc.code {
 				t.Fatalf("error = %v, want HTTP %d", err, tc.code)
 			}

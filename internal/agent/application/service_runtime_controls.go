@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -263,11 +262,16 @@ func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlR
 			Cancel: func() { cancel(context.Canceled) }, OwnershipCancel: cancel,
 		},
 	})
+	// The session runtime is this adapter's port; callers outside it only see
+	// the turn sentinel.
+	if errors.Is(err, sessionruntime.ErrSessionBusy) {
+		return turn.ErrSessionBusy
+	}
 	if err != nil {
 		return err
 	}
 	if !admission.Started {
-		return sessionruntime.ErrSessionBusy
+		return turn.ErrSessionBusy
 	}
 	handle := admission.Handle
 	runCtx = runtimefence.WithContext(runCtx, runtimefence.Fence{BotID: handle.BotID, SessionID: handle.SessionID, Token: handle.FencingToken})
@@ -279,9 +283,10 @@ func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlR
 		if errors.Is(resultErr, context.Canceled) || runCtx.Err() != nil {
 			status = sessionruntime.RunStatusAborted
 		}
-		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(runCtx), terminalWriteTimeout)
+		outcome := RunOutcome{Status: status, Cause: resultErr}
+		finishCtx, finishCancel := context.WithTimeout(WithRunOutcome(context.WithoutCancel(runCtx), handle.RunID, outcome), terminalWriteTimeout)
 		defer finishCancel()
-		if err := s.sessionRuntime.FinishRunWithErrorCode(finishCtx, handle, status, string(apperror.CodeOf(publicRuntimeControlError(resultErr)))); err != nil {
+		if _, err := s.sessionRuntime.FinishRunWithErrorCode(finishCtx, handle, status, string(apperror.CodeOf(publicRuntimeControlError(resultErr)))); err != nil {
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
@@ -310,34 +315,14 @@ func (s *Service) runtimeControlContext(ctx context.Context, request RuntimeCont
 	return ctx, nil
 }
 
+// publicRuntimeControlError keeps the team routing sentinel intact for its
+// own transports; everything else goes through the shared runtime control
+// translation.
 func publicRuntimeControlError(err error) error {
-	if err == nil || apperror.CodeOf(err) != "" {
+	if errors.Is(err, turn.ErrTeamNotServed) {
 		return err
 	}
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) || errors.Is(err, turn.ErrTeamNotServed) {
-		return err
-	}
-	code := apperror.CodeRuntimeControlFailed
-	switch {
-	case errors.Is(err, context.Canceled):
-		code = apperror.CodeRuntimeControlCancelled
-	case errors.Is(err, approval.ErrForbidden):
-		code = apperror.CodeRuntimeControlForbidden
-	case errors.Is(err, sessionruntime.ErrSessionBusy):
-		code = apperror.CodeSessionBusy
-	case errors.Is(err, external.ErrControlUnsupported):
-		code = apperror.CodeRuntimeControlUnsupported
-	case errors.Is(err, external.ErrCommandUnavailable):
-		code = apperror.CodeRuntimeControlCommandUnavailable
-	case errors.Is(err, external.ErrModeUnavailable):
-		code = apperror.CodeRuntimeControlModeUnavailable
-	case errors.Is(err, external.ErrThreadUnavailable):
-		code = apperror.CodeRuntimeControlThreadUnavailable
-	case errors.Is(err, external.ErrAuthRequired):
-		code = apperror.CodeExternalRuntimeAuthRequired
-	}
-	return apperror.Wrap(code, err, nil)
+	return RuntimeControlError(err)
 }
 
 func (s *Service) ControlRuntimeGoal(ctx context.Context, request RuntimeControlRequest, action string) (err error) {

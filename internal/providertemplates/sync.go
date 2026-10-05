@@ -13,6 +13,7 @@ import (
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type transactionRunner interface {
@@ -25,7 +26,7 @@ func Sync(ctx context.Context, logger *slog.Logger, queries dbstore.Queries, def
 	}
 	run := func(q dbstore.Queries) error {
 		if err := q.AcquireProviderTemplateSyncLock(ctx); err != nil {
-			return fmt.Errorf("acquire provider template sync lock: %w", err)
+			return errs.Wrap(err, "acquire provider template sync lock")
 		}
 		return syncLocked(ctx, logger, q, definitions)
 	}
@@ -38,7 +39,7 @@ func Sync(ctx context.Context, logger *slog.Logger, queries dbstore.Queries, def
 func syncLocked(ctx context.Context, logger *slog.Logger, queries dbstore.Queries, definitions []Definition) error {
 	existing, err := queries.ListAllProviderTemplates(ctx)
 	if err != nil {
-		return fmt.Errorf("list provider templates: %w", err)
+		return errs.Wrap(err, "list provider templates")
 	}
 	byIdentity := make(map[string]sqlc.TemplateProviderTemplate, len(existing))
 	for _, row := range existing {
@@ -52,7 +53,7 @@ func syncLocked(ctx context.Context, logger *slog.Logger, queries dbstore.Querie
 		}
 		key := identity(string(definition.Domain), definition.Key)
 		if _, duplicate := seen[key]; duplicate {
-			return fmt.Errorf("duplicate provider template %s", key)
+			return errs.New(fmt.Sprintf("duplicate provider template %s", key))
 		}
 		seen[key] = struct{}{}
 
@@ -74,7 +75,7 @@ func syncLocked(ctx context.Context, logger *slog.Logger, queries dbstore.Querie
 			continue
 		}
 		if err := queries.SetProviderTemplateActive(ctx, sqlc.SetProviderTemplateActiveParams{ID: row.ID, Active: false}); err != nil {
-			return fmt.Errorf("deactivate provider template %s/%s: %w", row.Domain, row.Key, err)
+			return errs.Wrap(err, fmt.Sprintf("deactivate provider template %s/%s", row.Domain, row.Key))
 		}
 	}
 	return nil
@@ -90,7 +91,7 @@ func normalizeDefinition(raw Definition, fallbackOrder int) (Definition, string,
 		definition.SortOrder = fallbackOrder
 	}
 	if definition.Key == "" || definition.Name == "" || definition.Driver == "" || !IsValidDomain(definition.Domain) {
-		return Definition{}, "", fmt.Errorf("invalid provider template definition %q", definition.Key)
+		return Definition{}, "", errs.New(fmt.Sprintf("invalid provider template definition %q", definition.Key))
 	}
 	if definition.ConfigSchema == nil {
 		definition.ConfigSchema = map[string]any{}
@@ -119,7 +120,7 @@ func normalizeDefinition(raw Definition, fallbackOrder int) (Definition, string,
 			model.Metadata = map[string]any{}
 		}
 		if model.ModelID == "" {
-			return Definition{}, "", fmt.Errorf("provider template %s has an empty model id", definition.Key)
+			return Definition{}, "", errs.New(fmt.Sprintf("provider template %s has an empty model id", definition.Key))
 		}
 	}
 	payload, err := json.Marshal(definition)
@@ -147,7 +148,7 @@ func upsertDefinition(ctx context.Context, queries dbstore.Queries, definition D
 	if strings.TrimSpace(definition.Icon) != "" {
 		icon = pgtype.Text{String: definition.Icon, Valid: true}
 	}
-	return queries.UpsertProviderTemplate(ctx, sqlc.UpsertProviderTemplateParams{
+	row, err := queries.UpsertProviderTemplate(ctx, sqlc.UpsertProviderTemplateParams{
 		Key:           definition.Key,
 		Domain:        string(definition.Domain),
 		Name:          definition.Name,
@@ -161,18 +162,19 @@ func upsertDefinition(ctx context.Context, queries dbstore.Queries, definition D
 		ContentHash:   hash,
 		SortOrder:     int32(definition.SortOrder), //nolint:gosec // Catalog sizes are bounded by checked-in configuration.
 	})
+	return row, errs.Wrap(err, "")
 }
 
 func syncModels(ctx context.Context, queries dbstore.Queries, templateID pgtype.UUID, definitions []ModelDefinition) error {
 	existing, err := queries.ListAllProviderTemplateModels(ctx, templateID)
 	if err != nil {
-		return err
+		return errs.Wrap(err, "")
 	}
 	seen := make(map[string]struct{}, len(definitions))
 	for _, definition := range definitions {
 		key := identity(definition.Type, definition.ModelID)
 		if _, duplicate := seen[key]; duplicate {
-			return fmt.Errorf("duplicate template model %s", key)
+			return errs.New(fmt.Sprintf("duplicate template model %s", key))
 		}
 		seen[key] = struct{}{}
 		config, err := json.Marshal(definition.Config)
@@ -192,7 +194,7 @@ func syncModels(ctx context.Context, queries dbstore.Queries, templateID pgtype.
 			Metadata:           metadata,
 			SortOrder:          int32(definition.SortOrder), //nolint:gosec // Catalog sizes are bounded by checked-in configuration.
 		}); err != nil {
-			return err
+			return errs.Wrap(err, "")
 		}
 	}
 	for _, row := range existing {
@@ -200,7 +202,7 @@ func syncModels(ctx context.Context, queries dbstore.Queries, templateID pgtype.
 			continue
 		}
 		if err := queries.SetProviderTemplateModelActive(ctx, sqlc.SetProviderTemplateModelActiveParams{ID: row.ID, Active: false}); err != nil {
-			return err
+			return errs.Wrap(err, "")
 		}
 	}
 	return nil

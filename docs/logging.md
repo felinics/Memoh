@@ -74,6 +74,7 @@ Added by the handler, never by the call site:
 | Key | Source |
 | --- | --- |
 | `request_id` | The id echo's `RequestID` middleware assigns, put into the context by `httpx.RequestIDContext`. The same id the client receives, in the response header and in `apperror.Problem`. |
+| | Work that does not arrive over HTTP gets its own id from `httpx.NewRequestID`: each inbound IM message and each discuss trigger. The internal RPC carries the caller's id in `x-request-id` metadata, so the callee's records report it too. |
 | `trace_id`, `span_id` | The span context, when tracing is configured — see [observability.md](observability.md). |
 
 Absent identity means absent keys rather than empty ones: an empty `trace_id`
@@ -92,9 +93,10 @@ to `group.request_id` and breaks queries written against the top level.
 | `INFO` | A thing happened that an operator would want in the record. |
 | `DEBUG` | Detail useful while working on this code. |
 
-A rejected request is not this process failing. Authentication and validation
-refusals are `WARN` at most, so that a filter on `ERROR` shows faults rather
-than ordinary traffic.
+A rejected request is not this process failing. The result record of a unit
+of work takes its level from the attribution of its error, so a refused or
+canceled request is `INFO` and a filter on `ERROR` shows faults rather than
+ordinary traffic. The full table is in [errors.md](errors.md#levels).
 
 ## Naming
 
@@ -104,7 +106,9 @@ and log pipelines commonly flatten dots to underscores on ingest, so a dotted
 spelling would be written one way and queried another.
 
 Entity identifiers are `<entity>_id` (`bot_id`, `config_id`, `workspace_id`).
-Durations use `slog.Duration`. Errors use `slog.Any("error", err)`.
+Durations use `slog.Duration`. An error that ends or interrupts a unit of work
+is logged with the fields `errlog` gives it, listed in
+[errors.md](errors.md#error-fields), rather than a bare `error` attribute.
 
 Attributes are `slog.Attr` values, not loose key-value pairs
 (`sloglint.attr-only`): an odd number of arguments silently renders as
@@ -123,10 +127,17 @@ use it, and a new one must too.
 
 One record per request, emitted by the shell, with `msg` = `request`:
 
-`method`, `uri` (through `SafeRequestLogURI`), `status`, `latency`,
-`remote_ip`. `request_id` and any trace identity come from the handler, so the
+`method`, `uri` (through `SafeRequestLogURI`), `route`, `status`, `latency`,
+`remote_ip`. `route` is the matched route template, such as `/bots/:bot_id`, so
+records group by endpoint rather than by concrete path; a request that matched
+no route has none. `request_id` and any trace identity come from the handler, so the
 access log does not name them itself — one source for those fields, on every
 record rather than on this line alone.
+
+The access record is also the request's result record. For a failed request
+it carries the error fields and takes its level from the error's attribution,
+so there is no separate "request failed" record. `server.AccessLog` writes it;
+see [errors.md](errors.md#result-records).
 
 Both HTTP shells — the main server and the webhook tunnel listener — emit it.
 A public entrance without one leaves a delivery that a third party reports as

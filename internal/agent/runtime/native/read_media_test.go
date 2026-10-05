@@ -115,8 +115,8 @@ func (*agentReadMediaMockProvider) ListModels(context.Context) ([]sdk.Model, err
 	return nil, nil
 }
 
-func (*agentReadMediaMockProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+func (*agentReadMediaMockProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*agentReadMediaMockProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {

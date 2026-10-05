@@ -40,6 +40,8 @@ const api = {
     runtimeState: (): Promise<DesktopRuntimeState> => ipcRenderer.invoke('desktop:runtime-state'),
     configureRuntime: (config: DesktopRuntimeConfig | null): Promise<DesktopRuntimeState> =>
       ipcRenderer.invoke('desktop:configure-runtime', config),
+    setRuntimePaused: (paused: boolean): Promise<DesktopRuntimeState> =>
+      ipcRenderer.invoke('desktop:set-runtime-paused', paused),
     onRuntimeStateChanged: (cb: (state: DesktopRuntimeState) => void): (() => void) => {
       const listener = (_event: IpcRendererEvent, state: DesktopRuntimeState) => cb(state)
       ipcRenderer.on('desktop:runtime-state-changed', listener)

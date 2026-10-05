@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const promptCancellationDrainTimeout = 3 * time.Second
@@ -25,12 +26,27 @@ func newClientConnection(client *clientCallbacks, peerInput io.Writer, peerOutpu
 	return c
 }
 
+// peerError marks an error from the Agent, or from the connection to it, as
+// the dependency's. The SDK reports a request the caller canceled as a
+// RequestError too; that one keeps this process's attribution.
+func peerError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return errs.WrapWithDepth(1, err, "")
+	}
+	return errs.WrapDependencyWithDepth(1, err, "")
+}
+
 func (c *clientConnection) Initialize(ctx context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
-	return acp.SendRequest[acp.InitializeResponse](c.conn, ctx, acp.AgentMethodInitialize, params)
+	resp, err := acp.SendRequest[acp.InitializeResponse](c.conn, ctx, acp.AgentMethodInitialize, params)
+	return resp, peerError(ctx, err)
 }
 
 func (c *clientConnection) NewSession(ctx context.Context, params acp.NewSessionRequest) (sessionResponse, error) {
-	return acp.SendRequest[sessionResponse](c.conn, ctx, acp.AgentMethodSessionNew, params)
+	resp, err := acp.SendRequest[sessionResponse](c.conn, ctx, acp.AgentMethodSessionNew, params)
+	return resp, peerError(ctx, err)
 }
 
 func (c *clientConnection) Prompt(ctx context.Context, params acp.PromptRequest) (acp.PromptResponse, error) {
@@ -59,7 +75,7 @@ func (c *clientConnection) Prompt(ctx context.Context, params acp.PromptRequest)
 	select {
 	case outcome := <-outcomes:
 		if ctx.Err() == nil {
-			return outcome.response, outcome.err
+			return outcome.response, peerError(ctx, outcome.err)
 		}
 		return c.finishCancelledPrompt(ctx, outcome, time.Now().Add(promptCancellationDrainTimeout))
 	case <-ctx.Done():
@@ -128,30 +144,33 @@ func (c *clientConnection) finishCancelledPrompt(
 }
 
 func (c *clientConnection) CloseSession(ctx context.Context, params acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
-	return acp.SendRequest[acp.CloseSessionResponse](c.conn, ctx, acp.AgentMethodSessionClose, params)
+	resp, err := acp.SendRequest[acp.CloseSessionResponse](c.conn, ctx, acp.AgentMethodSessionClose, params)
+	return resp, peerError(ctx, err)
 }
 
 func (c *clientConnection) Cancel(ctx context.Context, params acp.CancelNotification) error {
-	return c.conn.SendNotification(ctx, acp.AgentMethodSessionCancel, params)
+	return peerError(ctx, c.conn.SendNotification(ctx, acp.AgentMethodSessionCancel, params))
 }
 
 func (c *clientConnection) SetSessionMode(ctx context.Context, params acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
-	return acp.SendRequest[acp.SetSessionModeResponse](c.conn, ctx, acp.AgentMethodSessionSetMode, params)
+	resp, err := acp.SendRequest[acp.SetSessionModeResponse](c.conn, ctx, acp.AgentMethodSessionSetMode, params)
+	return resp, peerError(ctx, err)
 }
 
 func (c *clientConnection) SetSessionConfigOption(ctx context.Context, params acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	resp, err := acp.SendRequest[acp.SetSessionConfigOptionResponse](c.conn, ctx, acp.AgentMethodSessionSetConfigOption, params)
 	if err != nil {
-		return resp, err
+		return resp, peerError(ctx, err)
 	}
 	if err := (&resp).Validate(); err != nil {
-		return resp, fmt.Errorf("validate session config response: %w", err)
+		return resp, errs.WrapDependency(err, "validate session config response")
 	}
 	return resp, nil
 }
 
 func (c *clientConnection) SetLegacySessionModel(ctx context.Context, params legacySetSessionModelRequest) (legacySetSessionModelResponse, error) {
-	return acp.SendRequest[legacySetSessionModelResponse](c.conn, ctx, legacyAgentMethodSessionSetModel, params)
+	resp, err := acp.SendRequest[legacySetSessionModelResponse](c.conn, ctx, legacyAgentMethodSessionSetModel, params)
+	return resp, peerError(ctx, err)
 }
 
 func (c *clientConnection) handle(ctx context.Context, method string, params json.RawMessage) (any, *acp.RequestError) {

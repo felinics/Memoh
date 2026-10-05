@@ -4,6 +4,7 @@ import {
   REASONING_EFFORT_DISABLE,
   REASONING_EFFORT_LEGACY_OFF,
   reconcileStoredEffort,
+  displayedEffort,
   selectableEfforts,
 } from './reasoning-effort'
 
@@ -86,5 +87,19 @@ describe('reconcileStoredEffort', () => {
     })
     expect(reconcileStoredEffort('high', alwaysOn)).toBe('high')
     expect(reconcileStoredEffort('none', alwaysOn)).toBe('disable')
+  })
+})
+
+describe('displayedEffort', () => {
+  it('hides dormant choices on provider-managed models', () => {
+    for (const stored of ['disable', 'high', 'max']) {
+      expect(displayedEffort(stored, { supported: true })).toBe('')
+    }
+  })
+  it('shows the default instead of off when no preference is stored', () => {
+    expect(displayedEffort('', options())).toBe('medium')
+  })
+  it('shows a switch without inventing an intensity tier', () => {
+    expect(displayedEffort('high', options({ efforts: ['enabled'], default_effort: 'enabled' }))).toBe('enabled')
   })
 })

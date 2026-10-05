@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 // dingtalkOutboundStream accumulates streaming events and flushes the final message
@@ -74,6 +75,12 @@ func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.Prepare
 		s.mu.Unlock()
 		return nil
 
+	case channel.StreamEventReset:
+		s.mu.Lock()
+		s.textBuilder.Reset()
+		s.mu.Unlock()
+		return nil
+
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
 			return nil
@@ -94,14 +101,17 @@ func (s *dingtalkOutboundStream) Push(ctx context.Context, event channel.Prepare
 		return s.flush(ctx)
 
 	case channel.StreamEventError:
-		text := strings.TrimSpace(event.Error)
+		text := redact.Text(strings.TrimSpace(event.Error))
 		if text == "" {
 			return nil
 		}
 		s.mu.Lock()
 		s.final = &channel.PreparedMessage{
-			Message: channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text},
+			Message: channel.Message{Format: channel.MessageFormatPlain, Text: channel.ErrorReplyText(event.ErrorCode, text)},
 		}
+		// The error replaces the answer; the attachments buffered for it
+		// must not go out with the error.
+		s.attachments = nil
 		s.mu.Unlock()
 		return s.flush(ctx)
 	}

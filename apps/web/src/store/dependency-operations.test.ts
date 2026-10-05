@@ -248,6 +248,21 @@ describe('useDependencyOperationsStore', () => {
     expect(toastError).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['the server rejected it', { code: 'http.conflict', status: 409, fault: 'client' }, 'error'],
+    ['the server abandoned it as canceled', { code: 'canceled', status: 499, fault: 'canceled' }, 'unknown'],
+    ['no answer arrived', new TypeError('Failed to fetch'), 'unknown'],
+  ])('settles a stream that fails before its first event when %s', async (_case, error, status) => {
+    streamDependencyOperation.mockReturnValue({
+      [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(error) }),
+    })
+    const store = useDependencyOperationsStore()
+    store.start({ botId: 'bot-1', item: codex, action: 'install' })
+    store.view(operationKey('bot-1', 'codex'), 'panel')
+    await settleMicrotasks()
+    expect(store.get('bot-1', 'codex')?.status).toBe(status)
+  })
+
   it('drops everything silently on reset', async () => {
     const stream = controlledStream()
     streamDependencyOperation.mockReturnValue(stream.generator)

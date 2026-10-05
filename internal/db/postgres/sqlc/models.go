@@ -106,6 +106,7 @@ type Bot struct {
 	CompactionThreshold     int32              `json:"compaction_threshold"`
 	CompactionTargetPercent pgtype.Int4        `json:"compaction_target_percent"`
 	CompactionModelID       pgtype.UUID        `json:"compaction_model_id"`
+	MemoryLlmModelID        pgtype.UUID        `json:"memory_llm_model_id"`
 	ImageModelID            pgtype.UUID        `json:"image_model_id"`
 	DiscussProbeModelID     pgtype.UUID        `json:"discuss_probe_model_id"`
 	TtsModelID              pgtype.UUID        `json:"tts_model_id"`
@@ -330,6 +331,16 @@ type BotHistoryMessageCompact struct {
 	StartedAt       pgtype.Timestamptz `json:"started_at"`
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 	TeamID          pgtype.UUID        `json:"team_id"`
+}
+
+type BotMemoryUsage struct {
+	ID        pgtype.UUID        `json:"id"`
+	TeamID    pgtype.UUID        `json:"team_id"`
+	BotID     pgtype.UUID        `json:"bot_id"`
+	ModelID   pgtype.UUID        `json:"model_id"`
+	Operation string             `json:"operation"`
+	Usage     []byte             `json:"usage"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type BotRemoteRuntimeBinding struct {

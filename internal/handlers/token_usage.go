@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type TokenUsageHandler struct {
@@ -65,7 +67,10 @@ type TokenUsageResponse struct {
 	Discuss  []DailyTokenUsage `json:"discuss"`
 	ACPAgent []DailyTokenUsage `json:"acp_agent"`
 	Schedule []DailyTokenUsage `json:"schedule"`
-	ByModel  []ModelTokenUsage `json:"by_model"`
+	// Memory is usage of the memory LLM (extract / decide / compact), which
+	// runs outside any session.
+	Memory  []DailyTokenUsage `json:"memory"`
+	ByModel []ModelTokenUsage `json:"by_model"`
 }
 
 // TokenUsageRecord represents a single LLM call (one assistant message row) with its token usage.
@@ -99,11 +104,11 @@ type TokenUsageRecordsResponse struct {
 // @Param from query string true "Start date (YYYY-MM-DD)"
 // @Param to query string true "End date exclusive (YYYY-MM-DD)"
 // @Param model_id query string false "Optional model UUID to filter by"
-// @Param session_type query string false "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime."
+// @Param session_type query string false "Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls."
 // @Success 200 {object} TokenUsageResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/token-usage [get].
 func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -157,16 +162,23 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 
 	ctx := c.Request().Context()
 
-	chat, discuss, acpAgent, schedule, err := h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID, pgSessionType)
-	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "fetch token usage failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage")
+	var chat, discuss, acpAgent, schedule, memory []DailyTokenUsage
+	if !isMemoryUsageFilter(pgSessionType) {
+		chat, discuss, acpAgent, schedule, err = h.fetchUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID, pgSessionType)
+		if err != nil {
+			return errs.Wrap(err, "fetch token usage")
+		}
+	}
+	if !pgSessionType.Valid || isMemoryUsageFilter(pgSessionType) {
+		memory, err = h.fetchMemoryUsageByDay(ctx, pgBotID, fromTS, toTS, pgModelID)
+		if err != nil {
+			return errs.Wrap(err, "fetch memory token usage")
+		}
 	}
 
 	byModel, err := h.fetchUsageByModel(ctx, pgBotID, fromTS, toTS, pgSessionType)
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "fetch token usage by model failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch token usage by model")
+		return errs.Wrap(err, "fetch token usage by model")
 	}
 
 	resp := TokenUsageResponse{
@@ -174,6 +186,7 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 		Discuss:  discuss,
 		ACPAgent: acpAgent,
 		Schedule: schedule,
+		Memory:   memory,
 		ByModel:  byModel,
 	}
 	return c.JSON(http.StatusOK, resp)
@@ -213,29 +226,98 @@ func (h *TokenUsageHandler) fetchUsageByDay(ctx context.Context, botID pgtype.UU
 	return chat, discuss, acpAgent, schedule, nil
 }
 
-func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, sessionType pgtype.Text) ([]ModelTokenUsage, error) {
-	rows, err := h.queries.GetTokenUsageByModel(ctx, sqlc.GetTokenUsageByModelParams{
-		BotID:       botID,
-		FromTime:    from,
-		ToTime:      to,
-		SessionType: sessionType,
+func (h *TokenUsageHandler) fetchMemoryUsageByDay(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, modelID pgtype.UUID) ([]DailyTokenUsage, error) {
+	rows, err := h.queries.GetMemoryTokenUsageByDay(ctx, sqlc.GetMemoryTokenUsageByDayParams{
+		BotID:    botID,
+		FromTime: from,
+		ToTime:   to,
+		ModelID:  modelID,
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	result := make([]ModelTokenUsage, 0, len(rows))
+	result := make([]DailyTokenUsage, 0, len(rows))
 	for _, r := range rows {
-		result = append(result, ModelTokenUsage{
-			ModelID:      formatOptionalUUID(r.ModelID),
-			ModelSlug:    r.ModelSlug,
-			ModelName:    r.ModelName,
-			ProviderName: r.ProviderName,
-			InputTokens:  r.InputTokens,
-			OutputTokens: r.OutputTokens,
+		result = append(result, DailyTokenUsage{
+			Day:             formatPgDate(r.Day),
+			InputTokens:     r.InputTokens,
+			OutputTokens:    r.OutputTokens,
+			CacheReadTokens: r.CacheReadTokens,
+			ReasoningTokens: r.ReasoningTokens,
 		})
 	}
 	return result, nil
+}
+
+// fetchUsageByModel merges session usage and memory LLM usage per model, so a
+// model used for both shows one total.
+func (h *TokenUsageHandler) fetchUsageByModel(ctx context.Context, botID pgtype.UUID, from, to pgtype.Timestamptz, sessionType pgtype.Text) ([]ModelTokenUsage, error) {
+	var result []ModelTokenUsage
+	index := map[string]int{}
+	add := func(u ModelTokenUsage) {
+		if i, ok := index[u.ModelID]; ok {
+			result[i].InputTokens += u.InputTokens
+			result[i].OutputTokens += u.OutputTokens
+			return
+		}
+		index[u.ModelID] = len(result)
+		result = append(result, u)
+	}
+
+	if !isMemoryUsageFilter(sessionType) {
+		rows, err := h.queries.GetTokenUsageByModel(ctx, sqlc.GetTokenUsageByModelParams{
+			BotID:       botID,
+			FromTime:    from,
+			ToTime:      to,
+			SessionType: sessionType,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			add(ModelTokenUsage{
+				ModelID:      formatOptionalUUID(r.ModelID),
+				ModelSlug:    r.ModelSlug,
+				ModelName:    r.ModelName,
+				ProviderName: r.ProviderName,
+				InputTokens:  r.InputTokens,
+				OutputTokens: r.OutputTokens,
+			})
+		}
+	}
+	if !sessionType.Valid || isMemoryUsageFilter(sessionType) {
+		rows, err := h.queries.GetMemoryTokenUsageByModel(ctx, sqlc.GetMemoryTokenUsageByModelParams{
+			BotID:    botID,
+			FromTime: from,
+			ToTime:   to,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			add(ModelTokenUsage{
+				ModelID:      formatOptionalUUID(r.ModelID),
+				ModelSlug:    r.ModelSlug,
+				ModelName:    r.ModelName,
+				ProviderName: r.ProviderName,
+				InputTokens:  r.InputTokens,
+				OutputTokens: r.OutputTokens,
+			})
+		}
+	}
+
+	sort.SliceStable(result, func(i, j int) bool { return result[i].InputTokens > result[j].InputTokens })
+	if result == nil {
+		result = []ModelTokenUsage{}
+	}
+	return result, nil
+}
+
+// tokenUsageTypeMemory selects memory LLM calls; it is not a session type.
+const tokenUsageTypeMemory = "memory"
+
+func isMemoryUsageFilter(sessionType pgtype.Text) bool {
+	return sessionType.Valid && sessionType.String == tokenUsageTypeMemory
 }
 
 func formatPgDate(d pgtype.Date) string {
@@ -266,13 +348,13 @@ const (
 // @Param from query string true "Start date (YYYY-MM-DD)"
 // @Param to query string true "End date exclusive (YYYY-MM-DD)"
 // @Param model_id query string false "Optional model UUID to filter by"
-// @Param session_type query string false "Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime."
+// @Param session_type query string false "Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls."
 // @Param limit query int false "Page size (default 20, max 100)"
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} TokenUsageRecordsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/token-usage/records [get].
 func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -352,8 +434,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		PageLimit:   limit,
 	})
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "list token usage records failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list token usage records")
+		return errs.Wrap(err, "list token usage records")
 	}
 
 	total, err := h.queries.CountTokenUsageRecords(ctx, sqlc.CountTokenUsageRecordsParams{
@@ -364,8 +445,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		SessionType: pgSessionType,
 	})
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "count token usage records failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to count token usage records")
+		return errs.Wrap(err, "count token usage records")
 	}
 
 	items := make([]TokenUsageRecord, 0, len(rows))
@@ -397,10 +477,10 @@ func parseTokenUsageSessionType(c echo.Context) (pgtype.Text, error) {
 	switch sessionType := strings.TrimSpace(c.QueryParam("session_type")); sessionType {
 	case "":
 		return pgtype.Text{}, nil
-	case session.TypeChat, session.TypeDiscuss, session.TypeSchedule, session.TypeACPAgent:
+	case session.TypeChat, session.TypeDiscuss, session.TypeSchedule, session.TypeACPAgent, tokenUsageTypeMemory:
 		return pgtype.Text{String: sessionType, Valid: true}, nil
 	default:
-		return pgtype.Text{}, echo.NewHTTPError(http.StatusBadRequest, "invalid session_type, expected one of: chat, discuss, schedule, acp_agent")
+		return pgtype.Text{}, echo.NewHTTPError(http.StatusBadRequest, "invalid session_type, expected one of: chat, discuss, schedule, acp_agent, memory")
 	}
 }
 

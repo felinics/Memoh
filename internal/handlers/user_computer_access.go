@@ -39,8 +39,8 @@ func (h *UserComputerAccessHandler) Register(e *echo.Echo) {
 // @Tags user-runtimes
 // @Produce json
 // @Success 200 {object} workspace.WorkspaceTargetGrantsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/computer-access [get].
 func (h *UserComputerAccessHandler) List(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -49,7 +49,7 @@ func (h *UserComputerAccessHandler) List(c echo.Context) error {
 	}
 	grants, err := h.service.ListAccountGrants(c.Request().Context(), userID)
 	if err != nil {
-		return workspaceTargetHTTPError(h.log, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, workspace.WorkspaceTargetGrantsResponse{Grants: grants})
 }

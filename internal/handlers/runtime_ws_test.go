@@ -1,15 +1,18 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
+	"net/http"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/labstack/echo/v4"
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 )
@@ -100,17 +103,17 @@ type runtimeWSHarness struct {
 	source        *fakeRuntimeSource
 	subscriptions *runtimeSubscriptions
 	writer        *wsWriter
+	logs          bytes.Buffer
 }
 
 func newRuntimeWSHarness(t *testing.T) *runtimeWSHarness {
 	t.Helper()
 	source := &fakeRuntimeSource{}
 	writer := &wsWriter{ch: make(chan []byte, 64), stop: make(chan struct{}), done: make(chan struct{})}
-	return &runtimeWSHarness{
-		source:        source,
-		subscriptions: newRuntimeSubscriptions(source, writer, slog.Default()),
-		writer:        writer,
-	}
+	harness := &runtimeWSHarness{source: source, writer: writer}
+	logger := slog.New(slog.NewJSONHandler(&harness.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	harness.subscriptions = newRuntimeSubscriptions(source, writer, logger)
+	return harness
 }
 
 func (h *runtimeWSHarness) subscribe(sessionID string, authorize runtimeSubscribeAuthorizer) bool {
@@ -408,7 +411,7 @@ func TestRuntimeSubscribeReauthorizesEverySubscribe(t *testing.T) {
 		if calls == 1 {
 			return nil
 		}
-		return errors.New("session not found")
+		return echo.NewHTTPError(http.StatusNotFound, "session not found")
 	}
 
 	if !harness.subscribe(runtimeWSSessionID, authorize) {
@@ -434,8 +437,8 @@ func TestRuntimeSubscribeReauthorizesEverySubscribe(t *testing.T) {
 	}
 
 	frame := harness.next(t)
-	if frame["type"] != "error" || !strings.Contains(frame["message"].(string), "session not found") {
-		t.Fatalf("refused subscribe frame = %#v, want an error naming the refusal", frame)
+	if frame["type"] != "error" || frame["code"] != "http.not_found" || frame["message"] != "The requested resource was not found." {
+		t.Fatalf("refused subscribe frame = %#v, want http.not_found", frame)
 	}
 }
 
@@ -451,8 +454,38 @@ func TestRuntimeSubscribeRequiresSessionID(t *testing.T) {
 	if harness.source.count() != 0 {
 		t.Fatal("runtime_subscribe without a session created a subscription")
 	}
-	if frame := harness.next(t); frame["type"] != "error" {
-		t.Fatalf("frame = %#v, want an error", frame)
+	frame := harness.next(t)
+	if frame["type"] != "error" || frame["code"] != "http.bad_request" || frame["message"] != "The request is invalid." {
+		t.Fatalf("frame = %#v, want http.bad_request with catalog detail", frame)
+	}
+	if !strings.Contains(harness.logs.String(), `"msg":"ws request"`) ||
+		!strings.Contains(harness.logs.String(), `"operation":"ws.runtime_subscribe"`) ||
+		!strings.Contains(harness.logs.String(), `"fault":"client"`) ||
+		!strings.Contains(harness.logs.String(), `"level":"INFO"`) ||
+		!strings.Contains(harness.logs.String(), `session_id is required`) {
+		t.Fatalf("records = %s, want runtime_subscribe client result", harness.logs.String())
+	}
+}
+
+func TestRuntimeUnsubscribeRequiresSessionID(t *testing.T) {
+	t.Parallel()
+
+	harness := newRuntimeWSHarness(t)
+	defer harness.subscriptions.close()
+
+	if !harness.unsubscribe("   ") {
+		t.Fatal("runtime_unsubscribe was not handled")
+	}
+	frame := harness.next(t)
+	if frame["type"] != "error" || frame["code"] != "http.bad_request" || frame["message"] != "The request is invalid." {
+		t.Fatalf("frame = %#v, want http.bad_request with catalog detail", frame)
+	}
+	if !strings.Contains(harness.logs.String(), `"msg":"ws request"`) ||
+		!strings.Contains(harness.logs.String(), `"operation":"ws.runtime_unsubscribe"`) ||
+		!strings.Contains(harness.logs.String(), `"fault":"client"`) ||
+		!strings.Contains(harness.logs.String(), `"level":"INFO"`) ||
+		!strings.Contains(harness.logs.String(), `session_id is required`) {
+		t.Fatalf("records = %s, want runtime_unsubscribe client result", harness.logs.String())
 	}
 }
 

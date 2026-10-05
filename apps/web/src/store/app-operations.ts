@@ -15,7 +15,7 @@ import {
   type AppUpdateSelection,
 } from '@/composables/api/useAppStream'
 import { onAuthSessionCleared } from '@/lib/auth-session'
-import { apiErrorStatus, resolveApiErrorMessage } from '@/utils/api-error'
+import { isApiErrorAnswered, resolveApiErrorMessage } from '@/utils/api-error'
 import type { DependencyLogLine, DependencyProgressStatus } from '@/utils/workspace-dependency'
 
 // Streamed App operations that outlive the dialog that started them,
@@ -350,7 +350,7 @@ export const useAppOperationsStore = defineStore('app-operations', () => {
     } catch (error) {
       if (signal.aborted) return
       if (operation.status !== 'running') return
-      if (apiErrorStatus(error)) {
+      if (isApiErrorAnswered(error)) {
         operation.status = 'error'
         operation.error = resolveApiErrorMessage(error, t('apps.progress.failedTitle'))
       } else if (!(await reconcile(operation, signal))) {

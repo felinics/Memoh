@@ -48,7 +48,6 @@ func TestFeishuGateway_Integration(t *testing.T) {
 	handler := func(ctx context.Context, c channel.ChannelConfig, msg channel.InboundMessage) error {
 		plainText := msg.Message.PlainText()
 		logger.Info("received message in test",
-			slog.String("text", plainText),
 			slog.String("user_id", msg.Sender.Attribute("user_id")),
 			slog.String("route_key", msg.RoutingKey()))
 
@@ -109,8 +108,8 @@ func TestFeishuGateway_Integration(t *testing.T) {
 	fmt.Println("==================================================================")
 
 	select {
-	case msg := <-receivedChan:
-		logger.Info("integration test passed", slog.String("received_text", msg.Message.PlainText()))
+	case <-receivedChan:
+		logger.Info("integration test passed")
 		time.Sleep(2 * time.Second)
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {

@@ -948,34 +948,71 @@ func TestConvertMessagesToUITurnsTruncatesReplyPreview(t *testing.T) {
 	}
 }
 
-func TestConvertMessagesToUITurnsProjectsTimeoutFailure(t *testing.T) {
-	now := time.Now().UTC()
-	turns := convertTestMessagesToUITurns([]messagepkg.Message{{
-		ID:        "user-1",
-		TurnID:    "turn-1",
-		BotID:     "bot-1",
-		Role:      "user",
-		Content:   json.RawMessage(`{"role":"user","content":[{"type":"text","text":"hello"}]}`),
-		CreatedAt: now,
+func TestConvertMessagesToUITurnsProjectsHistoryErrorCode(t *testing.T) {
+	cases := []struct {
+		name     string
+		content  string
+		metadata map[string]any
+		want     []string
+	}{{
+		name:     "no content",
+		content:  `{"role":"assistant","content":[]}`,
+		metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "agent.response_timeout"},
+		want:     []string{"error agent.response_timeout"},
 	}, {
-		ID:      "assistant-1",
-		TurnID:  "turn-1",
-		BotID:   "bot-1",
-		Role:    "assistant",
-		Content: json.RawMessage(`{"role":"assistant","content":[]}`),
-		Metadata: map[string]any{
-			messagepkg.HistoryErrorCodeMetadataKey: "agent.response_timeout",
-		},
-		CreatedAt: now.Add(time.Second),
-	}})
-	if len(turns) != 2 {
-		t.Fatalf("expected user + timeout assistant, got %d", len(turns))
-	}
-	if turns[1].Role != "assistant" || len(turns[1].Messages) != 1 {
-		t.Fatalf("timeout assistant turn = %#v", turns[1])
-	}
-	if turns[1].Messages[0].Type != UIMessageError || turns[1].Messages[0].Code != "agent.response_timeout" {
-		t.Fatalf("timeout block = %#v", turns[1].Messages[0])
+		name:     "text",
+		content:  `{"role":"assistant","content":[{"type":"text","text":"partial"}]}`,
+		metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "agent.response_interrupted", "error": "stream reset"},
+		want:     []string{"text partial", "error agent.response_interrupted stream reset"},
+	}, {
+		name:     "tool call",
+		content:  `{"role":"assistant","content":[{"type":"text","text":"checking"},{"type":"tool-call","toolCallId":"exec-1","toolName":"exec","input":{}}]}`,
+		metadata: map[string]any{messagepkg.HistoryErrorCodeMetadataKey: "agent.tool_timeout"},
+		want:     []string{"text checking", "tool exec", "error agent.tool_timeout"},
+	}, {
+		name:    "no error code",
+		content: `{"role":"assistant","content":[{"type":"text","text":"done"}]}`,
+		want:    []string{"text done"},
+	}}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			turns := convertTestMessagesToUITurns([]messagepkg.Message{{
+				ID:        "user-1",
+				TurnID:    "turn-1",
+				BotID:     "bot-1",
+				Role:      "user",
+				Content:   json.RawMessage(`{"role":"user","content":[{"type":"text","text":"hello"}]}`),
+				CreatedAt: now,
+			}, {
+				ID:        "assistant-1",
+				TurnID:    "turn-1",
+				BotID:     "bot-1",
+				Role:      "assistant",
+				Content:   json.RawMessage(tc.content),
+				Metadata:  tc.metadata,
+				CreatedAt: now.Add(time.Second),
+			}})
+			if len(turns) != 2 || turns[1].Role != "assistant" {
+				t.Fatalf("expected user + assistant turn, got %#v", turns)
+			}
+			got := make([]string, 0, len(turns[1].Messages))
+			for _, message := range turns[1].Messages {
+				switch message.Type {
+				case UIMessageText:
+					got = append(got, "text "+message.Content)
+				case UIMessageTool:
+					got = append(got, "tool "+message.Name)
+				case UIMessageError:
+					got = append(got, strings.TrimSpace("error "+message.Code+" "+message.Content))
+				default:
+					got = append(got, string(message.Type))
+				}
+			}
+			if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("assistant blocks = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -480,12 +480,12 @@ type terminalNotifyingAdmitter struct {
 	terminal func(context.Context, sessionruntime.RunHandle)
 }
 
-func (a *terminalNotifyingAdmitter) FinishRunWithErrorCode(ctx context.Context, handle sessionruntime.RunHandle, status, message string) error {
-	if err := a.scriptedAdmitter.FinishRunWithErrorCode(ctx, handle, status, message); err != nil {
-		return err
+func (a *terminalNotifyingAdmitter) FinishRunWithErrorCode(ctx context.Context, handle sessionruntime.RunHandle, status, message string) (sessionruntime.TerminalRun, error) {
+	if _, err := a.scriptedAdmitter.FinishRunWithErrorCode(ctx, handle, status, message); err != nil {
+		return sessionruntime.TerminalRun{}, err
 	}
 	// Force the valid schedule in which the terminal observer runs before
 	// the handle closes and before the first starter has returned from drain.
 	a.terminal(ctx, handle)
-	return nil
+	return sessionruntime.TerminalRun{}, nil
 }

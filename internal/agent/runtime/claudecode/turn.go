@@ -22,6 +22,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -139,7 +140,7 @@ func (t *turnRunner) writeLine(line []byte) error {
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
 	_, err := t.proc.Write(append(line, '\n'))
-	return err
+	return errs.WrapDependency(err, "")
 }
 
 type controlResult struct {
@@ -192,7 +193,7 @@ func (t *turnRunner) processError(operation string) error {
 	protocolErr := t.protocolErr
 	t.mu.Unlock()
 	return errors.Join(
-		fmt.Errorf("claude %s: stream ended; stderr: %s", operation, t.proc.StderrTail()),
+		errs.NewDependency(fmt.Sprintf("claude %s: stream ended; stderr: %s", operation, t.proc.StderrTail())),
 		t.proc.Err(), protocolErr,
 	)
 }
@@ -204,7 +205,7 @@ func (t *turnRunner) getSettings(ctx context.Context) (settingsResponse, error) 
 	}
 	var settings settingsResponse
 	err = json.Unmarshal(raw, &settings)
-	return settings, err
+	return settings, errs.WrapDependency(err, "")
 }
 
 // readLoop consumes the CLI's NDJSON stream until the process exits.
@@ -226,7 +227,7 @@ func (t *turnRunner) readLoop() {
 		t.handleMessage(msg)
 	}
 	if err := scanner.Err(); err != nil {
-		t.observeExit(err)
+		t.observeExit(errs.WrapDependency(err, ""))
 	}
 	t.finish()
 }
@@ -477,7 +478,7 @@ func (t *turnRunner) handleMessage(msg *inboundMessage) {
 		if ch != nil {
 			result := controlResult{response: envelope.Response}
 			if envelope.Subtype != "success" {
-				result.err = &controlRejection{diagnostic: fmt.Sprintf("claude control %s: %s", envelope.Subtype, envelope.Error)}
+				result.err = errs.WrapDependency(&controlRejection{diagnostic: fmt.Sprintf("claude control %s: %s", envelope.Subtype, envelope.Error)}, "")
 			}
 			ch <- result
 		}
@@ -780,16 +781,16 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 		return out, t.protocolErr
 	case len(t.steers) > 0 && !t.ending:
 		out.StopReason = "process_exit"
-		return out, errors.New("claude exited with unsettled queued input")
+		return out, errs.NewDependency("claude exited with unsettled queued input")
 	case t.input.Command == "compact" && (!t.compactBoundary || t.compactFailed):
 		out.StopReason = "compaction_failed"
-		return out, errors.New("claude did not complete manual compaction")
+		return out, errs.NewDependency("claude did not complete manual compaction")
 	case t.result == nil:
 		out.StopReason = "process_exit"
 		if t.exitErr != nil {
 			return out, fmt.Errorf("claude CLI exited without a result: %w: %s", t.exitErr, t.proc.StderrTail())
 		}
-		return out, fmt.Errorf("claude CLI exited without a result: %s", t.proc.StderrTail())
+		return out, errs.NewDependency(fmt.Sprintf("claude CLI exited without a result: %s", t.proc.StderrTail()))
 	case t.result.IsError:
 		out.StopReason = t.result.Subtype
 		message := strings.TrimSpace(t.result.Result)
@@ -799,7 +800,7 @@ func (t *turnRunner) buildResult(storedSessionID string) (external.PromptResult,
 		if message == "" {
 			message = "claude turn failed (" + t.result.Subtype + ")"
 		}
-		return out, fmt.Errorf("%s", message)
+		return out, errs.NewDependency(message)
 	default:
 		out.StopReason = t.result.Subtype
 		out.TurnCompleted = true

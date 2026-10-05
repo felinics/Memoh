@@ -47,7 +47,7 @@ func (s *Service) runNativeDecisionContinuation(ctx context.Context, req ChatReq
 	var hasVisibleOutput bool
 	for event := range stream {
 		idleCancel.Observe(event)
-		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
+		if eventErr := agentStreamFailure(event); eventErr != nil && lifecycleCause == nil {
 			lifecycleCause = eventErr
 			// The public event forwarded downstream carries only a stable code;
 			// keep the runtime's private detail in the server log so a failed

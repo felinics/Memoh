@@ -7,6 +7,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/claudecode/claudecfg"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var (
@@ -84,7 +85,7 @@ func (t *turnRunner) reloadSkillNames(ctx context.Context) ([]string, error) {
 		Skills []initializeCommand `json:"skills"`
 	}
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, err
+		return nil, errs.WrapDependency(err, "")
 	}
 	names := make([]string, 0, len(response.Skills))
 	for _, skill := range response.Skills {

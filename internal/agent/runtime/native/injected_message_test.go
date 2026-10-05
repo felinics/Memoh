@@ -174,7 +174,7 @@ func TestAgentStreamRetryRevokesInjectedMessageRecord(t *testing.T) {
 			if !providerAttemptContainsText(params.Messages, marker) {
 				t.Fatal("failed provider attempt did not receive admitted injection")
 			}
-			return sdk.ModelResult{}, errors.New("api error 500")
+			return sdk.ModelResult{}, serverErr()
 		default:
 			if providerAttemptContainsText(params.Messages, marker) {
 				t.Fatal("retry provider attempt retained revoked injection")

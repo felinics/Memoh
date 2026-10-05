@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@memohai/icon': workspace:*
+
 patchedDependencies:
   dockview-core@7.0.2:
     hash: 8195455b5e4bc151ac7c9ca7beae0706d3f9bc46cddcceb43d4ece5ca47f6f61
@@ -402,6 +405,9 @@ importers:
       '@internationalized/date':
         specifier: ^3.12.2
         version: 3.12.2
+      '@memohai/icon':
+        specifier: workspace:*
+        version: link:../icons
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.1.5(@types/node@25.9.5)(esbuild@0.27.2)(jiti@2.7.0)(tsx@4.21.0)(yaml@2.9.0))

@@ -61,7 +61,6 @@ vi.mock('@pinia/colada', async () => {
 vi.mock('@memohai/sdk', () => ({
   getBotsNameAvailability: (...args: unknown[]) => mocks.getBotsNameAvailability(...args),
   getAcpProfiles: vi.fn(async () => ({ data: { items: mocks.acpProfiles } })),
-  getMemoryProviders: vi.fn(async () => ({ data: [] })),
   getModels: vi.fn(async () => ({ data: [] })),
   getProviders: vi.fn(async () => ({ data: [] })),
 }))
@@ -124,6 +123,7 @@ vi.mock('@felinic/ui', async () => {
     SettingsRow: SlottedRow,
     SettingsSection: Passthrough,
     Spinner: Passthrough,
+    Switch: Passthrough,
     Tabs: Passthrough,
     TabsList: Passthrough,
     TabsTrigger: Passthrough,
@@ -148,7 +148,6 @@ vi.mock('lucide-vue-next', async () => {
 vi.mock('@/components/timezone-select/index.vue', () => ({ default: (_props: Record<string, unknown>) => h('select') }))
 vi.mock('./components/avatar-edit-dialog.vue', () => ({ default: () => h('div') }))
 vi.mock('./components/bot-import-panel.vue', () => ({ default: () => h('div') }))
-vi.mock('./components/memory-provider-select.vue', () => ({ default: () => h('select') }))
 // The members list owns its own queries and a dozen @felinic/ui imports; this
 // test is about the submit hand-off, so it stands in as an inert child.
 vi.mock('./components/bot-user-access.vue', () => ({ default: () => h('div') }))

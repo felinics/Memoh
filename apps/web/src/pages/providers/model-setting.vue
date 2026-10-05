@@ -1,8 +1,10 @@
 <template>
   <SettingsShell width="narrow">
     <div class="space-y-4 sm:space-y-6">
-      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
-        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+      <ProviderIdentityCard
+        :name="curProvider?.name"
+      >
+        <template #media>
           <ProviderIcon
             v-if="curProvider?.icon"
             :icon="curProvider.icon"
@@ -14,13 +16,8 @@
           >
             {{ avatarInitials(curProvider?.name, '?') }}
           </span>
-        </span>
-        <div class="min-w-0 flex-1">
-          <h4 class="scroll-m-20 tracking-tight truncate">
-            {{ curProvider?.name }}
-          </h4>
-        </div>
-        <div class="ml-auto flex items-center gap-2">
+        </template>
+        <template #actions>
           <ConfirmPopover
             v-if="curProvider?.id"
             :message="$t('provider.deleteConfirm')"
@@ -47,10 +44,11 @@
             :aria-label="$t('provider.enable')"
             @update:model-value="handleToggleEnable"
           />
-        </div>
-      </section>
+        </template>
+      </ProviderIdentityCard>
 
       <ProviderForm
+        ref="providerForm"
         :provider="curProvider"
         :edit-loading="editLoading"
         :ensure-provider="ensureOAuthProvider"
@@ -62,7 +60,7 @@
         :models="providerModels"
         :managed="isManagedModelCatalogClientType(curProvider?.client_type)"
         :client-type="curProvider?.client_type"
-        :preview="!curProvider?.id"
+        :ensure-provider-id="curProvider?.id ? undefined : ensureProviderId"
         :delete-model-loading="deleteModelLoading"
         @edit="handleEditModel"
         @delete="deleteModel"
@@ -72,6 +70,7 @@
 </template>
 
 <script setup lang="ts">
+import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
 import { Button, ConfirmPopover, SettingsShell, Switch } from '@felinic/ui'
 import { Trash2 } from 'lucide-vue-next'
 import ProviderIcon from '@/components/provider-icon/index.vue'
@@ -79,7 +78,7 @@ import { avatarInitials } from '@/composables/useAvatarInitials'
 
 import ProviderForm from './components/provider-form.vue'
 import ModelList from './components/model-list.vue'
-import { computed, provide, reactive, ref, toRef, watch } from 'vue'
+import { computed, provide, reactive, ref, toRef, useTemplateRef, watch } from 'vue'
 import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
 import {
   deleteModelsById,
@@ -93,7 +92,6 @@ import type { ModelsGetResponse, ProvidersGetResponse, ProvidersUpdateRequest } 
 import { useI18n } from 'vue-i18n'
 import { toast } from '@felinic/ui'
 import { isManagedModelCatalogClientType } from '@/constants/client-types'
-import { useProviderTemplateModels } from '@/composables/useProviderTemplateModels'
 
 // ---- Model 编辑状态（provide 给 CreateModel） ----
 const openModel = reactive<{
@@ -122,10 +120,6 @@ const emit = defineEmits<{
   materialized: [provider: ProvidersGetResponse]
 }>()
 const curProviderId = computed(() => curProvider.value?.id)
-const curProviderTemplateId = computed(() => curProviderId.value
-  ? undefined
-  : curProvider.value?.provider_template_id)
-const { models: templateModels } = useProviderTemplateModels(curProviderTemplateId)
 const enableLoading = ref(false)
 const { t } = useI18n()
 
@@ -148,7 +142,10 @@ const { mutate: deleteProvider, isLoading: deleteLoading } = useMutation({
     if (!curProviderId.value) return
     await deleteProvidersById({ path: { id: curProviderId.value }, throwOnError: true })
   },
-  onSettled: invalidateProviderQueries,
+  onSettled: () => {
+    invalidateProviderQueries()
+    queryCache.invalidateQueries({ key: ['provider-templates', 'llm'] })
+  },
 })
 
 // mutateAsync (not mutate) because the form's autosave queue must await each
@@ -244,6 +241,29 @@ async function ensureOAuthProvider(): Promise<ProvidersGetResponse> {
   }, provider.enable !== false, false)
 }
 
+const providerForm = useTemplateRef('providerForm')
+
+// Adding a model to a template draft creates the provider first, from the
+// form's current (possibly unsaved) values. Models are not imported here:
+// without an API key the endpoint cannot be listed.
+async function ensureProviderId(): Promise<string> {
+  const provider = curProvider.value
+  if (!provider) throw new Error('provider is missing')
+  if (provider.id) return provider.id
+
+  const created = await materializeProvider(
+    providerForm.value?.draftPayload() ?? {
+      name: provider.name,
+      config: provider.config ?? {},
+      metadata: provider.metadata ?? {},
+    },
+    provider.enable !== false,
+    false,
+  )
+  if (!created.id) throw new Error('provider creation returned no id')
+  return created.id
+}
+
 async function handleToggleEnable(value: boolean) {
   if (!curProvider.value) return
 
@@ -253,16 +273,12 @@ async function handleToggleEnable(value: boolean) {
     enable: value,
   }
 
+  // 草稿的启用状态与表单字段同属一次手动保存，不能在这里提前物化；
+  // 否则会使用父组件快照创建 provider，覆盖表单里尚未保存的 key/URL。
+  if (!curProviderId.value) return
+
   enableLoading.value = true
   try {
-    if (!curProviderId.value) {
-      await materializeProvider({
-        name: curProvider.value.name,
-        config: curProvider.value.config ?? {},
-        metadata: curProvider.value.metadata ?? {},
-      }, value)
-      return
-    }
     await putProvidersById({
       path: { id: curProviderId.value },
       body: { enable: value },
@@ -301,16 +317,10 @@ const { data: modelDataList } = useQuery({
   enabled: () => !!curProviderId.value,
 })
 
-const providerModels = computed<ModelsGetResponse[]>(() => {
-  if (curProviderId.value) return modelDataList.value ?? []
-  return templateModels.value.map(model => ({
-    model_id: model.model_id,
-    name: model.name,
-    type: model.type as ModelsGetResponse['type'],
-    config: model.config as ModelsGetResponse['config'],
-    enable: true,
-  }))
-})
+// A template draft has no models of its own. The template catalog only
+// enriches imported models, so listing it here would show models that vanish
+// as soon as the provider is created.
+const providerModels = computed<ModelsGetResponse[]>(() => modelDataList.value ?? [])
 
 watch(curProvider, () => {
   queryCache.invalidateQueries({ key: ['provider-models'] })

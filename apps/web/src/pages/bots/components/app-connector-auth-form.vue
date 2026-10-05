@@ -75,13 +75,12 @@
         </FormField>
       </FormStack>
     </form>
-    <Alert
+    <CalloutBanner
       v-if="errorMessage"
-      variant="destructive"
-    >
-      <AlertTitle>{{ t('connectors.connectFailed') }}</AlertTitle>
-      <AlertDescription>{{ errorMessage }}</AlertDescription>
-    </Alert>
+      tone="destructive"
+      :title="t('connectors.connectFailed')"
+      :description="errorMessage"
+    />
   </div>
 </template>
 
@@ -93,9 +92,7 @@ import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import z from 'zod'
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
+  CalloutBanner,
   FieldStack,
   FormControl,
   FormField,

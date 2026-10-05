@@ -130,11 +130,6 @@ export interface CommandActionResult {
   items?: CommandActionListItem[]
 }
 
-export interface CommandActionError {
-  code: string
-  message: string
-}
-
 export interface CommandEventResponse {
   type: 'command_result' | 'command_error'
   invocation_id?: string
@@ -143,7 +138,9 @@ export interface CommandEventResponse {
   action_id?: string
   terminal: boolean
   result?: CommandActionResult
-  error?: CommandActionError
+  // A command_error's catalog or slash-command code, and the server's text.
+  code?: string
+  message?: string
 }
 
 export interface UIAttachment {
@@ -432,7 +429,7 @@ export interface UIStreamErrorEvent {
   session_id?: string
   code?: string
   message: string
-  feedback?: unknown
+  args?: Record<string, string>
 }
 
 export interface UIStreamSessionCreatedEvent {
@@ -490,8 +487,9 @@ export interface RuntimeCurrentRunView {
   // boundary. Claimed entries are provisional; applied entries reference the
   // settled history turn that replaces them.
   steer_turns?: RuntimeSteerTurnView[]
+  // The catalog code of the run's failure. The run view carries no error text;
+  // the client shows the copy for the code.
   error_code?: string
-  error?: string
   proposed_terminal_status?: RuntimeRunStatus
   finish_proposed_at?: string
   operation?: RuntimeRunOperation
@@ -523,7 +521,6 @@ export interface RuntimeCurrentRunPatch {
   run_id: string
   status?: RuntimeRunStatus
   error_code?: string
-  error?: string
   updated_at?: string
   owner_lease_expires_at?: string
 }

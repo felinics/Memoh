@@ -10,10 +10,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type Service struct {
@@ -400,7 +400,7 @@ func (*Service) ListMeta(_ context.Context) []ProviderMeta {
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, error) {
 	if !isValidProviderName(req.Provider) {
-		return GetResponse{}, fmt.Errorf("invalid provider: %s", req.Provider)
+		return GetResponse{}, fmt.Errorf("%w: %s", ErrInvalidProvider, req.Provider)
 	}
 	configJSON, err := json.Marshal(req.Config)
 	if err != nil {
@@ -425,7 +425,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 	}
 	row, err := s.queries.GetSearchProviderByID(ctx, pgID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get search provider: %w", err)
+		return GetResponse{}, errs.Wrap(err, "get search provider")
 	}
 	return s.toGetResponse(row), nil
 }
@@ -435,7 +435,8 @@ func (s *Service) GetRawByID(ctx context.Context, id string) (sqlc.SearchProvide
 	if err != nil {
 		return sqlc.SearchProvider{}, err
 	}
-	return s.queries.GetSearchProviderByID(ctx, pgID)
+	row, err := s.queries.GetSearchProviderByID(ctx, pgID)
+	return row, errs.Wrap(err, "")
 }
 
 func (s *Service) List(ctx context.Context, provider string) ([]GetResponse, error) {
@@ -450,7 +451,7 @@ func (s *Service) List(ctx context.Context, provider string) ([]GetResponse, err
 		rows, err = s.queries.ListSearchProvidersByProvider(ctx, provider)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list search providers: %w", err)
+		return nil, errs.Wrap(err, "list search providers")
 	}
 	items := make([]GetResponse, 0, len(rows))
 	for _, row := range rows {
@@ -466,7 +467,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	}
 	current, err := s.queries.GetSearchProviderByID(ctx, pgID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get search provider: %w", err)
+		return GetResponse{}, errs.Wrap(err, "get search provider")
 	}
 	name := current.Name
 	if req.Name != nil {
@@ -475,7 +476,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	provider := current.Provider
 	if req.Provider != nil {
 		if !isValidProviderName(*req.Provider) {
-			return GetResponse{}, fmt.Errorf("invalid provider: %s", *req.Provider)
+			return GetResponse{}, fmt.Errorf("%w: %s", ErrInvalidProvider, *req.Provider)
 		}
 		provider = string(*req.Provider)
 	}
@@ -504,15 +505,17 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 	return s.toGetResponse(updated), nil
 }
 
+// mapSearchProviderWriteError names the unique constraint a write violated:
+// ErrTypeConflict for the provider type, ErrNameTaken for the name.
 func mapSearchProviderWriteError(err error, operation string) error {
 	if !db.IsUniqueViolation(err) {
-		return fmt.Errorf("%s: %w", operation, err)
+		return errs.WrapWithDepth(1, err, operation)
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && strings.HasSuffix(pgErr.ConstraintName, "provider_unique") {
-		return apperror.Wrap(apperror.CodeSearchProviderTypeConflict, err, nil)
+		return fmt.Errorf("%s: %w: %w", operation, ErrTypeConflict, err)
 	}
-	return apperror.Wrap(apperror.CodeProviderNameTaken, err, nil)
+	return fmt.Errorf("%s: %w: %w", operation, ErrNameTaken, err)
 }
 
 func (s *Service) Delete(ctx context.Context, id string) error {
@@ -520,7 +523,8 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return s.queries.DeleteSearchProvider(ctx, pgID)
+	err = s.queries.DeleteSearchProvider(ctx, pgID)
+	return errs.Wrap(err, "")
 }
 
 func (s *Service) toGetResponse(row sqlc.SearchProvider) GetResponse {
@@ -562,7 +566,7 @@ var defaultProviders = []struct {
 func (s *Service) EnsureDefaults(ctx context.Context) error {
 	rows, err := s.queries.ListSearchProviders(ctx)
 	if err != nil {
-		return fmt.Errorf("list search providers: %w", err)
+		return errs.Wrap(err, "list search providers")
 	}
 
 	existing := make(map[string]struct{}, len(rows))

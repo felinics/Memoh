@@ -1,10 +1,12 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -32,6 +34,24 @@ func newStubTelegramBot(t *testing.T) *tele.Bot {
 		t.Fatalf("create stub telegram bot: %v", err)
 	}
 	return bot
+}
+
+func TestTelegramInboundLogDoesNotIncludeMessageText(t *testing.T) {
+	const messageText = "private telegram message 82f0c"
+	var logs bytes.Buffer
+	adapter := NewTelegramAdapter(slog.New(slog.NewJSONHandler(&logs, nil)))
+	msg := channel.InboundMessage{
+		Message:      channel.Message{Text: messageText},
+		Conversation: channel.Conversation{ID: "chat-1", Type: channel.ConversationTypePrivate},
+		Sender:       channel.Identity{Attributes: map[string]string{"user_id": "user-1"}},
+	}
+	adapter.logTelegramInbound(context.Background(), "config-1", msg)
+	if !strings.Contains(logs.String(), `"msg":"inbound received"`) || !strings.Contains(logs.String(), `"chat_id":"chat-1"`) {
+		t.Fatal("inbound event or chat ID missing")
+	}
+	if strings.Contains(logs.String(), messageText) || strings.Contains(logs.String(), `"text":`) {
+		t.Fatal("telegram inbound log exposed message text")
+	}
 }
 
 func TestResolveTelegramSender(t *testing.T) {

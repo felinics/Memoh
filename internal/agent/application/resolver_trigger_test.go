@@ -27,8 +27,8 @@ func (*triggerCaptureProvider) Name() string { return "trigger-capture" }
 
 func (*triggerCaptureProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
 
-func (*triggerCaptureProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*triggerCaptureProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*triggerCaptureProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {

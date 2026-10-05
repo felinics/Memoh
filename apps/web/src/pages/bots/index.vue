@@ -46,15 +46,15 @@
         v-if="isLoading"
         class="flex flex-wrap justify-center gap-4"
       >
-        <div
+        <SurfaceCard
           v-for="i in 2"
           :key="i"
-          class="flex w-52 flex-col items-center rounded-[var(--radius-menu-shell)] border border-border bg-card p-5"
+          class="flex w-52 flex-col items-center"
         >
           <Skeleton class="size-14 rounded-full" />
           <Skeleton class="mt-3 h-4 w-24" />
           <Skeleton class="mt-1.5 h-3 w-16" />
-        </div>
+        </SurfaceCard>
       </div>
 
       <!-- Bot tiles + the create tile (its companion, so a single bot is never a
@@ -100,6 +100,7 @@ import {
   Button,
   Input,
   Skeleton,
+  SurfaceCard,
 } from '@felinic/ui'
 import { Search, Plus, Upload } from 'lucide-vue-next'
 import { ref, computed, watch, onUnmounted } from 'vue'

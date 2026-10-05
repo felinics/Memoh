@@ -3,17 +3,19 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -68,7 +70,7 @@ func (h *ProvidersHandler) CreateFromTemplate(c echo.Context) error {
 	}
 	resp, err := h.service.CreateFromTemplate(c.Request().Context(), req)
 	if err != nil {
-		return err
+		return providerTemplateError(err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -81,8 +83,8 @@ func (h *ProvidersHandler) CreateFromTemplate(c echo.Context) error {
 // @Produce json
 // @Param request body providers.CreateRequest true "Provider configuration"
 // @Success 201 {object} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers [post].
 func (h *ProvidersHandler) Create(c echo.Context) error {
 	var req providers.CreateRequest
@@ -97,6 +99,9 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
+		if translated := providerError(err); apperror.CodeOf(translated) != "" {
+			return translated
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -110,7 +115,7 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Success 200 {array} providers.GetResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /providers [get].
 func (h *ProvidersHandler) List(c echo.Context) error {
 	resp, err := h.service.List(c.Request().Context())
@@ -129,9 +134,9 @@ func (h *ProvidersHandler) List(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id} [get].
 func (h *ProvidersHandler) Get(c echo.Context) error {
 	id := c.Param("id")
@@ -154,9 +159,9 @@ func (h *ProvidersHandler) Get(c echo.Context) error {
 // @Param id path string true "Provider ID (UUID)"
 // @Param type query string false "Model type (chat, embedding)"
 // @Success 200 {array} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id}/models [get].
 func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 	if h.modelsService == nil {
@@ -177,7 +182,7 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 		resp, err = h.modelsService.ListByProviderIDAndType(c.Request().Context(), id, models.ModelType(modelType))
 	}
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid") {
+		if errors.Is(err, db.ErrInvalidUUID) || errors.Is(err, models.ErrInvalidModelType) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -197,9 +202,9 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 // @Produce json
 // @Param name path string true "Provider name"
 // @Success 200 {object} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/name/{name} [get].
 func (h *ProvidersHandler) GetByName(c echo.Context) error {
 	name := c.Param("name")
@@ -224,9 +229,9 @@ func (h *ProvidersHandler) GetByName(c echo.Context) error {
 // @Param id path string true "Provider ID (UUID)"
 // @Param request body providers.UpdateRequest true "Updated provider configuration"
 // @Success 200 {object} providers.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id} [put].
 func (h *ProvidersHandler) Update(c echo.Context) error {
 	id := c.Param("id")
@@ -241,6 +246,9 @@ func (h *ProvidersHandler) Update(c echo.Context) error {
 
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
+		if translated := providerError(err); apperror.CodeOf(translated) != "" {
+			return translated
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -255,9 +263,9 @@ func (h *ProvidersHandler) Update(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id} [delete].
 func (h *ProvidersHandler) Delete(c echo.Context) error {
 	id := c.Param("id")
@@ -279,7 +287,7 @@ func (h *ProvidersHandler) Delete(c echo.Context) error {
 // @Accept json
 // @Produce json
 // @Success 200 {object} providers.CountResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/count [get].
 func (h *ProvidersHandler) Count(c echo.Context) error {
 	count, err := h.service.Count(c.Request().Context())
@@ -298,9 +306,9 @@ func (h *ProvidersHandler) Count(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.TestResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id}/test [post].
 func (h *ProvidersHandler) Test(c echo.Context) error {
 	id := c.Param("id")
@@ -315,10 +323,23 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid") {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, db.ErrInvalidUUID) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid provider id").WithInternal(err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to test provider").WithInternal(err)
+	}
+	if resp.Cause != nil {
+		// The response carries only the code; this event is where the cause
+		// is kept.
+		failure := probeError(resp.Cause, resp.Status == providers.TestStatusAuthError)
+		result := errlog.Event(ctx, "provider.test", failure, errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "provider test failed", append([]slog.Attr{
+			slog.String("provider_id", id), slog.String("status", string(resp.Status)),
+		}, result.Attrs()...)...)
+		resp.Code = string(apperror.CodeOf(failure))
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -333,9 +354,9 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 // @Param id path string true "Provider ID (UUID)"
 // @Param request body providers.ImportModelsRequest false "Explicit defaults for unknown custom chat models"
 // @Success 200 {object} providers.ImportModelsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /providers/{id}/import-models [post].
 func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	id := c.Param("id")
@@ -357,7 +378,13 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 
 	provider, err := h.service.Get(ctx, id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, fmt.Sprintf("provider not found: %v", err))
+		if errors.Is(err, db.ErrInvalidUUID) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid provider id").WithInternal(err)
+		}
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get provider").WithInternal(err)
 	}
 	if !models.IsLLMClientType(models.ClientType(provider.ClientType)) {
 		return echo.NewHTTPError(http.StatusBadRequest, "import models is not supported for speech providers")
@@ -365,7 +392,16 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("fetch remote models: %v", err))
+		if errors.Is(err, db.ErrInvalidUUID) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid provider id").WithInternal(err)
+		}
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
+		}
+		if translated := probeError(err, false); apperror.CodeOf(translated) != "" {
+			return translated
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch provider models").WithInternal(err)
 	}
 
 	resp := providers.ImportModelsResponse{
@@ -402,7 +438,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 			m,
 			modelType,
 			req.DefaultCompatibilities,
-			provider.ProviderTemplateID == "",
+			allowCustomModelCapabilityDefaults(provider),
 		)
 		_, err := h.modelsService.Create(ctx, models.AddRequest{
 			ModelID:    m.ID,
@@ -435,6 +471,27 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+func allowCustomModelCapabilityDefaults(provider providers.GetResponse) bool {
+	if strings.TrimSpace(provider.ProviderTemplateID) != "" {
+		return false
+	}
+	// Providers created from an older preset/registry flow may not have a
+	// provider_template_id, but their metadata still says that a template is
+	// authoritative. An endpoint-only model from such a provider must not
+	// receive protocol-wide capability guesses.
+	for _, section := range []string{"preset", "registry"} {
+		metadata, ok := provider.Metadata[section].(map[string]any)
+		if !ok {
+			continue
+		}
+		source, _ := metadata["source"].(string)
+		if strings.TrimSpace(source) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func importedCompatibilities(remote providers.RemoteModel, modelType models.ModelType, defaults []string, allowCustomDefaults bool) []string {

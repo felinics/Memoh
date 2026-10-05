@@ -11,6 +11,7 @@ export {}
 
 declare module '@memohai/web/router-guards/onboarding' {
   export function ensureOnboarding(): Promise<boolean>
+  export function hasOnboardingInProgress(): boolean
 }
 
 declare module '@memohai/web/routes' {
@@ -288,6 +289,7 @@ declare module '@memohai/web/lib/desktop-shell' {
   export interface DesktopRuntimeBridge {
     runtimeState(): Promise<DesktopRuntimeState>
     configureRuntime(config: { runtimeId: string, name: string, key: string, teamId?: string } | null): Promise<DesktopRuntimeState>
+    setRuntimePaused(paused: boolean): Promise<DesktopRuntimeState>
     onRuntimeStateChanged(listener: (state: DesktopRuntimeState) => void): () => void
   }
   export const DesktopRuntimeKey: InjectionKey<DesktopRuntimeBridge | undefined>

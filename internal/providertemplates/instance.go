@@ -9,30 +9,29 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
+// Resolve reads the template with the given ID. An ID that does not parse
+// or names no template is ErrNotFound; a template outside expectedDomain,
+// when one is given, is ErrDomainMismatch.
 func Resolve(ctx context.Context, queries dbstore.Queries, id string, expectedDomain Domain) (sqlc.TemplateProviderTemplate, error) {
 	pgID, err := db.ParseUUID(strings.TrimSpace(id))
 	if err != nil {
-		return sqlc.TemplateProviderTemplate{}, apperror.Wrap(apperror.CodeProviderTemplateNotFound, err, nil)
+		return sqlc.TemplateProviderTemplate{}, fmt.Errorf("%w: %w", ErrNotFound, err)
 	}
 	row, err := queries.GetProviderTemplateByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
-			return sqlc.TemplateProviderTemplate{}, apperror.New(apperror.CodeProviderTemplateNotFound, nil)
+			return sqlc.TemplateProviderTemplate{}, ErrNotFound
 		}
-		return sqlc.TemplateProviderTemplate{}, apperror.Wrap(
-			apperror.CodeProviderTemplateOperationFailed,
-			fmt.Errorf("get provider template: %w", err),
-			nil,
-		)
+		return sqlc.TemplateProviderTemplate{}, errs.Wrap(err, "get provider template")
 	}
 	if expectedDomain != "" && row.Domain != string(expectedDomain) {
-		return sqlc.TemplateProviderTemplate{}, apperror.New(apperror.CodeProviderTemplateDomainMismatch, nil)
+		return sqlc.TemplateProviderTemplate{}, ErrDomainMismatch
 	}
 	return row, nil
 }

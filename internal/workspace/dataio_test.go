@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/felinics/memoh/internal/config"
+	ctr "github.com/felinics/memoh/internal/container"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 	"github.com/felinics/memoh/internal/workspace/bridgesvc"
@@ -70,6 +73,49 @@ func TestImportDataViaGRPCPreservesWorkspaceData(t *testing.T) {
 	assertWorkspaceDataOnDisk(t, root)
 	assertPathContent(t, root, ".codex/auth/stale-target.json", `{"refresh_token":"old"}`)
 	assertPathContent(t, root, ".claude/projects/stale/session.jsonl", `{"message":"old"}`)
+}
+
+func TestImportDataViaGRPCReportsUnreachableBridgeAsNotReady(t *testing.T) {
+	listener := bufconn.Listen(1024)
+	_ = listener.Close()
+	conn, err := grpc.NewClient("passthrough:///workspace-dataio-test",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return listener.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	manager := &Manager{service: &dataIOBridgeProvider{client: bridge.NewClientFromConn(conn)}}
+	raw := buildWorkspaceArchive(t, workspaceArchiveFixture())
+
+	err = manager.importDataViaGRPC(context.Background(), "bot-1", bytes.NewReader(raw))
+	if !IsNotReady(err) {
+		t.Fatalf("importDataViaGRPC error = %v, want IsNotReady", err)
+	}
+}
+
+func TestIsNotReady(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "no workspace for the bot", err: fmt.Errorf("resolve: %w", ErrContainerNotFound), want: true},
+		{name: "container missing in the runtime", err: fmt.Errorf("get workspace runtime: %w", errors.Join(ctr.ErrNotFound, errors.New("No such container: workspace-1"))), want: true},
+		{name: "bridge not answering", err: fmt.Errorf("write /data/a: %w", bridge.ErrUnavailable), want: true},
+		{name: "path missing in a running workspace", err: fmt.Errorf("write /data/a: %w", bridge.ErrNotFound)},
+		{name: "runtime failure", err: errors.Join(ctr.ErrRuntime, errors.New("engine failure"))},
+		{name: "canceled", err: context.Canceled},
+		{name: "nil"},
+	}
+	for _, tc := range cases {
+		if got := IsNotReady(tc.err); got != tc.want {
+			t.Errorf("%s: IsNotReady(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
+	}
 }
 
 func TestUntarGzDirPreservesWorkspaceData(t *testing.T) {

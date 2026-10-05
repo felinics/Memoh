@@ -115,6 +115,31 @@ describe('ModelOptions', () => {
     return root
   }
 
+  it('hides the reasoning footer for supported but uncontrollable models', async () => {
+    const el = await mountPicker({
+      models: [{ id: 'model-1', type: 'chat', reasoning: { supported: true } }],
+    })
+    expect(el.querySelector('[aria-label="chat.reasoningEffort"]')).toBeNull()
+    expect(el.textContent).not.toContain('chat.reasoningOff')
+  })
+
+  it('offers the catalog maximum and shows the default for an unset preference', async () => {
+    const updateReasoning = vi.fn()
+    const el = await mountPicker({
+      reasoningEffort: '',
+      models: [{ id: 'model-1', type: 'chat', reasoning: {
+        supported: true, can_disable: true, efforts: ['low', 'medium', 'high', 'xhigh', 'max'], default_effort: 'medium',
+      } }],
+      'onUpdate:reasoningEffort': updateReasoning,
+    })
+    expect(el.querySelector('[aria-label="chat.reasoningEffort"]')?.textContent).toContain('chat.reasoningMedium')
+    const max = Array.from(el.querySelectorAll('button')).find(button => button.textContent?.includes('chat.reasoningMax'))
+    expect(max).toBeDefined()
+    max!.click()
+    await nextTick()
+    expect(updateReasoning).toHaveBeenCalledWith('max')
+  })
+
   it('dismisses an open model description when the list scrolls', async () => {
     const el = await mountPicker()
     const tooltip = el.querySelector<HTMLElement>('[data-model-tooltip]')

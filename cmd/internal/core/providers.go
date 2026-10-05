@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
 	"golang.org/x/crypto/bcrypt"
@@ -65,6 +66,7 @@ import (
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/db"
 	pgvectordb "github.com/felinics/memoh/internal/db/pgvector"
+	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	displaypkg "github.com/felinics/memoh/internal/display"
@@ -77,8 +79,6 @@ import (
 	"github.com/felinics/memoh/internal/media"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	membuiltin "github.com/felinics/memoh/internal/memory/adapters/builtin"
-	memmem0 "github.com/felinics/memoh/internal/memory/adapters/mem0"
-	memopenviking "github.com/felinics/memoh/internal/memory/adapters/openviking"
 	"github.com/felinics/memoh/internal/memory/memllm"
 	storefs "github.com/felinics/memoh/internal/memory/storefs"
 	"github.com/felinics/memoh/internal/memory/wikistore"
@@ -93,6 +93,7 @@ import (
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/searchproviders"
 	"github.com/felinics/memoh/internal/settings"
+	storagepkg "github.com/felinics/memoh/internal/storage"
 	"github.com/felinics/memoh/internal/storage/providers/containerfs"
 	"github.com/felinics/memoh/internal/storage/providers/fallback"
 	"github.com/felinics/memoh/internal/storage/providers/localfs"
@@ -278,10 +279,12 @@ func provideSettingsService(
 	networkService *netctl.Service,
 	modelsService *models.Service,
 	botAgentsService *botagents.Service,
+	memoryProviderService *memprovider.Service,
 ) *settings.Service {
 	service := settings.NewService(log, queries, aclService, networkService)
 	service.SetReasoningOptionsResolver(modelsService)
 	service.SetBotAgents(botAgentsService)
+	service.SetBuiltinMemoryResolver(memoryProviderService)
 	return service
 }
 
@@ -427,12 +430,6 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, provid
 		p.ApplyProviderConfig(providerConfig)
 		return p, nil
 	})
-	registry.RegisterFactory(string(memprovider.ProviderMem0), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		return memmem0.NewMem0Provider(log, providerConfig, fileStore)
-	})
-	registry.RegisterFactory(string(memprovider.ProviderOpenViking), func(_ context.Context, _, _ string, providerConfig map[string]any) (memprovider.Provider, error) {
-		return memopenviking.NewOpenVikingProvider(log, providerConfig)
-	})
 	// Default provider for bots without an explicit memory_provider_id. Uses the
 	// graph runtime (PG nodes/edges as source of truth) when a wiki store is
 	// wired; falls back to the file runtime otherwise (e.g. bootstrap before the
@@ -567,6 +564,9 @@ func injectToolProviders(a *native.Agent, msgService *message.DBService, hookSer
 			// terminal-snapshot behavior on its own.
 			adapter.SetStepCommitFactory(agentService.SubagentStepCommit)
 			adapter.SetRunObserverFactory(agentService.SubagentRunObserver)
+			// The parent model reads a spawned run's failure by the code the
+			// run itself failed with.
+			adapter.SetFailureTranslator(agentService.SubagentFailure)
 			sp.SetAgent(adapter)
 			sp.SetMessageService(msgService)
 			sp.SetSystemPromptFunc(native.SpawnSystemPrompt)
@@ -1007,7 +1007,7 @@ func startWorkspaceDependencyMaintenance(lc fx.Lifecycle, log *slog.Logger, serv
 	})
 }
 
-func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, memoryProviderService *memprovider.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
+func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbstore.Queries, botService *bots.Service, settingsService *settings.Service, aclService *acl.Service, channelStore *channel.Store, mcpService *mcp.ConnectionService, scheduleService *schedule.Service, providerService *providers.Service, modelsService *models.Service, searchProviderService *searchproviders.Service, fetchProviderService *fetchproviders.Service, manager *workspace.Manager, acpPool *acpagent.SessionPool, workdirStore dbstore.BotWorkdirStore) *botbackup.Service {
 	return botbackup.New(botbackup.Params{
 		Logger:          log,
 		DB:              conn,
@@ -1022,7 +1022,6 @@ func provideBotBackupService(log *slog.Logger, conn *pgxpool.Pool, queries dbsto
 		Models:          modelsService,
 		SearchProviders: searchProviderService,
 		FetchProviders:  fetchProviderService,
-		MemoryProviders: memoryProviderService,
 		Workspace:       manager,
 		ACPRuntimes:     acpPool,
 		Workdirs:        workdirStore,
@@ -1206,15 +1205,18 @@ func (a *acpRuntimePoolAdapter) CloseAgentRuntime(botID, runtimeID string) error
 	return a.pool.CloseRuntime(botID, runtimeID)
 }
 
-func provideMediaService(log *slog.Logger, provider bridge.Provider, cfg config.Config) *media.Service {
+func provideMediaStorage(provider bridge.Provider, cfg config.Config) storagepkg.Provider {
 	primary := containerfs.New(provider)
 	dataRoot := cfg.Workspace.DataRoot
 	if dataRoot == "" {
 		dataRoot = config.DefaultDataRoot
 	}
 	secondary := localfs.New(filepath.Join(dataRoot, "media"))
-	storageProvider := fallback.New(primary, secondary)
-	return media.NewService(log, storageProvider)
+	return fallback.New(primary, secondary)
+}
+
+func provideMediaService(log *slog.Logger, provider storagepkg.Provider) *media.Service {
+	return media.NewService(log, provider)
 }
 
 func provideAudioRegistry() *audiopkg.Registry {
@@ -1417,13 +1419,18 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		return nil, errors.New("models service not configured")
 	}
 
+	// Preference order: the bot's memory model, then its chat model, so a bot
+	// with only a chat model configured gets working memory without any extra
+	// setup. SelectMemoryModelForBot falls back to any enabled chat model when
+	// the chosen one is unusable.
 	chatModelID := ""
 	if c.settingsService != nil && strings.TrimSpace(botID) != "" {
 		if botSettings, err := c.settingsService.GetBot(ctx, botID); err == nil {
-			if id := strings.TrimSpace(botSettings.CompactionModelID); id != "" {
-				chatModelID = id
-			} else if id := strings.TrimSpace(botSettings.ChatModelID); id != "" {
-				chatModelID = id
+			for _, id := range []string{botSettings.MemoryLLMModelID, botSettings.ChatModelID} {
+				if id = strings.TrimSpace(id); id != "" {
+					chatModelID = id
+					break
+				}
 			}
 		}
 	}
@@ -1431,6 +1438,16 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 	memoryModel, memoryProvider, err := models.SelectMemoryModelForBot(ctx, c.modelsService, c.queries, chatModelID)
 	if err != nil {
 		return nil, err
+	}
+	// The configured model was disabled or deleted, so memory silently moved
+	// to another chat model; leave a trace for whoever wonders why usage
+	// shows a model nobody picked.
+	if chatModelID != "" && memoryModel.ID != chatModelID && memoryModel.ModelID != chatModelID && c.logger != nil {
+		c.logger.WarnContext(ctx, "configured memory model unusable; falling back",
+			slog.String("bot_id", botID),
+			slog.String("configured_model_id", chatModelID),
+			slog.String("fallback_model_id", memoryModel.ID),
+		)
 	}
 	return memllm.New(memllm.Config{
 		ModelID:               memoryModel.ModelID,
@@ -1440,7 +1457,35 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		ChatCompletionsCompat: providers.ProviderConfigString(memoryProvider, models.ChatCompletionsCompatConfigKey),
 		Timeout:               c.timeout,
 		PromptCacheTTL:        providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
+		OnUsage: func(ctx context.Context, operation string, usage sdk.Usage) {
+			c.recordUsage(ctx, botID, memoryModel.ID, operation, usage)
+		},
 	}), nil
+}
+
+// recordUsage writes one memory LLM call to bot_memory_usage. A failed write
+// is logged and dropped: losing a usage row must not fail memory formation.
+func (c *lazyLLMClient) recordUsage(ctx context.Context, botID, modelID, operation string, usage sdk.Usage) {
+	pgBotID, err := db.ParseUUID(botID)
+	if err != nil {
+		return
+	}
+	payload, err := json.Marshal(usage)
+	if err != nil {
+		return
+	}
+	// The call's own context may already be at its deadline; the row still
+	// describes tokens that were spent.
+	ctx = context.WithoutCancel(ctx)
+	if err := c.queries.CreateMemoryUsage(ctx, dbsqlc.CreateMemoryUsageParams{
+		BotID:     pgBotID,
+		ModelID:   db.ParseUUIDOrEmpty(modelID),
+		Operation: operation,
+		Usage:     payload,
+	}); err != nil && c.logger != nil {
+		c.logger.WarnContext(ctx, "record memory usage failed",
+			slog.String("bot_id", botID), slog.String("operation", operation), slog.Any("error", err))
+	}
 }
 
 type skillLoaderAdapter struct {

@@ -147,7 +147,7 @@ func (s *Service) maybeGenerateSessionTitle(ctx context.Context, req ChatRequest
 		return
 	}
 
-	title := s.generateTitle(ctx, ownerUserID, titleModel, provider, userQuery)
+	title := s.generateTitle(models.WithModelSession(ctx, sessionID), ownerUserID, titleModel, provider, userQuery)
 	if title == "" {
 		return
 	}

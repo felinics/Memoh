@@ -248,10 +248,10 @@
              page never grows a sub-level (sub-pages are reserved for entities
              like a Provider); a dialog keeps this page visibly underneath, so
              "where am I" never arises and no back-button chrome is needed. -->
-        <section class="space-y-2.5">
-          <h2 class="px-2 text-label font-medium text-muted-foreground">
-            {{ $t('bots.access.rulesTitle') }}
-          </h2>
+        <SectionGroup
+          :title="$t('bots.access.rulesTitle')"
+          tone="muted"
+        >
           <ActionCard
             :title="$t('bots.access.advanced.entryTitle')"
             @click="rulesOpen = true"
@@ -260,7 +260,7 @@
               <ShieldCheck />
             </template>
           </ActionCard>
-        </section>
+        </SectionGroup>
 
         <!-- Advanced rules dialog: the full list + add/edit form. Behavior is
              unchanged from the old sub-surface — only the container. view-swap
@@ -617,7 +617,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ConfirmPopover, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
+import { ConfirmPopover, InlineLoadingRow, PageShell, SettingsRow, SettingsSection, toast, SectionGroup } from '@felinic/ui'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import {
   Plus,

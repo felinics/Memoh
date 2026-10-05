@@ -6,18 +6,15 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
-
-	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestMapSearchProviderWriteError(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		err         error
-		wantCode    apperror.Code
-		wantWrapped bool
+		name string
+		err  error
+		want error
 	}{
 		{
 			name: "provider type conflict",
@@ -25,7 +22,7 @@ func TestMapSearchProviderWriteError(t *testing.T) {
 				Code:           "23505",
 				ConstraintName: "search_providers_team_provider_unique",
 			},
-			wantCode: apperror.CodeSearchProviderTypeConflict,
+			want: ErrTypeConflict,
 		},
 		{
 			name: "canonical provider type conflict",
@@ -33,7 +30,7 @@ func TestMapSearchProviderWriteError(t *testing.T) {
 				Code:           "23505",
 				ConstraintName: "search_providers_provider_unique",
 			}),
-			wantCode: apperror.CodeSearchProviderTypeConflict,
+			want: ErrTypeConflict,
 		},
 		{
 			name: "provider name conflict",
@@ -41,12 +38,11 @@ func TestMapSearchProviderWriteError(t *testing.T) {
 				Code:           "23505",
 				ConstraintName: "search_providers_name_unique",
 			},
-			wantCode: apperror.CodeProviderNameTaken,
+			want: ErrNameTaken,
 		},
 		{
-			name:        "infrastructure error",
-			err:         errors.New("database unavailable"),
-			wantWrapped: true,
+			name: "infrastructure error",
+			err:  errors.New("database unavailable"),
 		},
 	}
 
@@ -54,17 +50,13 @@ func TestMapSearchProviderWriteError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := mapSearchProviderWriteError(tt.err, "write search provider")
-			if tt.wantWrapped {
-				if !errors.Is(got, tt.err) {
-					t.Fatalf("error %v does not wrap %v", got, tt.err)
+			if !errors.Is(got, tt.err) {
+				t.Fatalf("error %v does not wrap %v", got, tt.err)
+			}
+			for _, sentinel := range []error{ErrTypeConflict, ErrNameTaken} {
+				if want := tt.want != nil && errors.Is(tt.want, sentinel); errors.Is(got, sentinel) != want {
+					t.Fatalf("errors.Is(%v, %v) = %t, want %t", got, sentinel, !want, want)
 				}
-				return
-			}
-			if code := apperror.CodeOf(got); code != tt.wantCode {
-				t.Fatalf("code = %q, want %q", code, tt.wantCode)
-			}
-			if cause := apperror.CauseOf(got); !errors.Is(cause, tt.err) {
-				t.Fatalf("private cause = %v, want %v", cause, tt.err)
 			}
 		})
 	}

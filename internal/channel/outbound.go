@@ -640,7 +640,7 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 		if err := validateMessageAgainstCapabilities(caps, ok, Message{Attachments: event.Attachments}); err != nil {
 			return err
 		}
-	case StreamEventAgentStart, StreamEventAgentEnd, StreamEventProcessingStarted, StreamEventProcessingCompleted:
+	case StreamEventAgentStart, StreamEventAgentEnd, StreamEventProcessingStarted, StreamEventProcessingCompleted, StreamEventReset:
 		return nil
 	case StreamEventProcessingFailed:
 		if strings.TrimSpace(event.Error) == "" {
@@ -667,9 +667,8 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 			return err
 		}
 	case StreamEventError:
-		if strings.TrimSpace(event.Error) == "" {
-			return errors.New("stream error is required")
-		}
+		// A blank error has nothing to show; Push drops it instead of sending
+		// an empty reply.
 	default:
 		return fmt.Errorf("unsupported stream event type: %s", event.Type)
 	}
@@ -788,6 +787,9 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 	if err := validateStreamEvent(s.manager.registry, s.channelType, event); err != nil {
 		return err
 	}
+	if event.Type == StreamEventError && strings.TrimSpace(event.Error) == "" {
+		return nil
+	}
 	if event.Type == StreamEventAttachment {
 		if caps, ok := s.manager.registry.GetOutboundCapabilities(s.channelType, s.config, s.target); ok {
 			if err := validateMessageAgainstCapabilities(caps, true, Message{Attachments: event.Attachments}); err != nil {
@@ -823,6 +825,12 @@ func (s *managerOutboundStream) Push(ctx context.Context, event StreamEvent) err
 
 	if event.Type == StreamEventDelta && event.Delta != "" && event.Phase != StreamPhaseReasoning {
 		return s.pushDelta(ctx, event)
+	}
+	if event.Type == StreamEventReset {
+		// The adapter drops its buffered text, so the split window restarts
+		// with it.
+		s.deltaRunes = 0
+		s.deltaText.Reset()
 	}
 
 	if event.Type == StreamEventFinal && event.Final != nil && s.send != nil {

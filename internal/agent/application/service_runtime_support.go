@@ -6,19 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/event"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/apperror"
 	attachmentpkg "github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/bots"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -359,13 +358,8 @@ func (s *Service) prepareRuntimeAttachments(ctx context.Context, req ChatRequest
 		References:               make([]string, 0, len(prepared)),
 		CanFallbackImagesToFiles: true,
 	}
-	for i, item := range prepared {
+	for _, item := range prepared {
 		attachmentType := strings.ToLower(strings.TrimSpace(item.Type))
-		name := strings.TrimSpace(item.Name)
-		if name == "" {
-			name = fmt.Sprintf("attachment %d", i+1)
-		}
-
 		contextAttachment := ChatAttachment{
 			Type:        attachmentType,
 			ContentHash: strings.TrimSpace(item.ContentHash),
@@ -400,7 +394,7 @@ func (s *Service) prepareRuntimeAttachments(ctx context.Context, req ChatRequest
 			for _, payload := range payloads {
 				image, imageErr := runtimePromptImageFromDataURL(payload, item.Mime)
 				if imageErr != nil {
-					return runtimePreparedAttachments{}, invalidAttachmentFeedback(name)
+					return runtimePreparedAttachments{}, invalidAttachmentError()
 				}
 				result.Images = append(result.Images, image)
 			}
@@ -413,16 +407,9 @@ func (s *Service) prepareRuntimeAttachments(ctx context.Context, req ChatRequest
 		case attachmentType == "image" && inlineBytes:
 			// Bytes were supplied, inspected and rejected, and nothing else
 			// points at the original — the user has to attach it again.
-			return runtimePreparedAttachments{}, invalidAttachmentFeedback(name)
+			return runtimePreparedAttachments{}, invalidAttachmentError()
 		default:
-			return runtimePreparedAttachments{}, agentfeedback.New(
-				agentfeedback.CodeAttachmentUnavailable,
-				"attachment_not_reachable",
-				http.StatusBadRequest,
-				"chat.externalAgent.attachmentUnavailable",
-				"The attachment could not be made available to the external agent. Please attach it again.",
-				map[string]string{"name": name},
-			)
+			return runtimePreparedAttachments{}, apperror.New(apperror.CodeACPAttachmentUnavailable, nil)
 		}
 
 		result.Context = append(result.Context, contextAttachment)
@@ -430,15 +417,8 @@ func (s *Service) prepareRuntimeAttachments(ctx context.Context, req ChatRequest
 	return result, nil
 }
 
-func invalidAttachmentFeedback(name string) error {
-	return agentfeedback.New(
-		agentfeedback.CodeAttachmentInvalid,
-		"invalid_image_data",
-		http.StatusBadRequest,
-		"chat.externalAgent.attachmentInvalid",
-		"The attachment is invalid. Please attach it again.",
-		map[string]string{"name": name},
-	)
+func invalidAttachmentError() error {
+	return apperror.New(apperror.CodeACPAttachmentInvalid, nil)
 }
 
 func runtimePromptImageFromDataURL(payload, fallbackMime string) (external.Image, error) {
@@ -478,14 +458,7 @@ func (s *Service) requireRuntimeOwnerWorkspaceExec(ctx context.Context, botID, r
 	}
 	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
-		return agentfeedback.New(
-			agentfeedback.CodeRuntimeOwnerMissing,
-			"missing_runtime_owner",
-			409,
-			"chat.externalAgent.runtimeOwnerMissing",
-			"External Agent runtime owner is missing; start a new External Agent session",
-			nil,
-		)
+		return apperror.New(apperror.CodeACPRuntimeOwnerMissing, nil)
 	}
 	ok, err := s.botPermissions.HasBotPermission(ctx, strings.TrimSpace(botID), runtimeOwnerAccountID, bots.PermissionWorkspaceExec)
 	if err != nil {
@@ -494,14 +467,7 @@ func (s *Service) requireRuntimeOwnerWorkspaceExec(ctx context.Context, botID, r
 	if ok {
 		return nil
 	}
-	return agentfeedback.New(
-		agentfeedback.CodeNoWorkspaceExec,
-		"missing_workspace_exec",
-		403,
-		"chat.externalAgent.noWorkspaceExec",
-		"External Agent runtime owner no longer has workspace execution permission for this bot.",
-		nil,
-	)
+	return apperror.New(apperror.CodeNoWorkspaceExec, nil)
 }
 
 func isRuntimeDecisionProjectionEvent(ev native.StreamEvent) bool {

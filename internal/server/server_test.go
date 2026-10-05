@@ -22,6 +22,8 @@ func TestShouldSkipJWT_ChannelWebhookPaths(t *testing.T) {
 		path string
 		want bool
 	}{
+		{path: "/ready", want: true},
+		{path: "/ready/private", want: false},
 		{path: "/channels/feishu/webhook/cfg-1", want: true},
 		{path: "/channels/wechatoa/webhook/cfg-1", want: true},
 		{path: "/channels/line/webhook/cfg-1", want: true},
@@ -137,26 +139,6 @@ func TestServerLogsFinalProblemStatus(t *testing.T) {
 	}
 	if got := logs.String(); !strings.Contains(got, `"msg":"request"`) || !strings.Contains(got, `"status":503`) {
 		t.Fatalf("request log did not capture final status: %s", got)
-	}
-}
-
-func TestServerKeepsLegacyHTTPErrorBehavior(t *testing.T) {
-	server := NewServer(
-		slog.New(slog.DiscardHandler),
-		":0",
-		"test-secret",
-		errorTestHandler{err: echo.NewHTTPError(http.StatusBadRequest, "legacy message")},
-	)
-
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-	server.echo.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-	if rec.Body.String() != "{\"message\":\"legacy message\"}\n" {
-		t.Fatalf("legacy body changed: %s", rec.Body.String())
 	}
 }
 

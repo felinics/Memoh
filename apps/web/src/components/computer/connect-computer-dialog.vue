@@ -141,7 +141,7 @@ const command = computed(() => buildRuntimeConnectCommand(
 
 const { runtimes, refetch: refetchRuntimes } = useAccountRuntimes()
 const { data: botsData } = useQuery(getBotsQuery())
-const { grantAccess } = useComputerAccessActions()
+const { grantBots } = useComputerAccessActions()
 
 const adoptedName = ref('')
 
@@ -198,16 +198,9 @@ watch([connectedRuntime, granting, open], async ([runtime]) => {
 })
 
 async function grantAllBots(connectedId: string): Promise<void> {
-  let failed = 0
-  for (const bot of botsData.value?.items ?? []) {
-    if (!bot.id) continue
-    try {
-      await grantAccess({ botId: bot.id, runtimeId: connectedId })
-    } catch {
-      failed += 1
-    }
-  }
-  if (failed > 0) {
+  const botIds = (botsData.value?.items ?? []).flatMap(bot => (bot.id ? [bot.id] : []))
+  const failures = await grantBots(connectedId, botIds)
+  if (failures.length > 0) {
     toast.error(t('computerAccess.updateFailed'))
   }
 }

@@ -35,7 +35,7 @@ func TestTraceContinuesAcrossTheInternalRPCBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := rpc.NewServer(sharedSecret)
+	srv := rpc.NewServer(nil, sharedSecret)
 	healthpb.RegisterHealthServer(srv, health.NewServer())
 	go func() { _ = srv.Serve(listener) }()
 	t.Cleanup(srv.Stop)

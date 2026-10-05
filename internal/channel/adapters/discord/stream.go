@@ -64,6 +64,13 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		}
 		return nil
 
+	case channel.StreamEventReset:
+		// Keep the message; the regenerated reply edits over the failed text.
+		s.mu.Lock()
+		s.buffer.Reset()
+		s.mu.Unlock()
+		return nil
+
 	case channel.StreamEventFinal:
 		s.mu.Lock()
 		bufText := strings.TrimSpace(s.buffer.String())
@@ -88,7 +95,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 		if errText == "" {
 			return nil
 		}
-		return s.finalizeMessage("Error: "+errText, nil, nil)
+		return s.finalizeMessage(channel.ErrorReplyText(event.ErrorCode, errText), nil, nil)
 
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {

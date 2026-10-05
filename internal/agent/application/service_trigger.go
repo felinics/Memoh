@@ -70,7 +70,7 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 		// than retried here.
 		return schedule.TriggerResult{}, err
 	}
-	defer func() { finish(triggeredRunTerminal{cause: err}) }()
+	defer func() { finish(RunOutcome{Cause: err}) }()
 	ctx = runCtx
 
 	// Runtime sessions (ACP, codex, claude-code) must never silently degrade
@@ -217,15 +217,17 @@ func (s *Service) consumeTriggeredStreamWithIdle(ctx context.Context, events <-c
 		if idle != nil {
 			idle.Observe(event)
 		}
-		if eventErr := agentStreamEventError(event); eventErr != nil {
-			s.logger.ErrorContext(ctx, "triggered run stream error",
-				slog.String("bot_id", req.BotID),
-				slog.String("session_id", req.ThreadID),
-				slog.Any("error", eventErr),
-			)
+		if eventErr := agentStreamFailure(event); eventErr != nil {
 			if streamErr == nil {
 				streamErr = eventErr
 			}
+		}
+		if event.Type == native.EventAgentEnd && strings.TrimSpace(event.ApprovalID) == "" {
+			// A clean end means an earlier retryable stream error recovered.
+			// Only event errors can be recorded before the terminal event: a
+			// refused publish stops the loop, and persistence errors are
+			// recorded below, after this reset.
+			streamErr = nil
 		}
 		if event.IsTerminal() && event.Type == native.EventAgentAbort && strings.TrimSpace(event.ApprovalID) == "" {
 			// A stopped run is not a success: mirror the WS loop, which maps

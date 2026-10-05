@@ -56,6 +56,15 @@ var (
 	ErrSessionRuntimeSplit = errors.New("session runtime cluster mode requires a distributed backend")
 )
 
+// Error codes written to session_runs.error_code when admission abandons a run
+// it has already claimed. They are persisted and registered in the apperror
+// catalog under the same values.
+const (
+	runErrorFenceActivationFailed = "runtime_fence_activation_failed"
+	runErrorReservationFailed     = "runtime_reservation_failed"
+	runErrorReservationDeclined   = "runtime_reservation_declined"
+)
+
 // AdmitInput is one submission from a public entry point: HTTP, a channel
 // adapter or a schedule. Every caller supplies the same three
 // identities, which is what lets one admission path serve all of them.
@@ -325,7 +334,7 @@ func (m *Manager) claimAndStart(ctx context.Context, in AdmitInput, admission Ad
 		// Ownership is this process's, so nothing else is harmed by ending the
 		// run here; leaving it running would strand the session's only slot
 		// until the reaper's grace period elapsed.
-		return Admission{}, m.abandonClaim(ctx, admission.RunID, token, "runtime_fence_activation_failed", fmt.Errorf("activate runtime persistence fence: %w", err))
+		return Admission{}, m.abandonClaim(ctx, admission.RunID, token, runErrorFenceActivationFailed, fmt.Errorf("activate runtime persistence fence: %w", err))
 	}
 
 	handle, cursor, err := m.startRun(ctx, runStart{
@@ -345,11 +354,11 @@ func (m *Manager) claimAndStart(ctx context.Context, in AdmitInput, admission Ad
 	})
 	switch {
 	case err != nil:
-		return Admission{}, m.abandonClaim(ctx, admission.RunID, token, "runtime_reservation_failed", err)
+		return Admission{}, m.abandonClaim(ctx, admission.RunID, token, runErrorReservationFailed, err)
 	case !handle.valid():
 		// The live backend declined without an error, which means the session
 		// already holds an active reservation this process cannot displace.
-		return Admission{}, m.abandonClaim(ctx, admission.RunID, token, "runtime_reservation_declined", ErrRunOwnershipLost)
+		return Admission{}, m.abandonClaim(ctx, admission.RunID, token, runErrorReservationDeclined, ErrRunOwnershipLost)
 	}
 
 	admission.Started = true
@@ -362,14 +371,14 @@ func (m *Manager) claimAndStart(ctx context.Context, in AdmitInput, admission Ad
 // fenced by the same token the claim used, so it cannot disturb a successor, and
 // it is idempotent, so a caller that crashes here leaves the run to the reaper
 // with the same outcome. cause is returned unchanged: the reason the run could
-// not start is more useful to the caller than the bookkeeping that followed.
+// not start is more useful to the caller than the bookkeeping that followed, and
+// the caller's result record is where it is reported. The run keeps only code.
 func (m *Manager) abandonClaim(ctx context.Context, runID string, token int64, code string, cause error) error {
 	_, _, err := m.runs.Finalize(context.WithoutCancel(ctx), ledger.FinalizeParams{
 		RunID:        runID,
 		FencingToken: token,
 		State:        ledger.StateFailed,
 		ErrorCode:    code,
-		ErrorMessage: cause.Error(),
 	})
 	if err != nil {
 		m.logger.ErrorContext(ctx, "release unstartable runtime run failed; the reaper will finish it",

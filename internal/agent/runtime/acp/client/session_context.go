@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -24,7 +25,7 @@ func ResolveSessionContext(input SessionContextInput) (ResolvedSessionContext, e
 	case "", bridge.WorkspaceBackendContainer:
 		backend = WorkspaceBackendContainer
 	default:
-		return ResolvedSessionContext{}, fmt.Errorf("unsupported workspace backend %q", input.Backend)
+		return ResolvedSessionContext{}, errs.New(fmt.Sprintf("unsupported workspace backend %q", input.Backend))
 	}
 	resolvedRoot := dataMountPath
 	projectPath, err := ResolvePathUnderVirtualRoot(resolvedRoot, input.ProjectPath)

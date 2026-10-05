@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	acpclient "github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
@@ -115,7 +116,7 @@ func (h *ACPRuntimeHandler) CreateRuntime(c echo.Context) error {
 	if agentID == "" {
 		return apperror.New(apperror.CodeACPRequestInvalid, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, agentID); err != nil {
+	if err := acpAgentSetupError(bot.Metadata, agentID); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	projectPath := strings.TrimSpace(req.ProjectPath)
@@ -340,7 +341,7 @@ func (h *ACPRuntimeHandler) EnsureRuntime(c echo.Context) error {
 	}
 	botID := bot.ID
 	acpMeta := acpRuntimeSessionMetadata(sess)
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
+	if err := acpAgentSetupError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
@@ -392,7 +393,7 @@ func (h *ACPRuntimeHandler) SetModel(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
+	if err := acpAgentSetupError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetModel(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
@@ -441,7 +442,7 @@ func (h *ACPRuntimeHandler) SetReasoning(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
+	if err := acpAgentSetupError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetReasoning(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
@@ -490,7 +491,7 @@ func (h *ACPRuntimeHandler) SetMode(c echo.Context) error {
 	if sessionMetadataString(acpMeta, "runtime_owner_account_id") == "" {
 		return apperror.New(apperror.CodeACPRuntimeConflict, nil)
 	}
-	if err := acpAgentSetupHTTPError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
+	if err := acpAgentSetupError(bot.Metadata, sessionMetadataString(acpMeta, "acp_agent_id")); err != nil {
 		return acpRuntimeHTTPError(err)
 	}
 	status, err := h.pool.SetMode(context.WithoutCancel(c.Request().Context()), acpagent.PromptInput{
@@ -524,8 +525,8 @@ func runtimePoolError(err error) error {
 	if err == nil || apperror.CodeOf(err) != "" {
 		return err
 	}
-	if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
-		return acpRuntimeHTTPError(feedbackErr)
+	if translated := application.ExternalAgentError(err); apperror.CodeOf(translated) != "" {
+		return translated
 	}
 	var commandNotFound *acpclient.CommandNotFoundError
 	switch {

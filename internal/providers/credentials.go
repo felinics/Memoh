@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	memohcopilot "github.com/felinics/memoh/internal/copilot"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -76,7 +76,7 @@ func (s *Service) ResolveModelCredentials(ctx context.Context, provider sqlc.Pro
 func codexAccountIDFromToken(token string) (string, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", errors.New("invalid oauth access token")
+		return "", errs.New("invalid oauth access token")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
@@ -92,7 +92,7 @@ func codexAccountIDFromToken(token string) (string, error) {
 	}
 	accountID := strings.TrimSpace(claims.OpenAIAuth.ChatGPTAccountID)
 	if accountID == "" {
-		return "", fmt.Errorf("oauth access token missing %s.chatgpt_account_id", openAIAuthClaimPath)
+		return "", errs.New(fmt.Sprintf("oauth access token missing %s.chatgpt_account_id", openAIAuthClaimPath))
 	}
 	return accountID, nil
 }

@@ -6,19 +6,23 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
-	"github.com/felinics/memoh/internal/apperror"
 )
 
 func TestNormalizePromptErrorNamesTheMissingCommand(t *testing.T) {
 	cause := fmt.Errorf("start devin acp: %w", &client.CommandNotFoundError{Command: "devin"})
 	err := normalizePromptError(cause)
-	if got := apperror.CodeOf(err); got != apperror.CodeACPCommandNotFound {
-		t.Fatalf("normalizePromptError() code = %q, want %q", got, apperror.CodeACPCommandNotFound)
+	var prompt *PromptError
+	if !errors.As(err, &prompt) {
+		t.Fatalf("normalizePromptError() = %T %v, want *PromptError", err, err)
 	}
-	if got := apperror.ArgsOf(err)["command"]; got != "devin" {
-		t.Fatalf("normalizePromptError() command arg = %q, want the command the user must install", got)
+	var missing *client.CommandNotFoundError
+	if !errors.As(prompt.Cause(), &missing) || missing.Command != "devin" {
+		t.Fatalf("normalizePromptError() cause = %v, want the command the user must install", prompt.Cause())
 	}
-	if got := apperror.CauseOf(err); !errors.Is(got, cause) {
-		t.Fatalf("normalizePromptError() cause = %v, want private cause", got)
+	if !errors.Is(prompt.Cause(), cause) {
+		t.Fatalf("normalizePromptError() cause = %v, want private cause", prompt.Cause())
+	}
+	if errors.As(err, &missing) {
+		t.Fatal("PromptError exposed its cause to errors.As")
 	}
 }

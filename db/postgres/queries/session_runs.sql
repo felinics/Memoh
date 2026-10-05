@@ -185,6 +185,7 @@ SET owner_id = sqlc.arg(owner_id),
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND state = 'waiting_decision'
+  AND abort_requested_at IS NULL
   AND fencing_token = sqlc.arg(previous_fencing_token)
   AND fencing_token < sqlc.arg(new_fencing_token)
 RETURNING *;
@@ -224,7 +225,38 @@ WHERE team_id = public.memoh_current_team_id()
   AND run_id = sqlc.arg(run_id)
   AND fencing_token = sqlc.arg(fencing_token)
   AND state IN ('accepted', 'running', 'waiting_decision', 'finishing')
+  AND (sqlc.narg(expected_state)::text IS NULL OR state = sqlc.narg(expected_state)::text)
 RETURNING *;
+
+-- name: AcceptSessionRunDecisionContinuation :one
+-- Called in the same fenced transaction that accepts the decision. A committed
+-- answer is executing work, even before the resumed producer's agent_start.
+UPDATE session_runs
+SET state = 'running',
+    input_json = jsonb_set(input_json, '{decision_continuations}',
+      COALESCE(input_json->'decision_continuations', '{}'::jsonb) ||
+      jsonb_build_object(sqlc.arg(decision_id)::text,
+        jsonb_build_object('kind', sqlc.arg(decision_kind)::text, 'phase', 'accepted')), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id) AND fencing_token = sqlc.arg(fencing_token)
+  AND state IN ('running', 'waiting_decision') AND abort_requested_at IS NULL
+RETURNING *;
+
+-- name: MarkSessionRunDecisionExecuting :execrows
+-- Checkpoint before invoking an approved tool; interruption is an uncertain
+-- result, never authorization to execute the approved operation a second time.
+UPDATE session_runs
+SET input_json = jsonb_set(input_json,
+      ARRAY['decision_continuations', sqlc.arg(decision_id)::text, 'phase'],
+      '"executing"'::jsonb, false),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = sqlc.arg(bot_id) AND session_id = sqlc.arg(session_id)
+  AND run_id = sqlc.arg(run_id) AND fencing_token = sqlc.arg(fencing_token)
+  AND state = 'running' AND abort_requested_at IS NULL
+  AND input_json->'decision_continuations'->(sqlc.arg(decision_id)::text)->>'phase' = 'accepted';
 
 -- name: PrepareSessionRunFinish :one
 -- Persist the terminal proposal before the live projection enters finishing.

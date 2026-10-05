@@ -256,7 +256,7 @@ func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListD
 			return nil, ctxErr
 		}
 		if err != nil {
-			return nil, status.Errorf(codes.NotFound, "walk: %v", err)
+			return nil, listDirStatusError("walk", err)
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].GetPath() < all[j].GetPath() })
 
@@ -275,7 +275,7 @@ func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListD
 			if ctxErr := contextStatusError(ctx); ctxErr != nil {
 				return nil, ctxErr
 			}
-			return nil, status.Errorf(codes.NotFound, "readdir: %v", err)
+			return nil, listDirStatusError("readdir", err)
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].GetPath() < all[j].GetPath() })
 	}
@@ -310,6 +310,17 @@ func (s *Server) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListD
 }
 
 const listReadBatchEntries = 256
+
+func listDirStatusError(operation string, err error) error {
+	code := codes.Internal
+	// Listing a file reports ENOTDIR: the requested directory does not exist.
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		code = codes.NotFound
+	} else if errors.Is(err, fs.ErrPermission) {
+		code = codes.PermissionDenied
+	}
+	return status.Errorf(code, "%s: %v", operation, err)
+}
 
 func readDirBatched(ctx context.Context, dir string, visit func(fs.DirEntry) error) error {
 	file, err := os.Open(dir) //nolint:gosec // dir is resolved by the bridge workspace policy.

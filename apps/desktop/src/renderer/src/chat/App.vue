@@ -22,6 +22,7 @@ provide(DesktopWindowKey, {
 provide(DesktopRuntimeKey, {
   runtimeState: window.api.desktop.runtimeState,
   configureRuntime: window.api.desktop.configureRuntime,
+  setRuntimePaused: window.api.desktop.setRuntimePaused,
   onRuntimeStateChanged: window.api.desktop.onRuntimeStateChanged,
 } satisfies DesktopRuntimeBridge)
 provide(DesktopUpdatesKey, {

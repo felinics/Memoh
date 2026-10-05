@@ -144,9 +144,12 @@ type Run struct {
 	// cursor for the fail-closed recovery sweep.
 	LiveGeneration string
 
-	AbortRequestedAt     time.Time
-	ProposedState        State
-	ProposedErrorCode    string
+	AbortRequestedAt  time.Time
+	ProposedState     State
+	ProposedErrorCode string
+	// ProposedErrorMessage and ErrorMessage are read from rows written before
+	// the ledger stopped recording error text. Nothing writes them: a run's
+	// failure is its code, and the cause belongs to the run's result record.
 	ProposedErrorMessage string
 	FinishProposedAt     time.Time
 	ErrorCode            string
@@ -187,7 +190,9 @@ type FinalizeParams struct {
 	FencingToken int64
 	State        State
 	ErrorCode    string
-	ErrorMessage string
+	// ExpectedState is optional. Shutdown uses it to avoid terminalizing a
+	// decision that parked after its classification read.
+	ExpectedState State
 }
 
 // PrepareFinishParams records the fenced, recoverable terminal proposal. A
@@ -199,7 +204,6 @@ type PrepareFinishParams struct {
 	FencingToken         int64
 	State                State
 	ErrorCode            string
-	ErrorMessage         string
 	AllowWaitingDecision bool
 }
 

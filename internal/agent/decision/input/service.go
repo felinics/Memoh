@@ -367,7 +367,10 @@ func (s *Service) Submit(ctx context.Context, input SubmitInput) (Request, error
 			ResponseControlID:            responseControlID,
 			ResponsePayloadHash:          responsePayloadHash,
 		})
-		return submitErr
+		if submitErr != nil {
+			return submitErr
+		}
+		return decision.ResumeNativeContinuation(ctx, queries, row.BotID, row.SessionID, row.RunID, row.ID, row.RuntimeFencingToken, runtimefence.DecisionUserInput)
 	})
 	return s.resolveAndNotify(ctx, input.RequestID, row, err)
 }
@@ -405,7 +408,10 @@ func (s *Service) Cancel(ctx context.Context, input CancelInput) (Request, error
 			ResponseControlID:            responseControlID,
 			ResponsePayloadHash:          responsePayloadHash,
 		})
-		return cancelErr
+		if cancelErr != nil {
+			return cancelErr
+		}
+		return decision.ResumeNativeContinuation(ctx, queries, row.BotID, row.SessionID, row.RunID, row.ID, row.RuntimeFencingToken, runtimefence.DecisionUserInput)
 	})
 	return s.resolveAndNotify(ctx, input.RequestID, row, err)
 }

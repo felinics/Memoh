@@ -1,5 +1,5 @@
 <template>
-  <section>
+  <section class="chat-composer-dock">
     <Transition
       enter-active-class="transition-all duration-150 ease-out"
       enter-from-class="opacity-0 translate-y-1"
@@ -15,9 +15,12 @@
         :command-panel="commandPanel"
         :error-message="errorMessage"
         :compacting="compacting"
+        :usage-notice="usageNotice"
         class="mb-2"
         @select-command-item="emit('selectCommandItem', $event)"
         @dismiss-command="emit('dismissCommand')"
+        @dismiss-usage="emit('dismissUsage')"
+        @dismiss-error="emit('dismissError')"
       />
     </Transition>
     <ChatUserInputForm
@@ -82,22 +85,30 @@ interface CommandPanelData {
   items: CommandActionListItem[]
 }
 
+interface UsageNotice {
+  exhausted: boolean
+  message: string
+}
+
 const props = defineProps<{
   approvals: PendingApprovalItem[]
   commandPanel: CommandPanelData | null
   errorMessage: string
   pendingUserInput: UIUserInput | null
   compacting?: boolean
+  usageNotice?: UsageNotice | null
 }>()
 
 const emit = defineEmits<{
   (e: 'selectCommandItem', item: CommandActionListItem): void
   (e: 'dismissCommand'): void
+  (e: 'dismissUsage'): void
+  (e: 'dismissError'): void
   (e: 'revealComposer', opts: { focus?: boolean }): void
 }>()
 
 const stackVisible = computed(() => Boolean(
-  props.errorMessage || props.commandPanel || props.approvals.length || props.compacting,
+  props.usageNotice || props.errorMessage || props.commandPanel || props.approvals.length || props.compacting,
 ))
 
 // Box-tier mutex: while an ask_user request is pending the capsule owns the

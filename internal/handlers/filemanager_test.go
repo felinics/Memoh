@@ -18,7 +18,89 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
+
+	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
+
+type mkdirTargetTestWorkspace struct {
+	containerWorkspace
+	primary containerWorkspace
+}
+
+func (w mkdirTargetTestWorkspace) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
+	switch bridge.WorkspaceTargetFromContext(ctx) {
+	case workspace.WorkspaceTargetNative:
+		return w.NativeMCPClient(ctx, botID)
+	case "", "remote-target":
+		return w.primary.NativeMCPClient(ctx, botID)
+	default:
+		return nil, workspace.ErrWorkspaceTargetNotFound
+	}
+}
+
+func TestFSMkdirUsesExplicitTargetAndPreservesPrimaryDefault(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		target string
+		native bool
+	}{
+		{name: "native overrides remote primary", target: "native", native: true},
+		{name: "explicit remote", target: "remote-target"},
+		{name: "omitted target uses primary"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			native := newSkillsTestEnv(t)
+			primary := newSkillsTestEnv(t)
+			native.handler.manager = mkdirTargetTestWorkspace{
+				containerWorkspace: native.handler.manager,
+				primary:            primary.handler.manager,
+			}
+			body := map[string]string{"path": "/data/new-folder"}
+			if tt.target != "" {
+				body["workspace_target_id"] = tt.target
+			}
+			rec, err := native.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/mkdir", body, native.handler.FSMkdir)
+			if err != nil || rec.Code != http.StatusOK {
+				t.Fatalf("FSMkdir status = %d, error = %v", rec.Code, err)
+			}
+			for _, location := range []struct {
+				env  *skillsTestEnv
+				want bool
+			}{{native, tt.native}, {primary, !tt.native}} {
+				info, err := os.Stat(location.env.localPath("/data/new-folder"))
+				if location.want {
+					if err != nil || !info.IsDir() {
+						t.Fatalf("selected workspace directory missing: %v", err)
+					}
+				} else if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("unselected workspace was modified: stat error = %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestFSMkdirInvalidExplicitTargetDoesNotFallBackToPrimary(t *testing.T) {
+	native := newSkillsTestEnv(t)
+	primary := newSkillsTestEnv(t)
+	native.handler.manager = mkdirTargetTestWorkspace{
+		containerWorkspace: native.handler.manager,
+		primary:            primary.handler.manager,
+	}
+	_, err := native.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/mkdir", map[string]string{
+		"path": "/data/new-folder", "workspace_target_id": "unknown-target",
+	}, native.handler.FSMkdir)
+	var httpErr *echo.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
+		t.Fatalf("FSMkdir error = %v, want HTTP 404", err)
+	}
+	for _, env := range []*skillsTestEnv{native, primary} {
+		if _, err := os.Stat(env.localPath("/data/new-folder")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("workspace was modified after target resolution failed: %v", err)
+		}
+	}
+}
 
 func TestResolveContainerPathUsesPOSIXSeparators(t *testing.T) {
 	tests := []struct {

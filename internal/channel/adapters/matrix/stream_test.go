@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 func mustPreparedMatrixEvent(t *testing.T, event channel.StreamEvent) channel.PreparedStreamEvent {
@@ -268,5 +269,70 @@ func TestMatrixStreamFinalSendsAttachments(t *testing.T) {
 	}
 	if !strings.Contains(bodies[1], `"msgtype":"m.image"`) || !strings.Contains(bodies[1], `mxc://matrix.example.com/media123`) {
 		t.Fatalf("expected second payload to be attachment, got %s", bodies[1])
+	}
+}
+
+func TestMatrixStreamErrorReply(t *testing.T) {
+	redact.ResetForTest()
+	t.Cleanup(redact.ResetForTest)
+	const secret = "matrix-secret-value-123456"
+	redact.SetSecrets("matrix-stream-test", secret)
+
+	cases := []struct {
+		name  string
+		event channel.PreparedStreamEvent
+		want  []string
+	}{
+		{
+			name:  "coded error shows the copy as it is",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
+			want:  []string{"The workspace is unreachable."},
+		},
+		{
+			name:  "uncoded error is redacted and labelled",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "request failed with token " + secret},
+			want:  []string{"Error: request failed with token " + strings.Repeat("*", len(secret))},
+		},
+		{
+			name:  "blank error sends nothing",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "  "},
+			want:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent []string
+			adapter := NewMatrixAdapter(nil)
+			adapter.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				var content struct {
+					Body string `json:"body"`
+				}
+				if req.Body != nil {
+					raw, _ := io.ReadAll(req.Body)
+					_ = json.Unmarshal(raw, &content)
+				}
+				sent = append(sent, content.Body)
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"event_id":"$evt1"}`)),
+					Header:     make(http.Header),
+				}, nil
+			})}
+			stream := &matrixOutboundStream{
+				adapter: adapter,
+				cfg:     Config{HomeserverURL: "https://matrix.example.com", AccessToken: "tok"},
+				target:  "!room:example.com",
+			}
+			ctx := context.Background()
+			if err := stream.Push(ctx, channel.PreparedStreamEvent{Type: channel.StreamEventDelta, Delta: "draft", Phase: channel.StreamPhaseText}); err != nil {
+				t.Fatalf("push delta: %v", err)
+			}
+			if err := stream.Push(ctx, tc.event); err != nil {
+				t.Fatalf("push error: %v", err)
+			}
+			if len(sent) != len(tc.want) || strings.Join(sent, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("sent messages = %q, want %q", sent, tc.want)
+			}
+		})
 	}
 }

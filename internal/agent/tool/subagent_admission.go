@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/background"
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/errlog"
 )
 
 // SubagentTerminal is the terminal audit data returned to the application
@@ -147,7 +149,7 @@ func subagentSubmission(req *agentRequest) ([]byte, error) {
 // rejectedAgentRun describes a task that never started, in the shape the
 // background record and the parent model both read.
 func rejectedAgentRun(req *agentRequest, cause error) agentRunResult {
-	return agentRunResult{
+	res := agentRunResult{
 		AgentID:   req.agentID,
 		SessionID: req.agentSessionID,
 		TaskID:    req.taskID,
@@ -155,20 +157,39 @@ func rejectedAgentRun(req *agentRequest, cause error) agentRunResult {
 		Provider:  req.config.ProviderName,
 		Fork:      req.config.Forked,
 		Message:   req.message,
-		Error:     subagentAdmissionMessage(cause),
 	}
+	if message, ok := subagentAdmissionMessage(cause); ok {
+		res.Error = message
+		return res
+	}
+	return res.failed(cause)
+}
+
+// recordAdmissionFailure records why an agent task could not start. A busy or
+// duplicate agent is an answer the parent model acts on; any other failure is
+// this process's, and the run the admission may have claimed records only its
+// code, so the cause is recorded here.
+func (p *SpawnProvider) recordAdmissionFailure(ctx context.Context, req *agentRequest, cause error) {
+	if p.logger == nil || errors.Is(cause, turn.ErrSessionBusy) || errors.Is(cause, turn.ErrDuplicateTurn) {
+		return
+	}
+	result := errlog.Event(ctx, "subagent.admit", cause, errlog.Options{})
+	p.logger.LogAttrs(ctx, result.Level, "agent task admission failed", append([]slog.Attr{
+		slog.String("task_id", req.taskID), slog.String("session_id", req.agentSessionID),
+	}, result.Attrs()...)...)
 }
 
 // subagentAdmissionMessage turns a refusal into something the parent model can
 // act on. Busy is the one worth naming: the agent is working, and sending the
-// message again after it reports back is the whole remedy.
-func subagentAdmissionMessage(cause error) string {
+// message again after it reports back is the whole remedy. Any other refusal
+// has no message of its own and reports false.
+func subagentAdmissionMessage(cause error) (string, bool) {
 	switch {
 	case errors.Is(cause, turn.ErrSessionBusy):
-		return "agent is already running a turn; wait for it to report back, then send the message again"
+		return "agent is already running a turn; wait for it to report back, then send the message again", true
 	case errors.Is(cause, turn.ErrDuplicateTurn):
-		return "this task was already started; use get_background_status(task_id) to read its result"
+		return "this task was already started; use get_background_status(task_id) to read its result", true
 	default:
-		return cause.Error()
+		return "", false
 	}
 }

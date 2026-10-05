@@ -22,6 +22,8 @@ import (
 var (
 	ErrModelIDAlreadyExists = errors.New("model_id already exists")
 	ErrModelIDAmbiguous     = errors.New("model_id is ambiguous across providers")
+	// ErrInvalidModelType reports a model type outside the supported set.
+	ErrInvalidModelType = errors.New("invalid model type")
 )
 
 // Service provides CRUD operations for models.
@@ -159,7 +161,7 @@ func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 // ListByType returns models filtered by type.
 func (s *Service) ListByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
 	if !IsValidModelType(modelType) {
-		return nil, fmt.Errorf("invalid model type: %s", modelType)
+		return nil, fmt.Errorf("%w: %s", ErrInvalidModelType, modelType)
 	}
 
 	dbModels, err := s.queries.ListModelsByType(ctx, string(modelType))
@@ -196,7 +198,7 @@ func (s *Service) ListEnabled(ctx context.Context) ([]GetResponse, error) {
 // ListEnabledByType returns models from enabled providers filtered by type.
 func (s *Service) ListEnabledByType(ctx context.Context, modelType ModelType) ([]GetResponse, error) {
 	if !IsValidModelType(modelType) {
-		return nil, fmt.Errorf("invalid model type: %s", modelType)
+		return nil, fmt.Errorf("%w: %s", ErrInvalidModelType, modelType)
 	}
 	dbModels, err := s.queries.ListEnabledModelsByType(ctx, string(modelType))
 	if err != nil {
@@ -237,7 +239,7 @@ func (s *Service) ListByProviderID(ctx context.Context, providerID string) ([]Ge
 // ListByProviderIDAndType returns models filtered by provider ID and type.
 func (s *Service) ListByProviderIDAndType(ctx context.Context, providerID string, modelType ModelType) ([]GetResponse, error) {
 	if !IsValidModelType(modelType) {
-		return nil, fmt.Errorf("invalid model type: %s", modelType)
+		return nil, fmt.Errorf("%w: %s", ErrInvalidModelType, modelType)
 	}
 	if strings.TrimSpace(providerID) == "" {
 		return nil, errors.New("provider id is required")
@@ -438,7 +440,7 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 // CountByType returns the number of models of a specific type.
 func (s *Service) CountByType(ctx context.Context, modelType ModelType) (int64, error) {
 	if !IsValidModelType(modelType) {
-		return 0, fmt.Errorf("invalid model type: %s", modelType)
+		return 0, fmt.Errorf("%w: %s", ErrInvalidModelType, modelType)
 	}
 
 	count, err := s.queries.CountModelsByType(ctx, string(modelType))
@@ -523,6 +525,7 @@ func IsValidClientType(clientType ClientType) bool {
 		ClientTypeGoogleGenerativeAI,
 		ClientTypeOpenAICodex,
 		ClientTypeGitHubCopilot,
+		ClientTypeOpenCodeGo,
 		ClientTypeEdgeSpeech,
 		ClientTypeOpenAISpeech,
 		ClientTypeOpenAITranscription,

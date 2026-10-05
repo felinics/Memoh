@@ -21,7 +21,6 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
-	"github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
@@ -30,6 +29,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -69,6 +69,17 @@ var (
 	// ErrRuntimeConfigUpdateFailed reports a transport or protocol failure
 	// while applying the model/reasoning values requested for a turn.
 	ErrRuntimeConfigUpdateFailed = errors.New("ACP runtime configuration update failed")
+	// ErrAgentNotFound reports an agent id with no ACP profile.
+	ErrAgentNotFound = errors.New("unknown ACP agent")
+	// ErrAgentNotEnabled reports an agent the bot has not enabled.
+	ErrAgentNotEnabled = errors.New("ACP agent is not enabled for this bot")
+	// ErrAgentNotConfigured reports a bot setup the agent cannot run with:
+	// an unsupported setup mode or workspace backend, or a missing managed
+	// field.
+	ErrAgentNotConfigured = errors.New("ACP agent is not configured for this bot")
+	// ErrRuntimeOwnerMissing reports a runtime request without the account
+	// that owns the runtime.
+	ErrRuntimeOwnerMissing = errors.New("ACP runtime owner is missing")
 )
 
 const (
@@ -391,11 +402,11 @@ func (p *SessionPool) owned(botID, runtimeID string) (*runtimeHandle, error) {
 // The runtime ID is server-generated; clients can never choose it.
 func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInput) (RuntimeStatus, error) {
 	if p == nil || p.runner == nil || p.bots == nil {
-		return RuntimeStatus{}, errors.New("ACP session pool is not configured")
+		return RuntimeStatus{}, errs.New("ACP session pool is not configured")
 	}
 	botID := strings.TrimSpace(input.BotID)
 	if botID == "" {
-		return RuntimeStatus{}, errors.New("bot_id is required")
+		return RuntimeStatus{}, errs.New("bot_id is required")
 	}
 	if p.sessionRuntime != nil {
 		if err := p.sessionRuntime.WaitForHistoryReset(ctx, botID, ""); err != nil {
@@ -404,12 +415,12 @@ func (p *SessionPool) CreateRuntime(ctx context.Context, input CreateRuntimeInpu
 	}
 	agentID := acpprofile.NormalizeAgentID(input.AgentID)
 	if agentID == "" {
-		return RuntimeStatus{}, errors.New("ACP agent id is required")
+		return RuntimeStatus{}, errs.New("ACP agent id is required")
 	}
 	projectPath := strings.TrimSpace(input.ProjectPath)
 	runtimeOwnerAccountID := strings.TrimSpace(input.RuntimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
-		return RuntimeStatus{}, runtimeOwnerMissingError()
+		return RuntimeStatus{}, ErrRuntimeOwnerMissing
 	}
 
 	p.reapIdle(time.Now()) //nolint:contextcheck // reaper uses each handle's owner context.
@@ -515,11 +526,11 @@ func (p *SessionPool) unboundBudgetLocked(botID string) ([]*runtimeHandle, error
 // start and must not treat that as fatal.
 func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, sessionID, agentID, projectPath, runtimeOwnerAccountID string) error {
 	if ctx == nil {
-		return errors.New("runtime bind context is required")
+		return errs.New("runtime bind context is required")
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return errors.New("session_id is required")
+		return errs.New("session_id is required")
 	}
 	bindTimeout := p.timeout
 	if bindTimeout <= 0 {
@@ -545,7 +556,7 @@ func (p *SessionPool) BindRuntime(ctx context.Context, botID, runtimeID, session
 	}
 	normalizedAgent := acpprofile.NormalizeAgentID(agentID)
 	if normalizedAgent == "" {
-		return errors.New("ACP agent id is required")
+		return errs.New("ACP agent id is required")
 	}
 	projectPath = strings.TrimSpace(projectPath)
 
@@ -788,17 +799,17 @@ func (p *SessionPool) ResolveRuntimeToolContext(botID, runtimeID, toolToken stri
 // the input with session metadata applied.
 func (p *SessionPool) prepareInput(ctx context.Context, input PromptInput) (PromptInput, error) {
 	if p == nil || p.runner == nil || p.bots == nil {
-		return PromptInput{}, errors.New("ACP session pool is not configured")
+		return PromptInput{}, errs.New("ACP session pool is not configured")
 	}
 	if strings.TrimSpace(input.SessionID) == "" {
-		return PromptInput{}, errors.New("session_id is required")
+		return PromptInput{}, errs.New("session_id is required")
 	}
 	resolved, err := p.resolveSessionMetadata(ctx, input)
 	if err != nil {
 		return PromptInput{}, err
 	}
 	if strings.TrimSpace(resolved.BotID) == "" {
-		return PromptInput{}, errors.New("bot_id is required")
+		return PromptInput{}, errs.New("bot_id is required")
 	}
 	if _, _, _, _, _, err := p.resolveAgentSetup(ctx, resolved.BotID, resolved.AgentID); err != nil {
 		return PromptInput{}, err
@@ -845,7 +856,7 @@ func (p *SessionPool) Prompt(ctx context.Context, input PromptInput) (client.Pro
 		}
 		return result, err
 	}
-	return client.PromptResult{}, errors.New("ACP runtime is restarting, retry the prompt")
+	return client.PromptResult{}, errs.New("ACP runtime is restarting, retry the prompt")
 }
 
 func (p *SessionPool) promptOnHandle(ctx context.Context, h *runtimeHandle, input PromptInput) (client.PromptResult, bool, error) {
@@ -1251,7 +1262,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 	identity := func() (agentID, projectPath, runtimeOwnerAccountID string, err error) {
 		agentID = acpprofile.NormalizeAgentID(input.AgentID)
 		if agentID == "" {
-			err = errors.New("ACP agent id is required")
+			err = errs.New("ACP agent id is required")
 			return
 		}
 		projectPath = strings.TrimSpace(input.ProjectPath)
@@ -1260,7 +1271,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 			runtimeOwnerAccountID = strings.TrimSpace(input.ChannelIdentityID)
 		}
 		if runtimeOwnerAccountID == "" {
-			err = runtimeOwnerMissingError()
+			err = ErrRuntimeOwnerMissing
 		}
 		return
 	}
@@ -1376,7 +1387,7 @@ func (p *SessionPool) runtimeForSession(ctx context.Context, input PromptInput) 
 		_ = p.closeHandle(h) //nolint:contextcheck // lifecycle close uses the handle owner context.
 		attempt++
 	}
-	return nil, errors.New("ACP runtime is restarting, retry the request")
+	return nil, errs.New("ACP runtime is restarting, retry the request")
 }
 
 type startOptions struct {
@@ -1398,7 +1409,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 	}
 	if h.closed {
 		h.state.Unlock()
-		return errors.New("ACP runtime was closed during startup")
+		return errs.New("ACP runtime was closed during startup")
 	}
 	h.startCancel = cancelStart
 	h.state.Unlock()
@@ -1542,7 +1553,7 @@ func (p *SessionPool) startRuntime(ctx context.Context, h *runtimeHandle, opts s
 			p.logger.WarnContext(ctx, "failed to close ACP session after startup cancellation",
 				slog.Any("error", closeErr), slog.String("runtime_id", h.id))
 		}
-		return errors.New("ACP runtime was closed during startup")
+		return errs.New("ACP runtime was closed during startup")
 	}
 	h.session = sess
 	h.nativeHead = canonicalHead
@@ -1716,7 +1727,7 @@ func (p *SessionPool) BeginSessionHistoryReset(ctx context.Context, botID, sessi
 	botID = strings.TrimSpace(botID)
 	sessionID = strings.TrimSpace(sessionID)
 	if botID == "" || sessionID == "" {
-		return nil, nil, errors.New("bot_id and session_id are required for ACP history reset")
+		return nil, nil, errs.New("bot_id and session_id are required for ACP history reset")
 	}
 	for {
 		p.mu.Lock()
@@ -1762,7 +1773,7 @@ func (p *SessionPool) BeginBotHistoryReset(ctx context.Context, botID string) (c
 	}
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
-		return nil, nil, errors.New("bot_id is required for ACP history reset")
+		return nil, nil, errs.New("bot_id is required for ACP history reset")
 	}
 	for {
 		p.mu.Lock()
@@ -2221,10 +2232,10 @@ func (p *SessionPool) resolveSessionMetadata(ctx context.Context, input PromptIn
 		return input, fmt.Errorf("load ACP session metadata: %w", err)
 	}
 	if !sess.IsACP {
-		return input, fmt.Errorf("session %s is not an ACP agent session", input.SessionID)
+		return input, errs.New(fmt.Sprintf("session %s is not an ACP agent session", input.SessionID))
 	}
 	if input.BotID != "" && sess.BotID != "" && input.BotID != sess.BotID {
-		return input, fmt.Errorf("session %s does not belong to bot %s", input.SessionID, input.BotID)
+		return input, errs.New(fmt.Sprintf("session %s does not belong to bot %s", input.SessionID, input.BotID))
 	}
 	if input.BotID == "" {
 		input.BotID = sess.BotID
@@ -2257,32 +2268,18 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 	agentID = acpprofile.NormalizeAgentID(agentID)
 	profile, ok := acpprofile.Lookup(agentID)
 	if !ok {
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-			feedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotFound",
-			fmt.Sprintf("Unknown ACP agent %q", agentID),
-			map[string]string{"agent_id": agentID},
-		)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 	}
 	bot, err := p.bots.Get(ctx, botID)
 	if err != nil {
 		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("load bot ACP setup: %w", err)
 	}
 	if strings.TrimSpace(bot.Status) == bots.BotStatusDeleting {
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("bot %s is not ready for ACP runtime (status %q)", botID, bot.Status)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, errs.New(fmt.Sprintf("bot %s is not ready for ACP runtime (status %q)", botID, bot.Status))
 	}
 	setup := acpprofile.ParseAgentSetup(bot.Metadata, agentID)
 	if !setup.Enabled {
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-			feedback.CodeAgentNotEnabled,
-			"agent_not_enabled",
-			http.StatusForbidden,
-			"chat.externalAgent.agentNotEnabled",
-			fmt.Sprintf("ACP agent %q is not enabled for this bot", agentID),
-			map[string]string{"agent_id": agentID},
-		)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %q", ErrAgentNotEnabled, agentID)
 	}
 	workspaceInfo, err := p.runner.WorkspaceInfo(ctx, botID)
 	if err != nil {
@@ -2295,37 +2292,14 @@ func (p *SessionPool) resolveAgentSetup(ctx context.Context, botID, agentID stri
 		mode = client.SetupModeAPIKey
 	}
 	if !profileSupportsSetupMode(profile, mode) {
-		reason := fmt.Sprintf("does not support setup mode %q", mode)
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-			feedback.CodeAgentNotConfigured,
-			reason,
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			fmt.Sprintf("%s %s", profile.DisplayName, reason),
-			map[string]string{"agent_id": agentID, "setup_mode": string(mode)},
-		)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %s does not support setup mode %q", ErrAgentNotConfigured, profile.DisplayName, mode)
 	}
 	if !profileSupportsBackend(profile, workspaceInfo.Backend) {
-		reason := fmt.Sprintf("does not support workspace backend %q", workspaceInfo.Backend)
-		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-			feedback.CodeAgentNotConfigured,
-			reason,
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			fmt.Sprintf("%s %s", profile.DisplayName, reason),
-			map[string]string{"agent_id": agentID, "workspace_backend": workspaceInfo.Backend},
-		)
+		return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %s does not support workspace backend %q", ErrAgentNotConfigured, profile.DisplayName, workspaceInfo.Backend)
 	}
 	if mode != client.SetupModeSelf {
 		if err := validateManagedFields(profile, setup.Managed, mode); err != nil {
-			return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, feedback.New(
-				feedback.CodeAgentNotConfigured,
-				"missing_managed_field",
-				http.StatusBadRequest,
-				"chat.externalAgent.agentNotConfigured",
-				err.Error(),
-				map[string]string{"agent_id": agentID},
-			)
+			return bots.Bot{}, acpprofile.Profile{}, acpprofile.AgentSetup{}, "", bridge.WorkspaceInfo{}, fmt.Errorf("%w: %w", ErrAgentNotConfigured, err)
 		}
 	}
 	return bot, profile, setup, mode, workspaceInfo, nil
@@ -2346,7 +2320,7 @@ func validateManagedFields(profile acpprofile.Profile, managed map[string]string
 	if id == "" {
 		id = "managed field"
 	}
-	return fmt.Errorf("%s required", id)
+	return errs.New(id + " required")
 }
 
 // stableToolIdentity is the only identity baked into the agent process
@@ -2525,17 +2499,6 @@ func (p *SessionPool) runtimeSyncGuard(botID string, expectedBotEpoch int64) cli
 	return func(ctx context.Context, fn func(context.Context) error) error {
 		return p.stateStore.GuardRuntimeSync(ctx, botID, expectedBotEpoch, fn)
 	}
-}
-
-func runtimeOwnerMissingError() *feedback.Error {
-	return feedback.New(
-		feedback.CodeRuntimeOwnerMissing,
-		"missing_runtime_owner",
-		http.StatusConflict,
-		"chat.externalAgent.runtimeOwnerMissing",
-		"External Agent runtime owner is missing; start a new External Agent session",
-		nil,
-	)
 }
 
 type promptToolEventSink struct {

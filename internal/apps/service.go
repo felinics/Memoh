@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,6 +66,8 @@ type DependencyManager interface {
 	Install(ctx context.Context, botID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Update(ctx context.Context, botID, depID, version string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
 	Remove(ctx context.Context, botID, depID string, sink workspacedeps.LogSink) (workspacedeps.OperationResult, error)
+	InstallOrder(ctx context.Context, depIDs []string) ([]string, error)
+	Dependents(ctx context.Context, botID, depID string) ([]string, error)
 	// EnsureRunning starts a stopped bot workspace before a mutating step.
 	EnsureRunning(ctx context.Context, botID string) error
 }
@@ -296,26 +299,43 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 		sink.Send(Event{Type: EventStepDone, Kind: step.Kind, ID: step.ID, Status: step.Status, Version: step.Version, Message: step.Error})
 	}
 
-	// 1. Dependencies: link present ones, install missing ones.
+	// 1. Dependencies: link present ones, install missing ones. Their
+	// requires run first as steps of their own; only the App's direct
+	// dependencies are referenced by the installation.
 	states, statesErr := s.dependencyStates(ctx, botID)
-	for _, depID := range release.Dependencies {
-		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
-		if err := s.store.AddDependencyRef(ctx, inst.ID, depID); err != nil {
-			return result, s.failInstallation(ctx, inst, fail("record dependency reference "+depID, err))
+	order := release.Dependencies
+	if s.dependencies != nil && statesErr == nil {
+		// A failed expansion leaves the direct list; Install then reports
+		// the same problem for the dependency that has it.
+		if expanded, err := s.dependencies.InstallOrder(ctx, release.Dependencies); err == nil {
+			order = expanded
 		}
+	}
+	failed := map[string]bool{}
+	for _, depID := range order {
+		sink.Send(Event{Type: EventStep, Kind: KindDependency, ID: depID})
+		if slices.Contains(release.Dependencies, depID) {
+			if err := s.store.AddDependencyRef(ctx, inst.ID, depID); err != nil {
+				return result, s.failInstallation(ctx, inst, fail("record dependency reference "+depID, err))
+			}
+		}
+		entry, known := states[depID]
 		switch {
 		case s.dependencies == nil:
 			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: ErrDependenciesUnavailable.Error()})
 		case statesErr != nil:
 			record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: publicCause(statesErr)})
+		case known && dependencyPresent(entry):
+			record(StepResult{Kind: KindDependency, ID: depID, Status: StepLinked, Version: entry.InstalledVersion})
 		default:
-			entry, known := states[depID]
-			if known && dependencyPresent(entry) {
-				record(StepResult{Kind: KindDependency, ID: depID, Status: StepLinked, Version: entry.InstalledVersion})
+			if blocked := failedPrerequisite(entry, failed); blocked != "" {
+				failed[depID] = true
+				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: "prerequisite " + blocked + " failed"})
 				continue
 			}
 			res, err := s.dependencies.Install(ctx, botID, depID, "", logSink(sink, KindDependency, depID))
 			if err != nil {
+				failed[depID] = true
 				record(StepResult{Kind: KindDependency, ID: depID, Status: StepFailed, Error: err.Error()})
 				continue
 			}
@@ -414,6 +434,17 @@ func indexEntries(result workspacedeps.ListResult) map[string]workspacedeps.Entr
 		states[entry.Dependency.ID] = entry
 	}
 	return states
+}
+
+// failedPrerequisite returns the first requirement of entry that already
+// failed in this operation; installing entry would only repeat that failure.
+func failedPrerequisite(entry workspacedeps.Entry, failed map[string]bool) string {
+	for _, required := range entry.Dependency.Requires {
+		if failed[required] {
+			return required
+		}
+	}
+	return ""
 }
 
 // dependencyPresent reports whether a usable copy of the dependency exists.

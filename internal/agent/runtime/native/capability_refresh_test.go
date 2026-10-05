@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -130,7 +129,7 @@ func TestCapabilityRefreshSurvivesMidStreamRetry(t *testing.T) {
 				&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls},
 			), nil
 		case 2:
-			return nil, errors.New("api error 429: engine overloaded")
+			return nil, rateLimitedErr()
 		case 3:
 			found := false
 			for _, tool := range params.Tools {

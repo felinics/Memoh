@@ -335,15 +335,14 @@ func (a *QQAdapter) handleDispatch(ctx context.Context, cfg channel.ChannelConfi
 	}
 }
 
-func (a *QQAdapter) dispatchInbound(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, inbound InboundEvent) {
+func (*QQAdapter) dispatchInbound(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, inbound InboundEvent) {
 	msg, ok := eventToInboundMessage(inbound, cfg.BotID)
 	if !ok {
 		return
 	}
 	go func() {
-		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.ErrorContext(ctx, "qq handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 	}()
 }
 

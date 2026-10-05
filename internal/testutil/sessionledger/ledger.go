@@ -203,7 +203,6 @@ func (f *Store) PrepareFinish(_ context.Context, params ledger.PrepareFinishPara
 		run.State = ledger.StateFinishing
 		run.ProposedState = params.State
 		run.ProposedErrorCode = params.ErrorCode
-		run.ProposedErrorMessage = params.ErrorMessage
 		run.FinishProposedAt = time.Now()
 	}
 	return *run, true, nil
@@ -219,9 +218,14 @@ func (f *Store) Finalize(_ context.Context, params ledger.FinalizeParams) (ledge
 	if !ok || run.FencingToken != params.FencingToken || run.State.Terminal() {
 		return ledger.Run{}, false, nil
 	}
+	if params.ExpectedState != "" && run.State != params.ExpectedState {
+		return ledger.Run{}, false, nil
+	}
 	state := params.State
 	errorCode := params.ErrorCode
-	errorMessage := params.ErrorMessage
+	// Like FinalizeSessionRun, a finalize writes no message of its own and
+	// keeps the one a proposal holds.
+	errorMessage := ""
 	if run.State == ledger.StateFinishing {
 		state = run.ProposedState
 		errorCode = run.ProposedErrorCode
@@ -229,7 +233,6 @@ func (f *Store) Finalize(_ context.Context, params ledger.FinalizeParams) (ledge
 	} else if state == ledger.StateLost && !run.AbortRequestedAt.IsZero() {
 		state = ledger.StateAborted
 		errorCode = ""
-		errorMessage = ""
 	}
 	run.State = state
 	run.ErrorCode = errorCode

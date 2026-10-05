@@ -303,6 +303,51 @@ func TestClientWriteRawDoesNotReplaceTargetOnReaderFailure(t *testing.T) {
 	}
 }
 
+// writeRawUnavailableTestServer ends every WriteRaw stream with Unavailable,
+// after the path chunk or after the whole payload.
+type writeRawUnavailableTestServer struct {
+	pb.UnimplementedContainerServiceServer
+	drain bool
+}
+
+func (s *writeRawUnavailableTestServer) WriteRaw(stream pb.ContainerService_WriteRawServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
+	}
+	for s.drain {
+		if _, err := stream.Recv(); err != nil {
+			break
+		}
+	}
+	return status.Error(codes.Unavailable, "bridge restarting")
+}
+
+func TestClientWriteRawMapsStreamStatus(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		drain   bool
+		payload int
+	}{
+		// The stream ends while chunks are still being sent, so Send fails.
+		{name: "during send", payload: 8 << 20},
+		// The stream ends after the payload, so CloseAndRecv fails.
+		{name: "at close", drain: true, payload: 16},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := newTestClient(t, &writeRawUnavailableTestServer{drain: tc.drain})
+			_, err := client.WriteRaw(context.Background(), "/data/file", bytes.NewReader(make([]byte, tc.payload)))
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("WriteRaw() error = %v, want ErrUnavailable", err)
+			}
+		})
+	}
+}
+
 func TestClientTunnelSurvivesDialContextCancellation(t *testing.T) {
 	t.Parallel()
 

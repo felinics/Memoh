@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const maxAppMetadataBytes = 8 * 1024 * 1024
@@ -112,7 +114,7 @@ func (c *Client) FetchCurrentApp(ctx context.Context, registryID, appID string) 
 		return AppDescriptor{}, err
 	}
 	if !isCanonicalSHA256(descriptor.Revision) {
-		return AppDescriptor{}, invalidResponse("decode App descriptor", errors.New("revision is invalid"))
+		return AppDescriptor{}, invalidResponse("decode App descriptor", errs.NewDependency("revision is invalid"))
 	}
 	for index := range descriptor.Skills {
 		descriptor.Skills[index].Artifact.DownloadURL = "/api/artifacts/skill/" + descriptor.Skills[index].Artifact.Digest
@@ -143,7 +145,7 @@ func (c *Client) DownloadArtifact(ctx context.Context, artifact ArtifactDownload
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, &ProtocolError{
 			Kind: ErrorInvalidResponse, Status: resp.StatusCode, Op: "download Artifact",
-			Err: errors.New("artifact was not found"),
+			Err: errs.NewDependency("artifact was not found"),
 		}
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -153,22 +155,22 @@ func (c *Client) DownloadArtifact(ctx context.Context, artifact ArtifactDownload
 		}
 		return nil, &ProtocolError{
 			Kind: kind, Status: resp.StatusCode, Op: "download Artifact",
-			Err: fmt.Errorf("supermarket returned status %d", resp.StatusCode),
+			Err: errs.NewDependency(fmt.Sprintf("supermarket returned status %d", resp.StatusCode)),
 		}
 	}
 	if resp.ContentLength >= 0 && resp.ContentLength != artifact.Size {
-		return nil, invalidResponse("download Artifact", errors.New("content length does not match its descriptor"))
+		return nil, invalidResponse("download Artifact", errs.NewDependency("content length does not match its descriptor"))
 	}
 	content, err := io.ReadAll(io.LimitReader(resp.Body, artifact.Size+1))
 	if err != nil {
-		return nil, &ProtocolError{Kind: ErrorUnavailable, Op: "read Artifact", Err: err}
+		return nil, &ProtocolError{Kind: ErrorUnavailable, Op: "read Artifact", Err: errs.WrapDependency(err, "")}
 	}
 	if int64(len(content)) != artifact.Size {
-		return nil, invalidResponse("download Artifact", errors.New("size does not match its descriptor"))
+		return nil, invalidResponse("download Artifact", errs.NewDependency("size does not match its descriptor"))
 	}
 	digest := sha256.Sum256(content)
 	if hex.EncodeToString(digest[:]) != artifact.Digest {
-		return nil, invalidResponse("download Artifact", errors.New("SHA-256 verification failed"))
+		return nil, invalidResponse("download Artifact", errs.NewDependency("SHA-256 verification failed"))
 	}
 	return content, nil
 }
@@ -185,15 +187,15 @@ func (c *Client) fetchJSONPayload(ctx context.Context, requestPath string, limit
 	if resp.StatusCode != http.StatusOK {
 		return nil, &ProtocolError{
 			Kind: ErrorUnavailable, Status: resp.StatusCode, Op: op,
-			Err: fmt.Errorf("supermarket returned status %d", resp.StatusCode),
+			Err: errs.NewDependency(fmt.Sprintf("supermarket returned status %d", resp.StatusCode)),
 		}
 	}
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, &ProtocolError{Kind: ErrorUnavailable, Op: op, Err: err}
+		return nil, &ProtocolError{Kind: ErrorUnavailable, Op: op, Err: errs.WrapDependency(err, "")}
 	}
 	if int64(len(payload)) > limit {
-		return nil, invalidResponse(op, errors.New("response is too large"))
+		return nil, invalidResponse(op, errs.NewDependency("response is too large"))
 	}
 	return payload, nil
 }
@@ -201,7 +203,7 @@ func (c *Client) fetchJSONPayload(ctx context.Context, requestPath string, limit
 func decodeJSONPayload(payload []byte, target any, op string) error {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	if err := decoder.Decode(target); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return invalidResponse(op, errors.New("response is malformed"))
+		return invalidResponse(op, errs.NewDependency("response is malformed"))
 	}
 	return nil
 }
@@ -226,7 +228,7 @@ func (c *Client) getImmutableJSON(
 	}
 	digest := sha256.Sum256(payload)
 	if hex.EncodeToString(digest[:]) != revision {
-		return invalidResponse("verify immutable release", errors.New("SHA-256 verification failed"))
+		return invalidResponse("verify immutable release", errs.NewDependency("SHA-256 verification failed"))
 	}
 	return decodeJSONPayload(payload, target, "decode immutable release")
 }

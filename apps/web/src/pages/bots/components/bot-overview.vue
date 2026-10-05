@@ -280,7 +280,6 @@ import VChart from 'vue-echarts'
 import { useDark } from '@vueuse/core'
 import { Badge, Button, CalloutBanner, MetricReadout, PageShell, SettingsRow, SettingsSection, Skeleton } from '@felinic/ui'
 import {
-  getBotsById,
   getBotsByBotIdSettings,
   getBotsByBotIdMemoryStatus,
   getBotsByBotIdTokenUsage,
@@ -292,6 +291,7 @@ import {
   type ChannelChannelConfig,
   type HandlersDailyTokenUsage,
 } from '@memohai/sdk'
+import { useBotQuery } from '@/composables/api/useBot'
 import BotChecksPanel from './bot-checks-panel.vue'
 import ChannelIcon from '@/components/channel-icon/index.vue'
 import { channelTypeDisplayName } from '@/utils/channel-type-label'
@@ -315,14 +315,7 @@ const { t } = useI18n()
 const routeIdentifier = computed(() => route.params.botName as string)
 const checksOpen = ref(false)
 
-const { data: bot } = useQuery({
-  key: () => ['bot', routeIdentifier.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!routeIdentifier.value,
-})
+const { data: bot } = useBotQuery(routeIdentifier)
 const botId = computed(() => bot.value?.id ?? '')
 
 const { hasIssue, issueTitle } = useBotStatusMeta(bot, t)
@@ -410,11 +403,7 @@ const reminders = computed<BotReminder[]>(() => {
   return list
 })
 
-const showMemorySection = computed(() => !!settings.value?.memory_provider_id)
-
-const memoryIsBuiltin = computed(() =>
-  (memoryStatus.value?.provider_type ?? 'builtin') === 'builtin',
-)
+const showMemorySection = computed(() => !!settings.value?.memory_enabled)
 
 const memoryMetricCards = computed(() => {
   const status = memoryStatus.value
@@ -427,10 +416,8 @@ const memoryMetricCards = computed(() => {
     },
     {
       key: 'edges',
-      label: memoryIsBuiltin.value
-        ? t('bots.settings.memoryGraphEdges')
-        : t('bots.settings.memorySourceEntries'),
-      value: formatCount(memoryIsBuiltin.value ? status?.edge_count : status?.source_count),
+      label: t('bots.settings.memoryGraphEdges'),
+      value: formatCount(status?.edge_count),
     },
     {
       key: 'sources',
@@ -442,7 +429,7 @@ const memoryMetricCards = computed(() => {
 
 const memoryStatsNote = computed(() => {
   if (memoryLoading.value) return ''
-  if (!settings.value?.memory_provider_id) return ''
+  if (!settings.value?.memory_enabled) return ''
   if (memoryStatus.value) return ''
   return t('bots.overview.memoryNoStats')
 })

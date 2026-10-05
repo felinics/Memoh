@@ -237,7 +237,7 @@ import { filterInstalledApps, uninstalledApps } from './supermarket-apps'
 /** The frame spans both text lines and their gap; the logo keeps the market card glyph size. */
 const appIconFrameClass = 'flex size-9.5 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent'
 
-const appRowClass = 'flex min-w-0 cursor-pointer items-start gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-3 py-2.5 transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-style: App cards reuse the schedule sidebar card surface and hover token while retaining their content layout. */
+const appRowClass = 'flex min-w-0 cursor-pointer items-start gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-3 py-2.5 transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' /* ui-allow-style: App cards reuse the schedule sidebar card surface (bordered in both modes — rationale in schedule-item.vue) and hover token while retaining their content layout. */
 
 const props = defineProps<{ botId: string, canManage: boolean }>()
 const { t, locale } = useI18n()

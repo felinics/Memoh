@@ -3,7 +3,6 @@ package native
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -116,7 +115,7 @@ func TestAgentStreamMidStreamRetryAppliesAccumulatedSuffixHygiene(t *testing.T) 
 		captured = append(captured, cloneGenerateParams(params))
 		return streamScript(&invocations,
 			scriptToolCall("hygiene-call-1", "lookup"),
-			scriptStreamError("hygiene-partial", "api error 429: engine overloaded"),
+			scriptStreamError("hygiene-partial", rateLimitedErr()),
 			scriptText("recovered"),
 		)(ctx, params)
 	}
@@ -207,7 +206,7 @@ func TestAgentStreamMidStreamRetryProtectedOverflowFencesProvider(t *testing.T) 
 	provider := &atomicMockProvider{}
 	provider.stream = streamScript(&invocations,
 		scriptToolCall("fence-call-1", "lookup"),
-		scriptStreamError("", "api error 429: engine overloaded"),
+		scriptStreamError("", rateLimitedErr()),
 	)
 	a := New(Deps{})
 	a.SetToolProviders(mockToolLoopTools())
@@ -283,7 +282,7 @@ func TestAgentStreamRetryPreservesStepDynamicHookContext(t *testing.T) {
 					}},
 				}, nil
 			case 2:
-				return sdk.ModelResult{}, errors.New("api error 500")
+				return sdk.ModelResult{}, serverErr()
 			default:
 				return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 			}

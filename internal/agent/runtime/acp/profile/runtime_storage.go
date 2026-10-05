@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path"
 	"strings"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // RuntimeStoragePolicy is the persistent/runtime boundary for an ACP agent:
@@ -41,28 +43,28 @@ func genericACPRuntimeStorage() RuntimeStoragePolicy {
 func validateRuntimeStorage(p Profile) error {
 	policy := p.RuntimeStorage
 	if len(policy.AgentEnv) == 0 {
-		return fmt.Errorf("profile %q has no runtime environment policy", p.ID)
+		return errs.New(fmt.Sprintf("profile %q has no runtime environment policy", p.ID))
 	}
 	seenEnv := make(map[string]struct{}, len(policy.AgentEnv))
 	for _, binding := range policy.AgentEnv {
 		name := strings.TrimSpace(binding.Name)
 		if name == "" || strings.ContainsAny(name, "=\x00") {
-			return fmt.Errorf("profile %q has invalid runtime environment name %q", p.ID, binding.Name)
+			return errs.New(fmt.Sprintf("profile %q has invalid runtime environment name %q", p.ID, binding.Name))
 		}
 		if _, duplicate := seenEnv[name]; duplicate {
-			return fmt.Errorf("profile %q declares runtime environment %q more than once", p.ID, name)
+			return errs.New(fmt.Sprintf("profile %q declares runtime environment %q more than once", p.ID, name))
 		}
 		seenEnv[name] = struct{}{}
 		hasRuntimePath := strings.TrimSpace(binding.RuntimePath) != ""
 		hasValue := strings.TrimSpace(binding.Value) != ""
 		if hasRuntimePath == hasValue {
-			return fmt.Errorf("profile %q runtime environment %q must set exactly one path source", p.ID, name)
+			return errs.New(fmt.Sprintf("profile %q runtime environment %q must set exactly one path source", p.ID, name))
 		}
 		if hasRuntimePath && !safeRelativeRuntimePath(binding.RuntimePath) {
-			return fmt.Errorf("profile %q runtime environment %q escapes the runtime root", p.ID, name)
+			return errs.New(fmt.Sprintf("profile %q runtime environment %q escapes the runtime root", p.ID, name))
 		}
 		if hasValue && strings.ContainsAny(binding.Value, "\x00\r\n") {
-			return fmt.Errorf("profile %q runtime environment %q has an invalid fixed value", p.ID, name)
+			return errs.New(fmt.Sprintf("profile %q runtime environment %q has an invalid fixed value", p.ID, name))
 		}
 	}
 

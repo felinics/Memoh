@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,5 +179,15 @@ func TestIsUniqueViolation(t *testing.T) {
 				t.Errorf("IsUniqueViolation() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseUUIDReportsInvalidUUID(t *testing.T) {
+	_, err := ParseUUID("not-a-uuid")
+	if !errors.Is(err, ErrInvalidUUID) {
+		t.Fatalf("errors.Is(%v, ErrInvalidUUID) = false", err)
+	}
+	if !strings.HasPrefix(err.Error(), "invalid UUID: ") {
+		t.Fatalf("message changed: %q", err.Error())
 	}
 }

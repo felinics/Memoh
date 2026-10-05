@@ -125,7 +125,7 @@ func TestSpawnAdapterGenerateWithWatchdogClearsRecoveredStreamError(t *testing.T
 			parts <- &sdk.StartPart{}
 			parts <- &sdk.StartStepPart{}
 			if call == 1 {
-				parts <- &sdk.ErrorPart{Error: errors.New("api error 500")}
+				parts <- &sdk.ErrorPart{Error: &sdk.APIError{StatusCode: 500, Kind: sdk.KindServerError}}
 				close(parts)
 				return parts, nil
 			}
@@ -260,7 +260,7 @@ func assertSpawnAbortObservedAsFailure(t *testing.T, events []StreamEvent) {
 	for i, event := range events {
 		switch event.Type {
 		case EventError:
-			if event.Error == "agent run aborted" {
+			if errors.Is(event.Cause, errSpawnAgentAborted) && event.Error == "" {
 				errorIndex = i
 			}
 		case EventAgentAbort:

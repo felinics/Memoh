@@ -78,6 +78,22 @@ export function shouldRefreshACPComposerConfig(
     && ACP_STALE_CONFIG_CODES.has(result.errorCode)
 }
 
+// What a failed send hands back to the composer: the draft and the error shown
+// above it. Only a failure before the server accepted the message returns
+// anything. An accepted message stays in the transcript with its failure, so
+// the composer keeps its cleared draft and shows no error.
+export function composerRestoreForSendResult(
+  result: SendMessageResult,
+  sentText: string,
+  fallbackError: string,
+): { input: string, error: string } | null {
+  if (result.ok || result.stage !== 'startup') return null
+  return {
+    input: result.restoreInput ?? sentText,
+    error: result.error || fallbackError,
+  }
+}
+
 // ── Composer (model, effort) pair draft (issue #879) ─────────────────────
 // The welcome composer keeps its picked pair in a per-bot localStorage draft
 // until the pair is durably handed to the server. The draft is consumed ONLY

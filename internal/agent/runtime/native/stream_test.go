@@ -34,8 +34,8 @@ func (agentStreamTestProvider) ListModels(context.Context) ([]sdk.Model, error) 
 	return nil, nil
 }
 
-func (agentStreamTestProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+func (agentStreamTestProvider) Test(context.Context) error {
+	return nil
 }
 
 func (agentStreamTestProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {

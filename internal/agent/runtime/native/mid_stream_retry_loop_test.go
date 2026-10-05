@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -49,7 +50,7 @@ func scriptText(text string) func(chan<- sdk.StreamPart) {
 
 // scriptStreamError fails the step mid-stream: any partial text is poisoned
 // (never committed), mirroring how a real provider 429 surfaces.
-func scriptStreamError(partialText, errMsg string) func(chan<- sdk.StreamPart) {
+func scriptStreamError(partialText string, err error) func(chan<- sdk.StreamPart) {
 	return func(ch chan<- sdk.StreamPart) {
 		ch <- &sdk.StartPart{}
 		ch <- &sdk.StartStepPart{}
@@ -57,8 +58,22 @@ func scriptStreamError(partialText, errMsg string) func(chan<- sdk.StreamPart) {
 			ch <- &sdk.TextStartPart{ID: "mock"}
 			ch <- &sdk.TextDeltaPart{ID: "mock", Text: partialText}
 		}
-		ch <- &sdk.ErrorPart{Error: errors.New(errMsg)}
+		ch <- &sdk.ErrorPart{Error: err}
 	}
+}
+
+// rateLimitedErr and serverErr are provider answers the loop retries;
+// rejectedErr is one it does not.
+func rateLimitedErr() error {
+	return &sdk.APIError{Provider: "mock", StatusCode: 429, Kind: sdk.KindRateLimited, Message: "engine overloaded"}
+}
+
+func serverErr() error {
+	return &sdk.APIError{Provider: "mock", StatusCode: 500, Kind: sdk.KindServerError}
+}
+
+func rejectedErr() error {
+	return &sdk.APIError{Provider: "mock", StatusCode: 400, Kind: sdk.KindUnknown, Message: "bad request"}
 }
 
 func scriptToolCall(callID, toolName string) func(chan<- sdk.StreamPart) {
@@ -121,7 +136,7 @@ func TestAgentStreamMidStreamRetryExhaustsAttempts(t *testing.T) {
 		captured = append(captured, cloneGenerateParams(params))
 		return streamScript(&invocations,
 			scriptToolCall("exhaust-call-1", "lookup"),
-			scriptStreamError("exhaust-partial", "api error 429: engine overloaded"),
+			scriptStreamError("exhaust-partial", rateLimitedErr()),
 		)(ctx, params)
 	}
 	a := New(Deps{})
@@ -145,20 +160,20 @@ func TestAgentStreamMidStreamRetryExhaustsAttempts(t *testing.T) {
 	if got := countEventType(events, EventRetry); got != 3 {
 		t.Fatalf("EventRetry count = %d, want MaxAttempts 3", got)
 	}
-	gaveUp := false
+	// A retried attempt publishes only its EventRetry; the give-up is the one
+	// error event, and its cause is the last attempt's provider failure.
+	if got := countEventType(events, EventError); got != 1 {
+		t.Fatalf("EventError count = %d, want only the give-up", got)
+	}
+	var gaveUp error
 	for _, ev := range events {
-		if ev.Type == EventError && strings.Contains(ev.Error, "all 3 attempts failed") {
-			gaveUp = true
+		if ev.Type == EventError {
+			gaveUp = ev.Cause
 		}
 	}
-	if !gaveUp {
-		t.Fatalf("events = %#v, want the giving-up error", events)
-	}
-	// Every failed attempt publishes one EventError that its EventRetry then
-	// retracts (initial failure + MaxAttempts retries); the give-up adds the
-	// last one. Nothing is emitted twice.
-	if got, want := countEventType(events, EventError), 1+3+1; got != want {
-		t.Fatalf("EventError count = %d, want %d (one per failed attempt plus the give-up)", got, want)
+	var apiErr *sdk.APIError
+	if !errors.As(gaveUp, &apiErr) || apiErr.Kind != sdk.KindRateLimited || !strings.Contains(gaveUp.Error(), "model call retries exhausted") {
+		t.Fatalf("give-up cause = %v, want the exhausted retries of the rate-limited call", gaveUp)
 	}
 	terminal := events[len(events)-1]
 	if terminal.Type != EventAgentAbort {
@@ -197,8 +212,8 @@ func TestAgentStreamMidStreamRetryStopsOnNonRetryableError(t *testing.T) {
 	var invocations atomic.Int32
 	provider := &atomicMockProvider{}
 	provider.stream = streamScript(&invocations,
-		scriptStreamError("", "api error 429: engine overloaded"),
-		scriptStreamError("", "api error 400: bad request"),
+		scriptStreamError("", rateLimitedErr()),
+		scriptStreamError("", rejectedErr()),
 	)
 	a := New(Deps{})
 
@@ -233,7 +248,7 @@ func TestAgentStreamMidStreamRetryBackoffHonorsContextCancel(t *testing.T) {
 	var invocations atomic.Int32
 	provider := &atomicMockProvider{}
 	provider.stream = streamScript(&invocations,
-		scriptStreamError("", "api error 429: engine overloaded"),
+		scriptStreamError("", rateLimitedErr()),
 	)
 	a := New(Deps{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -300,7 +315,7 @@ func TestAgentStreamMidStreamRetryChainRecovers(t *testing.T) {
 					}},
 				}, nil
 			case 2, 3:
-				return sdk.ModelResult{}, errors.New("api error 429: engine overloaded")
+				return sdk.ModelResult{}, rateLimitedErr()
 			default:
 				return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 			}
@@ -350,5 +365,71 @@ func TestAgentStreamMidStreamRetryChainRecovers(t *testing.T) {
 		if got := countToolResultText(callParams[idx].Messages, "large tool result"); got != 1 {
 			t.Fatalf("provider call %d tool result occurrences = %d, want 1", idx+1, got)
 		}
+	}
+}
+
+// A failed attempt the loop retries is recorded once, as an event: a WARN
+// record with the failure's attribution and text. The stream carries only the
+// retry, so a run that recovers publishes no error.
+func TestMidStreamRetryRecordsTheFailedAttemptAsAnEvent(t *testing.T) {
+	t.Parallel()
+
+	var invocations atomic.Int32
+	provider := &atomicMockProvider{}
+	provider.stream = streamScript(&invocations, scriptStreamError("", serverErr()), scriptText("recovered"))
+	handler := &lifecycleRecordingHandler{}
+	a := New(Deps{Logger: slog.New(handler)})
+
+	var events []StreamEvent
+	for ev := range a.Stream(context.Background(), RunConfig{
+		Model:            &sdk.Model{ID: "mock-model", Provider: provider},
+		Messages:         []sdk.Message{sdk.UserMessage("task")},
+		Identity:         SessionContext{BotID: "bot-1"},
+		ContextMutations: contextfrag.NewMutationLedger(),
+		Retry:            fastRetry,
+		RunID:            "run-retry",
+	}) {
+		events = append(events, ev)
+	}
+
+	if got := countEventType(events, EventError); got != 0 {
+		t.Fatalf("EventError count = %d, want none for a recovered run", got)
+	}
+	if terminal := events[len(events)-1]; terminal.Type != EventAgentEnd {
+		t.Fatalf("terminal event = %q, want %q", terminal.Type, EventAgentEnd)
+	}
+	var retries []StreamEvent
+	for _, ev := range events {
+		if ev.Type == EventRetry {
+			retries = append(retries, ev)
+		}
+	}
+	if len(retries) != 1 || retries[0].Attempt != 1 || retries[0].MaxAttempt != fastRetry.MaxAttempts ||
+		retries[0].Error != "" || retries[0].Code != "" || retries[0].Cause != nil {
+		t.Fatalf("retry events = %#v, want one carrying its counters alone", retries)
+	}
+
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	var recorded []slog.Record
+	for _, record := range handler.records {
+		if record.Level >= slog.LevelError {
+			t.Fatalf("record %q at %v, want no ERROR for a recovered run", record.Message, record.Level)
+		}
+		if record.Message == "model call failed, retrying" {
+			recorded = append(recorded, record)
+		}
+	}
+	if len(recorded) != 1 || recorded[0].Level != slog.LevelWarn {
+		t.Fatalf("retry records = %v, want one WARN event", recorded)
+	}
+	attrs := map[string]string{}
+	recorded[0].Attrs(func(attr slog.Attr) bool {
+		attrs[attr.Key] = attr.Value.String()
+		return true
+	})
+	if attrs["run_id"] != "run-retry" || attrs["attempt"] != "1" || attrs["max_attempts"] != "5" || attrs["fault"] != "dependency" ||
+		!strings.Contains(attrs["error"], "model stream: mock: 500") || attrs["error_source"] == "" {
+		t.Fatalf("retry record attrs = %v, want the attempt with the provider failure's attribution", attrs)
 	}
 }

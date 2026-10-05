@@ -210,6 +210,7 @@
       :open="confirm.open"
       :mode="confirm.mode"
       :item="confirm.item"
+      :prerequisites="confirmPrerequisites"
       @update:open="(value) => { confirm.open = value }"
       @confirm="onDependencyConfirmed"
     />
@@ -309,6 +310,7 @@ import {
   fetchDependencyScript,
   invalidateBotDependencies,
   rollbackDependency,
+  useBotDependenciesQuery,
   type DependencyItem,
   type DependencyOperationAction,
   type DependencyWorkspaceState,
@@ -328,6 +330,8 @@ import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   dependencyAllows,
   formatDependencyVersion,
+  missingPrerequisites,
+  prerequisiteRevisions,
   type DependencyConfirmMode,
   type DependencyMenuAction,
   type DependencyPrimaryAction,
@@ -656,6 +660,13 @@ const confirm = reactive<{
   definitionRevision: string
 }>({ open: false, mode: 'update', item: null, operation: 'update', definitionRevision: '' })
 
+// The full list includes prerequisites no App references directly.
+const { data: botDependencies } = useBotDependenciesQuery(botIdRef, undefined, () => confirm.open)
+const confirmPrerequisites = computed(() => {
+  if (!confirm.item || !botDependencies.value) return []
+  return missingPrerequisites(confirm.item, botDependencies.value.items ?? []).map(entry => dependencyName(entry))
+})
+
 function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operation: DependencyOperationAction) {
   confirm.item = item
   confirm.definitionRevision = item.definition_revision ?? ''
@@ -667,7 +678,10 @@ function openConfirm(item: DependencyItem, mode: DependencyConfirmMode, operatio
 function onDependencyConfirmed(version: string) {
   const item = confirm.item
   confirm.open = false
-  if (item) startDependency(item, confirm.operation, { version, definitionRevision: confirm.definitionRevision })
+  // Bind the prerequisites the dialog showed; before the list loads that is
+  // none, and the Server asks for a new review if one turns out missing.
+  const prerequisites = item ? prerequisiteRevisions(item, botDependencies.value?.items ?? []) : {}
+  if (item) startDependency(item, confirm.operation, { version, definitionRevision: confirm.definitionRevision, prerequisiteRevisions: prerequisites })
 }
 
 function onDependencyPrimary(item: DependencyItem, action: DependencyPrimaryAction) {

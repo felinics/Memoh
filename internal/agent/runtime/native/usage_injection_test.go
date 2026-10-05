@@ -82,8 +82,8 @@ func (*usageRecordingProvider) Name() string { return "usage-recording" }
 
 func (*usageRecordingProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
 
-func (*usageRecordingProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*usageRecordingProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*usageRecordingProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {

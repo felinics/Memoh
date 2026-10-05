@@ -171,3 +171,47 @@ func TestDecodeBackupSettingsIgnoresRetiredLanguage(t *testing.T) {
 		t.Fatal("export reintroduced the retired language setting")
 	}
 }
+
+func TestImportMemorySwitchCompatibility(t *testing.T) {
+	t.Parallel()
+
+	legacyProviders := `[
+		{"id":"builtin-1","provider":"builtin"},
+		{"id":"mem0-1","provider":"mem0"},
+		{"id":"viking-1","provider":"openviking"}
+	]`
+	cases := []struct {
+		name         string
+		raw          string
+		dependencies string
+		want         bool
+	}{
+		{name: "current archive on", raw: `{"memory_enabled":true}`, want: true},
+		{name: "current archive off", raw: `{"memory_enabled":false}`, want: false},
+		{name: "legacy builtin selection", raw: `{"memory_provider_id":"builtin-1"}`, dependencies: legacyProviders, want: true},
+		{name: "legacy mem0 selection", raw: `{"memory_provider_id":"mem0-1"}`, dependencies: legacyProviders, want: false},
+		{name: "legacy openviking selection", raw: `{"memory_provider_id":"viking-1"}`, dependencies: legacyProviders, want: false},
+		{name: "legacy selection without dependency file", raw: `{"memory_provider_id":"builtin-1"}`, want: true},
+		{name: "legacy no selection", raw: `{"memory_provider_id":""}`, dependencies: legacyProviders, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			state := &importState{entries: map[string]backupZipEntry{}}
+			if tc.dependencies != "" {
+				state.entries["dependencies/memory_providers.json"] = backupZipEntry{data: []byte(tc.dependencies)}
+			}
+			cfg, err := decodeBackupSettings([]byte(tc.raw))
+			if err != nil {
+				t.Fatalf("decodeBackupSettings() error = %v", err)
+			}
+			cfg = resolveLegacyMemoryProvider(state, cfg)
+			if cfg.MemoryEnabled != tc.want {
+				t.Fatalf("MemoryEnabled = %v, want %v", cfg.MemoryEnabled, tc.want)
+			}
+			if cfg.MemoryProviderID != "" {
+				t.Fatalf("archive-local provider id leaked into settings: %q", cfg.MemoryProviderID)
+			}
+		})
+	}
+}

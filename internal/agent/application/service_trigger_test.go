@@ -17,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/schedule"
 )
@@ -32,8 +33,8 @@ func (*silentTriggerProvider) Name() string { return "silent-trigger" }
 
 func (*silentTriggerProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
 
-func (*silentTriggerProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*silentTriggerProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*silentTriggerProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
@@ -378,13 +379,82 @@ func TestConsumeTriggeredStreamSurfacesStreamErrorWithoutTerminal(t *testing.T) 
 
 	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
 
+	providerErr := errors.New("provider boom")
 	events := make(chan native.StreamEvent, 1)
-	events <- native.StreamEvent{Type: native.EventError, Error: "provider boom"}
+	events <- native.StreamEvent{Type: native.EventError, Cause: providerErr}
 	close(events)
 
 	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "provider boom") {
-		t.Fatalf("consumeTriggeredStream() error = %v, want the provider error", err)
+	if apperror.CodeOf(err) != apperror.CodeAgentResponseInterrupted || !errors.Is(apperror.CauseOf(err), providerErr) {
+		t.Fatalf("consumeTriggeredStream() error = %v, want the provider error under its code", err)
+	}
+}
+
+// A retried stream error that recovered does not fail the schedule run, even
+// when the clean terminal carries no snapshot to settle it.
+func TestConsumeTriggeredStreamRecoveredRetryIsNotAFailure(t *testing.T) {
+	t.Parallel()
+
+	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
+
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventRetry, Attempt: 1, MaxAttempt: 5}
+	events <- native.StreamEvent{Type: native.EventAgentEnd}
+	close(events)
+
+	result, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	if err != nil {
+		t.Fatalf("consumeTriggeredStream() error = %v, want nil after a recovered retry", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("result.Status = %q, want ok", result.Status)
+	}
+}
+
+// A stream error followed by an abort still fails the schedule run.
+func TestConsumeTriggeredStreamErrorThenAbortFails(t *testing.T) {
+	t.Parallel()
+
+	svc := newTriggerStreamService(&recordingMessageService{}, &recordingTurnEventPublisher{})
+
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))}
+	events <- native.StreamEvent{Type: native.EventAgentAbort}
+	close(events)
+
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	var apiErr *sdk.APIError
+	if apperror.CodeOf(err) != apperror.CodeAgentProviderOverloaded || !errors.As(apperror.CauseOf(err), &apiErr) {
+		t.Fatalf("consumeTriggeredStream() error = %v, want the giving-up error under the provider's code", err)
+	}
+}
+
+// A background run records the provider's condition in its history marker,
+// the same code its published failure event carries.
+func TestConsumeTriggeredStreamRecordsTheProviderCodeInHistory(t *testing.T) {
+	t.Parallel()
+
+	messages := &recordingMessageService{}
+	pub := &recordingTurnEventPublisher{}
+	svc := newTriggerStreamService(messages, pub)
+
+	terminal := scheduleTerminalEvent(t, "")
+	terminal.Type = native.EventAgentAbort
+	events := make(chan native.StreamEvent, 2)
+	events <- native.StreamEvent{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))}
+	events <- terminal
+	close(events)
+
+	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+	if apperror.CodeOf(err) != apperror.CodeAgentProviderOverloaded {
+		t.Fatalf("consumeTriggeredStream() error = %v, want the provider's code", err)
+	}
+	if len(messages.persisted) != 2 || messages.persisted[1].Metadata[messagepkg.HistoryErrorCodeMetadataKey] != string(apperror.CodeAgentProviderOverloaded) {
+		t.Fatalf("persisted = %#v, want a failure marker with the provider's code", messages.persisted)
+	}
+	published := pub.published()
+	if len(published) == 0 || published[0].Code != string(apperror.CodeAgentProviderOverloaded) {
+		t.Fatalf("published events = %#v, want the provider's code first", published)
 	}
 }
 
@@ -394,12 +464,13 @@ func TestConsumeTriggeredStreamKeepsDiagnosticsInternalAndPublishesStableFailure
 	pub := &recordingTurnEventPublisher{}
 	svc := newTriggerStreamService(&recordingMessageService{}, pub)
 
+	providerErr := errors.New("SECRET provider boom")
 	events := make(chan native.StreamEvent, 1)
-	events <- native.StreamEvent{Type: native.EventError, Error: "SECRET provider boom"}
+	events <- native.StreamEvent{Type: native.EventError, Cause: providerErr}
 	close(events)
 
 	_, err := svc.consumeTriggeredStream(context.Background(), events, triggerStreamRequest(), resolvedContext{}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "SECRET provider boom") {
+	if !errors.Is(apperror.CauseOf(err), providerErr) {
 		t.Fatalf("internal trigger error = %v, want private provider diagnostic", err)
 	}
 	published := pub.published()
@@ -542,8 +613,8 @@ func (f *fakeTriggeredAdmitter) Admit(_ context.Context, input sessionruntime.Ad
 	}, nil
 }
 
-func (*fakeTriggeredAdmitter) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) error {
-	return nil
+func (*fakeTriggeredAdmitter) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) (sessionruntime.TerminalRun, error) {
+	return sessionruntime.TerminalRun{}, nil
 }
 
 func TestAdmitTriggeredRunInjectsAdmissionView(t *testing.T) {

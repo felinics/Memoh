@@ -2,13 +2,13 @@ package supermarket
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -69,7 +69,7 @@ func (e *WorkspaceTargetError) Unwrap() error { return e.Err }
 
 func (i *Installer) acquirePreparation(ctx context.Context) (func(), error) {
 	if i == nil {
-		return nil, errors.New("supermarket installer is not configured")
+		return nil, errs.New("supermarket installer is not configured")
 	}
 	select {
 	case appPreparationTokens <- struct{}{}:

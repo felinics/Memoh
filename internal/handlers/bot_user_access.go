@@ -65,9 +65,9 @@ func (h *BotUserAccessHandler) Register(e *echo.Echo) {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} BotUserGrantListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access [get].
 func (h *BotUserAccessHandler) ListGrants(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -88,10 +88,10 @@ func (h *BotUserAccessHandler) ListGrants(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body bots.CreateUserGrantRequest true "Grant payload"
 // @Success 201 {object} bots.UserGrant
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access [post].
 func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
@@ -117,10 +117,10 @@ func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 // @Param grant_id path string true "Grant ID"
 // @Param payload body bots.UpdateUserGrantRequest true "Grant payload"
 // @Success 200 {object} bots.UserGrant
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access/{grant_id} [put].
 func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -149,10 +149,10 @@ func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param grant_id path string true "Grant ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access/{grant_id} [delete].
 func (h *BotUserAccessHandler) DeleteGrant(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -177,9 +177,9 @@ func (h *BotUserAccessHandler) DeleteGrant(c echo.Context) error {
 // @Param q query string false "Search query"
 // @Param limit query int false "Max results"
 // @Success 200 {object} BotUserCandidateListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/user-access/candidates [get].
 func (h *BotUserAccessHandler) ListCandidates(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
@@ -195,8 +195,8 @@ func (h *BotUserAccessHandler) ListCandidates(c echo.Context) error {
 // @Param q query string false "Search query"
 // @Param limit query int false "Max results"
 // @Success 200 {object} BotUserCandidateListResponse
-// @Failure 401 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 401 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/user-access/candidates [get].
 func (h *BotUserAccessHandler) ListNewBotCandidates(c echo.Context) error {
 	if _, err := RequireChannelIdentityID(c); err != nil {

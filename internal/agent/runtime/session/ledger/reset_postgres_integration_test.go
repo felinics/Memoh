@@ -212,12 +212,15 @@ func TestPostgresLedgerFenceAndFinalizeOrphanRequiresValidLease(t *testing.T) {
 	if finalized.State != ledger.StateAborted {
 		t.Fatalf("finalized state = %q, want aborted", finalized.State)
 	}
-	var state string
-	if err := pool.QueryRow(ctx, "SELECT state FROM session_runs WHERE run_id = $1", runID).Scan(&state); err != nil {
+	var (
+		state, code string
+		message     *string
+	)
+	if err := pool.QueryRow(ctx, "SELECT state, error_code, error_message FROM session_runs WHERE run_id = $1", runID).Scan(&state, &code, &message); err != nil {
 		t.Fatalf("load finalized run: %v", err)
 	}
-	if state != string(ledger.StateAborted) {
-		t.Fatalf("durable run state = %q, want aborted", state)
+	if state != string(ledger.StateAborted) || code != "history_reset" || message != nil {
+		t.Fatalf("durable run = state:%q code:%q message:%v, want aborted, history_reset and no message", state, code, message)
 	}
 	// A second pass finds no active run and reports applied=false, not an error.
 	if _, applied, err := orphanStore.FenceAndFinalizeOrphan(ctx, lease, orphan); err != nil || applied {

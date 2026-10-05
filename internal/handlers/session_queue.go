@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // SessionQueueHandler exposes the live steer and follow-up queues. It owns
@@ -129,8 +131,11 @@ func (h *SessionQueueHandler) authorize(c echo.Context) (queueScope, error) {
 		return queueScope{}, apperror.New(apperror.CodeQueueAdmissionUnavailable, nil)
 	}
 	sess, err := h.queries.GetSessionByID(c.Request().Context(), sid)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, db.ErrNotFound) {
+		return queueScope{}, errs.Wrap(err, "load queue session", slog.String("session_id", sessionID))
+	}
 	if err != nil || sess.BotID.String() != botID {
-		return queueScope{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return queueScope{}, apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	// Queue admission is session-scoped. A chat grant is sufficient only for
 	// sessions owned by that actor; manage access retains the existing ability
@@ -153,25 +158,25 @@ func (h *SessionQueueHandler) authorizeQueueAccess(ctx context.Context, identity
 	}
 	isAdmin, err := h.accountService.IsAdmin(ctx, identityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "resolve admin role")
 	}
 	bot, err := h.botService.GetForAccess(ctx, botID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, bots.ErrBotNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "bot not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "load queue bot", slog.String("bot_id", botID))
 	}
 	perms, err := h.botService.ResolveUserPermissionsForBot(ctx, bot, identityID, isAdmin)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "resolve bot permissions", slog.String("bot_id", botID))
 	}
 	switch {
 	case bots.HasPermission(perms, bots.PermissionManage):
 		return nil
 	case bots.HasPermission(perms, bots.PermissionChat):
 		if !ownsSession {
-			return echo.NewHTTPError(http.StatusNotFound, "session not found")
+			return apperror.New(apperror.CodeSessionNotFound, nil)
 		}
 		return nil
 	default:
@@ -191,29 +196,24 @@ func decodeQueueRequest(c echo.Context) (enqueueQueueRequest, error) {
 	return req, nil
 }
 
+// queueAdmissionCodes renders queue admission refusals in the HTTP
+// vocabulary. The values are published and do not follow the channel codes.
+var queueAdmissionCodes = map[application.QueueAdmissionFailure]apperror.Code{
+	application.QueueAdmissionSteerUnsupported:   apperror.CodeQueueSteerUnsupported,
+	application.QueueAdmissionNoActiveRun:        apperror.CodeQueueNoActiveRun,
+	application.QueueAdmissionInvocationConflict: apperror.CodeSessionInvocationConflict,
+	application.QueueAdmissionOverloaded:         apperror.CodeQueueAdmissionOverloaded,
+	application.QueueAdmissionCapacityExceeded:   apperror.CodeQueueCapacityExceeded,
+	application.QueueAdmissionInvalidReference:   apperror.CodeQueueRequestInvalid,
+	application.QueueAdmissionUnavailable:        apperror.CodeQueueAdmissionUnavailable,
+}
+
 func queueAdmissionError(err error) error {
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, sessionruntime.ErrQueueSteerUnsupported):
-		return apperror.New(apperror.CodeQueueSteerUnsupported, nil)
-	case errors.Is(err, sessionruntime.ErrQueueNoActiveRun):
-		return apperror.New(apperror.CodeQueueNoActiveRun, nil)
-	case errors.Is(err, sessionruntime.ErrQueueInvocationConflict):
-		return apperror.New(apperror.CodeSessionInvocationConflict, nil)
-	case errors.Is(err, sessionruntime.ErrQueueAdmissionOverloaded):
-		return apperror.New(apperror.CodeQueueAdmissionOverloaded, nil)
-	case errors.Is(err, sessionruntime.ErrQueueCapacityExceeded):
-		return apperror.New(apperror.CodeQueueCapacityExceeded, nil)
-	case errors.Is(err, sessionruntime.ErrQueueInvalidReference):
-		return apperror.New(apperror.CodeQueueRequestInvalid, nil)
-	case errors.Is(err, application.ErrQueueInputIncomplete):
-		// The session row has no team or the ingress passed none: a server
-		// wiring fault, reported as unavailable rather than as a bad request.
-		return apperror.New(apperror.CodeQueueAdmissionUnavailable, nil)
-	default:
+	code, ok := queueAdmissionCodes[application.QueueAdmissionFailureOf(err)]
+	if !ok {
 		return err
 	}
+	return apperror.New(code, nil)
 }
 
 func queueMutationError(err error) error {

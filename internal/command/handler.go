@@ -16,7 +16,6 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/mcp"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/schedule"
@@ -74,7 +73,6 @@ type Handler struct {
 
 	modelsService     *models.Service
 	providersService  *providers.Service
-	memProvService    *memprovider.Service
 	searchProvService *searchproviders.Service
 	compactionService *compaction.Service
 	queries           CommandQueries
@@ -119,7 +117,6 @@ func NewHandler(
 	mcpConnService *mcp.ConnectionService,
 	modelsService *models.Service,
 	providersService *providers.Service,
-	memProvService *memprovider.Service,
 	searchProvService *searchproviders.Service,
 	queries CommandQueries,
 	aclEvaluator AccessEvaluator,
@@ -136,7 +133,6 @@ func NewHandler(
 		mcpConnService:    mcpConnService,
 		modelsService:     modelsService,
 		providersService:  providersService,
-		memProvService:    memProvService,
 		searchProvService: searchProvService,
 		queries:           queries,
 		aclEvaluator:      aclEvaluator,

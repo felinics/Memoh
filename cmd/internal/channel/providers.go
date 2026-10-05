@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	stdpath "path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -58,14 +57,13 @@ import (
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/media"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/policy"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/searchproviders"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/settings"
-	"github.com/felinics/memoh/internal/storage/providers/localfs"
 	"github.com/felinics/memoh/internal/telemetry"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -73,14 +71,6 @@ import (
 
 func providePipeline(log *slog.Logger) *timeline.Pipeline {
 	return timeline.NewPipelineWithOptions(timeline.RenderParams{}, timeline.PipelineOptions{Logger: log})
-}
-
-func provideLocalMediaService(log *slog.Logger, cfg config.Config) *media.Service {
-	dataRoot := cfg.Workspace.DataRoot
-	if strings.TrimSpace(dataRoot) == "" {
-		dataRoot = config.DefaultDataRoot
-	}
-	return media.NewService(log, localfs.New(filepath.Join(dataRoot, "media")))
 }
 
 func provideEventStore(log *slog.Logger, queries dbstore.Queries) *timeline.EventStore {
@@ -265,7 +255,6 @@ func provideCommandHandler(
 	mcpConnService *mcp.ConnectionService,
 	modelsService *models.Service,
 	providersService *providers.Service,
-	memProvService *memprovider.Service,
 	searchProvService *searchproviders.Service,
 	queries dbstore.Queries,
 	aclService *acl.Service,
@@ -281,7 +270,6 @@ func provideCommandHandler(
 		mcpConnService,
 		modelsService,
 		providersService,
-		memProvService,
 		searchProvService,
 		queries,
 		aclService,
@@ -334,41 +322,7 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 	if addr == "" {
 		addr = webhooktunnel.DefaultListenAddr
 	}
-	e := echo.New()
-	e.HideBanner = true
-	e.HidePort = true
-	// This listener faces the public internet: it receives third-party channel
-	// webhooks and serves public media. It had neither a request id nor an
-	// access log, so a delivery a platform reports as failed left nothing to
-	// look up. Both are assigned before anything else runs.
-	e.Use(middleware.RequestID())
-	e.Use(httpx.RequestIDContext)
-	e.Use(telemetry.EchoServer)
-	e.Use(middleware.Recover())
-	e.Use(middleware.BodyLimit("1M"))
-	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		HandleError: true,
-		LogStatus:   true,
-		LogURI:      true,
-		LogMethod:   true,
-		LogLatency:  true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			// Same fields and the same URI sanitizer as the main server: the
-			// media paths this listener serves carry an authorising token in
-			// the query string.
-			log.InfoContext(c.Request().Context(), "request",
-				slog.String("method", v.Method),
-				slog.String("uri", httpx.SafeRequestLogURI(c.Request().URL, v.URI)),
-				slog.Int("status", v.Status),
-				slog.Duration("latency", v.Latency),
-				slog.String("remote_ip", c.RealIP()),
-			)
-			return nil
-		},
-	}))
-	e.GET("/health", func(c echo.Context) error {
-		return c.String(http.StatusOK, "ok\n")
-	})
+	e := newWebhookTunnelEcho(log)
 	channel.NewWebhookServerHandler(log, store, channelManager).Register(e)
 	// This listener is only started for tunnel modes. Its public base URL is
 	// resolved from either configured public_base_url or the running tunnel, so
@@ -394,6 +348,31 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 			return e.Shutdown(ctx)
 		},
 	})
+}
+
+// newWebhookTunnelEcho builds the tunnel listener's Echo instance without its
+// routes other than /health.
+func newWebhookTunnelEcho(log *slog.Logger) *echo.Echo {
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+	// This listener faces the public internet: it receives third-party channel
+	// webhooks and serves public media. It had neither a request id nor an
+	// access log, so a delivery a platform reports as failed left nothing to
+	// look up. Both are assigned before anything else runs. Errors are
+	// answered and recorded the same way as on the main server, and the
+	// access log uses the same URI sanitizer: the media paths this listener
+	// serves carry an authorising token in the query string.
+	e.HTTPErrorHandler = server.NewHTTPErrorHandler(log)
+	e.Use(middleware.RequestID())
+	e.Use(httpx.RequestIDContext)
+	e.Use(telemetry.EchoServer)
+	e.Use(server.AccessLog(log))
+	e.Use(middleware.BodyLimit("1M"))
+	e.GET("/health", func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok\n")
+	})
+	return e
 }
 
 type sessionEnsurerAdapter struct {

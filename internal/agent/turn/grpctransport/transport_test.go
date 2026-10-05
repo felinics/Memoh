@@ -1,12 +1,15 @@
 package grpctransport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,11 +17,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/agent/turn/turnpb"
+	"github.com/felinics/memoh/internal/apperror"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/logger"
 	intrpc "github.com/felinics/memoh/internal/rpc"
 )
 
@@ -219,9 +223,14 @@ func TestCancelUnblocksFullClientEventBuffer(t *testing.T) {
 
 func newTestClient(t *testing.T, service turn.Service, clientSecret string) (*Client, func()) {
 	t.Helper()
+	return newLoggedTestClient(t, nil, service, clientSecret)
+}
+
+func newLoggedTestClient(t *testing.T, log *slog.Logger, service turn.Service, clientSecret string) (*Client, func()) {
+	t.Helper()
 	lis := bufconn.Listen(1 << 20)
-	server := intrpc.NewServer("secret")
-	turnpb.RegisterTurnServiceServer(server, NewServer(nil, service))
+	server := intrpc.NewServer(log, "secret")
+	turnpb.RegisterTurnServiceServer(server, NewServer(log, service))
 	go func() { _ = server.Serve(lis) }()
 	conn, err := grpc.NewClient(
 		"passthrough:///bufnet",
@@ -417,44 +426,23 @@ func TestInjectFailureKeepsStreamAlive(t *testing.T) {
 	}
 }
 
-// TestFeedbackErrorSurvivesTransport pins the agentfeedback envelope: typed
-// ACP feedback must cross the wire so the channel process can render its
-// localized guidance instead of a bare internal error.
-func TestFeedbackErrorSurvivesTransport(t *testing.T) {
-	events := make(chan turn.Event)
-	close(events)
-	errs := make(chan error, 1)
-	errs <- fmt.Errorf("resolve runtime: %w", sessionpkg.ErrACPAgentNotConfigured)
-	close(errs)
-
-	client, cleanup := newTestClient(t, &scriptedService{handle: &scriptedHandle{events: events, errs: errs}}, "secret")
-	defer cleanup()
-	handle, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
-	if err != nil {
-		t.Fatalf("start turn: %v", err)
-	}
-	for range handle.Events() {
-	}
-	var runErr error
-	for err := range handle.Errs() {
-		runErr = err
-	}
-	var feedback *agentfeedback.Error
-	if !errors.As(runErr, &feedback) {
-		t.Fatalf("run error lost feedback identity: %v", runErr)
-	}
-	if feedback.Code != agentfeedback.CodeAgentNotConfigured {
-		t.Fatalf("feedback code = %q", feedback.Code)
+// TestExternalAgentErrorSurvivesTransport pins the External Agent codes on
+// the wire: a thread sentinel crosses with its catalog code, and so does an
+// External Agent apperror, so the channel process can render its localized
+// guidance instead of a bare internal error.
+func TestExternalAgentErrorSurvivesTransport(t *testing.T) {
+	runErr := runErrorOverTransport(t, fmt.Errorf("resolve runtime: %w", sessionpkg.ErrACPAgentNotConfigured))
+	if code := apperror.CodeOf(runErr); code != apperror.CodeACPAgentNotConfigured {
+		t.Fatalf("run error code = %q (%v)", code, runErr)
 	}
 
-	// Start-path errors carry the envelope too.
-	direct := agentfeedback.New(agentfeedback.CodeAgentNotEnabled, "agent_not_enabled", 403, "chat.externalAgent.agentNotEnabled", "disabled", nil)
-	client2, cleanup2 := newTestClient(t, &scriptedService{startErr: direct}, "secret")
-	defer cleanup2()
-	_, err = client2.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
-	var startFeedback *agentfeedback.Error
-	if !errors.As(err, &startFeedback) || startFeedback.Code != agentfeedback.CodeAgentNotEnabled {
-		t.Fatalf("start error lost feedback identity: %v", err)
+	direct := apperror.New(apperror.CodeAgentDependencyMissing, map[string]string{"dep_id": "codex", "operation_in_progress": "true"})
+	startErr := startErrorOverTransport(t, direct)
+	if code := apperror.CodeOf(startErr); code != apperror.CodeAgentDependencyMissing {
+		t.Fatalf("start error code = %q (%v)", code, startErr)
+	}
+	if args := apperror.ArgsOf(startErr); args["dep_id"] != "codex" || args["operation_in_progress"] != "true" {
+		t.Fatalf("start error args = %v", args)
 	}
 }
 
@@ -525,5 +513,43 @@ func TestStopTurnSurvivesTransport(t *testing.T) {
 	}
 	if got := <-service.stopped; got != cmd {
 		t.Fatalf("command = %#v", got)
+	}
+}
+
+// An internal failure is recorded once, by the RPC result line, with the cause
+// the Internal status hides from the client.
+func TestInternalTurnErrorHasOneResultLine(t *testing.T) {
+	var logs bytes.Buffer
+	client, cleanup := newLoggedTestClient(t, logger.New(&logs, "debug", "json"),
+		&scriptedService{startErr: errors.New("private diagnostic")}, "secret")
+	_, err := client.StartTurn(context.Background(), turn.StartTurnCommand{TeamID: "team-1"})
+	if err == nil {
+		t.Fatal("start turn succeeded")
+	}
+	if strings.Contains(err.Error(), "private diagnostic") {
+		t.Fatalf("cause leaked to the client: %v", err)
+	}
+	cleanup()
+
+	var records []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		records = append(records, record)
+	}
+	if len(records) != 1 || records[0]["msg"] != "rpc request" {
+		t.Fatalf("records = %v, want one rpc request line", records)
+	}
+	record := records[0]
+	if record["level"] != "ERROR" || record["fault"] != "server" || record["grpc_code"] != "Internal" {
+		t.Fatalf("level/fault/grpc_code = %v/%v/%v: %v", record["level"], record["fault"], record["grpc_code"], record)
+	}
+	if record["error"] != "start turn: private diagnostic" {
+		t.Fatalf("error = %v", record["error"])
 	}
 }
