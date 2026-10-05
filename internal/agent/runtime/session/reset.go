@@ -3,7 +3,6 @@ package sessionruntime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -78,7 +78,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 			return nil, nil, err
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("acquire PostgreSQL history reset fence: %w", err)
+			return nil, nil, errs.WrapDependency(err, "acquire PostgreSQL history reset fence")
 		}
 		if applied {
 			durable = acquired
@@ -197,7 +197,7 @@ func historyResetSessions(ctx context.Context, scope ResetScope, store ledger.Re
 	}
 	ids, err := store.SessionIDsByBot(ctx, scope.BotID)
 	if err != nil {
-		return nil, fmt.Errorf("list history reset sessions: %w", err)
+		return nil, errs.WrapDependency(err, "list history reset sessions")
 	}
 	keys := make([]Key, 0, len(ids))
 	for _, id := range ids {
@@ -214,7 +214,7 @@ func (m *Manager) invalidateHistoryResetSnapshots(ctx context.Context, keys []Ke
 	for _, key := range keys {
 		now, err := m.backend.Now(ctx)
 		if err != nil {
-			return fmt.Errorf("load runtime backend time: %w", err)
+			return errs.WrapDependency(err, "load runtime backend time")
 		}
 		epoch := m.newEpoch()
 		snapshot, changed, err := m.backend.Update(ctx, key, func(snapshot Snapshot, ok bool) (Snapshot, bool, error) {
@@ -232,7 +232,7 @@ func (m *Manager) invalidateHistoryResetSnapshots(ctx context.Context, keys []Ke
 			return snapshot, true, nil
 		})
 		if err != nil {
-			return fmt.Errorf("invalidate runtime snapshot for history reset: %w", err)
+			return errs.WrapDependency(err, "invalidate runtime snapshot for history reset")
 		}
 		if !changed {
 			continue
@@ -327,7 +327,7 @@ func (m *Manager) drainHistoryReset(ctx context.Context, scope ResetScope, store
 			}
 		}
 		if err != nil {
-			return fmt.Errorf("list active history reset runs: %w", err)
+			return errs.WrapDependency(err, "list active history reset runs")
 		}
 		if len(runs) == 0 {
 			return nil

@@ -8,6 +8,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // resetRacingLedger is the run ledger with a hook that runs right after an
@@ -168,13 +169,54 @@ func TestBeginBotHistoryResetFailsClosedWithoutSessionList(t *testing.T) {
 	runs.botSessionsErr = errors.New("list failed")
 	manager, backend := newResetTestManager(t, runs)
 
-	if _, _, err := manager.BeginBotHistoryReset(context.Background(), "bot-1"); err == nil {
+	_, _, err := manager.BeginBotHistoryReset(context.Background(), "bot-1")
+	if err == nil {
 		t.Fatal("bot history reset began without its session list")
+	}
+	if fault := errs.FaultOf(err); fault != errs.FaultDependency {
+		t.Fatalf("session list failure fault = %q, want dependency", fault)
 	}
 	if released := runs.releasedLeases(); len(released) != 1 || released[0].Scope != ledger.ResetScopeBot {
 		t.Fatalf("durable release = %#v, want the bot lease returned", released)
 	}
 	if _, blocked, err := backend.EffectiveHistoryReset(context.Background(), ResetScope{BotID: "bot-1"}); err != nil || blocked {
 		t.Fatalf("live mirror after the failed reset = (%v, %v), want released", blocked, err)
+	}
+}
+
+// failingWriteBackend is the memory backend with writes that fail, the way a
+// Redis outage fails them.
+type failingWriteBackend struct{ *MemoryBackend }
+
+func (failingWriteBackend) Update(context.Context, Key, SnapshotUpdate) (Snapshot, bool, error) {
+	return Snapshot{}, false, errors.New("runtime backend write failed")
+}
+
+// A reset whose snapshot cannot be cleared fails as the backend's failure, so
+// the caller does not answer it as a busy conversation.
+func TestBeginHistoryResetSnapshotWriteFailureIsDependencyFault(t *testing.T) {
+	t.Parallel()
+	backend := NewMemoryBackend()
+	key := Key{BotID: "bot-1", SessionID: "session-1"}
+	if _, _, err := backend.Update(context.Background(), key, func(snapshot Snapshot, _ bool) (Snapshot, bool, error) {
+		snapshot.BotID, snapshot.SessionID, snapshot.Epoch = key.BotID, key.SessionID, "epoch-1"
+		snapshot.CurrentRunView = &CurrentRunView{RunID: "run-1", Status: RunStatusCompleted}
+		return snapshot, true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runs := newFakeResetLedger()
+	manager := NewManager(failingWriteBackend{backend}, Options{Ledger: runs, OwnerLeaseTTL: 40 * time.Millisecond})
+	t.Cleanup(func() { _ = manager.Close() })
+
+	_, _, err := manager.BeginSessionHistoryReset(context.Background(), key.BotID, key.SessionID)
+	if err == nil {
+		t.Fatal("history reset began although its snapshot could not be cleared")
+	}
+	if fault := errs.FaultOf(err); fault != errs.FaultDependency {
+		t.Fatalf("snapshot write failure fault = %q, want dependency", fault)
+	}
+	if released := runs.releasedLeases(); len(released) != 1 {
+		t.Fatalf("durable release = %#v, want the lease returned", released)
 	}
 }

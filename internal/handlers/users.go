@@ -809,7 +809,7 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	if shouldResetRuntimes {
 		resetCtx, releaseRuntimeReset, resetErr := h.runtimeResets.BeginBotHistoryReset(c.Request().Context(), bot.ID)
 		if resetErr != nil {
-			return apperror.Wrap(apperror.CodeSessionResetConflict, resetErr, nil)
+			return historyResetError(resetErr)
 		}
 		defer releaseRuntimeReset()
 		c.SetRequest(c.Request().WithContext(resetCtx))
@@ -963,7 +963,7 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 		var resetCtx context.Context
 		resetCtx, releaseRuntimeReset, err = h.runtimeResets.BeginBotHistoryReset(c.Request().Context(), botID)
 		if err != nil {
-			return apperror.Wrap(apperror.CodeSessionResetConflict, err, nil)
+			return historyResetError(err)
 		}
 		defer releaseRuntimeReset()
 		c.SetRequest(c.Request().WithContext(resetCtx))

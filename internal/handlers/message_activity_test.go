@@ -13,11 +13,14 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -229,6 +232,46 @@ func TestDeleteMessagesInvalidatesOnlyCommittedHistory(t *testing.T) {
 					t.Fatal("cleared history emitted no invalidation")
 				}
 			}
+		}
+	}
+}
+
+type failingHistoryReset struct{ err error }
+
+func (r failingHistoryReset) BeginSessionHistoryReset(context.Context, string, string) (context.Context, func(), error) {
+	return nil, nil, r.err
+}
+
+func (r failingHistoryReset) BeginBotHistoryReset(context.Context, string) (context.Context, func(), error) {
+	return nil, nil, r.err
+}
+
+// A busy reset lease is the client's conflict; a runtime backend or database
+// the reset could not use is a dependency failure, never a 409.
+func TestDeleteMessagesClassifiesHistoryResetFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		code  apperror.Code
+		fault errs.Fault
+	}{
+		{"lease busy", sessionruntime.ErrHistoryResetLeaseLost, apperror.CodeSessionResetConflict, errs.FaultClient},
+		{"backend failed", errs.WrapDependency(errors.New("runtime backend write failed"), "clear runtime snapshots"), apperror.CodeInternal, errs.FaultDependency},
+	} {
+		for _, sessionID := range []string{activityTestSessionID, ""} {
+			t.Run(tc.name+"/"+sessionID, func(t *testing.T) {
+				h, _ := activityTestHandler()
+				h.messageService = activityHistoryStore{}
+				h.SetRuntimeResetService(failingHistoryReset{err: tc.err})
+				req := httptest.NewRequest(http.MethodDelete, "/bots/"+activityTestBotID+"/messages?session_id="+sessionID, nil)
+				c := testAuthContext(echo.New(), req, httptest.NewRecorder(), "user-1")
+				c.SetParamNames("bot_id")
+				c.SetParamValues(activityTestBotID)
+				err := h.DeleteMessages(c)
+				if apperror.CodeOf(err) != tc.code || errs.FaultOf(err) != tc.fault {
+					t.Fatalf("DeleteMessages() = code %q fault %q (%v), want %q / %q", apperror.CodeOf(err), errs.FaultOf(err), err, tc.code, tc.fault)
+				}
+			})
 		}
 	}
 }

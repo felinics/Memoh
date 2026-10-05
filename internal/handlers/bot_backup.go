@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/botbackup"
 	"github.com/felinics/memoh/internal/botbackup/secure"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -206,6 +207,9 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 	if err != nil {
 		if errors.Is(err, runtimefence.ErrResetLeaseLost) {
 			return apperror.Wrap(apperror.CodeSessionResetConflict, err, nil)
+		}
+		if errors.Is(err, botbackup.ErrHistoryResetUnavailable) && errs.FaultOf(err) == errs.FaultDependency {
+			return apperror.Wrap(apperror.CodeInternal, err, nil)
 		}
 		if errors.Is(err, runtimefence.ErrTransactionsUnsupported) ||
 			errors.Is(err, botbackup.ErrHistoryResetUnavailable) {
