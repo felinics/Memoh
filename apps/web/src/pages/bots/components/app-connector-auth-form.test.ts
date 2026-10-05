@@ -5,9 +5,9 @@ import AppConnectorAuthForm from './app-connector-auth-form.vue'
 
 const mocks = vi.hoisted(() => ({ begin: vi.fn(), credential: vi.fn(), prepare: vi.fn(), open: vi.fn(), wait: vi.fn(), user: { role: 'member' } }))
 vi.mock('@/composables/api/useApps', () => ({ beginAppConnectorOAuth: mocks.begin, createAppConnectorCredential: mocks.credential }))
-vi.mock('@/composables/useConnectorOAuth', () => ({
+vi.mock('@/composables/useConnectorOAuth', async importOriginal => ({
+  ...await importOriginal<typeof import('@/composables/useConnectorOAuth')>(),
   prepareConnectorOAuthPopup: mocks.prepare, openConnectorOAuthURL: mocks.open, waitForConnectorOAuth: mocks.wait,
-  connectorOAuthErrorKey: () => null,
   isConnectorOAuthCancelled: (error: Error) => error.message === 'cancelled',
 }))
 vi.mock('@/utils/api-error', async importOriginal => ({

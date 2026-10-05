@@ -111,13 +111,12 @@ import {
   type AppConnectorItem,
 } from '@/composables/api/useApps'
 import {
-  connectorOAuthErrorKey,
+  connectorErrorMessage,
   isConnectorOAuthCancelled,
   openConnectorOAuthURL,
   prepareConnectorOAuthPopup,
   waitForConnectorOAuth,
 } from '@/composables/useConnectorOAuth'
-import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import { useUserStore } from '@/store/user'
 
 const props = defineProps<{
@@ -263,8 +262,11 @@ async function connect() {
   } catch (error) {
     oauthPopup?.close()
     if (flow.signal.aborted) return
-    const oauthKey = connectorOAuthErrorKey(error)
-    errorMessage.value = oauthKey ? t(oauthKey) : connectErrorMessage(error)
+    errorMessage.value = connectorErrorMessage(error, t, {
+      role: userStore.userInfo.role,
+      connector: props.catalog?.name || props.connector?.type || '',
+      fallback: t('connectors.connectFailed'),
+    })
   } finally {
     if (flow.signal.aborted) oauthPopup?.close()
     if (attempt === flow) {
@@ -272,15 +274,5 @@ async function connect() {
       phase.value = 'idle'
     }
   }
-}
-
-function connectErrorMessage(error: unknown) {
-  if (!isApiErrorCode(error, 'connector.oauth_client_not_configured')) {
-    return resolveApiErrorMessage(error, t('connectors.connectFailed'))
-  }
-  const hint = userStore.userInfo.role === 'admin'
-    ? 'connectors.oauthAppNotConfigured.admin'
-    : 'connectors.oauthAppNotConfigured.member'
-  return t(hint, { connector: props.catalog?.name || props.connector?.type })
 }
 </script>

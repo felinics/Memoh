@@ -602,7 +602,7 @@
       "not_found": "This connector is no longer available.",
       "conflict": "This connector conflicts with an existing connection.",
       "request_rejected": "Connect-It rejected the connector request.",
-      "oauth_client_not_configured": "Connect-It has no OAuth App configured for this connector. A deployment administrator needs to add its client ID and secret in Connect-It before it can be connected.",
+      "oauth_client_not_configured": "Connect-It has no OAuth App (Client ID and Client Secret) configured for this connector. Ask this deployment's administrator or the operator of its Connect-It to configure it, then connect again.",
       "upstream_unavailable": "Connect-It could not complete the request. Please try again shortly.",
       "operation_failed": "The connector operation failed. Please try again."
     },

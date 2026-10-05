@@ -277,7 +277,6 @@ import {
   deleteBotsByBotIdConnectorsByConnectionId,
   getConnectorsCatalog,
   patchBotsByBotIdConnectorsByConnectionId,
-  postBotsByBotIdConnectorsByConnectionIdReauth,
   postBotsByBotIdContainerStart,
   type ConnectorsConnector,
 } from '@memohai/sdk'
@@ -318,14 +317,14 @@ import {
   type ScriptResponse,
 } from '@/composables/api/useWorkspaceDependencies'
 import {
-  connectorOAuthErrorKey,
-  openConnectorOAuthURL,
+  connectorErrorMessage,
   prepareConnectorOAuthPopup,
-  waitForConnectorOAuth,
+  reauthorizeConnector,
 } from '@/composables/useConnectorOAuth'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useUserStore } from '@/store/user'
 import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
 import {
   dependencyAllows,
@@ -344,6 +343,7 @@ const route = useRoute()
 const router = useRouter()
 const queryCache = useQueryCache()
 const capabilitiesStore = useCapabilitiesStore()
+const userStore = useUserStore()
 const { run: runMutation } = useDialogMutation()
 const { dependencyName } = useWorkspaceDependencyText()
 const botIdRef = computed(() => props.botId) as Ref<string>
@@ -602,19 +602,16 @@ async function reauthorize(connector: AppConnectorItem) {
   const popup = prepareConnectorOAuthPopup(t('common.loading'))
   connectorPending.value.add(key)
   try {
-    const { data } = await postBotsByBotIdConnectorsByConnectionIdReauth({
-      path: { bot_id: props.botId, connection_id: connectionId },
-      throwOnError: true,
-    })
-    if (!data.authorization_url) throw new Error('oauth_failed')
-    await openConnectorOAuthURL(data.authorization_url, popup)
-    await waitForConnectorOAuth(props.botId, connectionId, popup)
+    await reauthorizeConnector(props.botId, connectionId, popup)
     await onConnectorAuthorized()
     toast.success(t('connectors.oauthSuccess'))
   } catch (err) {
     popup?.close()
-    const oauthKey = connectorOAuthErrorKey(err)
-    toast.error(oauthKey ? t(oauthKey) : resolveApiErrorMessage(err, t('connectors.oauthFailed')))
+    toast.error(connectorErrorMessage(err, t, {
+      role: userStore.userInfo.role,
+      connector: connectorCatalog.value.get(connector.type ?? '')?.name || connector.type || '',
+      fallback: t('connectors.oauthFailed'),
+    }))
   } finally {
     connectorPending.value.delete(key)
   }
