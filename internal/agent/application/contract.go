@@ -13,6 +13,7 @@ import (
 // channel and function fields below are strictly in-process runtime state.
 type ChatRequest struct {
 	discussCurrentSources    []turn.ContextMessageSource
+	discussOmittedSources    []turn.ContextMessageSource
 	discussMessages          []turn.DiscussMessage
 	discussContextTokens     int
 	discussRecoveryExhausted bool

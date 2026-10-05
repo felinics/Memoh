@@ -43,22 +43,33 @@ func (*DiscussContextCollector) Collect(_ context.Context, req CollectRequest) (
 	}
 
 	frags := make([]contextfrag.ContextFrag, 0, len(cfg.ComposedMessages))
-	currentUserIndex := latestComposedUserMessageIndex(cfg.ComposedMessages)
-	knownSources := false
-	for _, message := range cfg.ComposedMessages {
-		knownSources = knownSources || message.Source != nil
+	// The provider envelope protects only the newest unconsumed input. Older
+	// input of the same batch is history the final budget may trim, with a
+	// selection decision under its source ID, or recovery may compact.
+	currentUserIndex, known := latestComposedCurrentIndex(cfg.ComposedMessages)
+	if !known {
+		currentUserIndex = latestComposedUserMessageIndex(cfg.ComposedMessages)
 	}
 	for i, message := range cfg.ComposedMessages {
-		current := i == currentUserIndex
-		if knownSources {
-			current = message.Source != nil && message.Source.Current
-		}
-		frags = append(frags, discussComposedMessageFrag(message, i, current, req.Scope))
+		frags = append(frags, discussComposedMessageFrag(message, i, i == currentUserIndex, req.Scope))
 	}
 	if req.Intent == contextfrag.IntentRunConfigPreProvider {
 		frags = contextfrag.RepairToolClosureFrags(frags, req.Scope, discussContextCollectorName)
 	}
 	return injectDiscussImages(frags, cfg.InlineImages), nil
+}
+
+func latestComposedCurrentIndex(messages []timeline.ContextMessage) (int, bool) {
+	index, known := -1, false
+	for i, message := range messages {
+		if message.Source != nil {
+			known = true
+			if message.Source.Current {
+				index = i
+			}
+		}
+	}
+	return index, known
 }
 
 func latestComposedUserMessageIndex(messages []timeline.ContextMessage) int {

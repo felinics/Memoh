@@ -78,7 +78,7 @@ func AdmitContextEntries(entries []AdmissionEntry, budgetTokens int) AdmissionDe
 	}
 	decision.EstimatedTokens = total
 
-	current := CurrentAdmissionEntries(entries)
+	current := ProtectedAdmissionEntries(entries, budgetTokens)
 	selected := make([]bool, len(entries))
 	used := 0
 	if budgetTokens <= 0 || total <= budgetTokens {
@@ -152,6 +152,43 @@ func newestRawEntry(entries []AdmissionEntry) int {
 		}
 	}
 	return -1
+}
+
+// ProtectedAdmissionEntries marks the current entries no admission may drop:
+// the whole unconsumed batch when it fits beside the pinned entries, otherwise
+// the newest contiguous run of it that leaves a tenth of the budget for the
+// summary of the rest. The newest current entry is always protected. Older
+// current entries become ordinary history that recovery compacts.
+func ProtectedAdmissionEntries(entries []AdmissionEntry, budgetTokens int) []bool {
+	current := CurrentAdmissionEntries(entries)
+	if budgetTokens <= 0 {
+		return current
+	}
+	pinned, batch := 0, 0
+	for i, entry := range entries {
+		if entry.Pinned {
+			pinned += entry.Cost
+		} else if current[i] {
+			batch += entry.Cost
+		}
+	}
+	if pinned+batch <= budgetTokens {
+		return current
+	}
+	limit := budgetTokens - budgetTokens/10 - pinned
+	protected := make([]bool, len(entries))
+	used := 0
+	for i := len(entries) - 1; i >= 0; i-- {
+		if !current[i] || entries[i].Pinned {
+			continue
+		}
+		if used > 0 && used+entries[i].Cost > limit {
+			break
+		}
+		protected[i] = true
+		used += max(1, entries[i].Cost)
+	}
+	return protected
 }
 
 func CurrentAdmissionEntries(entries []AdmissionEntry) []bool {

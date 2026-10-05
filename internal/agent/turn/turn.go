@@ -117,6 +117,9 @@ type StartTurnCommand struct {
 	// projection. Image parts are injected into the last real user message
 	// before the runtime starts streaming.
 	DiscussCurrentSources []ContextMessageSource
+	// DiscussOmittedSources is older unconsumed input Channel selection left
+	// out of DiscussMessages; the server compacts it or records its omission.
+	DiscussOmittedSources []ContextMessageSource
 	DiscussMessages       []DiscussMessage
 	DiscussImageRefs      []DiscussImageRef
 	// Pressure is measured before Channel selection. Overflow requests recovery

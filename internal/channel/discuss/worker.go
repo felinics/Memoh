@@ -162,11 +162,15 @@ func (d *DiscussDriver) handleReplyWithTurn(ctx context.Context, sess *discussSe
 				slog.Int("recoveries", recoveries+1))
 			continue
 		}
+		if outcome.skipped {
+			d.cursor.Advance(ctx, sess, cfg, plan.consumed, log)
+			return
+		}
 		if admission.ProtectedOverflow {
 			return
 		}
 		if outcome.runtimeType == sessionRuntimeACPAgent {
-			if outcome.skipped || (outcome.streamed && outcome.terminal && !outcome.failed) {
+			if outcome.streamed && outcome.terminal && !outcome.failed {
 				d.cursor.Advance(ctx, sess, cfg, plan.consumed, log)
 			}
 			return

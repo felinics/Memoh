@@ -215,9 +215,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		h.emitErr(cause)
 		return
 	}
+	if runConfig.ContextMutations == nil {
+		runConfig.ContextMutations = contextfrag.NewMutationLedger()
+	}
+	recordOmittedCurrentInput(runConfig.ContextMutations, cmd.DiscussOmittedSources, admission.OmittedSources)
 	if admission.DroppedMessages > 0 {
 		cmd.DiscussContextTokens = max(cmd.DiscussContextTokens, admission.EstimatedTokens)
-		cmd.DiscussCurrentTokens = max(cmd.DiscussCurrentTokens, budgetTokens-admission.RecoveryBudgetTokens)
 		s.logger.InfoContext(ctx, "context_admission",
 			slog.String("path", "discuss_turn"),
 			slog.String("bot_id", cmd.BotID),
@@ -270,7 +273,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	outcome.watchIdle(idleCtx, idleCancel)
 	if !cmd.DiscussRecoveryExhausted {
 		runConfig.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
-			return s.recoverDiscussContextBudget(ctx, cmd, resolved.ModelID, cfg)
+			return s.recoverDiscussContextBudget(ctx, cmd, admitted, resolved.ModelID, cfg)
 		}
 	}
 	runConfig = pauseIdleDuringBudgetRecovery(runConfig, idleCancel)
@@ -560,6 +563,7 @@ func (s *Service) pumpDiscussAgent(ctx context.Context, cmd turn.StartTurnComman
 		ForceFreshRuntime:        true,
 		discussMessages:          cmd.DiscussMessages,
 		discussCurrentSources:    cmd.DiscussCurrentSources,
+		discussOmittedSources:    cmd.DiscussOmittedSources,
 		discussContextTokens:     discussContextPressure(cmd),
 		discussRecoveryExhausted: cmd.DiscussRecoveryExhausted,
 	})

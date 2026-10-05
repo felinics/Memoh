@@ -163,8 +163,11 @@ func TestComposeProtectsEveryUnconsumedExternalInput(t *testing.T) {
 			t.Fatalf("lost source: %+v", message)
 		}
 	}
-	_, admission = ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 700, After: &after})
-	if !admission.ProtectedOverflow {
-		t.Fatal("partially consumed an oversized current batch")
+	composed, admission = ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: 700, After: &after})
+	if composed == nil || admission.ProtectedOverflow || admission.CurrentTokens != 400 || len(composed.Messages) != 2 || composed.Messages[0].Source.ID != "m3" {
+		t.Fatalf("an oversized batch must keep its newest fitting suffix: admission=%+v result=%+v", admission, composed)
+	}
+	if len(admission.OmittedSources) != 1 || admission.OmittedSources[0].ID != "m2" || !admission.OmittedSources[0].Current {
+		t.Fatalf("older unconsumed input must be reported, not silently dropped: %+v", admission.OmittedSources)
 	}
 }

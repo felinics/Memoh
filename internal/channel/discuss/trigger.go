@@ -74,6 +74,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			ToolHTTPURL:             cfg.ToolHTTPURL,
 			DiscussMessages:         msgs,
 			DiscussCurrentSources:   currentSources,
+			DiscussOmittedSources:   admission.OmittedSources,
 			DiscussImageRefs:        imageRefs,
 			DiscussAddressed:        addressed,
 			DiscussContextTokens:    admission.EstimatedTokens,

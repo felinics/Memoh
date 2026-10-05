@@ -25,6 +25,9 @@ const (
 	MutationReadMedia             MutationKind = "read_media"
 	MutationRendererPrune         MutationKind = "renderer_prune"
 	MutationMidStreamRetry        MutationKind = "mid_stream_retry"
+	// MutationCurrentInputOmitted records older unconsumed input the run
+	// proceeds without because recovery could not compact it into the budget.
+	MutationCurrentInputOmitted MutationKind = "current_input_omitted"
 	// MutationRunAbortObserved marks a terminal classification where durable
 	// budget evidence outranked an explicit user cancellation: the run died of
 	// budget, but an abort was concurrently in flight. It keeps "who stopped
@@ -49,6 +52,7 @@ func AllMutationKinds() []MutationKind {
 		MutationReadMedia,
 		MutationRendererPrune,
 		MutationMidStreamRetry,
+		MutationCurrentInputOmitted,
 		MutationRunAbortObserved,
 	}
 }

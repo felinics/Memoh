@@ -127,18 +127,7 @@ func (s *Service) maybeCompact(ctx context.Context, req ChatRequest, rc resolved
 		return
 	}
 	cfg.TargetTokens = compactionTargetTokens(botSettings.CompactionTargetPercent, rc.contextTokenBudget)
-	cfg.ProtectedSources = append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
-	for _, message := range req.discussMessages {
-		if message.Source != nil && message.Source.Current {
-			cfg.ProtectedSources = append(cfg.ProtectedSources, *message.Source)
-		}
-	}
-	if req.ExternalMessageID != "" {
-		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
-	}
-	if req.RequiredHistoryMessageID != "" {
-		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
-	}
+	cfg.ProtectedSources = compactionProtectedSources(req)
 	cfg.AllowFrontierFusion = true
 	cfg.ContextWindowTokens = rc.contextTokenBudget
 	cfg.HardPressure = syncCompactionShouldRun(inputTokens, rc.contextTokenBudget)
@@ -216,18 +205,7 @@ func (s *Service) runSyncCompaction(ctx context.Context, req ChatRequest, inputT
 		// disabled means there is nothing to compact.
 		return compaction.Result{}
 	}
-	cfg.ProtectedSources = append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
-	for _, message := range req.discussMessages {
-		if message.Source != nil && message.Source.Current {
-			cfg.ProtectedSources = append(cfg.ProtectedSources, *message.Source)
-		}
-	}
-	if req.ExternalMessageID != "" {
-		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
-	}
-	if req.RequiredHistoryMessageID != "" {
-		cfg.ProtectedSources = append(cfg.ProtectedSources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
-	}
+	cfg.ProtectedSources = compactionProtectedSources(req)
 	cfg.AllowFrontierFusion = true
 	cfg.TargetTokens = syncBackstopTargetTokens(botSettings.CompactionTargetPercent, contextTokenBudget)
 	cfg.ContextWindowTokens = contextTokenBudget
@@ -308,4 +286,18 @@ func (s *Service) buildCompactionConfig(ctx context.Context, req ChatRequest, bo
 	cfg.TotalInputTokens = inputTokens
 	cfg.HTTPClient = s.compactionHTTPClient
 	return cfg, nil
+}
+
+// compactionProtectedSources is the current input a compaction must keep raw.
+// Discuss callers pass the protected suffix their admission chose, so older
+// unconsumed input stays compactable.
+func compactionProtectedSources(req ChatRequest) []turn.ContextMessageSource {
+	sources := append([]turn.ContextMessageSource(nil), req.discussCurrentSources...)
+	if req.ExternalMessageID != "" {
+		sources = append(sources, turn.ContextMessageSource{Kind: "external", ID: req.ExternalMessageID, Current: true})
+	}
+	if req.RequiredHistoryMessageID != "" {
+		sources = append(sources, turn.ContextMessageSource{Kind: "history", ID: req.RequiredHistoryMessageID, Current: true})
+	}
+	return sources
 }

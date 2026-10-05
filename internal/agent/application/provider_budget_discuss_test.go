@@ -177,6 +177,36 @@ func TestDiscussProviderBudgetRecoveryRecomposesBeforeProviderDispatch(t *testin
 	}
 }
 
+func TestDiscussProviderBudgetRecoveryCompactsOlderBatchBehindFittingSuffix(t *testing.T) {
+	service, _, provider, compactor, cmd := discussBudgetRecoveryFixture(t)
+	configureDiscussLifecycle(service)
+	cmd.DiscussMessages = cmd.DiscussMessages[:len(cmd.DiscussMessages)-1]
+	for _, id := range []string{"m1", "m2", "m3", "m4"} {
+		cmd.DiscussMessages = append(cmd.DiscussMessages, turn.DiscussMessage{Role: "user", Content: id + strings.Repeat("u", 800), Source: &turn.ContextMessageSource{Kind: "external", ID: id, Current: true}})
+	}
+	handle, err := service.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recomposed := false
+	for event := range handle.Events() {
+		recomposed = recomposed || event.Kind == turn.DiscussEventRecompose
+	}
+	for range handle.Errs() {
+	}
+	if !recomposed || len(compactor.configs) != 1 || provider.callCount() != 0 {
+		t.Fatalf("recompose=%v compactions=%d provider=%d, want recovery before dispatch", recomposed, len(compactor.configs), provider.callCount())
+	}
+	cfg := compactor.configs[0]
+	protected := map[string]bool{}
+	for _, source := range cfg.ProtectedSources {
+		protected[source.ID] = true
+	}
+	if !protected["m4"] || !protected["m3"] || protected["m1"] || cfg.HistoryBudgetTokens <= 0 || cfg.HistoryBudgetTokens >= 998 {
+		t.Fatalf("protected=%v history_budget=%d; the newest input and its fitting suffix stay raw, older input is compacted, protected cost is counted once", protected, cfg.HistoryBudgetTokens)
+	}
+}
+
 func TestDiscussProviderBudgetRecoveryKeepsUnresolvedOverflowFailClosed(t *testing.T) {
 	for _, scenario := range []string{"protected hook", "off", "compaction failure", "compaction noop"} {
 		t.Run(scenario, func(t *testing.T) {

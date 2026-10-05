@@ -15,6 +15,13 @@ type discussAdmission struct {
 	BudgetTokens         int
 	DroppedMessages      int
 	RecoveryBudgetTokens int
+	// ProtectedSources is the current input admission may not drop: the whole
+	// unconsumed batch when it fits, otherwise its newest fitting suffix.
+	// ProtectedTokens is its cost. OmittedSources is older current input the
+	// selection left out; recovery compacts it or the run records it.
+	ProtectedSources []turn.ContextMessageSource
+	ProtectedTokens  int
+	OmittedSources   []turn.ContextMessageSource
 	// ProtectedOverflow is set when artifact summaries plus the newest
 	// message alone exceed the budget, or when the newest message is a tool
 	// response that cannot open a valid window; the turn must fail closed
@@ -57,13 +64,8 @@ func admitDiscussAgentContext(messages []turn.DiscussMessage, budgetTokens, cont
 		return nil, admission
 	}
 	decision := turn.AdmitContextEntries(entries, available)
-	currentCost := 0
-	for i, current := range turn.CurrentAdmissionEntries(entries) {
-		if current {
-			currentCost += entries[i].Cost
-		}
-	}
-	admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(max(0, available-currentCost))
+	protectedCost := admission.recordProtection(messages, entries, available, decision)
+	admission.RecoveryBudgetTokens = turn.EstimateTokensFromBytes(max(0, available-protectedCost))
 	admission.SelectedTokens = turn.EstimateTokensFromBytes(fixedBytes+decision.SelectedTokens) + imageTokens
 	admission.DroppedMessages = decision.DroppedEntries
 	admission.ProtectedOverflow = decision.ProtectedOverflow
@@ -99,13 +101,8 @@ func admitDiscussMessages(messages []turn.DiscussMessage, budgetTokens int) ([]t
 			ToolResponse: strings.EqualFold(strings.TrimSpace(messages[i].Role), "tool"),
 		}
 	}
-	for i, current := range turn.CurrentAdmissionEntries(entries) {
-		if current {
-			admission.RecoveryBudgetTokens -= entries[i].Cost
-		}
-	}
-	admission.RecoveryBudgetTokens = max(0, admission.RecoveryBudgetTokens)
 	decision := turn.AdmitContextEntries(entries, budgetTokens)
+	admission.RecoveryBudgetTokens = max(0, budgetTokens-admission.recordProtection(messages, entries, budgetTokens, decision))
 	admission.EstimatedTokens = decision.EstimatedTokens
 	admission.SelectedTokens = decision.SelectedTokens
 	admission.DroppedMessages = decision.DroppedEntries
@@ -125,16 +122,40 @@ func admitDiscussMessages(messages []turn.DiscussMessage, budgetTokens int) ([]t
 	return kept, admission
 }
 
-func discussCurrentMessageTokens(messages []turn.DiscussMessage) int {
-	entries := make([]turn.AdmissionEntry, len(messages))
-	for i, message := range messages {
-		entries[i] = turn.AdmissionEntry{Source: message.Source, Pinned: message.CompactionArtifactID != "", Cost: discussMessageTokens(message)}
-	}
-	tokens := 0
+// recordProtection records which current input the decision protects and
+// which it omits, and returns the protected cost in the entries' unit.
+func (a *discussAdmission) recordProtection(messages []turn.DiscussMessage, entries []turn.AdmissionEntry, budget int, decision turn.AdmissionDecision) int {
+	cost := 0
+	protected := turn.ProtectedAdmissionEntries(entries, budget)
 	for i, current := range turn.CurrentAdmissionEntries(entries) {
-		if current {
-			tokens += entries[i].Cost
+		switch {
+		case protected[i]:
+			cost += entries[i].Cost
+			a.ProtectedTokens += discussMessageTokens(messages[i])
+			if source := messages[i].Source; source != nil {
+				a.ProtectedSources = append(a.ProtectedSources, *source)
+			}
+		case current && !decision.ProtectedOverflow && !decision.Selected[i]:
+			if source := messages[i].Source; source != nil {
+				a.OmittedSources = append(a.OmittedSources, *source)
+			}
 		}
 	}
-	return tokens
+	return cost
+}
+
+// recordOmittedCurrentInput records the older unconsumed input a run proceeds
+// without, so its absence from the provider context is never silent.
+func recordOmittedCurrentInput(ledger *contextfrag.MutationLedger, groups ...[]turn.ContextMessageSource) {
+	var ids []string
+	for _, sources := range groups {
+		for _, source := range sources {
+			if source.ID != "" {
+				ids = append(ids, source.ID)
+			}
+		}
+	}
+	if len(ids) > 0 {
+		ledger.Record(contextfrag.MutationCurrentInputOmitted, "sources="+strings.Join(ids, ","))
+	}
 }

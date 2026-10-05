@@ -508,7 +508,7 @@ func TestBudgetRecoveryRetainsPressureAfterAllHistoryWasTrimmed(t *testing.T) {
 				cfg.RecoverContextBudget = s.chatBudgetRecovery(ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID}, chatHistoryLayout{pressureTokens: 20000})
 			} else {
 				cfg.RecoverContextBudget = func(ctx context.Context, c native.RunConfig) (native.RunConfig, bool, error) {
-					return s.recoverDiscussContextBudget(ctx, turn.StartTurnCommand{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, DiscussContextTokens: 20004, DiscussCurrentTokens: 4}, "", c)
+					return s.recoverDiscussContextBudget(ctx, turn.StartTurnCommand{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, DiscussContextTokens: 20004, DiscussCurrentTokens: 4}, nil, "", c)
 				}
 			}
 			got, err := contextview.ProviderRunConfigApplier(nil)(t.Context(), cfg)

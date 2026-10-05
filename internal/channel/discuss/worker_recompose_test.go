@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/turn"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -128,5 +129,16 @@ func TestHandleReplyWithTurnThirdRecoveryCompletesOriginalInput(t *testing.T) {
 	driver.handleReplyWithTurn(t.Context(), sess, recomposeTestRC(), driver.logger, svc)
 	if svc.calls != 4 {
 		t.Fatal("same input processed twice")
+	}
+}
+
+func TestDiscussSkippedAgentTurnConsumesOverflowingInput(t *testing.T) {
+	svc := &fakeTurnService{runtimeType: sessionpkg.RuntimeACPAgent}
+	driver := NewDiscussDriver(DiscussDriverDeps{AdmissionMaxTokens: 100})
+	sess := &discussSession{config: DiscussSessionConfig{BotID: "bot-1", ThreadID: "sess-1", ConversationType: "group"}}
+	rc := timeline.RenderedContext{{MessageID: "big", ReceivedAtMs: 200, Content: []timeline.RenderedContentPiece{{Type: "text", Text: strings.Repeat("x", 2000)}}}}
+	driver.handleReplyWithTurn(t.Context(), sess, rc, driver.logger, svc)
+	if svc.calls != 1 || !svc.lastCmd.DiscussContextOverflow || sess.lastProcessed.SourceCursor != 200 {
+		t.Fatalf("calls=%d overflow=%v cursor=%+v; an unaddressed agent turn must consume what it skips", svc.calls, svc.lastCmd.DiscussContextOverflow, sess.lastProcessed)
 	}
 }

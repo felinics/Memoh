@@ -239,6 +239,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		}
 		contextMarkdown, contextURI, contextManifest = runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 		if contextManifest != nil {
+			recordOmittedCurrentInput(contextManifest.Mutations, req.discussOmittedSources)
 			contextLifecycle.SetManifest(*contextManifest)
 		}
 	}

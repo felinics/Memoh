@@ -143,6 +143,16 @@ func TestDiscussCollectorPreservesExplicitSourcesAndImage(t *testing.T) {
 	}
 }
 
+func TestDiscussCollectorProtectsOnlyTheNewestUnconsumedInput(t *testing.T) {
+	frags := collectDiscussContext(t, DiscussContextConfig{ComposedMessages: []timeline.ContextMessage{
+		{Role: "user", Content: "older", Source: &turn.ContextMessageSource{Kind: "external", ID: "older-id", Current: true}},
+		{Role: "user", Content: "newest", Source: &turn.ContextMessageSource{Kind: "external", ID: "newest-id", Current: true}},
+	}})
+	if frags[0].Kind != contextfrag.KindConversationEvent || frags[0].Provenance.SourceID != "older-id" || frags[1].Kind != contextfrag.KindCurrentUserMessage {
+		t.Fatalf("older input must stay compactable history under its source ID: %+v", frags)
+	}
+}
+
 // A composed discuss message with RawContent carries the stored content shape;
 // the collector types it through the codec instead of decoding SDK JSON.
 func TestDiscussContextMessageToSDKTypesStoredShape(t *testing.T) {

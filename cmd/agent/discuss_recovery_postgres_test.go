@@ -117,16 +117,25 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		t.Fatal(err)
 	}
 	const rounds = 32
-	for round := 0; round < rounds; round++ {
+	// The last round only adds one small message: the round after the
+	// recoveries must be answered with the summaries they persisted.
+	for round := 0; round <= rounds; round++ {
+		nextRound := round == rounds
 		// Grow consumed history again so each round must make durable progress.
-		if round > 0 {
+		if round > 0 && !nextRound {
 			appendMessage(fmt.Sprintf("growth-%d", round), "assistant", strings.Repeat("old history ", 1500), true)
 		}
 		a, b := fmt.Sprintf("input-a-%d", round), fmt.Sprintf("input-b-%d", round)
 		textA, textB := a+strings.Repeat("a", 600), b+strings.Repeat("b", 600)
-		appendMessage(a, "user", textA, false)
-		appendMessage(b, "user", textB, false)
-		appendMessage(fmt.Sprintf("echo-%d", round), "assistant", "self echo", true)
+		if nextRound {
+			a, textA = "next-round", "next-round small input"
+			appendMessage(a, "user", textA, false)
+			b, textB = a, textA
+		} else {
+			appendMessage(a, "user", textA, false)
+			appendMessage(b, "user", textB, false)
+			appendMessage(fmt.Sprintf("echo-%d", round), "assistant", "self echo", true)
+		}
 
 		manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{OwnerID: uuid.NewString(), Ledger: ledger.NewPostgres(sqlc.New(pool), pool), Fence: runtimefence.NewActivator(queries)})
 		t.Cleanup(func() { _ = manager.Close() })
@@ -154,6 +163,9 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 			t.Fatalf("fixture must require exactly three recoveries, got %d", summaries.Load()-before)
 		}
 		request, _ := lastRequest.Load().(string)
+		if nextRound && summaries.Load()-before > 3 {
+			t.Fatalf("next round exceeded the recovery bound: summaries=%d", summaries.Load()-before)
+		}
 		if modelCalls.Load()-callsBefore != 1 || strings.Count(request, textA) != 1 || strings.Count(request, textB) != 1 {
 			t.Fatalf("round %d: provider calls=%d, current input multiplicity=%d/%d", round, modelCalls.Load()-callsBefore, strings.Count(request, textA), strings.Count(request, textB))
 		}
@@ -172,7 +184,7 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 		driver.StopAll()
 		_ = manager.Close()
 	}
-	if summaries.Load() < rounds || summaries.Load() > rounds*3 {
+	if summaries.Load() < rounds || summaries.Load() > (rounds+1)*3 {
 		t.Fatalf("unexpected bounded recovery count=%d", summaries.Load())
 	}
 	var replies, pending int
@@ -182,10 +194,10 @@ func TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart(t *testing.
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM bot_history_message_compacts WHERE session_id=$1 AND status='pending'`, sessionID).Scan(&pending); err != nil {
 		t.Fatal(err)
 	}
-	if replies != rounds || pending != 0 {
+	if replies != rounds+1 || pending != 0 {
 		t.Fatalf("replies=%d pending=%d", replies, pending)
 	}
-	t.Logf("rounds=%d summary_calls=%d provider_calls=%d stored_replies=%d pending=0 duplicate_current=0", rounds, summaries.Load(), rounds, replies)
+	t.Logf("rounds=%d+next summary_calls=%d provider_calls=%d stored_replies=%d pending=0 duplicate_current=0", rounds, summaries.Load(), modelCalls.Load(), replies)
 }
 
 type notifyingRecoveryCursor struct {

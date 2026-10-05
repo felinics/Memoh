@@ -57,6 +57,30 @@ func TestDiscussCurrentInputAloneTooLargeDoesNotRunCompaction(t *testing.T) {
 	}
 }
 
+func TestDiscussOversizedBatchCompactsOlderInputBehindProtectedSuffix(t *testing.T) {
+	service, runner := newControllerPolicyService(t, nil)
+	var messages []turn.DiscussMessage
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		messages = append(messages, turn.DiscussMessage{Role: "user", Content: strings.Repeat(id, 1000), Source: &turn.ContextMessageSource{Kind: "external", ID: id, Current: true}})
+	}
+	fired := service.maybeSyncCompactDiscuss(t.Context(), turn.StartTurnCommand{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, DiscussMessages: messages}, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "recovery")
+	if !fired || len(runner.configs) != 1 {
+		t.Fatalf("an omitted older input must be compacted even in shadow mode: fired=%v calls=%d", fired, len(runner.configs))
+	}
+	cfg := runner.configs[0]
+	var protected []string
+	for _, source := range cfg.ProtectedSources {
+		protected = append(protected, source.ID)
+	}
+	if strings.Join(protected, ",") != "c,d,e" || cfg.HistoryBudgetTokens != 250 {
+		t.Fatalf("protected=%v history_budget=%d, want the newest suffix within 900 and its cost counted once", protected, cfg.HistoryBudgetTokens)
+	}
+	fired = service.maybeSyncCompactDiscuss(t.Context(), turn.StartTurnCommand{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, DiscussMessages: messages[2:], DiscussOmittedSources: []turn.ContextMessageSource{*messages[0].Source, *messages[1].Source}}, ResolveRunConfigResult{ContextBudgetMaxTokens: 1000}, "channel-omission")
+	if !fired || len(runner.configs) != 2 || len(runner.configs[1].ProtectedSources) != 3 {
+		t.Fatalf("input Channel omitted must be compacted too: fired=%v configs=%+v", fired, runner.configs)
+	}
+}
+
 func TestMaybeSyncCompactDiscussDefaultsToShadow(t *testing.T) {
 	t.Parallel()
 

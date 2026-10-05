@@ -6,6 +6,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/context/compaction"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 )
 
@@ -17,9 +18,11 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 		return req, err
 	}
 	admitted, admission := admitDiscussAgentContext(req.discussMessages, s.contextAbsoluteMaxTokens(), len(markdown), imageCount)
-	if admission.ProtectedOverflow || admission.DroppedMessages > 0 || max(0, req.discussContextTokens-discussCurrentMessageTokens(req.discussMessages)) > admission.RecoveryBudgetTokens {
+	if admission.ProtectedOverflow || admission.DroppedMessages > 0 || len(req.discussOmittedSources) > 0 || max(0, req.discussContextTokens-admission.ProtectedTokens) > admission.RecoveryBudgetTokens {
 		if !req.discussRecoveryExhausted && admission.RecoveryBudgetTokens > 0 && s.effectiveSyncCompactionMode() != syncCompactionModeOff && s.compactionService != nil && s.settingsService != nil {
-			result := s.runBudgetCompactionSync(ctx, req, max(req.discussContextTokens, admission.EstimatedTokens), admission.RecoveryBudgetTokens, "")
+			recovery := req
+			recovery.discussCurrentSources = admission.ProtectedSources
+			result := s.runBudgetCompactionSync(ctx, recovery, max(req.discussContextTokens, admission.EstimatedTokens), admission.RecoveryBudgetTokens, "")
 			if err := ctx.Err(); err != nil {
 				return req, err
 			}
@@ -41,5 +44,6 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 	req.Query = discussAgentFullContextPrompt(admitted)
 	req.RawQuery = req.Query
 	req.discussMessages = admitted
+	req.discussOmittedSources = append(append([]turn.ContextMessageSource(nil), req.discussOmittedSources...), admission.OmittedSources...)
 	return req, nil
 }

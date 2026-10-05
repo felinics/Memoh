@@ -53,16 +53,22 @@ func TestDiscussComposedInputSurvivesEchoThroughProviderAdmission(t *testing.T) 
 	}
 }
 
-func TestDiscussAdmissionProtectsExplicitCurrentBatch(t *testing.T) {
+func TestDiscussAdmissionKeepsNewestFittingSuffixOfCurrentBatch(t *testing.T) {
 	messages := []turn.DiscussMessage{
 		{Role: "user", Content: strings.Repeat("a", 2400), Source: &turn.ContextMessageSource{Kind: "external", ID: "a", Current: true}},
 		{Role: "user", Content: strings.Repeat("b", 2400), Source: &turn.ContextMessageSource{Kind: "external", ID: "b", Current: true}},
 		{Role: "user", Content: "echo", Source: &turn.ContextMessageSource{Kind: "self", ID: "echo"}},
 	}
 	for _, admit := range []func([]turn.DiscussMessage, int) ([]turn.DiscussMessage, discussAdmission){admitDiscussMessages, admitDiscussAgentMessages} {
-		_, admission := admit(messages, 1000)
-		if !admission.ProtectedOverflow || admission.RecoveryBudgetTokens != 0 {
-			t.Fatalf("batch partially admitted: %+v", admission)
+		kept, admission := admit(messages, 1000)
+		if admission.ProtectedOverflow || len(admission.ProtectedSources) != 1 || admission.ProtectedSources[0].ID != "b" || admission.ProtectedTokens != 600 {
+			t.Fatalf("an oversized batch must protect its newest fitting suffix: %+v", admission)
+		}
+		if len(admission.OmittedSources) != 1 || admission.OmittedSources[0].ID != "a" || admission.RecoveryBudgetTokens <= 0 || len(kept) != 2 {
+			t.Fatalf("older input must be reported for recovery, with room left to compact it: %+v kept=%d", admission, len(kept))
+		}
+		if _, admission := admit(messages[1:2], 500); !admission.ProtectedOverflow {
+			t.Fatalf("the newest input alone must never be dropped: %+v", admission)
 		}
 	}
 }
@@ -75,7 +81,7 @@ func TestDiscussRecoveryCarriesCurrentSourcesEvenWithoutMaterializedMessages(t *
 		t.Fatal("recovery did not run")
 	}
 	cfg := runner.configs[0]
-	if len(cfg.ProtectedSources) != 2 || cfg.ProtectedSources[0].ID != "a" || cfg.ProtectedSources[1].ID != "b" {
-		t.Fatalf("current identities lost: %+v", cfg.ProtectedSources)
+	if len(cfg.ProtectedSources) != 1 || cfg.ProtectedSources[0].ID != "b" || cfg.HistoryBudgetTokens != 900 {
+		t.Fatalf("Channel overflow must protect only the newest input and compact older input: %+v", cfg)
 	}
 }

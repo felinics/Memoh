@@ -40,7 +40,11 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 	if resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType) {
 		_, admission = admitDiscussAgentMessages(cmd.DiscussMessages, budget)
 	}
-	rejected := cmd.DiscussContextOverflow || admission.ProtectedOverflow
+	// Older unconsumed input that no longer fits must be compacted before
+	// admission drops it, so its omission requires recovery in any mode.
+	rejected := cmd.DiscussContextOverflow || admission.ProtectedOverflow ||
+		len(cmd.DiscussOmittedSources) > 0 || len(admission.OmittedSources) > 0
+	protected := admission.ProtectedSources
 	if !rejected && !syncCompactionShouldRun(pressure, budget) {
 		return false
 	}
@@ -58,6 +62,12 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 	}
 	if rejected {
 		if cmd.DiscussContextOverflow {
+			// Channel rejected even the newest input beside the summaries, so
+			// that newest input is the whole protected set.
+			protected = nil
+			if n := len(cmd.DiscussCurrentSources); n > 0 {
+				protected = cmd.DiscussCurrentSources[n-1:]
+			}
 			budget = max(0, budget-cmd.DiscussCurrentTokens)
 			if resolved.RuntimeType == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(resolved.RuntimeType) {
 				budget -= turn.EstimateTokensFromBytes(len(discussAgentPromptPrefix) + len(discussAgentPromptSuffix) + len("[assistant]\n\n\n") + turn.ContextBytesPerToken - 1)
@@ -70,7 +80,7 @@ func (s *Service) maybeSyncCompactDiscuss(ctx context.Context, cmd turn.StartTur
 		}
 	}
 	start := time.Now()
-	req := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: runID, discussCurrentSources: cmd.DiscussCurrentSources, discussMessages: cmd.DiscussMessages}
+	req := ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: runID, discussCurrentSources: protected}
 	var res compaction.Result
 	if rejected {
 		res = s.runBudgetCompactionSync(ctx, req, pressure, budget, resolved.ModelID)

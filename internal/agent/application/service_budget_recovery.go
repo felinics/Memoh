@@ -225,29 +225,58 @@ func (l chatHistoryLayout) replaceSourceFrags(ctx context.Context, old, cfg nati
 	return out
 }
 
-func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.StartTurnCommand, modelID string, cfg native.RunConfig) (native.RunConfig, bool, error) {
+func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage, modelID string, cfg native.RunConfig) (native.RunConfig, bool, error) {
 	plan := cfg.ContextManifest.BudgetPlan
 	if s.effectiveSyncCompactionMode() == syncCompactionModeOff || plan == nil || ctx.Err() != nil {
 		return cfg, false, nil
 	}
-	available, pressure := plan.HistoryBudget, 0
-	for _, frag := range cfg.ContextSourceFrags {
-		if frag.Slot == contextfrag.SlotSystem || frag.Slot == contextfrag.SlotCurrentUser || frag.Kind == contextfrag.KindCurrentUserMessage {
-			continue
-		}
-		cost := contextfrag.ResolveProviderBudgetFragTokens(frag)
-		if frag.Kind == contextfrag.KindConversationSummary || (frag.Slot == contextfrag.SlotHistory && frag.Kind == contextfrag.KindConversationEvent) {
-			pressure += cost
-		} else {
-			available -= cost
+	batch := make(map[string]turn.ContextMessageSource)
+	newestTokens := 0
+	for _, message := range admitted {
+		if message.Source != nil && message.Source.Current {
+			batch[message.Source.ID] = *message.Source
+			newestTokens = discussMessageTokens(message)
 		}
 	}
-	originalHistory := max(0, cmd.DiscussContextTokens-cmd.DiscussCurrentTokens)
+	type batchInput struct {
+		source turn.ContextMessageSource
+		cost   int
+	}
+	var protected []turn.ContextMessageSource
+	var older []batchInput
+	available, pressure := plan.HistoryBudget, 0
+	for _, frag := range cfg.ContextSourceFrags {
+		source, inBatch := batch[frag.Provenance.SourceID]
+		switch {
+		case frag.Slot == contextfrag.SlotSystem:
+		case frag.Slot == contextfrag.SlotCurrentUser || frag.Kind == contextfrag.KindCurrentUserMessage:
+			if inBatch {
+				protected = append(protected, source)
+			}
+		case frag.Kind == contextfrag.KindConversationSummary || (frag.Slot == contextfrag.SlotHistory && frag.Kind == contextfrag.KindConversationEvent):
+			cost := contextfrag.ResolveProviderBudgetFragTokens(frag)
+			pressure += cost
+			if inBatch {
+				older = append(older, batchInput{source: source, cost: cost})
+			}
+		default:
+			available -= contextfrag.ResolveProviderBudgetFragTokens(frag)
+		}
+	}
+	originalHistory := max(0, cmd.DiscussContextTokens-newestTokens)
 	pressure = max(pressure, contextfrag.ProviderBudgetTokensFromBytes(int(contextfrag.BudgetBytesForTokens(originalHistory))))
 	if pressure <= available || available <= 0 {
 		return cfg, false, nil
 	}
-	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: cmd.DiscussCurrentSources, discussMessages: cmd.DiscussMessages}, pressure, available, modelID)
+	// Older input of the batch stays raw while it fits, leaving a tenth of the
+	// allowance for the summary of what does not; only the rest is compacted.
+	historyBudget, limit := available, available-available/10
+	for i := len(older) - 1; i >= 0 && older[i].cost <= limit; i-- {
+		protected = append(protected, older[i].source)
+		limit -= older[i].cost
+		historyBudget -= older[i].cost
+	}
+	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: protected}, pressure, historyBudget, modelID)
 	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
 		return cfg, false, nil
 	}

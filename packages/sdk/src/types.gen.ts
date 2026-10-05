@@ -1245,7 +1245,7 @@ export type ContextfragMemoryRecallTrace = {
     retrieval_mode?: string;
 };
 
-export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'renderer_prune' | 'mid_stream_retry' | 'run_abort_observed';
+export type ContextfragMutationKind = 'before_model_call_hook' | 'background_summary' | 'mid_task_prune' | 'loop_step_reselection' | 'injected_message' | 'context_view_fallback' | 'context_budget_failure' | 'context_budget_disabled' | 'capability_gate' | 'read_media' | 'renderer_prune' | 'mid_stream_retry' | 'current_input_omitted' | 'run_abort_observed';
 
 export type ContextfragMutationRecord = {
     detail?: string;

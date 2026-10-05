@@ -1,6 +1,7 @@
 package turn_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/turn"
@@ -171,11 +172,31 @@ func TestAdmissionProtectsExplicitCurrentSources(t *testing.T) {
 		{Cost: 200, Source: &turn.ContextMessageSource{Kind: "external", ID: "b", Current: true}},
 		{Cost: 1, Source: &turn.ContextMessageSource{Kind: "external", ID: "echo"}},
 	}
-	if got := turn.AdmitContextEntries(entries, 1000); !got.ProtectedOverflow {
-		t.Fatalf("discarded current input: %+v", got)
-	}
 	got := turn.AdmitContextEntries(entries, 1100)
 	if got.ProtectedOverflow || !got.Selected[0] || !got.Selected[1] || got.Selected[2] {
-		t.Fatalf("source selection=%+v", got)
+		t.Fatalf("a fitting batch must be kept whole: %+v", got)
+	}
+	got = turn.AdmitContextEntries(entries, 1000)
+	if got.ProtectedOverflow || got.Selected[0] || !got.Selected[1] || !got.Selected[2] {
+		t.Fatalf("an oversized batch must keep its newest fitting suffix: %+v", got)
+	}
+	if got := turn.AdmitContextEntries(entries[1:2], 100); !got.ProtectedOverflow {
+		t.Fatalf("the newest current entry alone must never be dropped: %+v", got)
+	}
+}
+
+func TestProtectedSuffixLeavesRoomForTheSummaryOfOlderInput(t *testing.T) {
+	entries := []turn.AdmissionEntry{{Cost: 300, Pinned: true}}
+	for _, id := range []string{"a", "b", "c", "d", "e"} {
+		entries = append(entries, turn.AdmissionEntry{Cost: 200, Source: &turn.ContextMessageSource{Kind: "external", ID: id, Current: true}})
+	}
+	protected := turn.ProtectedAdmissionEntries(entries, 1000)
+	if fmt.Sprint(protected) != "[false false false true true true]" {
+		t.Fatalf("protected=%v, want the newest suffix within 1000-100-300", protected)
+	}
+	entries[4].Cost = 2000
+	protected = turn.ProtectedAdmissionEntries(entries, 1000)
+	if fmt.Sprint(protected) != "[false false false false false true]" {
+		t.Fatalf("protected=%v, want a contiguous suffix stopping at the first entry that does not fit", protected)
 	}
 }

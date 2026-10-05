@@ -20189,6 +20189,7 @@ const docTemplate = `{
                 "read_media",
                 "renderer_prune",
                 "mid_stream_retry",
+                "current_input_omitted",
                 "run_abort_observed"
             ],
             "x-enum-varnames": [
@@ -20204,6 +20205,7 @@ const docTemplate = `{
                 "MutationReadMedia",
                 "MutationRendererPrune",
                 "MutationMidStreamRetry",
+                "MutationCurrentInputOmitted",
                 "MutationRunAbortObserved"
             ]
         },

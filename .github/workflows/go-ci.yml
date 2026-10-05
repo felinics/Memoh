@@ -215,7 +215,7 @@ jobs:
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgresBotCreate' ./internal/bots
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
-            -run '^TestPostgresDiscussRecoveryPreservesBatchAcrossCompactorRestart$' ./cmd/agent
+            -run '^TestPostgresDiscuss(RecoveryPreservesBatchAcrossCompactorRestart|BacklogOverBudgetIsAnsweredAndNextRoundContinues|BacklogWithoutCompactionIsAnsweredAndRecordsOmission|OversizedInputFailsOnceThenNextMessageIsAnswered)$' ./cmd/agent
           TEST_POSTGRES_BOOTSTRAP_SCHEMA=0 go test -v -race -count=1 -timeout 90s \
             -run '^TestPostgres(SummaryOnlyRollup|CompleteCompactionRollup)' ./internal/chat/message
       - name: Verify atomic connector disconnect and tenant isolation
