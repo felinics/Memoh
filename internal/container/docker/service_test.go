@@ -15,8 +15,10 @@ import (
 	dockernetwork "github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/config"
 	containerapi "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func TestDockerSnapshotImageRefSanitizesRuntimeName(t *testing.T) {
@@ -173,6 +175,9 @@ func TestGetImageMapsUnreachableDaemonToUnavailable(t *testing.T) {
 		if !errors.Is(err, containerapi.ErrUnavailable) || !errors.Is(err, containerapi.ErrRuntime) {
 			t.Fatalf("GetImage() error = %v, want ErrUnavailable and ErrRuntime", err)
 		}
+		if fault := errs.FaultOf(err); fault != apperror.FaultDependency {
+			t.Fatalf("GetImage() fault = %s, want dependency", fault)
+		}
 	})
 	t.Run("connection refused", func(t *testing.T) {
 		server := httptest.NewServer(http.NotFoundHandler())
@@ -188,6 +193,9 @@ func TestGetImageMapsUnreachableDaemonToUnavailable(t *testing.T) {
 		if !errors.Is(err, containerapi.ErrUnavailable) {
 			t.Fatalf("GetImage() error = %v, want ErrUnavailable", err)
 		}
+		if fault := errs.FaultOf(err); fault != apperror.FaultDependency {
+			t.Fatalf("GetImage() fault = %s, want dependency", fault)
+		}
 	})
 	t.Run("daemon failure", func(t *testing.T) {
 		svc := newTestService(t, "", func(w http.ResponseWriter, _ *http.Request) {
@@ -196,6 +204,9 @@ func TestGetImageMapsUnreachableDaemonToUnavailable(t *testing.T) {
 		_, err := svc.GetImage(context.Background(), "debian:bookworm-slim")
 		if errors.Is(err, containerapi.ErrUnavailable) || !errors.Is(err, containerapi.ErrRuntime) {
 			t.Fatalf("GetImage() error = %v, want ErrRuntime only", err)
+		}
+		if fault := errs.FaultOf(err); fault != apperror.FaultServer {
+			t.Fatalf("GetImage() fault = %s, want server", fault)
 		}
 	})
 }

@@ -25,6 +25,7 @@ import (
 
 	"github.com/felinics/memoh/internal/config"
 	containerapi "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -948,11 +949,10 @@ func mapDockerErr(err error) error {
 	if errdefs.IsAlreadyExists(err) || errdefs.IsConflict(err) {
 		return errors.Join(containerapi.ErrAlreadyExists, err)
 	}
-	if client.IsErrConnectionFailed(err) {
-		return errors.Join(containerapi.ErrUnavailable, containerapi.ErrRuntime, fmt.Errorf("docker daemon unavailable: %w", err))
-	}
-	if errdefs.IsUnavailable(err) {
-		return errors.Join(containerapi.ErrUnavailable, containerapi.ErrRuntime, err)
+	// The daemon is a dependency of this process: when it cannot be reached
+	// or refuses the call for now, the failure is its own.
+	if client.IsErrConnectionFailed(err) || errdefs.IsUnavailable(err) {
+		return errs.WrapDependency(errors.Join(containerapi.ErrUnavailable, containerapi.ErrRuntime, err), "docker daemon unavailable")
 	}
 	return errors.Join(containerapi.ErrRuntime, err)
 }

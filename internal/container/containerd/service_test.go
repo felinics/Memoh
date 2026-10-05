@@ -8,6 +8,9 @@ import (
 
 	"github.com/containerd/errdefs"
 	"github.com/opencontainers/runtime-spec/specs-go"
+
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func TestSpecOptsFromResourceLimitsSetsLinuxResources(t *testing.T) {
@@ -57,9 +60,15 @@ func TestMapContainerdErrMarksUnavailable(t *testing.T) {
 	if !errors.Is(err, ErrUnavailable) || !errors.Is(err, ErrRuntime) {
 		t.Fatalf("mapContainerdErr(unavailable) = %v, want ErrUnavailable and ErrRuntime", err)
 	}
+	if fault := errs.FaultOf(err); fault != apperror.FaultDependency {
+		t.Fatalf("mapContainerdErr(unavailable) fault = %s, want dependency", fault)
+	}
 
 	err = mapContainerdErr(errors.New("snapshot unpack failed"))
 	if errors.Is(err, ErrUnavailable) || !errors.Is(err, ErrRuntime) {
 		t.Fatalf("mapContainerdErr(other) = %v, want ErrRuntime only", err)
+	}
+	if fault := errs.FaultOf(err); fault != apperror.FaultServer {
+		t.Fatalf("mapContainerdErr(other) fault = %s, want server", fault)
 	}
 }
