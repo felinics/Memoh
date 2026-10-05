@@ -692,7 +692,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   watch([activeId, currentBotId, () => selection.sessionId], () => { pendingChatInputFocus.value = null }, { flush: 'sync' })
 
   function requestChatInputFocus() {
-    activateChatPanel()
+    if (!activePanelId.value || panelComponentOf(activePanelId.value) !== 'chat') activateChatPanel()
     const panel = api.value?.activePanel
     if (!activePanelIsChat.value || !panel || !currentBotId.value) return
     pendingChatInputFocus.value = {

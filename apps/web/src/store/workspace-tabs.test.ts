@@ -842,6 +842,42 @@ describe('workspace layout store', () => {
     unregister()
   })
 
+  it('focuses the chat the user is in rather than the first chat of another group', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    store.openDraftChat()
+    const first = store.activeId
+    store.openFileToSide('/right.txt')
+    registry.dispatch(appKeyboardCommands.newChatSession)
+    const second = store.activeId
+    expect(dock.getPanel(second!)?.component).toBe('chat')
+    expect(second).not.toBe(first)
+
+    registry.dispatch(appKeyboardCommands.focusChatInput)
+    await nextTick()
+    expect(store.activeId).toBe(second)
+    expect(store.pendingChatInputFocus?.panelId).toBe(second)
+    unregister()
+  })
+
+  it('opens a chat to focus when the dock is empty', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    expect(dock.panels).toHaveLength(0)
+
+    registry.dispatch(appKeyboardCommands.focusChatInput)
+    await nextTick()
+    expect(dock.getPanel(store.activeId!)?.component).toBe('chat')
+    expect(store.pendingChatInputFocus?.panelId).toBe(store.activeId)
+    unregister()
+  })
+
   it('creates once from a shortcut, suppresses repeat, blocks settings and accepts a live rebind', () => {
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
