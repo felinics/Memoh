@@ -49,7 +49,9 @@ const active = ref(true)
 const windowBridge = inject(DesktopWindowKey, undefined)
 
 function setCapture(open: boolean) {
-  void windowBridge?.setIgnoreMenuShortcuts?.(open)?.catch(() => toast.error(t('common.saveFailed')))
+  void windowBridge?.setIgnoreMenuShortcuts?.(open)?.catch(() => {
+    toast.error(t(open ? 'settings.keyboard.dialog.menuPauseFailed' : 'settings.keyboard.dialog.menuRestoreFailed'))
+  })
 }
 
 watch(() => props.open, (isOpen) => {

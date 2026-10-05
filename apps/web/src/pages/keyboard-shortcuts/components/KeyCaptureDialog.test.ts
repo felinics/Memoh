@@ -9,6 +9,12 @@ import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboa
 import { connectBrowserKeyboardShortcutsLive } from '@/lib/browser-keyboard-shortcuts'
 import { keyboardBindings } from '@/lib/keyboard-bindings'
 
+const toastError = vi.hoisted(() => vi.fn())
+vi.mock('@felinic/ui', async importOriginal => ({
+  ...await importOriginal<typeof import('@felinic/ui')>(),
+  toast: { error: toastError, success: vi.fn() },
+}))
+
 let app: App | undefined
 let host: HTMLElement | undefined
 let disconnect = () => {}
@@ -95,4 +101,22 @@ it('explains and blocks a text editing combo before accepting a free one', async
   await nextTick()
   expect(document.body.textContent).not.toContain(i18n.global.t('settings.keyboard.dialog.editingError'))
   expect(save().disabled).toBe(false)
+})
+
+it('reports a failed menu shortcut pause and a failed restore with their own messages', async () => {
+  toastError.mockClear()
+  const setIgnoreMenuShortcuts = vi.fn(async (_ignored: boolean) => { throw new Error('ipc') })
+  const open = ref(true)
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp({ setup: () => () => h(KeyCaptureDialog, {
+    open: open.value, command: appKeyboardCommands.toggleSidebar, i18nKey: 'toggleSidebar',
+  }) }).use(createPinia()).use(i18n).provide(DesktopWindowKey, {
+    isFullScreen: async () => false, onFullScreenChanged: () => () => {}, setIgnoreMenuShortcuts,
+  })
+  app.mount(host)
+  await vi.waitFor(() => expect(toastError).toHaveBeenLastCalledWith(i18n.global.t('settings.keyboard.dialog.menuPauseFailed')))
+  open.value = false
+  await vi.waitFor(() => expect(toastError).toHaveBeenLastCalledWith(i18n.global.t('settings.keyboard.dialog.menuRestoreFailed')))
+  expect(i18n.global.t('settings.keyboard.dialog.menuPauseFailed')).not.toBe('settings.keyboard.dialog.menuPauseFailed')
 })

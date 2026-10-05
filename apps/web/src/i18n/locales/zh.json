@@ -692,6 +692,8 @@
         "resetDefault": "恢复默认",
         "reservedError": "该组合键已被浏览器、操作系统或应用菜单占用。",
         "editingError": "该组合键用于文本编辑（复制、粘贴、撤销等）。",
+        "menuPauseFailed": "无法暂停应用菜单快捷键，录制时它们仍可能被触发。",
+        "menuRestoreFailed": "无法恢复应用菜单快捷键，如果它们不再响应，请重新加载窗口。",
         "noModifierError": "该快捷键必须包含 Cmd/Ctrl 或 Alt 修饰键，否则会在普通输入时被触发。",
         "sameScopeError": "这个组合已用于“{command}”。",
         "crossScopeWarn": "也被 {command} 使用（仅在其作用域内生效）。"
