@@ -3,6 +3,8 @@ package sessionruntime
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,5 +220,57 @@ func TestBeginHistoryResetSnapshotWriteFailureIsDependencyFault(t *testing.T) {
 	}
 	if released := runs.releasedLeases(); len(released) != 1 {
 		t.Fatalf("durable release = %#v, want the lease returned", released)
+	}
+}
+
+// On Redis the owner releases its run with its routing lease. When a reset
+// dropped the run from the projection between the owner's terminal write and
+// that release, the finish still clears the lease and its index entry, so no
+// reaper later mistakes the finished run for an abandoned one.
+func TestRedisFinishRunAfterResetDroppedTheProjection(t *testing.T) {
+	url := os.Getenv("MEMOH_TEST_REDIS_URL")
+	if url == "" {
+		if os.Getenv("MEMOH_TEST_DISTRIBUTED_REQUIRED") == "1" {
+			t.Fatal("MEMOH_TEST_REDIS_URL required")
+		}
+		t.Skip("set MEMOH_TEST_REDIS_URL")
+	}
+	ctx := context.Background()
+	backend, err := NewRedisBackend(ctx, RedisOptions{URL: url, KeyPrefix: uniqueRuntimeBackendPrefix("reset-finish"), StateTTL: time.Minute})
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	runs := &resetRacingLedger{fakeLedger: newFakeLedger()}
+	manager := NewManager(backend, Options{
+		OwnerID: "owner-reset-race-redis", StateTTL: time.Minute, OwnerLeaseTTL: time.Minute,
+		Ledger: runs, Fence: &fakeFence{},
+	})
+	t.Cleanup(func() { _ = manager.Close() })
+	admission := admitResetRaceRun(t, manager)
+	key := Key{BotID: testBotID, SessionID: testSessionID}
+	if _, ok, err := backend.LoadRunRef(ctx, key, admission.RunID); err != nil || !ok {
+		t.Fatalf("run lease before finish = (%v, %v), want held", ok, err)
+	}
+	runs.afterFinalize = func() {
+		if err := manager.invalidateHistoryResetSnapshots(ctx, []Key{key}, true); err != nil {
+			t.Errorf("drop projection: %v", err)
+		}
+	}
+
+	terminal, err := manager.FinishRun(ctx, admission.Handle, RunStatusAborted)
+	if err != nil || !terminal.Applied {
+		t.Fatalf("FinishRun() = (%+v, %v), want this owner's applied terminal", terminal, err)
+	}
+	if _, ok, err := backend.LoadRunRef(ctx, key, admission.RunID); err != nil || ok {
+		t.Fatalf("run lease after finish = (%v, %v), want released", ok, err)
+	}
+	members, err := backend.client.ZRange(ctx, backend.leaseIndexKey(), 0, -1).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range members {
+		if strings.Contains(member, admission.RunID) {
+			t.Fatalf("lease index still lists the finished run: %q", member)
+		}
 	}
 }

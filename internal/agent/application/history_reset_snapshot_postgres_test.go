@@ -458,3 +458,50 @@ func TestPostgresHistoryResetSubscriberHealsWithoutReleasePass(t *testing.T) {
 	// No release: the subscriber must notice the cleared ledger by itself.
 	awaitClearedSubscription(t, sub, before.RunID)
 }
+
+// A bot-wide clear reaches every session of the bot, not only the first.
+func TestPostgresBotHistoryResetClearsEverySession(t *testing.T) {
+	first := newWSStepHistoryHarness(t, wsStepHistorySuccess)
+	ctx := context.Background()
+	second := first
+	second.sessionID = uuid.NewString()
+	if _, err := first.pool.Exec(ctx, `
+		INSERT INTO bot_sessions (id, bot_id, channel_type, runtime_type)
+		VALUES ($1, $2, 'telegram', 'model')
+	`, second.sessionID, first.botID); err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+	sessions := []wsStepHistoryHarness{first, second}
+	subs := make([]sessionruntime.Subscription, len(sessions))
+	runs := make([]string, len(sessions))
+	for i, h := range sessions {
+		sub, err := h.manager.Subscribe(ctx, h.botID, h.sessionID)
+		if err != nil {
+			t.Fatalf("Subscribe() error = %v", err)
+		}
+		defer sub.Close()
+		subs[i] = sub
+		h.run(t, nil)
+		run := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
+		if run == nil {
+			t.Fatalf("session %d: finished run is missing from the live snapshot", i)
+		}
+		runs[i] = run.RunID
+	}
+	for _, sub := range subs {
+		drainSubscription(sub)
+	}
+
+	first.clearHistory(t, historyResetBot, nil)
+
+	restarted := first.restarted(t)
+	for i, h := range sessions {
+		if got := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView; got != nil {
+			t.Errorf("session %d: live snapshot after the bot clear holds %s", i, describeRun(got))
+		}
+		if got := mustSnapshot(t, restarted, h.botID, h.sessionID).CurrentRunView; got != nil {
+			t.Errorf("session %d: ledger fallback after the bot clear reports %s", i, describeRun(got))
+		}
+		awaitClearedSubscription(t, subs[i], runs[i])
+	}
+}
