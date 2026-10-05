@@ -81,8 +81,8 @@ func (h *BotRemoteRuntimeHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} workspace.WorkspaceTargetsResponse
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets [get].
 func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionWorkspaceRead)
@@ -103,9 +103,9 @@ func (h *BotRemoteRuntimeHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param runtime_id path string true "Runtime ID"
 // @Success 200 {object} workspace.WorkspaceTarget
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets/remotes/{runtime_id} [put].
 func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -126,9 +126,9 @@ func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param target_id path string true "Workspace target ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets/{target_id} [delete].
 func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -151,9 +151,9 @@ func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param request body workspace.SetPrimaryWorkspaceTargetRequest true "Primary target"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets/primary [put].
 func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)
@@ -182,9 +182,9 @@ func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 // @Param target_id path string true "Workspace target ID"
 // @Param request body workspace.UpdateWorkspaceTargetToolApprovalRequest true "Target tool approval"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workspace-targets/{target_id}/tool-approval [put].
 func (h *BotRemoteRuntimeHandler) UpdateToolApproval(c echo.Context) error {
 	botID, err := h.requirePermission(c, bots.PermissionManage)

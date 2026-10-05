@@ -51,10 +51,10 @@ type sessionInvocationResponse struct {
 // @Param session_id path string true "Session ID"
 // @Param invocation_id path string true "Client invocation ID"
 // @Success 200 {object} sessionInvocationResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/invocations/{invocation_id} [get].
 func (h *SessionHandler) GetSessionInvocation(c echo.Context) error {
 	channelIdentityID, err := RequireChannelIdentityID(c)

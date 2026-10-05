@@ -159,7 +159,7 @@ func (c *Client) ReadFile(ctx context.Context, path string, lineOffset, nLines i
 		LineOffset: lineOffset,
 		NLines:     nLines,
 	})
-	return resp, mapError(err)
+	return resp, mapError(ctx, err)
 }
 
 func (c *Client) WriteFile(ctx context.Context, path string, content []byte) error {
@@ -167,7 +167,7 @@ func (c *Client) WriteFile(ctx context.Context, path string, content []byte) err
 		Path:    path,
 		Content: content,
 	})
-	return mapError(err)
+	return mapError(ctx, err)
 }
 
 // ListDirResult holds the paginated result of a directory listing.
@@ -186,7 +186,7 @@ func (c *Client) ListDir(ctx context.Context, path string, recursive bool, offse
 		CollapseThreshold: collapseThreshold,
 	})
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	return &ListDirResult{
 		Entries:    resp.GetEntries(),
@@ -215,7 +215,7 @@ func (c *Client) ListDirBounded(ctx context.Context, path string, recursive bool
 		MaxEntries: maxEntries,
 	})
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	return resp.GetEntries(), nil
 }
@@ -223,19 +223,19 @@ func (c *Client) ListDirBounded(ctx context.Context, path string, recursive bool
 func (c *Client) Stat(ctx context.Context, path string) (*pb.FileEntry, error) {
 	resp, err := c.svc.Stat(ctx, &pb.StatRequest{Path: path})
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	return resp.GetEntry(), nil
 }
 
 func (c *Client) Mkdir(ctx context.Context, path string) error {
 	_, err := c.svc.Mkdir(ctx, &pb.MkdirRequest{Path: path})
-	return mapError(err)
+	return mapError(ctx, err)
 }
 
 func (c *Client) Rename(ctx context.Context, oldPath, newPath string) error {
 	_, err := c.svc.Rename(ctx, &pb.RenameRequest{OldPath: oldPath, NewPath: newPath})
-	return mapError(err)
+	return mapError(ctx, err)
 }
 
 // ExecResult holds the output of a non-streaming exec call.
@@ -283,7 +283,7 @@ func (c *Client) ExecWithStdinEnv(ctx context.Context, command, workDir string, 
 func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, timeout int32, stdinData []byte, opts ExecOptions) (*ExecResult, error) {
 	stream, err := c.svc.Exec(ctx)
 	if err != nil {
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 
 	// A command may exit without consuming its stdin; the server then closes
@@ -300,15 +300,15 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		ReportLiveness: opts.ReportLiveness,
 	})
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, mapError(ctx, err)
 	}
 	if err == nil && len(stdinData) > 0 {
 		if err := stream.Send(&pb.ExecInput{StdinData: stdinData}); err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
+			return nil, mapError(ctx, err)
 		}
 	}
 	if err := stream.CloseSend(); err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, mapError(ctx, err)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -320,7 +320,7 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, mapError(ctx, err)
 		}
 		switch msg.GetStream() {
 		case pb.ExecOutput_STDOUT:
@@ -357,7 +357,7 @@ func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir str
 	stream, err := c.svc.Exec(streamCtx)
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 
 	// Send config message first
@@ -372,7 +372,7 @@ func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir str
 	})
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, mapError(ctx, err)
 	}
 
 	return &ExecStream{stream: stream, cancel: cancel}, nil
@@ -389,23 +389,24 @@ type ExecStream struct {
 func (s *ExecStream) SendStdin(data []byte) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
-	return s.stream.Send(&pb.ExecInput{
+	return mapStreamError(s.stream, s.stream.Send(&pb.ExecInput{
 		StdinData: data,
-	})
+	}))
 }
 
 // Recv receives output from the process.
 func (s *ExecStream) Recv() (*pb.ExecOutput, error) {
-	return s.stream.Recv()
+	msg, err := s.stream.Recv()
+	return msg, mapStreamError(s.stream, err)
 }
 
 // Resize sends a terminal resize event to the running process.
 func (s *ExecStream) Resize(cols, rows uint32) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
-	return s.stream.Send(&pb.ExecInput{
+	return mapStreamError(s.stream, s.stream.Send(&pb.ExecInput{
 		Resize: &pb.TerminalResize{Cols: cols, Rows: rows},
-	})
+	}))
 }
 
 // Close closes the stream.
@@ -437,7 +438,7 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 	stream, err := c.svc.Exec(streamCtx)
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 
 	err = stream.Send(&pb.ExecInput{
@@ -454,7 +455,7 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 	})
 	if err != nil {
 		cancel()
-		return nil, err
+		return nil, mapError(ctx, err)
 	}
 
 	return &ExecStream{stream: stream, cancel: cancel}, nil
@@ -466,7 +467,7 @@ func (c *Client) ReadRaw(ctx context.Context, path string) (io.ReadCloser, error
 	stream, err := c.svc.ReadRaw(streamCtx, &pb.ReadRawRequest{Path: path})
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	return newStreamReader(stream, cancel)
 }
@@ -478,7 +479,7 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 
 	stream, err := c.svc.WriteRaw(streamCtx)
 	if err != nil {
-		return 0, mapError(err)
+		return 0, mapError(ctx, err)
 	}
 	// Always send the path first, even for an empty reader. Besides making empty
 	// files representable, this lets the server create its temporary file before
@@ -511,7 +512,7 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
-		return 0, mapError(err)
+		return 0, mapError(ctx, err)
 	}
 	return resp.GetBytesWritten(), nil
 }
@@ -525,7 +526,7 @@ func writeRawSendError(stream pb.ContainerService_WriteRawClient, err error) err
 			err = recvErr
 		}
 	}
-	return mapError(err)
+	return mapStreamError(stream, err)
 }
 
 func (c *Client) DeleteFile(ctx context.Context, path string, recursive bool) error {
@@ -533,7 +534,7 @@ func (c *Client) DeleteFile(ctx context.Context, path string, recursive bool) er
 		Path:      path,
 		Recursive: recursive,
 	})
-	return mapError(err)
+	return mapError(ctx, err)
 }
 
 func (c *Client) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
@@ -547,13 +548,13 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 	stream, err := c.svc.Tunnel(streamCtx)
 	if err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	if err := sendTunnelFrame(ctx, stream, &pb.TunnelFrame{
 		Frame: &pb.TunnelFrame_Open{Open: &pb.TunnelOpen{Address: address}},
 	}); err != nil {
 		cancel()
-		return nil, mapError(err)
+		return nil, mapError(ctx, err)
 	}
 	conn := &tunnelConn{
 		stream: stream,
@@ -612,7 +613,7 @@ func (c *tunnelConn) waitOpen(ctx context.Context) error {
 	select {
 	case result := <-resultCh:
 		if result.err != nil {
-			return mapError(result.err)
+			return mapError(ctx, result.err)
 		}
 		switch payload := result.frame.GetFrame().(type) {
 		case *pb.TunnelFrame_Data:
@@ -646,7 +647,7 @@ func (c *tunnelConn) Read(p []byte) (int, error) {
 			if errors.Is(err, io.EOF) {
 				return 0, io.EOF
 			}
-			return 0, mapError(err)
+			return 0, mapStreamError(c.stream, err)
 		}
 		switch payload := frame.GetFrame().(type) {
 		case *pb.TunnelFrame_Data:
@@ -680,7 +681,7 @@ func (c *tunnelConn) Write(p []byte) (int, error) {
 	if err := c.stream.Send(&pb.TunnelFrame{
 		Frame: &pb.TunnelFrame_Data{Data: &pb.TunnelData{Data: data}},
 	}); err != nil {
-		return 0, mapError(err)
+		return 0, mapStreamError(c.stream, err)
 	}
 	return len(p), nil
 }
@@ -723,7 +724,7 @@ func newStreamReader(stream pb.ContainerService_ReadRawClient, cancel context.Ca
 		return io.NopCloser(bytes.NewReader(nil)), nil
 	case err != nil:
 		cancel()
-		return nil, mapError(err)
+		return nil, mapStreamError(stream, err)
 	default:
 		return &streamReader{stream: stream, buf: first.GetData(), cancel: cancel}, nil
 	}
@@ -737,7 +738,7 @@ func (r *streamReader) fill() error {
 			if errors.Is(err, io.EOF) {
 				return io.EOF
 			}
-			return mapError(err)
+			return mapStreamError(r.stream, err)
 		}
 		r.buf = msg.GetData()
 		r.off = 0

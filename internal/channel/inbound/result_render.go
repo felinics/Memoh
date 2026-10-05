@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/i18n"
@@ -165,16 +164,6 @@ func renderResult(result *command.Result, rc RenderContext) channel.Message {
 		}
 	}
 	return applyMessageFormat(msg, rc.Caps)
-}
-
-// externalAgentErrorText is the channel copy for the code err carries, with
-// its args, or the catalog detail when the channel has no copy for it.
-func externalAgentErrorText(err error, t *i18n.Localizer) string {
-	code := apperror.CodeOf(err)
-	if text, ok := channel.ErrorCodeText(t, code, apperror.ArgsOf(err)); ok {
-		return text
-	}
-	return string(code)
 }
 
 // appendFallbackTrailer adds a typeable-command guide derived from Interactive

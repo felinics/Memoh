@@ -44,7 +44,7 @@ func (h *AgentAuthorizationHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param payload body agentcredential.AuthorizationRequest true "Authorization request"
 // @Success 201 {object} agentcredential.Authorization
-// @Failure 400,403,409,429,503 {object} apperror.Problem
+// @Failure 400,403,409,429,503 {object} server.Problem
 // @Router /agent-authorizations [post].
 func (h *AgentAuthorizationHandler) Create(c echo.Context) error {
 	owner, err := RequireChannelIdentityID(c)
@@ -69,7 +69,7 @@ func (h *AgentAuthorizationHandler) Create(c echo.Context) error {
 // @Tags agent-authorizations
 // @Param id path string true "Authorization ID"
 // @Success 200 {object} agentcredential.Authorization
-// @Failure 403,410,503 {object} apperror.Problem
+// @Failure 403,410,503 {object} server.Problem
 // @Router /agent-authorizations/{id} [get].
 func (h *AgentAuthorizationHandler) Get(c echo.Context) error { return h.status(c, false) }
 
@@ -78,7 +78,7 @@ func (h *AgentAuthorizationHandler) Get(c echo.Context) error { return h.status(
 // @Tags agent-authorizations
 // @Param id path string true "Authorization ID"
 // @Success 200 {object} agentcredential.Authorization
-// @Failure 403,410,503 {object} apperror.Problem
+// @Failure 403,410,503 {object} server.Problem
 // @Router /agent-authorizations/{id}/poll [post].
 func (h *AgentAuthorizationHandler) Poll(c echo.Context) error { return h.status(c, true) }
 
@@ -94,7 +94,7 @@ type AgentAuthorizationExchangeRequest struct {
 // @Param id path string true "Authorization ID"
 // @Param payload body AgentAuthorizationExchangeRequest true "Authorization code"
 // @Success 200 {object} agentcredential.Authorization
-// @Failure 400,403,410,503 {object} apperror.Problem
+// @Failure 400,403,410,503 {object} server.Problem
 // @Router /agent-authorizations/{id}/exchange [post].
 func (h *AgentAuthorizationHandler) Exchange(c echo.Context) error {
 	owner, err := RequireChannelIdentityID(c)
@@ -133,7 +133,7 @@ func (h *AgentAuthorizationHandler) status(c echo.Context, poll bool) error {
 // @Tags agent-authorizations
 // @Param id path string true "Authorization ID"
 // @Success 204
-// @Failure 400,403,503 {object} apperror.Problem
+// @Failure 400,403,503 {object} server.Problem
 // @Router /agent-authorizations/{id} [delete].
 func (h *AgentAuthorizationHandler) Cancel(c echo.Context) error {
 	owner, err := RequireChannelIdentityID(c)
@@ -160,7 +160,7 @@ type AgentAuthorizationClaimRequest struct {
 // @Param id path string true "Agent ID"
 // @Param payload body AgentAuthorizationClaimRequest true "Authorization reference"
 // @Success 200 {object} agentcredential.PublicCredential
-// @Failure 400,403,404,409,410,503 {object} apperror.Problem
+// @Failure 400,403,404,409,410,503 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/credential/claim [post].
 func (h *AgentAuthorizationHandler) Claim(c echo.Context) error {
 	owner, err := RequireChannelIdentityID(c)

@@ -51,8 +51,8 @@ func (h *SearchProvidersHandler) ListMeta(c echo.Context) error {
 // @Produce json
 // @Param request body searchproviders.CreateRequest true "Search provider configuration"
 // @Success 201 {object} searchproviders.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /search-providers [post].
 func (h *SearchProvidersHandler) Create(c echo.Context) error {
 	var req searchproviders.CreateRequest
@@ -83,7 +83,7 @@ func (h *SearchProvidersHandler) Create(c echo.Context) error {
 // @Produce json
 // @Param provider query string false "Provider filter (brave)"
 // @Success 200 {array} searchproviders.GetResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /search-providers [get].
 func (h *SearchProvidersHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context(), c.QueryParam("provider"))
@@ -101,8 +101,8 @@ func (h *SearchProvidersHandler) List(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 200 {object} searchproviders.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /search-providers/{id} [get].
 func (h *SearchProvidersHandler) Get(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -125,8 +125,8 @@ func (h *SearchProvidersHandler) Get(c echo.Context) error {
 // @Param id path string true "Provider ID"
 // @Param request body searchproviders.UpdateRequest true "Updated configuration"
 // @Success 200 {object} searchproviders.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /search-providers/{id} [put].
 func (h *SearchProvidersHandler) Update(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -155,8 +155,8 @@ func (h *SearchProvidersHandler) Update(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /search-providers/{id} [delete].
 func (h *SearchProvidersHandler) Delete(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))

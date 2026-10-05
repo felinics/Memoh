@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -50,11 +51,13 @@ type Reason struct {
 }
 
 // Status returns the envelope for r. A non-empty adapterMessage is redacted
-// and carried under MetadataAdapterMessage.
+// and carried under MetadataAdapterMessage. The fault is the one r's code
+// gives: a reason is registered with the code that says whether the
+// condition refuses the request.
 func (r Reason) Status(adapterMessage string) error {
-	var metadata map[string]string
+	metadata := map[string]string{MetadataFault: string(errs.FaultOf(status.Error(r.Code, r.Message)))}
 	if adapterMessage != "" {
-		metadata = map[string]string{MetadataAdapterMessage: redactAdapterMessage(adapterMessage)}
+		metadata[MetadataAdapterMessage] = redactAdapterMessage(adapterMessage)
 	}
 	return envelope(r.Code, r.Message, r.Reason, metadata)
 }
@@ -88,18 +91,21 @@ func (t Reasons) Decode(err error) error {
 	return nil
 }
 
-// AppErrorStatus returns the envelope for an apperror whose code is in the
-// catalog: the code is the reason, the catalog detail is the message, and the
-// metadata holds the args and the fault this process attributes err to. It
-// returns nil for any other error.
-func AppErrorStatus(err error) error {
-	code := apperror.CodeOf(err)
-	definition, ok := apperror.Lookup(code)
-	if code == "" || !ok {
-		return nil
+// AnswerStatus is the status an RPC server answers err with, chosen by
+// errs.Answer under the call's ctx. A cancellation by the caller is Canceled.
+// Anything else is the envelope of the public error: its code is the reason,
+// the catalog detail is the message, and the metadata holds the args and the
+// fault this process attributes err to. An error without a public error of
+// its own is the envelope of the generic code for its fault.
+func AnswerStatus(ctx context.Context, err error) error {
+	public, fault := errs.Answer(ctx, err)
+	if fault == apperror.FaultCanceled {
+		return status.Error(codes.Canceled, "call canceled")
 	}
-	metadata := apperror.ArgsOf(err)
-	metadata[MetadataFault] = string(errs.FaultOf(err))
+	code := apperror.CodeOf(public)
+	definition, _ := apperror.Lookup(code)
+	metadata := apperror.ArgsOf(public)
+	metadata[MetadataFault] = string(fault)
 	return envelope(statusCodeForHTTP(definition.HTTPStatus), definition.Detail, string(code), metadata)
 }
 
@@ -131,7 +137,8 @@ func ReasonOf(err error) (string, bool) {
 // Restored is what an RPC client returns for a failure it restored from the
 // received status. It reads as the restored error. Its chain holds the
 // restored error and the received status under one remote marker, so errors.Is
-// and errors.As find the restored value and diagnostics read the status.
+// and errors.As find the restored value and diagnostics read the status: the
+// error field of a result record renders the chain, received status included.
 func Restored(restored, received error) error {
 	return &restoredError{restored: restored, received: received, chain: errs.Remote(errors.Join(restored, received))}
 }
@@ -151,7 +158,11 @@ type restoredError struct {
 }
 
 func (e *restoredError) Error() string { return e.restored.Error() }
-func (e *restoredError) Unwrap() error { return e.chain }
+
+// Unwrap returns the chain as a list: errs renders a list from its members,
+// so the rendered text carries the received status, where a single Unwrap
+// would render only Error.
+func (e *restoredError) Unwrap() []error { return []error{e.chain} }
 
 // WithAdapterMessage returns an error that reads as message and matches
 // sentinel under errors.Is. An empty message returns sentinel.

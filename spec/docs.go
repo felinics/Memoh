@@ -66,31 +66,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "429": {
                         "description": "Too Many Requests",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -121,19 +121,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "410": {
                         "description": "Gone",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -159,19 +159,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -217,25 +217,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "410": {
                         "description": "Gone",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -266,19 +266,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "410": {
                         "description": "Gone",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -312,19 +312,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -347,13 +347,13 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 },
@@ -389,19 +389,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -439,25 +439,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -518,19 +518,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -591,13 +591,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -635,13 +635,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -678,13 +678,13 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -728,19 +728,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -779,19 +779,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -830,19 +830,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -874,19 +874,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -922,19 +922,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -966,19 +966,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1017,19 +1017,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1077,19 +1077,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1123,19 +1123,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1176,37 +1176,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "429": {
                         "description": "Too Many Requests",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1244,31 +1244,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1301,31 +1301,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1373,37 +1373,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1451,37 +1451,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1528,37 +1528,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1593,7 +1593,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1638,19 +1638,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1692,13 +1692,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1732,19 +1732,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1796,25 +1796,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1852,19 +1852,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1908,13 +1908,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -1961,13 +1961,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2006,31 +2006,31 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2068,7 +2068,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2114,25 +2114,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2165,7 +2165,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2219,37 +2219,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "410": {
                         "description": "Gone",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2299,19 +2299,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2349,19 +2349,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2402,31 +2402,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2471,25 +2471,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2524,19 +2524,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2583,25 +2583,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2642,19 +2642,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2700,13 +2700,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2767,31 +2767,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2852,31 +2852,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2917,19 +2917,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -2971,13 +2971,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3023,19 +3023,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3069,13 +3069,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3107,19 +3107,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3155,19 +3155,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3203,19 +3203,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3261,13 +3261,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3294,13 +3294,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3332,31 +3332,31 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3395,37 +3395,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3459,43 +3459,43 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3538,37 +3538,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3607,43 +3607,43 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3674,13 +3674,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3719,13 +3719,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3757,13 +3757,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3803,25 +3803,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3856,13 +3856,13 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3900,19 +3900,19 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3943,13 +3943,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -3980,7 +3980,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4015,7 +4015,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4046,7 +4046,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4081,7 +4081,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4121,13 +4121,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4166,31 +4166,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4234,31 +4234,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4299,31 +4299,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4365,25 +4365,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4424,37 +4424,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4493,25 +4493,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4552,31 +4552,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4615,25 +4615,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4674,31 +4674,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4747,25 +4747,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4806,25 +4806,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4855,7 +4855,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4893,13 +4893,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4936,25 +4936,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -4992,31 +4992,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5054,31 +5054,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5118,31 +5118,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5179,7 +5179,7 @@ const docTemplate = `{
                     "501": {
                         "description": "Snapshots currently not supported on this backend",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5217,19 +5217,19 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "501": {
                         "description": "Snapshots currently not supported on this backend",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5269,13 +5269,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5306,13 +5306,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5343,13 +5343,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5380,7 +5380,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5428,13 +5428,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5475,31 +5475,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5534,31 +5534,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5605,31 +5605,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5682,31 +5682,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5759,31 +5759,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5825,43 +5825,43 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -5923,31 +5923,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6000,31 +6000,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "422": {
                         "description": "Unprocessable Entity",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6055,19 +6055,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6107,19 +6107,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6142,25 +6142,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6192,25 +6192,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6241,19 +6241,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6276,19 +6276,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6322,19 +6322,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6375,19 +6375,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6435,19 +6435,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6479,25 +6479,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6536,25 +6536,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6581,25 +6581,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6639,13 +6639,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6685,13 +6685,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6728,7 +6728,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6760,13 +6760,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6795,7 +6795,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6827,25 +6827,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6886,25 +6886,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -6949,25 +6949,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7011,25 +7011,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7076,31 +7076,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "501": {
                         "description": "Not Implemented",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7135,19 +7135,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7182,31 +7182,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7241,31 +7241,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7312,31 +7312,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7371,31 +7371,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7430,25 +7430,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7490,25 +7490,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7562,25 +7562,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7646,25 +7646,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7694,19 +7694,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7775,25 +7775,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7840,19 +7840,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7884,13 +7884,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7929,13 +7929,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -7981,13 +7981,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8014,13 +8014,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8059,19 +8059,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8117,13 +8117,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8157,13 +8157,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8216,13 +8216,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8283,13 +8283,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8327,13 +8327,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8368,19 +8368,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8411,13 +8411,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8455,19 +8455,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8500,13 +8500,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8551,25 +8551,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8607,31 +8607,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8667,37 +8667,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8745,37 +8745,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8822,37 +8822,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8899,37 +8899,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -8968,13 +8968,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9019,31 +9019,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9081,7 +9081,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9126,19 +9126,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9185,19 +9185,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9239,19 +9239,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9303,19 +9303,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9360,19 +9360,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9419,25 +9419,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9483,25 +9483,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9539,7 +9539,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9577,19 +9577,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9636,25 +9636,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9692,19 +9692,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9746,19 +9746,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9805,25 +9805,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9868,19 +9868,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9918,7 +9918,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -9963,19 +9963,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10022,19 +10022,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10076,19 +10076,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10140,19 +10140,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10184,13 +10184,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10229,19 +10229,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10280,19 +10280,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10319,13 +10319,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10356,25 +10356,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10432,19 +10432,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10518,19 +10518,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10579,31 +10579,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10652,31 +10652,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10717,19 +10717,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10776,13 +10776,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10814,19 +10814,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10865,25 +10865,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10927,19 +10927,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -10987,25 +10987,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11039,25 +11039,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11107,19 +11107,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11154,19 +11154,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11198,19 +11198,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11250,13 +11250,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11301,25 +11301,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11366,31 +11366,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11426,13 +11426,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11484,19 +11484,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11537,19 +11537,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11600,25 +11600,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11652,13 +11652,13 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11698,19 +11698,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11751,19 +11751,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11799,19 +11799,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11859,19 +11859,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11903,25 +11903,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -11960,31 +11960,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12017,25 +12017,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12074,25 +12074,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12138,37 +12138,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12202,25 +12202,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12271,31 +12271,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12346,31 +12346,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12418,37 +12418,37 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12496,31 +12496,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12552,25 +12552,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12611,25 +12611,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12655,7 +12655,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12687,13 +12687,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12719,19 +12719,19 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12771,7 +12771,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12809,13 +12809,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12873,13 +12873,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12924,13 +12924,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12963,13 +12963,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -12995,7 +12995,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13033,13 +13033,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13079,13 +13079,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13117,13 +13117,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13154,13 +13154,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13192,19 +13192,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13243,19 +13243,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13282,19 +13282,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13326,19 +13326,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13377,19 +13377,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13416,19 +13416,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13466,19 +13466,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13580,13 +13580,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13621,13 +13621,13 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13659,7 +13659,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13697,13 +13697,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13732,7 +13732,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13772,25 +13772,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13828,19 +13828,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13878,7 +13878,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13916,19 +13916,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -13973,19 +13973,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14018,19 +14018,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14076,19 +14076,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14129,19 +14129,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14172,13 +14172,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14209,13 +14209,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14246,13 +14246,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14280,13 +14280,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14324,19 +14324,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14376,7 +14376,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14414,13 +14414,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14478,13 +14478,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14529,13 +14529,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14568,13 +14568,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14628,7 +14628,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14662,7 +14662,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14706,13 +14706,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14746,7 +14746,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14793,13 +14793,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14828,7 +14828,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14883,13 +14883,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14927,19 +14927,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -14977,13 +14977,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15060,13 +15060,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15097,19 +15097,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15139,19 +15139,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15173,7 +15173,7 @@ const docTemplate = `{
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15240,19 +15240,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15290,19 +15290,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15347,19 +15347,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15404,19 +15404,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15488,13 +15488,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15523,7 +15523,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15557,7 +15557,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15601,13 +15601,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15641,7 +15641,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15692,13 +15692,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15727,7 +15727,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15782,13 +15782,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15826,19 +15826,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15876,13 +15876,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15905,19 +15905,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15949,19 +15949,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -15984,19 +15984,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16028,13 +16028,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16057,7 +16057,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16086,13 +16086,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16125,13 +16125,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16163,19 +16163,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16214,13 +16214,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16246,13 +16246,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16283,13 +16283,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16317,7 +16317,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16355,19 +16355,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16395,19 +16395,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16439,25 +16439,25 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16496,31 +16496,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16547,31 +16547,31 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16599,7 +16599,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16633,13 +16633,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16683,19 +16683,19 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16724,7 +16724,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16778,13 +16778,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16821,13 +16821,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16864,13 +16864,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16912,7 +16912,7 @@ const docTemplate = `{
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -16946,13 +16946,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/apperror.Problem"
+                            "$ref": "#/definitions/server.Problem"
                         }
                     }
                 }
@@ -17874,45 +17874,20 @@ const docTemplate = `{
                 }
             }
         },
-        "apperror.Problem": {
-            "type": "object",
-            "required": [
-                "args",
-                "code",
-                "detail",
-                "fault",
-                "status",
-                "type"
+        "apperror.Fault": {
+            "type": "string",
+            "enum": [
+                "client",
+                "server",
+                "dependency",
+                "canceled"
             ],
-            "properties": {
-                "args": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "string"
-                    }
-                },
-                "code": {
-                    "type": "string"
-                },
-                "detail": {
-                    "type": "string"
-                },
-                "fault": {
-                    "type": "string"
-                },
-                "request_id": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "integer"
-                },
-                "trace_id": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
+            "x-enum-varnames": [
+                "FaultClient",
+                "FaultServer",
+                "FaultDependency",
+                "FaultCanceled"
+            ]
         },
         "audio.ConfigSchema": {
             "type": "object",
@@ -21639,6 +21614,9 @@ const docTemplate = `{
                 "detail": {
                     "type": "string"
                 },
+                "fault": {
+                    "$ref": "#/definitions/apperror.Fault"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -21855,12 +21833,21 @@ const docTemplate = `{
                 "action_id": {
                     "type": "string"
                 },
+                "args": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "code": {
-                    "description": "Code and Message describe a command_error; the client renders the code.",
+                    "description": "Code, Args, Message and Fault describe a command_error, as the error\nevent of a stream does; the client renders the code.",
                     "type": "string"
                 },
                 "composer_scope": {
                     "type": "string"
+                },
+                "fault": {
+                    "$ref": "#/definitions/apperror.Fault"
                 },
                 "invocation_id": {
                     "type": "string"
@@ -24324,6 +24311,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "fault": {
+                    "$ref": "#/definitions/apperror.Fault"
+                },
                 "message": {
                     "type": "string"
                 },
@@ -26450,6 +26440,46 @@ const docTemplate = `{
                 },
                 "provider": {
                     "$ref": "#/definitions/searchproviders.ProviderName"
+                }
+            }
+        },
+        "server.Problem": {
+            "type": "object",
+            "required": [
+                "args",
+                "code",
+                "detail",
+                "fault",
+                "status",
+                "type"
+            ],
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "code": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "fault": {
+                    "$ref": "#/definitions/apperror.Fault"
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "trace_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
                 }
             }
         },

@@ -546,9 +546,10 @@ func newReplyError(key string, args map[string]any) error {
 
 // failureReply is the reply for a handler error. Its own text is never shown:
 // a replyError or a known settings sentinel gets its command copy, an error
-// with a public code gets that code's channel copy, and any other error gets
+// with a specific public error gets its channel copy, and any other error gets
 // the generic copy for the command. The error is answered here, so a cause
-// that is a failure of this process is recorded here as an event.
+// that is a failure of this process or a dependency is recorded here as an
+// event.
 func (h *Handler) failureReply(ctx context.Context, t *i18n.Localizer, resource string, err error) string {
 	var reply *replyError
 	if errors.As(err, &reply) {
@@ -561,19 +562,22 @@ func (h *Handler) failureReply(ctx context.Context, t *i18n.Localizer, resource 
 			"levels": strings.Join(reasoningChoicesFor(invalidReasoning.Options), ", "),
 		})
 	}
-	if errs.FaultOf(err) != errs.FaultClient {
+	if fault := errs.Analyze(ctx, err).Fault; fault == apperror.FaultServer || fault == apperror.FaultDependency {
 		h.recordFailure(ctx, resource, err)
 	}
 	if errors.Is(err, settings.ErrReasoningOptionsUnavailable) {
 		return t.T("cmd.reasoning.unavailable")
 	}
-	if text, ok := channel.ErrorCodeText(t, apperror.CodeOf(err), apperror.ArgsOf(err)); ok {
+	fallback := t.T("cmd.error.genericNoResource")
+	if resource != "" {
+		fallback = t.T("cmd.error.generic", map[string]any{"command": CmdRef(resource)})
+	}
+	// A Result always carries text, so a command whose caller has canceled
+	// still gets the generic copy.
+	if text := channel.ReplyText(ctx, t, err, fallback); text != "" {
 		return text
 	}
-	if resource == "" {
-		return t.T("cmd.error.genericNoResource")
-	}
-	return t.T("cmd.error.generic", map[string]any{"command": CmdRef(resource)})
+	return fallback
 }
 
 func (h *Handler) recordFailure(ctx context.Context, resource string, err error) {

@@ -17,11 +17,15 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	grpccodes "google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/logger"
+	"github.com/felinics/memoh/internal/rpc"
 )
 
 const boundaryTestSecret = "boundary-test-secret"
@@ -64,12 +68,12 @@ func (r boundaryResult) request(t *testing.T) map[string]any {
 	return found[0]
 }
 
-func (r boundaryResult) problem(t *testing.T) apperror.Problem {
+func (r boundaryResult) problem(t *testing.T) Problem {
 	t.Helper()
 	if got := r.rec.Header().Get(echo.HeaderContentType); got != "application/problem+json" {
 		t.Fatalf("content-type = %q, body %s", got, r.rec.Body.String())
 	}
-	var problem apperror.Problem
+	var problem Problem
 	if err := json.Unmarshal(r.rec.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode problem: %v: %s", err, r.rec.Body.String())
 	}
@@ -108,6 +112,21 @@ func serveBoundary(t *testing.T, handlerErr error, req *http.Request) boundaryRe
 	return boundaryResult{rec: rec, records: records, spans: recorder.Ended()}
 }
 
+// rpcRefusal is what an RPC client returns when the server refused the call
+// with a client-fault catalog code: the restored apperror under the remote
+// marker, not forwarded.
+func rpcRefusal(t *testing.T) error {
+	t.Helper()
+	st, err := status.New(grpccodes.PermissionDenied, "agent not enabled").WithDetails(&errdetails.ErrorInfo{
+		Reason:   string(apperror.CodeACPAgentNotEnabled),
+		Metadata: map[string]string{rpc.MetadataFault: string(apperror.FaultClient)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rpc.Decode(st.Err(), nil, nil)
+}
+
 func TestBoundaryAnswersEveryErrorWithAProblem(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -117,22 +136,26 @@ func TestBoundaryAnswersEveryErrorWithAProblem(t *testing.T) {
 		body      string
 		status    int
 		code      apperror.Code
-		fault     errs.Fault
+		fault     apperror.Fault
 		level     string
 		errorText string
 	}{
-		{name: "unknown route", path: "/nowhere", status: http.StatusNotFound, code: apperror.CodeHTTPNotFound, fault: errs.FaultClient, level: "INFO"},
-		{name: "method not allowed", method: http.MethodDelete, path: "/probe", status: http.StatusMethodNotAllowed, code: apperror.CodeHTTPMethodNotAllowed, fault: errs.FaultClient, level: "INFO"},
-		{name: "body too large", method: http.MethodPost, path: "/channels/line/webhook/cfg-1", body: strings.Repeat("x", 2<<20), status: http.StatusRequestEntityTooLarge, code: apperror.CodeHTTPPayloadTooLarge, fault: errs.FaultClient, level: "INFO"},
-		{name: "http error message stays in the record", err: echo.NewHTTPError(http.StatusBadRequest, "synthetic handler message"), path: "/probe", status: http.StatusBadRequest, code: apperror.CodeHTTPBadRequest, fault: errs.FaultClient, level: "INFO", errorText: "synthetic handler message"},
-		{name: "client status without a framework code", err: echo.NewHTTPError(http.StatusUnprocessableEntity), path: "/probe", status: http.StatusBadRequest, code: apperror.CodeHTTPBadRequest, fault: errs.FaultClient, level: "INFO"},
-		{name: "server http error", err: echo.NewHTTPError(http.StatusInternalServerError, "synthetic query failed"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: errs.FaultServer, level: "ERROR", errorText: "synthetic query failed"},
-		{name: "untranslated error", err: errors.New("dial tcp 10.0.0.9:5432: synthetic refusal"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: errs.FaultServer, level: "ERROR", errorText: "synthetic refusal"},
-		{name: "dependency error", err: errs.WrapDependency(errors.New("synthetic upstream reset"), "call upstream"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: errs.FaultDependency, level: "ERROR", errorText: "synthetic upstream reset"},
-		{name: "public error", err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("synthetic socket refused"), nil), path: "/probe", status: http.StatusServiceUnavailable, code: apperror.CodeWorkspaceUnreachable, fault: errs.FaultServer, level: "ERROR", errorText: "synthetic socket refused"},
-		{name: "provider error", err: apperror.Wrap(apperror.CodeAgentProviderAuthFailed, errors.New("synthetic api error 401"), nil), path: "/probe", status: http.StatusBadGateway, code: apperror.CodeAgentProviderAuthFailed, fault: errs.FaultDependency, level: "ERROR", errorText: "synthetic api error 401"},
-		{name: "external agent error", err: apperror.Wrap(apperror.CodeACPAgentNotEnabled, errors.New("synthetic agent codex disabled"), nil), path: "/probe", status: http.StatusForbidden, code: apperror.CodeACPAgentNotEnabled, fault: errs.FaultClient, level: "INFO", errorText: "synthetic agent codex disabled"},
-		{name: "panic", path: "/panic", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: errs.FaultServer, level: "ERROR", errorText: "panic"},
+		{name: "unknown route", path: "/nowhere", status: http.StatusNotFound, code: apperror.CodeHTTPNotFound, fault: apperror.FaultClient, level: "INFO"},
+		{name: "method not allowed", method: http.MethodDelete, path: "/probe", status: http.StatusMethodNotAllowed, code: apperror.CodeHTTPMethodNotAllowed, fault: apperror.FaultClient, level: "INFO"},
+		{name: "body too large", method: http.MethodPost, path: "/channels/line/webhook/cfg-1", body: strings.Repeat("x", 2<<20), status: http.StatusRequestEntityTooLarge, code: apperror.CodeHTTPPayloadTooLarge, fault: apperror.FaultClient, level: "INFO"},
+		{name: "http error message stays in the record", err: echo.NewHTTPError(http.StatusBadRequest, "synthetic handler message"), path: "/probe", status: http.StatusBadRequest, code: apperror.CodeHTTPBadRequest, fault: apperror.FaultClient, level: "INFO", errorText: "synthetic handler message"},
+		{name: "client status without a framework code", err: echo.NewHTTPError(http.StatusUnprocessableEntity), path: "/probe", status: http.StatusBadRequest, code: apperror.CodeHTTPBadRequest, fault: apperror.FaultClient, level: "INFO"},
+		{name: "server http error", err: echo.NewHTTPError(http.StatusInternalServerError, "synthetic query failed"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: apperror.FaultServer, level: "ERROR", errorText: "synthetic query failed"},
+		{name: "untranslated error", err: errors.New("dial tcp 10.0.0.9:5432: synthetic refusal"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: apperror.FaultServer, level: "ERROR", errorText: "synthetic refusal"},
+		{name: "dependency error", err: errs.WrapDependency(errors.New("synthetic upstream reset"), "call upstream"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: apperror.FaultDependency, level: "ERROR", errorText: "synthetic upstream reset"},
+		{name: "public error", err: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("synthetic socket refused"), nil), path: "/probe", status: http.StatusServiceUnavailable, code: apperror.CodeWorkspaceUnreachable, fault: apperror.FaultServer, level: "ERROR", errorText: "synthetic socket refused"},
+		{name: "provider error", err: apperror.Wrap(apperror.CodeAgentProviderAuthFailed, errors.New("synthetic api error 401"), nil), path: "/probe", status: http.StatusBadGateway, code: apperror.CodeAgentProviderAuthFailed, fault: apperror.FaultDependency, level: "ERROR", errorText: "synthetic api error 401"},
+		{name: "external agent error", err: apperror.Wrap(apperror.CodeACPAgentNotEnabled, errors.New("synthetic agent codex disabled"), nil), path: "/probe", status: http.StatusForbidden, code: apperror.CodeACPAgentNotEnabled, fault: apperror.FaultClient, level: "INFO", errorText: "synthetic agent codex disabled"},
+		{name: "native client status", err: status.Error(grpccodes.InvalidArgument, "synthetic payload rejected"), path: "/probe", status: http.StatusBadRequest, code: apperror.CodeHTTPBadRequest, fault: apperror.FaultClient, level: "INFO", errorText: "synthetic payload rejected"},
+		{name: "remote refusal of this process", err: errs.Wrap(rpcRefusal(t), "call runtime"), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: apperror.FaultServer, level: "ERROR"},
+		{name: "forwarded remote refusal", err: rpc.Forward(rpcRefusal(t)), path: "/probe", status: http.StatusForbidden, code: apperror.CodeACPAgentNotEnabled, fault: apperror.FaultClient, level: "INFO"},
+		{name: "code outside the catalog", err: apperror.Wrap("synthetic.unregistered", errors.New("synthetic cause"), nil), path: "/probe", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: apperror.FaultServer, level: "ERROR", errorText: "synthetic cause"},
+		{name: "panic", path: "/panic", status: http.StatusInternalServerError, code: apperror.CodeInternal, fault: apperror.FaultServer, level: "ERROR", errorText: "panic"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			method := tc.method
@@ -152,7 +175,7 @@ func TestBoundaryAnswersEveryErrorWithAProblem(t *testing.T) {
 			if problem.Code != string(tc.code) || problem.Status != tc.status || problem.Type != apperror.TypeURI(tc.code) {
 				t.Fatalf("problem = %+v, want code %s status %d", problem, tc.code, tc.status)
 			}
-			if problem.Fault != string(tc.fault) {
+			if problem.Fault != tc.fault {
 				t.Errorf("problem fault = %q, want %q", problem.Fault, tc.fault)
 			}
 			if problem.RequestID == "" || problem.RequestID != res.rec.Header().Get(echo.HeaderXRequestID) {
@@ -185,11 +208,11 @@ func TestBoundaryAnswersACanceledRequestAsCanceled(t *testing.T) {
 		t.Fatalf("status = %d, want 499", res.rec.Code)
 	}
 	problem := res.problem(t)
-	if problem.Code != string(apperror.CodeCanceled) || problem.Fault != string(errs.FaultCanceled) {
+	if problem.Code != string(apperror.CodeCanceled) || problem.Fault != apperror.FaultCanceled {
 		t.Fatalf("problem = %+v", problem)
 	}
 	record := res.request(t)
-	if record["level"] != "INFO" || record["fault"] != string(errs.FaultCanceled) || record["reason"] != "canceled" {
+	if record["level"] != "INFO" || record["fault"] != string(apperror.FaultCanceled) || record["reason"] != "canceled" {
 		t.Fatalf("record = %v", record)
 	}
 }
@@ -231,7 +254,7 @@ func TestBoundaryRecordsAServerStatusWrittenWithoutAnError(t *testing.T) {
 	res := serveBoundary(t, nil, httptest.NewRequest(http.MethodGet, "/written", nil))
 
 	record := res.request(t)
-	if record["level"] != "ERROR" || record["fault"] != string(errs.FaultServer) {
+	if record["level"] != "ERROR" || record["fault"] != string(apperror.FaultServer) {
 		t.Fatalf("record = %v", record)
 	}
 }

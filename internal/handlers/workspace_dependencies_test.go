@@ -25,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspacedeps"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
 )
@@ -701,9 +702,7 @@ func TestWorkspaceDependencyStreamReportsErrorsAsFrames(t *testing.T) {
 	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog(), opLogs: [][2]string{{"stderr", "starting"}}, opErr: workspacedeps.ErrBusy}
 	h := newDepsTestHandler("admin", svc)
 	rec, err := depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}.invoke(t, h.UpdateWorkspaceDependency)
-	if err != nil {
-		t.Fatalf("UpdateWorkspaceDependency: %v", err)
-	}
+	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyBusy)
 	frames := sseFrames(t, rec.Body.String())
 	if len(frames) != 3 || frames[2]["type"] != "error" {
 		t.Fatalf("frames = %v", frames)
@@ -717,14 +716,15 @@ func TestWorkspaceDependencyStreamReportsErrorsAsFrames(t *testing.T) {
 	if _, ok := frames[2]["args"].(map[string]any); !ok {
 		t.Errorf("error args must be an object: %v", frames[2])
 	}
+	if frames[2]["fault"] != string(apperror.FaultClient) {
+		t.Errorf("error fault = %v, want client", frames[2]["fault"])
+	}
 
 	// Structured errors must not leak private diagnostics. Execution logs
 	// remain separate log events.
 	svc.opErr = &workspacedeps.ExitError{Code: 1, StderrTail: "npm ERR! 404"}
 	rec, err = depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/reinstall", depID: "codex"}.invoke(t, h.ReinstallWorkspaceDependency)
-	if err != nil {
-		t.Fatalf("ReinstallWorkspaceDependency: %v", err)
-	}
+	requireAppErrorCode(t, err, apperror.CodeWorkspaceDependencyOperationFailed)
 	frames = sseFrames(t, rec.Body.String())
 	last := frames[len(frames)-1]
 	if last["type"] != "error" || last["code"] != string(apperror.CodeWorkspaceDependencyOperationFailed) {
@@ -738,33 +738,32 @@ func TestWorkspaceDependencyStreamReportsErrorsAsFrames(t *testing.T) {
 	}
 }
 
-// TestWorkspaceDependencyStreamLogsRefusalsBelowWarn pins the log level of
-// the two outcomes that are not faults: a busy verdict (operations never
-// queue) and the client going away. A script failure stays a warning.
-func TestWorkspaceDependencyStreamLogsRefusalsBelowWarn(t *testing.T) {
-	var logs strings.Builder
-	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog(), opErr: workspacedeps.ErrBusy}
+// TestWorkspaceDependencyStreamReturnsTheRenderedError pins what the
+// request's result record attributes after the error frame: a busy verdict is
+// a refusal (operations never queue), a script failure is not, and an
+// operation whose result is unconfirmed keeps its own code.
+func TestWorkspaceDependencyStreamReturnsTheRenderedError(t *testing.T) {
+	svc := &fakeWorkspaceDependencyService{deps: depsTestCatalog()}
 	h := newDepsTestHandler("admin", svc)
-	h.logger = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-
-	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}).invoke(t, h.UpdateWorkspaceDependency); err != nil {
-		t.Fatalf("UpdateWorkspaceDependency: %v", err)
-	}
-	out := logs.String()
-	if strings.Contains(out, "level=WARN") || strings.Contains(out, "level=ERROR") {
-		t.Errorf("busy verdict logged above INFO:\n%s", out)
-	}
-	if !strings.Contains(out, "level=INFO") || !strings.Contains(out, "another operation is in progress") {
-		t.Errorf("busy verdict not logged at INFO:\n%s", out)
-	}
-
-	logs.Reset()
-	svc.opErr = &workspacedeps.ExitError{Code: 1, StderrTail: "boom"}
-	if _, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}).invoke(t, h.UpdateWorkspaceDependency); err != nil {
-		t.Fatalf("UpdateWorkspaceDependency: %v", err)
-	}
-	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "operation failed") {
-		t.Errorf("script failure not logged at WARN:\n%s", out)
+	for _, tc := range []struct {
+		err   error
+		code  apperror.Code
+		fault apperror.Fault
+	}{
+		{workspacedeps.ErrBusy, apperror.CodeWorkspaceDependencyBusy, apperror.FaultClient},
+		{&workspacedeps.ExitError{Code: 1, StderrTail: "boom"}, apperror.CodeWorkspaceDependencyOperationFailed, apperror.FaultServer},
+		{workspacedeps.ErrOperationUncertain, apperror.CodeWorkspaceDependencyOperationUnknown, apperror.FaultServer},
+	} {
+		svc.opErr = tc.err
+		rec, err := (depsCall{method: http.MethodPost, target: "/bots/x/dependencies/codex/update", depID: "codex"}).invoke(t, h.UpdateWorkspaceDependency)
+		requireAppErrorCode(t, err, tc.code)
+		if fault := errs.Analyze(context.Background(), err).Fault; fault != tc.fault {
+			t.Errorf("%v: result fault = %s, want %s", tc.err, fault, tc.fault)
+		}
+		frames := sseFrames(t, rec.Body.String())
+		if last := frames[len(frames)-1]; last["code"] != string(tc.code) || last["fault"] != string(tc.fault) {
+			t.Errorf("%v: frame = %v, want %s %s", tc.err, last, tc.code, tc.fault)
+		}
 	}
 }
 

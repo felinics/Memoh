@@ -17,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/identities"
 	"github.com/felinics/memoh/internal/channel/route"
+	"github.com/felinics/memoh/internal/errlog"
 )
 
 // scriptedFailureGateway replays raw turn event payloads and then an optional
@@ -104,6 +105,29 @@ func TestCharacterizeIMStartFailureText_CurrentBehavior(t *testing.T) {
 	assertIMFailure(t, runIMFailure(t, &scriptedFailureGateway{
 		fakeChatGateway: fakeChatGateway{startErr: apperror.Wrap(apperror.CodeWorkspaceUnreachable, errors.New("SECRET dial"), nil)},
 	}), "workspace.unreachable", true, "The workspace could not be reached.")
+}
+
+// A turn the server refused for a client reason, at start or during the run,
+// is the sender's fault: the inbound message record keeps it a client fault.
+func TestIMClientFailureIsNotRecordedAsAnError(t *testing.T) {
+	t.Parallel()
+	refusal := apperror.New(apperror.CodeACPAgentNotEnabled, nil)
+	for name, gateway := range map[string]*scriptedFailureGateway{
+		"start refused": {fakeChatGateway: fakeChatGateway{startErr: refusal}},
+		"run failed":    {tailErr: refusal},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := runIMFailure(t, gateway)
+			if len(got.errorTexts) != 1 || apperror.CodeOf(got.err) != apperror.CodeACPAgentNotEnabled {
+				t.Fatalf("HandleInbound error = %v, replies = %q; want the refusal answered once", got.err, got.errorTexts)
+			}
+			record := errlog.Finish(context.Background(), "channel.inbound", got.err, errlog.Options{})
+			if record.Level != slog.LevelInfo || record.Report.Fault != apperror.FaultClient {
+				t.Fatalf("inbound record level=%v fault=%q, want INFO client", record.Level, record.Report.Fault)
+			}
+		})
+	}
 }
 
 // Scenario 1 and 10 after output started: a turn-port error is shown the same way.

@@ -87,7 +87,7 @@ func (h *AudioHandler) ListTranscriptionMeta(c echo.Context) error {
 // @Tags speech-providers
 // @Produce json
 // @Success 200 {array} audiopkg.SpeechProviderResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /speech-providers [get].
 func (h *AudioHandler) ListProviders(c echo.Context) error {
 	items, err := h.service.ListSpeechProviders(c.Request().Context())
@@ -103,7 +103,7 @@ func (h *AudioHandler) ListProviders(c echo.Context) error {
 // @Tags transcription-providers
 // @Produce json
 // @Success 200 {array} audiopkg.SpeechProviderResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /transcription-providers [get].
 func (h *AudioHandler) ListTranscriptionProviders(c echo.Context) error {
 	items, err := h.service.ListTranscriptionProviders(c.Request().Context())
@@ -120,8 +120,8 @@ func (h *AudioHandler) ListTranscriptionProviders(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} audiopkg.SpeechProviderResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /speech-providers/{id} [get].
 // @Router /transcription-providers/{id} [get].
 func (h *AudioHandler) GetProvider(c echo.Context) error {
@@ -143,8 +143,8 @@ func (h *AudioHandler) GetProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {array} audiopkg.SpeechModelResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /speech-providers/{id}/models [get].
 func (h *AudioHandler) ListModelsByProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -166,9 +166,9 @@ func (h *AudioHandler) ListModelsByProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} audiopkg.ImportModelsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /speech-providers/{id}/import-models [post].
 func (h *AudioHandler) ImportModels(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -223,8 +223,8 @@ func (h *AudioHandler) ImportModels(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {array} audiopkg.TranscriptionModelResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /transcription-providers/{id}/models [get].
 func (h *AudioHandler) ListTranscriptionModelsByProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -246,9 +246,9 @@ func (h *AudioHandler) ListTranscriptionModelsByProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} audiopkg.ImportModelsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /transcription-providers/{id}/import-models [post].
 func (h *AudioHandler) ImportTranscriptionModels(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -301,7 +301,7 @@ func (h *AudioHandler) ImportTranscriptionModels(c echo.Context) error {
 // @Tags speech-models
 // @Produce json
 // @Success 200 {array} audiopkg.SpeechModelResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /speech-models [get].
 func (h *AudioHandler) ListModels(c echo.Context) error {
 	items, err := h.service.ListSpeechModels(c.Request().Context())
@@ -317,7 +317,7 @@ func (h *AudioHandler) ListModels(c echo.Context) error {
 // @Tags transcription-models
 // @Produce json
 // @Success 200 {array} audiopkg.TranscriptionModelResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /transcription-models [get].
 func (h *AudioHandler) ListTranscriptionModels(c echo.Context) error {
 	items, err := h.service.ListTranscriptionModels(c.Request().Context())
@@ -333,7 +333,7 @@ func (h *AudioHandler) ListTranscriptionModels(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID"
 // @Success 200 {object} audiopkg.SpeechModelResponse
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /speech-models/{id} [get].
 func (h *AudioHandler) GetModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -355,8 +355,8 @@ func (h *AudioHandler) GetModel(c echo.Context) error {
 // @Param id path string true "Model ID"
 // @Param request body audiopkg.UpdateSpeechModelRequest true "Model update payload"
 // @Success 200 {object} audiopkg.SpeechModelResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /speech-models/{id} [put].
 func (h *AudioHandler) UpdateModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -380,7 +380,7 @@ func (h *AudioHandler) UpdateModel(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID"
 // @Success 200 {object} audiopkg.TranscriptionModelResponse
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /transcription-models/{id} [get].
 func (h *AudioHandler) GetTranscriptionModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -402,8 +402,8 @@ func (h *AudioHandler) GetTranscriptionModel(c echo.Context) error {
 // @Param id path string true "Model ID"
 // @Param request body audiopkg.UpdateSpeechModelRequest true "Model update payload"
 // @Success 200 {object} audiopkg.TranscriptionModelResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /transcription-models/{id} [put].
 func (h *AudioHandler) UpdateTranscriptionModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -427,7 +427,7 @@ func (h *AudioHandler) UpdateTranscriptionModel(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID"
 // @Success 200 {object} audiopkg.ModelCapabilities
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /speech-models/{id}/capabilities [get].
 func (h *AudioHandler) GetModelCapabilities(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -447,7 +447,7 @@ func (h *AudioHandler) GetModelCapabilities(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID"
 // @Success 200 {object} audiopkg.ModelCapabilities
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /transcription-models/{id}/capabilities [get].
 func (h *AudioHandler) GetTranscriptionModelCapabilities(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -470,8 +470,8 @@ func (h *AudioHandler) GetTranscriptionModelCapabilities(c echo.Context) error {
 // @Param id path string true "Model ID"
 // @Param request body audiopkg.TestSynthesizeRequest true "Text to synthesize"
 // @Success 200 {file} binary "Audio data"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /speech-models/{id}/test [post].
 func (h *AudioHandler) TestModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -507,8 +507,8 @@ func (h *AudioHandler) TestModel(c echo.Context) error {
 // @Param file formData file true "Audio file"
 // @Param config formData string false "Optional JSON config"
 // @Success 200 {object} audiopkg.TestTranscriptionResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /transcription-models/{id}/test [post].
 func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))

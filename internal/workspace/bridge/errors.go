@@ -1,14 +1,13 @@
 package bridge
 
 import (
+	"context"
 	"errors"
-	"fmt"
-	"strings"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
-	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/rpc"
 )
 
 var (
@@ -18,45 +17,44 @@ var (
 	ErrForbidden   = errors.New("permission denied")
 )
 
-// mapError converts a gRPC status error into a domain error.
-// Non-gRPC errors pass through unchanged. ErrUnavailable is marked as the
-// workspace runtime's failure, so a public error that wraps it is
-// attributed to a dependency.
-func mapError(err error) error {
-	if err == nil {
-		return nil
-	}
-	s, ok := status.FromError(err)
-	if !ok {
-		return err
-	}
-	msg := s.Message()
-	switch s.Code() {
-	case codes.NotFound:
-		return fmt.Errorf("%w: %s", ErrNotFound, msg)
-	case codes.InvalidArgument:
-		return fmt.Errorf("%w: %s", ErrBadRequest, msg)
-	case codes.PermissionDenied:
-		return fmt.Errorf("%w: %s", ErrForbidden, msg)
-	case codes.Unavailable, codes.Aborted:
-		return unavailable(msg)
-	case codes.Canceled:
-		if isConnectionClosingMessage(msg) {
-			return unavailable(msg)
-		}
-		return fmt.Errorf("grpc %s: %s", s.Code(), msg)
-	default:
-		return fmt.Errorf("grpc %s: %s", s.Code(), msg)
-	}
+// restoredByCode is how the client restores a bridge status: the bridge
+// reports its failures by status code alone.
+var restoredByCode = map[codes.Code]error{
+	codes.NotFound:         ErrNotFound,
+	codes.InvalidArgument:  ErrBadRequest,
+	codes.PermissionDenied: ErrForbidden,
+	codes.Unavailable:      ErrUnavailable,
+	codes.Aborted:          ErrUnavailable,
 }
 
-func unavailable(msg string) error {
-	return errs.WrapDependency(fmt.Errorf("%w: %s", ErrUnavailable, msg), "")
+// restoredWhileLive adds Canceled to restoredByCode for a call whose context
+// is still live: its caller did not end it, so the connection or the bridge
+// closed it, and the workspace is unavailable.
+var restoredWhileLive = func() map[codes.Code]error {
+	m := map[codes.Code]error{codes.Canceled: ErrUnavailable}
+	for code, sentinel := range restoredByCode {
+		m[code] = sentinel
+	}
+	return m
+}()
+
+// mapError is what the client returns for err, received from a call made
+// under ctx, by rpc.Decode: a failure the bridge reported, attributed to it.
+func mapError(ctx context.Context, err error) error {
+	return decodeError(ctx.Err() == nil, err)
 }
 
-func isConnectionClosingMessage(msg string) bool {
-	lower := strings.ToLower(msg)
-	return strings.Contains(lower, "client connection is closing") ||
-		strings.Contains(lower, "transport is closing") ||
-		strings.Contains(lower, "use of closed network connection")
+// mapStreamError is mapError for err, received on stream: the stream's own
+// context is the context of the call.
+func mapStreamError(stream grpc.ClientStream, err error) error {
+	return decodeError(stream.Context().Err() == nil, err)
+}
+
+// decodeError decodes err, received from a call whose context was live or
+// had ended when it failed.
+func decodeError(live bool, err error) error {
+	if live {
+		return rpc.Decode(err, nil, restoredWhileLive)
+	}
+	return rpc.Decode(err, nil, restoredByCode)
 }

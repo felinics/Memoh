@@ -35,7 +35,7 @@ func (h *MemoryConfigHandler) Register(e *echo.Echo) {
 // @Tags memory
 // @Produce json
 // @Success 200 {object} adapters.MemoryConfig
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /memory/config [get].
 func (h *MemoryConfigHandler) Get(c echo.Context) error {
 	cfg, err := h.service.GetConfig(c.Request().Context())
@@ -53,8 +53,8 @@ func (h *MemoryConfigHandler) Get(c echo.Context) error {
 // @Produce json
 // @Param request body adapters.MemoryConfigUpdateRequest true "Built-in Memory configuration"
 // @Success 200 {object} adapters.MemoryConfig
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /memory/config [put].
 func (h *MemoryConfigHandler) Update(c echo.Context) error {
 	var req memprovider.MemoryConfigUpdateRequest

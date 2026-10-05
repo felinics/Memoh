@@ -292,11 +292,11 @@ func workspaceUnavailableError(cause error) error {
 // @Param bot_id path string true "Bot ID"
 // @Param path query string true "Workspace path"
 // @Success 200 {object} FSFileInfo
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs [get].
 func (h *ContainerdHandler) FSStat(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -341,10 +341,10 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param path query string true "Workspace directory path"
 // @Success 200 {object} FSListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/list [get].
 func (h *ContainerdHandler) FSList(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -400,10 +400,10 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param path query string true "Workspace file path"
 // @Success 200 {object} FSReadResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/read [get].
 func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -453,10 +453,10 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 // @Param path query string true "Workspace file path"
 // @Produce octet-stream
 // @Success 200 {file} binary
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/download [get].
 func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 	rawPath := c.QueryParam("path")
@@ -526,11 +526,11 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 // @Param payload body FSArchiveRequest true "Archive request"
 // @Produce octet-stream
 // @Success 200 {file} binary
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/archive [post].
 func (h *ContainerdHandler) FSArchive(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -653,10 +653,10 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSWriteRequest true "Write request"
 // @Success 200 {object} fsOpResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/write [post].
 func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -718,10 +718,10 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 // @Param file formData file true "File to upload"
 // @Accept multipart/form-data
 // @Success 200 {object} FSUploadResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/upload [post].
 func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -772,11 +772,11 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSMkdirRequest true "Mkdir request"
 // @Success 200 {object} fsOpResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/mkdir [post].
 func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -823,11 +823,11 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSDeleteRequest true "Delete request"
 // @Success 200 {object} fsOpResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/delete [post].
 func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -871,11 +871,11 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSRenameRequest true "Rename request"
 // @Success 200 {object} fsOpResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/rename [post].
 func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)
@@ -919,12 +919,12 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body FSExtractRequest true "Extract request"
 // @Success 200 {object} FSExtractResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/extract [post].
 func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceWrite)

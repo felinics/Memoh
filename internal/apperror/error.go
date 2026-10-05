@@ -287,20 +287,39 @@ const (
 	CodeWorkspaceRestoreFailed                  Code = "workspace_restore_failed"
 )
 
-// Fault is the attribution a catalog entry declares for its code: who is at
-// fault when this process answers with it. The values are the fault values of
-// the error contract.
+// Fault is who a failure is attributed to. The values are the fault values of
+// the error contract: the fault field of a Problem and the fault metadata of
+// an RPC ErrorInfo. A catalog entry may declare client, server or dependency;
+// canceled is attributed at a boundary from the caller's context and is never
+// declared.
 type Fault string
 
 const (
-	// FaultClient: the caller must change the request.
+	// FaultClient means the caller's request was refused by this process's
+	// rules; the caller must change the request.
 	FaultClient Fault = "client"
-	// FaultServer: this process failed.
+	// FaultServer means this process failed: its code, data or configuration,
+	// including a bad request this process sent downstream.
 	FaultServer Fault = "server"
-	// FaultDependency: a service outside this process failed or refused the
-	// call, such as an LLM provider or an external agent runtime.
+	// FaultDependency means a service outside this process failed or refused
+	// the call, such as an LLM provider, an external agent runtime, an
+	// internal downstream service or the network.
 	FaultDependency Fault = "dependency"
+	// FaultCanceled means the caller canceled, or the caller's deadline passed.
+	FaultCanceled Fault = "canceled"
 )
+
+// ParseFault reads a fault value received as a string, such as the fault
+// metadata of an RPC ErrorInfo. It reports false for any other string.
+func ParseFault(s string) (Fault, bool) {
+	f := Fault(s)
+	switch f {
+	case FaultClient, FaultServer, FaultDependency, FaultCanceled:
+		return f, true
+	default:
+		return "", false
+	}
+}
 
 // Definition is the single catalog entry for a public error contract.
 // Type URIs and frontend i18n keys are derived mechanically from Code.
@@ -1109,40 +1128,6 @@ func Lookup(code Code) (Definition, bool) {
 	definition, ok := catalog[code]
 	definition.AllowedArgs = append([]string(nil), definition.AllowedArgs...)
 	return definition, ok
-}
-
-// externalAgentCodes are the External Agent codes: an agent that is unknown,
-// disabled or not set up, a workspace the caller cannot run in, a runtime
-// without its owner, or input the agent cannot take.
-var externalAgentCodes = map[Code]bool{
-	CodeACPAgentNotFound:                        true,
-	CodeACPAgentNotEnabled:                      true,
-	CodeACPAgentNotConfigured:                   true,
-	CodeCodexOAuthIncomplete:                    true,
-	CodeCodexAuthTokenMissing:                   true,
-	CodeACPAgentAuthInvalid:                     true,
-	CodeNoWorkspaceExec:                         true,
-	CodeACPRuntimeOwnerMissing:                  true,
-	CodeACPDiscussUnsupported:                   true,
-	CodeGroupChatACPUnsupported:                 true,
-	CodeACPProjectModeInvalid:                   true,
-	CodeACPProjectPathInvalid:                   true,
-	CodeACPDisplayArgsInvalid:                   true,
-	CodeACPRuntimeStartFailed:                   true,
-	CodeACPRuntimeBusy:                          true,
-	CodeACPAttachmentInvalid:                    true,
-	CodeACPAttachmentUnavailable:                true,
-	CodeRuntimeAgentCommandStale:                true,
-	CodeACPImageInputUnsupported:                true,
-	CodeInvalidChatRuntime:                      true,
-	CodeAgentDependencyMissing:                  true,
-	CodeExternalAgentAccountUnbound:             true,
-	CodeExternalAgentContainerWorkspaceRequired: true,
-}
-
-// IsExternalAgentCode reports whether code is an External Agent code.
-func IsExternalAgentCode(code Code) bool {
-	return externalAgentCodes[code]
 }
 
 func TypeURI(code Code) string {

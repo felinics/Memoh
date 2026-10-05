@@ -170,10 +170,10 @@ func newBrowserSessionID() (string, error) {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body browserSessionCreateRequest true "Browser session request"
 // @Success 200 {object} browserSessionCreateResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/browser/sessions [post].
 func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -214,9 +214,9 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Browser session ID"
 // @Success 200 {object} browserSessionKeepAliveResponse
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/container/browser/sessions/{session_id}/keepalive [post].
 func (h *ContainerdHandler) KeepAliveBrowserSession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -239,8 +239,8 @@ func (h *ContainerdHandler) KeepAliveBrowserSession(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Browser session ID"
 // @Success 204
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/container/browser/sessions/{session_id} [delete].
 func (h *ContainerdHandler) DeleteBrowserSession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)

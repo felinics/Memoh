@@ -13,6 +13,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/server"
 )
 
 type fakeGatewayAssetLoader struct {
@@ -395,7 +396,7 @@ func TestPrepareACPAttachments_RejectsInvalidOrUnreachableData(t *testing.T) {
 				BotID:       "bot-1",
 				Attachments: []ChatAttachment{tt.input},
 			})
-			problem, _ := apperror.ProblemFrom(err, "")
+			problem, _ := server.ProblemFrom(err, "")
 			if apperror.CodeOf(err) != tt.wantCode || problem.Status != 400 {
 				t.Fatalf("error = %#v, want code %q with status 400", err, tt.wantCode)
 			}
