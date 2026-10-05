@@ -693,10 +693,6 @@
                         <!-- One transformable wrapper for the press squish —
                              same contract as composer-continue-on's pill. -->
                         <span class="composer-pill-content inline-flex min-w-0 items-center gap-2">
-                          <Spinner
-                            v-if="composerSpinnerVisible"
-                            class="size-3.5 shrink-0"
-                          />
                           <span class="min-w-0 truncate text-label text-composer-control-label">{{ modelTriggerLabel }}</span>
                           <ChevronDown
                             class="size-3.5 shrink-0 text-muted-foreground"
@@ -723,7 +719,7 @@
                         :none-label="activeUsesDirectRuntime && composerDefaultModelId && composerDefaultModelId !== 'default' ? composerDefaultModelLabel : undefined"
                         :show-reasoning="!activeUsesDirectRuntime || !!composerReasoningOptions?.length"
                         :loading="composerModelsLoading"
-                        :error="directModelCatalogError"
+                        :error="modelCatalogMenuError"
                         :auth-required="directRuntimeAuthRequired"
                         @update:model-value="onComposerModelValueSelected"
                         @update:reasoning-effort="onComposerReasoningEffortSelected"
@@ -1239,7 +1235,7 @@ import { Memoh as MemohIcon, MemohColor } from '@memohai/icon'
 import { AddIcon, UploadIcon } from '@memohai/icon/ui'
 
 import { EXTERNAL_AGENT_DEFAULT_PROJECT_MODE, EXTERNAL_AGENT_DEFAULT_PROJECT_PATH, normalizeAgentID } from '@/utils/external-agent'
-import { ref, reactive, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated, type Ref } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, useTemplateRef, watch, onWatcherCleanup, nextTick, onActivated, onDeactivated } from 'vue'
 import {
   ImagePlus,
   ChevronDown,
@@ -1433,25 +1429,6 @@ const overrideReasoningEffort = computed({
   get: () => paneView.value.pairEffort.value,
   set: (value: string) => { paneView.value.pairEffort.value = value },
 })
-
-// Show the composer loading spinner only when the load outlasts a fast
-// round-trip: sub-3s catalog loads must not flash a spinner on every pane
-// switch (user feedback, 2026-09-02). The popover's own loading row stays
-// immediate — there the user is actively waiting on an open menu.
-function useDelayedTrue(source: Ref<boolean>, delayMs: number): Ref<boolean> {
-  const visible = ref(false)
-  let timer: ReturnType<typeof setTimeout> | undefined
-  watch(source, (value) => {
-    if (value) {
-      timer ??= setTimeout(() => { visible.value = true }, delayMs)
-      return
-    }
-    if (timer) { clearTimeout(timer); timer = undefined }
-    visible.value = false
-  }, { immediate: true })
-  onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
-  return visible
-}
 
 // Session creation briefly changes several pieces of the direct-runtime
 // identity. That is one draft being promoted, not a switch to another chat.
@@ -2546,6 +2523,13 @@ const directRuntimeAuthRequired = computed(() =>
     || isApiErrorCode(composerModelCatalogError.value, 'agent_credential.reauthorization_required')
   ),
 )
+// Native catalogs keep the last loaded list on a failed refresh, so the menu
+// only reports a failure it has nothing to show for.
+const modelCatalogMenuError = computed(() => {
+  if (activeUsesDirectRuntime.value) return directModelCatalogError.value
+  if (!composerModelCatalogError.value || composerModels.value.length) return ''
+  return resolveApiErrorMessage(composerModelCatalogError.value, t('common.loadFailed'))
+})
 const directModelCatalogError = computed(() => {
   if (!activeUsesDirectRuntime.value || !composerModelCatalogError.value) return ''
   return resolveApiErrorMessage(composerModelCatalogError.value, t('bots.agent.modelsLoadFailed'))
@@ -2558,10 +2542,6 @@ const composerAgentConfigPending = computed(() => activeUsesExternalAgentCompose
 // manual loading paints hover chrome. Keep opacity only, with no busy chrome
 // or model/Agent preparation spinner.
 const composerConfigPending = computed(() => composerAgentConfigPending.value || runtimeModeChanging.value)
-const composerSpinnerVisible = useDelayedTrue(
-  computed(() => composerAgentConfigPending.value || composerModelsLoading.value),
-  3000,
-)
 const canAddAgent = computed(() => !!currentBotId.value && hasBotPermission(currentBot.value?.current_user_permissions, 'manage'))
 const canChangeAgent = computed(() => !!currentBotId.value
   && !hasRenderedSession.value
