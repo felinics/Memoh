@@ -30,6 +30,8 @@ type fakeResetLedger struct {
 	// has no active runs left.
 	activeRunsByBot [][]ledger.Run
 	orphanLeases    []ledger.ResetLease
+	botSessionIDs   []string
+	botSessionsErr  error
 }
 
 type fakeRenewResult struct {
@@ -94,6 +96,12 @@ func (f *fakeResetLedger) ActiveRunsByBot(context.Context, string) ([]ledger.Run
 	runs := f.activeRunsByBot[0]
 	f.activeRunsByBot = f.activeRunsByBot[1:]
 	return runs, nil
+}
+
+func (f *fakeResetLedger) SessionIDsByBot(context.Context, string) ([]string, error) {
+	f.resetMu.Lock()
+	defer f.resetMu.Unlock()
+	return append([]string(nil), f.botSessionIDs...), f.botSessionsErr
 }
 
 func (f *fakeResetLedger) FenceAndFinalizeOrphan(_ context.Context, reset ledger.ResetLease, run ledger.Run) (ledger.Run, bool, error) {

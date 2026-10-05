@@ -407,13 +407,33 @@ func (q *Queries) GetActiveSessionRun(ctx context.Context, sessionID pgtype.UUID
 
 const getLatestSessionRun = `-- name: GetLatestSessionRun :one
 SELECT run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
-FROM session_runs
-WHERE team_id = public.memoh_current_team_id()
-  AND session_id = $1
-ORDER BY created_at DESC, run_id DESC
-LIMIT 1
+FROM session_runs run
+WHERE run.team_id = public.memoh_current_team_id()
+  AND run.session_id = $1
+  AND run.run_id = (
+    SELECT latest.run_id
+    FROM session_runs latest
+    WHERE latest.team_id = public.memoh_current_team_id()
+      AND latest.session_id = $1
+    ORDER BY latest.created_at DESC, latest.run_id DESC
+    LIMIT 1
+  )
+  AND run.error_code IS DISTINCT FROM 'history_reset'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_sessions session
+    WHERE session.team_id = run.team_id
+      AND session.id = run.session_id
+      AND run.fencing_token > 0
+      AND session.runtime_fencing_token > run.fencing_token
+  )
 `
 
+// The latest run, reported only while it belongs to the session's current
+// runtime generation. Clearing history, deleting the session and every other
+// runtime reset move bot_sessions.runtime_fencing_token past the token of each
+// run claimed before them; a run the reset ended itself carries history_reset.
+// Such a run has nothing left to report, and no older run stands in for it.
 func (q *Queries) GetLatestSessionRun(ctx context.Context, sessionID pgtype.UUID) (SessionRun, error) {
 	row := q.db.QueryRow(ctx, getLatestSessionRun, sessionID)
 	var i SessionRun

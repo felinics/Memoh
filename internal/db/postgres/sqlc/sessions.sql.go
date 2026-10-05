@@ -615,6 +615,36 @@ func (q *Queries) GetSessionDiscussCursor(ctx context.Context, arg GetSessionDis
 	return i, err
 }
 
+const listBotSessionIDs = `-- name: ListBotSessionIDs :many
+SELECT id
+FROM bot_sessions
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $1
+ORDER BY id
+`
+
+// Every session a bot-wide runtime reset covers, deleted ones included, as
+// ClearHistoryByBot does.
+func (q *Queries) ListBotSessionIDs(ctx context.Context, botID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listBotSessionIDs, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSessionDiscussCursorsByBot = `-- name: ListSessionDiscussCursorsByBot :many
 SELECT c.session_id, c.scope_key, c.route_id, c.source, c.consumed_cursor, c.consumed_event_cursor, c.updated_at, c.team_id
 FROM bot_session_discuss_cursors c

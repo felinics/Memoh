@@ -109,12 +109,32 @@ WHERE team_id = public.memoh_current_team_id()
 ORDER BY session_id, run_id;
 
 -- name: GetLatestSessionRun :one
+-- The latest run, reported only while it belongs to the session's current
+-- runtime generation. Clearing history, deleting the session and every other
+-- runtime reset move bot_sessions.runtime_fencing_token past the token of each
+-- run claimed before them; a run the reset ended itself carries history_reset.
+-- Such a run has nothing left to report, and no older run stands in for it.
 SELECT *
-FROM session_runs
-WHERE team_id = public.memoh_current_team_id()
-  AND session_id = sqlc.arg(session_id)
-ORDER BY created_at DESC, run_id DESC
-LIMIT 1;
+FROM session_runs run
+WHERE run.team_id = public.memoh_current_team_id()
+  AND run.session_id = sqlc.arg(session_id)
+  AND run.run_id = (
+    SELECT latest.run_id
+    FROM session_runs latest
+    WHERE latest.team_id = public.memoh_current_team_id()
+      AND latest.session_id = sqlc.arg(session_id)
+    ORDER BY latest.created_at DESC, latest.run_id DESC
+    LIMIT 1
+  )
+  AND run.error_code IS DISTINCT FROM 'history_reset'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM bot_sessions session
+    WHERE session.team_id = run.team_id
+      AND session.id = run.session_id
+      AND run.fencing_token > 0
+      AND session.runtime_fencing_token > run.fencing_token
+  );
 
 -- name: LockBotForSessionRunClaim :one
 -- Claim uses a real transaction and a fresh statement after this parent lock.

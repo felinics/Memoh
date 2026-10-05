@@ -117,9 +117,25 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 	renewDone := make(chan struct{})
 	go m.renewHistoryReset(resetCtx, cancelReset, resetStore, ttl, live, liveHeld, durable, stopRenew, renewDone)
 
+	var resetKeys []Key
 	var releaseOnce sync.Once
 	release := func() {
 		releaseOnce.Do(func() {
+			if len(resetKeys) > 0 && context.Cause(resetCtx) == nil {
+				// The deletion has settled while the lease still holds every new
+				// run out: restart the projections once more so subscribers that
+				// fell back to the ledger during the reset read it again.
+				restartCtx, cancel := context.WithTimeout(resetCtx, ttl/3)
+				if err := m.invalidateHistoryResetSnapshots(restartCtx, resetKeys, false); err != nil {
+					m.logger.WarnContext(ctx, "restart runtime snapshots after history reset failed; subscribers keep the projection read during the reset",
+						slog.Any("error", err),
+						slog.String("scope", scope.kind()),
+						slog.String("bot_id", scope.BotID),
+						slog.String("session_id", scope.SessionID),
+					)
+				}
+				cancel()
+			}
 			close(stopRenew)
 			<-renewDone
 			cancelReset(context.Canceled)
@@ -159,7 +175,77 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 		}
 		return nil, nil, err
 	}
+	// Every run the reset covers is terminal now and none can start until
+	// release. Drop them from the live projections before the caller deletes
+	// their history; a projection that cannot be cleared fails the reset, so
+	// no deletion proceeds under a view that still shows the run.
+	keys, err := historyResetSessions(resetCtx, scope, resetStore)
+	if err == nil {
+		resetKeys = keys
+		err = m.invalidateHistoryResetSnapshots(resetCtx, keys, true)
+	}
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
 	return resetCtx, release, nil
+}
+
+func historyResetSessions(ctx context.Context, scope ResetScope, store ledger.ResetStore) ([]Key, error) {
+	if scope.SessionID != "" {
+		return []Key{{BotID: scope.BotID, SessionID: scope.SessionID}}, nil
+	}
+	ids, err := store.SessionIDsByBot(ctx, scope.BotID)
+	if err != nil {
+		return nil, fmt.Errorf("list history reset sessions: %w", err)
+	}
+	keys := make([]Key, 0, len(ids))
+	for _, id := range ids {
+		keys = append(keys, Key{BotID: scope.BotID, SessionID: id})
+	}
+	return keys, nil
+}
+
+// invalidateHistoryResetSnapshots restarts each projection under a new epoch,
+// which makes every subscriber reload it. Before the deletion it drops the
+// run a projection shows and leaves projections without one alone; after it,
+// it restarts every projection but never touches an active run.
+func (m *Manager) invalidateHistoryResetSnapshots(ctx context.Context, keys []Key, beforeDeletion bool) error {
+	for _, key := range keys {
+		now, err := m.backend.Now(ctx)
+		if err != nil {
+			return fmt.Errorf("load runtime backend time: %w", err)
+		}
+		epoch := m.newEpoch()
+		snapshot, changed, err := m.backend.Update(ctx, key, func(snapshot Snapshot, ok bool) (Snapshot, bool, error) {
+			if !ok {
+				return snapshot, false, nil
+			}
+			run := snapshot.CurrentRunView
+			if beforeDeletion && run == nil || !beforeDeletion && run != nil && isActiveRunStatus(run.Status) {
+				return snapshot, false, nil
+			}
+			snapshot.CurrentRunView = nil
+			snapshot.Epoch = epoch
+			snapshot.Seq = 0
+			snapshot.UpdatedAt = now
+			return snapshot, true, nil
+		})
+		if err != nil {
+			return fmt.Errorf("invalidate runtime snapshot for history reset: %w", err)
+		}
+		if !changed {
+			continue
+		}
+		if err := m.publishRuntimeDelta(ctx, snapshot, "", RuntimeDelta{}); err != nil {
+			m.logger.WarnContext(ctx, "publish history reset snapshot failed; subscribers will reconcile from snapshot",
+				slog.Any("error", err),
+				slog.String("bot_id", key.BotID),
+				slog.String("session_id", key.SessionID),
+			)
+		}
+	}
+	return nil
 }
 
 func (m *Manager) renewHistoryReset(

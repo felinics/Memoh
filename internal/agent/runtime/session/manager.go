@@ -1508,7 +1508,10 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	}
 	if errors.Is(err, ErrRunOwnershipLost) {
 		snapshot, ok, loadErr := m.backend.Load(context.WithoutCancel(ctx), handle.key())
-		if loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
+		// A projection that no longer holds any run (a history reset dropped
+		// it once the ledger was terminal) has nothing left to release.
+		released := loadErr == nil && (!ok || snapshot.CurrentRunView == nil)
+		if released || loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
 			m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
 			return terminal, nil
 		}

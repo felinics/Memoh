@@ -191,6 +191,11 @@ type wsStepHistoryHarness struct {
 
 func newWSStepHistoryHarness(t *testing.T, mode wsStepHistoryModel) wsStepHistoryHarness {
 	t.Helper()
+	return newWSStepHistoryHarnessOn(t, mode, sessionruntime.NewMemoryBackend())
+}
+
+func newWSStepHistoryHarnessOn(t *testing.T, mode wsStepHistoryModel, backend sessionruntime.Backend) wsStepHistoryHarness {
+	t.Helper()
 	ctx := context.Background()
 	pool := openTurnAdmissionPostgres(t, ctx)
 	botID, sessionID := createTurnAdmissionFixture(t, ctx, pool)
@@ -210,7 +215,7 @@ func newWSStepHistoryHarness(t *testing.T, mode wsStepHistoryModel) wsStepHistor
 		t.Fatalf("create model fixture: %v", err)
 	}
 	queries := postgresstore.NewQueriesWithPool(pool, dbsqlc.New(pool))
-	manager := sessionruntime.NewManager(sessionruntime.NewMemoryBackend(), sessionruntime.Options{
+	manager := sessionruntime.NewManager(backend, sessionruntime.Options{
 		OwnerID:       "owner-ws-step-history",
 		StateTTL:      time.Minute,
 		OwnerLeaseTTL: time.Minute,

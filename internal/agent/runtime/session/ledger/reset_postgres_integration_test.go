@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
@@ -304,4 +305,91 @@ func createLedgerResetSession(t *testing.T, ctx context.Context, pool *pgxpool.P
 		t.Fatalf("create ledger reset session: %v", err)
 	}
 	return sessionID.String()
+}
+
+// LatestRun is what a runtime that lost its live projection reports for a
+// session. A reset that cleared the session's history leaves nothing to report
+// of the runs before it, and an older run never stands in for a hidden one.
+func TestPostgresLedgerLatestRunBelongsToTheCurrentRuntime(t *testing.T) {
+	ctx := context.Background()
+	pool := openLedgerResetPostgres(t, ctx)
+	botID, sessionID := createLedgerResetFixture(t, ctx, pool)
+	store := ledger.NewPostgres(dbsqlc.New(pool), pool)
+	queries := dbsqlc.New(pool)
+	pgSessionID := pgtype.UUID{Bytes: uuid.MustParse(sessionID), Valid: true}
+	base := time.Now().Add(-time.Hour)
+	insertRun := func(state string, token int64, at time.Duration) string {
+		t.Helper()
+		runID := uuid.NewString()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO session_runs (
+				run_id, bot_id, session_id, invocation_id, turn_id, turn_position,
+				state, input_json, input_fingerprint, fencing_token, created_at
+			) VALUES ($1, $2, $3, $4, $5, 1, $6, '{}'::jsonb, 'latest-run', $7, $8)
+		`, runID, botID, sessionID, uuid.NewString(), uuid.NewString(), state, token, base.Add(at)); err != nil {
+			t.Fatalf("create %s run: %v", state, err)
+		}
+		return runID
+	}
+	claim := func() int64 {
+		t.Helper()
+		token, err := queries.NextSessionRuntimeFenceToken(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE bot_sessions SET runtime_fencing_token = $1 WHERE id = $2`, token, pgSessionID); err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	latest := func() string {
+		t.Helper()
+		run, err := store.LatestRun(ctx, sessionID)
+		if errors.Is(err, ledger.ErrRunNotFound) {
+			return ""
+		}
+		if err != nil {
+			t.Fatalf("LatestRun() error = %v", err)
+		}
+		return run.RunID
+	}
+
+	completed := insertRun("completed", claim(), time.Minute)
+	if got := latest(); got != completed {
+		t.Fatalf("latest run = %q, want the completed run %q", got, completed)
+	}
+	if err := queries.ClearHistoryBySession(ctx, pgSessionID); err != nil {
+		t.Fatalf("clear session history: %v", err)
+	}
+	if got := latest(); got != "" {
+		t.Fatalf("latest run after clearing history = %q, want none", got)
+	}
+
+	// A run admitted after the clear but never claimed carries no token to
+	// compare; it is still the session's latest run.
+	unclaimed := insertRun("accepted", 0, 2*time.Minute)
+	if got := latest(); got != unclaimed {
+		t.Fatalf("latest run = %q, want the unclaimed run %q", got, unclaimed)
+	}
+	lease, applied, err := store.(ledger.ResetStore).AcquireReset(ctx, ledger.ResetLease{
+		Scope: ledger.ResetScopeBot, BotID: botID, Token: uuid.NewString(),
+	}, time.Minute)
+	if err != nil || !applied {
+		t.Fatalf("acquire reset lease = (%v, %v)", applied, err)
+	}
+	if _, applied, err := store.(ledger.OrphanResetStore).FenceAndFinalizeOrphan(ctx, lease, ledger.Run{RunID: unclaimed, BotID: botID, SessionID: sessionID}); err != nil || !applied {
+		t.Fatalf("finalize unclaimed run by the reset = (%v, %v)", applied, err)
+	}
+	if ok, err := store.(ledger.ResetStore).ReleaseReset(ctx, lease); err != nil || !ok {
+		t.Fatalf("release reset lease = (%v, %v)", ok, err)
+	}
+	if got := latest(); got != "" {
+		t.Fatalf("latest run ended by the reset = %q, want none", got)
+	}
+
+	// A run whose owner disappeared is still reported, as lost.
+	lost := insertRun("lost", claim(), 3*time.Minute)
+	if got := latest(); got != lost {
+		t.Fatalf("latest run = %q, want the lost run %q", got, lost)
+	}
 }
