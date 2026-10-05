@@ -117,7 +117,8 @@ import {
   prepareConnectorOAuthPopup,
   waitForConnectorOAuth,
 } from '@/composables/useConnectorOAuth'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { isApiErrorCode, resolveApiErrorMessage } from '@/utils/api-error'
+import { useUserStore } from '@/store/user'
 
 const props = defineProps<{
   autoStart?: boolean
@@ -135,6 +136,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const userStore = useUserStore()
 const schema = toTypedSchema(z.object({
   auth_method: z.string().min(1, t('connectors.validation.authMethodRequired')),
   fields: z.record(z.string(), z.string().optional()),
@@ -262,7 +264,7 @@ async function connect() {
     oauthPopup?.close()
     if (flow.signal.aborted) return
     const oauthKey = connectorOAuthErrorKey(error)
-    errorMessage.value = oauthKey ? t(oauthKey) : resolveApiErrorMessage(error, t('connectors.connectFailed'))
+    errorMessage.value = oauthKey ? t(oauthKey) : connectErrorMessage(error)
   } finally {
     if (flow.signal.aborted) oauthPopup?.close()
     if (attempt === flow) {
@@ -270,5 +272,15 @@ async function connect() {
       phase.value = 'idle'
     }
   }
+}
+
+function connectErrorMessage(error: unknown) {
+  if (!isApiErrorCode(error, 'connector.oauth_client_not_configured')) {
+    return resolveApiErrorMessage(error, t('connectors.connectFailed'))
+  }
+  const hint = userStore.userInfo.role === 'admin'
+    ? 'connectors.oauthAppNotConfigured.admin'
+    : 'connectors.oauthAppNotConfigured.member'
+  return t(hint, { connector: props.catalog?.name || props.connector?.type })
 }
 </script>

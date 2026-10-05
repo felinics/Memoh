@@ -602,6 +602,7 @@
       "not_found": "该连接器已不可用，请刷新后重新连接。",
       "conflict": "该连接器与现有连接冲突。",
       "request_rejected": "Connect-It 拒绝了该连接器请求，请检查填写内容后重试。",
+      "oauth_client_not_configured": "Connect-It 尚未为该连接器配置 OAuth App，需要部署管理员在 Connect-It 中填写 Client ID 和 Client Secret 后才能连接。",
       "upstream_unavailable": "Connect-It 暂时无法完成请求，请稍后重试。",
       "operation_failed": "连接器操作失败，请重试。"
     },

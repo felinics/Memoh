@@ -61,6 +61,7 @@ const (
 	CodeConnectorNotFound                        Code = "connector.not_found"
 	CodeConnectorConflict                        Code = "connector.conflict"
 	CodeConnectorRequestRejected                 Code = "connector.request_rejected"
+	CodeConnectorOAuthClientNotConfigured        Code = "connector.oauth_client_not_configured"
 	CodeConnectorUpstreamUnavailable             Code = "connector.upstream_unavailable"
 	CodeConnectorOperationFailed                 Code = "connector.operation_failed"
 	CodeSkillBuiltinReadOnly                     Code = "skill.builtin_read_only"
@@ -546,6 +547,14 @@ var catalog = map[Code]Definition{
 	CodeConnectorRequestRejected: {
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "Connect-It rejected the connector request.",
+	},
+	// Connect-It has no OAuth App client ID or secret for the connector. Only
+	// a deployment administrator can configure it there, so neither the
+	// request nor a retry can fix it.
+	CodeConnectorOAuthClientNotConfigured: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "Connect-It has no OAuth App configured for this connector.",
+		Fault:      FaultDependency,
 	},
 	CodeConnectorUpstreamUnavailable: {
 		HTTPStatus: http.StatusBadGateway,

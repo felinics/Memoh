@@ -178,6 +178,7 @@ look up the target in this process stays `server`. A guard test in
 | `agent.provider_auth_failed`, `agent.provider_permission_denied`, `agent.provider_quota_exhausted`, `agent.provider_rate_limited`, `agent.provider_overloaded`, `agent.provider_request_rejected`, `agent.provider_unreachable` | `dependency` |
 | `agent.response_interrupted`, `agent.response_timeout` | `dependency` |
 | `runtime_prompt_failed`, `external_runtime.session_resume_failed`, `external_runtime.usage_limited`, `acp.config_update_failed` | `dependency` |
+| `connector.oauth_client_not_configured` | `dependency` |
 
 ## Attribution across an RPC
 

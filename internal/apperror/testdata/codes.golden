@@ -60,6 +60,7 @@ compaction.model_unavailable	400
 connector.conflict	409
 connector.not_configured	503
 connector.not_found	404
+connector.oauth_client_not_configured	503
 connector.operation_failed	500
 connector.request_invalid	400
 connector.request_rejected	400

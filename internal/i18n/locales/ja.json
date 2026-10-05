@@ -602,6 +602,7 @@
       "not_found": "このコネクターは利用できなくなりました。再読み込みして接続し直してください。",
       "conflict": "このコネクターは既存の接続と競合しています。",
       "request_rejected": "Connect-It がコネクターのリクエストを拒否しました。入力内容を確認して、もう一度お試しください。",
+      "oauth_client_not_configured": "Connect-It でこのコネクターの OAuth App が設定されていません。接続するには、デプロイ管理者が Connect-It で Client ID と Client Secret を設定する必要があります。",
       "upstream_unavailable": "Connect-It でリクエストを処理できませんでした。しばらくしてからもう一度お試しください。",
       "operation_failed": "コネクターの操作に失敗しました。もう一度お試しください。"
     },

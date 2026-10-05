@@ -198,6 +198,7 @@
       "not_found": "This connector is no longer available.",
       "conflict": "This connector conflicts with an existing connection.",
       "request_rejected": "Connect-It rejected the connector request.",
+      "oauth_client_not_configured": "Connect-It has no OAuth App configured for this connector. A deployment administrator needs to add its client ID and secret in Connect-It before it can be connected.",
       "upstream_unavailable": "Connect-It could not complete the request. Please try again shortly.",
       "operation_failed": "The connector operation failed. Please try again."
     },
@@ -3840,6 +3841,10 @@
     "oauthPopupBlocked": "The authorization window was blocked — allow popups for this page and try again.",
     "connectedSuccess": "{name} connected",
     "connectFailed": "Failed to connect service",
+    "oauthAppNotConfigured": {
+      "admin": "Connect-It has no OAuth App configured for {connector}. Open the Connect-It admin console, enter the OAuth App client ID and secret on the {connector} connector's config page, then connect again.",
+      "member": "Connect-It has no OAuth App configured for {connector}, and only a deployment administrator can add one. Ask your Memoh administrator to set it up, then connect again."
+    },
     "status": {
       "active": "Connected",
       "pending": "Waiting for authorization",

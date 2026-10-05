@@ -15,6 +15,8 @@ import (
 	"github.com/felinics/memoh/internal/connectors"
 )
 
+const connectItOAuthClientNotConfigured = "oauth_client_not_configured"
+
 type ConnectorsHandler struct {
 	service        *connectors.Service
 	botService     *bots.Service
@@ -266,6 +268,9 @@ func connectorHTTPError(err error) error {
 	}
 	var apiErr *connectsdk.APIError
 	if errors.As(err, &apiErr) {
+		if apiErr.Code == connectItOAuthClientNotConfigured {
+			return apperror.Wrap(apperror.CodeConnectorOAuthClientNotConfigured, err, nil)
+		}
 		switch apiErr.StatusCode {
 		case http.StatusBadRequest, http.StatusUnprocessableEntity:
 			return apperror.Wrap(apperror.CodeConnectorRequestRejected, err, nil)
