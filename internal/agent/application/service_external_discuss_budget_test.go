@@ -97,6 +97,38 @@ func TestExternalDiscussDriverReceivesBoundedFinalEnvelope(t *testing.T) {
 	}
 }
 
+func TestExternalDiscussOversizedBatchCompactsOlderInputOrRecordsOmission(t *testing.T) {
+	var messages []turn.DiscussMessage
+	for _, id := range []string{"a", "b", "c", "d"} {
+		messages = append(messages, turn.DiscussMessage{Role: "user", Content: id + strings.Repeat("x", 1200), Source: &turn.ContextMessageSource{Kind: "external", ID: id, Current: true}})
+	}
+	for _, mode := range []string{"shadow", "off"} {
+		service, compactor := newControllerPolicyService(t, nil)
+		service.SetContextAbsoluteMaxTokens(1000)
+		service.SetSyncCompactionMode(mode)
+		got, err := service.prepareExternalDiscussContext(t.Context(), ChatRequest{BotID: syncCompactBotID, ThreadID: syncCompactThreadID, discussMessages: messages}, "", 0)
+		if mode == "shadow" {
+			if !errors.Is(err, native.ErrContextRecompose) || len(compactor.configs) != 1 {
+				t.Fatalf("older input must be compacted: err=%v compactions=%d", err, len(compactor.configs))
+			}
+			for _, source := range compactor.configs[0].ProtectedSources {
+				if source.ID == "a" {
+					t.Fatalf("the oldest input was protected from compaction: %+v", compactor.configs[0].ProtectedSources)
+				}
+			}
+			continue
+		}
+		if err != nil || len(got.discussOmittedSources) == 0 || got.discussOmittedSources[0].ID != "a" || !strings.Contains(got.Query, "d"+strings.Repeat("x", 1200)) {
+			t.Fatalf("without recovery the newest input must proceed and the omission must be recorded: err=%v omitted=%+v", err, got.discussOmittedSources)
+		}
+		ledger := contextfrag.NewMutationLedger()
+		recordOmittedCurrentInput(ledger, got.discussOmittedSources)
+		if records := ledger.Records(); len(records) != 1 || records[0].Kind != contextfrag.MutationCurrentInputOmitted || !strings.HasPrefix(records[0].Detail, "sources=a") {
+			t.Fatalf("omission record=%+v", records)
+		}
+	}
+}
+
 func TestExternalDiscussFinalAdmissionRejectsIrreducibleContext(t *testing.T) {
 	for _, images := range []int{0, 1} {
 		service, compactor := newControllerPolicyService(t, nil)
