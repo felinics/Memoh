@@ -16,6 +16,9 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/job"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -88,10 +91,10 @@ func (s *Service) SetEventPublisher(p messageevent.Publisher) {
 	s.eventPublisher = p
 }
 
-// maybeGenerateSessionTitle checks whether the session needs an auto-generated
-// title and, if so, calls the configured title model to produce one.
-// It is fired asynchronously when a user message is received so the title
-// appears as early as possible without blocking the chat flow.
+// maybeGenerateSessionTitle starts a background unit that gives the session
+// an auto-generated title if it has none yet. It is fired when a user
+// message is received so the title appears as early as possible without
+// blocking the chat flow.
 func (s *Service) maybeGenerateSessionTitle(ctx context.Context, req ChatRequest, userQuery string) {
 	if req.SkipTitleGeneration {
 		return
@@ -100,64 +103,63 @@ func (s *Service) maybeGenerateSessionTitle(ctx context.Context, req ChatRequest
 	if sessionID == "" || s.sessionService == nil {
 		return
 	}
-
 	userQuery = strings.TrimSpace(userQuery)
 	if userQuery == "" {
 		return
 	}
+	job.Go(ctx, s.logger, "agent.title", job.Options{}, func(ctx context.Context) error {
+		return s.generateSessionTitle(ctx, req, sessionID, userQuery)
+	}, slog.String("bot_id", req.BotID), slog.String("session_id", sessionID))
+}
 
+// generateSessionTitle is the body of one title unit.
+func (s *Service) generateSessionTitle(ctx context.Context, req ChatRequest, sessionID, userQuery string) error {
 	sess, err := s.sessionService.Get(ctx, sessionID)
 	if err != nil {
-		s.logger.WarnContext(ctx, "title gen: failed to get session", slog.String("session_id", sessionID), slog.Any("error", err))
-		return
+		return errs.Wrap(err, "get session")
 	}
 	// Only generate a title when the session doesn't have one yet. Reading the
 	// DB title (rather than an in-memory cache) keeps this guard restart-safe:
 	// a session that already has an LLM-generated title is never re-run, even
 	// after a server restart.
 	if !shouldGenerateSessionTitle(sess) {
-		return
+		job.Annotate(ctx, slog.String("skipped", "titled"))
+		return nil
 	}
-
-	promptTitle := fallbackSessionTitle(userQuery)
 
 	// Persist a prompt-derived title immediately so a brand-new session is never
 	// left "Untitled" — before (or without) the LLM title model. The sidebar
 	// shows the user's first prompt right away; if a title model is configured
 	// and the LLM succeeds below, it upgrades this.
-	if strings.TrimSpace(sess.Title) == "" && promptTitle != "" {
+	if strings.TrimSpace(sess.Title) == "" {
 		s.applyFallbackTitle(ctx, req, sessionID, userQuery)
 	}
 
 	titleModelID, ownerUserID, err := s.resolveTitleModel(ctx, req.BotID)
 	if err != nil {
-		s.logger.WarnContext(ctx, "title gen: failed to load owner profile", slog.String("bot_id", req.BotID), slog.Any("error", err))
-		return
+		return errs.Wrap(err, "load title model profile")
 	}
 	if titleModelID == "" {
-		s.logger.DebugContext(ctx, "title gen: no title model configured", slog.String("bot_id", req.BotID), slog.String("owner_user_id", ownerUserID))
-		return
+		job.Annotate(ctx, slog.String("skipped", "no_title_model"))
+		return nil
 	}
-
-	s.logger.InfoContext(ctx, "title gen: generating title", slog.String("session_id", sessionID), slog.String("title_model_id", titleModelID))
+	job.Annotate(ctx, slog.String("title_model_id", titleModelID))
 
 	titleModel, provider, err := s.fetchChatModel(ctx, titleModelID)
 	if err != nil {
-		s.logger.WarnContext(ctx, "title gen: failed to resolve title model", slog.String("model_id", titleModelID), slog.Any("error", err))
-		return
+		return errs.Wrap(err, "resolve title model")
 	}
 
-	title := s.generateTitle(models.WithModelSession(ctx, sessionID), ownerUserID, titleModel, provider, userQuery)
-	if title == "" {
-		return
+	title, err := s.generateTitle(models.WithModelSession(ctx, sessionID), ownerUserID, titleModel, provider, userQuery)
+	if err != nil || title == "" {
+		return err
 	}
 
 	if _, err := s.sessionService.UpdateTitle(ctx, sessionID, title); err != nil {
-		s.logger.WarnContext(ctx, "title gen: failed to update session title", slog.String("session_id", sessionID), slog.Any("error", err))
-	} else {
-		s.logger.InfoContext(ctx, "title gen: session title updated", slog.String("session_id", sessionID), slog.String("title", title))
-		s.publishSessionTitleUpdated(req.BotID, sessionID, title)
+		return errs.Wrap(err, "update session title")
 	}
+	s.publishSessionTitleUpdated(req.BotID, sessionID, title)
+	return nil
 }
 
 func (s *Service) resolveTitleModel(ctx context.Context, botID string) (modelID, ownerUserID string, err error) {
@@ -259,10 +261,10 @@ func boundTitleInput(msg string, contextWindowTokens int) string {
 	return string(runes[:head]) + "\n…\n" + string(runes[len(runes)-tail:])
 }
 
-func (s *Service) generateTitle(ctx context.Context, userID string, model models.GetResponse, provider sqlc.Provider, userQuery string) string {
+func (s *Service) generateTitle(ctx context.Context, userID string, model models.GetResponse, provider sqlc.Provider, userQuery string) (string, error) {
 	userSnippet := boundTitleInput(strings.TrimSpace(userQuery), model.Config.ContextBudgetMaxTokens())
 	if userSnippet == "" {
-		return ""
+		return "", nil
 	}
 
 	prompt := titleGenerationPrompt + userSnippet
@@ -271,8 +273,7 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 	authCtx := oauthctx.WithUserID(ctx, userID)
 	creds, err := authService.ResolveModelCredentials(authCtx, provider)
 	if err != nil {
-		s.logger.WarnContext(ctx, "title gen: failed to resolve provider credentials", slog.Any("error", err))
-		return ""
+		return "", errs.Wrap(err, "resolve title provider credentials")
 	}
 
 	modelCfg := models.SDKModelConfig{
@@ -300,14 +301,13 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 		MaxTokens: &maxTokens,
 	})
 	if err != nil {
-		s.logger.WarnContext(ctx, "title gen: LLM call failed", slog.Any("error", err))
-		return ""
+		return "", errs.WrapDependency(err, "generate title")
 	}
 
 	title := strings.TrimSpace(result.Text)
 	title = strings.Trim(title, "\"'`")
 	title = strings.TrimSpace(title)
-	return title
+	return title, nil
 }
 
 func (s *Service) publishSessionTitleUpdated(botID, sessionID, title string) {
@@ -405,7 +405,9 @@ func (s *Service) applyFallbackTitle(ctx context.Context, req ChatRequest, sessi
 		return
 	}
 	if _, err := s.sessionService.UpdateTitle(ctx, sessionID, title); err != nil {
-		s.logger.WarnContext(ctx, "title gen: failed to apply fallback title", slog.String("session_id", sessionID), slog.Any("error", err))
+		// The LLM title below can still replace it.
+		result := errlog.Event(ctx, "agent.title", errs.Wrap(err, "apply fallback title", slog.String("session_id", sessionID)), errlog.Options{})
+		s.logger.LogAttrs(ctx, result.Level, "title gen: failed to apply fallback title", result.Attrs()...)
 		return
 	}
 	s.logger.InfoContext(ctx, "title gen: applied fallback title", slog.String("session_id", sessionID), slog.String("title", title))

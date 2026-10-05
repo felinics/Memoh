@@ -18,6 +18,9 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/job"
 	"github.com/felinics/memoh/internal/runtimefence"
 	tzutil "github.com/felinics/memoh/internal/timezone"
 	"github.com/felinics/memoh/internal/workspace"
@@ -724,13 +727,16 @@ func (s *Service) ListChecks(ctx context.Context, botID string) ([]BotCheck, err
 }
 
 func (s *Service) enqueueDeleteLifecycle(ctx context.Context, botID, revertStatus string) {
-	go s.runDeleteLifecycle(context.WithoutCancel(ctx), botID, revertStatus)
+	job.Go(ctx, s.logger, "bot.delete", job.Options{}, func(ctx context.Context) error {
+		return s.runDeleteLifecycle(ctx, botID, revertStatus)
+	}, slog.String("bot_id", botID))
 }
 
 // runDeleteLifecycle tears the bot down. revertStatus is restored when a
 // blocking step fails so the user can retry (ready, or failed for a bot whose
-// creation never completed).
-func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus string) {
+// creation never completed). The returned error is the step that stopped the
+// deletion.
+func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus string) error {
 	lifecycleCtx, cancel := context.WithTimeout(ctx, botLifecycleOperationTimeout)
 	defer cancel()
 	if revertStatus != BotStatusFailed {
@@ -740,22 +746,19 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 	// The revert must succeed even when the failing cleanup consumed the
 	// whole lifecycle budget: reverting on the exhausted context would
 	// strand the bot in status "deleting" with no retry path.
-	revertToReady := func() {
+	revert := func(cause error) error {
 		revertCtx, cancelRevert := context.WithTimeout(context.WithoutCancel(lifecycleCtx), botLifecycleStatusWriteTimeout)
 		defer cancelRevert()
 		if err := s.updateStatus(revertCtx, botID, revertStatus); err != nil {
-			s.logger.ErrorContext(ctx, "revert bot status failed", slog.String("bot_id", botID), slog.Any("error", err))
+			result := errlog.Event(ctx, "bot.delete", errs.Wrap(err, "revert bot status", slog.String("status", revertStatus)), errlog.Options{})
+			s.logger.LogAttrs(ctx, result.Level, "revert bot status failed", append([]slog.Attr{slog.String("bot_id", botID)}, result.Attrs()...)...)
 		}
+		return cause
 	}
 
 	if s.connectorLifecycle != nil {
 		if err := s.connectorLifecycle.CleanupBotConnectors(lifecycleCtx, botID); err != nil {
-			s.logger.ErrorContext(ctx, "bot connector cleanup failed",
-				slog.String("bot_id", botID),
-				slog.Any("error", err),
-			)
-			revertToReady()
-			return
+			return revert(errs.Wrap(err, "clean up bot connectors"))
 		}
 	}
 
@@ -768,31 +771,23 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 	if s.workspaceIntents != nil {
 		generation, err := s.workspaceIntents.RequestAbsent(lifecycleCtx, botID, false)
 		if err != nil {
-			s.logger.ErrorContext(ctx, "record workspace removal intent failed", slog.String("bot_id", botID), slog.Any("error", err))
-			revertToReady()
-			return
+			return revert(errs.Wrap(err, "record workspace removal intent"))
 		}
 		outcome, err := s.workspaceIntents.AwaitSettled(lifecycleCtx, botID, generation)
-		if err != nil || outcome.Observed != WorkspaceObservedAbsent {
-			s.logger.ErrorContext(ctx, "bot workspace removal did not complete within the delete budget",
-				slog.String("bot_id", botID),
+		if err != nil {
+			return revert(errs.Wrap(err, "await workspace removal", slog.String("observed", outcome.Observed), slog.String("last_error", outcome.LastError)))
+		}
+		if outcome.Observed != WorkspaceObservedAbsent {
+			return revert(errs.New("workspace removal did not complete within the delete budget",
 				slog.String("observed", outcome.Observed),
 				slog.String("last_error", outcome.LastError),
-				slog.Any("error", err),
-			)
-			revertToReady()
-			return
+			))
 		}
 	}
 
 	botUUID, err := db.ParseUUID(botID)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "invalid bot id while finalizing delete",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-		revertToReady()
-		return
+		return revert(errs.Wrap(err, "parse bot id"))
 	}
 	// Agent credentials point at bot_agents from the credential side, so the
 	// bot cascade alone would leave every attached secret active forever.
@@ -802,20 +797,12 @@ func (s *Service) runDeleteLifecycle(ctx context.Context, botID, revertStatus st
 	// secrets forever. Treat it like the other blocking cleanups and keep a
 	// retry path by reverting to ready.
 	if err := s.queries.RevokeAgentCredentialsForBot(lifecycleCtx, botUUID); err != nil {
-		s.logger.ErrorContext(ctx, "revoke agent credentials for deleted bot failed",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-		revertToReady()
-		return
+		return revert(errs.Wrap(err, "revoke agent credentials"))
 	}
 	if err := s.queries.DeleteBotByID(lifecycleCtx, botUUID); err != nil {
-		s.logger.ErrorContext(ctx, "failed to delete bot after cleanup",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
-		revertToReady()
+		return revert(errs.Wrap(err, "delete bot row"))
 	}
+	return nil
 }
 
 func (s *Service) updateStatus(ctx context.Context, botID, status string) error {
