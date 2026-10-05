@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strconv"
 	"strings"
@@ -45,7 +46,7 @@ type recoveryHistoryService struct {
 func (s *recoveryHistoryService) ListActiveSinceBySessionWithinBytes(_ context.Context, _ string, _ time.Time, maxBytes int64) ([]messagepkg.Message, error) {
 	s.loads++
 	s.maxBytes = maxBytes
-	return s.messages, s.err
+	return append([]messagepkg.Message(nil), s.messages...), s.err
 }
 
 type recoveryCompactionRunner struct {
@@ -290,6 +291,82 @@ func TestTriggeredBudgetRecoveryPausesIdleUntilProviderDispatch(t *testing.T) {
 			t.Fatalf("compaction calls=%d provider calls=%d error=%v, want compaction then a timed-out provider", len(runner.configs), provider.calls.Load(), err)
 		}
 	})
+}
+
+type delayedRecoveryCompactor struct {
+	calls   atomic.Int32
+	delay   time.Duration
+	history *recoveryHistoryService
+}
+
+func (c *delayedRecoveryCompactor) RunCompactionSync(ctx context.Context, _ compaction.TriggerConfig) (compaction.Result, error) {
+	c.calls.Add(1)
+	select {
+	case <-time.After(c.delay):
+	case <-ctx.Done():
+		return compaction.Result{}, context.Cause(ctx)
+	}
+	c.history.messages = []messagepkg.Message{{ID: "history-new", BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, Role: "assistant", Content: newTextContent("compacted history")}}
+	return compaction.Result{Status: compaction.StatusOK}, nil
+}
+
+// slowRecoveryFixture serves a history above the final allowance but below the
+// pre-turn backstop, and a compaction slower than the model idle window.
+func slowRecoveryFixture(t *testing.T) (directLifecycleFixture, *delayedRecoveryCompactor) {
+	t.Helper()
+	fixture := newDirectLifecycleFixture(t, directLifecycleModelSuccess)
+	queries := fixture.service.queries.(*directLifecycleQueries)
+	queries.compactionEnabled = true
+	model := queries.models["direct-lifecycle-model"]
+	model.Config = []byte(`{"context_window":8000}`)
+	queries.models["direct-lifecycle-model"] = model
+	history := &recoveryHistoryService{messages: []messagepkg.Message{{ID: "history-old", BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, Role: "assistant", Content: newTextContent(strings.Repeat("h", 14000))}}}
+	fixture.service.messageService = triggerRecoveryMessages{recordingMessageService: fixture.messages, history: history}
+	compactor := &delayedRecoveryCompactor{delay: 400 * time.Millisecond, history: history}
+	fixture.service.compactionService = compactor
+	logger := slog.New(slog.DiscardHandler)
+	fixture.service.agent = native.New(native.Deps{Logger: logger, ContextViewApplier: contextview.ProviderRunConfigApplier(logger)})
+	fixture.service.streamIdleTimeout = 100 * time.Millisecond
+	return fixture, compactor
+}
+
+func slowRecoveryRequest() ChatRequest {
+	return ChatRequest{
+		BotID: lifecycleTestBotID, ChatID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID,
+		Query: directLifecyclePrompt + " " + strings.Repeat("q", 6000), UserMessagePersisted: true,
+	}
+}
+
+func TestStreamChatBudgetRecoveryPausesIdleUntilProviderDispatch(t *testing.T) {
+	fixture, compactor := slowRecoveryFixture(t)
+	chunks, errs := fixture.service.StreamChat(t.Context(), slowRecoveryRequest())
+	var failures []error
+	for chunks != nil || errs != nil {
+		select {
+		case _, ok := <-chunks:
+			if !ok {
+				chunks = nil
+			}
+		case err, ok := <-errs:
+			if !ok {
+				errs = nil
+				continue
+			}
+			failures = append(failures, err)
+		}
+	}
+	if compactor.calls.Load() != 1 || len(failures) != 0 {
+		t.Fatalf("compactions=%d errors=%v, want one recovery then a completed turn", compactor.calls.Load(), failures)
+	}
+}
+
+func TestWSBudgetRecoveryPausesIdleUntilProviderDispatch(t *testing.T) {
+	fixture, compactor := slowRecoveryFixture(t)
+	eventCh := make(chan WSStreamEvent, 256)
+	outcome, err := fixture.service.StreamChatWS(t.Context(), slowRecoveryRequest(), eventCh, nil)
+	if err != nil || outcome.Cause != nil || compactor.calls.Load() != 1 {
+		t.Fatalf("error=%v outcome=%+v compactions=%d, want one recovery then a completed turn", err, outcome, compactor.calls.Load())
+	}
 }
 
 func TestChatBudgetRecoveryCompactsOrdinaryHistoryBeforeTrimming(t *testing.T) {
