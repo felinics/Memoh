@@ -19,8 +19,10 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/contextview"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -257,6 +259,35 @@ func TestChatBudgetRecoveryPausesIdleUntilProviderDispatch(t *testing.T) {
 		}
 		if len(runner.configs) != 1 || provider.calls.Load() != 1 || !idle.DidFire() {
 			t.Fatalf("compaction calls=%d provider calls=%d idle fired=%v, want compaction then a timed-out provider", len(runner.configs), provider.calls.Load(), idle.DidFire())
+		}
+	})
+}
+
+type triggerRecoveryMessages struct {
+	*recordingMessageService
+	history *recoveryHistoryService
+}
+
+func (m triggerRecoveryMessages) ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]messagepkg.Message, error) {
+	return m.history.ListActiveSinceBySessionWithinBytes(ctx, sessionID, since, maxBytes)
+}
+
+func TestTriggeredBudgetRecoveryPausesIdleUntilProviderDispatch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, history, runner, cfg := chatRecoveryFixture(t)
+		runner.run = func() (compaction.Result, error) {
+			time.Sleep(time.Minute)
+			history.messages = []messagepkg.Message{{ID: "history-new", BotID: syncCompactBotID, SessionID: syncCompactThreadID, Role: "assistant", Content: newTextContent("compacted history")}}
+			return compaction.Result{Status: compaction.StatusOK}, nil
+		}
+		s.messageService = triggerRecoveryMessages{recordingMessageService: &recordingMessageService{}, history: history}
+		provider := &recoverySilentProvider{}
+		cfg.Model.Provider = provider
+		s.agent = native.New(native.Deps{ContextViewApplier: contextview.ProviderRunConfigApplier(nil)})
+		s.streamIdleTimeout = 10 * time.Second
+		_, err := s.runTriggeredNativeStream(t.Context(), cfg, triggerStreamRequest(), resolvedContext{runConfig: cfg}, sessionruntime.RunHandle{RunID: "run-1", TurnID: "turn-1"}, nil, nil)
+		if len(runner.configs) != 1 || provider.calls.Load() != 1 || apperror.CodeOf(err) != apperror.CodeAgentResponseTimeout {
+			t.Fatalf("compaction calls=%d provider calls=%d error=%v, want compaction then a timed-out provider", len(runner.configs), provider.calls.Load(), err)
 		}
 	})
 }

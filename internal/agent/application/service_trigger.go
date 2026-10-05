@@ -161,6 +161,7 @@ func (s *Service) runTriggeredNativeStream(
 		cancelStream()
 		idleCancel.Stop()
 	}()
+	cfg = pauseIdleDuringBudgetRecovery(cfg, idleCancel)
 
 	return s.consumeTriggeredStreamWithIdle(
 		idleCtx,
