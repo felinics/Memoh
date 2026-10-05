@@ -5,7 +5,6 @@ import {
   toElectronAccelerator,
   acceleratorForCommand,
   selectWebBindings,
-  selectDesktopKeydownBindings,
   resolveBindingKey,
   detectPlatform,
   RESERVED_BROWSER_COMBOS,
@@ -18,17 +17,17 @@ describe('keyboard bindings table', () => {
     const save = keyboardBindings.find(b => b.command === appKeyboardCommands.saveActiveFile)
 
     expect(close).toMatchObject({ key: 'w', mod: true, desktop: 'menu', browser: 'passthrough', scope: 'workspace' })
-    expect(save).toMatchObject({ key: 's', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'workspace' })
+    expect(save).toMatchObject({ key: 's', mod: true, browser: 'intercept', scope: 'workspace' })
   })
 
   it('migrates the previously hardcoded sidebar toggle into the table', () => {
     const toggle = keyboardBindings.find(b => b.command === appKeyboardCommands.toggleSidebar)
-    expect(toggle).toMatchObject({ key: 'b', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'workspace' })
+    expect(toggle).toMatchObject({ key: 'b', mod: true, browser: 'intercept', scope: 'workspace' })
   })
 
   it('declares Mod+K as the open-settings global shortcut', () => {
     const open = keyboardBindings.find(b => b.command === appKeyboardCommands.openSettings)
-    expect(open).toMatchObject({ key: 'k', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
+    expect(open).toMatchObject({ key: 'k', mod: true, browser: 'intercept', scope: 'global' })
   })
 
   it('migrates the lightbox keys with a scoped lifetime (not global)', () => {
@@ -68,7 +67,7 @@ describe('toElectronAccelerator', () => {
   })
 
   it('orders modifiers CmdOrCtrl, Alt, Shift and uppercases single-char keys', () => {
-    const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, desktop: 'keydown', browser: 'intercept', scope: 'global', i18nKey: 'saveActiveFile' }
+    const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, browser: 'intercept', scope: 'global', i18nKey: 'saveActiveFile' }
     expect(toElectronAccelerator(binding)).toBe('CmdOrCtrl+Alt+Shift+K')
   })
 
@@ -100,14 +99,6 @@ describe('acceleratorForCommand', () => {
 describe('selectWebBindings', () => {
   it('keeps intercept bindings and drops passthrough ones (browser keeps native behavior)', () => {
     const commands = selectWebBindings(keyboardBindings).map(b => b.command)
-    expect(commands).toContain(appKeyboardCommands.saveActiveFile)
-    expect(commands).not.toContain(appKeyboardCommands.closeCurrentWorkspaceTab)
-  })
-})
-
-describe('selectDesktopKeydownBindings', () => {
-  it('keeps keydown bindings and drops menu ones (avoids double-firing with menu accelerators)', () => {
-    const commands = selectDesktopKeydownBindings(keyboardBindings).map(b => b.command)
     expect(commands).toContain(appKeyboardCommands.saveActiveFile)
     expect(commands).not.toContain(appKeyboardCommands.closeCurrentWorkspaceTab)
   })

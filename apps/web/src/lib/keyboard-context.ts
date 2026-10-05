@@ -24,11 +24,12 @@ export function selectActiveKeyboardBindings<T extends { scope: string }>(bindin
 
 export function canDispatchKeyboardCommand(command: AppKeyboardCommand, route: { name?: unknown; path: string }, root: Document = document, hasWorkspace = true): boolean {
   const chatRoute = route.name === 'home' || route.name === 'bot'
-  if (!chatRoute && !route.path.startsWith('/settings') && (command !== appKeyboardCommands.closeCurrentWorkspaceTab || hasWorkspace)) return false
+  const settingsRoute = route.path.startsWith('/settings')
+  const closesWindow = command === appKeyboardCommands.closeCurrentWorkspaceTab && !hasWorkspace
+  if (!chatRoute && !settingsRoute && !closesWindow) return false
   const dialog = activeKeyboardDialog(root)
   const mediaCommand = keyboardBindings.find(binding => binding.command === command)?.scope === 'mediaLightbox'
   if (dialog) return mediaCommand && dialog.dataset.keyboardScope === 'mediaLightbox'
-  if (command === appKeyboardCommands.closeCurrentWorkspaceTab && !hasWorkspace) return true
-  if (mediaCommand) return true
-  return command === appKeyboardCommands.openSettings || chatRoute
+  if (closesWindow || mediaCommand) return true
+  return chatRoute || command === appKeyboardCommands.openSettings
 }

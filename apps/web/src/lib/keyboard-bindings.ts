@@ -1,11 +1,10 @@
 import { appKeyboardCommands, type AppKeyboardCommand } from './keyboard-commands'
 
 /**
- * - `menu`    - also exposed in the native menu; menu clicks route via IPC.
- * - `keydown` - exposed through the shared renderer keydown listener.
- * Both use the shared DOM listener for physical keys in the chat window.
+ * `menu` also exposes the binding in the native menu; menu clicks route via IPC.
+ * Physical keys always go through the shared DOM listener in the chat window.
  */
-export type DesktopDelivery = 'menu' | 'keydown'
+export type DesktopDelivery = 'menu'
 
 /**
  * How a binding behaves in a plain browser:
@@ -41,7 +40,7 @@ export interface KeyboardBinding {
   alt?: boolean
   shift?: boolean
   repeat?: boolean
-  desktop: DesktopDelivery
+  desktop?: DesktopDelivery
   browser: BrowserBehavior
   scope: KeyboardScope
   /** camelCase id used as the i18n branch under `settings.keyboard.commands.<i18nKey>`. */
@@ -67,7 +66,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     command: appKeyboardCommands.saveActiveFile,
     key: 's',
     mod: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'saveActiveFile',
@@ -76,7 +74,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     command: appKeyboardCommands.toggleSidebar,
     key: 'b',
     mod: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'toggleSidebar',
@@ -85,7 +82,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     command: appKeyboardCommands.openSettings,
     key: 'k',
     mod: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'global',
     i18nKey: 'openSettings',
@@ -95,7 +91,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: 'n',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'newChatSession',
@@ -105,7 +100,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: 'Enter',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'focusChatInput',
@@ -115,7 +109,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: '1',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSessions',
@@ -125,7 +118,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: '2',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showFiles',
@@ -135,7 +127,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: '3',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSchedule',
@@ -145,7 +136,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: '4',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSupermarket',
@@ -155,7 +145,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: ']',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'nextWorkspaceTab',
@@ -166,7 +155,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: '[',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'previousWorkspaceTab',
@@ -177,7 +165,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: '.',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'splitWorkspaceRight',
@@ -187,7 +174,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: ',',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'splitWorkspaceBelow',
@@ -197,7 +183,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: 'x',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'newTerminal',
@@ -207,7 +192,6 @@ export const keyboardBindings: KeyboardBinding[] = [
     key: 'o',
     mod: true,
     alt: true,
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'newBrowser',
@@ -215,7 +199,6 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.closeMediaLightbox,
     key: 'Escape',
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'mediaLightbox',
     i18nKey: 'closeMediaLightbox',
@@ -223,7 +206,6 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.mediaLightboxPrev,
     key: 'ArrowLeft',
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'mediaLightbox',
     repeat: true,
@@ -232,7 +214,6 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.mediaLightboxNext,
     key: 'ArrowRight',
-    desktop: 'keydown',
     browser: 'intercept',
     scope: 'mediaLightbox',
     repeat: true,
@@ -320,9 +301,4 @@ export function acceleratorForCommand(command: AppKeyboardCommand): string | und
 /** Bindings the web keydown listener should act on (browser-owned combos excluded). */
 export function selectWebBindings(bindings: KeyboardBinding[]): KeyboardBinding[] {
   return bindings.filter(b => b.browser === 'intercept')
-}
-
-/** Bindings the Electron renderer keydown listener should act on (menu-owned excluded). */
-export function selectDesktopKeydownBindings(bindings: KeyboardBinding[]): KeyboardBinding[] {
-  return bindings.filter(b => b.desktop === 'keydown')
 }

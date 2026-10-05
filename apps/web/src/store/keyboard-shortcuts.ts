@@ -58,12 +58,9 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
 
   const effectiveBindings = computed<KeyboardBinding[]>(() => {
     const merged = keyboardBindings.map(binding => applyOverride(binding, overrides.value[binding.command]))
-    // Non-global (scoped) bindings come first so the dispatcher's first-handled-
-    // wins iterator gives them a chance to claim their keys before any global
-    // binding that happens to share a combo. A scoped command's handler is only
-    // registered while its owning component is mounted, so when the scope is
-    // inactive the matcher falls through to the global. Stable sort preserves
-    // intra-scope order from the source table.
+    // Narrower scopes come first so a combo shared across scopes resolves to the
+    // active narrower one; selectActiveKeyboardBindings drops lightbox bindings
+    // while no lightbox is open. Stable sort keeps the table order per scope.
     return [...merged].sort((a, b) => {
       const order = { mediaLightbox: 0, workspace: 1, global: 2 }
       return order[a.scope] - order[b.scope]
@@ -84,11 +81,9 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     if (textEditingCombos.some(editing => keyCombosEqual(editing, combo))) return { kind: 'editing' }
     const ownBinding = keyboardBindings.find(b => b.command === command)
     if (!ownBinding) return { kind: 'none' }
-    // Global shortcuts dispatch from a window-level listener that does not skip
-    // focused inputs, so a bare-key global binding would fire on every literal
-    // keystroke (e.g. binding 'b' would make typing 'b' open the sidebar).
-    // Scoped bindings only register their handler while the owning component is
-    // mounted, so a bare arrow key for the lightbox is fine.
+    // The window-level listener also runs while text inputs have focus, so a
+    // bare key would fire on every keystroke. Lightbox bindings are only active
+    // while the overlay is open, so a bare arrow key is fine there.
     if (ownBinding.scope !== 'mediaLightbox' && !combo.mod && !combo.alt) {
       return { kind: 'no-modifier' }
     }

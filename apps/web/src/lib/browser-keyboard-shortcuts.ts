@@ -69,15 +69,13 @@ function bindingMatchesEvent(
  * Match a keydown against the given bindings and dispatch the first hit that a
  * handler actually claims. The matcher acts on exactly the bindings it is
  * handed. Deciding which combos are browser-owned (passthrough) is the caller's
- * job, done via selectWebBindings. preventDefault is only called when a handler
- * actually claimed the command, so unhandled keys fall through to the
- * browser/OS.
+ * job, done via selectWebBindings. preventDefault is called when a handler
+ * claims the command, or when a held key repeats a binding that does not allow
+ * repeat; other keys fall through to the browser/OS.
  *
- * When several bindings share the same combo (e.g. a scoped 'mediaLightbox'
- * Escape alongside a future global Escape), we keep iterating past bindings
- * whose commands have no live handler. This lets scoped commands hand the key
- * back to globals while their owning component is unmounted, without forcing
- * callers to keep two binding lists in sync.
+ * When several bindings share the same combo, iteration continues past
+ * bindings whose commands are not handled, so a narrower scope can hand the key
+ * back to a broader one.
  */
 export function handleBrowserKeyboardShortcut(
   event: BrowserKeyboardShortcutEvent,
@@ -121,8 +119,7 @@ export function connectBrowserKeyboardShortcuts(
  * Reactive variant: takes a getter that returns the current bindings, so a
  * Pinia store's `effectiveBindings` (defaults + user overrides) can drive
  * dispatch without re-subscribing a listener every time the user rebinds a
- * key. The getter is invoked on each keydown — cheap for our 5-10 row table
- * and keeps the wiring stateless.
+ * key. The getter is invoked on each keydown.
  */
 export function connectBrowserKeyboardShortcutsLive(
   registry: Pick<KeyboardCommandRegistry, 'dispatch'>,

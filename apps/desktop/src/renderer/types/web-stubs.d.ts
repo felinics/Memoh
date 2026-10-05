@@ -101,7 +101,7 @@ declare module '@memohai/web/lib/keyboard-context' {
 
 declare module '@memohai/web/lib/keyboard-bindings' {
   import type { AppKeyboardCommand } from '@memohai/web/lib/keyboard-commands'
-  export type DesktopDelivery = 'menu' | 'keydown'
+  export type DesktopDelivery = 'menu'
   export type BrowserBehavior = 'intercept' | 'passthrough'
   export type KeyboardScope = 'global' | 'workspace' | 'mediaLightbox'
   export interface KeyboardBinding {
@@ -111,7 +111,7 @@ declare module '@memohai/web/lib/keyboard-bindings' {
     alt?: boolean
     shift?: boolean
     repeat?: boolean
-    desktop: DesktopDelivery
+    desktop?: DesktopDelivery
     browser: BrowserBehavior
     scope: KeyboardScope
     i18nKey: string
@@ -121,7 +121,6 @@ declare module '@memohai/web/lib/keyboard-bindings' {
   export function toElectronAccelerator(binding: Pick<KeyboardBinding, 'key' | 'mod' | 'alt' | 'shift'>): string
   export function acceleratorForCommand(command: AppKeyboardCommand): string | undefined
   export function selectWebBindings(bindings: KeyboardBinding[]): KeyboardBinding[]
-  export function selectDesktopKeydownBindings(bindings: KeyboardBinding[]): KeyboardBinding[]
 }
 
 declare module '@memohai/web/lib/browser-keyboard-shortcuts' {
