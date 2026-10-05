@@ -737,7 +737,7 @@ func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
 			errs = append(errs, liveErr)
 			continue
 		}
-		if errors.Is(liveErr, ErrRunOwnershipLost) && !changed {
+		if errors.Is(liveErr, ErrRunOwnershipLost) && !changed && m.projectionHoldsActiveRun(ctx, handle) {
 			errs = append(errs, liveErr)
 			continue
 		}
@@ -751,6 +751,17 @@ func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
 		m.mu.Unlock()
 	}
 	return errors.Join(errs...)
+}
+
+// projectionHoldsActiveRun reports whether the live projection still shows
+// handle's run as active, the only state a durable terminal has to release.
+// A projection it cannot read is assumed to.
+func (m *Manager) projectionHoldsActiveRun(ctx context.Context, handle RunHandle) bool {
+	snapshot, ok, err := m.backend.Load(ctx, handle.key())
+	if err != nil {
+		return true
+	}
+	return ok && runMatchesHandle(snapshot.CurrentRunView, handle) && isActiveRunStatus(snapshot.CurrentRunView.Status)
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -1508,9 +1519,9 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	}
 	if errors.Is(err, ErrRunOwnershipLost) {
 		snapshot, ok, loadErr := m.backend.Load(context.WithoutCancel(ctx), handle.key())
-		// A projection that no longer holds any run (a history reset dropped
-		// it once the ledger was terminal) has nothing left to release.
-		released := loadErr == nil && (!ok || snapshot.CurrentRunView == nil)
+		// This owner's terminal write landed and then a history reset dropped
+		// the run from the projection: nothing is left to release.
+		released := terminal.Applied && loadErr == nil && (!ok || snapshot.CurrentRunView == nil)
 		if released || loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
 			m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
 			return terminal, nil
