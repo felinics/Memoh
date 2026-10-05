@@ -264,12 +264,17 @@ func TestAppConnectorOAuthKeepsOtherConnectItAnswers(t *testing.T) {
 		{"Connect-It before the stable code", http.StatusUnprocessableEntity, legacyClientMissing, apperror.CodeConnectorRequestRejected, "client", "INFO"},
 		{"request validation", http.StatusUnprocessableEntity, unknownAuthMethod, apperror.CodeConnectorRequestRejected, "client", "INFO"},
 		{"Connect-It failure", http.StatusInternalServerError, `{"error":"internal","message":"PRIVATE internal error"}`, apperror.CodeConnectorUpstreamUnavailable, "dependency", "ERROR"},
+		{"Memoh's API token rejected", http.StatusUnauthorized, `{"error":"unauthorized","message":"PRIVATE invalid API token"}`, apperror.CodeConnectorUpstreamUnavailable, "server", "ERROR"},
+		{"Memoh's API token forbidden", http.StatusForbidden, `{"error":"forbidden","message":"PRIVATE forbidden"}`, apperror.CodeConnectorUpstreamUnavailable, "server", "ERROR"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			chain := newOAuthChain(t)
 			chain.upstream.set(tc.status, tc.body)
 			rec, record := chain.beginOAuth(t)
 			assertConnectorProblem(t, rec, record, tc.code, tc.fault, tc.level)
+			if _, located := record["error_source"].(map[string]any); tc.fault != "client" && !located {
+				t.Fatalf("the record has no error source: %v", record)
+			}
 		})
 	}
 }

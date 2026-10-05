@@ -484,5 +484,11 @@ func upstreamError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return errs.WrapDependencyWithDepth(1, fmt.Errorf("%w: %w", ErrUpstreamUnavailable, err), "")
+	err = fmt.Errorf("%w: %w", ErrUpstreamUnavailable, err)
+	// A 4xx answer refuses what this process sent, such as its own API token.
+	var apiErr *connectsdk.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode < http.StatusInternalServerError {
+		return errs.WrapWithDepth(1, err, "call connect-it")
+	}
+	return errs.WrapDependencyWithDepth(1, err, "call connect-it")
 }
