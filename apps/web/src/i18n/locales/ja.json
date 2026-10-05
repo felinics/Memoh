@@ -692,7 +692,7 @@
         "prompt": "新しい組み合わせを押してください…",
         "resetDefault": "デフォルトに戻す",
         "reservedError": "この組み合わせはブラウザまたは OS に予約されています。",
-        "noModifierError": "グローバルショートカットには Cmd/Ctrl または Alt 修飾キーが必要です（通常入力で誤発火しないように）。",
+        "noModifierError": "このショートカットには Cmd/Ctrl または Alt 修飾キーが必要です（通常入力で誤発火しないように）。",
         "sameScopeError": "このキーの組み合わせは {command} で使用されています。",
         "crossScopeWarn": "{command} でも使用されています（異なるコンテキストでのみ有効）。"
       },
@@ -706,8 +706,8 @@
           "description": "チャットパネルに移動し、メッセージ入力欄にフォーカスします。"
         },
         "showSessions": {
-          "label": "セッションを表示",
-          "description": "セッションのサイドバーを開きます。"
+          "label": "チャットを表示",
+          "description": "チャットのサイドバーとセッション一覧を開きます。"
         },
         "showFiles": {
           "label": "ファイルを表示",
@@ -718,8 +718,8 @@
           "description": "スケジュールのサイドバーを開きます。"
         },
         "showSupermarket": {
-          "label": "Supermarket を表示",
-          "description": "Supermarket のサイドバーを開きます。"
+          "label": "マーケットプレイスを表示",
+          "description": "マーケットプレイスのサイドバーを開きます。"
         },
         "nextWorkspaceTab": {
           "label": "次のタブ",

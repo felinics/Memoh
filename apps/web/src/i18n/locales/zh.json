@@ -691,7 +691,7 @@
         "prompt": "请按下新的组合键…",
         "resetDefault": "恢复默认",
         "reservedError": "该组合键已被浏览器或操作系统占用。",
-        "noModifierError": "全局快捷键必须包含 Cmd/Ctrl 或 Alt 修饰键，否则会在普通输入时被触发。",
+        "noModifierError": "该快捷键必须包含 Cmd/Ctrl 或 Alt 修饰键，否则会在普通输入时被触发。",
         "sameScopeError": "这个组合已用于“{command}”。",
         "crossScopeWarn": "也被 {command} 使用（仅在其作用域内生效）。"
       },
@@ -705,20 +705,20 @@
           "description": "切换到聊天面板并聚焦消息输入框。"
         },
         "showSessions": {
-          "label": "显示会话",
-          "description": "打开会话侧栏。"
+          "label": "显示对话",
+          "description": "打开对话侧栏和会话列表。"
         },
         "showFiles": {
           "label": "显示文件",
           "description": "打开工作区文件侧栏。"
         },
         "showSchedule": {
-          "label": "显示计划任务",
-          "description": "打开计划任务侧栏。"
+          "label": "显示日程",
+          "description": "打开日程侧栏。"
         },
         "showSupermarket": {
-          "label": "显示 Supermarket",
-          "description": "打开 Supermarket 侧栏。"
+          "label": "显示市场",
+          "description": "打开市场侧栏。"
         },
         "nextWorkspaceTab": {
           "label": "下一个标签",

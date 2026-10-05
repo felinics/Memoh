@@ -695,7 +695,7 @@
         "prompt": "Press a key combination…",
         "resetDefault": "Reset to default",
         "reservedError": "This combination is reserved by the browser or OS.",
-        "noModifierError": "Global shortcuts need a Cmd/Ctrl or Alt modifier so they don't fire while typing.",
+        "noModifierError": "This shortcut needs a Cmd/Ctrl or Alt modifier so it doesn't fire while typing.",
         "sameScopeError": "This combination is already used by {command}.",
         "crossScopeWarn": "Also used by {command} (only active in a different context)."
       },
@@ -709,16 +709,16 @@
           "description": "Activate chat and focus its message input."
         },
         "showSessions": {
-          "label": "Show sessions",
-          "description": "Open the sessions sidebar."
+          "label": "Show Chat",
+          "description": "Open the Chat sidebar with your sessions."
         },
         "showFiles": {
-          "label": "Show files",
-          "description": "Open the workspace files sidebar."
+          "label": "Show Files",
+          "description": "Open the Files sidebar."
         },
         "showSchedule": {
-          "label": "Show schedules",
-          "description": "Open the schedules sidebar."
+          "label": "Show Schedule",
+          "description": "Open the Schedule sidebar."
         },
         "showSupermarket": {
           "label": "Show Supermarket",
