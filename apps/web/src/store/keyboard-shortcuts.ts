@@ -34,7 +34,7 @@ function isReservedCombo(combo: ParsedKeyCombo): boolean {
 function applyOverride(binding: KeyboardBinding, override: string | undefined): KeyboardBinding {
   if (!override) return binding
   const parsed = parseKeyCombo(override)
-  if (!parsed) return binding
+  if (!parsed || (binding.scope !== 'mediaLightbox' && !parsed.mod && !parsed.alt)) return binding
   return {
     ...binding,
     key: parsed.key,

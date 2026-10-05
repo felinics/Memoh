@@ -1,21 +1,12 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useKeyboardShortcutsStore } from './keyboard-shortcuts'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { comboFromBinding } from '@/lib/keyboard-combo'
 
-class MemoryStorage implements Storage {
-  private data = new Map<string, string>()
-  get length() { return this.data.size }
-  clear() { this.data.clear() }
-  getItem(key: string) { return this.data.get(key) ?? null }
-  setItem(key: string, value: string) { this.data.set(key, value) }
-  removeItem(key: string) { this.data.delete(key) }
-  key(index: number) { return Array.from(this.data.keys())[index] ?? null }
-}
-
 beforeEach(() => {
-  (globalThis as unknown as { localStorage: Storage }).localStorage = new MemoryStorage()
+  localStorage.clear()
   setActivePinia(createPinia())
 })
 
@@ -198,11 +189,18 @@ describe('useKeyboardShortcutsStore', () => {
     expect(firstGlobal).toBeGreaterThan(lastScoped)
   })
 
+  it.each([
+    'new-chat-session', 'focus-chat-input', 'show-sessions', 'show-files',
+    'show-schedule', 'show-supermarket', 'next-workspace-tab', 'previous-workspace-tab',
+    'split-workspace-right', 'split-workspace-below', 'new-terminal', 'new-browser',
+  ])('keeps applying an override saved under the shipped command id %s', (command) => {
+    localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [command]: 'Mod+Alt+Shift+F9' }))
+    const store = useKeyboardShortcutsStore()
+    expect(store.effectiveBindings.find(binding => binding.command === command)).toMatchObject({ key: 'F9', mod: true, alt: true, shift: true })
+  })
+
   it('garbage stored overrides do not poison the effective bindings', () => {
-    (globalThis as unknown as { localStorage: Storage }).localStorage.setItem(
-      'keyboard-shortcuts-overrides',
-      JSON.stringify({ [appKeyboardCommands.saveActiveFile]: '!!!' }),
-    )
+    localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.saveActiveFile]: '!!!' }))
     const store = useKeyboardShortcutsStore()
     const save = store.effectiveBindings.find(b => b.command === appKeyboardCommands.saveActiveFile)
     expect(save).toMatchObject({ key: 's', mod: true })
