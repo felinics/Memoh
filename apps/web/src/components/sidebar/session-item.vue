@@ -17,6 +17,7 @@
         class="group relative flex items-center min-h-[2.125rem] w-full rounded-[9px] px-[11px] text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         :data-ui-selected="isActive ? '' : undefined"
         :data-menu-open="menuOpen || undefined"
+        :data-streaming="streaming || undefined"
         :title="hoverTitle"
         @click="$emit('select', session)"
         @keydown.enter.prevent="$emit('select', session)"
@@ -54,70 +55,75 @@
              per-script treatment as the chat body (.sidebar-cjk / .sidebar-latin reuse
              the --chat-*-body weight + Latin size/tracking). The only thing dropped vs
              the body is streaming — a title is a static one-line label. -->
-        <MarqueeText class="flex-1 min-w-0 text-control text-foreground dark:text-[color:oklch(0.92_0_0)]">
-          <span
-            v-for="(run, i) in titleRuns"
-            :key="i"
-            :class="run.script === 'cjk' ? 'sidebar-cjk' : 'sidebar-latin'"
-          >{{ run.text }}</span>
-        </MarqueeText>
-
-        <!-- Reserve the actions slot even at rest so crossing rows never
-             resizes the title or retriggers its ResizeObserver. Spinner and
-             actions share one center; the absolute button cannot squeeze the
-             spinner's in-flow box. Only their opacity changes on hover. -->
-        <div
-          class="relative ml-1.5 flex h-6 w-6 shrink-0 items-center justify-end"
-        >
-          <div
-            v-if="streaming"
-            class="flex h-6 w-6 items-center justify-center transition-opacity duration-150 group-hover:opacity-0"
-            :class="menuOpen ? 'opacity-0' : 'opacity-100'"
+        <div class="relative min-w-0 flex-1">
+          <MarqueeText
+            :overlay="actionsEl"
+            class="mr-1.5 min-w-0 text-control text-foreground dark:text-[color:oklch(0.92_0_0)]"
           >
-            <LoaderCircle
-              class="size-3 animate-spin text-muted-foreground"
-              :aria-label="t('chat.sessionStreaming')"
-            />
-          </div>
+            <span
+              v-for="(run, i) in titleRuns"
+              :key="i"
+              :class="run.script === 'cjk' ? 'sidebar-cjk' : 'sidebar-latin'"
+            >{{ run.text }}</span>
+          </MarqueeText>
 
-          <DropdownMenu v-model:open="menuOpen">
-            <DropdownMenuTrigger as-child>
-              <!-- Plain button (not <Button variant="ghost">): the ghost chip color
-                   (--btn-ghost-hover) is the same gray as the row's own hover, so the
-                   button's hover was invisible while sitting on a hovered row. A
-                   translucent foreground mix darkens whatever is behind it, so the
-                   chip reads clearly on top of both the hover and active row fills. -->
-              <button
-                type="button"
-                class="absolute inset-y-0 right-0 my-auto inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)] hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)] data-[state=open]:text-foreground"
-                :class="menuOpen ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open=true]:opacity-100 group-data-[menu-open=true]:pointer-events-auto'"
-                :aria-label="t('chat.sessionActions')"
-                @click.stop
-                @keydown.enter.stop
-                @keydown.space.stop
-              >
-                <MoreHorizontal class="size-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              @click.stop
+          <!-- Keep the overlay out of flow so revealing actions never resizes
+               the title. The marquee masks this area while a control is visible. -->
+          <div
+            ref="actionsEl"
+            data-slot="sidebar-session-overlay"
+            class="absolute right-0 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-end"
+          >
+            <div
+              v-if="streaming"
+              data-slot="sidebar-session-spinner"
+              class="flex h-6 w-6 items-center justify-center transition-opacity duration-150"
             >
-              <DropdownMenuItem
-                @select="$emit('rename', session)"
+              <LoaderCircle
+                class="size-3 animate-spin text-muted-foreground"
+                :aria-label="t('chat.sessionStreaming')"
+              />
+            </div>
+
+            <DropdownMenu v-model:open="menuOpen">
+              <DropdownMenuTrigger as-child>
+                <!-- Plain button (not <Button variant="ghost">): the ghost chip color
+                     (--btn-ghost-hover) is the same gray as the row's own hover, so the
+                     button's hover was invisible while sitting on a hovered row. A
+                     translucent foreground mix darkens whatever is behind it, so the
+                     chip reads clearly on top of both the hover and active row fills. -->
+                <button
+                  type="button"
+                  class="absolute inset-y-0 right-0 my-auto inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)] hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)] data-[state=open]:text-foreground"
+                  :class="menuOpen ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-data-[menu-open=true]:opacity-100 group-data-[menu-open=true]:pointer-events-auto'"
+                  :aria-label="t('chat.sessionActions')"
+                  @click.stop
+                  @keydown.enter.stop
+                  @keydown.space.stop
+                >
+                  <MoreHorizontal class="size-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                @click.stop
               >
-                <Pencil />
-                {{ t('common.rename') }}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                variant="destructive"
-                @select="$emit('delete', session)"
-              >
-                <Trash2 />
-                {{ t('common.delete') }}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuItem
+                  @select="$emit('rename', session)"
+                >
+                  <Pencil />
+                  {{ t('common.rename') }}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  @select="$emit('delete', session)"
+                >
+                  <Trash2 />
+                  {{ t('common.delete') }}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
     </ContextMenuTrigger>
@@ -188,6 +194,7 @@ defineEmits<{
 const { t } = useI18n()
 
 const menuOpen = ref(false)
+const actionsEl = ref<HTMLElement>()
 
 function routeMeta(): Record<string, unknown> {
   return props.session.route_metadata ?? {}

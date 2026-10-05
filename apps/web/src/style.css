@@ -461,6 +461,17 @@
   [data-slot="sidebar-session-row"]:not([data-ui-selected]):is(:hover, :active, [data-menu-open='true']) {
     background-color: var(--sidebar-hover);
   }
+
+  /* Keyboard-revealed actions share the same slot as the streaming spinner. */
+  [data-slot="sidebar-session-row"]:is([data-menu-open='true'], :has([data-slot="sidebar-session-overlay"] button:focus-visible)) [data-slot="sidebar-session-spinner"] {
+    opacity: 0;
+  }
+
+  @media (hover: hover) {
+    [data-slot="sidebar-session-row"]:hover [data-slot="sidebar-session-spinner"] {
+      opacity: 0;
+    }
+  }
 }
 
 @layer base {
