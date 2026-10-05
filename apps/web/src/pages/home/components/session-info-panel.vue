@@ -38,12 +38,15 @@
                     :class="contextPercentColor"
                   >({{ contextPercent.toFixed(1) }}%)</span>
                 </template>
-                <template v-else-if="contextWindow != null">
+                <template v-else-if="contextWindow != null && usedTokens != null">
                   {{ $t('chat.infoContextTokens', { used: formatTokenCount(usedTokens), window: formatTokenCount(contextWindow) }) }}
                   <span class="text-muted-foreground font-normal ml-1">({{ contextPercent.toFixed(1) }}%)</span>
                 </template>
-                <template v-else>
+                <template v-else-if="usedTokens != null">
                   {{ $t('chat.infoContextTokensNoWindow', { used: formatTokenCount(usedTokens) }) }}
+                </template>
+                <template v-else>
+                  --
                 </template>
               </span>
             </div>
@@ -68,11 +71,11 @@
 
           <!-- Provider-reported input of the latest turn: the only actual↔estimate bridge -->
           <div
-            v-if="composition && usedTokens > 0"
+            v-if="composition && usedTokens != null && usedTokens > 0"
             class="flex items-center justify-between py-2"
           >
             <span class="text-muted-foreground">{{ $t('chat.infoProviderInput') }}</span>
-            <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(usedTokens) }}</span>
+            <span class="font-medium text-foreground tabular-nums">{{ formatTokenCount(usedTokens ?? 0) }}</span>
           </div>
 
           <!-- Cache Hit Rate -->
