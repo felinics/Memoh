@@ -317,7 +317,10 @@ func (s *Service) ApproveOption(ctx context.Context, approvalID, actorID, reason
 			ResponseControlID:          responseControlID,
 			ResponsePayloadHash:        responsePayloadHash,
 		})
-		return approveErr
+		if approveErr != nil {
+			return approveErr
+		}
+		return decision.ResumeNativeContinuation(ctx, queries, row.BotID, row.SessionID, row.RunID, row.ID, row.RuntimeFencingToken, runtimefence.DecisionToolApproval)
 	})
 	req, err := s.resolveAndNotify(ctx, approvalID, row, err)
 	if err == nil && strings.TrimSpace(actorID) != "" {
@@ -361,7 +364,10 @@ func (s *Service) RejectOption(ctx context.Context, approvalID, actorID, reason,
 			ResponseControlID:          responseControlID,
 			ResponsePayloadHash:        responsePayloadHash,
 		})
-		return rejectErr
+		if rejectErr != nil {
+			return rejectErr
+		}
+		return decision.ResumeNativeContinuation(ctx, queries, row.BotID, row.SessionID, row.RunID, row.ID, row.RuntimeFencingToken, runtimefence.DecisionToolApproval)
 	})
 	req, err := s.resolveAndNotify(ctx, approvalID, row, err)
 	if err == nil && strings.TrimSpace(actorID) != "" {

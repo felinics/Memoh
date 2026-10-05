@@ -583,7 +583,9 @@ func (m *Manager) reconcileAndObserveTerminalRun(ctx context.Context, run Termin
 	if m == nil || run.RunID == "" {
 		return
 	}
-	m.reconcileTerminalLive(context.WithoutCancel(ctx), run)
+	if err := m.reconcileTerminalLive(context.WithoutCancel(ctx), run); err != nil {
+		m.logger.WarnContext(ctx, "reconcile durable runtime terminal failed", slog.Any("error", err), slog.String("run_id", run.RunID))
+	}
 	m.observeTerminalRun(ctx, run)
 }
 
@@ -591,25 +593,36 @@ func (m *Manager) reconcileAndObserveTerminalRun(ctx context.Context, run Termin
 // outlived its owner. Unlike ordinary owner release, this path is allowed after
 // lease expiry. The backend atomically verifies the exact durable token against
 // the surviving snapshot (or the lease ref for older snapshots).
-func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRun) {
+func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRun) error {
 	if m == nil || m.distributed == nil || terminal.FencingToken <= 0 {
-		return
+		return nil
 	}
 	key := Key{BotID: terminal.BotID, SessionID: terminal.SessionID}
 	current, ok, err := m.backend.Load(ctx, key)
 	if err != nil {
-		m.logger.WarnContext(ctx, "load runtime snapshot for terminal reconciliation failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
-		return
+		return fmt.Errorf("load runtime snapshot for terminal reconciliation: %w", err)
 	}
 	if !ok || current.CurrentRunView == nil || current.CurrentRunView.RunID != terminal.RunID {
-		return
+		return nil
 	}
 	run := current.CurrentRunView
 	status := liveRunStatus(ledger.State(terminal.State))
-	if run.Status == status && run.OwnerLeaseExpiresAt == nil && run.ProposedTerminalStatus == "" {
-		return
+	pendingDecision := false
+	for _, message := range run.Messages {
+		pendingDecision = pendingDecision || message.UserInput != nil && (message.UserInput.Status == "pending" || message.UserInput.CanRespond) ||
+			message.Approval != nil && (message.Approval.Status == "pending" || message.Approval.CanApprove)
+	}
+	if run.Status == status && run.OwnerLeaseExpiresAt == nil && run.ProposedTerminalStatus == "" && !pendingDecision {
+		return nil
 	}
 	ref := RunRef{BotID: key.BotID, SessionID: key.SessionID, RunID: run.RunID, OwnerID: run.OwnerID, Generation: run.Generation, FencingToken: terminal.FencingToken}
+	if run.FencingToken > 0 && run.FencingToken < terminal.FencingToken {
+		// Graceful handoff advanced the DB fence without replacing this old
+		// receipt. A durable terminal outcome supersedes an older same-run
+		// projection. CAS against that exact receipt; a concurrent successor
+		// receipt or a different run still fails the backend's ownership check.
+		ref.FencingToken = run.FencingToken
+	}
 	snapshot, changed, err := m.distributed.ReconcileTerminalRun(ctx, key, ref, func(snapshot Snapshot, now time.Time) (Snapshot, bool, error) {
 		run := snapshot.CurrentRunView
 		if run == nil || run.RunID != ref.RunID || run.Generation != ref.Generation || run.OwnerID != ref.OwnerID {
@@ -618,6 +631,7 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 		snapshot.Seq++
 		snapshot.UpdatedAt = now
 		run.Status = status
+		run.FencingToken = terminal.FencingToken
 		run.UpdatedAt = now
 		run.OwnerLeaseExpiresAt = nil
 		run.ProposedTerminalStatus = ""
@@ -626,16 +640,31 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 		if status == RunStatusCompleted || status == RunStatusAborted {
 			run.ErrorCode = ""
 		}
+		for i := range run.Messages {
+			message := &run.Messages[i]
+			if message.UserInput != nil {
+				message.UserInput.CanRespond = false
+				if message.UserInput.Status == "pending" {
+					message.UserInput.Status = "canceled"
+				}
+			}
+			if message.Approval != nil {
+				message.Approval.CanApprove = false
+				if message.Approval.Status == "pending" {
+					message.Approval.Status = "cancelled"
+				}
+			}
+		}
 		return snapshot, true, nil
 	})
 	if err != nil {
-		if !errors.Is(err, ErrRunOwnershipLost) {
-			m.logger.WarnContext(ctx, "reconcile durable runtime terminal to live state failed", slog.Any("error", err), slog.String("run_id", terminal.RunID))
+		if errors.Is(err, ErrRunOwnershipLost) {
+			return nil
 		}
-		return
+		return fmt.Errorf("reconcile durable runtime terminal to live state: %w", err)
 	}
 	if !changed {
-		return
+		return nil
 	}
 	delta := runtimeRunPatch(snapshot, true, true, true)
 	if err := m.publishRuntimeDelta(ctx, snapshot, terminal.RunID, delta); err != nil {
@@ -645,6 +674,7 @@ func (m *Manager) reconcileTerminalLive(ctx context.Context, terminal TerminalRu
 		BotID: terminal.BotID, SessionID: terminal.SessionID, RunID: terminal.RunID,
 		Generation: ref.Generation, FencingToken: terminal.FencingToken,
 	})
+	return nil
 }
 
 func (m *Manager) reconcileTerminalRuns(ctx context.Context) error {
@@ -851,7 +881,8 @@ func (m *Manager) startReaper(ctx context.Context) error {
 	}
 	reaper := NewReaper(m.runs, m.liveness, m.tuning, m.ownerID, m.logger)
 	reaper.SetWaitingDecisionRecoverer(m.recoverWaitingDecision)
-	reaper.SetTerminalObserver(m.reconcileAndObserveTerminalRun)
+	reaper.SetTerminalLiveReconciler(m.reconcileTerminalLive)
+	reaper.SetTerminalObserver(m.observeTerminalRun)
 	reaper.SetTerminalReconciler(m.reconcileTerminalRuns)
 	m.mu.Lock()
 	cancelLostRunDecisions := m.cancelLostRunDecisions

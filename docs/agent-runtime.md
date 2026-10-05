@@ -172,9 +172,18 @@ local execution. It leaves the old Redis lease index in place as the recovery
 pointer. Once the lease expires, the existing reaper reserves a fresh owner;
 failed reservations retain that pointer for retry. No answer is synthesized.
 Decision commands cannot begin after shutdown closes admission. A previously
-accepted native answer is allowed to leave the waiting phase before shutdown
-classifies its continuation as running work. A state CAS prevents a running-row
+accepted native answer moves its run to `running` in the same fenced PostgreSQL
+transaction as the decision response. `input_json.decision_continuations` records
+each accepted decision; approved tools checkpoint `executing` before dispatch.
+Shutdown therefore classifies an accepted continuation as running work even while
+the tool is still executing and has not emitted `agent_start`. A state CAS prevents a running-row
 snapshot from terminalizing a decision that parked concurrently.
+
+An expired decision after graceful handoff is retired under the authoritative
+database token, after checking that no live successor owns it. An unapplied
+terminal CAS on an active row retains the recovery index for retry. A renewed
+same-token owner retains its index; only an obsolete entry may be removed while
+a successor remains live.
 
 Codex, Claude Code and ACP inline waiters still depend on the exiting process;
 they are not preserved as resumable native decisions. Expired requests, explicit
@@ -186,6 +195,14 @@ whose tool-call persistence failed or exceeded the shutdown budget.
 The continuation keeps its original durable turn and request message ID. A
 response retry uses the existing control-ID deduplication contract; tests cover
 shutdown, a fresh manager's lease recovery, the answer and duplicate submission.
+An accepted continuation interrupted during execution uses the ordinary
+`session_runtime.interrupted` recovery path. Recovery validates saved decision
+records against their Bot, session, run and token, and reconstructs the reasoning
+with the accepted answers and approval status. It does not dispatch the approved
+tool again. An executing tool without a saved result may already have produced
+side effects: inspect history, workspace state and external receipts, and request
+a new user decision if the outcome cannot be established. This is recovery of the
+continuation, not an exactly-once guarantee for arbitrary external tools.
 
 **First upgrade and rollback:** the old executable still runs the shutdown hook
 on the first rollout, so deploying this fix cannot protect waits already ended

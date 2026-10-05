@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/decision"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/toolexec"
@@ -112,6 +113,9 @@ func (s *Service) CommitUserInputResponse(ctx context.Context, input UserInputRe
 			return CommittedUserInputResponse{}, err
 		}
 		return CommittedUserInputResponse{request: target, input: input, isExternalAgent: true, ackOnly: true}, nil
+	}
+	if !isProcessLocalExternalAgent {
+		ctx = decision.WithNativeContinuation(ctx)
 	}
 	var activePrompt *externalAgentActivePromptSubscription
 	if isProcessLocalExternalAgent && !input.SuppressActivePromptAttach {
