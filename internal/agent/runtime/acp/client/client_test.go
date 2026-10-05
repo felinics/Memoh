@@ -3284,7 +3284,7 @@ func TestFakeACPAgentHelper(_ *testing.T) {
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT") != "1" {
 		return
 	}
-	agent := &fakeACPAgent{}
+	agent := &fakeACPAgent{cancelled: make(chan struct{})}
 	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
 	agent.conn = conn
 	<-conn.Done()
@@ -3293,6 +3293,9 @@ func TestFakeACPAgentHelper(_ *testing.T) {
 
 type fakeACPAgent struct {
 	conn                   *acp.AgentSideConnection
+	cancelled              chan struct{}
+	cancelOnce             sync.Once
+	prompts                int
 	cwd                    string
 	modelID                string
 	reasoningEffort        string
@@ -3331,11 +3334,40 @@ func (*fakeACPAgent) Initialize(context.Context, acp.InitializeRequest) (acp.Ini
 	}, nil
 }
 
-func (*fakeACPAgent) Cancel(context.Context, acp.CancelNotification) error {
+func (a *fakeACPAgent) Cancel(context.Context, acp.CancelNotification) error {
 	if path := os.Getenv("MEMOH_ACP_PROMPT_CANCELLED_FILE"); path != "" {
 		_ = os.WriteFile(path, []byte("cancelled"), 0o600) //nolint:gosec // test helper writes to env-provided temp path.
 	}
+	a.cancelOnce.Do(func() { close(a.cancelled) })
 	return nil
+}
+
+// promptCancelUsage reports usage, waits for session/cancel, reports usage
+// again while winding down, and answers cancelled; later prompts report none.
+func (a *fakeACPAgent) promptCancelUsage(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
+	a.prompts++
+	if a.prompts > 1 {
+		_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText("second")})
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	}
+	usage := func(used int) error {
+		return a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.SessionUpdate{UsageUpdate: &acp.SessionUsageUpdate{Used: used, Size: 200000}}})
+	}
+	if err := usage(1000); err != nil {
+		return acp.PromptResponse{}, err
+	}
+	if path := os.Getenv("MEMOH_ACP_PROMPT_STARTED_FILE"); path != "" {
+		_ = os.WriteFile(path, []byte("started"), 0o600) //nolint:gosec // test helper writes to env-provided temp path.
+	}
+	select {
+	case <-a.cancelled:
+	case <-ctx.Done():
+		return acp.PromptResponse{}, ctx.Err()
+	}
+	if err := usage(2000); err != nil {
+		return acp.PromptResponse{}, err
+	}
+	return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 }
 
 func (*fakeACPAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
@@ -3388,12 +3420,31 @@ func (a *fakeACPAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Pro
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_RELEASE_TERMINAL_WITHOUT_WAIT") == "1" {
 		return a.promptReleaseTerminalAfterOutput(ctx, p)
 	}
+	if os.Getenv("MEMOH_ACP_FAKE_AGENT_CANCEL_USAGE") == "1" {
+		return a.promptCancelUsage(ctx, p)
+	}
 	if raw := os.Getenv("MEMOH_ACP_FAKE_AGENT_USAGE"); raw != "" {
 		var usage acp.Usage
 		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
 			return acp.PromptResponse{}, err
 		}
 		_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText("usage reported")})
+		if raw := os.Getenv("MEMOH_ACP_FAKE_AGENT_USAGE_UPDATES"); raw != "" {
+			var updates []acp.SessionUsageUpdate
+			if err := json.Unmarshal([]byte(raw), &updates); err != nil {
+				return acp.PromptResponse{}, err
+			}
+			for i := range updates {
+				sessionID := p.SessionId
+				if other, ok := updates[i].Meta["memoh_fake_session"].(string); ok {
+					sessionID = acp.SessionId(other)
+					updates[i].Meta = nil
+				}
+				if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: sessionID, Update: acp.SessionUpdate{UsageUpdate: &updates[i]}}); err != nil {
+					return acp.PromptResponse{}, err
+				}
+			}
+		}
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: &usage}, nil
 	}
 

@@ -22,6 +22,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
@@ -97,6 +98,8 @@ type RunResult struct {
 	Events      []event.StreamEvent `json:"events,omitempty"`
 	// Output is the in-process transcript used for persistence.
 	Output []sdk.Message `json:"-"`
+	// Context is the last usage_update observed during the prompt.
+	Context *external.ContextUsage `json:"-"`
 }
 
 func NewRunner(log *slog.Logger, workspace Workspace) *Runner {

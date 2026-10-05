@@ -19,6 +19,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/toolcontext"
@@ -68,6 +69,9 @@ type PromptResult struct {
 	Text       string              `json:"text,omitempty"`
 	Events     []event.StreamEvent `json:"events,omitempty"`
 	Usage      *sdk.Usage          `json:"usage,omitempty"`
+	// Context is the agent's last usage_update for this session during the
+	// prompt; nil when it reported none.
+	Context *external.ContextUsage `json:"-"`
 	// Output is the in-process transcript used for persistence.
 	Output []sdk.Message `json:"-"`
 }
@@ -684,6 +688,7 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 
 	promptBlocks := s.promptBlocks(prompt, resources, images)
 	collector := newEventCollector(options.ToolOutputLimit)
+	collector.sessionID = sessionID
 	// The prompt context is the output boundary. Once Stop/Close cancels it,
 	// late adapter notifications must not reach either history or the live UI.
 	collector.bindContext(promptCtx)
@@ -721,6 +726,7 @@ func (s *Session) PromptWithToolContextOptions(ctx context.Context, prompt strin
 		Text:       collected.Text,
 		Events:     collected.Events,
 		Usage:      usage,
+		Context:    collected.Context,
 		Output:     attachUsageToLastAssistant(collected.Output, usage),
 	}
 	if err != nil {
