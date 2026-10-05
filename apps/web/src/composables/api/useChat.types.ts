@@ -436,6 +436,9 @@ export interface UIStreamSessionCreatedEvent {
   type: 'session_created'
   invocation_id: string
   session_id: string
+  /** The workdir the session was actually born bound to; absent when it has
+   *  none. A backend that predates in-band workdir binding never sends it. */
+  workdir_id?: string
 }
 
 export type RuntimeRunStatus =

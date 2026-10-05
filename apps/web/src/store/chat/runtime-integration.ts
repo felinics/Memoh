@@ -18,6 +18,7 @@ import type {
   ChatViewTarget,
 } from './types'
 import type { createChatViewRegistry } from './view-registry'
+import type { FirstSendTracker } from './first-send'
 
 // The catalog code of a WS failure frame.
 export function wsFrameErrorCode(event: { code?: string }): string {
@@ -33,7 +34,11 @@ type ChatViews = ReturnType<typeof createChatViewRegistry>
 export interface RuntimeIntegrationDeps {
   currentBotId: Ref<string | null>
   sessionId: Ref<string | null>
+  explicitSessionSelection: Ref<boolean>
+  draftIntent: Ref<boolean>
   focusedViewId: Ref<string>
+  firstSend: FirstSendTracker
+  workdirMismatchMessage: () => string
   assistantStreams: AssistantStreams
   decisions: Decisions
   realtime: Realtime
@@ -99,7 +104,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
   }>()
 
   function handleSessionCreated(
-    event: { invocation_id: string; session_id: string },
+    event: { invocation_id: string; session_id: string; workdir_id?: string },
     sourceBotId = '',
   ) {
     const eventSessionId = event.session_id.trim()
@@ -116,6 +121,24 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       event.invocation_id,
       eventSessionId,
     ) || eventSessionId
+    // The workdir binding is fixed when the session is created, so a session
+    // born without the requested workdir cannot be repaired afterwards. A
+    // server that predates in-band workdir binding omits the field and
+    // creates an unbound session; treat any mismatch as a startup failure.
+    // The stop is replayed once run_accepted names the run, and send.ts
+    // deletes the session and rolls the draft back.
+    const requestedWorkdirId = deps.firstSend.requestedWorkdirFor(event.invocation_id)
+    if (requestedWorkdirId && (event.workdir_id ?? '').trim() !== requestedWorkdirId) {
+      if (pending) {
+        abortRun(event.invocation_id)
+        deps.assistantStreams.rejectAssistantStream(
+          event.invocation_id,
+          new StreamFailureError(deps.workdirMismatchMessage(), 'startup', event),
+        )
+      }
+      return
+    }
+    deps.firstSend.admit(event.invocation_id, sessionId)
     const deferredAbort = deferredAbortByInvocation.get(event.invocation_id)
     if (deferredAbort) {
       deferredAbortByInvocation.delete(event.invocation_id)
@@ -139,6 +162,8 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         session_mode: 'chat',
         runtime_type: 'model',
         title: provisionalSessionTitle(promoted.transcript.latestOptimisticUserText()),
+        // Places the row in its folder rather than Recents.
+        workdir_id: (event.workdir_id ?? '').trim() || undefined,
         created_at: now,
         updated_at: now,
       })
@@ -154,6 +179,10 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       deps.rescopeSessionCommandEventToComposer(botId, sessionId, composerScope)
     }
     deps.sessionId.value = sessionId
+    // Same selection state a created session gets anywhere else: the user
+    // chose it by sending, so a reload returns to it instead of the draft.
+    deps.explicitSessionSelection.value = true
+    deps.draftIntent.value = false
   }
 
   function handleWebSocketEvent(
@@ -189,6 +218,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         event.run_id,
         turnId,
       )
+      deps.firstSend.advance(event.invocation_id, 'streaming')
       const sessionId = event.session_id.trim()
       const botId = (
         accepted?.botId
@@ -197,11 +227,16 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         || ''
       ).trim()
       if (sessionId && botId) {
-        deps.chatViews.getOrCreate({
-          botId,
-          sessionId,
-          viewId: deps.focusedViewId.value,
-        }).transcript.bindRuntimeTurn(
+        // A send that already ended locally (a stop, or a rolled-back first
+        // send whose session was deleted) must not recreate a view for it.
+        const view = deps.assistantStreams.getAssistantStream(event.invocation_id)
+          ? deps.chatViews.getOrCreate({
+              botId,
+              sessionId,
+              viewId: deps.focusedViewId.value,
+            })
+          : deps.chatViews.getSession(botId, sessionId)
+        view?.transcript.bindRuntimeTurn(
           event.invocation_id,
           turnId,
           event.run_id,
@@ -505,6 +540,15 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     }
     for (const invocationId of invocationIds) {
       if (!runtimeAborted) abortRun(invocationId)
+      // A first send whose run the server has not named yet may still be
+      // created and started. Failing it locally would leave that run going
+      // with nobody watching, so the stream stays open: the stop is replayed
+      // when run_accepted arrives and the aborted run's terminal frame ends
+      // the send. The pane shows the stop as pending meanwhile.
+      if (deps.firstSend.isAwaitingRun(invocationId)) {
+        deps.firstSend.requestStop(invocationId)
+        continue
+      }
       deps.assistantStreams.rejectAssistantStream(invocationId, abortError)
     }
     deps.chatViews.prune()

@@ -1128,6 +1128,7 @@
     "pdfUnsupportedByModel": "当前模型不支持读取 PDF,文件将以路径形式存入工作区,模型无法直接查看其内容。",
     "send": "发送",
     "sendFailed": "消息发送失败",
+    "sendWorkdirUnsupported": "服务端无法在所选文件夹中开始这个对话。请升级服务端，或取消文件夹后再发送。",
     "forkFailed": "分叉会话失败",
     "forkedFrom": "分叉自 {session}",
     "forkSourceUnavailable": "原始会话不存在或已被删除。",

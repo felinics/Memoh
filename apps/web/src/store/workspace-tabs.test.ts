@@ -239,6 +239,7 @@ vi.mock('@/store/chat-list', () => ({
       },
     ],
     isSessionStreaming: vi.fn(() => false),
+    isSessionTentative: vi.fn(() => false),
     knownSessionSummary: chatStoreMock.knownSessionSummary,
     createNewSession: chatStoreMock.createNewSession,
     focusChatView: chatStoreMock.focusChatView,

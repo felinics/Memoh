@@ -26,7 +26,7 @@ import {
   commandErrorMessage,
   forkFailedMessage,
   sendFailedMessage,
-  userInputConnectionLostMessage,
+  userInputConnectionLostMessage, workdirMismatchMessage,
 } from './chat/messages'
 import {
   createBackgroundTaskTracker,
@@ -84,7 +84,7 @@ export const useChatStore = defineStore('chat', () => {
     focusedViewId: focusedChatViewId,
     draftPromoted,
     projectionVersion: runtimeProjectionVersion,
-    chatViews, assistantStreams, draftSessionCreations,
+    chatViews, assistantStreams, firstSend, draftSessionCreations,
     draftCreationKey: draftSessionCreationKey,
     isCreatingDraft: isChatViewCreatingSession,
     normalizeTarget: normalizedChatViewTarget,
@@ -230,7 +230,9 @@ export const useChatStore = defineStore('chat', () => {
     createChatRuntimeLayer({
     currentBotId,
     sessionId,
+    explicitSessionSelection, draftIntent,
     focusedViewId: focusedChatViewId,
+    firstSend, workdirMismatchMessage,
     assistantStreams,
     sessionList,
     chatViews,
@@ -569,6 +571,8 @@ export const useChatStore = defineStore('chat', () => {
     cleanupFailedDeferredSession,
     discardAssistantStream,
     rememberStartupSendFailure,
+    draftWorkdirIdFor: botId => workdirsStore.sessionWorkdirIdFor(botId, { externalAgent: false }),
+    firstSend,
     sendFailedMessage,
     updateForkAnchorForReplacedMessage,
     restoreTailFromOptimistic,
@@ -600,6 +604,7 @@ export const useChatStore = defineStore('chat', () => {
     _hasLoadedOlder: hasLoadedOlder,
 
     startupSendFailure, startupSendFailureFor,
+    firstSendFor: firstSend.entryFor, isSessionTentative: firstSend.isSessionTentative,
     commandEvent, commandEventForScope, rememberCommandEvent, beginCommandEvent, showCommandError,
     fsChangedAt, markFsChanged, affectsPath, fsEventForPath,
     backgroundTaskFor,

@@ -312,9 +312,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   }
 
   // Per-session chat title fallback (syncChatTitles overlays the server title
-  // once known). Draft tabs (no session) are system-titled.
+  // once known). Draft tabs (no session) are system-titled, and so is a first
+  // send's tab until its reply starts (see isSessionTentative).
   function chatTitleFallbackFor(sid: string | null): string {
-    if (!sid) return defaultChatTitle()
+    if (!sid || chatStore.isSessionTentative(sid)) return defaultChatTitle()
     const session = chatStore.knownSessionSummary(sid)
     return (session?.title ?? '').trim() || routeConversationLabel(session) || i18n.global.t('chat.untitledSession')
   }
@@ -1130,7 +1131,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       // fallback chain (conversation name → untitled): this refreshes a persisted
       // "Untitled Session" placeholder after upgrade and follows a group rename —
       // repairPanelTitles skips non-empty session titles, so without this both stay stale.
-      const next = (session.title ?? '').trim() || chatTitleFallbackFor(sid)
+      const next = chatTitleFallbackFor(sid)
       if (panel.api.title !== next) panel.api.setTitle(next)
     }
   }
@@ -2096,8 +2097,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // Server renames flow into each open chat tab's title. Keyed by a sorted
   // id:title:conversation-name digest so it fires on title changes AND on
   // channel route (group/peer name) changes, not on every sidebar reorder.
+  // Tentativeness is part of the key so a first send's tab takes the session
+  // title when its reply starts.
   watch(
-    () => chatStore.knownSessions.map(s => `${s.id}:${s.title ?? ''}:${(s.route_metadata?.conversation_name as string) ?? ''}`).sort().join('|'),
+    () => chatStore.knownSessions.map(s => `${s.id}:${s.title ?? ''}:${(s.route_metadata?.conversation_name as string) ?? ''}:${chatStore.isSessionTentative(s.id) ? 1 : 0}`).sort().join('|'),
     () => syncChatTitles(),
   )
 
