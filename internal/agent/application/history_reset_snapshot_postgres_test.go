@@ -416,3 +416,45 @@ func TestPostgresHistoryResetOrphanedAdmissionExposesNoContent(t *testing.T) {
 		}
 	}
 }
+
+// A subscriber that read the cleared run from the ledger while the reset was
+// under way catches up on its own within the reconcile interval, even when
+// the reset never gets to restart the projections (its release pass skipped,
+// timed out, or its process died after the deletion committed).
+func TestPostgresHistoryResetSubscriberHealsWithoutReleasePass(t *testing.T) {
+	h := newWSStepHistoryHarness(t, wsStepHistoryAuthFailure)
+	ctx := context.Background()
+	sub, err := h.manager.Subscribe(ctx, h.botID, h.sessionID)
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer sub.Close()
+	h.run(t, nil)
+	before := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
+	if before == nil {
+		t.Fatal("failed run is missing from the live snapshot")
+	}
+	drainSubscription(sub)
+
+	resetCtx, release, err := h.manager.BeginSessionHistoryReset(ctx, h.botID, h.sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	stale := false
+	deadline := time.After(5 * time.Second)
+	for !stale {
+		select {
+		case event := <-sub.C:
+			stale = event.Type == sessionruntime.EventRuntimeSnapshot && event.Snapshot != nil &&
+				event.Snapshot.CurrentRunView != nil && event.Snapshot.CurrentRunView.RunID == before.RunID
+		case <-deadline:
+			t.Fatal("subscriber did not reload from the ledger when the reset began")
+		}
+	}
+	if err := h.messages.DeleteBySession(resetCtx, h.sessionID); err != nil {
+		t.Fatal(err)
+	}
+	// No release: the subscriber must notice the cleared ledger by itself.
+	awaitClearedSubscription(t, sub, before.RunID)
+}

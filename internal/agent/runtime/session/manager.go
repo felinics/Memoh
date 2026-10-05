@@ -2056,14 +2056,31 @@ func (m *Manager) resumeWaitingDecision(ctx context.Context, handle RunHandle) e
 // answers first because it is the only place a run in flight exists; the ledger
 // fallback below covers the case where it cannot answer at all.
 func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
+	snapshot, _, err := m.observedSnapshot(ctx, botID, sessionID)
+	return snapshot, err
+}
+
+// observedSnapshot is Snapshot together with the identity of the run it
+// reports from the ledger rather than the live projection, empty when it
+// reports none. The ledger can change under an unchanged live cursor, and a
+// subscriber compares this identity to notice it.
+func (m *Manager) observedSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, string, error) {
 	if m == nil || m.backend == nil {
-		return EmptySnapshot(botID, sessionID), nil
+		return EmptySnapshot(botID, sessionID), "", nil
 	}
 	snapshot, err := m.liveSnapshot(ctx, botID, sessionID)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, "", err
 	}
-	return m.hydrateSnapshotFromLedger(ctx, snapshot), nil
+	if snapshot.CurrentRunView != nil {
+		return snapshot, "", nil
+	}
+	snapshot = m.hydrateSnapshotFromLedger(ctx, snapshot)
+	run := snapshot.CurrentRunView
+	if run == nil {
+		return snapshot, "", nil
+	}
+	return snapshot, strings.Join([]string{run.RunID, run.Status, run.ErrorCode, run.ProposedTerminalStatus}, "\x00"), nil
 }
 
 func (m *Manager) liveSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
@@ -2225,7 +2242,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		cancel()
 		return Subscription{}, err
 	}
-	baseline, err := m.Snapshot(subCtx, key.BotID, key.SessionID)
+	baseline, baselineLedgerRun, err := m.observedSnapshot(subCtx, key.BotID, key.SessionID)
 	if err != nil {
 		backendSub.Close()
 		cancel()
@@ -2273,6 +2290,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		ticker := time.NewTicker(reconcileInterval)
 		defer ticker.Stop()
 		lastEpoch := baseline.Epoch
+		lastLedgerRun := baselineLedgerRun
 		lastSeq := baseline.Seq
 		terminalDrop := func(message string) {
 			_ = send(Event{
@@ -2285,7 +2303,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 			})
 		}
 		reconcile := func(observedEpoch string, observedSeq int64, reason string) bool {
-			snapshot, err := m.Snapshot(subCtx, key.BotID, key.SessionID)
+			snapshot, ledgerRun, err := m.observedSnapshot(subCtx, key.BotID, key.SessionID)
 			if err != nil {
 				if subCtx.Err() == nil {
 					m.logger.WarnContext(ctx, "reconcile runtime subscription failed", slog.Any("error", err), slog.String("session_id", key.SessionID), slog.String("reason", reason))
@@ -2307,11 +2325,12 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				terminalDrop(reason + ": snapshot sequence regressed")
 				return false
 			}
-			if snapshotEpoch == lastEpoch && snapshot.Seq == lastSeq {
+			if snapshotEpoch == lastEpoch && snapshot.Seq == lastSeq && ledgerRun == lastLedgerRun {
 				return true
 			}
 			lastEpoch = snapshotEpoch
 			lastSeq = snapshot.Seq
+			lastLedgerRun = ledgerRun
 			return send(Event{
 				Type:      EventRuntimeSnapshot,
 				BotID:     key.BotID,
