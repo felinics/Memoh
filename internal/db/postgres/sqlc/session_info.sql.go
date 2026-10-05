@@ -43,6 +43,36 @@ func (q *Queries) GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.
 	return input_tokens, err
 }
 
+const getLatestContextUsage = `-- name: GetLatestContextUsage :one
+SELECT
+  m.runtime_type,
+  m.usage,
+  (m.metadata->'context_usage')::jsonb AS context_usage
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = $1
+  AND m.role = 'assistant'
+  AND (m.runtime_type <> 'model' OR m.usage IS NOT NULL)
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT 1
+`
+
+type GetLatestContextUsageRow struct {
+	RuntimeType  string `json:"runtime_type"`
+	Usage        []byte `json:"usage"`
+	ContextUsage []byte `json:"context_usage"`
+}
+
+// The newest visible context state: a native assistant message with usage,
+// or the newest External Agent assistant message, whose context_usage may be
+// unknown. An unknown state is returned as is, never skipped for an older one.
+func (q *Queries) GetLatestContextUsage(ctx context.Context, sessionID pgtype.UUID) (GetLatestContextUsageRow, error) {
+	row := q.db.QueryRow(ctx, getLatestContextUsage, sessionID)
+	var i GetLatestContextUsageRow
+	err := row.Scan(&i.RuntimeType, &i.Usage, &i.ContextUsage)
+	return i, err
+}
+
 const getLatestSessionIDByBot = `-- name: GetLatestSessionIDByBot :one
 SELECT s.id
 FROM bot_sessions s
@@ -195,4 +225,45 @@ func (q *Queries) GetSessionUsedSkills(ctx context.Context, sessionID pgtype.UUI
 		return nil, err
 	}
 	return items, nil
+}
+
+const markLatestContextUsageStale = `-- name: MarkLatestContextUsageStale :execrows
+UPDATE bot_history_messages m
+SET metadata = jsonb_set(m.metadata, '{context_usage,stale}', to_jsonb($1::text))
+WHERE m.team_id = public.memoh_current_team_id()
+  AND jsonb_typeof(m.metadata->'context_usage') = 'object'
+  AND m.id = (
+    SELECT v.id
+    FROM bot_visible_history_messages v
+    WHERE v.team_id = public.memoh_current_team_id()
+      AND v.session_id = $2
+      AND v.role = 'assistant'
+      AND (v.runtime_type <> 'model' OR v.usage IS NOT NULL)
+    ORDER BY v.turn_position DESC, v.turn_message_seq DESC, v.created_at DESC, v.id DESC
+    LIMIT 1
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM bot_sessions s
+    WHERE s.team_id = public.memoh_current_team_id()
+      AND s.id = m.session_id
+      AND ($3::bigint IS NULL OR s.runtime_fencing_token <= $3::bigint)
+  )
+`
+
+type MarkLatestContextUsageStaleParams struct {
+	Reason       string      `json:"reason"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	FencingToken pgtype.Int8 `json:"fencing_token"`
+}
+
+// A runtime operation such as manual compaction replaced the context the
+// newest observation measured. The mark stays on that message, so a refresh
+// or restart still reads unknown until a later turn records a new state.
+func (q *Queries) MarkLatestContextUsageStale(ctx context.Context, arg MarkLatestContextUsageStaleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markLatestContextUsageStale, arg.Reason, arg.SessionID, arg.FencingToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

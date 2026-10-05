@@ -14,6 +14,48 @@ WHERE m.team_id = public.memoh_current_team_id()
 ORDER BY m.created_at DESC
 LIMIT 1;
 
+-- name: GetLatestContextUsage :one
+-- The newest visible context state: a native assistant message with usage,
+-- or the newest External Agent assistant message, whose context_usage may be
+-- unknown. An unknown state is returned as is, never skipped for an older one.
+SELECT
+  m.runtime_type,
+  m.usage,
+  (m.metadata->'context_usage')::jsonb AS context_usage
+FROM bot_visible_history_messages m
+WHERE m.team_id = public.memoh_current_team_id()
+  AND m.session_id = sqlc.arg(session_id)
+  AND m.role = 'assistant'
+  AND (m.runtime_type <> 'model' OR m.usage IS NOT NULL)
+ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+LIMIT 1;
+
+-- name: MarkLatestContextUsageStale :execrows
+-- A runtime operation such as manual compaction replaced the context the
+-- newest observation measured. The mark stays on that message, so a refresh
+-- or restart still reads unknown until a later turn records a new state.
+UPDATE bot_history_messages m
+SET metadata = jsonb_set(m.metadata, '{context_usage,stale}', to_jsonb(sqlc.arg(reason)::text))
+WHERE m.team_id = public.memoh_current_team_id()
+  AND jsonb_typeof(m.metadata->'context_usage') = 'object'
+  AND m.id = (
+    SELECT v.id
+    FROM bot_visible_history_messages v
+    WHERE v.team_id = public.memoh_current_team_id()
+      AND v.session_id = sqlc.arg(session_id)
+      AND v.role = 'assistant'
+      AND (v.runtime_type <> 'model' OR v.usage IS NOT NULL)
+    ORDER BY v.turn_position DESC, v.turn_message_seq DESC, v.created_at DESC, v.id DESC
+    LIMIT 1
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM bot_sessions s
+    WHERE s.team_id = public.memoh_current_team_id()
+      AND s.id = m.session_id
+      AND (sqlc.narg(fencing_token)::bigint IS NULL OR s.runtime_fencing_token <= sqlc.narg(fencing_token)::bigint)
+  );
+
 -- name: GetLatestSessionModelID :one
 SELECT m.model_id
 FROM bot_visible_history_messages m

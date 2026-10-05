@@ -953,6 +953,11 @@ func (s *Service) persistRuntimeRound(
 	if firstAssistantIndex >= 0 && len(result.Notices) > 0 {
 		metadataByIndex[firstAssistantIndex+metadataOffset][event.RuntimeNoticesMetadataKey] = result.Notices
 	}
+	// The round's context measurement belongs to its last assistant row; a
+	// row without one reads as unknown, never as an older measurement.
+	if lastAssistantIndex >= 0 && result.Context != nil {
+		metadataByIndex[lastAssistantIndex+metadataOffset][messagepkg.ContextUsageMetadataKey] = runtimeContextUsageMetadata(result.Context)
+	}
 	// ACP uses the committed run ID to detect stale warm processes. Failed or
 	// interrupted turns keep the previously observed head.
 	var publication *messagepkg.AgentPublication
@@ -987,6 +992,10 @@ func (s *Service) persistRuntimeRound(
 		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 	return err
+}
+
+func runtimeContextUsageMetadata(observed *external.ContextUsage) map[string]any {
+	return messagepkg.ContextUsageMetadata(observed.UsedTokens, observed.WindowTokens, observed.Source)
 }
 
 // runtimeTurnRan reports evidence that the runtime accepted the turn. "Nothing
