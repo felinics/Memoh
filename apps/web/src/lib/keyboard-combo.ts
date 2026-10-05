@@ -75,10 +75,25 @@ export function keyCombosEqual(a: ParsedKeyCombo, b: ParsedKeyCombo): boolean {
 
 export interface KeyboardEventLike {
   key: string
+  code?: string
   ctrlKey: boolean
   metaKey: boolean
   altKey: boolean
   shiftKey: boolean
+}
+
+const CODE_KEYS: Record<string, string> = {
+  Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+  Semicolon: ';', Quote: '\'', Comma: ',', Period: '.', Slash: '/', Backquote: '`',
+}
+
+// macOS applies Option to `key` even while Command is held (Option+1 is `¡`,
+// Option+N is a dead key), so Command+Option combos are read from the physical key.
+export function shortcutKeyFromEvent(event: KeyboardEventLike, isMac: boolean): string {
+  if (!isMac || !event.metaKey || !event.altKey || !event.code) return event.key
+  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase()
+  if (/^Digit\d$/.test(event.code)) return event.code.slice(5)
+  return CODE_KEYS[event.code] ?? event.key
 }
 
 export function keyComboFromEvent(event: KeyboardEventLike, isMac: boolean): ParsedKeyCombo | null {
@@ -93,7 +108,7 @@ export function keyComboFromEvent(event: KeyboardEventLike, isMac: boolean): Par
     mod: isMac ? event.metaKey : event.ctrlKey,
     alt: event.altKey,
     shift: event.shiftKey,
-    key: canonicalKey(event.key),
+    key: canonicalKey(shortcutKeyFromEvent(event, isMac)),
   }
 }
 

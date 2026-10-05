@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { appKeyboardCommands, type KeyboardCommandRegistry } from './keyboard-commands'
+import { keyboardBindings } from './keyboard-bindings'
+import { formatKeyCombo, keyComboFromEvent, parseKeyCombo } from './keyboard-combo'
 import {
   connectBrowserKeyboardShortcutsLive,
   handleBrowserKeyboardShortcut,
@@ -181,6 +183,70 @@ describe('browser keyboard shortcuts matcher', () => {
     expect(handleBrowserKeyboardShortcut(event, registry, bindings, 'mac')).toBe(true)
     expect(dispatch).toHaveBeenCalledTimes(2)
     expect(event.preventDefault).toHaveBeenCalledOnce()
+  })
+})
+
+describe('macOS Command+Option shortcuts', () => {
+  const optionKeys: Record<string, { key: string; code: string }> = {
+    'n': { key: 'Dead', code: 'KeyN' },
+    'Enter': { key: 'Enter', code: 'Enter' },
+    '1': { key: '¡', code: 'Digit1' },
+    '2': { key: '™', code: 'Digit2' },
+    '3': { key: '£', code: 'Digit3' },
+    '4': { key: '¢', code: 'Digit4' },
+    ']': { key: '‘', code: 'BracketRight' },
+    '[': { key: '“', code: 'BracketLeft' },
+    '.': { key: '≥', code: 'Period' },
+    ',': { key: '≤', code: 'Comma' },
+    'x': { key: '≈', code: 'KeyX' },
+    'o': { key: 'ø', code: 'KeyO' },
+  }
+  const defaults = keyboardBindings.filter(binding => binding.mod && binding.alt)
+
+  it.each(defaults.map(binding => [binding.command, binding] as const))('dispatches %s from the Option-modified key', (_command, binding) => {
+    const registry = createRegistry(true)
+    const event = { ...createKeyboardEventLike({ ...optionKeys[binding.key]!, metaKey: true, altKey: true }), code: optionKeys[binding.key]!.code }
+
+    expect(handleBrowserKeyboardShortcut(event, registry, defaults, 'mac')).toBe(true)
+    expect(registry.dispatch).toHaveBeenCalledWith(binding.command)
+  })
+
+  it('accepts Firefox reporting Option as AltGraph while Command is held', () => {
+    const registry = createRegistry(true)
+    const event = {
+      ...createKeyboardEventLike({ key: '¡', metaKey: true, altKey: true }),
+      code: 'Digit1',
+      getModifierState: (key: string) => key === 'AltGraph',
+    }
+
+    expect(handleBrowserKeyboardShortcut(event, registry, defaults, 'mac')).toBe(true)
+    expect(registry.dispatch).toHaveBeenCalledWith(appKeyboardCommands.showSessions)
+  })
+
+  it('dispatches a Command+Option combo recorded on the same Mac', () => {
+    const press = { ...createKeyboardEventLike({ key: '√', metaKey: true, altKey: true }), code: 'KeyV' }
+    const combo = parseKeyCombo(formatKeyCombo(keyComboFromEvent(press, true)!))!
+    const registry = createRegistry(true)
+
+    expect(handleBrowserKeyboardShortcut(press, registry, [{ command: appKeyboardCommands.newBrowser, ...combo }], 'mac')).toBe(true)
+    expect(registry.dispatch).toHaveBeenCalledWith(appKeyboardCommands.newBrowser)
+  })
+
+  it('keeps an override captured as the Option character working', () => {
+    const registry = createRegistry(true)
+    const event = { ...createKeyboardEventLike({ key: '∫', metaKey: true, altKey: true }), code: 'KeyB' }
+
+    expect(handleBrowserKeyboardShortcut(event, registry, [{ command: appKeyboardCommands.toggleSidebar, key: '∫', mod: true, alt: true }], 'mac')).toBe(true)
+  })
+
+  it('leaves AltGr text on Windows and Linux to the focused input', () => {
+    for (const platform of ['win', 'linux'] as const) {
+      const registry = createRegistry(true)
+      const event = { ...createKeyboardEventLike({ key: 'ń', ctrlKey: true, altKey: true }), code: 'KeyN' }
+
+      expect(handleBrowserKeyboardShortcut(event, registry, defaults, platform)).toBe(false)
+      expect(registry.dispatch).not.toHaveBeenCalled()
+    }
   })
 })
 

@@ -525,7 +525,7 @@ function createChatWindow(): BrowserWindow {
   if (process.platform === 'win32') window.setMenuBarVisibility(false)
   keyboardCapture = false
   window.webContents.on('before-input-event', (_event, input) => {
-    const key = { key: input.key, ctrlKey: input.control, metaKey: input.meta, altKey: input.alt, shiftKey: input.shift }
+    const key = { key: input.key, code: input.code, ctrlKey: input.control, metaKey: input.meta, altKey: input.alt, shiftKey: input.shift }
     const platform = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux'
     const command = appKeyboardCommands.closeCurrentWorkspaceTab
     window.webContents.setIgnoreMenuShortcuts(keyboardCapture || input.isAutoRepeat || input.isComposing

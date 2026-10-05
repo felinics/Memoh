@@ -120,6 +120,20 @@ describe('keyComboFromEvent', () => {
       .toBeNull()
   })
 
+  it('on mac records Command+Option by the physical key instead of the Option character', () => {
+    expect(keyComboFromEvent({ key: '¡', code: 'Digit1', ctrlKey: false, metaKey: true, altKey: true, shiftKey: false }, true))
+      .toEqual({ mod: true, alt: true, shift: false, key: '1' })
+    expect(keyComboFromEvent({ key: 'Dead', code: 'KeyN', ctrlKey: false, metaKey: true, altKey: true, shiftKey: false }, true))
+      .toEqual({ mod: true, alt: true, shift: false, key: 'n' })
+    expect(keyComboFromEvent({ key: '’', code: 'BracketRight', ctrlKey: false, metaKey: true, altKey: true, shiftKey: true }, true))
+      .toEqual({ mod: true, alt: true, shift: true, key: ']' })
+  })
+
+  it('keeps the produced character for Ctrl+Alt outside macOS', () => {
+    expect(keyComboFromEvent({ key: 'ń', code: 'KeyN', ctrlKey: true, metaKey: false, altKey: true, shiftKey: false }, false))
+      .toEqual({ mod: true, alt: true, shift: false, key: 'ń' })
+  })
+
   it('on non-mac maps ctrlKey to mod', () => {
     expect(keyComboFromEvent({ key: 's', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, false))
       .toEqual({ mod: true, alt: false, shift: false, key: 's' })

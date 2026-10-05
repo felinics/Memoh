@@ -1,8 +1,10 @@
 import type { AppKeyboardCommand, KeyboardCommandRegistry } from './keyboard-commands'
 import { detectPlatform, resolveBindingKey, type KeyboardPlatform } from './keyboard-bindings'
+import { shortcutKeyFromEvent } from './keyboard-combo'
 
 export interface BrowserKeyboardShortcutEvent {
   key: string
+  code?: string
   metaKey: boolean
   ctrlKey: boolean
   altKey: boolean
@@ -56,7 +58,8 @@ function bindingMatchesEvent(
   event: BrowserKeyboardShortcutEvent,
   platform: KeyboardPlatform,
 ): boolean {
-  return normalizeKey(event.key) === normalizeKey(resolveBindingKey(binding, platform))
+  const key = normalizeKey(resolveBindingKey(binding, platform))
+  return (normalizeKey(event.key) === key || normalizeKey(shortcutKeyFromEvent(event, platform === 'mac')) === key)
     && modMatches(event, binding.mod, platform === 'mac')
     && modifierMatches(event.altKey, binding.alt)
     && modifierMatches(event.shiftKey, binding.shift)
@@ -82,7 +85,8 @@ export function handleBrowserKeyboardShortcut(
   bindings: BrowserKeyboardShortcutBinding[],
   platform: KeyboardPlatform = detectPlatform(),
 ): boolean {
-  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return false
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return false
+  if (event.getModifierState?.('AltGraph') && !(platform === 'mac' && event.metaKey)) return false
   for (const binding of bindings) {
     if (!bindingMatchesEvent(binding, event, platform)) continue
     if (event.repeat && !binding.repeat) {
