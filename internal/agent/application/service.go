@@ -829,7 +829,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	req.Query = rc.query
 	req.RunID = rc.runConfig.RunID
 
-	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	cfg := rc.runConfig
 	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
@@ -876,7 +876,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			return ChatResponse{}, err
 		}
 		if result.Usage != nil {
-			go s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
+			s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
 		}
 	}
 

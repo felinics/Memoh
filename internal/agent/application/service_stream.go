@@ -214,8 +214,10 @@ func agentFailureStreamEvent(cause error) native.StreamEvent {
 		Code:  string(code),
 		Error: definition.Detail,
 	}
-	if public, ok := apperror.PublicFrom(cause, ""); ok && public.Code == code && len(public.Args) > 0 {
-		event.Args = public.Args
+	if apperror.CodeOf(cause) == code {
+		if args := apperror.ArgsOf(cause); len(args) > 0 {
+			event.Args = args
+		}
 	}
 	return event
 }
@@ -365,7 +367,7 @@ func (s *Service) StreamChat(ctx context.Context, req ChatRequest) (<-chan Strea
 		streamReq.Query = rc.query
 		streamReq.RunID = rc.runConfig.RunID
 
-		go s.maybeGenerateSessionTitle(context.WithoutCancel(streamCtx), streamReq, streamReq.RawQuery)
+		s.maybeGenerateSessionTitle(context.WithoutCancel(streamCtx), streamReq, streamReq.RawQuery)
 
 		cfg := rc.runConfig
 		cfg.LiveToolStream = true
@@ -694,7 +696,7 @@ func (s *Service) streamChatWSResultWithHooks(
 	req.Query = rc.query
 	req.RunID = rc.runConfig.RunID
 
-	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -983,7 +985,7 @@ func (s *Service) persistTerminalSnapshotResult(ctx context.Context, req ChatReq
 	}
 
 	if inputTokens := extractInputTokensFromUsage(snap.usage); inputTokens > 0 {
-		go s.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
+		s.maybeCompact(context.WithoutCancel(ctx), req, rc, inputTokens)
 	}
 
 	return persisted, nil
@@ -1048,7 +1050,7 @@ func (s *Service) persistPartialResult(
 			// contexts don't deadlock (where the LLM can never succeed and
 			// therefore compaction never fires).
 			if rc.estimatedTokens > 0 {
-				go s.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
+				s.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 			}
 			return persisted
 		}
@@ -1077,7 +1079,7 @@ func (s *Service) persistPartialResult(
 	)
 
 	if rc.estimatedTokens > 0 {
-		go s.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
+		s.maybeCompact(persistCtx, req, rc, rc.estimatedTokens)
 	}
 	return nil
 }

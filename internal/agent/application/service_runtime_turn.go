@@ -224,7 +224,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 			s.cleanupReplacementMessages(context.WithoutCancel(ctx), []messagepkg.Message{*leadingUser})
 		}
 	}
-	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -988,7 +988,7 @@ func (s *Service) persistRuntimeRound(
 		s.publishRuntimeSteerHistory(ctx, req, result.SteerInputIDs, persisted)
 	}
 	if err == nil && promptErr == nil && (req.UserMessagePersisted || req.ReusePersistedUserMessage) && !req.SkipMemoryExtraction {
-		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
+		s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 	return err
 }
@@ -1026,8 +1026,10 @@ func runtimeTurnRan(result external.PromptResult) bool {
 func runtimeFailureEvent(cause error) native.StreamEvent {
 	code := string(classifyRuntimeFailure(cause))
 	event := native.StreamEvent{Type: native.EventError, Code: code, Error: code}
-	if public, ok := apperror.PublicFrom(ExternalAgentError(cause), ""); ok && len(public.Args) > 0 {
-		event.Args = public.Args
+	if public := ExternalAgentError(cause); hasCatalogCode(public) {
+		if args := apperror.ArgsOf(public); len(args) > 0 {
+			event.Args = args
+		}
 	}
 	return event
 }

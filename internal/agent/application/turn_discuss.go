@@ -404,12 +404,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		return
 	}
 
-	// Compute pressure on this goroutine so the detached trigger holds a few
-	// scalars instead of pinning the whole composed context until it runs.
+	// Compute pressure here so the compaction unit holds a few scalars
+	// instead of pinning the whole composed context until it runs.
 	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
 		// Pressure is measured on the full composed context, not the admitted
 		// window: what admission dropped is exactly what compaction must cover.
-		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
+		s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
 	}
 }
 
