@@ -250,7 +250,6 @@ type Queries interface {
 	GetContextLifecycleSelectionDecisionsByRunID(ctx context.Context, runID pgtype.UUID) ([]byte, error)
 	GetLatestAssistantContextLifecycleMetadataByRunID(ctx context.Context, runID pgtype.UUID) ([]byte, error)
 	GetLatestContextLifecycleBySession(ctx context.Context, sessionID pgtype.UUID) ([]byte, error)
-	GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.UUID) (int64, error)
 	GetLatestContextUsage(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.GetLatestContextUsageRow, error)
 	MarkLatestContextUsageStale(ctx context.Context, arg dbsqlc.MarkLatestContextUsageStaleParams) (int64, error)
 	GetLatestVisibleHistoryTurnBySession(ctx context.Context, sessionID pgtype.UUID) (HistoryTurn, error)

@@ -3564,6 +3564,8 @@ definitions:
     type: object
   handlers.ContextUsage:
     properties:
+      basis:
+        type: string
       breakdown:
         items:
           $ref: '#/definitions/contextfrag.KindBreakdown'
@@ -3574,11 +3576,18 @@ definitions:
         $ref: '#/definitions/handlers.CompactionInfo'
       context_window:
         type: integer
+      source:
+        type: string
       tool_defs:
         items:
           $ref: '#/definitions/handlers.ToolDefBucket'
         type: array
       used_tokens:
+        description: |-
+          UsedTokens is omitted when the session's newest context state is
+          unknown. Basis says what it measures: provider_input is the newest
+          native request's input; runtime is the External Agent runtime's own
+          measure, named by Source, with ContextWindow from the same observation.
         type: integer
     type: object
   handlers.CreateContainerRequest:

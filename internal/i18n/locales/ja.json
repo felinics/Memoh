@@ -129,6 +129,7 @@
       "title": "コンテクスト",
       "usedWithWindow": "{percent}・{used}・{window}使用",
       "tokensUsed": "使用される {used} Token",
+      "unavailable": "利用不可",
       "fieldCacheHit": "キャッシュヒット"
     },
     "access": {

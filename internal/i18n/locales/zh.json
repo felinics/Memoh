@@ -129,6 +129,7 @@
       "title": "上下文",
       "usedWithWindow": "{percent} · 已用 {used} / {window}",
       "tokensUsed": "已用 {used} tokens",
+      "unavailable": "不可用",
       "fieldCacheHit": "缓存命中"
     },
     "access": {

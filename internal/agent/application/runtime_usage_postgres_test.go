@@ -10,7 +10,6 @@ import (
 
 	"github.com/felinics/twilight/sdk"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -114,13 +113,10 @@ func (h externalUsageHarness) latest(t *testing.T, ctx context.Context) messagep
 	t.Helper()
 	sessionID, _ := dbpkg.ParseUUID(h.sessionID)
 	row, err := h.queries.GetLatestContextUsage(ctx, sessionID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return messagepkg.NoContextObservation(h.runtime)
-	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	return messagepkg.ResolveContextObservation(row.RuntimeType, row.Usage, row.ContextUsage)
+	return messagepkg.ResolveContextObservation(row.SessionRuntimeType, row.MessageRuntimeType, row.Usage, row.ContextUsage)
 }
 
 func (h externalUsageHarness) expectLatest(t *testing.T, ctx context.Context, step string, want messagepkg.ContextObservation) {

@@ -39,24 +39,27 @@ type ContextObservation struct {
 	Source       string
 }
 
-// NoContextObservation is the state of a session without any context row.
-func NoContextObservation(runtimeType string) ContextObservation {
-	if isNativeRuntime(runtimeType) {
-		return ContextObservation{Basis: ContextBasisProviderInput, Known: true}
-	}
-	return ContextObservation{Basis: ContextBasisRuntime}
-}
-
-// ResolveContextObservation interprets the newest context state row. A
-// runtime row without a current measurement, including one written before
-// rounds recorded context_usage, is unknown rather than its turn total.
-func ResolveContextObservation(runtimeType string, usage, contextUsage []byte) ContextObservation {
-	if isNativeRuntime(runtimeType) {
-		var native struct {
-			InputTokens int64 `json:"inputTokens"`
+// ResolveContextObservation interprets a session's newest context state row
+// (rowRuntime is empty without one). The session's current runtime decides
+// the basis; a row from another runtime measured another context. A runtime
+// row without a current measurement, including one written before rounds
+// recorded context_usage, is unknown rather than its turn total.
+func ResolveContextObservation(sessionRuntime, rowRuntime string, usage, contextUsage []byte) ContextObservation {
+	native := isNativeRuntime(sessionRuntime)
+	if native {
+		observation := ContextObservation{Basis: ContextBasisProviderInput, Known: true}
+		if isNativeRuntime(rowRuntime) && strings.TrimSpace(rowRuntime) != "" {
+			var input struct {
+				InputTokens int64 `json:"inputTokens"`
+			}
+			_ = json.Unmarshal(usage, &input)
+			observation.UsedTokens = input.InputTokens
 		}
-		_ = json.Unmarshal(usage, &native)
-		return ContextObservation{Basis: ContextBasisProviderInput, Known: true, UsedTokens: native.InputTokens}
+		return observation
+	}
+	observation := ContextObservation{Basis: ContextBasisRuntime}
+	if strings.TrimSpace(rowRuntime) != strings.TrimSpace(sessionRuntime) || len(contextUsage) == 0 {
+		return observation
 	}
 	var state struct {
 		UsedTokens    *int64 `json:"used_tokens"`
@@ -64,11 +67,7 @@ func ResolveContextObservation(runtimeType string, usage, contextUsage []byte) C
 		Source        string `json:"source"`
 		Stale         string `json:"stale"`
 	}
-	observation := ContextObservation{Basis: ContextBasisRuntime}
-	if len(contextUsage) == 0 || json.Unmarshal(contextUsage, &state) != nil {
-		return observation
-	}
-	if state.UsedTokens == nil || *state.UsedTokens < 0 || state.Stale != "" {
+	if json.Unmarshal(contextUsage, &state) != nil || state.UsedTokens == nil || *state.UsedTokens < 0 || state.Stale != "" {
 		return observation
 	}
 	observation.Known = true

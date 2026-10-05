@@ -500,8 +500,8 @@ func (f *fakeCommandQueries) CountMessagesBySession(_ context.Context, sessionID
 	return f.messageCount, nil
 }
 
-func (f *fakeCommandQueries) GetLatestAssistantUsage(_ context.Context, _ pgtype.UUID) (int64, error) {
-	return f.usage, nil
+func (f *fakeCommandQueries) GetLatestContextUsage(_ context.Context, _ pgtype.UUID) (dbsqlc.GetLatestContextUsageRow, error) {
+	return dbsqlc.GetLatestContextUsageRow{SessionRuntimeType: "model", MessageRuntimeType: "model", Usage: []byte(`{"inputTokens":` + strconv.FormatInt(f.usage, 10) + `}`)}, nil
 }
 
 func (f *fakeCommandQueries) GetSessionCacheStats(_ context.Context, _ pgtype.UUID) (dbsqlc.GetSessionCacheStatsRow, error) {

@@ -6,6 +6,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 // buildContextGroup registers /context — a focused token/context-window view for
@@ -36,10 +39,11 @@ func (h *Handler) renderContextUsage(cc CommandContext, sessionID string) (strin
 	if err != nil {
 		return "", err
 	}
-	used, err := h.queries.GetLatestAssistantUsage(cc.Ctx, pgSessionID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	observation, err := h.contextObservation(cc, pgSessionID)
+	if err != nil {
 		return "", fmt.Errorf("get usage: %w", err)
 	}
+	used := observation.UsedTokens
 	msgCount, err := h.queries.CountMessagesBySession(cc.Ctx, pgSessionID)
 	if err != nil {
 		return "", fmt.Errorf("count messages: %w", err)
@@ -49,19 +53,22 @@ func (h *Handler) renderContextUsage(cc CommandContext, sessionID string) (strin
 	if cacheRow.TotalInputTokens > 0 {
 		cacheHit = float64(cacheRow.CacheReadTokens) / float64(cacheRow.TotalInputTokens) * 100
 	}
-	window := h.resolveContextWindowTokens(cc)
+	window := h.contextWindowFor(cc, observation)
 
 	var b strings.Builder
 	b.WriteString(MdBold(cc.T("cmd.context.title")))
 	b.WriteString("\n\n")
-	if window > 0 {
+	switch {
+	case !observation.Known:
+		b.WriteString(cc.T("cmd.context.unavailable"))
+	case window > 0:
 		frac := float64(used) / float64(window)
 		fmt.Fprintf(&b, "%s  %s", renderProgressBar(frac, 12), cc.T("cmd.context.usedWithWindow", map[string]any{
 			"percent": fmt.Sprintf("%.0f%%", frac*100),
 			"used":    formatTokens(used),
 			"window":  formatTokens(window),
 		}))
-	} else {
+	default:
 		fmt.Fprintf(&b, "%s", cc.T("cmd.context.tokensUsed", map[string]any{"used": formatTokens(used)}))
 	}
 	fmt.Fprintf(&b, "\n\n- %s: %d", cc.T("cmd.status.fieldMessages"), msgCount)
@@ -86,4 +93,26 @@ func renderProgressBar(frac float64, cells int) string {
 		filled = cells
 	}
 	return strings.Repeat("█", filled) + strings.Repeat("░", cells-filled)
+}
+
+// contextObservation reads the session's newest context state.
+func (h *Handler) contextObservation(cc CommandContext, sessionID pgtype.UUID) (messagepkg.ContextObservation, error) {
+	row, err := h.queries.GetLatestContextUsage(cc.Ctx, sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return messagepkg.ResolveContextObservation("", "", nil, nil), nil
+	}
+	if err != nil {
+		return messagepkg.ContextObservation{}, err
+	}
+	return messagepkg.ResolveContextObservation(row.SessionRuntimeType, row.MessageRuntimeType, row.Usage, row.ContextUsage), nil
+}
+
+// contextWindowFor is the window the observation is drawn against: the
+// runtime's own window from the same observation, or the chat model's window
+// for a native session. A runtime observation never borrows the chat model's.
+func (h *Handler) contextWindowFor(cc CommandContext, observation messagepkg.ContextObservation) int64 {
+	if observation.Basis == messagepkg.ContextBasisRuntime {
+		return observation.WindowTokens
+	}
+	return h.resolveContextWindowTokens(cc)
 }

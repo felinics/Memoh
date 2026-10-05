@@ -3,32 +3,32 @@ SELECT COUNT(*)::bigint AS message_count
 FROM bot_visible_history_messages
 WHERE team_id = public.memoh_current_team_id() AND session_id = sqlc.arg(session_id);
 
--- name: GetLatestAssistantUsage :one
-SELECT
-  COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens
-FROM bot_visible_history_messages m
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.session_id = sqlc.arg(session_id)
-  AND m.role = 'assistant'
-  AND m.usage IS NOT NULL
-ORDER BY m.created_at DESC
-LIMIT 1;
-
 -- name: GetLatestContextUsage :one
--- The newest visible context state: a native assistant message with usage,
--- or the newest External Agent assistant message, whose context_usage may be
--- unknown. An unknown state is returned as is, never skipped for an older one.
+-- The session's runtime and its newest visible context state: a native
+-- assistant message with usage, or the newest External Agent assistant
+-- message, whose context_usage may be absent. An unknown state is returned as
+-- is, never skipped for an older one.
 SELECT
-  m.runtime_type,
-  m.usage,
-  (m.metadata->'context_usage')::jsonb AS context_usage
-FROM bot_visible_history_messages m
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.session_id = sqlc.arg(session_id)
-  AND m.role = 'assistant'
-  AND (m.runtime_type <> 'model' OR m.usage IS NOT NULL)
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-LIMIT 1;
+  s.runtime_type AS session_runtime_type,
+  COALESCE(latest.runtime_type, '')::text AS message_runtime_type,
+  latest.usage,
+  latest.context_usage
+FROM bot_sessions s
+LEFT JOIN LATERAL (
+  SELECT
+    m.runtime_type,
+    m.usage,
+    (m.metadata->'context_usage')::jsonb AS context_usage
+  FROM bot_visible_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = s.id
+    AND m.role = 'assistant'
+    AND (m.runtime_type <> 'model' OR m.usage IS NOT NULL)
+  ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  LIMIT 1
+) latest ON true
+WHERE s.team_id = public.memoh_current_team_id()
+  AND s.id = sqlc.arg(session_id);
 
 -- name: MarkLatestContextUsageStale :execrows
 -- A runtime operation such as manual compaction replaced the context the

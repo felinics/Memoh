@@ -24,52 +24,50 @@ func (q *Queries) CountMessagesBySession(ctx context.Context, sessionID pgtype.U
 	return message_count, err
 }
 
-const getLatestAssistantUsage = `-- name: GetLatestAssistantUsage :one
-SELECT
-  COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens
-FROM bot_visible_history_messages m
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.session_id = $1
-  AND m.role = 'assistant'
-  AND m.usage IS NOT NULL
-ORDER BY m.created_at DESC
-LIMIT 1
-`
-
-func (q *Queries) GetLatestAssistantUsage(ctx context.Context, sessionID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, getLatestAssistantUsage, sessionID)
-	var input_tokens int64
-	err := row.Scan(&input_tokens)
-	return input_tokens, err
-}
-
 const getLatestContextUsage = `-- name: GetLatestContextUsage :one
 SELECT
-  m.runtime_type,
-  m.usage,
-  (m.metadata->'context_usage')::jsonb AS context_usage
-FROM bot_visible_history_messages m
-WHERE m.team_id = public.memoh_current_team_id()
-  AND m.session_id = $1
-  AND m.role = 'assistant'
-  AND (m.runtime_type <> 'model' OR m.usage IS NOT NULL)
-ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
-LIMIT 1
+  s.runtime_type AS session_runtime_type,
+  COALESCE(latest.runtime_type, '')::text AS message_runtime_type,
+  latest.usage,
+  latest.context_usage
+FROM bot_sessions s
+LEFT JOIN LATERAL (
+  SELECT
+    m.runtime_type,
+    m.usage,
+    (m.metadata->'context_usage')::jsonb AS context_usage
+  FROM bot_visible_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = s.id
+    AND m.role = 'assistant'
+    AND (m.runtime_type <> 'model' OR m.usage IS NOT NULL)
+  ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+  LIMIT 1
+) latest ON true
+WHERE s.team_id = public.memoh_current_team_id()
+  AND s.id = $1
 `
 
 type GetLatestContextUsageRow struct {
-	RuntimeType  string `json:"runtime_type"`
-	Usage        []byte `json:"usage"`
-	ContextUsage []byte `json:"context_usage"`
+	SessionRuntimeType string `json:"session_runtime_type"`
+	MessageRuntimeType string `json:"message_runtime_type"`
+	Usage              []byte `json:"usage"`
+	ContextUsage       []byte `json:"context_usage"`
 }
 
-// The newest visible context state: a native assistant message with usage,
-// or the newest External Agent assistant message, whose context_usage may be
-// unknown. An unknown state is returned as is, never skipped for an older one.
+// The session's runtime and its newest visible context state: a native
+// assistant message with usage, or the newest External Agent assistant
+// message, whose context_usage may be absent. An unknown state is returned as
+// is, never skipped for an older one.
 func (q *Queries) GetLatestContextUsage(ctx context.Context, sessionID pgtype.UUID) (GetLatestContextUsageRow, error) {
 	row := q.db.QueryRow(ctx, getLatestContextUsage, sessionID)
 	var i GetLatestContextUsageRow
-	err := row.Scan(&i.RuntimeType, &i.Usage, &i.ContextUsage)
+	err := row.Scan(
+		&i.SessionRuntimeType,
+		&i.MessageRuntimeType,
+		&i.Usage,
+		&i.ContextUsage,
+	)
 	return i, err
 }
 
