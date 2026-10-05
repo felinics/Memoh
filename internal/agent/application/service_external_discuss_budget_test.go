@@ -2,10 +2,12 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
@@ -16,6 +18,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/runtimefence"
 )
 
 type externalDiscussQueries struct{ *recoveryHistoryQueries }
@@ -126,6 +129,80 @@ func TestExternalDiscussOversizedBatchCompactsOlderInputOrRecordsOmission(t *tes
 		if records := ledger.Records(); len(records) != 1 || records[0].Kind != contextfrag.MutationCurrentInputOmitted || !strings.HasPrefix(records[0].Detail, "sources=a") {
 			t.Fatalf("omission record=%+v", records)
 		}
+	}
+}
+
+type externalResumeQueries struct {
+	*externalDiscussQueries
+	saved *resumeSaveQueries
+}
+
+func (externalResumeQueries) DeleteRuntimeDecisionProjectionsByRun(context.Context, sqlc.DeleteRuntimeDecisionProjectionsByRunParams) (int64, error) {
+	return 0, nil
+}
+
+func (q externalResumeQueries) SaveSessionRunResumeContext(ctx context.Context, arg sqlc.SaveSessionRunResumeContextParams) (int64, error) {
+	return q.saved.SaveSessionRunResumeContext(ctx, arg)
+}
+
+func externalResumeService(t *testing.T) (*Service, *recordingACPPrompter, *resumeSaveQueries, context.Context) {
+	t.Helper()
+	pool := &recordingACPPrompter{result: acpclient.PromptResult{Text: "done", StopReason: "end_turn"}}
+	service := newACPLifecycleService(t, pool, &recordingMessageService{}, nil)
+	service.SetACPSessionPool(pool)
+	service.SetContextAbsoluteMaxTokens(1000)
+	saved := &resumeSaveQueries{}
+	policy, _ := newControllerPolicyService(t, nil)
+	service.queries = externalResumeQueries{externalDiscussQueries: &externalDiscussQueries{&recoveryHistoryQueries{policy.queries.(*controllerQueries)}}, saved: saved}
+	service.resumeSecret = "resume-test-secret"
+	ctx := runtimefence.WithContext(t.Context(), runtimefence.Fence{BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, Token: 7})
+	return service, pool, saved, ctx
+}
+
+func externalOversizedDiscuss() []turn.DiscussMessage {
+	sources := make([]turn.DiscussMessage, 1000)
+	for i := range sources {
+		sources[i] = turn.DiscussMessage{Role: "user", Content: "abcd"}
+	}
+	sources[len(sources)-1].Content = "CURRENT"
+	return sources
+}
+
+// A graceful-shutdown resume replays the saved prompt without re-admission,
+// so the saved prompt must be the one final admission sent.
+func TestExternalDiscussResumeContextSavesTheAdmittedPrompt(t *testing.T) {
+	service, pool, saved, ctx := externalResumeService(t)
+	candidate := discussAgentFullContextPrompt(externalOversizedDiscuss())
+	chunks, errs := service.StreamChat(ctx, ChatRequest{
+		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: uuid.NewString(),
+		Query: candidate, UserMessagePersisted: true, discussMessages: externalOversizedDiscuss(),
+	})
+	drainStreamChunks(t, chunks)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	var resume resumeContext
+	if err := json.Unmarshal(saved.saved.ResumeContext, &resume); err != nil {
+		t.Fatal(err)
+	}
+	if pool.calls != 1 || resume.Query != pool.input.Prompt || resume.Query == candidate {
+		t.Fatalf("resume context saved %d bytes, final prompt %d bytes, candidate %d bytes", len(resume.Query), len(pool.input.Prompt), len(candidate))
+	}
+}
+
+func TestExternalShutdownResumeBoundsInstructionPromptAndRuntimeContext(t *testing.T) {
+	service, pool, _, ctx := externalResumeService(t)
+	chunks, errs := service.StreamChat(ctx, ChatRequest{
+		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: uuid.NewString(), ShutdownResume: true,
+		Query: resumeInstruction + discussAgentFullContextPrompt(externalOversizedDiscuss()), UserMessagePersisted: true,
+	})
+	drainStreamChunks(t, chunks)
+	var failure error
+	for err := range errs {
+		failure = err
+	}
+	if apperror.CodeOf(failure) != apperror.CodeContextProtectedOverflow || pool.calls != 0 {
+		t.Fatalf("oversized resume: err=%v dispatches=%d, want a bounded protected_overflow", failure, pool.calls)
 	}
 }
 

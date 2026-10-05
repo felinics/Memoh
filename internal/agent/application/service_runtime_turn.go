@@ -17,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
@@ -227,21 +228,32 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 	if memoryTrace != nil {
 		contextLifecycle.SetMemoryRecall(*memoryTrace)
 	}
+	failAdmission := func(err error) (RunOutcome, error) {
+		if !errors.Is(err, native.ErrContextRecompose) {
+			s.contextLifecycleTerminal(ctx, native.RunConfig{
+				RunID: req.RunID, Identity: native.SessionContext{BotID: req.BotID, SessionID: req.ThreadID}, ContextLifecycle: contextLifecycle,
+			})(err)
+		}
+		return RunOutcome{}, err
+	}
 	if req.discussMessages != nil {
 		req, err = s.prepareExternalDiscussContext(ctx, req, contextMarkdown, len(preparedAttachments.Images))
 		if err != nil {
-			if !errors.Is(err, native.ErrContextRecompose) {
-				s.contextLifecycleTerminal(ctx, native.RunConfig{
-					RunID: req.RunID, Identity: native.SessionContext{BotID: req.BotID, SessionID: req.ThreadID}, ContextLifecycle: contextLifecycle,
-				})(err)
-			}
-			return RunOutcome{}, err
+			return failAdmission(err)
+		}
+		// A shutdown resume replays the saved prompt without re-admission, so
+		// the saved prompt must be the admitted one.
+		if err := s.recordRunResumeContext(ctx, req); err != nil {
+			return failAdmission(err)
 		}
 		contextMarkdown, contextURI, contextManifest = runtimeContextViaContextView(ctx, s.logger, contextSections, req.Query)
 		if contextManifest != nil {
 			recordOmittedCurrentInput(contextManifest.Mutations, req.discussOmittedSources)
 			contextLifecycle.SetManifest(*contextManifest)
 		}
+	}
+	if req.ShutdownResume && turn.EstimateTokensFromBytes(len(req.Query)+len(contextMarkdown))+len(preparedAttachments.Images)*contextfrag.EstimateImageTokens > s.contextAbsoluteMaxTokens() {
+		return failAdmission(apperror.New(apperror.CodeContextProtectedOverflow, nil))
 	}
 	var leadingUser *messagepkg.Message
 	req, leadingUser, err = s.persistRuntimeLeadingUserMessage(context.WithoutCancel(ctx), req)
