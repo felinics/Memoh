@@ -28,6 +28,7 @@ import (
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -223,7 +224,14 @@ func newWSStepHistoryHarnessOn(t *testing.T, mode wsStepHistoryModel, backend se
 		Fence:         runtimefence.NewActivator(queries),
 	})
 	t.Cleanup(func() { _ = manager.Close() })
+	service, messages := newWSStepHistoryService(t, mode, queries, manager)
+	return wsStepHistoryHarness{pool: pool, botID: botID, sessionID: sessionID, service: service, manager: manager, messages: messages}
+}
 
+// newWSStepHistoryService is the application service of one server process:
+// its runtime is manager and its history lives in queries.
+func newWSStepHistoryService(t *testing.T, mode wsStepHistoryModel, queries dbstore.Queries, manager *sessionruntime.Manager) (*Service, *messagepkg.DBService) {
+	t.Helper()
 	fixture := newDirectLifecycleFixture(t, directLifecycleModelSuccess)
 	service := fixture.service
 	messages := messagepkg.NewService(service.logger, queries)
@@ -243,7 +251,7 @@ func newWSStepHistoryHarnessOn(t *testing.T, mode wsStepHistoryModel, backend se
 	if mode == wsStepHistoryTextLoop {
 		service.queries = loopDetectionQueries{service.queries.(noDecisionQueries)}
 	}
-	return wsStepHistoryHarness{pool: pool, botID: botID, sessionID: sessionID, service: service, manager: manager, messages: messages}
+	return service, messages
 }
 
 // run admits one Web chat turn and runs it to its terminal write. stop, when

@@ -338,6 +338,17 @@ deleted_acp_publications AS (
     AND publication.session_id = invalidated.id
   RETURNING publication.session_id
 ),
+retired_resume_intents AS (
+  UPDATE session_runs run
+  SET input_json = run.input_json - 'resume'
+  FROM invalidated_sessions invalidated
+  WHERE run.team_id = public.memoh_current_team_id()
+    AND run.session_id = invalidated.id
+    AND run.state = 'lost'
+    AND run.error_code = 'session_runtime.interrupted'
+    AND run.input_json ? 'resume'
+  RETURNING run.run_id
+),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
@@ -371,6 +382,8 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND message.id = target.id
 `
 
+// A turn interrupted by a graceful shutdown would resume the task this
+// history held; its resume intent goes with the history.
 func (q *Queries) ClearHistoryByBot(ctx context.Context, targetBotID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, clearHistoryByBot, targetBotID)
 	return err
@@ -407,6 +420,17 @@ deleted_acp_publications AS (
     AND publication.session_id = invalidated.id
   RETURNING publication.session_id
 ),
+retired_resume_intents AS (
+  UPDATE session_runs run
+  SET input_json = run.input_json - 'resume'
+  FROM invalidated_session invalidated
+  WHERE run.team_id = public.memoh_current_team_id()
+    AND run.session_id = invalidated.id
+    AND run.state = 'lost'
+    AND run.error_code = 'session_runtime.interrupted'
+    AND run.input_json ? 'resume'
+  RETURNING run.run_id
+),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
@@ -440,6 +464,8 @@ WHERE message.team_id = public.memoh_current_team_id()
   AND message.id = target.id
 `
 
+// Same as ClearHistoryByBot: an interrupted turn's resume intent goes with
+// the history it would resume.
 func (q *Queries) ClearHistoryBySession(ctx context.Context, targetSessionID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, clearHistoryBySession, targetSessionID)
 	return err

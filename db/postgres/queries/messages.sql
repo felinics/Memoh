@@ -2548,6 +2548,19 @@ deleted_acp_publications AS (
     AND publication.session_id = invalidated.id
   RETURNING publication.session_id
 ),
+-- A turn interrupted by a graceful shutdown would resume the task this
+-- history held; its resume intent goes with the history.
+retired_resume_intents AS (
+  UPDATE session_runs run
+  SET input_json = run.input_json - 'resume'
+  FROM invalidated_sessions invalidated
+  WHERE run.team_id = public.memoh_current_team_id()
+    AND run.session_id = invalidated.id
+    AND run.state = 'lost'
+    AND run.error_code = 'session_runtime.interrupted'
+    AND run.input_json ? 'resume'
+  RETURNING run.run_id
+),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
   FROM bot_history_message_compacts compact
@@ -2610,6 +2623,19 @@ deleted_acp_publications AS (
   WHERE publication.team_id = public.memoh_current_team_id()
     AND publication.session_id = invalidated.id
   RETURNING publication.session_id
+),
+-- Same as ClearHistoryByBot: an interrupted turn's resume intent goes with
+-- the history it would resume.
+retired_resume_intents AS (
+  UPDATE session_runs run
+  SET input_json = run.input_json - 'resume'
+  FROM invalidated_session invalidated
+  WHERE run.team_id = public.memoh_current_team_id()
+    AND run.session_id = invalidated.id
+    AND run.state = 'lost'
+    AND run.error_code = 'session_runtime.interrupted'
+    AND run.input_json ? 'resume'
+  RETURNING run.run_id
 ),
 target_compaction_artifacts AS MATERIALIZED (
   SELECT compact.id
