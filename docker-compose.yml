@@ -57,6 +57,7 @@ services:
       - memoh-network
 
   server:
+    stop_grace_period: 45s
     image: memohai/server:latest
     container_name: memoh-server
     privileged: true
@@ -131,7 +132,6 @@ services:
       MEMOH_WEBHOOK_TUNNEL_METRICS_URL: "http://webhook-tunnel:18735"
     volumes:
       - ${MEMOH_CONFIG:-./config.toml}:/app/config.toml:ro
-      - memoh_data:/opt/memoh/data
       - /etc/localtime:/etc/localtime:ro
     expose:
       - "8081"
@@ -238,8 +238,6 @@ volumes:
   memoh_data:
     driver: local
   server_cni_state:
-    driver: local
-  openviking_data:
     driver: local
 
 networks:

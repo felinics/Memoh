@@ -34,8 +34,8 @@ func (*triggerLifecycleProvider) Name() string { return "trigger-lifecycle" }
 
 func (*triggerLifecycleProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
 
-func (*triggerLifecycleProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*triggerLifecycleProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*triggerLifecycleProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
@@ -166,6 +166,7 @@ func hasLifecycleMutation(snapshot contextfrag.LifecycleSnapshot, kind contextfr
 func triggerDirectSchedule(t *testing.T, service *Service) (schedule.TriggerResult, error) {
 	t.Helper()
 	return service.TriggerSchedule(context.Background(), lifecycleTestBotID, schedule.TriggerPayload{
+		FireID:      "test-fire",
 		SessionID:   lifecycleTestSessionID,
 		Command:     directLifecyclePrompt,
 		OwnerUserID: "user-1",
@@ -215,8 +216,10 @@ func TestTriggerScheduleProviderFailurePersistsFailedProviderLifecycle(t *testin
 	if len(fixture.runtime.finishes) != 1 || fixture.runtime.finishes[0].status != sessionruntime.RunStatusErrored {
 		t.Fatalf("runtime finishes = %#v, want one errored finish", fixture.runtime.finishes)
 	}
-	if fixture.lifecycles.creates()[0].ErrorCode.Valid {
-		t.Fatalf("private provider diagnostic became stable error code: %#v", fixture.lifecycles.creates()[0].ErrorCode)
+	// The provider refused the request with a 400: a background run names it
+	// as the WebSocket path does, and nothing of the provider's text.
+	if code := fixture.lifecycles.creates()[0].ErrorCode; code.String != string(apperror.CodeAgentProviderRequestRejected) {
+		t.Fatalf("lifecycle error code = %#v, want %q", code, apperror.CodeAgentProviderRequestRejected)
 	}
 }
 
@@ -340,6 +343,7 @@ func TestTriggerScheduleACPPersistsCompletedLifecycle(t *testing.T) {
 		context.Background(),
 		lifecycleTestBotID,
 		schedule.TriggerPayload{
+			FireID:          "test-fire",
 			SessionID:       lifecycleTestSessionID,
 			Command:         "run scheduled task",
 			OwnerUserID:     "user-1",
@@ -390,7 +394,7 @@ func TestTriggerScheduleRuntimeRejectsIncompleteTurn(t *testing.T) {
 	_, err := service.triggerScheduleRuntime(
 		ctx,
 		lifecycleTestBotID,
-		schedule.TriggerPayload{SessionID: lifecycleTestSessionID, Command: "run scheduled task", OwnerUserID: "user-1"},
+		schedule.TriggerPayload{FireID: "test-fire", SessionID: lifecycleTestSessionID, Command: "run scheduled task", OwnerUserID: "user-1"},
 		"",
 		lifecycleTestRunID,
 		driver,

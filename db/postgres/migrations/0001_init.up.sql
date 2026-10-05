@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS providers (
     'google-generative-ai',
     'openai-codex',
     'github-copilot',
+    'opencode-go',
     'edge-speech',
     'openai-speech',
     'openai-transcription',
@@ -249,6 +250,7 @@ CREATE TABLE IF NOT EXISTS bots (
   compaction_threshold INTEGER NOT NULL DEFAULT 0,
   compaction_target_percent INTEGER,
   compaction_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
+  memory_llm_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   image_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   discuss_probe_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
   tts_model_id UUID REFERENCES models(id) ON DELETE SET NULL,
@@ -890,6 +892,7 @@ CREATE INDEX IF NOT EXISTS idx_lifecycle_events_container_id ON lifecycle_events
 CREATE INDEX IF NOT EXISTS idx_lifecycle_events_event_type ON lifecycle_events(event_type);
 
 CREATE TABLE IF NOT EXISTS schedule (
+  max_run_seconds integer NOT NULL DEFAULT 3600 CHECK (max_run_seconds BETWEEN 300 AND 86400),
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   description TEXT NOT NULL,
@@ -2246,6 +2249,12 @@ CREATE INDEX IF NOT EXISTS idx_session_runs_orphan
     ON public.session_runs (team_id, created_at, run_id)
     WHERE state = 'accepted' AND owner_id IS NULL;
 
+-- Interrupted runs whose resume intent is still pending; the recovery worker
+-- lists these instead of walking a team's run history.
+CREATE INDEX IF NOT EXISTS idx_session_runs_resume_pending
+    ON public.session_runs (team_id, run_id)
+    WHERE state = 'lost' AND error_code = 'session_runtime.interrupted' AND input_json ? 'resume';
+
 ALTER TABLE public.session_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.session_runs FORCE ROW LEVEL SECURITY;
 
@@ -3045,3 +3054,54 @@ CREATE POLICY bot_workspaces_team_update ON public.bot_workspaces
     WITH CHECK (team_id = public.memoh_current_team_id());
 CREATE POLICY bot_workspaces_team_delete ON public.bot_workspaces
     FOR DELETE USING (team_id = public.memoh_current_team_id());
+
+-- Usage ledger for memory LLM calls (extract / decide / compact), which never
+-- produce a chat message. bots.memory_llm_model_id picks their model.
+CREATE TABLE IF NOT EXISTS public.bot_memory_usage (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id    UUID        NOT NULL DEFAULT public.memoh_current_team_id()
+                         REFERENCES public.teams(id) ON DELETE RESTRICT,
+  bot_id     UUID        NOT NULL,
+  model_id   UUID,
+  operation  TEXT        NOT NULL,
+  usage      JSONB       NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT memoh_team_key_cdc0b6740345 UNIQUE (team_id, id),
+  CONSTRAINT bot_memory_usage_operation_check
+    CHECK (operation IN ('extract', 'decide', 'compact'))
+);
+
+ALTER TABLE public.bot_memory_usage
+  DROP CONSTRAINT IF EXISTS bot_memory_usage_bot_id_fkey,
+  ADD CONSTRAINT bot_memory_usage_bot_id_fkey
+    FOREIGN KEY (team_id, bot_id)
+    REFERENCES public.bots(team_id, id) ON DELETE CASCADE;
+
+ALTER TABLE public.bot_memory_usage
+  DROP CONSTRAINT IF EXISTS bot_memory_usage_model_id_fkey,
+  ADD CONSTRAINT bot_memory_usage_model_id_fkey
+    FOREIGN KEY (team_id, model_id)
+    REFERENCES public.models(team_id, id)
+    ON DELETE SET NULL (model_id);
+
+CREATE INDEX IF NOT EXISTS idx_bot_memory_usage_bot_created
+  ON public.bot_memory_usage (team_id, bot_id, created_at DESC);
+
+ALTER TABLE public.bot_memory_usage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bot_memory_usage FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS bot_memory_usage_team_select ON public.bot_memory_usage;
+DROP POLICY IF EXISTS bot_memory_usage_team_insert ON public.bot_memory_usage;
+DROP POLICY IF EXISTS bot_memory_usage_team_update ON public.bot_memory_usage;
+DROP POLICY IF EXISTS bot_memory_usage_team_delete ON public.bot_memory_usage;
+
+CREATE POLICY bot_memory_usage_team_select ON public.bot_memory_usage
+  FOR SELECT USING (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_memory_usage_team_insert ON public.bot_memory_usage
+  FOR INSERT WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_memory_usage_team_update ON public.bot_memory_usage
+  FOR UPDATE
+  USING (team_id = public.memoh_current_team_id())
+  WITH CHECK (team_id = public.memoh_current_team_id());
+CREATE POLICY bot_memory_usage_team_delete ON public.bot_memory_usage
+  FOR DELETE USING (team_id = public.memoh_current_team_id());

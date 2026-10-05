@@ -417,12 +417,8 @@ func (a *DingTalkAdapter) newChatBotHandler(cfg channel.ChannelConfig, handler c
 			return nil, nil
 		}
 		msg.BotID = cfg.BotID
-		if err := handler(ctx, cfg, msg); err != nil {
-			a.logger.Error("dingtalk: inbound handler error",
-				slog.String("config_id", cfg.ID),
-				slog.Any("error", err),
-			)
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 		return nil, nil
 	}
 }

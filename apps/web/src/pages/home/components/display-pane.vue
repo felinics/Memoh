@@ -31,7 +31,7 @@
       v-if="prepareProgress"
       class="absolute inset-0 flex items-center justify-center px-6"
     >
-      <div class="w-full max-w-[520px] rounded-lg border border-border bg-card p-5">
+      <SurfaceCard class="w-full max-w-[520px]">
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <p class="text-sm font-medium text-foreground">
@@ -71,7 +71,7 @@
             </span>
           </div>
         </div>
-      </div>
+      </SurfaceCard>
     </div>
     <div
       v-if="status === 'connected' || displaySessionId"
@@ -213,7 +213,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch, type Component, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, Spinner } from '@felinic/ui'
+import { Button, Spinner, SurfaceCard } from '@felinic/ui'
 import { Activity, Globe, Maximize, Monitor, Package, Wrench, X } from 'lucide-vue-next'
 import { useMagicKeys, useMouseInElement, useToggle } from '@vueuse/core'
 import { useBotDisplayConnection } from '@/composables/useBotDisplayConnection'

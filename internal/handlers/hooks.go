@@ -82,9 +82,9 @@ func (h *HooksHandler) Register(e *echo.Echo) {
 // @Tags hooks
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} HooksEventsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/hooks/events [get].
 func (h *HooksHandler) Events(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -117,9 +117,9 @@ func (h *HooksHandler) Events(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body HookTestRequest true "Hook test payload"
 // @Success 200 {object} HookTestResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/hooks/test [post].
 func (h *HooksHandler) Test(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)

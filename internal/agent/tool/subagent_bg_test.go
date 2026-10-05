@@ -19,6 +19,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
@@ -304,6 +305,10 @@ func (*fakeAgentMessageService) ListActiveSinceBySessionWithinBytes(context.Cont
 }
 
 func (*fakeAgentMessageService) ListActiveSinceWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
+func (*fakeAgentMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
 	return nil, nil
 }
 
@@ -798,9 +803,7 @@ func TestSpawnAgentRetainsContextLifecycleWhenBudgetPreflightFails(t *testing.T)
 	if result["status"] != string(background.TaskFailed) {
 		t.Fatalf("spawn_agent status = %v, want %q", result["status"], background.TaskFailed)
 	}
-	if result["error"] != contextfrag.ErrBudgetUnsatisfied.Error() {
-		t.Fatalf("spawn_agent error = %v, want %q", result["error"], contextfrag.ErrBudgetUnsatisfied)
-	}
+	assertCatalogFailure(t, result, apperror.CodeContextBudgetUnsatisfied, contextfrag.ErrBudgetUnsatisfied.Error())
 	if _, ok := result["context_lifecycle"]; ok {
 		t.Fatalf("spawn_agent exposed internal context lifecycle: %#v", result)
 	}

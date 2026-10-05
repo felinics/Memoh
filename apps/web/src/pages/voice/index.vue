@@ -129,6 +129,24 @@ const transcriptionTemplateDrafts = computed<TemplateAudioProvider[]>(() =>
   availableTranscriptionTemplates.value.map(template => providerDraftFromTemplate(template) as TemplateAudioProvider),
 )
 
+// Search box + Add button live in the Providers container's fixed header; this
+// panel receives the query and exposes an add trigger instead. Voice has TWO
+// provider kinds (Speaking/Listening) — the header Add opens the Speaking
+// dialog, and each section keeps its own Add for the other kind.
+const props = defineProps<{ searchQuery: string }>()
+defineExpose({ openAdd: () => openAddSpeech() })
+
+function byName<T extends { name?: string }>(list: T[]): T[] {
+  const keyword = props.searchQuery.trim().toLowerCase()
+  if (!keyword) return list
+  return list.filter(p => (p.name ?? '').toLowerCase().includes(keyword))
+}
+
+const filteredSpeechProviders = computed(() => byName(catalogSpeechProviders.value))
+const filteredSpeechTemplateDrafts = computed(() => byName(speechTemplateDrafts.value))
+const filteredTranscriptionProviders = computed(() => byName(catalogTranscriptionProviders.value))
+const filteredTranscriptionTemplateDrafts = computed(() => byName(transcriptionTemplateDrafts.value))
+
 // Page-owned query key, valued `kind:id` so refresh restores which pane.
 const {
   view,
@@ -251,7 +269,8 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
     <!-- Two capability sections -->
     <PageShell
       v-if="view === 'list'"
-      :title="t('voice.title')"
+      variant="tab"
+      class="px-4 md:px-6"
     >
       <div class="space-y-8">
         <!-- Speaking (TTS) -->
@@ -276,11 +295,11 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
           />
 
           <div
-            v-else-if="catalogSpeechProviders.length + speechTemplateDrafts.length > 0"
+            v-else-if="filteredSpeechProviders.length + filteredSpeechTemplateDrafts.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
-              v-for="provider in catalogSpeechProviders"
+              v-for="provider in filteredSpeechProviders"
               :key="provider.id"
               :name="provider.name ?? ''"
               :enabled="provider.enable !== false"
@@ -303,7 +322,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
               </template>
             </BackendCard>
             <BackendCard
-              v-for="provider in speechTemplateDrafts"
+              v-for="provider in filteredSpeechTemplateDrafts"
               :key="`template:${provider.provider_template_id}`"
               :name="provider.name ?? ''"
               @click="openSpeech(provider)"
@@ -355,11 +374,11 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
           />
 
           <div
-            v-else-if="catalogTranscriptionProviders.length + transcriptionTemplateDrafts.length > 0"
+            v-else-if="filteredTranscriptionProviders.length + filteredTranscriptionTemplateDrafts.length > 0"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <BackendCard
-              v-for="provider in catalogTranscriptionProviders"
+              v-for="provider in filteredTranscriptionProviders"
               :key="provider.id"
               :name="provider.name ?? ''"
               :enabled="provider.enable !== false"
@@ -382,7 +401,7 @@ watch(() => openStatus.addTranscriptionOpen, (isOpen, wasOpen) => {
               </template>
             </BackendCard>
             <BackendCard
-              v-for="provider in transcriptionTemplateDrafts"
+              v-for="provider in filteredTranscriptionTemplateDrafts"
               :key="`template:${provider.provider_template_id}`"
               :name="provider.name ?? ''"
               @click="openTranscription(provider)"

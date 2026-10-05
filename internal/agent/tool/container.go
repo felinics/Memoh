@@ -32,6 +32,7 @@ var blockedSleepPattern = regexp.MustCompile(`^sleep\s+(\d+(?:\.\d+)?)(?:\s*[;&]
 const (
 	defaultContainerExecWorkDir  = "/data"
 	remoteBackgroundOutputLogDir = "/data/.memoh/background"
+	minCommandExecBudgetSeconds  = 30
 )
 
 // containerOpTimeout is the maximum time allowed for individual file
@@ -293,8 +294,10 @@ Delete a file:
 			toolexec.Describe("command", fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)),
 			toolexec.Describe("work_dir", fmt.Sprintf("Working directory (default: %s)", wd)),
 			toolexec.Describe("description", workspace.descriptionExamples),
-			toolexec.Describe("timeout", fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout)),
+			toolexec.Describe("timeout", fmt.Sprintf("Maximum foreground wait in seconds (default: %d, max: %d). A command still running afterward moves to the background; handoff may happen earlier to preserve max_duration_seconds.", background.DefaultExecTimeout, background.MaxExecTimeout)),
 			toolexec.Range("timeout", 1, float64(background.MaxExecTimeout)),
+			toolexec.Range("max_duration_seconds", minCommandExecBudgetSeconds, float64(background.MaxBackgroundExecTimeout)),
+			toolexec.EnumStrings("background_mode", []string{"task", "service"}),
 		),
 	}
 	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
@@ -363,12 +366,14 @@ type applyPatchArgs struct {
 }
 
 type execArgs struct {
-	TargetID        string `json:"target_id,omitempty"`
-	Command         string `json:"command"`
-	WorkDir         string `json:"work_dir,omitempty"`
-	Description     string `json:"description,omitempty"`
-	Timeout         *int   `json:"timeout,omitempty"`
-	RunInBackground bool   `json:"run_in_background,omitempty" jsonschema:"If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."`
+	TargetID           string `json:"target_id,omitempty"`
+	Command            string `json:"command"`
+	WorkDir            string `json:"work_dir,omitempty"`
+	Description        string `json:"description,omitempty"`
+	Timeout            *int   `json:"timeout,omitempty"`
+	MaxDurationSeconds *int   `json:"max_duration_seconds,omitempty" jsonschema:"Total budget for a finite command, including time spent in foreground. Minimum 30 seconds; default 7200; max 86400. Backgrounding does not restart it."`
+	BackgroundMode     string `json:"background_mode,omitempty" jsonschema:"task (default) uses the execution budget; service runs until explicitly stopped or the workspace closes. service requires run_in_background=true and no max_duration_seconds."`
+	RunInBackground    bool   `json:"run_in_background,omitempty" jsonschema:"If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."`
 }
 
 type toolWorkspace struct {
@@ -1145,6 +1150,10 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 
 	// Block sleep N (N>=2) in foreground — nudge model toward run_in_background.
 	runInBg := args.RunInBackground
+	budget, err := execBudget(args.MaxDurationSeconds, args.BackgroundMode, runInBg)
+	if err != nil {
+		return nil, err
+	}
 	if !runInBg {
 		if reason := detectBlockedSleep(command); reason != "" {
 			return nil, fmt.Errorf("blocked: %s. Run blocking commands in the background with run_in_background: true, then use wait_until(task_id) and get_background_status(task_id). If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds", reason)
@@ -1154,7 +1163,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	// Background execution path.
 	if runInBg && p.bgManager != nil {
 		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, true, func() (any, error) {
-			return p.execExecBackground(ctx, session, client, command, workDir, description, backgroundOutputDir)
+			return p.execExecBackground(ctx, session, client, command, workDir, description, backgroundOutputDir, budget)
 		})
 	}
 
@@ -1162,7 +1171,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	// to background on timeout without killing the process.
 	if p.bgManager != nil {
 		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
-			return p.execExecWithFlip(ctx, session, client, command, workDir, description, backgroundOutputDir, timeout)
+			return p.execExecWithFlip(ctx, session, client, command, workDir, description, backgroundOutputDir, timeout, budget)
 		})
 	}
 
@@ -1213,9 +1222,13 @@ func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session 
 const backgroundReplayBytes = 4096
 
 type backgroundExecStreamReader struct {
-	resultCh chan background.AdoptResult
-	logger   *slog.Logger
-	command  string
+	resultCh        chan background.AdoptResult
+	logger          *slog.Logger
+	command         string
+	deadline        time.Time
+	cancel          context.CancelFunc
+	lastLiveness    time.Time
+	livenessHandler func(time.Time)
 
 	mu             sync.Mutex
 	stdout         strings.Builder
@@ -1236,6 +1249,26 @@ func startBackgroundExecStreamReader(log *slog.Logger, stream *bridge.ExecStream
 
 func (r *backgroundExecStreamReader) run(stream *bridge.ExecStream, cancel context.CancelFunc) {
 	defer cancel()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				r.mu.Lock()
+				last := r.lastLiveness
+				r.mu.Unlock()
+				if !last.IsZero() && time.Since(last) > 90*time.Second {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	var exitCode int32
 	var exitReceived bool
 	for {
@@ -1260,6 +1293,15 @@ func (r *backgroundExecStreamReader) run(stream *bridge.ExecStream, cancel conte
 			return
 		}
 		switch msg.GetStream() {
+		case pb.ExecOutput_HEARTBEAT:
+			r.mu.Lock()
+			r.lastLiveness = time.Now()
+			handler := r.livenessHandler
+			at := r.lastLiveness
+			r.mu.Unlock()
+			if handler != nil {
+				handler(at)
+			}
 		case pb.ExecOutput_STDOUT:
 			r.appendChunk("stdout", string(msg.GetData()))
 		case pb.ExecOutput_STDERR:
@@ -1341,22 +1383,26 @@ func tailText(value string, maxBytes int) string {
 // agent gets an immediate "auto_backgrounded" response.
 func (p *ContainerProvider) execExecWithFlip(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description, outputDir string, softTimeout int32,
+	command, workDir, description, outputDir string, softTimeout int32, budgets ...time.Duration,
 ) (any, error) {
 	// Start streaming exec with a large container-side timeout so the process
 	// keeps running even after we stop reading in the foreground.
 	// Use a fully independent context (not derived from the agent request ctx)
 	// so the gRPC stream is never cancelled when the foreground session ends.
-	streamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(background.BackgroundExecTimeout)*time.Second)
-	stream, err := client.ExecStream(streamCtx, command, workDir, background.BackgroundExecTimeout)
+	streamCtx, streamCancel := execBudgetContext(ctx, budgets)
+	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true})
 	if err != nil {
 		streamCancel()
 		return nil, err
 	}
 	reader := startBackgroundExecStreamReader(p.logger, stream, streamCancel, command)
+	reader.deadline, _ = streamCtx.Deadline()
+	reader.cancel = streamCancel
 
-	// Wait for either the result or soft timeout.
-	timer := time.NewTimer(time.Duration(softTimeout) * time.Second)
+	// Leave time to hand the stream to the background manager before its hard
+	// deadline. This also applies when an ancestor budget ends sooner.
+	foregroundWait := foregroundWaitBeforeBudget(streamCtx, softTimeout)
+	timer := time.NewTimer(foregroundWait)
 	defer timer.Stop()
 
 	select {
@@ -1370,12 +1416,13 @@ func (p *ContainerProvider) execExecWithFlip(
 		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": r.ExitCode}, nil
 
 	case <-timer.C:
-		// Soft timeout fired — flip the running stream to background.
+		// Foreground waiting ended, possibly early to preserve the hard budget.
 		// The container process is still alive; we hand off the stream reader
 		// goroutine to the background manager.
-		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, outputDir, softTimeout)
+		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, outputDir, foregroundWait)
 
 	case <-ctx.Done():
+		streamCancel()
 		return nil, ctx.Err()
 	}
 }
@@ -1386,7 +1433,7 @@ func (p *ContainerProvider) flipToBackground(
 	ctx context.Context,
 	session SessionContext, client *bridge.Client,
 	reader *backgroundExecStreamReader,
-	command, workDir, description, outputDir string, softTimeout int32,
+	command, workDir, description, outputDir string, foregroundWait time.Duration,
 ) (any, error) {
 	writeFn := func(ctx context.Context, path string, data []byte) error {
 		return client.WriteFile(ctx, path, data)
@@ -1395,10 +1442,11 @@ func (p *ContainerProvider) flipToBackground(
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
 		session.BotID, session.SessionID, command, workDir, description, outputDir,
-		reader.Result(), writeFn,
+		reader.Result(), writeFn, background.AdoptOptions{Deadline: reader.deadline, Cancel: reader.cancel},
 	)
 	// SetChunkHandler replays output collected during the foreground phase
 	// into the task buffer, so the tail below already contains it.
+	reader.SetLivenessHandler(func(at time.Time) { p.bgManager.RecordLiveness(taskID, at) })
 	reader.SetChunkHandler(func(stream, chunk string) {
 		p.bgManager.RecordOutput(taskID, stream, chunk)
 	})
@@ -1406,7 +1454,7 @@ func (p *ContainerProvider) flipToBackground(
 	p.logger.InfoContext(ctx, "foreground exec flipped to background",
 		slog.String("task_id", taskID),
 		slog.String("command", truncateStr(command, 120)),
-		slog.Int("soft_timeout_seconds", int(softTimeout)),
+		slog.Duration("foreground_wait", foregroundWait),
 	)
 
 	result := map[string]any{
@@ -1414,12 +1462,12 @@ func (p *ContainerProvider) flipToBackground(
 		"task_id":     taskID,
 		"output_file": outputFile,
 		"message": fmt.Sprintf(
-			"Command exceeded the foreground timeout (%ds) and has been moved to the background with task ID: %s. "+
+			"Command moved to the background after %s of foreground waiting with task ID: %s. "+
 				"The process is still running — no work was lost; output collected so far is in output_tail. "+
 				"Use wait_until(task_id) to keep observing: it returns when the task finishes, stalls, or goes quiet (reason 'idle') — for servers, a ready message in output_tail means it is up. "+
 				"The full log is written to %s after the task ends. "+
 				"For long-running commands, use run_in_background: true from the start to avoid this delay.",
-			softTimeout, taskID, outputFile,
+			foregroundWait.Round(time.Second), taskID, outputFile,
 		),
 	}
 	if task := p.bgManager.Get(taskID); task != nil {
@@ -1448,15 +1496,17 @@ func detectBlockedSleep(command string) string {
 // execExecBackground spawns the command as a background task and returns immediately.
 func (p *ContainerProvider) execExecBackground(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description, outputDir string,
+	command, workDir, description, outputDir string, budgets ...time.Duration,
 ) (any, error) {
-	streamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(background.BackgroundExecTimeout)*time.Second)
-	stream, err := client.ExecStream(streamCtx, command, workDir, background.BackgroundExecTimeout)
+	streamCtx, streamCancel := execBudgetContext(ctx, budgets)
+	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true})
 	if err != nil {
 		streamCancel()
 		return nil, err
 	}
 	reader := startBackgroundExecStreamReader(p.logger, stream, streamCancel, command)
+	reader.deadline, _ = streamCtx.Deadline()
+	reader.cancel = streamCancel
 
 	writeFn := func(ctx context.Context, path string, data []byte) error {
 		return client.WriteFile(ctx, path, data)
@@ -1464,8 +1514,9 @@ func (p *ContainerProvider) execExecBackground(
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
 		session.BotID, session.SessionID, command, workDir, description, outputDir,
-		reader.Result(), writeFn,
+		reader.Result(), writeFn, background.AdoptOptions{Deadline: reader.deadline, Cancel: reader.cancel},
 	)
+	reader.SetLivenessHandler(func(at time.Time) { p.bgManager.RecordLiveness(taskID, at) })
 	reader.SetChunkHandler(func(stream, chunk string) {
 		p.bgManager.RecordOutput(taskID, stream, chunk)
 	})
@@ -1501,4 +1552,77 @@ func addLineNumbers(content string, startLine int) string {
 		fmt.Fprintf(&out, "%6d\t%s\n", startLine+i, line)
 	}
 	return out.String()
+}
+
+func (r *backgroundExecStreamReader) SetLivenessHandler(handler func(time.Time)) {
+	r.mu.Lock()
+	r.livenessHandler = handler
+	at := r.lastLiveness
+	r.mu.Unlock()
+	if handler != nil && !at.IsZero() {
+		handler(at)
+	}
+}
+
+func execBudget(maxDurationSeconds *int, backgroundMode string, backgroundRun bool) (time.Duration, error) {
+	mode := strings.TrimSpace(backgroundMode)
+	if mode != "" && mode != "task" && mode != "service" {
+		return 0, errors.New("background_mode must be task or service")
+	}
+	if mode == "service" {
+		if !backgroundRun || maxDurationSeconds != nil {
+			return 0, errors.New("service mode requires run_in_background=true and no max_duration_seconds")
+		}
+		return 0, nil
+	}
+	return finiteTaskBudget(maxDurationSeconds, minCommandExecBudgetSeconds)
+}
+
+// Video monitoring has no foreground-to-background transition and retains its
+// existing one-second minimum.
+func videoMonitorBudget(maxDurationSeconds *int) (time.Duration, error) {
+	return finiteTaskBudget(maxDurationSeconds, 1)
+}
+
+func finiteTaskBudget(maxDurationSeconds *int, minimum int) (time.Duration, error) {
+	seconds := int(background.BackgroundExecTimeout)
+	if maxDurationSeconds != nil {
+		seconds = *maxDurationSeconds
+	}
+	if seconds < minimum || seconds > int(background.MaxBackgroundExecTimeout) {
+		return 0, fmt.Errorf("max_duration_seconds must be between %d and 86400", minimum)
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+func foregroundWaitBeforeBudget(ctx context.Context, softTimeout int32) time.Duration {
+	wait := time.Duration(softTimeout) * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline) - time.Second; remaining < wait {
+			wait = remaining
+		}
+	}
+	if wait < 0 {
+		return 0
+	}
+	return wait
+}
+
+func execBudgetContext(parent context.Context, budgets []time.Duration) (context.Context, context.CancelFunc) {
+	budget := time.Duration(background.BackgroundExecTimeout) * time.Second
+	if len(budgets) > 0 {
+		budget = budgets[0]
+	}
+	deadline, hasDeadline := parent.Deadline()
+	if budget > 0 {
+		candidate := time.Now().Add(budget)
+		if !hasDeadline || candidate.Before(deadline) {
+			deadline = candidate
+			hasDeadline = true
+		}
+	}
+	if hasDeadline {
+		return context.WithDeadline(context.WithoutCancel(parent), deadline)
+	}
+	return context.WithCancel(context.WithoutCancel(parent))
 }

@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -266,7 +270,7 @@ type fakeRegistry struct {
 func (f *fakeRegistry) FetchRelease(_ context.Context, registryID, appID, revision string) (supermarket.AppDescriptor, error) {
 	pkg, ok := f.releases[registryID+"/"+appID+"/"+revision]
 	if !ok {
-		return supermarket.AppDescriptor{}, &supermarket.ProtocolError{Kind: supermarket.ErrorNotFound, Op: "fetch"}
+		return supermarket.AppDescriptor{}, supermarket.ErrAppNotFound
 	}
 	return pkg, nil
 }
@@ -274,7 +278,7 @@ func (f *fakeRegistry) FetchRelease(_ context.Context, registryID, appID, revisi
 func (f *fakeRegistry) FetchCurrentApp(_ context.Context, registryID, appID string) (supermarket.AppDescriptor, error) {
 	pkg, ok := f.current[registryID+"/"+appID]
 	if !ok {
-		return supermarket.AppDescriptor{}, &supermarket.ProtocolError{Kind: supermarket.ErrorNotFound, Op: "fetch"}
+		return supermarket.AppDescriptor{}, supermarket.ErrAppNotFound
 	}
 	return pkg, nil
 }
@@ -380,6 +384,40 @@ func (f *fakeDeps) Remove(_ context.Context, _, depID string, _ workspacedeps.Lo
 	f.removed = append(f.removed, depID)
 	delete(f.present, depID)
 	return workspacedeps.OperationResult{DependencyID: depID}, nil
+}
+
+// InstallOrder expands requires from the entries' manifests, prerequisites
+// first, the way the real catalog does.
+func (f *fakeDeps) InstallOrder(_ context.Context, depIDs []string) ([]string, error) {
+	seen := map[string]bool{}
+	var order []string
+	var visit func(id string)
+	visit = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		for _, required := range f.present[id].Dependency.Requires {
+			visit(required)
+		}
+		order = append(order, id)
+	}
+	for _, id := range depIDs {
+		visit(id)
+	}
+	return order, nil
+}
+
+// Dependents lists present managed entries whose requires name depID.
+func (f *fakeDeps) Dependents(_ context.Context, _, depID string) ([]string, error) {
+	var dependents []string
+	for id, entry := range f.present {
+		if id != depID && entry.Observed.Present && entry.Observed.Source == workspacedeps.SourceManaged && slices.Contains(entry.Dependency.Requires, depID) {
+			dependents = append(dependents, id)
+		}
+	}
+	slices.Sort(dependents)
+	return dependents, nil
 }
 
 type fakeConnectors struct {
@@ -737,6 +775,75 @@ func TestListShowsDiscoveredDependenciesThroughTheirCanonicalApp(t *testing.T) {
 	}
 	if !byID["node"].Discovered || byID["node"].Installation != nil || byID["node"].Dependencies[0].Entry == nil {
 		t.Fatalf("node item = %+v", byID["node"])
+	}
+}
+
+func TestCheckUpdatesIgnoresAppMissingFromRealRegistry(t *testing.T) {
+	liveRevision := revisionOf("a")
+	var liveChecked atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/api/registries/memoh/apps/gone":
+			http.NotFound(w, req)
+		case "/api/registries/memoh/apps/live":
+			liveChecked.Store(true)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"schema_version":"2","registry_id":"memoh","app_id":"live","name":"live","description":"","tags":[],"version":"2.0.0","category":"tool","category_name":"Tools","dependencies":["node"],"connectors":[],"skill_count":0,"dependency_count":1,"connector_count":0,"revision":"%s","skills":[]}`, liveRevision)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	h := newHarness()
+	gone, err := h.store.Upsert(context.Background(), UpsertInstallation{
+		BotID: testBotID, RegistryID: "memoh", AppID: "gone", Revision: revisionOf("c"),
+		Version: "1.0.0", Status: StatusInstalled, Reason: ReasonUser,
+	})
+	if err != nil {
+		t.Fatalf("store.Upsert(gone): %v", err)
+	}
+	live, err := h.store.Upsert(context.Background(), UpsertInstallation{
+		BotID: testBotID, RegistryID: "memoh", AppID: "live", Revision: revisionOf("b"),
+		Version: "1.0.0", Status: StatusInstalled, Reason: ReasonUser,
+	})
+	if err != nil {
+		t.Fatalf("store.Upsert(live): %v", err)
+	}
+	oldRevision := revisionOf("d")
+	if _, err := h.store.SetCheck(context.Background(), testBotID, gone.ID, oldRevision, "0.9.0", time.Now()); err != nil {
+		t.Fatalf("store.SetCheck(gone): %v", err)
+	}
+	if _, err := h.store.SetCheck(context.Background(), testBotID, live.ID, oldRevision, "0.9.0", time.Now()); err != nil {
+		t.Fatalf("store.SetCheck(live): %v", err)
+	}
+
+	installer := supermarket.NewInstaller(
+		supermarket.NewClient(server.URL, server.Client()), nil, nil,
+	)
+	registry := NewSupermarketPublisher(installer)
+	h.service = NewService(Options{
+		Store: h.store, Registry: registry, Skills: h.publisher,
+		Dependencies: h.deps, Connectors: h.connectors,
+	})
+	checked, err := h.service.CheckUpdates(context.Background(), testBotID)
+	if err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	if !liveChecked.Load() {
+		t.Fatal("CheckUpdates did not inspect the remaining App")
+	}
+	items := make(map[string]Installation, len(checked.Items))
+	for _, item := range checked.Items {
+		if item.Installation != nil {
+			items[item.AppID] = *item.Installation
+		}
+	}
+	if gone := items["gone"]; gone.AvailableRevision != "" || gone.AvailableVersion != "" || gone.LastCheckedAt == nil {
+		t.Fatalf("removed App check = %+v", gone)
+	}
+	if live := items["live"]; live.AvailableRevision != liveRevision || live.AvailableVersion != "2.0.0" || live.LastCheckedAt == nil {
+		t.Fatalf("remaining App check = %+v", live)
 	}
 }
 

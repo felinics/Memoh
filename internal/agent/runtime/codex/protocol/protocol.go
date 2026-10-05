@@ -15,10 +15,11 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // RequestID mirrors the app-server RequestId, which is a string or a number.
@@ -35,7 +36,7 @@ func NewRequestID(n uint64) RequestID {
 
 func (id RequestID) MarshalJSON() ([]byte, error) {
 	if len(id.raw) == 0 {
-		return nil, errors.New("codex protocol: marshaling zero RequestID")
+		return nil, errs.New("codex protocol: marshaling zero RequestID")
 	}
 	return id.raw, nil
 }
@@ -157,7 +158,7 @@ func DecodeInbound(line []byte) (*Inbound, error) {
 		Error  *RPCError       `json:"error"`
 	}
 	if err := json.Unmarshal(line, &probe); err != nil {
-		return nil, fmt.Errorf("codex protocol: decoding inbound line: %w", err)
+		return nil, errs.WrapDependency(err, "codex protocol: decoding inbound line")
 	}
 	in := &Inbound{
 		Method: probe.Method,
@@ -185,7 +186,7 @@ func DecodeInbound(line []byte) (*Inbound, error) {
 		// it as an orphan instead of dropping the error on the floor.
 		in.Kind = InboundResponse
 	default:
-		return nil, errors.New("codex protocol: inbound line is neither request, response, nor notification")
+		return nil, errs.NewDependency("codex protocol: inbound line is neither request, response, nor notification")
 	}
 	return in, nil
 }
@@ -249,5 +250,5 @@ func marshalKeyed(key string, payload any) ([]byte, error) {
 }
 
 func errNoVariant(name string) error {
-	return fmt.Errorf("codex protocol: %s: no variant set", name)
+	return errs.NewWithDepth(1, fmt.Sprintf("codex protocol: %s: no variant set", name))
 }

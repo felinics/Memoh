@@ -1,12 +1,15 @@
 package native
 
 import (
+	"context"
+
 	"github.com/felinics/twilight/sdk"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/telemetry"
 )
 
@@ -55,12 +58,19 @@ func wrapToolTracing(sdkTools []toolexec.Tool) []toolexec.Tool {
 			scoped.Context = ctx
 
 			output, err := execute(&scoped, input)
-			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, "")
-			}
+			markToolSpan(ctx, span, err)
 			return output, err
 		}
 	}
 	return wrapped
+}
+
+// markToolSpan marks a tool call's span failed when the call failed. A tool its
+// caller cancelled did not fail, for the reason endCallSpan gives for a model
+// call.
+func markToolSpan(ctx context.Context, span trace.Span, err error) {
+	if err != nil && !errs.CallerEnded(ctx) {
+		span.RecordError(spanFailure(ctx, err))
+		span.SetStatus(codes.Error, "")
+	}
 }

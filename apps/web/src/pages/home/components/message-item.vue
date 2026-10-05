@@ -280,24 +280,22 @@
                 </div>
               </div>
 
-              <div
+              <CalloutBanner
                 v-else-if="node.block.type === 'error' && (node.block.code || node.block.content)"
-                class="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-              >
-                <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-                <span class="min-w-0 whitespace-pre-wrap break-words">{{ errorBlockContent(node.block) }}</span>
-              </div>
+                tone="destructive"
+                size="sm"
+                :description="errorBlockContent(node.block)"
+              />
 
               <!-- Runtime notice block: a degradation the runtime wants the
                    user to see (tools unavailable, an interaction declined).
                    Warning-toned, quieter than an error — the turn continues. -->
-              <div
+              <CalloutBanner
                 v-else-if="node.block.type === 'notice' && node.block.content"
-                class="flex items-start gap-2 rounded-md border border-warning-border bg-warning-soft px-3 py-2 text-xs text-warning-foreground"
-              >
-                <TriangleAlert class="mt-0.5 size-3.5 shrink-0" />
-                <span class="min-w-0 whitespace-pre-wrap break-words">{{ noticeBlockContent(node.block) }}</span>
-              </div>
+                tone="warning"
+                size="sm"
+                :description="noticeBlockContent(node.block)"
+              />
 
               <!-- Attachment block. An assistant turn posts images as reply
                    content, so they render inline at natural aspect ratio rather
@@ -407,9 +405,9 @@ if (typeof document !== 'undefined') {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, useTemplateRef, watch } from 'vue'
-import { CircleAlert, Sparkles, Target, TriangleAlert } from 'lucide-vue-next'
+import { Sparkles, Target } from 'lucide-vue-next'
 import { formatRelativeTime, formatDateTime, formatCalendarTime } from '@/utils/date-time'
-import { Avatar, AvatarImage, AvatarFallback, Button, Textarea } from '@felinic/ui'
+import { Avatar, AvatarImage, AvatarFallback, Button, CalloutBanner, Textarea } from '@felinic/ui'
 import MarkdownRender, { enableKatex, enableMermaid } from 'markstream-vue'
 import { useSettingsStore } from '@/store/settings'
 import ToolCallGroup from './tool-call-group.vue'
@@ -421,6 +419,7 @@ import MessageActions from './message-actions.vue'
 import BackgroundTaskBlock from './background-task-block.vue'
 import DependencyMissingBlock from './dependency-missing-block.vue'
 import { isDependencyMissingBlock } from './dependency-missing'
+import { errorBlockText } from './error-block'
 import ChannelBadge from '@/components/chat-list/channel-badge/index.vue'
 import { useUserStore } from '@/store/user'
 import { useI18n } from 'vue-i18n'
@@ -851,13 +850,14 @@ function isVisibleAssistantBlock(block: ContentBlock): boolean {
 }
 
 function errorBlockContent(block: Pick<ErrorBlock, 'code' | 'content'> & { args?: Record<string, string> }): string {
-  const code = block.code?.trim()
-  const key = code ? `errors.${code}` : ''
-  return key && te(key) ? t(key, block.args ?? {}) : block.content
+  return errorBlockText(block, t, te)
 }
 
+// A notice's name may be a catalog code with copy; otherwise its own text stands.
 function noticeBlockContent(block: { name?: string; content: string; args?: Record<string, string> }): string {
-  return errorBlockContent({ code: block.name, content: block.content, args: block.args })
+  const code = block.name?.trim()
+  const key = code ? `errors.${code}` : ''
+  return key && te(key) ? t(key, block.args ?? {}) : block.content
 }
 
 // Consecutive tools and reasoning form one process, regardless of tool kind.

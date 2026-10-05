@@ -162,3 +162,29 @@ func TestCapabilityAppRefreshInvalidatesConnectorDiscoveryAfterAuthorization(t *
 		t.Fatal("authorization refresh left connector discovery cached")
 	}
 }
+
+func TestCapabilityReviewListsPrerequisiteRevisions(t *testing.T) {
+	p, _, _, _ := capabilityFixture(t)
+	p.opts.FreezeDependencies = func(ctx context.Context) (context.Context, []catalog.Dependency, error) {
+		return ctx, []catalog.Dependency{
+			{ID: "pandoc", Revision: "r-pandoc", Requires: []string{"python", "micromamba"}},
+			{ID: "micromamba", Revision: "r-mamba", Requires: []string{"python"}},
+			{ID: "python", Revision: "r-python"},
+		}, nil
+	}
+	_, revisions, prerequisites, err := p.freeze(t.Context(), []string{"pandoc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 1 || revisions["pandoc"] != "r-pandoc" {
+		t.Fatalf("dependencies = %v", revisions)
+	}
+	if len(prerequisites) != 2 || prerequisites["micromamba"] != "r-mamba" || prerequisites["python"] != "r-python" {
+		t.Fatalf("prerequisites = %v, want the transitive requires with their frozen revisions", prerequisites)
+	}
+	// A prerequisite the App also references directly is listed once, as a dependency.
+	_, revisions, prerequisites, err = p.freeze(t.Context(), []string{"pandoc", "python"})
+	if err != nil || len(revisions) != 2 || len(prerequisites) != 1 || prerequisites["micromamba"] != "r-mamba" {
+		t.Fatalf("dependencies = %v, prerequisites = %v, err = %v", revisions, prerequisites, err)
+	}
+}

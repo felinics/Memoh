@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/errs"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
 )
 
@@ -46,15 +47,31 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 	}
 	resp, err := h.upstream.Get(c.Request().Context(), requestPath, "application/json")
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "supermarket proxy failed", slog.String("path", requestPath), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
+		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable").
+			WithInternal(errs.WrapDependency(err, "proxy supermarket request", slog.String("path", upstreamPath)))
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return upstreamStatusError(resp.StatusCode, upstreamPath)
+	}
 
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	c.Response().WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(c.Response(), resp.Body)
 	return nil
+}
+
+// upstreamStatusError answers a Supermarket response that is not a success
+// without forwarding its body. A missing resource is unknown to the client;
+// any other status is Supermarket's failure.
+func upstreamStatusError(status int, upstreamPath string) error {
+	attrs := []slog.Attr{slog.Int("upstream_status", status), slog.String("path", upstreamPath)}
+	if status == http.StatusNotFound {
+		return echo.NewHTTPError(http.StatusNotFound, "supermarket resource not found").
+			WithInternal(errs.New("supermarket resource not found", attrs...))
+	}
+	return echo.NewHTTPError(http.StatusBadGateway, "supermarket request failed").
+		WithInternal(errs.NewDependency("supermarket answered with an error status", attrs...))
 }
 
 // --- Supermarket upstream types (for swagger) ---

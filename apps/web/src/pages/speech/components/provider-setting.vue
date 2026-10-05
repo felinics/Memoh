@@ -2,8 +2,10 @@
   <SettingsShell width="narrow">
     <div class="space-y-4 sm:space-y-6">
       <!-- Identity card: same header shape as the provider detail. -->
-      <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
-        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+      <ProviderIdentityCard
+        :name="curProvider?.name"
+      >
+        <template #media>
           <ProviderIcon
             v-if="curProvider?.icon"
             :icon="curProvider.icon"
@@ -15,13 +17,8 @@
           >
             {{ getInitials(curProvider?.name) }}
           </span>
-        </span>
-        <div class="min-w-0 flex-1">
-          <h2 class="truncate text-sm font-semibold">
-            {{ curProvider?.name }}
-          </h2>
-        </div>
-        <div class="ml-auto flex shrink-0 items-center gap-2">
+        </template>
+        <template #actions>
           <span class="text-xs text-muted-foreground">
             {{ $t('common.enable') }}
           </span>
@@ -31,8 +28,8 @@
             :aria-label="$t('common.enable')"
             @update:model-value="handleToggleEnable"
           />
-        </div>
-      </section>
+        </template>
+      </ProviderIdentityCard>
 
       <!-- Provider configuration card -->
       <form @submit.prevent="handleSaveProvider">
@@ -209,6 +206,7 @@
 </template>
 
 <script setup lang="ts">
+import ProviderIdentityCard from '@/components/provider-identity-card/index.vue'
 import {
   Dialog,
   DialogContent,

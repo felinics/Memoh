@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -77,4 +79,26 @@ func (PgxTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQ
 		span.SetStatus(codes.Error, "")
 	}
 	span.End()
+}
+
+// RecordPoolStats reports a pool's state as the pgxpool.* metrics:
+// connections in use against the maximum, how often an acquire found the
+// pool empty and how long it waited. A request that is slow because every
+// connection is taken looks, on its span, like a slow query; these say which
+// one it is.
+//
+// The metrics come from otelpgx, which is used here for nothing else. They
+// are counts read from pool.Stat(), so the objection that keeps its query
+// tracer out (see PgxTracer) does not apply. Each pool is told apart by
+// db.client.connection.pool.name, host:port/database.
+//
+// Call it once per pool, after the pool is opened. The meter comes from the
+// global provider, which hands off to the one Setup installs whether the pool
+// was opened before Setup ran or after; with metrics off it is a no-op. A
+// failure to register goes to the OpenTelemetry error handler, because
+// missing pool metrics are not a reason to refuse a database.
+func RecordPoolStats(pool *pgxpool.Pool) {
+	if err := otelpgx.RecordStats(pool); err != nil {
+		otel.Handle(err)
+	}
 }

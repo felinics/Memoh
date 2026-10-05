@@ -79,6 +79,8 @@ jobs:
         with:
           node-version: lts/*
           cache: pnpm
+      - name: UI contract guard
+        run: node scripts/check-ui-contract.mjs
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Run ESLint

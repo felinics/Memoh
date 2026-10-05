@@ -88,9 +88,11 @@ type Config struct {
 	Telemetry             TelemetryConfig             `toml:"telemetry"`
 }
 
-// TelemetryConfig configures OpenTelemetry trace export. It is off unless an
-// endpoint is set, here or through the standard OTEL_EXPORTER_OTLP_ENDPOINT /
-// OTEL_EXPORTER_OTLP_TRACES_ENDPOINT variables.
+// TelemetryConfig configures OpenTelemetry trace and metric export. It is off
+// unless an endpoint is set, here or through the standard
+// OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_TRACES_ENDPOINT variables.
+// Metrics go to the same collector; OTEL_METRICS_EXPORTER=none turns them
+// off and leaves traces on.
 //
 // "Off" has to mean no exporter at all rather than an exporter pointed
 // somewhere harmless: the OTLP SDK defaults an unset endpoint to
@@ -124,12 +126,12 @@ const (
 	TelemetryProtocolHTTP = "http"
 )
 
-// Enabled reports whether trace export should be configured.
+// Enabled reports whether OTLP export should be configured.
 func (c TelemetryConfig) Enabled() bool {
 	return strings.TrimSpace(c.Endpoint) != ""
 }
 
-// applyTelemetryEnvOverrides lets the standard OTEL_* variables drive trace
+// applyTelemetryEnvOverrides lets the standard OTEL_* variables drive OTLP
 // export, overriding the config file.
 //
 // Operators of a self-hosted deployment know these variable names from every

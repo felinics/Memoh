@@ -44,36 +44,6 @@ func TestTranscriptSurvivesEventBufferCap(t *testing.T) {
 	}
 }
 
-// TestAppendTranscriptTextMergeSemantics pins the failure-note semantics:
-// merge into a trailing assistant text when possible, otherwise a new
-// assistant message - mirroring how the builder accumulates text while
-// streaming.
-func TestAppendTranscriptTextMergeSemantics(t *testing.T) {
-	t.Parallel()
-
-	merged := AppendTranscriptText([]sdk.Message{
-		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "partial answer"}}},
-	}, "agent failed: boom")
-	if len(merged) != 1 {
-		t.Fatalf("messages = %d, want merged into existing assistant", len(merged))
-	}
-	if text := merged[0].Content[0].(sdk.TextPart).Text; text != "partial answer\n\nagent failed: boom" {
-		t.Fatalf("merged text = %q", text)
-	}
-
-	appended := AppendTranscriptText([]sdk.Message{
-		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.ToolCallPart{ToolCallID: "c1", ToolName: "exec"}}},
-	}, "agent failed: boom")
-	if len(appended) != 2 {
-		t.Fatalf("messages = %d, want new assistant after tool-call message", len(appended))
-	}
-
-	fromEmpty := AppendTranscriptText(nil, "agent failed: boom")
-	if len(fromEmpty) != 1 || fromEmpty[0].Role != sdk.MessageRoleAssistant {
-		t.Fatalf("fromEmpty = %#v, want single assistant message", fromEmpty)
-	}
-}
-
 func TestTranscriptMCPErrorResultSetsToolResultError(t *testing.T) {
 	t.Parallel()
 

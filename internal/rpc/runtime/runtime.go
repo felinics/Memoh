@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"fmt"
 	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/felinics/memoh/internal/rpc"
 	"github.com/felinics/memoh/internal/rpc/runtimepb"
 )
 
@@ -43,6 +44,17 @@ func Public(err error) error {
 func (e *publicError) Error() string { return e.err.Error() }
 func (e *publicError) Unwrap() error { return e.err }
 
+// errPublic is the identity of a Public error restored by the client. Its
+// text is the peer's adapter message.
+var errPublic = errors.New("internal runtime call failed")
+
+// publicReason is how a Public error travels in the envelope: its text goes
+// under the adapter message key.
+var publicReason = rpc.Reason{Err: errPublic, Reason: "runtime.public_error", Code: codes.Unknown, Message: "internal runtime call failed"}
+
+// reasons is the wire table of this transport.
+var reasons = rpc.Reasons{publicReason}
+
 // grpcStatusError is implemented by errors constructed via status.Error.
 // Checked with a direct type assertion (no unwrap): only a status built by
 // this layer's handlers is intentional wire vocabulary. A status buried in
@@ -56,15 +68,13 @@ type grpcStatusError interface {
 
 type Server struct {
 	runtimepb.UnimplementedRuntimeServiceServer
-	logger   *slog.Logger
 	handlers map[string]Handler
 }
 
-func NewServer(log *slog.Logger, handlers map[string]Handler) *Server {
-	if log == nil {
-		log = slog.Default()
-	}
-	return &Server{logger: log.With(slog.String("component", "runtime_rpc")), handlers: handlers}
+// NewServer serves handlers by method name. The RPC result line, written by
+// the server interceptor, records each call.
+func NewServer(handlers map[string]Handler) *Server {
+	return &Server{handlers: handlers}
 }
 
 func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtimepb.CallResponse, error) {
@@ -75,25 +85,36 @@ func (s *Server) Call(ctx context.Context, req *runtimepb.CallRequest) (*runtime
 	}
 	result, err := handler(ctx, json.RawMessage(req.GetPayload()))
 	if err != nil {
-		s.logger.ErrorContext(ctx, "runtime rpc call failed", slog.String("method", method), slog.Any("error", err))
-		var public *publicError
-		if errors.As(err, &public) {
-			return nil, status.Error(codes.Unknown, public.Error())
-		}
-		if _, direct := err.(grpcStatusError); direct { //nolint:errorlint // deliberate direct assertion: only a status built by this layer is wire vocabulary; a wrapped one is a downstream leak
-			return nil, err
-		}
-		return nil, status.Error(codes.Internal, "internal runtime operation failed")
+		rpc.RecordError(ctx, fmt.Errorf("runtime method %s: %w", method, err))
+		return nil, encodeError(err)
 	}
 	if result == nil {
 		return &runtimepb.CallResponse{}, nil
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "runtime rpc result encoding failed", slog.String("method", method), slog.Any("error", err))
+		rpc.RecordError(ctx, fmt.Errorf("encode runtime method %s result: %w", method, err))
 		return nil, status.Error(codes.Internal, "internal runtime result encoding failed")
 	}
 	return &runtimepb.CallResponse{Payload: data}, nil
+}
+
+// encodeError maps a handler error to the status the client receives. A
+// Public error travels as its adapter message, a status built by the handler
+// group as it is, and a catalog apperror as its code and args. Anything else
+// is an opaque internal error.
+func encodeError(err error) error {
+	var public *publicError
+	if errors.As(err, &public) {
+		return publicReason.Status(public.Error())
+	}
+	if _, direct := err.(grpcStatusError); direct { //nolint:errorlint // deliberate direct assertion: only a status built by this layer is wire vocabulary; a wrapped one is a downstream leak
+		return err
+	}
+	if encoded := rpc.AppErrorStatus(err); encoded != nil {
+		return encoded
+	}
+	return status.Error(codes.Internal, "internal runtime operation failed")
 }
 
 type Client struct {
@@ -115,22 +136,34 @@ func (c *Client) Call(ctx context.Context, method string, input, output any) err
 	}
 	resp, err := c.client.Call(ctx, &runtimepb.CallRequest{Method: method, Payload: payload})
 	if err != nil {
-		switch status.Code(err) {
-		case codes.Unavailable, codes.DeadlineExceeded:
-			return errors.Join(ErrUnavailable, err)
-		case codes.Unauthenticated:
-			return errors.Join(ErrUnavailable, ErrUnauthenticated, err)
-		case codes.Unknown:
-			// Unknown carries a Public() message from the peer's handler;
-			// strip the rpc-status envelope so callers (and users) see the
-			// original adapter error text.
-			return errors.New(status.Convert(err).Message())
-		default:
-			return err
-		}
+		return decodeError(err)
 	}
 	if output == nil || len(resp.GetPayload()) == 0 {
 		return nil
 	}
 	return json.Unmarshal(resp.GetPayload(), output)
+}
+
+// decodeError maps a received status to what the caller sees. A Public error
+// is restored from its envelope and a catalog code to its apperror. A status
+// this transport does not recognize is returned unchanged, for the handler
+// group's client to restore its own reasons.
+func decodeError(err error) error {
+	if restored := reasons.Decode(err); restored != nil {
+		return restored
+	}
+	if restored := rpc.DecodeAppError(err); restored != nil {
+		return restored
+	}
+	switch status.Code(err) {
+	case codes.Unavailable:
+		// DeadlineExceeded and Canceled are not unavailability: the status
+		// stays on the chain for the caller to attribute against its own
+		// context.
+		return errors.Join(ErrUnavailable, err)
+	case codes.Unauthenticated:
+		return errors.Join(ErrUnavailable, ErrUnauthenticated, err)
+	default:
+		return err
+	}
 }

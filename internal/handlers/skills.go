@@ -73,10 +73,10 @@ type skillsOpResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param workspace_target_id query string false "Workspace target ID"
 // @Success 200 {object} SkillsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [get].
 func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionManage)
@@ -90,7 +90,7 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 	}
 	skills, err := h.listSkillsFromContainer(ctx, botID)
 	if err != nil {
-		return workspaceTargetHTTPError(h.logger, err)
+		return workspaceTargetHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, SkillsResponse{Skills: skills})
 }
@@ -100,10 +100,10 @@ func (h *ContainerdHandler) ListSkills(c echo.Context) error {
 // @Tags skills
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} SafeSkillsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/skills/catalog [get].
 func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionChat)
@@ -123,9 +123,9 @@ func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body SkillsUpsertRequest true "Skills payload"
 // @Success 200 {object} skillsOpResponse
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
-// @Failure 404 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [post].
@@ -237,10 +237,10 @@ func skillSaveHTTPError(err error) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body SkillsDeleteRequest true "Delete skills payload"
 // @Success 200 {object} skillsOpResponse
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills [delete].
 func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
@@ -353,10 +353,10 @@ func pruneEmptySkillNamespaceDirs(ctx context.Context, client *bridge.Client, sk
 // @Param bot_id path string true "Bot ID"
 // @Param payload body SkillsActionRequest true "Skill action payload"
 // @Success 200 {object} skillsOpResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/container/skills/actions [post].
 func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {

@@ -13,10 +13,10 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/providertemplates"
 	"github.com/felinics/memoh/internal/registry"
@@ -79,15 +79,16 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
-		if isProviderNameConflict(err) {
+		if db.IsUniqueViolation(err) {
 			if provider, ok, activateErr := s.activateHiddenRegistryTemplate(ctx, req, clientType, icon, configJSON, metadataJSON); ok {
 				if activateErr != nil {
 					return GetResponse{}, activateErr
 				}
 				return s.toGetResponse(provider), nil
 			}
+			return GetResponse{}, fmt.Errorf("create provider: %w: %w", ErrNameTaken, err)
 		}
-		return GetResponse{}, fmt.Errorf("create provider: %w", err)
+		return GetResponse{}, errs.Wrap(err, "create provider")
 	}
 
 	return s.toGetResponse(provider), nil
@@ -96,7 +97,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (GetResponse, e
 func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplateRequest) (GetResponse, error) {
 	expectedDomain := providertemplates.Domain(strings.TrimSpace(req.Domain))
 	if expectedDomain != "" && !providertemplates.IsValidDomain(expectedDomain) {
-		return GetResponse{}, apperror.New(apperror.CodeProviderTemplateDomainInvalid, nil)
+		return GetResponse{}, fmt.Errorf("%w: %s", providertemplates.ErrDomainInvalid, expectedDomain)
 	}
 	template, err := providertemplates.Resolve(ctx, s.queries, req.TemplateID, expectedDomain)
 	if err != nil {
@@ -105,7 +106,7 @@ func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplate
 	switch providertemplates.Domain(template.Domain) {
 	case providertemplates.DomainLLM, providertemplates.DomainSpeech, providertemplates.DomainTranscription, providertemplates.DomainVideo:
 	default:
-		return GetResponse{}, apperror.New(apperror.CodeProviderTemplateDomainMismatch, nil)
+		return GetResponse{}, fmt.Errorf("%w: %s", providertemplates.ErrDomainMismatch, template.Domain)
 	}
 
 	name := strings.TrimSpace(req.Name)
@@ -115,11 +116,11 @@ func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplate
 	config := providertemplates.MergeConfig(providertemplates.DecodeConfig(template.DefaultConfig), req.Config)
 	configJSON, err := providertemplates.Marshal(normalizeProviderConfig(template.Driver, config))
 	if err != nil {
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, err, nil)
+		return GetResponse{}, err
 	}
 	metadataJSON, err := providertemplates.Marshal(providertemplates.MergeMetadata(template, req.Metadata))
 	if err != nil {
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, err, nil)
+		return GetResponse{}, err
 	}
 	provider, err := s.queries.CreateProviderFromTemplate(ctx, sqlc.CreateProviderFromTemplateParams{
 		ProviderTemplateID: template.ID,
@@ -131,10 +132,10 @@ func (s *Service) CreateFromTemplate(ctx context.Context, req CreateFromTemplate
 		Metadata:           metadataJSON,
 	})
 	if err != nil {
-		if isProviderNameConflict(err) {
-			return GetResponse{}, apperror.Wrap(apperror.CodeProviderNameTaken, err, nil)
+		if db.IsUniqueViolation(err) {
+			return GetResponse{}, fmt.Errorf("create provider from template: %w: %w", ErrNameTaken, err)
 		}
-		return GetResponse{}, apperror.Wrap(apperror.CodeProviderTemplateOperationFailed, fmt.Errorf("create provider from template: %w", err), nil)
+		return GetResponse{}, errs.Wrap(err, "create provider from template")
 	}
 	return s.toGetResponse(provider), nil
 }
@@ -148,7 +149,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 
 	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get provider: %w", err)
+		return GetResponse{}, errs.Wrap(err, "get provider")
 	}
 
 	return s.toGetResponse(provider), nil
@@ -158,7 +159,7 @@ func (s *Service) Get(ctx context.Context, id string) (GetResponse, error) {
 func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, error) {
 	provider, err := s.queries.GetProviderByName(ctx, name)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get provider by name: %w", err)
+		return GetResponse{}, errs.Wrap(err, "get provider by name")
 	}
 
 	return s.toGetResponse(provider), nil
@@ -168,7 +169,7 @@ func (s *Service) GetByName(ctx context.Context, name string) (GetResponse, erro
 func (s *Service) List(ctx context.Context) ([]GetResponse, error) {
 	providers, err := s.queries.ListProviders(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list providers: %w", err)
+		return nil, errs.Wrap(err, "list providers")
 	}
 
 	results := make([]GetResponse, 0, len(providers))
@@ -187,7 +188,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 
 	existing, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("get provider: %w", err)
+		return GetResponse{}, errs.Wrap(err, "get provider")
 	}
 
 	name := existing.Name
@@ -244,7 +245,10 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Get
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
-		return GetResponse{}, fmt.Errorf("update provider: %w", err)
+		if db.IsUniqueViolation(err) {
+			return GetResponse{}, fmt.Errorf("update provider: %w: %w", ErrNameTaken, err)
+		}
+		return GetResponse{}, errs.Wrap(err, "update provider")
 	}
 
 	return s.toGetResponse(updated), nil
@@ -258,7 +262,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	}
 
 	if err := s.queries.DeleteProvider(ctx, providerID); err != nil {
-		return fmt.Errorf("delete provider: %w", err)
+		return errs.Wrap(err, "delete provider")
 	}
 	return nil
 }
@@ -287,13 +291,20 @@ const (
 // misclassified as "Invalid API key" even after the key had authenticated.
 // Per-model availability is covered by models.Service.Test instead.
 //
-// Outcome semantics (#1087) — the models list is only a partial falsifier:
-//   - reachable + 200: verified (ok);
-//   - reachable + 401/403: auth failed (auth_error) — the request carries no
-//     model parameter, so this cannot be confused with "model not found";
-//   - reachable + anything else (404/5xx): unverified, NOT a failure — the
-//     base URL may be wrong, or the provider may not implement model listing;
-//   - unreachable (DNS/TCP): error, the only hard failure kept at this layer.
+// Outcome semantics (#1087): the models list is only a partial falsifier,
+// so the outcome follows what sdk.Provider.Test returned:
+//   - nil: verified (ok), except for OpenCode Go, whose models list is
+//     public and answers without valid credentials (unverified);
+//   - an *sdk.APIError of kind authentication or permission_denied: auth
+//     failed (auth_error). The request carries no model parameter, so this
+//     cannot be confused with "model not found";
+//   - any other *sdk.APIError (404, 429, 5xx, ...): unverified, NOT a
+//     failure. The endpoint answered, but the base URL may be wrong or the
+//     provider may not implement model listing;
+//   - no *sdk.APIError in the chain (DNS, TCP, TLS, an ended context): error,
+//     the only hard failure kept at this layer.
+//
+// Every outcome other than ok carries the SDK error as Cause.
 func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	providerID, err := db.ParseUUID(id)
 	if err != nil {
@@ -302,7 +313,7 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 
 	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
-		return TestResponse{}, fmt.Errorf("get provider: %w", err)
+		return TestResponse{}, errs.Wrap(err, "get provider")
 	}
 
 	cfg := providerConfig(provider.Config)
@@ -317,64 +328,31 @@ func (s *Service) Test(ctx context.Context, id string) (TestResponse, error) {
 	sdkProvider := models.NewSDKProvider(baseURL, creds.APIKey, creds.CodexAccountID, clientType, probeTimeout, nil)
 
 	start := time.Now()
-	result := sdkProvider.Test(ctx)
-	message := providerTestMessage(result)
-
-	switch result.Status {
-	case sdk.ProviderStatusUnreachable:
-		return TestResponse{
-			Status:    TestStatusError,
-			Reachable: false,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   message,
-		}, nil
-	case sdk.ProviderStatusUnhealthy:
-		if strings.Contains(result.Message, "authentication failed") {
-			return TestResponse{
-				Status:    TestStatusAuthError,
-				Reachable: true,
-				LatencyMs: time.Since(start).Milliseconds(),
-				Message:   message,
-			}, nil
-		}
-		return TestResponse{
-			Status:    TestStatusUnverified,
-			Reachable: true,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   message,
-		}, nil
-	default:
-		return TestResponse{
-			Status:    TestStatusOK,
-			Reachable: true,
-			LatencyMs: time.Since(start).Milliseconds(),
-			Message:   result.Message,
-		}, nil
+	resp := providerTestOutcome(sdkProvider.Test(ctx))
+	if clientType == models.ClientTypeOpenCodeGo && resp.Status == TestStatusOK {
+		// Go's public catalog succeeds without valid credentials. Keep the UI
+		// verdict unverified until the user runs a real model generation probe.
+		resp.Status = TestStatusUnverified
 	}
+	resp.LatencyMs = time.Since(start).Milliseconds()
+	return resp, nil
 }
 
-// errorDetailer is implemented by transport errors that can expand into a
-// fuller diagnostic, including the raw upstream response body. The probe path
-// only fills a short summary (e.g. "service error (404):"), so we reach for
-// this richer detail when the upstream replies with an opaque, non-JSON body.
-type errorDetailer interface {
-	Detail() string
-}
-
-// providerTestMessage returns the most informative message for a probe result,
-// preferring the upstream response detail over the short summary so that
-// opaque statuses still surface the provider's actual response body.
-func providerTestMessage(result *sdk.ProviderTestResult) string {
-	if result == nil {
-		return ""
+// providerTestOutcome maps the result of sdk.Provider.Test to a TestResponse
+// by the rules documented on Service.Test.
+func providerTestOutcome(err error) TestResponse {
+	if err == nil {
+		return TestResponse{Status: TestStatusOK, Reachable: true}
 	}
-	var detailer errorDetailer
-	if errors.As(result.Error, &detailer) {
-		if detail := strings.TrimSpace(detailer.Detail()); detail != "" {
-			return detail
-		}
+	cause := errs.WrapDependency(err, "test provider")
+	if kind := sdk.KindOf(err); kind == sdk.KindAuthentication || kind == sdk.KindPermissionDenied {
+		return TestResponse{Status: TestStatusAuthError, Reachable: true, Cause: cause}
 	}
-	return result.Message
+	var apiErr *sdk.APIError
+	if errors.As(err, &apiErr) {
+		return TestResponse{Status: TestStatusUnverified, Reachable: true, Cause: cause}
+	}
+	return TestResponse{Status: TestStatusError, Cause: cause}
 }
 
 // FetchRemoteModels fetches available models from the provider using the Twilight AI SDK.
@@ -386,7 +364,7 @@ func (s *Service) FetchRemoteModels(ctx context.Context, id string) ([]RemoteMod
 
 	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if err != nil {
-		return nil, fmt.Errorf("get provider: %w", err)
+		return nil, errs.Wrap(err, "get provider")
 	}
 
 	clientType := models.ClientType(provider.ClientType)
@@ -514,7 +492,7 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 
 	sdkModels, err := sdkProvider.ListModels(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list models: %w", err)
+		return nil, errs.WrapDependency(err, "list models")
 	}
 
 	// Best-effort capability lookup: template/catalog entries keyed by model ID
@@ -594,6 +572,10 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 			remote.ThinkingBudgetMax = template.ThinkingBudgetMax
 			remote.ContextWindow = template.ContextWindow
 			remote.CapabilitiesKnown = true
+		} else if clientType == models.ClientTypeOpenCodeGo {
+			remote.Compatibilities = []string{models.CompatToolCall, models.CompatReasoning}
+			remote.ThinkingMode = models.ThinkingModeAlways
+			remote.CapabilitiesKnown = true
 		}
 		remoteModels = append(remoteModels, remote)
 	}
@@ -617,6 +599,10 @@ func (s *Service) toGetResponse(provider sqlc.Provider) GetResponse {
 	var icon string
 	if provider.Icon.Valid {
 		icon = provider.Icon.String
+	}
+	// Instances created before the Go preset had an icon retain an empty value.
+	if icon == "" && provider.ClientType == string(models.ClientTypeOpenCodeGo) {
+		icon = "opencode-go"
 	}
 	var templateID string
 	if provider.ProviderTemplateID.Valid {
@@ -841,19 +827,9 @@ func (s *Service) activateHiddenRegistryTemplate(
 		Metadata:   metadataJSON,
 	})
 	if err != nil {
-		return sqlc.Provider{}, true, fmt.Errorf("activate registry provider template: %w", err)
+		return sqlc.Provider{}, true, errs.Wrap(err, "activate registry provider template")
 	}
 	return updated, true, nil
-}
-
-func isProviderNameConflict(err error) bool {
-	if db.IsUniqueViolation(err) {
-		return true
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "unique") &&
-		strings.Contains(message, "providers") &&
-		strings.Contains(message, "name")
 }
 
 func isHiddenRegistryTemplate(provider sqlc.Provider) bool {

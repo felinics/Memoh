@@ -200,7 +200,7 @@ func TestAgentStreamRetryPreflightFailureDoesNotPersistUncommittedInjection(t *t
 			if !providerAttemptContainsText(params.Messages, marker) {
 				t.Fatal("failed dispatched attempt did not receive the injected message")
 			}
-			return sdk.ModelResult{}, errors.New("api error 500")
+			return sdk.ModelResult{}, serverErr()
 		default:
 			t.Fatalf("provider call %d crossed the failed retry preflight", call)
 			return sdk.ModelResult{}, nil

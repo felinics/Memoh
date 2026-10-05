@@ -22,7 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -91,27 +91,15 @@ func (a *Agent) applyContextView(ctx context.Context, cfg RunConfig) (RunConfig,
 	return cfg.RefreshContextFrag(), nil
 }
 
-const publicContextPreparationError = "The model context could not be prepared."
-
-// publicResponseInterruptedError is the fallback detail for a steer checkpoint
-// that could not be persisted, used only if the public registry lookup fails.
-const publicResponseInterruptedError = "The model response was interrupted. Please try again."
-
+// contextViewStreamError is the error event for a model context that could not
+// be prepared. The chain keeps contextfrag's budget sentinels for the
+// application to name; any other preparation failure is the runtime's own.
 func contextViewStreamError(err error) StreamEvent {
-	var code apperror.Code
-	switch {
-	case errors.Is(err, contextfrag.ErrProtectedContextOverflow):
-		code = apperror.CodeContextProtectedOverflow
-	case errors.Is(err, contextfrag.ErrBudgetUnsatisfied):
-		code = apperror.CodeContextBudgetUnsatisfied
-	default:
-		return StreamEvent{Type: EventError, Error: publicContextPreparationError}
+	event := StreamEvent{Type: EventError, Cause: errs.WrapWithDepth(1, err, "prepare context view")}
+	if !errors.Is(err, contextfrag.ErrProtectedContextOverflow) && !errors.Is(err, contextfrag.ErrBudgetUnsatisfied) {
+		event.Code = codeRunFailed
 	}
-	public, ok := apperror.PublicFrom(apperror.New(code, nil), "")
-	if !ok {
-		return StreamEvent{Type: EventError, Error: publicContextPreparationError}
-	}
-	return StreamEvent{Type: EventError, Code: string(public.Code), Error: public.Detail}
+	return event
 }
 
 func installContextStepFailureHandler(cfg *RunConfig, cancel context.CancelCauseFunc) {
@@ -683,6 +671,7 @@ func (a *Agent) assembleTools(
 		}
 		usage = "## Tool usage\n\n" + strings.Join(texts, "\n\n")
 	}
+	//nolint:contextcheck // Each tool call reads its own context from its ToolExecContext, not from this assembly.
 	return wrapToolTracing(allTools), usage, structuredToolUsage(usageSections, cfg.ContextScope), toolDefs, nil
 }
 

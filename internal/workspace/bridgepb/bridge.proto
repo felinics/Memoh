@@ -76,6 +76,8 @@ message ExecInput {
   TerminalResize resize = 7;
   bool clean_env = 8;
   repeated string unset_env = 9;
+  // Opt-in process liveness frames; older bridges safely ignore this field.
+  bool report_liveness = 10;
 }
 
 message TerminalResize {
@@ -88,6 +90,7 @@ message ExecOutput {
     STDOUT = 0;
     STDERR = 1;
     EXIT = 2;
+    HEARTBEAT = 3;
   }
   Stream stream = 1;
   bytes data = 2;

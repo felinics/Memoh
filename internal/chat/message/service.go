@@ -1376,6 +1376,25 @@ func (s *DBService) ListVisibleFromBySession(ctx context.Context, sessionID stri
 	return msgs, nil
 }
 
+func (s *DBService) GetVisibleHistoryTurnRequestMessageIDByTurn(ctx context.Context, sessionID string, turnID string) (string, error) {
+	pgSessionID, err := dbpkg.ParseUUID(sessionID)
+	if err != nil {
+		return "", err
+	}
+	pgTurnID, err := dbpkg.ParseUUID(turnID)
+	if err != nil {
+		return "", err
+	}
+	turn, err := s.queries.GetHistoryTurnByID(ctx, sqlc.GetHistoryTurnByIDParams{
+		SessionID: pgSessionID,
+		OldTurnID: pgTurnID,
+	})
+	if err != nil {
+		return "", err
+	}
+	return uuidString(turn.RequestMessageID), nil
+}
+
 func (s *DBService) GetVisibleTurnByMessage(ctx context.Context, sessionID string, messageID string) (HistoryTurn, error) {
 	pgSessionID, err := dbpkg.ParseUUID(sessionID)
 	if err != nil {
@@ -2335,7 +2354,7 @@ func toMessagesFromActiveSinceBySession(rows []sqlc.ListActiveMessagesSinceBySes
 func toMessagesFromActiveSinceWithinBytes(rows []sqlc.ListActiveMessagesSinceWithinBytesRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromActiveSinceBySessionRow(sqlc.ListActiveMessagesSinceBySessionRow(row)))
+		messages = append(messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
 	}
 	return messages
 }
@@ -2343,9 +2362,41 @@ func toMessagesFromActiveSinceWithinBytes(rows []sqlc.ListActiveMessagesSinceWit
 func toMessagesFromActiveSinceBySessionWithinBytes(rows []sqlc.ListActiveMessagesSinceBySessionWithinBytesRow) []Message {
 	messages := make([]Message, 0, len(rows))
 	for _, row := range rows {
-		messages = append(messages, toMessageFromActiveSinceBySessionRow(sqlc.ListActiveMessagesSinceBySessionRow(row)))
+		messages = append(messages, toAdmissionMessage(sqlc.ListActiveMessagesSinceBySessionRow(row)))
 	}
 	return messages
+}
+
+// toAdmissionMessage leaves metadata undecoded for the byte-budgeted loaders:
+// the budget only covers content, and decoding every row up front holds all
+// of their metadata, legacy lifecycle audits included, at once (CM-ADM-001).
+func toAdmissionMessage(row sqlc.ListActiveMessagesSinceBySessionRow) Message {
+	m := toMessageFieldsWithMetadata(
+		row.ID,
+		row.BotID,
+		row.SessionID,
+		row.SenderChannelIdentityID,
+		row.SenderUserID,
+		row.SenderDisplayName,
+		row.SenderAvatarUrl,
+		row.Platform,
+		row.ExternalMessageID,
+		row.SourceReplyToMessageID,
+		row.Role,
+		row.Content,
+		row.Metadata,
+		row.Usage,
+		row.SessionMode,
+		row.RuntimeType,
+		row.EventID,
+		row.DisplayText,
+		row.CreatedAt,
+		nil,
+	)
+	if row.CompactID.Valid {
+		m.CompactID = row.CompactID.String()
+	}
+	return m
 }
 
 func toMessagesFromLatest(rows []sqlc.ListMessagesLatestRow) []Message {

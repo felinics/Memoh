@@ -231,7 +231,7 @@ func TestStreamChatWSRejectsACPRequestedSkillsBeforePool(t *testing.T) {
 	}
 	resolver.SetACPSessionPool(pool)
 
-	err := resolver.StreamChatWS(
+	_, err := resolver.StreamChatWS(
 		context.Background(),
 		requestedSkillGuardRequest("session-1"),
 		make(chan WSStreamEvent, 1),

@@ -119,7 +119,7 @@ func (s *mockExecContainerService) WriteFile(_ context.Context, req *pb.WriteFil
 // Test helpers
 // ---------------------------------------------------------------------------
 
-func setupExecTestInfra(t *testing.T, svc *mockExecContainerService) (bridge.Provider, func()) {
+func setupExecTestInfra(t *testing.T, svc pb.ContainerServiceServer) (bridge.Provider, func()) {
 	t.Helper()
 
 	lis := bufconn.Listen(1 << 20)

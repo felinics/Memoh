@@ -19,6 +19,7 @@ import (
 	acpagent "github.com/felinics/memoh/internal/agent/runtime/acp"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agentcredential"
 	audiopkg "github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/boot"
@@ -90,7 +91,7 @@ func provideMessageHandler(log *slog.Logger, msgService *message.DBService, sess
 	return h
 }
 
-func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline) *handlers.SessionHandler {
+func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service, acpPool *acpagent.SessionPool, botService *bots.Service, accountService *accounts.Service, routeService *route.DBService, workdirService *workdir.Service, botAgentsService *botagents.Service, agentService *application.Service, pipeline *timeline.Pipeline, runs ledger.Store) *handlers.SessionHandler {
 	handler := handlers.NewSessionHandler(log, sessionService, acpPool, botService, accountService)
 	handler.SetThreadEnricher(routeService)
 	handler.SetWorkdirService(workdirService)
@@ -98,6 +99,7 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	handler.SetAgentRuntimeService(agentService)
 	handler.SetModelPreferenceService(agentService)
 	handler.SetProjectionCache(pipeline)
+	handler.SetInvocationLookup(runs)
 	return handler
 }
 
@@ -179,7 +181,7 @@ func provideServer(params serverParams) *server.Server {
 	)
 }
 
-func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {
+func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, agentService *application.Service, shutdowner fx.Shutdowner, cfg config.Config, queries dbstore.Queries, accountStore dbstore.AccountStore, botService *bots.Service, _ *handlers.ContainerdHandler, manager *workspace.Manager, mcpConnService *mcp.ConnectionService, toolGateway *mcp.ToolGatewayService, channelRuntime channel.Runtime, modelsService *models.Service) {
 	fmt.Printf("Starting Memoh Agent %s\n", version.GetInfo())
 
 	lc.Append(fx.Hook{
@@ -210,10 +212,13 @@ func startServer(lc fx.Lifecycle, logger *slog.Logger, srv *server.Server, shutd
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
-			if err := srv.Stop(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return fmt.Errorf("server stop: %w", err)
+			stopErr := srv.Stop(ctx)
+			if errors.Is(stopErr, http.ErrServerClosed) {
+				stopErr = nil
+			} else if stopErr != nil {
+				stopErr = fmt.Errorf("server stop: %w", stopErr)
 			}
-			return nil
+			return errors.Join(stopErr, agentService.DrainActiveTurns(ctx))
 		},
 	})
 }

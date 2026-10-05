@@ -210,39 +210,42 @@ func TestSpawnAdapterGenerateWithWatchdogDoesNotRetryPersistedInterruptedCheckpo
 	}
 }
 
+// assertSpawnAttemptObservedAsRetry requires the session to see an attempt the
+// spawn provider runs again as one retry and nothing else: no error, no abort.
 func assertSpawnAttemptObservedAsRetry(t *testing.T, events []StreamEvent, attempt, maxAttempts int) {
 	t.Helper()
-	errorIndex, retryIndex := -1, -1
-	for i, event := range events {
+	retries := 0
+	for _, event := range events {
 		switch event.Type {
 		case EventError:
-			if event.Error == "agent run aborted" {
-				errorIndex = i
-			}
+			t.Fatalf("retryable attempt published an error: %#v", events)
 		case EventAgentAbort:
 			t.Fatalf("retryable attempt published terminal abort: %#v", events)
 		case EventRetry:
-			if event.Attempt == attempt && event.MaxAttempt == maxAttempts {
-				retryIndex = i
+			if event.Attempt != attempt || event.MaxAttempt != maxAttempts {
+				t.Fatalf("retry event = %#v, want attempt %d of %d", event, attempt, maxAttempts)
 			}
+			retries++
 		}
 	}
-	if errorIndex < 0 || retryIndex <= errorIndex {
-		t.Fatalf("observed events = %#v, want generic error followed by retry", events)
+	if retries != 1 {
+		t.Fatalf("observed events = %#v, want exactly one retry", events)
 	}
 }
 
-func TestObserveSpawnAttemptFailurePreservesProviderError(t *testing.T) {
-	providerErr := errors.New("api error 500: provider unavailable")
+// An attempt that ends with a provider failure publishes that failure only
+// when it is the run's outcome; an attempt that is run again publishes the
+// retry alone.
+func TestObserveSpawnAttemptFailurePublishesOnlyTheFinalFailure(t *testing.T) {
+	providerErr := &sdk.APIError{StatusCode: 500, Kind: sdk.KindServerError}
 	abort := &StreamEvent{Type: EventAgentAbort}
 	tests := []struct {
 		name        string
 		disposition tools.SpawnAttemptDisposition
-		wantType    agentevent.StreamEventType
-		wantRetry   string
+		want        []agentevent.StreamEventType
 	}{
-		{name: "retry", disposition: tools.SpawnAttemptRetry, wantType: EventRetry, wantRetry: providerErr.Error()},
-		{name: "final", disposition: tools.SpawnAttemptFailure, wantType: EventAgentAbort},
+		{name: "retry", disposition: tools.SpawnAttemptRetry, want: []agentevent.StreamEventType{EventRetry}},
+		{name: "final", disposition: tools.SpawnAttemptFailure, want: []agentevent.StreamEventType{EventError, EventAgentAbort}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -259,15 +262,27 @@ func TestObserveSpawnAttemptFailurePreservesProviderError(t *testing.T) {
 					ResolveAttempt: func(error) tools.SpawnAttemptDisposition { return tc.disposition },
 				},
 				abort,
-				[]StreamEvent{{Type: EventError, Error: providerErr.Error()}},
-				providerErr.Error(),
+				[]StreamEvent{{Type: EventError, Cause: providerErr}},
 				providerErr,
 			)
-			if len(observed) != 2 || observed[0].Type != EventError || observed[1].Type != tc.wantType {
-				t.Fatalf("observed events = %#v, want provider error then %q", observed, tc.wantType)
+			if len(observed) != len(tc.want) {
+				t.Fatalf("observed events = %#v, want %v", observed, tc.want)
 			}
-			if observed[0].Error != providerErr.Error() || observed[1].RetryError != tc.wantRetry {
-				t.Fatalf("provider/retry errors = %q/%q, want %q/%q", observed[0].Error, observed[1].RetryError, providerErr, tc.wantRetry)
+			for i, event := range observed {
+				if event.Type != tc.want[i] {
+					t.Fatalf("observed events = %#v, want %v", observed, tc.want)
+				}
+			}
+			switch observed[0].Type {
+			case EventRetry:
+				if observed[0].Attempt != 1 || observed[0].MaxAttempt != 2 || observed[0].Error != "" || observed[0].Cause != nil {
+					t.Fatalf("retry event = %#v, want the attempt counters alone", observed[0])
+				}
+			case EventError:
+				var apiErr *sdk.APIError
+				if !errors.As(observed[0].Cause, &apiErr) || apiErr != providerErr {
+					t.Fatalf("error event cause = %v, want the provider failure", observed[0].Cause)
+				}
 			}
 		})
 	}
@@ -294,8 +309,7 @@ func TestObserveSpawnAttemptFailureMakesOwningCancellationAuthoritative(t *testi
 			return tools.SpawnAttemptAbort
 		}},
 		abort,
-		[]StreamEvent{{Type: EventError, Error: "private provider detail"}},
-		"private provider detail",
+		[]StreamEvent{{Type: EventError, Cause: errors.New("private provider detail")}},
 		context.Canceled,
 	)
 	if dispositionCalls != 1 {
@@ -318,7 +332,6 @@ func TestObserveSpawnAttemptFailureResolvesWithoutObserver(t *testing.T) {
 		}},
 		nil,
 		nil,
-		"",
 		errors.New("failed before streaming"),
 	)
 	if calls != 1 {

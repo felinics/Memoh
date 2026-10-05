@@ -3,13 +3,12 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const steerInputEvent event.StreamEventType = "claude_steer_input"
@@ -65,8 +64,7 @@ func (t *turnRunner) startSteering(ctx context.Context) func() {
 			if err != nil {
 				if ctx.Err() == nil && (ok || workerCtx.Err() == nil) {
 					t.logger.WarnContext(ctx, "claude steer was not delivered", slog.Any("error", err))
-					public, _ := apperror.PublicFrom(apperror.New(apperror.CodeRuntimeControlSteerFailed, nil), "")
-					t.emit(event.StreamEvent{Type: event.RuntimeNotice, Code: string(public.Code), Delta: public.Detail})
+					t.emit(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
 				}
 				return
 			}
@@ -94,7 +92,7 @@ func (t *turnRunner) submitSteer(ctx context.Context, input external.SteerInput)
 	if t.ending || t.closed {
 		t.mu.Unlock()
 		t.submissionMu.Unlock()
-		return errors.New("claude turn ended")
+		return errs.New("claude turn ended")
 	}
 	pending := &pendingSteer{input: input, step: len(t.steers), settled: make(chan error, 1)}
 	t.steers[input.ID] = pending
@@ -122,7 +120,7 @@ func (t *turnRunner) submitSteer(ctx context.Context, input external.SteerInput)
 		case err := <-pending.settled:
 			return err
 		default:
-			return errors.New("claude ended before consuming steer")
+			return errs.New("claude ended before consuming steer")
 		}
 	}
 }
@@ -159,7 +157,7 @@ func (t *turnRunner) handleCommandLifecycle(msg *inboundMessage) {
 	}
 	if terminal && !observed {
 		select {
-		case pending.settled <- errors.New("claude did not consume queued input"):
+		case pending.settled <- errs.New("claude did not consume queued input"):
 		default:
 		}
 	}

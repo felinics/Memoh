@@ -12,6 +12,23 @@ import (
 
 var errInvalidOwnerTerminalState = errors.New("session runtime: invalid owner terminal state")
 
+// runErrorRunFailed is the session_runs.error_code of a failed run whose owner
+// reported no code. Like the reaper's codes it is persisted, so it keeps its
+// value; it is registered in the apperror catalog under the same value.
+const runErrorRunFailed = "runtime_run_failed"
+
+// ledgerFailureCode is the error code a terminal write persists. A failed run
+// always carries one: when its owner named none, it is runErrorRunFailed. Both
+// durable entry points apply it, because a proposal is kept as written and the
+// finalize write cannot fill in a code the proposal left empty.
+func ledgerFailureCode(state ledger.State, errorCode string) string {
+	errorCode = strings.TrimSpace(errorCode)
+	if state == ledger.StateFailed && errorCode == "" {
+		return runErrorRunFailed
+	}
+	return errorCode
+}
+
 // prepareLedgerFinish makes the proposed owner outcome durable while the run
 // remains active. The reaper may later pass StateLost to Finalize, but the
 // ledger resolves a prepared run to this proposal instead. That is the crash
@@ -20,22 +37,22 @@ var errInvalidOwnerTerminalState = errors.New("session runtime: invalid owner te
 func (m *Manager) prepareLedgerFinish(
 	ctx context.Context,
 	handle RunHandle,
-	status, errorCode, message string,
+	status, errorCode string,
 	allowWaitingDecision bool,
 ) (ledger.Run, error) {
-	state := terminalLedgerState(status, errorCode, message)
+	state := terminalLedgerState(status, errorCode)
 	// Lost is a reaper-only conclusion: an owner cannot authoritatively claim
 	// that it disappeared. Reject it at the persistence boundary so a future
 	// caller cannot turn a deterministic misuse into an endless durable retry.
 	if state == ledger.StateLost || !state.Terminal() {
 		return ledger.Run{}, fmt.Errorf("%w: %q", errInvalidOwnerTerminalState, state)
 	}
+	errorCode = ledgerFailureCode(state, errorCode)
 	if m.runs == nil || handle.FencingToken <= 0 {
 		return ledger.Run{
-			State:                ledger.StateFinishing,
-			ProposedState:        state,
-			ProposedErrorCode:    strings.TrimSpace(errorCode),
-			ProposedErrorMessage: strings.TrimSpace(message),
+			State:             ledger.StateFinishing,
+			ProposedState:     state,
+			ProposedErrorCode: errorCode,
 		}, nil
 	}
 	run, applied, err := m.runs.PrepareFinish(ctx, ledger.PrepareFinishParams{
@@ -43,7 +60,6 @@ func (m *Manager) prepareLedgerFinish(
 		FencingToken:         handle.FencingToken,
 		State:                state,
 		ErrorCode:            errorCode,
-		ErrorMessage:         message,
 		AllowWaitingDecision: allowWaitingDecision,
 	})
 	if err != nil {
@@ -81,21 +97,22 @@ func (m *Manager) prepareLedgerFinish(
 //
 // Backend-only reservation tests use zero fencing tokens and have no durable
 // row to transition. Production admission always supplies a positive token.
-func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, errorCode, message string) (TerminalRun, error) {
+func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, status, errorCode string) (TerminalRun, error) {
+	return m.finalizeLedgerRunFromState(ctx, handle, status, errorCode, "")
+}
+
+func (m *Manager) finalizeLedgerRunFromState(ctx context.Context, handle RunHandle, status, errorCode string, expected ledger.State) (TerminalRun, error) {
 	if m.runs == nil || handle.FencingToken <= 0 {
 		return TerminalRun{}, nil
 	}
-	state := terminalLedgerState(status, errorCode, message)
-	errorCode = strings.TrimSpace(errorCode)
-	if state == ledger.StateFailed && errorCode == "" {
-		errorCode = "runtime_run_failed"
-	}
+	state := terminalLedgerState(status, errorCode)
+	errorCode = ledgerFailureCode(state, errorCode)
 	run, applied, err := m.runs.Finalize(ctx, ledger.FinalizeParams{
-		RunID:        handle.RunID,
-		FencingToken: handle.FencingToken,
-		State:        state,
-		ErrorCode:    errorCode,
-		ErrorMessage: message,
+		RunID:         handle.RunID,
+		FencingToken:  handle.FencingToken,
+		State:         state,
+		ErrorCode:     errorCode,
+		ExpectedState: expected,
 	})
 	if err != nil {
 		return TerminalRun{}, fmt.Errorf("finalize runtime run: %w", err)
@@ -116,6 +133,7 @@ func (m *Manager) finalizeLedgerRun(ctx context.Context, handle RunHandle, statu
 		}
 	}
 	terminal := terminalRunFromLedger(run)
+	terminal.Applied = applied
 	if run.RunID != handle.RunID || run.BotID != handle.BotID || run.SessionID != handle.SessionID {
 		return TerminalRun{}, ErrRunOwnershipLost
 	}
@@ -133,7 +151,6 @@ func terminalRunFromLedger(run ledger.Run) TerminalRun {
 		FencingToken: run.FencingToken,
 		State:        string(run.State),
 		ErrorCode:    run.ErrorCode,
-		ErrorMessage: run.ErrorMessage,
 	}
 }
 
@@ -141,7 +158,7 @@ func terminalRunFromLedger(run ledger.Run) TerminalRun {
 // live vocabulary is larger than the durable one on purpose — `admitting` and
 // `aborting` are transitions an owner passes through, not ways a run can end —
 // so this collapses rather than translates.
-func terminalLedgerState(status, errorCode, message string) ledger.State {
+func terminalLedgerState(status, errorCode string) ledger.State {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case RunStatusAborted, RunStatusAborting:
 		return ledger.StateAborted
@@ -152,9 +169,9 @@ func terminalLedgerState(status, errorCode, message string) ledger.State {
 	case RunStatusLost:
 		return ledger.StateLost
 	}
-	// An empty status means the caller left the outcome to be derived. A finish
-	// message is only set when something went wrong, so it is the signal.
-	if strings.TrimSpace(errorCode) != "" || strings.TrimSpace(message) != "" {
+	// An empty status means the caller left the outcome to be derived. A code
+	// is only set when something went wrong, so it is the signal.
+	if strings.TrimSpace(errorCode) != "" {
 		return ledger.StateFailed
 	}
 	return ledger.StateCompleted

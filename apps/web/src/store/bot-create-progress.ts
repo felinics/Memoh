@@ -16,7 +16,8 @@ import {
   pushBotCreateTerminalLine,
   type BotCreateTerminalLine,
 } from '@/composables/api/botCreateTerminal'
-import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
+import { markOnboardingCompleted } from '@/composables/useOnboarding'
+import { apiErrorStatus, parseMemohError, renderI18nMessage, resolveApiErrorMessage } from '@/utils/api-error'
 import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
 import { writeCreatedBotSession, type CreatedBotSession, type CreatedBotSessionRuntime } from '@/pages/bots/created-bot-session'
@@ -40,7 +41,7 @@ export type BotCreateDisplay = {
 
 export type BotCreateSettings = {
   chat_model_id?: string
-  memory_provider_id?: string
+  memory_enabled?: boolean
   reasoning_effort?: string
 }
 
@@ -82,20 +83,18 @@ const NOTHING_APPLIED: BotCreateStartResult = { settingsApplied: false, agentApp
 export const BOT_STATUS_POLL_INTERVAL_MS = 2000
 export const BOT_STATUS_POLL_BUDGET_MS = 15 * 60 * 1000
 
-const WORKSPACE_FAILURE_FALLBACK = { i18n_key: 'bots.create.failedSubtitle' }
-const WORKSPACE_STILL_PROVISIONING = { i18n_key: 'bots.create.stillProvisioning' }
 const BOT_STATUS_FAILED = 'failed'
 const BOT_STATUS_CREATING = 'creating'
 const CONTAINER_INIT_CHECK = 'container.init'
 
 function hasSettings(settings?: BotCreateSettings): boolean {
-  return !!(settings && (settings.chat_model_id || settings.memory_provider_id || settings.reasoning_effort))
+  return !!(settings && (settings.chat_model_id || settings.memory_enabled !== undefined || settings.reasoning_effort))
 }
 
 function settingsBody(settings: BotCreateSettings) {
   return {
     ...(settings.chat_model_id ? { chat_model_id: settings.chat_model_id } : {}),
-    ...(settings.memory_provider_id ? { memory_provider_id: settings.memory_provider_id } : {}),
+    ...(settings.memory_enabled !== undefined ? { memory_enabled: settings.memory_enabled } : {}),
     ...(settings.reasoning_effort ? { reasoning_effort: settings.reasoning_effort } : {}),
   }
 }
@@ -166,7 +165,7 @@ async function workspaceFailureDetail(botId: string): Promise<string> {
   } catch {
     // The check list is a nicety; the failure itself is already known.
   }
-  return resolveApiErrorMessage(WORKSPACE_FAILURE_FALLBACK, 'Workspace setup failed')
+  return renderI18nMessage('bots.create.failedSubtitle') || 'Workspace setup failed'
 }
 
 // Owns the bot-create SSE stream and derived state so it survives navigation
@@ -352,7 +351,16 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       grantsApplied = true
       await applyGrants(botId, lastOptions.grants, message => { setupError.value = message })
     }
-    return await applySetup(recovering)
+    const result = await applySetup(recovering)
+    // The setup that onboarding asked for lives only in this tab. Once it has
+    // all been applied, a user who leaves before the final step must not be
+    // sent back through the wizard on the next sign-in. A Bot left mid-setup
+    // stays incomplete on purpose: Step4 adopts it and the final step then
+    // reports what is still missing.
+    if (lastOptions.onboarding && status.value === 'ready' && !setupError.value) {
+      void markOnboardingCompleted().catch(() => {})
+    }
+    return result
   }
 
   // Relays a workspace provisioning stream (create or container retry) into
@@ -394,7 +402,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         return NOTHING_APPLIED
       }
       if (current.status === BOT_STATUS_CREATING) {
-        failWorkspace(resolveApiErrorMessage(WORKSPACE_STILL_PROVISIONING, 'Workspace setup is still in progress'), 'workspace_setup_timeout')
+        failWorkspace(renderI18nMessage('bots.create.stillProvisioning') || 'Workspace setup is still in progress', 'workspace_setup_timeout')
         return NOTHING_APPLIED
       }
       lines.value = finalizeBotCreateTerminalLines(lines.value)

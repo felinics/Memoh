@@ -45,8 +45,8 @@ func (h *SettingsHandler) Register(e *echo.Echo) {
 // @Tags settings
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} settings.Settings
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [get].
 func (h *SettingsHandler) Get(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -78,7 +78,7 @@ func (h *SettingsHandler) Get(c echo.Context) error {
 // @Success 200 {object} settings.Settings
 // @Failure 400 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [put]
 // @Router /bots/{bot_id}/settings [post].
 func (h *SettingsHandler) Upsert(c echo.Context) error {
@@ -105,8 +105,8 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 		if reasoningErr := settingsReasoningHTTPError(err); reasoningErr != nil {
 			return reasoningErr
 		}
-		if feedbackErr := externalAgentFeedbackHTTPError(err); feedbackErr != nil {
-			return feedbackErr
+		if runtimeErr := settingsRuntimeHTTPError(err); runtimeErr != nil {
+			return runtimeErr
 		}
 		if errors.Is(err, settings.ErrInvalidModelRef) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -133,14 +133,37 @@ func settingsReasoningHTTPError(err error) error {
 	return nil
 }
 
+// settingsRuntimeHTTPError answers a chat runtime the bot cannot be saved
+// with.
+func settingsRuntimeHTTPError(err error) error {
+	var code apperror.Code
+	switch {
+	case errors.Is(err, settings.ErrInvalidChatRuntime):
+		code = apperror.CodeInvalidChatRuntime
+	case errors.Is(err, settings.ErrACPProjectModeInvalid):
+		code = apperror.CodeACPProjectModeInvalid
+	case errors.Is(err, settings.ErrACPProjectPathInvalid):
+		code = apperror.CodeACPProjectPathInvalid
+	case errors.Is(err, settings.ErrACPUnknownAgent):
+		code = apperror.CodeACPAgentNotFound
+	case errors.Is(err, settings.ErrACPAgentNotEnabled):
+		code = apperror.CodeACPAgentNotEnabled
+	case errors.Is(err, settings.ErrACPAgentNotConfigured):
+		code = apperror.CodeACPAgentNotConfigured
+	default:
+		return nil
+	}
+	return apperror.Wrap(code, err, nil)
+}
+
 // Delete godoc
 // @Summary Delete user settings
 // @Description Remove agent settings for current user
 // @Tags settings
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/settings [delete].
 func (h *SettingsHandler) Delete(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)

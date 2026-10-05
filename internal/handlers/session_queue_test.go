@@ -2,17 +2,23 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/agent/application"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 func TestSessionQueueHandlerRegistersSeparateQueueRoutes(t *testing.T) {
@@ -89,5 +95,79 @@ func TestSessionQueueEditBySomeoneElseIsForbidden(t *testing.T) {
 	problem, ok := apperror.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeQueueItemNotEditable) {
 		t.Fatalf("queueMutationError() = %v, want %d %s", err, http.StatusForbidden, apperror.CodeQueueItemNotEditable)
+	}
+}
+
+type queueSessionQueries struct {
+	dbstore.Queries
+	session sqlc.BotSession
+	err     error
+}
+
+func (q queueSessionQueries) GetSessionByID(context.Context, pgtype.UUID) (sqlc.BotSession, error) {
+	return q.session, q.err
+}
+
+func TestSessionQueueAuthorizeSeparatesAMissingSessionFromAFailedLookup(t *testing.T) {
+	const (
+		botID     = "00000000-0000-0000-0000-000000000701"
+		sessionID = "00000000-0000-0000-0000-000000000702"
+	)
+	lookupFailure := errors.New("synthetic connection reset")
+	for _, tc := range []struct {
+		name    string
+		queries queueSessionQueries
+		code    apperror.Code
+		cause   error
+	}{
+		{name: "no such session", queries: queueSessionQueries{err: pgx.ErrNoRows}, code: apperror.CodeSessionNotFound},
+		{name: "session of another bot", queries: queueSessionQueries{session: sqlc.BotSession{BotID: testUUID("00000000-0000-0000-0000-000000000799")}}, code: apperror.CodeSessionNotFound},
+		{name: "failed lookup", queries: queueSessionQueries{err: lookupFailure}, cause: lookupFailure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &SessionQueueHandler{queries: tc.queries, agentService: &application.Service{}}
+			e := echo.New()
+			c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/", nil), httptest.NewRecorder(), "user-1")
+			c.SetParamNames("bot_id", "session_id")
+			c.SetParamValues(botID, sessionID)
+
+			_, err := h.authorize(c)
+			if tc.cause != nil {
+				if apperror.CodeOf(err) != "" || !errors.Is(err, tc.cause) {
+					t.Fatalf("authorize() = %v, want the lookup failure without a public code", err)
+				}
+				return
+			}
+			if got := apperror.CodeOf(err); got != tc.code {
+				t.Fatalf("authorize() code = %q (%v), want %q", got, err, tc.code)
+			}
+		})
+	}
+}
+
+func TestQueueAdmissionErrorKeepsPublishedCodes(t *testing.T) {
+	cases := []struct {
+		err  error
+		want apperror.Code
+	}{
+		{sessionruntime.ErrQueueSteerUnsupported, apperror.CodeQueueSteerUnsupported},
+		{sessionruntime.ErrQueueNoActiveRun, apperror.CodeQueueNoActiveRun},
+		{sessionruntime.ErrQueueInvocationConflict, apperror.CodeSessionInvocationConflict},
+		{sessionruntime.ErrQueueAdmissionOverloaded, apperror.CodeQueueAdmissionOverloaded},
+		{sessionruntime.ErrQueueCapacityExceeded, apperror.CodeQueueCapacityExceeded},
+		{sessionruntime.ErrQueueInvalidReference, apperror.CodeQueueRequestInvalid},
+		{application.ErrQueueInputIncomplete, apperror.CodeQueueAdmissionUnavailable},
+	}
+	for _, tc := range cases {
+		if got := apperror.CodeOf(queueAdmissionError(tc.err)); got != tc.want {
+			t.Errorf("queueAdmissionError(%v) = %q, want %q", tc.err, got, tc.want)
+		}
+	}
+	other := fmt.Errorf("store: %w", sessionruntime.ErrLiveQueueUnavailable)
+	if got := queueAdmissionError(other); !errors.Is(got, other) {
+		t.Fatalf("unclassified error was rewritten: %v", got)
+	}
+	if queueAdmissionError(nil) != nil {
+		t.Fatal("nil error was rewritten")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
@@ -308,7 +309,8 @@ func TestBotAgentsHandlerUpdateReportsRuntimeDependency(t *testing.T) {
 }
 
 // catalogDriver is a direct runtime whose model catalog call fails the way
-// drivers report failures: stable agent feedback, or a plain error.
+// drivers report failures: a package error the application translates, or a
+// plain error.
 type catalogDriver struct {
 	plainDriver
 	err error
@@ -326,50 +328,27 @@ func listModelsRequest(t *testing.T) (echo.Context, *httptest.ResponseRecorder) 
 	return ctx, rec
 }
 
-func TestBotAgentsHandlerListModelsPassesThroughRuntimeFeedback(t *testing.T) {
-	feedback := agentfeedback.New(
-		agentfeedback.CodeAgentDependencyMissing,
-		"no codex launcher in workspace",
-		http.StatusConflict,
-		"chat.externalAgent.dependencyMissing",
-		"Codex is not installed in the workspace",
-		map[string]string{"dep_id": "codex", "install_task_id": "task-1"},
-	)
+func TestBotAgentsHandlerListModelsAnswersMissingDependencyWithItsCode(t *testing.T) {
 	queries := &botAgentsQueries{rows: []sqlc.BotAgent{
 		botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, true),
 	}}
 	handler := newBotAgentsTestHandler(queries, catalogDriver{
 		plainDriver: plainDriver{runtimeType: botagents.RuntimeCodex},
-		err:         feedback,
+		err:         fmt.Errorf("start app-server: %w", &external.DependencyMissingError{DependencyID: "codex", TaskID: "task-1", OperationInProgress: true}),
 	})
 
-	ctx, rec := listModelsRequest(t)
+	ctx, _ := listModelsRequest(t)
 	err := handler.ListModels(ctx)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusConflict {
-		t.Fatalf("ListModels() error = %#v, want HTTP %d carrying the feedback", err, http.StatusConflict)
+	if got := apperror.CodeOf(err); got != apperror.CodeAgentDependencyMissing {
+		t.Fatalf("ListModels() code = %q, want %s: %v", got, apperror.CodeAgentDependencyMissing, err)
 	}
-	if httpErr.Message != feedback {
-		t.Fatalf("ListModels() message = %#v, want the driver feedback passed through", httpErr.Message)
+	problem, ok := apperror.ProblemFrom(err, "")
+	if !ok || problem.Status != http.StatusConflict {
+		t.Fatalf("problem = %+v, want status %d", problem, http.StatusConflict)
 	}
-
-	ctx.Echo().DefaultHTTPErrorHandler(err, ctx)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusConflict, rec.Body.String())
-	}
-	var got struct {
-		Code string            `json:"code"`
-		Args map[string]string `json:"args"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode response %s: %v", rec.Body.String(), err)
-	}
-	if got.Code != agentfeedback.CodeAgentDependencyMissing {
-		t.Fatalf("code = %q, want %q: %s", got.Code, agentfeedback.CodeAgentDependencyMissing, rec.Body.String())
-	}
-	for key, want := range map[string]string{"dep_id": "codex", "install_task_id": "task-1"} {
-		if got.Args[key] != want {
-			t.Fatalf("args[%s] = %q, want %q: %s", key, got.Args[key], want, rec.Body.String())
+	for key, want := range map[string]string{"dep_id": "codex", "install_task_id": "task-1", "operation_in_progress": "true"} {
+		if got := problem.Args[key]; got != want {
+			t.Fatalf("args[%s] = %q, want %q: %+v", key, got, want, problem)
 		}
 	}
 }
@@ -388,5 +367,86 @@ func TestBotAgentsHandlerListModelsWrapsPlainRuntimeErrors(t *testing.T) {
 	problem, ok := apperror.ProblemFrom(err, "")
 	if !ok || problem.Code != string(apperror.CodeExternalRuntimeUnavailable) || problem.Status != http.StatusServiceUnavailable {
 		t.Fatalf("ListModels() error = %v, want %d %s", err, http.StatusServiceUnavailable, apperror.CodeExternalRuntimeUnavailable)
+	}
+}
+
+// A runtime failure the model catalog reports keeps its own code and status.
+func TestBotAgentsHandlerListModelsAnswersRuntimeFailuresWithTheirCode(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		code   apperror.Code
+		status int
+	}{
+		{"auth required", external.Fail(external.FailureAuthRequired, external.ErrAuthRequired), apperror.CodeExternalRuntimeAuthRequired, http.StatusConflict},
+		{"credential revoked", external.CredentialError(agentcredential.ErrRevoked), apperror.CodeAgentCredentialRevoked, http.StatusConflict},
+		{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := &botAgentsQueries{rows: []sqlc.BotAgent{
+				botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, true),
+			}}
+			handler := newBotAgentsTestHandler(queries, catalogDriver{
+				plainDriver: plainDriver{runtimeType: botagents.RuntimeCodex},
+				err:         fmt.Errorf("model catalog: %w", tc.err),
+			})
+			ctx, _ := listModelsRequest(t)
+			problem, ok := apperror.ProblemFrom(handler.ListModels(ctx), "")
+			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
+				t.Fatalf("ListModels() problem = %+v, want %d %s", problem, tc.status, tc.code)
+			}
+		})
+	}
+}
+
+// purgeDriver is a direct runtime whose credential purge fails.
+type purgeDriver struct {
+	plainDriver
+	err error
+}
+
+func (d purgeDriver) PurgeBotAgentAuth(context.Context, string, string) error { return d.err }
+
+func (q *botAgentsQueries) SoftDeleteBotAgent(_ context.Context, params sqlc.SoftDeleteBotAgentParams) (sqlc.BotAgent, error) {
+	for _, row := range q.rows {
+		if row.ID == params.ID {
+			return row, nil
+		}
+	}
+	return sqlc.BotAgent{}, pgx.ErrNoRows
+}
+
+// purgeFailures are the ways a runtime's credential purge fails: a runtime
+// failure keeps its own code, and any other error is a materialization failure.
+var purgeFailures = []struct {
+	name   string
+	err    error
+	code   apperror.Code
+	status int
+}{
+	{"credential in use", external.Fail(external.FailureCredentialBusy, nil), apperror.CodeAgentCredentialRuntimeBusy, http.StatusConflict},
+	{"runtime unavailable", external.Unavailable(errors.New("bridge refused")), apperror.CodeExternalRuntimeUnavailable, http.StatusServiceUnavailable},
+	{"missing dependency", &external.DependencyMissingError{DependencyID: "codex"}, apperror.CodeAgentCredentialMaterializationFailed, http.StatusInternalServerError},
+	{"plain error", errors.New("delete auth.json: permission denied"), apperror.CodeAgentCredentialMaterializationFailed, http.StatusInternalServerError},
+}
+
+func TestBotAgentsHandlerDeleteAnswersPurgeFailures(t *testing.T) {
+	for _, tc := range purgeFailures {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := &botAgentsQueries{rows: []sqlc.BotAgent{
+				botAgentRow(botAgentsTestCodexID, botagents.RuntimeCodex, true),
+			}}
+			handler := newBotAgentsTestHandler(queries, purgeDriver{
+				plainDriver: plainDriver{runtimeType: botagents.RuntimeCodex},
+				err:         tc.err,
+			})
+			ctx, _ := botAgentsRequest(t, http.MethodDelete, "/bots/"+botAgentsTestBotID+"/agents/"+botAgentsTestCodexID, "")
+			ctx.SetParamNames("bot_id", "id")
+			ctx.SetParamValues(botAgentsTestBotID, botAgentsTestCodexID)
+			problem, ok := apperror.ProblemFrom(handler.Delete(ctx), "")
+			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
+				t.Fatalf("Delete() problem = %+v, want %d %s", problem, tc.status, tc.code)
+			}
+		})
 	}
 }

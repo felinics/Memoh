@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -791,6 +795,47 @@ func serverURL(r *http.Request) string {
 func TestFetchRemoteModelsViaSDK(t *testing.T) {
 	t.Parallel()
 
+	t.Run("opencode go imports listed models with agent defaults", func(t *testing.T) {
+		t.Parallel()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{
+				{"id": "glm-5.2"}, {"id": "minimax-m2.7"}, {"id": "gpt-5.6-luna"}, {"id": "future-model"},
+			}})
+		}))
+		defer server.Close()
+		s := &Service{}
+		items, err := s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeOpenCodeGo),
+			Config:     []byte(`{"base_url":"` + server.URL + `"}`),
+		})
+		if err != nil || len(items) != 4 {
+			t.Fatalf("models = %v, error = %v", items, err)
+		}
+		for _, item := range items {
+			if !item.CapabilitiesKnown || strings.Join(item.Compatibilities, ",") != "tool-call,reasoning" || item.ThinkingMode != models.ThinkingModeAlways {
+				t.Fatalf("missing agent capabilities or unsafe synthetic thinking control: %+v", item)
+			}
+		}
+		// A preset must retain curated capabilities when discovery uses the
+		// live endpoint. Conservative custom-provider defaults must not erase
+		// Luna's reasoning controls, vision support, or context window.
+		s.templatesDir = "../../conf/providers"
+		items, err = s.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+			ClientType: string(models.ClientTypeOpenCodeGo),
+			Config:     []byte(`{"base_url":"` + server.URL + `"}`),
+			Metadata:   []byte(`{"preset":{"source":"opencode-go.yaml"}}`),
+		})
+		if err != nil || len(items) != 4 {
+			t.Fatalf("preset models = %v, error = %v", items, err)
+		}
+		luna := items[2]
+		if luna.ID != "gpt-5.6-luna" || luna.ThinkingMode != models.ThinkingModeToggle ||
+			len(luna.ReasoningEfforts) == 0 || luna.ContextWindow == nil || *luna.ContextWindow != 1050000 ||
+			!strings.Contains(strings.Join(luna.Compatibilities, ","), "vision") {
+			t.Fatalf("preset capabilities were overwritten: %+v", luna)
+		}
+	})
+
 	t.Run("anthropic", func(t *testing.T) {
 		t.Parallel()
 
@@ -1146,6 +1191,26 @@ func (s providerTestQueries) GetProviderByID(context.Context, pgtype.UUID) (sqlc
 	return s.provider, nil
 }
 
+func TestOpenCodeGoPublicCatalogDoesNotVerifyCredentials(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Errorf("provider connectivity check unexpectedly generated text: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "glm-5.2"}}})
+	}))
+	defer server.Close()
+	providerID := pgtype.UUID{Bytes: [16]byte{0x13, 0x10}, Valid: true}
+	service := &Service{queries: providerTestQueries{provider: sqlc.Provider{
+		ID: providerID, ClientType: string(models.ClientTypeOpenCodeGo),
+		Config: []byte(`{"api_key":"invalid","base_url":"` + server.URL + `"}`),
+	}}}
+	resp, err := service.Test(context.Background(), providerID.String())
+	if err != nil || resp.Status != TestStatusUnverified || !resp.Reachable {
+		t.Fatalf("public catalog falsely verified credentials: %+v, %v", resp, err)
+	}
+}
+
 // Regression for #1042: a successful models list is conclusive for
 // reachability + auth. The fake-model generation probe that used to run
 // afterwards turned into an "Invalid API key" false positive on gateways
@@ -1178,7 +1243,7 @@ func TestTestSkipsModelProbeAfterSuccessfulModelsList(t *testing.T) {
 		t.Fatalf("Test() error = %v", err)
 	}
 	if resp.Status != TestStatusOK {
-		t.Fatalf("status = %q, want %q (message: %s)", resp.Status, TestStatusOK, resp.Message)
+		t.Fatalf("status = %q, want %q (cause: %v)", resp.Status, TestStatusOK, resp.Cause)
 	}
 	if !resp.Reachable {
 		t.Fatal("reachable = false, want true")
@@ -1224,10 +1289,56 @@ func TestTestModelsListOutcomeMapping(t *testing.T) {
 				t.Fatalf("Test() error = %v", err)
 			}
 			if resp.Status != tc.wantStatus {
-				t.Fatalf("status = %q, want %q (message: %s)", resp.Status, tc.wantStatus, resp.Message)
+				t.Fatalf("status = %q, want %q (cause: %v)", resp.Status, tc.wantStatus, resp.Cause)
 			}
 			if !resp.Reachable {
 				t.Fatal("reachable = false, want true")
+			}
+		})
+	}
+}
+
+// Locks the outcome rules on Service.Test against the three shapes
+// sdk.Provider.Test returns: nil, an *sdk.APIError, and any other error.
+func TestProviderTestOutcome(t *testing.T) {
+	t.Parallel()
+
+	refused := &url.Error{Op: "Get", URL: "http://127.0.0.1:1/models", Err: errors.New("connect: connection refused")}
+	cases := []struct {
+		name          string
+		err           error
+		wantStatus    TestStatus
+		wantReachable bool
+	}{
+		{"passed", nil, TestStatusOK, true},
+		{"401", &sdk.APIError{StatusCode: http.StatusUnauthorized, Kind: sdk.KindAuthentication}, TestStatusAuthError, true},
+		{"403", &sdk.APIError{StatusCode: http.StatusForbidden, Kind: sdk.KindPermissionDenied}, TestStatusAuthError, true},
+		{"404", &sdk.APIError{StatusCode: http.StatusNotFound, Kind: sdk.KindUnknown}, TestStatusUnverified, true},
+		{"429", &sdk.APIError{StatusCode: http.StatusTooManyRequests, Kind: sdk.KindRateLimited}, TestStatusUnverified, true},
+		{"503", &sdk.APIError{StatusCode: http.StatusServiceUnavailable, Kind: sdk.KindServerError}, TestStatusUnverified, true},
+		{"wrapped 401", fmt.Errorf("openai: test request failed: %w", &sdk.APIError{StatusCode: http.StatusUnauthorized, Kind: sdk.KindAuthentication}), TestStatusAuthError, true},
+		{"connection refused", fmt.Errorf("request failed: %w", refused), TestStatusError, false},
+		{"context ended", context.DeadlineExceeded, TestStatusError, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			resp := providerTestOutcome(tc.err)
+			if resp.Status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", resp.Status, tc.wantStatus)
+			}
+			if resp.Reachable != tc.wantReachable {
+				t.Fatalf("reachable = %v, want %v", resp.Reachable, tc.wantReachable)
+			}
+			if tc.err == nil {
+				if resp.Cause != nil {
+					t.Fatalf("cause = %v, want nil", resp.Cause)
+				}
+				return
+			}
+			if !errors.Is(resp.Cause, tc.err) {
+				t.Fatalf("cause = %v, want it to wrap %v", resp.Cause, tc.err)
 			}
 		})
 	}
@@ -1253,5 +1364,9 @@ func TestTestUnreachableStaysHardError(t *testing.T) {
 	}
 	if resp.Reachable {
 		t.Fatal("reachable = true, want false")
+	}
+	var urlErr *url.Error
+	if !errors.As(resp.Cause, &urlErr) {
+		t.Fatalf("cause = %v, want a *url.Error in the chain", resp.Cause)
 	}
 }

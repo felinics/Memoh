@@ -229,7 +229,7 @@ func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, e
 			_, err = s.store.SetCheck(ctx, botID, inst.ID, current.Revision, current.Version, now)
 		case err == nil:
 			_, err = s.store.SetCheck(ctx, botID, inst.ID, "", "", now)
-		case supermarket.ErrorKindOf(err) == supermarket.ErrorNotFound || isNotFound(err):
+		case errors.Is(err, supermarket.ErrAppNotFound):
 			// The App left the registry; nothing newer can be offered.
 			_, err = s.store.SetCheck(ctx, botID, inst.ID, "", "", now)
 		default:
@@ -255,12 +255,4 @@ func (s *Service) CheckUpdates(ctx context.Context, botID string) (ListResult, e
 		return ListResult{}, fmt.Errorf("apps: list installations: %w", err)
 	}
 	return s.assemble(ctx, botID, installations, deps)
-}
-
-func isNotFound(err error) bool {
-	var notFound interface{ NotFound() bool }
-	if errors.As(err, &notFound) {
-		return notFound.NotFound()
-	}
-	return false
 }

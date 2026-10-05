@@ -129,47 +129,58 @@ func TestLineStreamSuppressesPartialSendFailure(t *testing.T) {
 	}
 }
 
-func TestLineStreamErrorRedactsSecretsAndClearsBuffer(t *testing.T) {
+func TestLineStreamErrorReplyClearsBuffer(t *testing.T) {
 	redact.ResetForTest()
 	t.Cleanup(redact.ResetForTest)
 
 	const secret = "line-secret-value-123456"
 	redact.SetSecrets("line-stream-test", secret)
 
-	client := &testMessagingClient{}
-	adapter := NewAdapter(nil)
-	adapter.client = testLineClientFactory{messaging: client}
+	cases := []struct {
+		name  string
+		event channel.PreparedStreamEvent
+		want  []string
+	}{
+		{
+			name:  "coded error shows the copy as it is",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
+			want:  []string{"The workspace is unreachable."},
+		},
+		{
+			name:  "uncoded error is redacted and labelled",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "request failed with token " + secret},
+			want:  []string{"Error: request failed with token " + strings.Repeat("*", len(secret))},
+		},
+		{
+			name:  "blank error sends nothing",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "  "},
+			want:  nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &testMessagingClient{}
+			adapter := NewAdapter(nil)
+			adapter.client = testLineClientFactory{messaging: client}
 
-	stream, err := adapter.OpenStream(context.Background(), testLineConfig(), "Uuser", channel.StreamOptions{})
-	if err != nil {
-		t.Fatalf("OpenStream returned error: %v", err)
-	}
-	if err := stream.Push(context.Background(), channel.PreparedStreamEvent{Type: channel.StreamEventDelta, Delta: "draft"}); err != nil {
-		t.Fatalf("Push delta returned error: %v", err)
-	}
-	err = stream.Push(context.Background(), channel.PreparedStreamEvent{
-		Type:  channel.StreamEventError,
-		Error: "request failed with token " + secret,
-	})
-	if err != nil {
-		t.Fatalf("Push error returned error: %v", err)
-	}
-	if err := stream.Close(context.Background()); err != nil {
-		t.Fatalf("Close returned error: %v", err)
-	}
-
-	got := pushedTextMessages(client)
-	if len(got) != 1 {
-		t.Fatalf("pushed text messages = %#v, want exactly one error message", got)
-	}
-	if strings.Contains(got[0], secret) {
-		t.Fatalf("pushed error leaked secret: %q", got[0])
-	}
-	if strings.Contains(got[0], "draft") {
-		t.Fatalf("pushed error retained buffered draft: %q", got[0])
-	}
-	if !strings.Contains(got[0], "Error: ") || !strings.Contains(got[0], strings.Repeat("*", len(secret))) {
-		t.Fatalf("pushed error did not contain expected redacted error text: %q", got[0])
+			stream, err := adapter.OpenStream(context.Background(), testLineConfig(), "Uuser", channel.StreamOptions{})
+			if err != nil {
+				t.Fatalf("OpenStream returned error: %v", err)
+			}
+			if err := stream.Push(context.Background(), channel.PreparedStreamEvent{Type: channel.StreamEventDelta, Delta: "draft"}); err != nil {
+				t.Fatalf("Push delta returned error: %v", err)
+			}
+			if err := stream.Push(context.Background(), tc.event); err != nil {
+				t.Fatalf("Push error returned error: %v", err)
+			}
+			if err := stream.Close(context.Background()); err != nil {
+				t.Fatalf("Close returned error: %v", err)
+			}
+			got := pushedTextMessages(client)
+			if len(got) != len(tc.want) || strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("pushed text messages = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

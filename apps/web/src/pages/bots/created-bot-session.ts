@@ -50,7 +50,7 @@ export function readCreatedBotSession(onboarding = false): CreatedBotSession | n
       setupError: typeof value.setupError === 'string' ? value.setupError : null,
       ...(value.settings && { settings: {
         chat_model_id: optionalString(value.settings.chat_model_id),
-        memory_provider_id: optionalString(value.settings.memory_provider_id),
+        ...(typeof value.settings.memory_enabled === 'boolean' && { memory_enabled: value.settings.memory_enabled }),
         reasoning_effort: optionalString(value.settings.reasoning_effort),
       } }),
     }

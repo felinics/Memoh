@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"io"
+	"strings"
 )
 
 // PreparedAttachmentKind identifies how an attachment should be delivered.
@@ -73,12 +74,23 @@ type PreparedStreamEvent struct {
 	Delta       string
 	Final       *PreparedStreamFinalizePayload
 	Error       string
+	ErrorCode   string
 	ToolCall    *StreamToolCall
 	Phase       StreamPhase
 	Attachments []PreparedAttachment
 	Reactions   []ReactRequest
 	Speeches    []SpeechRequest
 	Metadata    map[string]any
+}
+
+// ErrorReplyText is the text an adapter shows for a stream error. Copy rendered
+// from an error code is a complete sentence and is shown as it is; a bare error
+// text is labelled as an error.
+func ErrorReplyText(errorCode, text string) string {
+	if strings.TrimSpace(errorCode) != "" {
+		return text
+	}
+	return "Error: " + text
 }
 
 // LogicalEvent converts the prepared stream event back to the logical model.
@@ -88,6 +100,7 @@ func (e PreparedStreamEvent) LogicalEvent() StreamEvent {
 		Status:    e.Status,
 		Delta:     e.Delta,
 		Error:     e.Error,
+		ErrorCode: e.ErrorCode,
 		ToolCall:  e.ToolCall,
 		Phase:     e.Phase,
 		Reactions: e.Reactions,

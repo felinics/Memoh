@@ -10,13 +10,10 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"net/http"
 	"strings"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/runtimekind"
 )
 
@@ -144,58 +141,37 @@ func DriverPromptResult(result client.PromptResult, agentID string) external.Pro
 	return out
 }
 
-// normalizePromptError translates pool errors into the port's stable error
-// shapes: user-facing feedback for input-class failures, apperror codes for
-// configuration-class failures, and the raw error otherwise.
+// PromptError is a pool failure that rejects the turn's configuration before
+// the agent runs it: an unknown command, a model or reasoning choice the agent
+// cannot apply, or a configuration update the agent refused. Err is the pool
+// error, and the application chooses the public error from it. Like a public
+// error, PromptError hides Err from errors.Is and errors.As; diagnostics reach
+// it through Cause.
+type PromptError struct {
+	Err error
+}
+
+func (e *PromptError) Error() string { return e.Err.Error() }
+
+// Cause returns the pool error.
+func (e *PromptError) Cause() error { return e.Err }
+
+// normalizePromptError marks the pool failures that reject the turn's
+// configuration as a PromptError and returns any other error unchanged.
+// Input-class failures (a stale command, an image the agent cannot read) stay
+// package errors for the application to translate.
 func normalizePromptError(err error) error {
 	var commandNotFound *client.CommandNotFoundError
 	switch {
-	case errors.As(err, &commandNotFound):
-		return apperror.Wrap(apperror.CodeACPCommandNotFound, err, map[string]string{"command": commandNotFound.Command})
-	case errors.Is(err, ErrAgentCommandUnavailable):
-		// The runtime that admission matched was replaced (or updated its
-		// command set) before the prompt; the turn fails closed exactly like
-		// admission would have.
-		return agentfeedback.New(
-			agentfeedback.CodeAgentCommandStale,
-			"agent_command_stale",
-			http.StatusConflict,
-			"chat.externalAgent.agentCommandStale",
-			"The agent no longer offers this command. Reopen the command picker and try again.",
-			nil,
-		)
-	case errors.Is(err, client.ErrImagePromptUnsupported):
-		return agentfeedback.New(
-			agentfeedback.CodeImageInputUnsupported,
-			"image_input_unsupported",
-			http.StatusBadRequest,
-			"chat.externalAgent.imageInputUnsupported",
-			"This external agent cannot read the attached image.",
-			nil,
-		)
-	case errors.Is(err, client.ErrInvalidPromptImage):
-		return agentfeedback.New(
-			agentfeedback.CodeAttachmentInvalid,
-			"invalid_image_data",
-			http.StatusBadRequest,
-			"chat.externalAgent.attachmentInvalid",
-			"The attachment is invalid. Please attach it again.",
-			nil,
-		)
-	case errors.Is(err, client.ErrModelSelectionUnsupported):
-		return apperror.New(apperror.CodeACPModelSelectionUnsupported, nil)
-	case errors.Is(err, client.ErrModelIDRequired):
-		return apperror.New(apperror.CodeACPModelIDRequired, nil)
-	case errors.Is(err, client.ErrModelUnavailable):
-		return apperror.New(apperror.CodeACPModelUnavailable, nil)
-	case errors.Is(err, client.ErrReasoningSelectionUnsupported):
-		return apperror.New(apperror.CodeACPReasoningUnsupported, nil)
-	case errors.Is(err, client.ErrReasoningEffortRequired):
-		return apperror.New(apperror.CodeACPReasoningEffortRequired, nil)
-	case errors.Is(err, client.ErrReasoningEffortUnavailable):
-		return apperror.New(apperror.CodeACPReasoningUnavailable, nil)
-	case errors.Is(err, ErrRuntimeConfigUpdateFailed):
-		return apperror.Wrap(apperror.CodeACPConfigUpdateFailed, err, nil)
+	case errors.As(err, &commandNotFound),
+		errors.Is(err, client.ErrModelSelectionUnsupported),
+		errors.Is(err, client.ErrModelIDRequired),
+		errors.Is(err, client.ErrModelUnavailable),
+		errors.Is(err, client.ErrReasoningSelectionUnsupported),
+		errors.Is(err, client.ErrReasoningEffortRequired),
+		errors.Is(err, client.ErrReasoningEffortUnavailable),
+		errors.Is(err, ErrRuntimeConfigUpdateFailed):
+		return &PromptError{Err: err}
 	default:
 		return err
 	}

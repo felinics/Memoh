@@ -50,6 +50,9 @@
                 <SelectItem value="schedule">
                   {{ $t('usage.schedule') }}
                 </SelectItem>
+                <SelectItem value="memory">
+                  {{ $t('usage.memory') }}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -245,7 +248,7 @@
                   <TableCell class="whitespace-nowrap text-muted-foreground">
                     {{ formatDateTimeShort(r.created_at, { locale }) }}
                   </TableCell>
-                  <TableCell>{{ harnessLabel(r.harness) }}</TableCell>
+                  <TableCell>{{ r.session_type === 'memory' ? $t('usage.memory') : harnessLabel(r.harness) }}</TableCell>
                   <TableCell>{{ recordModelLabel(r) }}</TableCell>
                   <TableCell class="text-muted-foreground">
                     {{ recordProviderLabel(r.provider_name) }}
@@ -453,7 +456,7 @@ const modelIdFilter = computed(() =>
   selectedModelId.value === 'all' ? undefined : selectedModelId.value,
 )
 
-type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'schedule'
+type UsageBucketType = 'chat' | 'discuss' | 'acp_agent' | 'schedule' | 'memory'
 type SessionTypeFilter = UsageBucketType
 
 // Declared before the first useQuery below: Pinia Colada evaluates `key`
@@ -597,9 +600,10 @@ interface TypedDayMaps {
   discuss: Map<string, HandlersDailyTokenUsage>
   acp_agent: Map<string, HandlersDailyTokenUsage>
   schedule: Map<string, HandlersDailyTokenUsage>
+  memory: Map<string, HandlersDailyTokenUsage>
 }
 
-const usageBucketTypes: UsageBucketType[] = ['chat', 'discuss', 'acp_agent', 'schedule']
+const usageBucketTypes: UsageBucketType[] = ['chat', 'discuss', 'acp_agent', 'schedule', 'memory']
 
 function buildDayMap(rows: HandlersDailyTokenUsage[] | undefined) {
   const map = new Map<string, HandlersDailyTokenUsage>()
@@ -614,6 +618,7 @@ const dayMaps = computed<TypedDayMaps>(() => ({
   discuss: buildDayMap(usageData.value?.discuss),
   acp_agent: buildDayMap(usageData.value?.acp_agent),
   schedule: buildDayMap(usageData.value?.schedule),
+  memory: buildDayMap(usageData.value?.memory),
 }))
 
 const activeTypes = computed<UsageBucketType[]>(() => {
@@ -645,7 +650,8 @@ const hasData = computed(() => {
   const discuss = usageData.value?.discuss ?? []
   const acpAgent = usageData.value?.acp_agent ?? []
   const schedule = usageData.value?.schedule ?? []
-  return chat.length > 0 || discuss.length > 0 || acpAgent.length > 0 || schedule.length > 0 || byModelData.value.length > 0
+  const memory = usageData.value?.memory ?? []
+  return chat.length > 0 || discuss.length > 0 || acpAgent.length > 0 || schedule.length > 0 || memory.length > 0 || byModelData.value.length > 0
 })
 
 const summary = computed(() => {

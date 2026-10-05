@@ -77,6 +77,33 @@ func (s *PostgresStore) Admit(ctx context.Context, params AdmitParams) (Run, boo
 		}
 		return Run{}, false, fmt.Errorf("ledger(postgres): lock admission bot: %w", err)
 	}
+	if params.ResumeRunID != "" {
+		existing, lookupErr := txq.GetSessionRunByInvocation(ctx, dbsqlc.GetSessionRunByInvocationParams{SessionID: sessionID, InvocationID: params.InvocationID})
+		if lookupErr == nil && existing.BotID == botID {
+			return runFromRow(existing), false, nil
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return Run{}, false, lookupErr
+		}
+		sourceID, parseErr := dbpkg.ParseUUID(params.ResumeRunID)
+		if parseErr != nil {
+			return Run{}, false, ErrResumeSuperseded
+		}
+		source, sourceErr := txq.GetSessionRun(ctx, sourceID)
+		if sourceErr != nil {
+			if errors.Is(sourceErr, pgx.ErrNoRows) {
+				return Run{}, false, ErrResumeSuperseded
+			}
+			return Run{}, false, sourceErr
+		}
+		current, currentErr := txq.IsInterruptedSessionRunLatest(ctx, sourceID)
+		if currentErr != nil {
+			return Run{}, false, currentErr
+		}
+		if source.BotID != botID || source.SessionID != sessionID || !current {
+			return Run{}, false, ErrResumeSuperseded
+		}
+	}
 	row, err := txq.AdmitLockedSessionRun(ctx, dbsqlc.AdmitLockedSessionRunParams{
 		RunID:            runID,
 		BotID:            botID,
@@ -339,6 +366,11 @@ func (s *PostgresStore) ActiveRunsByBot(ctx context.Context, botID string) ([]Ru
 	return runsFromRows(rows), nil
 }
 
+// runErrorHistoryReset is the session_runs.error_code of a run aborted by a
+// history reset. It is persisted and registered in the apperror catalog under
+// the same value.
+const runErrorHistoryReset = "history_reset"
+
 func (s *PostgresStore) FenceAndFinalizeOrphan(ctx context.Context, reset ResetLease, run Run) (Run, bool, error) {
 	if err := s.ready(); err != nil {
 		return Run{}, false, err
@@ -433,7 +465,7 @@ func (s *PostgresStore) FenceAndFinalizeOrphan(ctx context.Context, reset ResetL
 	}
 	row, err := txq.FinalizeSessionRun(ctx, dbsqlc.FinalizeSessionRunParams{
 		RunID: runID, FencingToken: run.FencingToken, State: string(StateAborted),
-		ErrorCode: textOrNull("history_reset"), ErrorMessage: textOrNull("run canceled by history reset"),
+		ErrorCode: textOrNull(runErrorHistoryReset),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Run{}, false, nil
@@ -678,7 +710,6 @@ func (s *PostgresStore) PrepareFinish(ctx context.Context, params PrepareFinishP
 		FencingToken:          params.FencingToken,
 		ProposedTerminalState: string(params.State),
 		ProposedErrorCode:     textOrNull(params.ErrorCode),
-		ProposedErrorMessage:  textOrNull(params.ErrorMessage),
 		AllowWaitingDecision:  params.AllowWaitingDecision,
 	})
 	return applyResult("prepare run finish", row, err)
@@ -696,11 +727,11 @@ func (s *PostgresStore) Finalize(ctx context.Context, params FinalizeParams) (Ru
 		return Run{}, false, fmt.Errorf("ledger(postgres): invalid run id: %w", err)
 	}
 	row, err := s.q.FinalizeSessionRun(ctx, dbsqlc.FinalizeSessionRunParams{
-		RunID:        runID,
-		FencingToken: params.FencingToken,
-		State:        string(params.State),
-		ErrorCode:    textOrNull(params.ErrorCode),
-		ErrorMessage: textOrNull(params.ErrorMessage),
+		RunID:         runID,
+		FencingToken:  params.FencingToken,
+		State:         string(params.State),
+		ErrorCode:     textOrNull(params.ErrorCode),
+		ExpectedState: textOrNull(string(params.ExpectedState)),
 	})
 	return applyResult("finalize run", row, err)
 }

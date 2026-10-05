@@ -323,7 +323,7 @@ func startMCPStderrLogger(stderr io.ReadCloser, containerID string, logger *slog
 			logger.Warn("mcp stderr", slog.String("container_id", containerID), slog.String("message", line))
 		}
 		if err := scanner.Err(); err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || strings.Contains(err.Error(), "closed pipe") {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
 				return
 			}
 			logger.Error("mcp stderr read failed", slog.Any("error", err), slog.String("container_id", containerID))
@@ -419,9 +419,9 @@ type mcpStdioSession struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body MCPStdioRequest true "Stdio MCP payload"
 // @Success 200 {object} MCPStdioResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp-stdio [post].
 func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -483,9 +483,9 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 // @Param connection_id path string true "Connection ID"
 // @Param payload body object true "JSON-RPC request"
 // @Success 200 {object} object "JSON-RPC response: {jsonrpc,id,result|error}"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post].
 // ensureStdioSession lazily starts the session process on the first proxied
 // message. An initialize starts it with a client built from the message's own

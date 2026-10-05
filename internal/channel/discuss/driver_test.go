@@ -482,6 +482,42 @@ func TestHandleReplyWithTurn_UsesPersistedDiscussCursor(t *testing.T) {
 	}
 }
 
+func TestAgentEventToChannelEventMapsErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		event    agentevent.StreamEvent
+		wantText string
+		wantCode string
+	}{
+		{
+			name:     "catalogued code gets channel copy",
+			event:    agentevent.StreamEvent{Type: agentevent.Error, Code: " agent.provider_overloaded ", Error: "raw provider text"},
+			wantText: "The model provider is unavailable or overloaded right now. Please try again in a moment.",
+			wantCode: "agent.provider_overloaded",
+		},
+		{
+			name:     "unknown code gets the failed run copy",
+			event:    agentevent.StreamEvent{Type: agentevent.Error, Code: "not.in_catalog", Error: "raw provider text"},
+			wantText: "The response could not be completed. Please try again.",
+			wantCode: "runtime_run_failed",
+		},
+		{
+			name:     "uncoded gets the failed run copy",
+			event:    agentevent.StreamEvent{Type: agentevent.Error, Error: "raw provider text"},
+			wantText: "The response could not be completed. Please try again.",
+			wantCode: "runtime_run_failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := agentEventToChannelEvent(tt.event)
+			if !ok || got.Type != channel.StreamEventError || got.Error != tt.wantText || got.ErrorCode != tt.wantCode {
+				t.Fatalf("event = %+v ok=%v, want error %q code %q", got, ok, tt.wantText, tt.wantCode)
+			}
+		})
+	}
+}
+
 func TestAgentEventToChannelEventMapsACPDecisionRequests(t *testing.T) {
 	approval, ok := agentEventToChannelEvent(agentevent.StreamEvent{
 		Type:       agentevent.ToolApprovalRequest,
@@ -530,6 +566,7 @@ type fakeTurnService struct {
 	startErr       error
 	streamErr      error
 	midStreamError bool // emit a recovered Error event before the clean AgentEnd
+	endWithError   bool // end the stream on an Error event without AgentEnd
 	onStart        func(turn.StartTurnCommand)
 	calls          int
 	lastCmd        turn.StartTurnCommand
@@ -574,6 +611,11 @@ func (f *fakeTurnService) StartTurn(_ context.Context, cmd turn.StartTurnCommand
 		}
 		if f.streamErr != nil {
 			h.errs <- f.streamErr
+			return
+		}
+		if f.endWithError {
+			failed, _ := json.Marshal(agentevent.StreamEvent{Type: agentevent.Error, Error: "provider rejected the request"})
+			emit(string(agentevent.Error), failed)
 			return
 		}
 		if f.midStreamError {

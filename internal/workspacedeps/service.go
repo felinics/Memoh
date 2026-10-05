@@ -804,6 +804,9 @@ func (s *Service) Install(ctx context.Context, botID, depID, version string, sin
 	if op.dep.Retired {
 		return OperationResult{}, ErrDependencyNotFound
 	}
+	if err := s.ensureRequires(ctx, op, sink); err != nil {
+		return OperationResult{}, err
+	}
 	return s.provision(ctx, op, catalog.ActionInstall, StatusInstalling, sink)
 }
 
@@ -819,6 +822,9 @@ func (s *Service) Update(ctx context.Context, botID, depID, version string, sink
 		return OperationResult{}, err
 	}
 	defer op.release()
+	if err := s.ensureRequires(ctx, op, sink); err != nil {
+		return OperationResult{}, err
+	}
 	return s.provision(ctx, op, catalog.ActionUpdate, StatusUpdating, sink)
 }
 
@@ -835,6 +841,9 @@ func (s *Service) Reinstall(ctx context.Context, botID, depID, version string, s
 		return OperationResult{}, err
 	}
 	defer op.release()
+	if err := s.ensureRequires(ctx, op, sink); err != nil {
+		return OperationResult{}, err
+	}
 	return s.provision(ctx, op, catalog.ActionReinstall, StatusInstalling, sink)
 }
 
@@ -857,6 +866,12 @@ func (s *Service) Remove(ctx context.Context, botID, depID string, sink LogSink)
 	}
 	previous := s.readStateBestEffort(ctx, op)
 	if err := s.markInProgress(ctx, op, StatusRemoving); err != nil {
+		return OperationResult{}, err
+	}
+	// Checked after the claim, so a dependent claiming concurrently either
+	// shows up here or sees this removal in verifyRequires.
+	if err := s.checkNotRequired(ctx, op); err != nil {
+		s.restore(ctx, op)
 		return OperationResult{}, err
 	}
 	if _, err := s.runScript(ctx, op, catalog.ActionRemove, script, "", stateVersion(previous), 0, sink); err != nil {
@@ -1089,6 +1104,9 @@ type operation struct {
 	receipt     *OperationReceipt
 	operationID string
 	finalizing  bool
+	// requires is the catalog op's prerequisites resolved against, set by
+	// ensureRequires; verifyRequires re-checks them after the claim.
+	requires *catalog.Catalog
 }
 
 // begin validates the dependency, takes the in-memory lock, makes sure the
@@ -1104,6 +1122,12 @@ func (s *Service) begin(ctx context.Context, botID, depID, version string, requi
 	if err != nil {
 		return nil, err
 	}
+	return s.beginWith(ctx, cat, botID, depID, version, requirePlatform)
+}
+
+// beginWith is begin with the catalog already resolved. Prerequisites use it
+// so they resolve against the catalog their dependent was prepared with.
+func (s *Service) beginWith(ctx context.Context, cat *catalog.Catalog, botID, depID, version string, requirePlatform bool) (*operation, error) {
 	dep, ok := cat.Get(strings.TrimSpace(depID))
 	if !ok {
 		return nil, ErrDependencyNotFound
@@ -1209,6 +1233,10 @@ func (s *Service) provision(ctx context.Context, op *operation, action catalog.A
 	}
 	previous := s.readStateBestEffort(ctx, op)
 	if err := s.markInProgress(ctx, op, status); err != nil {
+		return OperationResult{}, err
+	}
+	if err := s.verifyRequires(ctx, op); err != nil {
+		s.restore(ctx, op)
 		return OperationResult{}, err
 	}
 	result, err := s.runScript(ctx, op, action, script, op.version, stateVersion(previous), 0, sink)

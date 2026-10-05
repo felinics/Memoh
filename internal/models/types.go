@@ -28,6 +28,7 @@ const (
 	ClientTypeGoogleGenerativeAI      ClientType = "google-generative-ai"
 	ClientTypeOpenAICodex             ClientType = "openai-codex"
 	ClientTypeGitHubCopilot           ClientType = "github-copilot"
+	ClientTypeOpenCodeGo              ClientType = "opencode-go"
 	ClientTypeEdgeSpeech              ClientType = "edge-speech"
 	ClientTypeOpenAISpeech            ClientType = "openai-speech"
 	ClientTypeOpenAITranscription     ClientType = "openai-transcription"
@@ -218,7 +219,7 @@ func (m *Model) Validate() error {
 		return errors.New("provider ID must be a valid UUID")
 	}
 	if !IsValidModelType(m.Type) {
-		return errors.New("invalid model type")
+		return ErrInvalidModelType
 	}
 	if m.Type == ModelTypeEmbedding {
 		if m.Config.Dimensions == nil || *m.Config.Dimensions <= 0 {
@@ -384,5 +385,10 @@ type TestResponse struct {
 	Status    TestStatus `json:"status"`
 	Reachable bool       `json:"reachable"`
 	LatencyMs int64      `json:"latency_ms,omitempty"`
-	Message   string     `json:"message,omitempty"`
+	// Code is the error catalog code for why the test did not pass. It is
+	// empty on success and when no catalog code describes the failure.
+	Code string `json:"code,omitempty"`
+	// Cause is why the test did not pass. It never leaves the process; the
+	// handler records it and derives Code from it.
+	Cause error `json:"-"`
 }

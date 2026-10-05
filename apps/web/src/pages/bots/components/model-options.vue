@@ -100,7 +100,7 @@
     <!-- Reasoning effort lives in the model menu, not beside it: the tiers a model
          offers depend on the model, so picking one without the other is a two-stop
          trip through a menu that already knows the answer. -->
-    <template v-if="showReasoning">
+    <template v-if="showReasoning && canSelectReasoning">
       <div :class="menuSeparatorClass" />
       <div class="p-1.5 pt-0">
         <PopoverAnchor as-child>
@@ -127,7 +127,7 @@
     </template>
 
     <PopoverContent
-      v-if="showReasoning"
+      v-if="showReasoning && canSelectReasoning"
       menu
       side="right"
       align="start"
@@ -200,7 +200,7 @@ import { measureVirtualRow } from '@/utils/virtual-row-measure'
 import {
   EFFORT_LABELS,
   EFFORT_OPACITY,
-  REASONING_EFFORT_DISABLE,
+  displayedEffort,
   selectableEfforts,
 } from './reasoning-effort'
 
@@ -519,7 +519,7 @@ const currentReasoningValue = computed(() => {
   // External runtimes own their effort vocabulary. An unset value inherits
   // their defaults; it does not mean the native composer's "off" state.
   if (props.reasoningOptions !== undefined) return reasoningEffort.value
-  return canSelectReasoning.value ? reasoningEffort.value || REASONING_EFFORT_DISABLE : REASONING_EFFORT_DISABLE
+  return displayedEffort(reasoningEffort.value, activeModel.value?.reasoning)
 })
 
 const currentReasoningOption = computed(() =>

@@ -241,7 +241,7 @@ func TestAgentStreamRetryRevokesReadMediaAdmission(t *testing.T) {
 			if !messagesHaveFilePart(params.Messages) {
 				t.Fatal("failed provider attempt did not receive admitted file")
 			}
-			return sdk.ModelResult{}, errors.New("api error 500")
+			return sdk.ModelResult{}, serverErr()
 		default:
 			if messagesHaveFilePart(params.Messages) {
 				t.Fatal("retry provider attempt retained file selected for eviction")

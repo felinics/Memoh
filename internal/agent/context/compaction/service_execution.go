@@ -332,7 +332,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		selectedSystemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
 	)
 
-	result, err := model.Generate(ctx, sdk.Request{
+	result, err := model.Generate(models.WithModelSession(ctx, cfg.SessionID), sdk.Request{
 		System:    systemPromptDecorated,
 		Messages:  sdkMessages,
 		MaxTokens: &maxOutputTokens,

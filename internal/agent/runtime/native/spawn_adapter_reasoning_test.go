@@ -41,8 +41,8 @@ func (*spawnReasoningProvider) ListModels(context.Context) ([]sdk.Model, error) 
 	return nil, nil
 }
 
-func (*spawnReasoningProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*spawnReasoningProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*spawnReasoningProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {

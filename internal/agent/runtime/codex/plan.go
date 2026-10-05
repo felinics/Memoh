@@ -2,10 +2,10 @@ package codex
 
 import (
 	"context"
-	"errors"
 
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var _ external.PlanModeProvider = (*Driver)(nil)
@@ -45,7 +45,7 @@ func applyCollaborationMode(params *protocol.TurnStartParams, input external.Pro
 		settings.ReasoningEffort = params.Effort
 	}
 	if settings.Model == "" {
-		return errors.New("codex thread did not report its model for collaboration mode")
+		return errs.NewDependency("codex thread did not report its model for collaboration mode")
 	}
 	// nil selects Codex's built-in mode instructions.
 	settings.DeveloperInstructions = nil

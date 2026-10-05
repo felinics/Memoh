@@ -30,13 +30,13 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/mcp"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	modelpkg "github.com/felinics/memoh/internal/models"
 	providerpkg "github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/schedule"
 	searchpkg "github.com/felinics/memoh/internal/searchproviders"
 	"github.com/felinics/memoh/internal/settings"
+	"github.com/felinics/memoh/internal/workspace"
 )
 
 type importState struct {
@@ -50,6 +50,9 @@ type importState struct {
 	// workdir.
 	workdirMap map[string]pgtype.UUID
 	warnings   []string
+	// botID is the bot being restored, recorded on the event of each skipped
+	// step. A create-mode import learns it only once the bot exists.
+	botID string
 	// counts records how many items each section restored, surfaced to the UI.
 	counts map[Section]int
 	// createMode is true for a fresh-bot import. In create mode any restore
@@ -83,12 +86,19 @@ func decodeBundle(raw []byte, passphrase string) (plaintext []byte, encrypted bo
 // itemErr decides how a per-item restore failure is handled: fatal in create
 // mode (so the caller rolls back the whole bot), a warning in overwrite mode so
 // one bad row does not abort an otherwise-good restore.
-func (st *importState) itemErr(label string, err error) error {
-	if st.createMode {
+func (s *Service) itemErr(ctx context.Context, state *importState, step, warning string, err error) error {
+	if state.createMode {
 		return err
 	}
-	st.warnings = append(st.warnings, label+" skipped: "+err.Error())
+	s.skipImport(ctx, state, step, warning, err)
 	return nil
+}
+
+// skipImport reports a restore step that failed and was skipped: the result
+// carries the fixed warning, and the cause is recorded as an event.
+func (s *Service) skipImport(ctx context.Context, state *importState, step, warning string, err error) {
+	state.warnings = append(state.warnings, warning)
+	s.recordSkipped(ctx, importOperation, state.botID, step, err)
 }
 
 func (s *Service) Preview(ctx context.Context, raw []byte, opts ImportOptions, passphrase string) (PreviewResult, error) {
@@ -456,6 +466,10 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		warnings:   append([]string(nil), manifest.Warnings...),
 		counts:     map[Section]int{},
 	}
+	if normalizeImportMode(opts.Mode) == ImportModeOverwrite {
+		// The target is known before its dependencies are imported.
+		state.botID = strings.TrimSpace(opts.TargetBotID)
+	}
 
 	profile, err := readEntry[bots.Bot](state, "bot/profile.json")
 	if err != nil {
@@ -470,6 +484,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	if err != nil {
 		return ImportResult{}, fmt.Errorf("read bot/settings.json: %w", err)
 	}
+	cfg = resolveLegacyMemoryProvider(state, cfg)
 	// Dependencies (providers/models/...) are global, idempotent resources; they
 	// are created before the bot and are intentionally NOT rolled back, so a
 	// retry reuses them by name.
@@ -500,6 +515,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		return ImportResult{}, err
 	}
 	state.idMap[profile.ID] = targetBotID
+	state.botID = targetBotID
 	state.createMode = created
 
 	// Compensation: in create mode, undo a partially-imported bot on any fatal
@@ -573,25 +589,26 @@ func appendWarningOnce(warnings []string, warning string) []string {
 // only meaningful in overwrite mode degrade their own item failures to warnings.
 func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID string, cfg settings.Settings, deps dependencyMap, opts ImportOptions, state *importState) error {
 	// restore wraps a section step: fatal in create mode, a warning otherwise.
-	restore := func(label string, fn func() error) error {
+	// The label is the warning, and the prefix of the error in create mode.
+	restore := func(step, label string, fn func() error) error {
 		if err := fn(); err != nil {
 			if state.createMode {
 				return fmt.Errorf("%s: %w", label, err)
 			}
-			state.warnings = append(state.warnings, label+": "+err.Error())
+			s.skipImport(ctx, state, step, label, err)
 		}
 		return nil
 	}
 
 	if opts.wants(SectionSettings) || opts.wants(SectionModels) {
-		if err := restore("settings import failed", func() error {
+		if err := restore("settings", "settings import failed", func() error {
 			return s.restoreSettings(ctx, targetBotID, cfg, deps, opts.wants(SectionSettings), opts.wants(SectionModels))
 		}); err != nil {
 			return err
 		}
 	}
 	if (opts.wants(SectionSettings) || opts.wants(SectionWorkspace)) && hasEntry(state.entries, "bot/workspace_resource_limits.json") {
-		if err := restore("workspace resource limits import failed", func() error {
+		if err := restore("workspace_resource_limits", "workspace resource limits import failed", func() error {
 			return s.restoreWorkspaceResourceLimits(ctx, targetBotID, state)
 		}); err != nil {
 			return err
@@ -600,7 +617,7 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 	// Workdirs must restore before history: restored sessions reference the
 	// recreated workdir rows through a real foreign key.
 	if (opts.wants(SectionWorkspace) || opts.wants(SectionHistory)) && hasEntry(state.entries, "bot/workdirs.json") {
-		if err := restore("workdir import failed", func() error {
+		if err := restore("workdirs", "workdir import failed", func() error {
 			return s.restoreWorkdirs(ctx, targetBotID, actorUserID, state)
 		}); err != nil {
 			return err
@@ -610,7 +627,7 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 		if opts.strategyFor(SectionACL) == StrategyReplace {
 			s.clearACL(ctx, targetBotID)
 		}
-		if err := restore("acl import failed", func() error { return s.restoreACL(ctx, targetBotID, actorUserID, state) }); err != nil {
+		if err := restore("acl", "acl import failed", func() error { return s.restoreACL(ctx, targetBotID, actorUserID, state) }); err != nil {
 			return err
 		}
 	}
@@ -618,7 +635,7 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 		if opts.strategyFor(SectionChannels) == StrategyReplace {
 			s.clearChannels(ctx, targetBotID)
 		}
-		if err := restore("channels import failed", func() error { return s.restoreChannels(ctx, targetBotID, state) }); err != nil {
+		if err := restore("channels", "channels import failed", func() error { return s.restoreChannels(ctx, targetBotID, state) }); err != nil {
 			return err
 		}
 	}
@@ -626,7 +643,7 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 		if opts.strategyFor(SectionMCP) == StrategyReplace {
 			s.clearMCP(ctx, targetBotID)
 		}
-		if err := restore("mcp import failed", func() error { return s.restoreMCP(ctx, targetBotID, state) }); err != nil {
+		if err := restore("mcp", "mcp import failed", func() error { return s.restoreMCP(ctx, targetBotID, state) }); err != nil {
 			return err
 		}
 	}
@@ -634,13 +651,13 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 		if opts.strategyFor(SectionSchedules) == StrategyReplace {
 			s.clearSchedules(ctx, targetBotID)
 		}
-		if err := restore("schedules import failed", func() error { return s.restoreSchedules(ctx, targetBotID, state) }); err != nil {
+		if err := restore("schedules", "schedules import failed", func() error { return s.restoreSchedules(ctx, targetBotID, state) }); err != nil {
 			return err
 		}
 	}
 	if opts.wants(SectionHistory) {
 		replace := opts.strategyFor(SectionHistory) == StrategyReplace
-		if err := restore("history import failed", func() error {
+		if err := restore("history", "history import failed", func() error {
 			return s.restoreHistory(ctx, actorUserID, targetBotID, state, opts.wants(SectionAssets), replace)
 		}); err != nil {
 			return err
@@ -653,7 +670,7 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 		if s.workspace == nil {
 			state.warnings = append(state.warnings, "workspace restore skipped: workspace manager not configured")
 		} else if archive, err := workspaceArchive(state.entries); err != nil {
-			state.warnings = append(state.warnings, "workspace restore failed: "+err.Error())
+			s.skipImport(ctx, state, "workspace", "workspace restore failed", err)
 		} else {
 			_, fenced := runtimefence.ResetFromContext(ctx)
 			var transferErr, guardErr error
@@ -676,7 +693,7 @@ func (s *Service) applyRestore(ctx context.Context, actorUserID, targetBotID str
 			case transferErr == nil:
 				state.counts[SectionWorkspace] = countWorkspaceFiles(state.entries)
 			default:
-				state.warnings = append(state.warnings, "workspace restore failed: "+transferErr.Error())
+				s.skipImport(ctx, state, "workspace", "workspace restore failed", transferErr)
 			}
 		}
 	}
@@ -699,7 +716,7 @@ func (s *Service) restoreWorkspaceData(ctx context.Context, botID string, raw []
 			return nil
 		}
 		lastErr = err
-		if !isWorkspaceRestoreRetryable(err) || time.Now().After(deadline) {
+		if !workspace.IsNotReady(err) || time.Now().After(deadline) {
 			return lastErr
 		}
 		timer := time.NewTimer(workspaceRestoreRetryInterval)
@@ -712,31 +729,11 @@ func (s *Service) restoreWorkspaceData(ctx context.Context, botID string, raw []
 	}
 }
 
-func isWorkspaceRestoreRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	retryable := []string{
-		"not found",
-		"no such container",
-		"workspace is not reachable",
-		"connection refused",
-	}
-	for _, item := range retryable {
-		if strings.Contains(msg, item) {
-			return true
-		}
-	}
-	return false
-}
-
 type dependencyMap struct {
 	providers       map[string]string
 	models          map[string]string
 	searchProviders map[string]string
 	fetchProviders  map[string]string
-	memoryProviders map[string]string
 }
 
 func newDependencyMap() dependencyMap {
@@ -745,7 +742,6 @@ func newDependencyMap() dependencyMap {
 		models:          map[string]string{},
 		searchProviders: map[string]string{},
 		fetchProviders:  map[string]string{},
-		memoryProviders: map[string]string{},
 	}
 }
 
@@ -765,7 +761,7 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 	for _, item := range providers {
 		id, err := s.ensureProvider(ctx, item)
 		if err != nil {
-			state.warnings = append(state.warnings, "provider dependency skipped: "+err.Error())
+			s.skipImport(ctx, state, "provider_dependency", "provider dependency skipped", err)
 			continue
 		}
 		deps.providers[item.ID] = id
@@ -774,7 +770,7 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 	for _, item := range models {
 		id, err := s.ensureModel(ctx, item, deps)
 		if err != nil {
-			state.warnings = append(state.warnings, "model dependency skipped: "+err.Error())
+			s.skipImport(ctx, state, "model_dependency", "model dependency skipped", err)
 			continue
 		}
 		deps.models[item.ID] = id
@@ -783,7 +779,7 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 	for _, item := range searchProviders {
 		id, err := s.ensureSearchProvider(ctx, item)
 		if err != nil {
-			state.warnings = append(state.warnings, "search provider dependency skipped: "+err.Error())
+			s.skipImport(ctx, state, "search_provider_dependency", "search provider dependency skipped", err)
 			continue
 		}
 		deps.searchProviders[item.ID] = id
@@ -792,19 +788,10 @@ func (s *Service) importDependencies(ctx context.Context, state *importState) (d
 	for _, item := range fetchProviders {
 		id, err := s.ensureFetchProvider(ctx, item)
 		if err != nil {
-			state.warnings = append(state.warnings, "fetch provider dependency skipped: "+err.Error())
+			s.skipImport(ctx, state, "fetch_provider_dependency", "fetch provider dependency skipped", err)
 			continue
 		}
 		deps.fetchProviders[item.ID] = id
-	}
-	memoryProviders, _ := readEntry[[]memprovider.ProviderGetResponse](state, "dependencies/memory_providers.json")
-	for _, item := range memoryProviders {
-		id, err := s.ensureMemoryProvider(ctx, item)
-		if err != nil {
-			state.warnings = append(state.warnings, "memory provider dependency skipped: "+err.Error())
-			continue
-		}
-		deps.memoryProviders[item.ID] = id
 	}
 	return deps, nil
 }
@@ -882,10 +869,11 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 				eff.ImageModelID = current.ImageModelID
 				eff.SearchProviderID = current.SearchProviderID
 				eff.FetchProviderID = current.FetchProviderID
-				eff.MemoryProviderID = current.MemoryProviderID
+				eff.MemoryEnabled = current.MemoryEnabled
 				eff.TtsModelID = current.TtsModelID
 				eff.TranscriptionModelID = current.TranscriptionModelID
 				eff.CompactionModelID = current.CompactionModelID
+				eff.MemoryLLMModelID = current.MemoryLLMModelID
 				eff.DiscussProbeModelID = current.DiscussProbeModelID
 			}
 			if !importSettings {
@@ -934,6 +922,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 	overlayEnabled := eff.OverlayEnabled
 	overlayProvider := eff.OverlayProvider
 	fetchProviderID := modelID(eff.FetchProviderID, deps.fetchProviders)
+	memoryEnabled := eff.MemoryEnabled
 	_, err := s.settings.UpsertBot(ctx, botID, settings.UpsertRequest{
 		ChatModelID:             ptrStringAllowEmpty(modelID(eff.ChatModelID, deps.models)),
 		ChatRuntime:             ptrStringAllowEmpty(eff.ChatRuntime),
@@ -943,7 +932,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		ImageModelID:            ptrStringAllowEmpty(modelID(eff.ImageModelID, deps.models)),
 		SearchProviderID:        ptrStringAllowEmpty(modelID(eff.SearchProviderID, deps.searchProviders)),
 		FetchProviderID:         &fetchProviderID,
-		MemoryProviderID:        ptrStringAllowEmpty(modelID(eff.MemoryProviderID, deps.memoryProviders)),
+		MemoryEnabled:           &memoryEnabled,
 		TtsModelID:              ptrStringAllowEmpty(modelID(eff.TtsModelID, deps.models)),
 		TranscriptionModelID:    ptrStringAllowEmpty(modelID(eff.TranscriptionModelID, deps.models)),
 		AclDefaultEffect:        eff.AclDefaultEffect,
@@ -953,6 +942,7 @@ func (s *Service) restoreSettings(ctx context.Context, botID string, cfg setting
 		CompactionThreshold:     &compactionThreshold,
 		CompactionTargetPercent: &compactionTargetPercent,
 		CompactionModelID:       ptrString(modelID(eff.CompactionModelID, deps.models)),
+		MemoryLLMModelID:        ptrString(modelID(eff.MemoryLLMModelID, deps.models)),
 		DiscussProbeModelID:     modelID(eff.DiscussProbeModelID, deps.models),
 		PersistFullToolResults:  &persistFullToolResults,
 		ShowToolCallsInIM:       &showToolCalls,
@@ -1018,7 +1008,7 @@ func (s *Service) restoreWorkdirs(ctx context.Context, botID, actorUserID string
 		archived := false
 		if item.Archived {
 			if err := s.workdirs.ArchiveWorkdir(ctx, botID, created.ID); err != nil {
-				state.warnings = append(state.warnings, "workdir archive flag restore failed for "+item.Name+": "+err.Error())
+				s.skipImport(ctx, state, "workdir_archive_flag", "workdir archive flag restore failed for "+item.Name, err)
 			} else {
 				archived = true
 			}
@@ -1091,7 +1081,7 @@ func (s *Service) restoreACL(ctx context.Context, botID, actorUserID string, sta
 			SourceScope:        sourceScope,
 		})
 		if err != nil {
-			if e := state.itemErr("acl rule", err); e != nil {
+			if e := s.itemErr(ctx, state, "acl_rule", "acl rule skipped", err); e != nil {
 				return e
 			}
 			continue
@@ -1121,7 +1111,7 @@ func (s *Service) restoreChannels(ctx context.Context, botID string, state *impo
 			VerifiedAt:       &verifiedAt,
 		})
 		if err != nil {
-			if e := state.itemErr("channel config", err); e != nil {
+			if e := s.itemErr(ctx, state, "channel_config", "channel config skipped", err); e != nil {
 				return e
 			}
 			continue
@@ -1142,7 +1132,7 @@ func (s *Service) restoreMCP(ctx context.Context, botID string, state *importSta
 	for _, item := range items {
 		req := mcpRequestFromConnection(item)
 		if _, err := s.mcp.Create(ctx, botID, req); err != nil {
-			if e := state.itemErr("mcp connection", err); e != nil {
+			if e := s.itemErr(ctx, state, "mcp_connection", "mcp connection skipped", err); e != nil {
 				return e
 			}
 			continue
@@ -1163,15 +1153,16 @@ func (s *Service) restoreSchedules(ctx context.Context, botID string, state *imp
 	for _, item := range items {
 		enabled := item.Enabled
 		_, err := s.schedules.Create(ctx, botID, schedule.CreateRequest{
-			Name:        item.Name,
-			Description: item.Description,
-			Pattern:     item.Pattern,
-			MaxCalls:    schedule.NullableInt{Value: item.MaxCalls, Set: true},
-			Command:     item.Command,
-			Enabled:     &enabled,
+			Name:            item.Name,
+			Description:     item.Description,
+			Pattern:         item.Pattern,
+			MaxCalls:        schedule.NullableInt{Value: item.MaxCalls, Set: true},
+			Command:         item.Command,
+			Enabled:         &enabled,
+			ExecutionConfig: schedule.ExecutionConfig{MaxRunSeconds: item.MaxRunSeconds},
 		})
 		if err != nil {
-			if e := state.itemErr("schedule", err); e != nil {
+			if e := s.itemErr(ctx, state, "schedule", "schedule skipped", err); e != nil {
 				return e
 			}
 			continue
@@ -1991,27 +1982,6 @@ func (s *Service) ensureFetchProvider(ctx context.Context, item fetchpkg.GetResp
 		if _, err := s.fetchProviders.Update(ctx, created.ID, fetchpkg.UpdateRequest{Enable: &enable}); err != nil {
 			return "", err
 		}
-	}
-	return created.ID, nil
-}
-
-func (s *Service) ensureMemoryProvider(ctx context.Context, item memprovider.ProviderGetResponse) (string, error) {
-	if s.memoryProviders == nil {
-		return item.ID, errors.New("memory provider service not configured")
-	}
-	list, _ := s.memoryProviders.List(ctx)
-	for _, existing := range list {
-		if existing.Name == item.Name {
-			return existing.ID, nil
-		}
-	}
-	created, err := s.memoryProviders.Create(ctx, memprovider.ProviderCreateRequest{
-		Name:     item.Name,
-		Provider: memprovider.ProviderType(item.Provider),
-		Config:   item.Config,
-	})
-	if err != nil {
-		return "", err
 	}
 	return created.ID, nil
 }

@@ -17,6 +17,7 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
 )
@@ -90,9 +91,9 @@ type CacheStats struct {
 // @Param session_id path string true "Session ID"
 // @Param model_id query string false "Optional model UUID override for context window"
 // @Success 200 {object} SessionInfoResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/status [get].
 func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -150,15 +151,13 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	messageCount, err := h.queries.CountMessagesBySession(ctx, pgSessionID)
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "count messages failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to count messages")
+		return errs.Wrap(err, "count messages")
 	}
 
 	var usedTokens int64
 	latestUsage, err := h.queries.GetLatestAssistantUsage(ctx, pgSessionID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		h.logger.ErrorContext(c.Request().Context(), "get latest usage failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get latest usage")
+		return errs.Wrap(err, "get latest usage")
 	}
 	if err == nil {
 		usedTokens = latestUsage
@@ -169,8 +168,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	cacheRow, err := h.queries.GetSessionCacheStats(ctx, pgSessionID)
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "get cache stats failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get cache stats")
+		return errs.Wrap(err, "get cache stats")
 	}
 
 	var cacheHitRate float64
@@ -180,8 +178,7 @@ func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 
 	skills, err := h.queries.GetSessionUsedSkills(ctx, pgSessionID)
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "get used skills failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get used skills")
+		return errs.Wrap(err, "get used skills")
 	}
 	if skills == nil {
 		skills = []string{}

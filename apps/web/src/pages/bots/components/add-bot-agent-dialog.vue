@@ -110,6 +110,7 @@ import { useDialogMutation } from '@/composables/useDialogMutation'
 import {
   withEnabledACPAgentMetadataIfConfigured,
 } from '@/utils/acp'
+import { UserFacingError } from '@/utils/api-error'
 import {
   BOT_AGENT_RUNTIME_ACP,
   botAgentRuntimeOptions,
@@ -169,12 +170,12 @@ const { mutateAsync: createMutation, isLoading } = useMutation({
   mutation: async (value: { provider: string; name: string }) => {
     const provider = normalizeAgentID(value.provider)
     const option = providerOptions.value.find(item => item.value === provider)
-    if (!option) throw new Error(t('bots.agent.providerRequired'))
+    if (!option) throw new UserFacingError(t('bots.agent.providerRequired'))
 
     let agentMetadata: Record<string, unknown> = { provider }
     if (option.runtime === BOT_AGENT_RUNTIME_ACP) {
       const profile = props.profiles.find(item => normalizeAgentID(item.id) === provider)
-      if (!profile) throw new Error(t('bots.agent.providerRequired'))
+      if (!profile) throw new UserFacingError(t('bots.agent.providerRequired'))
       const metadata = withEnabledACPAgentMetadataIfConfigured(props.botMetadata, profile)
       if (metadata) {
         await putBotsById({

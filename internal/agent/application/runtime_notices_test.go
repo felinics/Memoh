@@ -38,7 +38,7 @@ func TestRuntimeNoticesSurviveTerminalAndHistory(t *testing.T) {
 				service := newACPLifecycleService(t, &recordingACPPrompter{}, messages, &recordingContextLifecycleStore{})
 				driver := noticeTestDriver{kind: runtime, prompt: func(_ context.Context, input external.PromptInput) (external.PromptResult, error) {
 					notice := event.StreamEvent{
-						Type: event.RuntimeNotice, Code: "tools_unavailable", Delta: "public runtime notice",
+						Type: event.RuntimeNotice, NoticeKind: event.NoticeToolsUnavailable, Delta: "public runtime notice",
 						Metadata: map[string]any{"dep_id": "codex", "diagnostic": map[string]any{"private": "SECRET"}}, Error: "SECRET",
 					}
 					// The application must collect notices even before a driver has
@@ -47,10 +47,10 @@ func TestRuntimeNoticesSurviveTerminalAndHistory(t *testing.T) {
 					input.Sink.EmitStreamEvent(notice)
 					if outcome == "stopped_during_setup" {
 						cancel()
-						return external.PromptResult{}, apperror.New(apperror.CodeExternalRuntimeUnavailable, nil)
+						return external.PromptResult{}, external.Unavailable(context.Canceled)
 					}
 					if outcome == "configuration_failure" {
-						return external.PromptResult{}, apperror.New(apperror.CodeExternalRuntimeUnavailable, nil)
+						return external.PromptResult{}, external.Unavailable(errors.New("SECRET bridge down"))
 					}
 					result := external.PromptResult{Output: []sdk.Message{sdk.AssistantMessage("first"), sdk.AssistantMessage("last")}, TurnCompleted: outcome == "completed"}
 					if outcome == "failed" {
@@ -59,7 +59,7 @@ func TestRuntimeNoticesSurviveTerminalAndHistory(t *testing.T) {
 					return result, nil
 				}}
 				ch := make(chan WSStreamEvent, 64)
-				if err := service.streamRuntimeWS(ctx, driver, ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: lifecycleTestRunID, Query: "test"}, ch, make(chan struct{})); err != nil {
+				if _, err := service.streamRuntimeWS(ctx, driver, ChatRequest{BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: lifecycleTestRunID, Query: "test"}, ch, make(chan struct{}), true); err != nil {
 					t.Fatal(err)
 				}
 				if len(messages.deleted) != 0 {
@@ -122,7 +122,7 @@ func TestScheduledRuntimeNoticeIsPersistedWithoutInteractiveSubscriber(t *testin
 	messages := &recordingMessageService{}
 	service := newACPLifecycleService(t, &recordingACPPrompter{}, messages, &recordingContextLifecycleStore{})
 	driver := noticeTestDriver{kind: "codex", prompt: func(_ context.Context, input external.PromptInput) (external.PromptResult, error) {
-		input.Sink.EmitStreamEvent(event.StreamEvent{Type: event.RuntimeNotice, Code: "tools_unavailable", Delta: "public runtime notice"})
+		input.Sink.EmitStreamEvent(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeToolsUnavailable, Delta: "public runtime notice"})
 		return external.PromptResult{Text: "done", Output: []sdk.Message{sdk.AssistantMessage("done")}, TurnCompleted: true}, nil
 	}}
 	_, err := service.triggerScheduleRuntime(context.Background(), lifecycleTestBotID, schedule.TriggerPayload{SessionID: lifecycleTestSessionID, Command: "test", OwnerUserID: "user-1"}, "", lifecycleTestRunID, driver)
@@ -130,4 +130,43 @@ func TestScheduledRuntimeNoticeIsPersistedWithoutInteractiveSubscriber(t *testin
 		t.Fatal(err)
 	}
 	assertPersistedRuntimeNotice(t, messages)
+}
+
+// Each notice kind a runtime reports leaves the application with its public
+// code, and the kind itself does not.
+func TestPublicRuntimeNoticeGivesEachKindItsCode(t *testing.T) {
+	for kind, code := range map[event.NoticeKind]apperror.Code{
+		event.NoticeNativeHistoryLost:   apperror.CodeRuntimeNativeHistoryLost,
+		event.NoticeToolsUnavailable:    apperror.CodeRuntimeToolsUnavailable,
+		event.NoticeElicitationDeclined: apperror.CodeRuntimeElicitationDeclined,
+		event.NoticeSteerFailed:         apperror.CodeRuntimeControlSteerFailed,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			got := publicRuntimeNotice(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: kind, Delta: "runtime text"})
+			if got.Code != string(code) || got.Delta != "runtime text" || got.NoticeKind != "" {
+				t.Fatalf("notice = %+v, want code %s with the runtime's text", got, code)
+			}
+		})
+	}
+}
+
+// A failed steer carries no text of its own; it takes the catalog detail.
+func TestPublicRuntimeNoticeFillsSteerFailedDetail(t *testing.T) {
+	got := publicRuntimeNotice(event.StreamEvent{Type: event.RuntimeNotice, NoticeKind: event.NoticeSteerFailed})
+	want := "The additional instruction could not be delivered. Send it again after this turn finishes."
+	if got.Code != string(apperror.CodeRuntimeControlSteerFailed) || got.Delta != want {
+		t.Fatalf("notice = %+v, want %q", got, want)
+	}
+}
+
+func TestPublicRuntimeNoticeLeavesOtherEvents(t *testing.T) {
+	for _, ev := range []event.StreamEvent{
+		{Type: event.TextDelta, Delta: "hello"},
+		{Type: event.RuntimeNotice, Code: "tools_unavailable", Delta: "already public"},
+		{Type: event.RuntimeNotice, NoticeKind: "unknown_kind", Delta: "text"},
+	} {
+		if got := publicRuntimeNotice(ev); got.Code != ev.Code || got.Delta != ev.Delta || got.NoticeKind != ev.NoticeKind {
+			t.Fatalf("publicRuntimeNotice(%+v) = %+v, want it unchanged", ev, got)
+		}
+	}
 }

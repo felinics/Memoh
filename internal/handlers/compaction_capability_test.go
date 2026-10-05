@@ -246,19 +246,27 @@ func TestTriggerCompactRejectsProviderWithoutOutputLimitBeforeService(t *testing
 	}
 }
 
-func TestTriggerCompactInfraFailureReturnsGeneric500(t *testing.T) {
+func TestTriggerCompactInfraFailureIsAnsweredAsInternal(t *testing.T) {
 	t.Parallel()
 
 	queries := compactionCodexQueries("00000000-0000-0000-0000-000000000423")
 	queries.settingsErr = errors.New("pq: connection refused to db-internal-host")
 
 	err := triggerCompactError(t, queries)
+	assertInternalFailure(t, err, queries.settingsErr)
+}
+
+// assertInternalFailure checks that err carries cause for the result record
+// and nothing the boundary would answer other than internal, which keeps the
+// cause out of the response.
+func assertInternalFailure(t *testing.T, err, cause error) {
+	t.Helper()
 	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusInternalServerError {
-		t.Fatalf("TriggerCompact() infra failure = %v, want a plain 500", err)
+	if errors.As(err, &httpErr) || apperror.CodeOf(err) != "" {
+		t.Fatalf("failure = %v, want an error the boundary answers as internal", err)
 	}
-	if message, _ := httpErr.Message.(string); strings.Contains(message, "pq:") || strings.Contains(message, "db-internal-host") {
-		t.Fatalf("infra failure leaked diagnostics: %q", message)
+	if !errors.Is(err, cause) {
+		t.Fatalf("failure = %v, want it to keep its cause", err)
 	}
 }
 
@@ -281,12 +289,6 @@ func TestCompactionRunFailureShapes(t *testing.T) {
 		t.Fatalf("problem body %s missing the window_too_small reason", body)
 	}
 
-	generic := compactionRunFailure(errors.New("window=512 output_reserve=51 fixed_prompt=180"))
-	var httpErr *echo.HTTPError
-	if !errors.As(generic, &httpErr) || httpErr.Code != http.StatusInternalServerError {
-		t.Fatalf("generic failure = %v, want a plain 500", generic)
-	}
-	if message, _ := httpErr.Message.(string); strings.Contains(message, "window=") {
-		t.Fatalf("generic failure leaked diagnostics: %q", message)
-	}
+	cause := errors.New("window=512 output_reserve=51 fixed_prompt=180")
+	assertInternalFailure(t, compactionRunFailure(cause), cause)
 }

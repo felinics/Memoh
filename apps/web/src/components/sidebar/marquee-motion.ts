@@ -16,7 +16,7 @@ export const MARQUEE_OVERSHOOT_PX = 6
 export interface MarqueeMotion {
   truncated: boolean
   // Distance the text must travel left for the tail to rest flush at the
-  // viewport's right edge — exactly the overflow, never more: scrolling
+  // uncovered viewport edge, including any overlay inset: scrolling
   // further would leave a dead gap between the tail and the actions slot.
   travelPx: number
   // ONE full cycle: forward leg (travel + 2·Overshoot at constant speed —
@@ -29,13 +29,16 @@ export interface MarqueeMotion {
   durationMs: number
 }
 
+// Keep negative overflow until the overlay inset is added: a fitting title
+// may still need to scroll when controls cover its end.
 // Sub-pixel jitter (<2px) is not truncation: a nearly-fitting label keeps
 // its crisp tail rather than gaining a fade and a scroll.
-export function computeMarqueeMotion(overflowPx: number): MarqueeMotion {
-  if (overflowPx <= 1) {
+export function computeMarqueeMotion(overflowPx: number, endInsetPx = 0): MarqueeMotion {
+  const travelPx = overflowPx + endInsetPx
+  if (travelPx <= 1) {
     return { truncated: false, travelPx: 0, durationMs: 0 }
   }
-  const span = overflowPx + 2 * MARQUEE_OVERSHOOT_PX
+  const span = travelPx + 2 * MARQUEE_OVERSHOOT_PX
   const durationMs = Math.round((span * 2000) / MARQUEE_SPEED_PX_PER_S)
-  return { truncated: true, travelPx: overflowPx, durationMs }
+  return { truncated: true, travelPx, durationMs }
 }

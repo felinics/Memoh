@@ -1735,12 +1735,45 @@ WHERE m.team_id = public.memoh_current_team_id()
   AND m.created_at >= sqlc.arg(created_at)
   AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync');
 
+-- name: ListTurnResponseSourcesSinceBySessionWithinBytes :many
+-- Turn-response (TR) composition, in Discuss and in pipeline chat, only needs
+-- content and the interrupted-checkpoint flag. Never return full metadata:
+-- legacy context_lifecycle snapshots can dwarf the content budget. Preserve
+-- the active-history window, including its crossing row and turn order.
+SELECT
+  ranked.id,
+  ranked.role,
+  ranked.content,
+  ranked.created_at,
+  ranked.interrupted
+FROM (
+  SELECT
+    m.id,
+    m.role,
+    m.content,
+    m.created_at,
+    m.turn_position,
+    m.turn_message_seq,
+    COALESCE(m.metadata->'agent_step_interrupted' = 'true'::jsonb, false)::boolean AS interrupted,
+    (SUM(octet_length(m.content::text)) OVER (
+      ORDER BY m.turn_position DESC, m.turn_message_seq DESC, m.created_at DESC, m.id DESC
+    ) - octet_length(m.content::text))::BIGINT AS preceding_bytes
+  FROM bot_visible_history_messages m
+  WHERE m.team_id = public.memoh_current_team_id()
+    AND m.session_id = sqlc.arg(session_id)
+    AND m.created_at >= sqlc.arg(created_at)
+    AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+) ranked
+WHERE ranked.preceding_bytes < sqlc.arg(max_bytes)::BIGINT
+ORDER BY ranked.turn_position ASC, ranked.turn_message_seq ASC, ranked.created_at ASC, ranked.id ASC;
+
 -- name: ListActiveMessagesSinceBySessionWithinBytes :many
 -- Byte-budgeted variant of ListActiveMessagesSinceBySession (CM-ADM-001):
 -- rows are admitted newest-first until their running content byte total
 -- crosses max_bytes (the crossing row is kept, so the newest row always
--- loads), then returned in ascending order. Process memory is bounded by
--- max_bytes regardless of total history size.
+-- loads), then returned in ascending order. Only content is budgeted: full
+-- rows, metadata included, still load, so callers that need content alone
+-- use ListTurnResponseSourcesSinceBySessionWithinBytes.
 SELECT
   ranked.id,
   ranked.bot_id,

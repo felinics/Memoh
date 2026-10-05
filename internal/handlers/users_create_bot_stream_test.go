@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -203,8 +202,9 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 		botID:   botID,
 	}
 
+	logs := captureLogs()
 	handler := &UsersHandler{
-		logger:         slog.Default(),
+		logger:         logs.logger,
 		service:        newTestCreateBotAccountService(ownerID),
 		botService:     bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
 		workspaceSetup: &createBotStreamWorkspace{err: errors.New("image pull failed")},
@@ -222,11 +222,7 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
 	wireCreateBotIntents(handler)
-	if err := handler.CreateBot(ctx); err != nil {
-		t.Fatalf("CreateBot() error = %v", err)
-	}
-
-	events := decodeSSEEvents(t, rec.Body.String())
+	events := serveWorkspaceStream(t, logs, handler.CreateBot, ctx, rec)
 	if len(events) < 2 {
 		t.Fatalf("events len = %d, want bot_created and error: %#v", len(events), events)
 	}
@@ -240,12 +236,10 @@ func TestCreateBotStreamReportsSetupErrorAfterCreatedBot(t *testing.T) {
 	if last["type"] != "error" {
 		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
 	}
-	message, _ := last["message"].(string)
-	if message != "workspace setup failed" {
-		t.Fatalf("error message = %q, want stable workspace setup failure", message)
-	}
-	if strings.Contains(message, "image pull failed") {
-		t.Fatalf("backend error leaked into the stream message %q", message)
+	requireCatalogErrorEvent(t, events, apperror.CodeWorkspaceSetupFailed, "image pull failed")
+	requireStreamFailureRecord(t, logs, apperror.CodeWorkspaceSetupFailed, "server", "image pull failed")
+	if _, ok := last["i18n_key"]; ok {
+		t.Fatalf("error event = %#v, want no i18n_key", last)
 	}
 	// The handler only records intent; bots.status is derived by the
 	// reconciler, so the request path must not touch it.
@@ -258,8 +252,9 @@ func TestCreateBotStreamReportsStableBootstrapError(t *testing.T) {
 	ownerID := "00000000-0000-0000-0000-000000000108"
 	botID := "00000000-0000-0000-0000-000000000208"
 	streamDB := &createBotStreamDB{ownerID: ownerID, botID: botID}
+	logs := captureLogs()
 	handler := &UsersHandler{
-		logger:     slog.Default(),
+		logger:     logs.logger,
 		service:    newTestCreateBotAccountService(ownerID),
 		botService: bots.NewService(nil, postgresstore.NewQueries(sqlc.New(streamDB))),
 		workspaceSetup: &createBotStreamWorkspace{
@@ -280,21 +275,13 @@ func TestCreateBotStreamReportsStableBootstrapError(t *testing.T) {
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 
 	wireCreateBotIntents(handler)
-	if err := handler.CreateBot(ctx); err != nil {
-		t.Fatalf("CreateBot() error = %v", err)
-	}
-	events := decodeSSEEvents(t, rec.Body.String())
+	events := serveWorkspaceStream(t, logs, handler.CreateBot, ctx, rec)
 	last := events[len(events)-1]
 	if last["type"] != "error" {
 		t.Fatalf("last event type = %#v, want error; events=%#v", last["type"], events)
 	}
-	if last["code"] != string(apperror.CodeWorkspaceTemplateBootstrapFailed) {
-		t.Fatalf("error code = %#v, want %q", last["code"], apperror.CodeWorkspaceTemplateBootstrapFailed)
-	}
-	message, _ := last["message"].(string)
-	if strings.Contains(message, "/data/AGENTS.md") {
-		t.Fatalf("private workspace path leaked in message %q", message)
-	}
+	requireCatalogErrorEvent(t, events, apperror.CodeWorkspaceTemplateBootstrapFailed, "/data/AGENTS.md")
+	requireStreamFailureRecord(t, logs, apperror.CodeWorkspaceTemplateBootstrapFailed, "server", "/data/AGENTS.md")
 }
 
 func TestGetMeReturnsUnauthorizedWhenTokenUserIsMissing(t *testing.T) {

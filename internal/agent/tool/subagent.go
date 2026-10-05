@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"regexp"
 	"sort"
 	"strconv"
@@ -21,6 +20,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -148,13 +148,13 @@ type SpawnResult struct {
 }
 
 const (
-	// subagentTimeout caps total execution time as a safety net per attempt.
-	subagentTimeout = 10 * time.Minute
 	// spawnProgressInterval keeps the parent stream active during foreground waits.
-	spawnProgressInterval   = 30 * time.Second
-	subagentMaxRetries      = 3
-	subagentRetryBaseDelay  = 2 * time.Second
-	subagentWatchdogTimeout = 3 * time.Minute
+	spawnProgressInterval  = 30 * time.Second
+	subagentMaxRetries     = 3
+	subagentRetryBaseDelay = 2 * time.Second
+	// Match Claude Code's inactivity window: progress extends the run, while
+	// ten minutes without a stream event ends the attempt.
+	subagentWatchdogTimeout = 10 * time.Minute
 
 	agentControlVersion = "v2"
 )
@@ -163,9 +163,6 @@ const (
 var ErrWatchdogTimedOut = errors.New("subagent watchdog: no activity within timeout")
 
 var (
-	err429Pattern    = regexp.MustCompile(`(^|[^0-9])429($|[^0-9])`)
-	errEOFPattern    = regexp.MustCompile(`(?i)connection (reset|refused)|EOF$`)
-	serverErrPattern = regexp.MustCompile(`api error 5\d{2}`)
 	agentIDPattern   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 	errAgentNotFound = errors.New("agent not found")
 )
@@ -436,6 +433,7 @@ type agentRunResult struct {
 	Status           string                         `json:"status"`
 	Message          string                         `json:"message,omitempty"`
 	Text             string                         `json:"text,omitempty"`
+	Code             string                         `json:"code,omitempty"`
 	Error            string                         `json:"error,omitempty"`
 	QueuePosition    int                            `json:"queue_position,omitempty"`
 	QueueRemaining   int                            `json:"queue_remaining,omitempty"`
@@ -745,7 +743,7 @@ func (p *SpawnProvider) submitAgentTask(ctx context.Context, session SessionCont
 		}, nil
 	}
 
-	taskID, taskCtx, err := p.bgManager.StartAgentTask(context.WithoutCancel(ctx), session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, false)
+	taskID, taskCtx, err := p.bgManager.StartAgentTask(ctx, session.BotID, session.SessionID, rec.AgentID, rec.SessionID, message, description, false)
 	if err != nil {
 		p.coord.mu.Unlock()
 		return nil, err
@@ -782,6 +780,7 @@ func (p *SpawnProvider) runAgentRequest(ctx context.Context, key string, req *ag
 		// Nothing was started and nothing was persisted, but the task record has
 		// to close anyway: a caller waiting on it would otherwise wait on a run
 		// that will never exist.
+		p.recordAdmissionFailure(ctx, req, admitErr)
 		return p.completeAgentRequest(ctx, key, req, rejectedAgentRun(req, admitErr))
 	}
 	requestMessageID, persisted := p.persistUserMessage(context.WithoutCancel(runCtx), req)
@@ -892,8 +891,7 @@ func (p *SpawnProvider) finishAgentRequest(ctx context.Context, key string, resu
 			Fork:      next.config.Forked,
 			Status:    string(background.TaskFailed),
 			Message:   next.message,
-			Error:     err.Error(),
-		})
+		}.failed(err))
 		return
 	}
 	if !ok {
@@ -930,15 +928,13 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		req.config.ProviderName,
 	)
 	if err != nil {
-		res.Error = fmt.Sprintf("resolve pinned subagent model: %v", err)
-		res.Cause = err
+		res.fail(err)
 		res.Status = string(background.TaskFailed)
 		return res
 	}
 	req.runtime = runtime
 	if err := p.runSubagentHook(ctx, hooks.EventSubagentStart, req, res); err != nil {
-		res.Error = err.Error()
-		res.Cause = err
+		res.fail(err)
 		res.Status = string(background.TaskFailed)
 		return res
 	}
@@ -958,8 +954,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 	if req.config.Forked {
 		parentMessages, loadErr := p.loadAgentForkContext(context.WithoutCancel(ctx), req.agentSessionID)
 		if loadErr != nil {
-			res.Error = fmt.Sprintf("load fork context: %v", loadErr)
-			res.Cause = loadErr
+			res.fail(loadErr)
 			res.Status = string(background.TaskFailed)
 			return res
 		}
@@ -1038,7 +1033,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			case <-timer.C:
 			case <-ctx.Done():
 				timer.Stop()
-				res.Error = fmt.Sprintf("parent cancelled: %v", ctx.Err())
+				res.Error = "parent cancelled"
 				res.Cause = context.Cause(ctx)
 				res.AttemptResolved = true
 				res.AttemptOutcome = SpawnAttemptFailure
@@ -1049,8 +1044,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			}
 		}
 
-		safetyCtx, safetyCancel := context.WithTimeout(ctx, subagentTimeout)
-		wdCtx, wd := NewSubagentWatchdog(safetyCtx, subagentWatchdogTimeout, p.logger)
+		wdCtx, wd := NewSubagentWatchdog(ctx, subagentWatchdogTimeout, p.logger)
 		cfg.Attempt = attempt + 1
 		cfg.MaxAttempts = subagentMaxRetries + 1
 		attemptDisposition := SpawnAttemptFailure
@@ -1087,7 +1081,6 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		}
 		genResult, err := p.agent.GenerateWithWatchdog(wdCtx, cfg, wd.Touch)
 		wd.Stop()
-		safetyCancel()
 
 		if genResult != nil && genResult.ContextLifecycle != nil {
 			res.ContextLifecycle = genResult.ContextLifecycle
@@ -1103,8 +1096,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 				if persistErr := p.persistMessages(context.WithoutCancel(ctx), req, genResult, !req.messagePersisted); persistErr != nil {
 					res.AttemptResolved = true
 					res.AttemptOutcome = SpawnAttemptFailure
-					res.Error = persistErr.Error()
-					res.Cause = persistErr
+					res.fail(persistErr)
 					return res
 				}
 				genResult.Persisted = true
@@ -1116,7 +1108,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 				if cause == nil {
 					cause = context.Canceled
 				}
-				res.Error = fmt.Sprintf("parent cancelled: %v", cause)
+				res.Error = "parent cancelled"
 				res.Cause = cause
 				return res
 			}
@@ -1125,8 +1117,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 				if cause == nil {
 					cause = errors.New("agent run failed")
 				}
-				res.Error = cause.Error()
-				res.Cause = cause
+				res.fail(cause)
 				return res
 			}
 			res.Text = genResult.Text
@@ -1155,27 +1146,66 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 			if cause == nil {
 				cause = context.Canceled
 			}
-			res.Error = fmt.Sprintf("parent cancelled: %v", cause)
+			res.Error = "parent cancelled"
 			res.Cause = cause
 			return res
 		}
 		if stepPersisted.Load() {
-			res.Error = fmt.Sprintf("%v (progress from this attempt is saved; send a follow-up message to continue)", err)
+			res.fail(err)
+			res.Error += " (progress from this attempt is saved; send a follow-up message to continue)"
 			return res
 		}
-		if (errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err)) &&
-			attempt == subagentMaxRetries {
+		if errors.Is(err, ErrWatchdogTimedOut) && attempt == subagentMaxRetries {
 			break
 		}
-		res.Error = err.Error()
-		res.Cause = err
+		res.fail(err)
 		return res
 	}
-	res.Error = fmt.Sprintf("all %d attempts failed (last: %v)", subagentMaxRetries+1, lastErr)
-	res.Cause = lastErr
+	res.fail(lastErr)
 	return res
 }
 
+// fail records err as the task's failure. The parent model reads only the
+// catalog code and its fixed detail; err itself stays on the result for the
+// task's terminal record.
+func (r *agentRunResult) fail(err error) {
+	public, _ := apperror.PublicFrom(apperror.New(subagentFailureCode(err), nil), "")
+	r.Code = string(public.Code)
+	r.Error = public.Detail
+	r.Cause = err
+}
+
+// failed is r with err recorded as its failure.
+func (r agentRunResult) failed(err error) agentRunResult {
+	r.fail(err)
+	return r
+}
+
+// subagentFailureCode names a task failure: the catalog code err carries, the
+// code of a timeout or context sentinel, or runtime_run_failed for the
+// runtime's own failure. A failure the spawned run ended with carries the code
+// the application named it with, so a provider failure reads as it would for
+// the run itself.
+func subagentFailureCode(err error) apperror.Code {
+	if _, ok := apperror.Lookup(apperror.CodeOf(err)); ok {
+		return apperror.CodeOf(err)
+	}
+	switch {
+	case errors.Is(err, ErrWatchdogTimedOut):
+		return apperror.CodeAgentResponseTimeout
+	case errors.Is(err, contextfrag.ErrProtectedContextOverflow):
+		return apperror.CodeContextProtectedOverflow
+	case errors.Is(err, contextfrag.ErrBudgetUnsatisfied):
+		return apperror.CodeContextBudgetUnsatisfied
+	}
+	return apperror.CodeRuntimeRunFailed
+}
+
+// subagentAttemptDisposition restarts an attempt only when the subagent
+// watchdog ended it. The native runtime inside the attempt already retries
+// provider failures, so any other error reaching this point is final: retrying
+// it here would multiply calls to a failing provider, or replay local work such
+// as a tool batch or a commit.
 func subagentAttemptDisposition(
 	ctx context.Context,
 	err error,
@@ -1188,8 +1218,7 @@ func subagentAttemptDisposition(
 	if ctx != nil && ctx.Err() != nil {
 		return SpawnAttemptFailure
 	}
-	if err != nil && !stepPersisted && attemptsRemain &&
-		(errors.Is(err, ErrWatchdogTimedOut) || isRetryableSubagentError(err)) {
+	if !stepPersisted && attemptsRemain && errors.Is(err, ErrWatchdogTimedOut) {
 		return SpawnAttemptRetry
 	}
 	return SpawnAttemptFailure
@@ -1495,6 +1524,9 @@ func agentResultMap(res agentRunResult) map[string]any {
 	if res.Text != "" {
 		out["text"] = res.Text
 	}
+	if res.Code != "" {
+		out["code"] = res.Code
+	}
 	if res.Error != "" {
 		out["error"] = res.Error
 	}
@@ -1537,27 +1569,6 @@ func runSpawnProgress(ctx context.Context, emitter StreamEmitter, ticks <-chan t
 			emitter(ToolStreamEvent{Type: StreamEventSpawnProgress})
 		}
 	}
-}
-
-func isRetryableSubagentError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	if strings.Contains(errStr, "rate limit") || strings.Contains(errStr, "rate_limit") {
-		return true
-	}
-	if err429Pattern.MatchString(errStr) || serverErrPattern.MatchString(errStr) {
-		return true
-	}
-	if errEOFPattern.MatchString(errStr) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (p *SpawnProvider) persistMessages(

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 type matrixOutboundStream struct {
@@ -80,12 +81,17 @@ func (s *matrixOutboundStream) Push(ctx context.Context, event channel.PreparedS
 		s.rawBuffer.WriteString(event.Delta)
 		s.mu.Unlock()
 		return nil
+	case channel.StreamEventReset:
+		s.mu.Lock()
+		s.rawBuffer.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventError:
-		errText := strings.TrimSpace(event.Error)
+		errText := redact.Text(strings.TrimSpace(event.Error))
 		if errText == "" {
 			return nil
 		}
-		return s.upsertText(ctx, "Error: "+errText, channel.MessageFormatPlain, true)
+		return s.upsertText(ctx, channel.ErrorReplyText(event.ErrorCode, errText), channel.MessageFormatPlain, true)
 	case channel.StreamEventAttachment:
 		return s.pushAttachments(ctx, event.Attachments)
 	case channel.StreamEventFinal:

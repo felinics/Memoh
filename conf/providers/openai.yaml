@@ -75,7 +75,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 400000
       thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high, xhigh]
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5.2-pro
     name: GPT-5.2 pro
@@ -120,7 +120,7 @@ models:
       compatibilities: [vision, file-input, tool-call, reasoning]
       context_window: 400000
       thinking_mode: toggle
-      reasoning_efforts: [minimal, low, medium, high, xhigh]
+      reasoning_efforts: [minimal, low, medium, high]
 
   - model_id: gpt-5.1-codex
     name: GPT-5.1 Codex

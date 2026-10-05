@@ -403,9 +403,8 @@ func TestAuthorizeACPRuntimeSessionAccess(t *testing.T) {
 			[]string{bots.PermissionChat},
 			"user-1",
 		)
-		var httpErr *echo.HTTPError
-		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-			t.Fatalf("authorizeExternalAgentSessionAccess() error = %v, want HTTP 403", err)
+		if apperror.CodeOf(err) != apperror.CodeNoWorkspaceExec {
+			t.Fatalf("authorizeExternalAgentSessionAccess() error = %v, want %s", err, apperror.CodeNoWorkspaceExec)
 		}
 	})
 
@@ -426,9 +425,8 @@ func TestAuthorizeACPRuntimeSessionAccess(t *testing.T) {
 			[]string{bots.PermissionChat},
 			"user-2",
 		)
-		var httpErr *echo.HTTPError
-		if !errors.As(err, &httpErr) || httpErr.Code != http.StatusForbidden {
-			t.Fatalf("authorizeExternalAgentSessionAccess() error = %v, want HTTP 403", err)
+		if apperror.CodeOf(err) != apperror.CodeNoWorkspaceExec {
+			t.Fatalf("authorizeExternalAgentSessionAccess() error = %v, want %s", err, apperror.CodeNoWorkspaceExec)
 		}
 	})
 }
@@ -695,8 +693,8 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsDisabledAgent(t *testing.T) {
 
 	err := handler.CreateRuntime(ctx)
 	problem, ok := apperror.ProblemFrom(err, "")
-	if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeACPAccessForbidden) {
-		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusForbidden, apperror.CodeACPAccessForbidden)
+	if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeACPAgentNotEnabled) {
+		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusForbidden, apperror.CodeACPAgentNotEnabled)
 	}
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for a disabled agent: %#v", pool.createInput)
@@ -737,8 +735,8 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsUnconfiguredAgent(t *testing.T) {
 
 	err := handler.CreateRuntime(ctx)
 	problem, ok := apperror.ProblemFrom(err, "")
-	if !ok || problem.Status != http.StatusBadRequest || problem.Code != string(apperror.CodeACPRequestInvalid) {
-		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusBadRequest, apperror.CodeACPRequestInvalid)
+	if !ok || problem.Status != http.StatusBadRequest || problem.Code != string(apperror.CodeACPAgentNotConfigured) {
+		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusBadRequest, apperror.CodeACPAgentNotConfigured)
 	}
 	if pool.createInput.BotID != "" {
 		t.Fatalf("pool should not be called for an unconfigured agent: %#v", pool.createInput)

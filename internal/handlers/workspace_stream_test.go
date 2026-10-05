@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/config"
@@ -37,15 +38,18 @@ func TestStreamWorkspaceProvisioningStopsWhenClientDisconnects(t *testing.T) {
 	errorSent := false
 	outcome := streamWorkspaceProvisioning(
 		context.Background(),
-		func(any) bool { return false },
+		func(payload any) bool {
+			_, isError := payload.(createContainerErrorEvent)
+			errorSent = errorSent || isError
+			return false
+		},
 		events,
 		await,
 		"req-1",
-		func(string, string, string) { errorSent = true },
 	)
 
-	if !outcome.Disconnected {
-		t.Fatalf("outcome = %+v, want Disconnected", outcome)
+	if !outcome.Disconnected || outcome.Err != nil {
+		t.Fatalf("outcome = %+v, want Disconnected without an error", outcome)
 	}
 	if errorSent {
 		t.Fatal("no error event should be written to a disconnected client")
@@ -102,16 +106,21 @@ func newRestoreContainerHandler(t *testing.T, ownerID, botID string, manager con
 
 func callCreateContainer(t *testing.T, handler *ContainerdHandler, ownerID, botID, body string) []map[string]any {
 	t.Helper()
+	ctx, rec := createContainerContext(ownerID, botID, body)
+	if err := handler.CreateContainer(ctx); err != nil {
+		t.Fatalf("CreateContainer() error = %v", err)
+	}
+	return decodeSSEEvents(t, rec.Body.String())
+}
+
+func createContainerContext(ownerID, botID, body string) (echo.Context, *httptest.ResponseRecorder) {
 	req := httptest.NewRequest(http.MethodPost, "/bots/"+botID+"/container", strings.NewReader(body))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	ctx := testAuthContext(echo.New(), req, rec, ownerID)
 	ctx.SetParamNames("bot_id")
 	ctx.SetParamValues(botID)
-	if err := handler.CreateContainer(ctx); err != nil {
-		t.Fatalf("CreateContainer() error = %v", err)
-	}
-	return decodeSSEEvents(t, rec.Body.String())
+	return ctx, rec
 }
 
 // restore_data is honored once the reconciler has settled the workspace: the
@@ -185,8 +194,11 @@ func TestCreateContainerReportsRestoreFailure(t *testing.T) {
 		{Type: "complete", Image: "debian:bookworm-slim", Started: true},
 	}}
 	handler := newRestoreContainerHandler(t, ownerID, botID, manager, ws)
+	logs := captureLogs()
+	handler.logger = logs.logger
+	ctx, rec := createContainerContext(ownerID, botID, `{"restore_data": true}`)
 
-	events := callCreateContainer(t, handler, ownerID, botID, `{"restore_data": true}`)
+	events := serveWorkspaceStream(t, logs, handler.CreateContainer, ctx, rec)
 
 	if hasEventType(events, "complete") {
 		t.Fatalf("complete must not be sent after a failed restore: %#v", events)
@@ -195,6 +207,11 @@ func TestCreateContainerReportsRestoreFailure(t *testing.T) {
 	if !ok || errEvent["code"] != "workspace_restore_failed" {
 		t.Fatalf("error event = %#v, want workspace_restore_failed", errEvent)
 	}
+	if _, ok := errEvent["i18n_key"]; ok {
+		t.Fatalf("error event = %#v, want no i18n_key", errEvent)
+	}
+	requireCatalogErrorEvent(t, events, apperror.CodeWorkspaceRestoreFailed, "archive corrupt")
+	requireStreamFailureRecord(t, logs, apperror.CodeWorkspaceRestoreFailed, "server", "archive corrupt")
 }
 
 // Without restore_data the archive is left alone and the reconciler's

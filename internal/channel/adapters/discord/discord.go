@@ -15,7 +15,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/redact"
 )
@@ -287,14 +286,12 @@ func (a *DiscordAdapter) Connect(ctx context.Context, cfg channel.ChannelConfig,
 				slog.String("chat_type", chatType),
 				slog.String("user_id", m.Author.ID),
 				slog.String("username", m.Author.Username),
-				slog.String("text", common.SummarizeText(text)),
 			)
 		}
 
 		go func() {
-			if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-				a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, msg)
 		}()
 	})
 

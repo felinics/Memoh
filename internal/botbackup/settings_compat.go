@@ -1,6 +1,9 @@
 package botbackup
 
 import (
+	"strings"
+
+	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/settings"
 )
@@ -14,11 +17,20 @@ func decodeBackupSettings(raw []byte) (settings.Settings, error) {
 		return settings.Settings{}, err
 	}
 	var legacy struct {
-		CompactionRatio  *int  `json:"compaction_ratio"`
-		ReasoningEnabled *bool `json:"reasoning_enabled"`
+		CompactionRatio  *int   `json:"compaction_ratio"`
+		ReasoningEnabled *bool  `json:"reasoning_enabled"`
+		MemoryEnabled    *bool  `json:"memory_enabled"`
+		MemoryProviderID string `json:"memory_provider_id"`
 	}
 	if err := unmarshalJSON(raw, &legacy); err != nil {
 		return settings.Settings{}, err
+	}
+	// Archives written before the single memory switch carry the selected
+	// provider instead. Keep its archive-local ID so resolveLegacyMemoryProvider
+	// can tell a Built-in selection from a retired mem0/OpenViking one.
+	if legacy.MemoryEnabled == nil {
+		cfg.MemoryProviderID = strings.TrimSpace(legacy.MemoryProviderID)
+		cfg.MemoryEnabled = cfg.MemoryProviderID != ""
 	}
 	// Archives written before bots dropped reasoning_enabled carry the on/off
 	// state in a field Settings no longer decodes, so an archive with reasoning
@@ -38,4 +50,26 @@ func decodeBackupSettings(raw []byte) (settings.Settings, error) {
 		cfg.CompactionTargetPercent = &target
 	}
 	return cfg, nil
+}
+
+// resolveLegacyMemoryProvider finishes the memory switch for pre-switch
+// archives: a selection of a retired external provider (mem0/OpenViking) was
+// already a no-op, so it imports as memory off. The archive-local provider ID
+// never survives into the target bot's settings.
+func resolveLegacyMemoryProvider(state *importState, cfg settings.Settings) settings.Settings {
+	legacyID := cfg.MemoryProviderID
+	cfg.MemoryProviderID = ""
+	if legacyID == "" {
+		return cfg
+	}
+	providers, _ := readEntry[[]struct {
+		ID       string `json:"id"`
+		Provider string `json:"provider"`
+	}](state, "dependencies/memory_providers.json")
+	for _, provider := range providers {
+		if provider.ID == legacyID && provider.Provider != string(memprovider.ProviderBuiltin) {
+			cfg.MemoryEnabled = false
+		}
+	}
+	return cfg
 }

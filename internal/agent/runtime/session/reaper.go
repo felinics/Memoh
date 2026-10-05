@@ -41,6 +41,7 @@ type Reaper struct {
 	logger                 *slog.Logger
 	recoverWaitingDecision func(context.Context, LeaseCandidate) (bool, error)
 	terminalObserver       func(context.Context, TerminalRun)
+	terminalLiveReconciler func(context.Context, TerminalRun) error
 	terminalReconciler     func(context.Context) error
 	cancelLostRunDecisions func(context.Context, string, string, string, int64, string) error
 
@@ -88,6 +89,14 @@ func (r *Reaper) SetTerminalObserver(observer func(context.Context, TerminalRun)
 		return
 	}
 	r.terminalObserver = observer
+}
+
+// SetTerminalLiveReconciler keeps a lease-index retry pointer until an
+// authoritative terminal result has also retired its obsolete live projection.
+func (r *Reaper) SetTerminalLiveReconciler(reconciler func(context.Context, TerminalRun) error) {
+	if r != nil {
+		r.terminalLiveReconciler = reconciler
+	}
 }
 
 // SetTerminalReconciler installs the bounded repair pass run by the elected
@@ -229,17 +238,31 @@ func (r *Reaper) reapExpiredLeases(ctx context.Context) error {
 				continue
 			}
 			if recovered {
+				current, err := r.runs.Get(ctx, candidate.RunID)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
+				if current.State.Active() && current.FencingToken == candidate.FencingToken {
+					// Recovery observed a renewed, still-live owner. Keep its
+					// same-token index rather than erasing its next expiry.
+					continue
+				}
 				if _, err := r.liveness.ReleaseLeaseCandidate(ctx, candidate); err != nil {
 					errs = append(errs, fmt.Errorf("release reclaimed session runtime lease candidate: %w", err))
 				}
 				continue
 			}
 		}
-		if err := r.markLost(ctx, candidate.RunID, candidate.FencingToken, runErrorOwnerLeaseExpired); err != nil {
+		consumed, err := r.finalizeExpiredLease(ctx, candidate)
+		if err != nil {
 			errs = append(errs, err)
 			// Keep the index entry so the next tick retries. Releasing an entry
 			// whose durable transition failed would strand the run active with
 			// no lease left to rediscover it.
+			continue
+		}
+		if !consumed {
 			continue
 		}
 		// Released only after the durable transition, and only while the entry
@@ -285,7 +308,7 @@ func (r *Reaper) recoverLostBackendGeneration(ctx context.Context) error {
 			break
 		}
 		for _, run := range runs {
-			if err := r.markLost(ctx, run.RunID, run.FencingToken, runErrorBackendLost); err != nil {
+			if _, err := r.markLost(ctx, run.RunID, run.FencingToken, runErrorBackendLost, ""); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -357,29 +380,61 @@ func (r *Reaper) repairOrphanedAdmissions(ctx context.Context) error {
 	for _, run := range runs {
 		// FencingToken is 0 on a never-claimed row, which the fenced statement
 		// accepts because it matches what is stored.
-		if err := r.markLost(ctx, run.RunID, run.FencingToken, runErrorAdmissionOrphaned); err != nil {
+		if _, err := r.markLost(ctx, run.RunID, run.FencingToken, runErrorAdmissionOrphaned, ""); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// markLost applies the fenced terminal transition, and that is the whole
-// operation: the transition frees the session's active slot, and because
-// admission answers busy instead of queueing, there is nothing waiting to
-// promote. The next submission simply succeeds.
-//
-// The transition is idempotent, so a reaper that dies mid-pass or fails over
-// repeats at most one no-op write — which is what makes leader failover boring.
-func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64, errorCode string) error {
+// A graceful handoff can leave an index with the previous DB token. If the
+// decision expires before recovery, retire the authoritative run only after
+// checking that no live successor owns it. The state/token CAS arbitrates a
+// concurrent response or reclaim after that liveness read.
+func (r *Reaper) finalizeExpiredLease(ctx context.Context, candidate LeaseCandidate) (bool, error) {
+	run, err := r.runs.Get(ctx, candidate.RunID)
+	if errors.Is(err, ledger.ErrRunNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if run.State.Active() && run.State != ledger.StateFinishing {
+		reader, ok := r.liveness.(interface {
+			LoadRunRef(context.Context, Key, string) (RunRef, bool, error)
+		})
+		if ok {
+			ref, live, err := reader.LoadRunRef(ctx, Key{BotID: run.BotID, SessionID: run.SessionID}, run.RunID)
+			if err != nil {
+				return false, err
+			}
+			if live && ref.FencingToken >= run.FencingToken {
+				// A renewed lease with the same token still needs its index. An
+				// older token's entry may be consumed without touching that owner.
+				return candidate.FencingToken < run.FencingToken, nil
+			}
+		} else if run.FencingToken != candidate.FencingToken {
+			return false, nil
+		}
+		if run.FencingToken < candidate.FencingToken {
+			return false, nil
+		}
+	}
+	return r.markLost(ctx, run.RunID, run.FencingToken, runErrorOwnerLeaseExpired, run.State)
+}
+
+// markLost reports whether a recovery pointer can be consumed. An unapplied
+// CAS on an active run leaves work for another pass rather than reporting success.
+func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64, errorCode string, expected ledger.State) (bool, error) {
 	run, applied, err := r.runs.Finalize(ctx, ledger.FinalizeParams{
-		RunID:        runID,
-		FencingToken: fencingToken,
-		State:        ledger.StateLost,
-		ErrorCode:    errorCode,
+		RunID:         runID,
+		FencingToken:  fencingToken,
+		State:         ledger.StateLost,
+		ErrorCode:     errorCode,
+		ExpectedState: expected,
 	})
 	if err != nil {
-		return fmt.Errorf("mark session run lost: %w", err)
+		return false, fmt.Errorf("mark session run lost: %w", err)
 	}
 	if !applied {
 		// A prior owner may have committed its terminal row and died before
@@ -388,12 +443,12 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 		run, err = r.runs.Get(ctx, runID)
 		if err != nil {
 			if errors.Is(err, ledger.ErrRunNotFound) {
-				return nil
+				return true, nil
 			}
-			return fmt.Errorf("load authoritative reaped run terminal: %w", err)
+			return false, fmt.Errorf("load authoritative reaped run terminal: %w", err)
 		}
 		if !run.State.Terminal() {
-			return nil
+			return false, nil
 		}
 	}
 	if r.cancelLostRunDecisions != nil && run.BotID != "" && run.SessionID != "" {
@@ -407,31 +462,42 @@ func (r *Reaper) markLost(ctx context.Context, runID string, fencingToken int64,
 			r.logger.WarnContext(ctx, "cancel lost run decisions failed", slog.String("run_id", run.RunID), slog.Any("error", cancelErr))
 		}
 	}
+	terminal := terminalRunFromLedger(run)
+	terminal.Applied = applied
+	var reconcileErr error
+	if r.terminalLiveReconciler != nil {
+		reconcileErr = r.terminalLiveReconciler(context.WithoutCancel(ctx), terminal)
+	}
 	if r.terminalObserver != nil {
-		r.terminalObserver(context.WithoutCancel(ctx), terminalRunFromLedger(run))
+		r.terminalObserver(context.WithoutCancel(ctx), terminal)
+	}
+	if reconcileErr != nil {
+		return false, reconcileErr
 	}
 	if !applied {
-		return nil
+		return true, nil
 	}
+	// The run's result record comes from the terminal observer; these only
+	// say which reaper branch resolved it.
 	if run.State == ledger.StateAborted {
-		r.logger.InfoContext(ctx, "session run finalized after abort intent",
+		r.logger.DebugContext(ctx, "session run finalized after abort intent",
 			slog.String("run_id", run.RunID),
 			slog.String("session_id", run.SessionID),
 		)
-		return nil
+		return true, nil
 	}
 	if run.State != ledger.StateLost {
-		r.logger.InfoContext(ctx, "session run finalized from durable finish proposal",
+		r.logger.DebugContext(ctx, "session run finalized from durable finish proposal",
 			slog.String("run_id", run.RunID),
 			slog.String("session_id", run.SessionID),
 			slog.String("state", string(run.State)),
 		)
-		return nil
+		return true, nil
 	}
-	r.logger.InfoContext(ctx, "session run marked lost",
+	r.logger.DebugContext(ctx, "session run marked lost",
 		slog.String("run_id", run.RunID),
 		slog.String("session_id", run.SessionID),
 		slog.String("error_code", errorCode),
 	)
-	return nil
+	return true, nil
 }

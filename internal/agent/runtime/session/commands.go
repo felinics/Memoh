@@ -9,11 +9,13 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 func (m *Manager) RunRef(ctx context.Context, botID, sessionID, runID string) (RunRef, bool, error) {
@@ -47,13 +49,28 @@ func runHandleForCommand(cmd Command) RunHandle {
 // command acknowledgement deadline while keeping it tied to the run owner's
 // lifecycle and persistence fence.
 func (m *Manager) DecisionContinuationContext(cmd Command) (context.Context, context.CancelFunc, RunHandle, error) {
-	ctrl := m.localControlForScope(cmd.BotID, cmd.SessionID, cmd.RunID)
+	m.mu.Lock()
+	if m.isClosed() {
+		m.mu.Unlock()
+		return nil, func() {}, RunHandle{}, ErrManagerClosed
+	}
+	ctrl := m.controls[scopedRunControlKey(cmd.BotID, cmd.SessionID, cmd.RunID)]
 	if ctrl == nil || ctrl.generation != strings.TrimSpace(cmd.Generation) || !ctrl.commandsActive() {
+		m.mu.Unlock()
 		return nil, func() {}, RunHandle{}, ErrCommandTargetNotActive
 	}
+	ctrl.decisionContinuations.Add(1)
+	m.mu.Unlock()
 	// The acknowledgement request ends before the continuation. Only the run
 	// lifecycle owns this context, so no transport cancellation is attached.
-	ctx, cancel := ctrl.commandContext(context.Background())
+	ctx, cancelContext := ctrl.commandContext(context.Background())
+	var once sync.Once
+	cancel := func() {
+		once.Do(func() {
+			cancelContext()
+			ctrl.decisionContinuations.Add(-1)
+		})
+	}
 	handle := ctrl.handle()
 	if err := m.ValidateRunOwnership(ctx, handle); err != nil {
 		cancel()
@@ -94,7 +111,7 @@ func (m *Manager) ValidateRunOwnership(ctx context.Context, handle RunHandle) er
 		return ErrRunOwnershipLost
 	}
 	ctrl := m.localControlForHandle(handle)
-	if ctrl == nil {
+	if ctrl == nil || ctrl.ownershipWasLost() {
 		return ErrRunOwnershipLost
 	}
 	key := handle.key()
@@ -121,7 +138,7 @@ func (m *Manager) ValidateRunOwnership(ctx context.Context, handle RunHandle) er
 	// A Redis round trip can consume the final part of the conservative local
 	// lease window. Recheck after the atomic server-side decision before any
 	// durable side effect begins.
-	if !ctrl.leaseIsValidAt(time.Now()) || m.localControlForHandle(handle) != ctrl {
+	if ctrl.ownershipWasLost() || !ctrl.leaseIsValidAt(time.Now()) || m.localControlForHandle(handle) != ctrl {
 		return ErrRunOwnershipLost
 	}
 	return nil
@@ -372,7 +389,7 @@ func (m *Manager) abortLocal(ctx context.Context, ctrl *runControl) (bool, error
 		// own FinishRun records the abort AFTER the driver actually returns,
 		// so the ledger's terminal state is a truthful "driver stopped"
 		// signal for deletion barriers on any instance.
-		if err := m.FinishRun(context.WithoutCancel(ctx), ctrl.handle(), RunStatusAborted, ""); err != nil {
+		if _, err := m.FinishRun(context.WithoutCancel(ctx), ctrl.handle(), RunStatusAborted); err != nil {
 			return false, err
 		}
 	}
@@ -476,7 +493,8 @@ func (m *Manager) abortClaimedAdmission(ctx context.Context, ctrl *runControl) e
 		ctrl.cancel()
 	}
 	ctrl.markReady()
-	return m.FinishRun(ctx, ctrl.handle(), RunStatusAborted, "")
+	_, err = m.FinishRun(ctx, ctrl.handle(), RunStatusAborted)
+	return err
 }
 
 // RouteDecisionResponse is the single decision entry point for WebSocket, HTTP,
@@ -970,6 +988,13 @@ func newCommandResult(request Command, err error) Command {
 		result.ErrorCode = "payload_conflict"
 	default:
 		result.ErrorCode = "runtime_command_failed"
+		if code := apperror.CodeOf(err); code != "" {
+			if _, ok := apperror.Lookup(code); ok {
+				// A catalogued failure crosses as its code and catalog args, the
+				// way an RPC error envelope carries one; its cause stays here.
+				result.ErrorCode, result.ErrorArgs, result.Error = string(code), apperror.ArgsOf(err), string(code)
+			}
+		}
 	}
 	return result
 }
@@ -1203,6 +1228,11 @@ func commandResultError(result Command) error {
 	case "payload_conflict":
 		return fmt.Errorf("%w: %s", ErrCommandPayloadConflict, result.Error)
 	default:
+		if code := apperror.Code(result.ErrorCode); code != "" {
+			if _, ok := apperror.Lookup(code); ok {
+				return apperror.New(code, result.ErrorArgs)
+			}
+		}
 		return errors.New(result.Error)
 	}
 }

@@ -14,6 +14,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/server"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
 )
 
@@ -252,4 +254,61 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
+}
+
+func TestSupermarketProxyAnswersUpstreamErrorsAsProblem(t *testing.T) {
+	const upstreamBody = `{"error":"synthetic upstream detail"}`
+	cases := []struct {
+		name     string
+		upstream int
+		status   int
+		code     apperror.Code
+		fault    string
+	}{
+		{"not found", http.StatusNotFound, http.StatusNotFound, apperror.CodeHTTPNotFound, "client"},
+		{"other client status", http.StatusUnauthorized, http.StatusBadGateway, apperror.CodeHTTPBadGateway, "dependency"},
+		{"server status", http.StatusServiceUnavailable, http.StatusBadGateway, apperror.CodeHTTPBadGateway, "dependency"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+				w.WriteHeader(tc.upstream)
+				_, _ = w.Write([]byte(upstreamBody))
+			}))
+			t.Cleanup(upstream.Close)
+			handler := &SupermarketHandler{
+				upstream: supermarketclient.NewClient(upstream.URL, upstream.Client()),
+				logger:   slog.New(slog.DiscardHandler),
+			}
+			e := echo.New()
+			e.HTTPErrorHandler = server.NewHTTPErrorHandler(slog.New(slog.DiscardHandler))
+			handler.Register(e)
+
+			for _, path := range []string{
+				"/supermarket/registries/memoh/apps/missing",
+				"/supermarket/apps?q=web",
+				"/supermarket/artifacts/icon/" + strings.Repeat("a", sha256.Size*2),
+			} {
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+				if rec.Code != tc.status {
+					t.Fatalf("GET %s status = %d, want %d: %s", path, rec.Code, tc.status, rec.Body.String())
+				}
+				if got := rec.Header().Get(echo.HeaderContentType); got != "application/problem+json" {
+					t.Fatalf("GET %s content type = %q, want application/problem+json", path, got)
+				}
+				if strings.Contains(rec.Body.String(), "synthetic upstream detail") {
+					t.Fatalf("GET %s forwarded the upstream body: %s", path, rec.Body.String())
+				}
+				var problem apperror.Problem
+				if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+					t.Fatalf("decode problem: %v", err)
+				}
+				if problem.Code != string(tc.code) || problem.Fault != tc.fault {
+					t.Fatalf("GET %s problem = %s %s, want %s %s", path, problem.Code, problem.Fault, tc.code, tc.fault)
+				}
+			}
+		})
+	}
 }

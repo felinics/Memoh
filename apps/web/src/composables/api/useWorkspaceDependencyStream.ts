@@ -29,6 +29,12 @@ export interface WorkspaceDependencyStreamRequestOptions {
   /** Revision returned by this operation's script preview. Omit to resolve latest. */
   definitionRevision?: string
   /**
+   * Prerequisite revisions the confirmation showed, by dependency id. Missing
+   * prerequisites then install only from these; omit to resolve them when
+   * the operation starts.
+   */
+  prerequisiteRevisions?: Record<string, string>
+  /**
    * Version to install / update / reinstall to. Empty means the latest the
    * catalog script resolves (or the manifest pin).
    */
@@ -118,10 +124,11 @@ export async function* streamDependencyOperation(
   const sessionId = options.sessionId?.trim() ?? ''
   const versioned = {
     ...request,
-    body: version || definitionRevision || sessionId ? {
+    body: version || definitionRevision || sessionId || options.prerequisiteRevisions ? {
       version: version || undefined,
       definition_revision: definitionRevision || undefined,
       session_id: sessionId || undefined,
+      prerequisite_revisions: options.prerequisiteRevisions,
     } : undefined,
   }
 
@@ -154,7 +161,7 @@ export function openWorkspaceDependencyStream(
       options.botId,
       options.depId,
       options.action,
-      { version: options.version, definitionRevision: options.definitionRevision, sessionId: options.sessionId, signal: options.signal },
+      { version: options.version, definitionRevision: options.definitionRevision, prerequisiteRevisions: options.prerequisiteRevisions, sessionId: options.sessionId, signal: options.signal },
     ),
   }
 }

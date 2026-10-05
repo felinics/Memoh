@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/agent/application"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agentcredential"
 	"github.com/felinics/memoh/internal/apperror"
@@ -127,7 +128,7 @@ func (h *AgentCredentialHandler) Delete(c echo.Context) error {
 	if err != nil {
 		return mapAgentCredentialError(agentcredential.ErrNotFound)
 	}
-	if err := h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID); err != nil {
+	if err := application.ExternalRuntimeError(h.runtimes.PurgeBotAgentAuth(c.Request().Context(), agent.Runtime, botID, botAgentID)); err != nil {
 		if apperror.CodeOf(err) != "" {
 			return err
 		}

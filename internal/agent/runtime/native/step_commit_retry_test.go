@@ -16,96 +16,188 @@ import (
 	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
-func TestStepCommitFailureMustNotReplayExecutedTool(t *testing.T) {
-	var effects, commits, providerCalls atomic.Int32
-	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
-		providerCalls.Add(1)
-		return closedAgentTestStream(
-			&sdk.StartStepPart{},
-			&sdk.StreamToolCallPart{ToolCallID: "side-effect-1", ToolName: "record_effect", Input: toolexec.ArgumentsFromValue(map[string]any{})},
-			&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls},
-		), nil
-	})
-	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
-		Name: "record_effect",
-		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
-			effects.Add(1)
-			return toolexec.OutputFromValue("effect recorded"), nil
-		},
-	}}}})
-	var events []StreamEvent
-	for event := range a.Stream(context.Background(), RunConfig{
-		Model:            &sdk.Model{ID: "qc-fixture", Provider: provider},
-		Messages:         []sdk.Message{sdk.UserMessage("record one effect")},
-		SupportsToolCall: true,
-		Identity:         SessionContext{BotID: "qc-bot"},
-		Retry:            RetryConfig{MaxAttempts: 1, FastAttempts: 1},
-		OnStepCommitted: func(context.Context, int, *step.Record) (StepDirective, error) {
-			commits.Add(1)
-			return StepDirective{}, io.EOF
-		},
-	}) {
-		events = append(events, event)
+// localFailureCauses are failures a retry would take if the provider call
+// reported them. Reported by the loop's own work they end the run instead.
+func localFailureCauses() []struct {
+	name string
+	err  error
+} {
+	return []struct {
+		name string
+		err  error
+	}{
+		{"unexpected EOF", fmt.Errorf("write step: %w", io.ErrUnexpectedEOF)},
+		{"provider 503", &sdk.APIError{StatusCode: 503, Kind: sdk.KindServerError}},
+		{"refused connection", refusedConnection()},
 	}
+}
 
-	if got := effects.Load(); got != 1 {
-		t.Fatalf("executed side effects = %d, want 1", got)
-	}
-	if got := providerCalls.Load(); got != 1 {
-		t.Fatalf("provider calls = %d, want 1", got)
-	}
-	if got := commits.Load(); got != 1 {
-		t.Fatalf("commit attempts = %d, want 1", got)
-	}
-	var retries, errorsSeen int
+// assertLocalFailureEndedRun requires the run to end with one error event
+// whose cause holds want and is not a model call failure, and no retry.
+func assertLocalFailureEndedRun(t *testing.T, events []StreamEvent, want error, stage string) {
+	t.Helper()
+	var retries int
+	var failures []StreamEvent
 	for _, event := range events {
 		switch event.Type {
 		case EventRetry:
 			retries++
 		case EventError:
-			errorsSeen++
-			if !strings.Contains(event.Error, "commit step") {
-				t.Fatalf("commit error = %q, want commit step context", event.Error)
-			}
+			failures = append(failures, event)
 		}
 	}
 	if retries != 0 {
 		t.Fatalf("retry events = %d, want 0", retries)
 	}
-	if errorsSeen != 1 {
-		t.Fatalf("error events = %d, want 1", errorsSeen)
+	if len(failures) != 1 {
+		t.Fatalf("error events = %#v, want exactly one", failures)
+	}
+	cause := failures[0].Cause
+	if !errors.Is(cause, want) {
+		t.Fatalf("error cause = %v, want it to hold %v", cause, want)
+	}
+	if !strings.Contains(cause.Error(), stage) || failures[0].Error != "" || failures[0].Code != codeRunFailed {
+		t.Fatalf("error event = %#v, want a %s event with a cause naming %q", failures[0], codeRunFailed, stage)
+	}
+	if IsModelCallFailure(cause) {
+		t.Fatalf("IsModelCallFailure(%v) = true, want false for the loop's own work", cause)
 	}
 	if len(events) == 0 || events[len(events)-1].Type != EventAgentAbort {
 		t.Fatalf("stream termination = %v, want %q", events, EventAgentAbort)
 	}
 }
 
-func TestRetryableStreamErrorRejectsTaggedCommitErrors(t *testing.T) {
-	t.Parallel()
+func TestStepCommitFailureMustNotReplayExecutedTool(t *testing.T) {
+	for _, tc := range localFailureCauses() {
+		t.Run(tc.name, func(t *testing.T) {
+			var effects, commits, providerCalls atomic.Int32
+			provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
+				providerCalls.Add(1)
+				return closedAgentTestStream(
+					&sdk.StartStepPart{},
+					&sdk.StreamToolCallPart{ToolCallID: "side-effect-1", ToolName: "record_effect", Input: toolexec.ArgumentsFromValue(map[string]any{})},
+					&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls},
+				), nil
+			})
+			a := New(Deps{})
+			a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
+				Name: "record_effect",
+				Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+					effects.Add(1)
+					return toolexec.OutputFromValue("effect recorded"), nil
+				},
+			}}}})
+			var events []StreamEvent
+			for event := range a.Stream(context.Background(), RunConfig{
+				Model:            &sdk.Model{ID: "qc-fixture", Provider: provider},
+				Messages:         []sdk.Message{sdk.UserMessage("record one effect")},
+				SupportsToolCall: true,
+				Identity:         SessionContext{BotID: "qc-bot"},
+				Retry:            fastRetry,
+				OnStepCommitted: func(context.Context, int, *step.Record) (StepDirective, error) {
+					commits.Add(1)
+					return StepDirective{}, tc.err
+				},
+			}) {
+				events = append(events, event)
+			}
 
-	tagged := tagStepCommitError(io.EOF)
-	if isRetryableStreamError(tagged) {
-		t.Fatal("tagged commit error wrapping EOF is retryable")
-	}
-	rewrapped := fmt.Errorf("twilightai: commit step 0: %w", tagged)
-	if isRetryableStreamError(rewrapped) {
-		t.Fatal("re-wrapped tagged commit error is retryable")
-	}
-	if !isRetryableStreamError(io.EOF) {
-		t.Fatal("plain EOF is not retryable")
+			if got := effects.Load(); got != 1 {
+				t.Fatalf("executed side effects = %d, want 1", got)
+			}
+			if got := providerCalls.Load(); got != 1 {
+				t.Fatalf("provider calls = %d, want 1", got)
+			}
+			if got := commits.Load(); got != 1 {
+				t.Fatalf("commit attempts = %d, want 1", got)
+			}
+			assertLocalFailureEndedRun(t, events, tc.err, "commit step")
+		})
 	}
 }
 
-func TestStepCommitErrorPreservesCauseAndMessage(t *testing.T) {
+// A tool batch that fails (here its approval handler) ends the run: a retry
+// would call the model again and run the batch a second time.
+func TestToolBatchFailureIsNotRetried(t *testing.T) {
+	for _, tc := range localFailureCauses() {
+		t.Run(tc.name, func(t *testing.T) {
+			var executions, providerCalls atomic.Int32
+			provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
+				providerCalls.Add(1)
+				return closedAgentTestStream(
+					&sdk.StartStepPart{},
+					&sdk.StreamToolCallPart{ToolCallID: "guarded-1", ToolName: "guarded", Input: toolexec.ArgumentsFromValue(map[string]any{})},
+					&sdk.FinishStepPart{FinishReason: sdk.FinishReasonToolCalls},
+				), nil
+			})
+			a := New(Deps{})
+			a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
+				Name:            "guarded",
+				RequireApproval: true,
+				Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+					executions.Add(1)
+					return toolexec.OutputFromValue("ran"), nil
+				},
+			}}}})
+			var events []StreamEvent
+			for event := range a.Stream(context.Background(), RunConfig{
+				Model:            &sdk.Model{ID: "tool-failure", Provider: provider},
+				Messages:         []sdk.Message{sdk.UserMessage("run the guarded tool")},
+				SupportsToolCall: true,
+				Identity:         SessionContext{BotID: "bot-1"},
+				Retry:            fastRetry,
+				ToolApprovalHandler: func(context.Context, sdk.ToolCall) (toolexec.ToolApprovalResult, error) {
+					return toolexec.ToolApprovalResult{}, tc.err
+				},
+			}) {
+				events = append(events, event)
+			}
+
+			if got := providerCalls.Load(); got != 1 {
+				t.Fatalf("provider calls = %d, want 1", got)
+			}
+			if got := executions.Load(); got != 0 {
+				t.Fatalf("tool executions = %d, want 0", got)
+			}
+			assertLocalFailureEndedRun(t, events, tc.err, "approval handler")
+		})
+	}
+}
+
+// A provider attempt the loop cannot hand off ends the run before the model
+// is called, without a retry.
+func TestProviderAttemptHandoffFailureIsNotRetried(t *testing.T) {
 	t.Parallel()
 
-	original := errors.New("commit failed")
-	tagged := tagStepCommitError(original)
-	if tagged.Error() != original.Error() {
-		t.Fatalf("tagged error = %q, want %q", tagged.Error(), original.Error())
+	var providerCalls atomic.Int32
+	provider := agentStreamTestProvider(func(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
+		providerCalls.Add(1)
+		return closedAgentTestStream(&sdk.StartStepPart{}, &sdk.FinishStepPart{FinishReason: sdk.FinishReasonStop}), nil
+	})
+	cfg := RunConfig{Model: &sdk.Model{ID: "handoff-failure", Provider: provider}, Retry: fastRetry}
+	eng := &streamEngine{
+		agent:     New(Deps{}),
+		baseCfg:   cfg,
+		cfg:       cfg,
+		streamCtx: context.Background(),
+		events:    make(chan StreamEvent, 8),
+		done:      make(chan struct{}),
 	}
-	if !errors.Is(tagged, original) {
-		t.Fatal("tagged error does not preserve original cause")
+	// No staged attempt: publishing it fails.
+	eng.reset(generateDispatch{handoff: newProviderAttemptHandoff(cfg)})
+	eng.run()
+
+	var events []StreamEvent
+	for event := range eng.events {
+		events = append(events, event)
+	}
+	if got := providerCalls.Load(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0", got)
+	}
+	if len(events) != 1 || events[0].Type != EventError || !errors.Is(events[0].Cause, errProviderAttemptNotPrepared) {
+		t.Fatalf("events = %#v, want one error event for the failed handoff", events)
+	}
+	if !eng.aborted {
+		t.Fatal("engine did not end after the failed handoff")
 	}
 }

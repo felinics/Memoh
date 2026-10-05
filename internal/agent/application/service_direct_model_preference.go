@@ -30,7 +30,7 @@ func (s *Service) reconcileDirectModelPreference(ctx context.Context, botID, bot
 		BotID: botID, BotAgentID: botAgentID, ProjectPath: projectPath, ModelID: modelID, ResolveDefaults: strings.TrimSpace(modelID) == "",
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", ExternalRuntimeError(err)
 	}
 	return reconcileDirectPair(catalog, modelID, effort)
 }

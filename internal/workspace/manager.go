@@ -56,6 +56,14 @@ const (
 // ErrContainerNotFound is returned when no container exists for a bot.
 var ErrContainerNotFound = errors.New("workspace not found for bot")
 
+// IsNotReady reports whether err says that the bot's workspace container does
+// not exist in the runtime or that its bridge does not answer. Both clear once
+// a workspace that is being created has started, so a caller that waits for a
+// new workspace retries on them.
+func IsNotReady(err error) bool {
+	return errors.Is(err, ErrContainerNotFound) || ctr.IsNotFound(err) || errors.Is(err, bridge.ErrUnavailable)
+}
+
 // ContainerStatus combines DB records with live containerd state.
 type ContainerStatus struct {
 	ContainerID      string    `json:"container_id"`

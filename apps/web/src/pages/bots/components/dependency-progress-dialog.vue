@@ -13,10 +13,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
   Button,
+  CalloutBanner,
   Dialog,
   DialogBody,
   DialogDescription,
@@ -174,16 +172,19 @@ function finish() {
           </div>
         </div>
 
-        <Alert
+        <CalloutBanner
           v-if="status === 'error' || status === 'unknown'"
-          :variant="status === 'error' ? 'destructive' : 'default'"
-          class="min-w-0"
+          :tone="status === 'error' ? 'destructive' : 'neutral'"
+          :title="status === 'unknown' ? t('bots.dependencies.progress.unknownTitle') : t('bots.dependencies.progress.failedTitle')"
+          :description="t(status === 'unknown' ? 'bots.dependencies.progress.unknownHint' : 'bots.dependencies.progress.failedHint')"
         >
-          <AlertTitle class="break-words">
-            {{ status === 'unknown' ? t('bots.dependencies.progress.unknownTitle') : error || t('bots.dependencies.progress.failedTitle') }}
-          </AlertTitle>
-          <AlertDescription>{{ t(status === 'unknown' ? 'bots.dependencies.progress.unknownHint' : 'bots.dependencies.progress.failedHint') }}</AlertDescription>
-        </Alert>
+          <template
+            v-if="status === 'error' && error"
+            #details
+          >
+            {{ error }}
+          </template>
+        </CalloutBanner>
 
         <DependencyKvList
           v-if="status === 'done'"

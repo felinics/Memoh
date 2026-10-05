@@ -84,6 +84,8 @@ type WorkspaceDependencyItem struct {
 	Icon   string `json:"icon,omitempty"`
 	// Provides lists the commands the dependency makes available.
 	Provides []string `json:"provides"`
+	// Requires lists the dependency IDs installed first when missing.
+	Requires []string `json:"requires,omitempty"`
 	// PlatformSupported is false when the probed workspace platform is not
 	// listed by the catalog manifest; PlatformReason then says why.
 	PlatformSupported bool   `json:"platform_supported"`
@@ -139,6 +141,8 @@ type WorkspaceDependencyCatalogItem struct {
 	Description  string                                    `json:"description"`
 	IconURL      string                                    `json:"icon_url,omitempty"`
 	Translations map[string]WorkspaceDependencyTranslation `json:"translations,omitempty"`
+	// Requires lists the dependency IDs installed first when missing.
+	Requires []string `json:"requires,omitempty"`
 }
 
 type WorkspaceDependencyCatalogResponse struct {
@@ -167,6 +171,7 @@ func (h *ContainerdHandler) ListWorkspaceDependencyCatalog(c echo.Context) error
 		items = append(items, WorkspaceDependencyCatalogItem{
 			ID: dep.ID, Name: dep.Name, Description: dep.Description,
 			IconURL: dependencyIconURL(dep), Translations: dependencyTranslations(dep),
+			Requires: append([]string(nil), dep.Requires...),
 		})
 	}
 	return c.JSON(http.StatusOK, WorkspaceDependencyCatalogResponse{Items: items, CatalogStale: view.Stale})
@@ -210,6 +215,13 @@ type WorkspaceDependencyInstallRequest struct {
 	// catalog script resolves, or the manifest pin when the dependency has
 	// one. The version recorded afterwards is the one the script reports.
 	Version string `json:"version,omitempty"`
+	// PrerequisiteRevisions are the definition revisions the confirmation
+	// showed for the dependency's prerequisites, keyed by dependency id. When
+	// present, a missing prerequisite installs only from its confirmed
+	// revision; one without an entry refuses the operation with
+	// workspace_dependency.prerequisites_changed. Omitted, prerequisites
+	// resolve when the operation starts, like an omitted definition_revision.
+	PrerequisiteRevisions map[string]string `json:"prerequisite_revisions,omitempty"`
 }
 
 // WorkspaceDependencyPreflightResponse reports whether the requested
@@ -311,9 +323,9 @@ type workspaceDependencyErrorEvent struct {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} WorkspaceDependencyListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Param refresh query bool false "Refresh definitions and workspace discovery"
@@ -343,9 +355,9 @@ func (h *ContainerdHandler) ListWorkspaceDependencies(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} WorkspaceDependencyListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/dependencies/check-updates [post].
@@ -372,8 +384,8 @@ func (h *ContainerdHandler) CheckWorkspaceDependencyUpdates(c echo.Context) erro
 // @Param payload body WorkspaceDependencyPreflightRequest true "Dependencies to check"
 // @Success 200 {object} WorkspaceDependencyPreflightResponse
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /bots/{bot_id}/dependencies/preflight [post].
@@ -426,7 +438,7 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -446,7 +458,7 @@ func (h *ContainerdHandler) InstallWorkspaceDependency(c echo.Context) error {
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to update to (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -466,7 +478,7 @@ func (h *ContainerdHandler) UpdateWorkspaceDependency(c echo.Context) error {
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -484,7 +496,7 @@ func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 // @Param dep_id path string true "Dependency ID"
 // @Success 200 {object} WorkspaceDependencyOperationResponse
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
@@ -525,7 +537,7 @@ func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 // @Param action query string false "Action" Enums(install, update, remove, reinstall, rollback) default(install)
 // @Success 200 {object} WorkspaceDependencyScriptResponse
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 422 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
@@ -604,6 +616,9 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 		return workspaceDependencyError(err)
 	}
 	ctx = workspacedeps.WithDefinitionRevision(ctx, preview.Revision)
+	if request.PrerequisiteRevisions != nil {
+		ctx = workspacedeps.WithPrerequisiteRevisions(ctx, request.PrerequisiteRevisions)
+	}
 	if validator, ok := svc.(interface {
 		ValidateOperationSession(context.Context, string, string) error
 	}); ok {
@@ -800,6 +815,11 @@ func workspaceDependencyOperationRequest(c echo.Context, action catalog.Action) 
 	if req.DefinitionRevision != "" && !catalog.ValidRevision(req.DefinitionRevision) {
 		return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
 	}
+	for id, revision := range req.PrerequisiteRevisions {
+		if len(id) > 80 || !workspaceDependencyIDPattern.MatchString(id) || !catalog.ValidRevision(revision) {
+			return req, apperror.New(apperror.CodeWorkspaceDependencyRequestInvalid, nil)
+		}
+	}
 	if action == catalog.ActionRemove {
 		req.Version = ""
 	}
@@ -857,6 +877,15 @@ func workspaceDependencyError(err error) error {
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyPlatformUnsupported, err, nil)
 	case errors.Is(err, workspacedeps.ErrBusy):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyBusy, err, nil)
+	case errors.Is(err, workspacedeps.ErrPrerequisitesChanged):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyPrerequisitesChanged, err, nil)
+	case errors.Is(err, workspacedeps.ErrRequired):
+		var required *workspacedeps.RequiredError
+		args := map[string]string{}
+		if errors.As(err, &required) {
+			args["dependents"] = strings.Join(required.Dependents, ",")
+		}
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyRequired, err, args)
 	case errors.Is(err, workspacedeps.ErrWorkspaceNotRunning):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyWorkspaceNotRunning, err, nil)
 	case errors.Is(err, workspacedeps.ErrWorkspaceMissing):
@@ -978,6 +1007,7 @@ func workspaceDependencyItem(entry workspacedeps.Entry, dataRoot string) Workspa
 		Source:            string(dep.Source),
 		Icon:              dep.Icon,
 		Provides:          append([]string{}, dep.Provides...),
+		Requires:          append([]string(nil), dep.Requires...),
 		PlatformSupported: entry.PlatformSupported,
 		Status:            string(entry.Status),
 		InstalledVersion:  entry.InstalledVersion,

@@ -13,7 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/felinics/memoh/internal/channel"
-	"github.com/felinics/memoh/internal/channel/common"
 	"github.com/felinics/memoh/internal/redact"
 	"github.com/felinics/memoh/internal/textutil"
 )
@@ -367,9 +366,8 @@ func (a *MisskeyAdapter) handleChannelEvent(ctx context.Context, cfg channel.Cha
 		}
 		a.logInbound(cfg.ID, inbound)
 		go func() {
-			if err := handler(ctx, cfg, inbound); err != nil && a.logger != nil {
-				a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, inbound)
 		}()
 
 	case "notification":
@@ -393,9 +391,8 @@ func (a *MisskeyAdapter) handleChannelEvent(ctx context.Context, cfg channel.Cha
 		}
 		a.logInbound(cfg.ID, inbound)
 		go func() {
-			if err := handler(ctx, cfg, inbound); err != nil && a.logger != nil {
-				a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, inbound)
 		}()
 	}
 }
@@ -546,7 +543,6 @@ func (a *MisskeyAdapter) logInbound(configID string, msg channel.InboundMessage)
 		slog.String("config_id", configID),
 		slog.String("user_id", msg.Sender.Attribute("user_id")),
 		slog.String("username", msg.Sender.Attribute("username")),
-		slog.String("text", common.SummarizeText(msg.Message.Text)),
 	)
 }
 
@@ -646,15 +642,32 @@ type misskeyBlockStream struct {
 	closed      bool
 }
 
-func (s *misskeyBlockStream) Push(_ context.Context, event channel.PreparedStreamEvent) error {
+func (s *misskeyBlockStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s.closed {
 		return nil
 	}
 	switch event.Type {
+	case channel.StreamEventError:
+		errText := redact.Text(strings.TrimSpace(event.Error))
+		s.textBuilder.Reset()
+		s.attachments = nil
+		s.final = nil
+		if errText == "" {
+			return nil
+		}
+		return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
+			Target: s.target,
+			Message: channel.PreparedMessage{Message: channel.Message{
+				Format: channel.MessageFormatPlain,
+				Text:   channel.ErrorReplyText(event.ErrorCode, errText),
+			}},
+		})
 	case channel.StreamEventDelta:
 		if strings.TrimSpace(event.Delta) != "" && event.Phase != channel.StreamPhaseReasoning {
 			s.textBuilder.WriteString(event.Delta)
 		}
+	case channel.StreamEventReset:
+		s.textBuilder.Reset()
 	case channel.StreamEventAttachment:
 		s.attachments = append(s.attachments, event.Attachments...)
 	case channel.StreamEventFinal:

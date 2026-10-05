@@ -3,14 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CalloutBanner, ConfirmPopover, InlineLoadingRow, MetricReadout, PageShell, SettingsRow, SettingsSection, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { useQuery } from '@pinia/colada'
 import { Play, AlertCircle, ChevronRight } from 'lucide-vue-next'
 import {
   deleteBotsByBotIdContainer,
   getBotsByBotIdContainer,
   getBotsByBotIdContainerMetrics,
   getBotsByBotIdContainerSnapshots,
-  getBotsById,
   postBotsByBotIdContainerDataRestore,
   postBotsByBotIdContainerSnapshots,
   postBotsByBotIdContainerSnapshotsRollback,
@@ -23,6 +21,7 @@ import {
   type HandlersUpdateContainerMetricsRequest,
   type HandlersListSnapshotsResponse,
 } from '@memohai/sdk'
+import { useBotQuery } from '@/composables/api/useBot'
 import {
   postBotsByBotIdContainerStream,
   type ContainerCreateLayerStatus,
@@ -51,7 +50,7 @@ import { useCapabilitiesStore } from '@/store/capabilities'
 import { formatDateTime, formatRelativeTime } from '@/utils/date-time'
 import { shortenImageRef } from '@/utils/image-ref'
 import { formatMetricBytes, formatMetricPercent } from '@/utils/format-bytes'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import { UserFacingError, resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
 const { t, locale } = useI18n()
@@ -274,14 +273,7 @@ async function refreshContainerMetricsSilently() {
   }
 }
 
-const { data: bot, refetch: refetchBot } = useQuery({
-  key: () => ['bot', routeIdentifier.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!routeIdentifier.value,
-})
+const { data: bot, refetch: refetchBot } = useBotQuery(routeIdentifier)
 
 function rememberedWorkspaceImage(metadata: Record<string, unknown> | undefined): string {
   const workspace = metadata?.workspace
@@ -434,7 +426,7 @@ async function handleCreateContainer() {
   try {
     const gpuDevices = parseCDIDevices(createGPUDevices.value)
     if (createGPUEnabled.value && gpuDevices.length === 0) {
-      throw new Error(t('bots.container.gpuDevicesRequired'))
+      throw new UserFacingError(t('bots.container.gpuDevicesRequired'))
     }
 
     const body: HandlersCreateContainerRequest = {
@@ -524,7 +516,7 @@ function parseLimitInput(value: string, fieldLabel: string): number {
 
   const parsed = Number(trimmed)
   if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(t('bots.container.resourceLimits.invalidNumber', { field: fieldLabel }))
+    throw new UserFacingError(t('bots.container.resourceLimits.invalidNumber', { field: fieldLabel }))
   }
   return parsed
 }

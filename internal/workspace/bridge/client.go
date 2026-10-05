@@ -253,9 +253,10 @@ type ExecResult struct {
 // inherited environment keys before Env is appended, so explicit Env entries
 // remain authoritative.
 type ExecOptions struct {
-	Env      []string
-	CleanEnv bool
-	UnsetEnv []string
+	ReportLiveness bool
+	Env            []string
+	CleanEnv       bool
+	UnsetEnv       []string
 }
 
 // Exec runs a command and collects all output. For streaming, use ExecStream.
@@ -296,6 +297,7 @@ func (c *Client) ExecWithOptions(ctx context.Context, command, workDir string, t
 		TimeoutSeconds: timeout,
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
+		ReportLiveness: opts.ReportLiveness,
 	})
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
@@ -366,6 +368,7 @@ func (c *Client) ExecStreamWithOptions(ctx context.Context, command, workDir str
 		TimeoutSeconds: timeout,
 		CleanEnv:       opts.CleanEnv,
 		UnsetEnv:       opts.UnsetEnv,
+		ReportLiveness: opts.ReportLiveness,
 	})
 	if err != nil {
 		cancel()
@@ -445,6 +448,9 @@ func (c *Client) ExecStreamPTYWithOptions(ctx context.Context, command, workDir 
 		Resize:   &pb.TerminalResize{Cols: cols, Rows: rows},
 		CleanEnv: opts.CleanEnv,
 		UnsetEnv: opts.UnsetEnv,
+		// A terminal has no command deadline; the stream's lifetime bounds
+		// the shell. Without this the bridge applies its default PTY timeout.
+		TimeoutSeconds: -1,
 	})
 	if err != nil {
 		cancel()
@@ -478,7 +484,7 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 	// files representable, this lets the server create its temporary file before
 	// any payload chunks arrive.
 	if err := stream.Send(&pb.WriteRawChunk{Path: path}); err != nil {
-		return 0, err
+		return 0, writeRawSendError(stream, err)
 	}
 
 	buf := make([]byte, 64*1024)
@@ -487,7 +493,7 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 		if n > 0 {
 			chunk := &pb.WriteRawChunk{Data: buf[:n]}
 			if sendErr := stream.Send(chunk); sendErr != nil {
-				return 0, sendErr
+				return 0, writeRawSendError(stream, sendErr)
 			}
 		}
 		if readErr == io.EOF {
@@ -505,9 +511,21 @@ func (c *Client) WriteRaw(ctx context.Context, path string, r io.Reader) (int64,
 
 	resp, err := stream.CloseAndRecv()
 	if err != nil {
-		return 0, err
+		return 0, mapError(err)
 	}
 	return resp.GetBytesWritten(), nil
+}
+
+// writeRawSendError returns the status of a WriteRaw stream that Send failed
+// on. Send reports io.EOF when the stream has already ended, and the status is
+// left for CloseAndRecv.
+func writeRawSendError(stream pb.ContainerService_WriteRawClient, err error) error {
+	if errors.Is(err, io.EOF) {
+		if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
+			err = recvErr
+		}
+	}
+	return mapError(err)
 }
 
 func (c *Client) DeleteFile(ctx context.Context, path string, recursive bool) error {

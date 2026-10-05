@@ -358,7 +358,6 @@ describe('runtime projection', () => {
         run_id: 'run-1',
         status: 'lost',
         error_code: 'agent.response_timeout',
-        error: 'The model did not respond in time. Please try again.',
       },
     }))
 
@@ -370,7 +369,7 @@ describe('runtime projection', () => {
         id: 0,
         type: 'error',
         code: 'agent.response_timeout',
-        content: 'The model did not respond in time. Please try again.',
+        content: '',
       }],
     })
   })
@@ -380,7 +379,6 @@ describe('runtime projection', () => {
       status: 'errored',
       request_user_turn: undefined,
       error_code: 'agent.response_interrupted',
-      error: undefined,
       messages: [],
     })))
 

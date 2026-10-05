@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -248,7 +247,7 @@ func TestAgentStreamMarksRetryTextLoopAsAbort(t *testing.T) {
 				}
 
 				if call == 1 {
-					_ = send(&sdk.ErrorPart{Error: errors.New("api error 500")})
+					_ = send(&sdk.ErrorPart{Error: serverErr()})
 					return
 				}
 
@@ -322,7 +321,7 @@ func TestAgentStreamMidStreamRetryRecordsCacheUsageForRetryAttempt(t *testing.T)
 				ch <- &sdk.StartPart{}
 				ch <- &sdk.StartStepPart{}
 				if call == 1 {
-					ch <- &sdk.ErrorPart{Error: errors.New("api error 500")}
+					ch <- &sdk.ErrorPart{Error: serverErr()}
 					return
 				}
 				ch <- &sdk.TextStartPart{ID: "mock-retry-usage"}

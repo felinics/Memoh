@@ -60,7 +60,7 @@ type InstallRegistrySkillResponse = supermarketclient.InstallSkillResponse
 // @Summary List Skill Registries from supermarket
 // @Tags supermarket
 // @Success 200 {object} SupermarketRegistryListResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/registries [get].
 func (h *SupermarketHandler) ListRegistries(c echo.Context) error {
 	return h.proxy(c, "/api/registries")
@@ -71,9 +71,9 @@ func (h *SupermarketHandler) ListRegistries(c echo.Context) error {
 // @Tags supermarket
 // @Param registry query string false "Registry ID"
 // @Success 200 {object} SupermarketAppCategoryListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/categories [get].
 func (h *SupermarketHandler) ListCategories(c echo.Context) error {
 	return h.proxy(c, "/api/categories")
@@ -91,8 +91,8 @@ func (h *SupermarketHandler) ListCategories(c echo.Context) error {
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
 // @Success 200 {object} SupermarketCatalogSkillListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/skills [get].
 func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 	return h.proxy(c, "/api/skills")
@@ -110,8 +110,8 @@ func (h *SupermarketHandler) ListSkills(c echo.Context) error {
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
 // @Success 200 {object} SupermarketAppListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/apps [get].
 func (h *SupermarketHandler) ListApps(c echo.Context) error {
 	return h.proxy(c, "/api/apps")
@@ -128,9 +128,9 @@ func (h *SupermarketHandler) ListApps(c echo.Context) error {
 // @Param limit query int false "Items per page"
 // @Param sort query string false "Sort order"
 // @Success 200 {object} SupermarketAppListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/registries/{registry_id}/apps [get].
 func (h *SupermarketHandler) ListRegistryApps(c echo.Context) error {
 	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
@@ -146,9 +146,9 @@ func (h *SupermarketHandler) ListRegistryApps(c echo.Context) error {
 // @Param registry_id path string true "Registry ID"
 // @Param app_id path string true "App ID"
 // @Success 200 {object} SupermarketAppDescriptor
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/registries/{registry_id}/apps/{app_id} [get].
 func (h *SupermarketHandler) GetRegistryApp(c echo.Context) error {
 	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
@@ -169,9 +169,9 @@ func (h *SupermarketHandler) GetRegistryApp(c echo.Context) error {
 // @Param app_id path string true "App ID"
 // @Param revision path string true "App revision"
 // @Success 200 {object} SupermarketAppDescriptor
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/registries/{registry_id}/apps/{app_id}/releases/{revision} [get].
 func (h *SupermarketHandler) GetRegistryAppRelease(c echo.Context) error {
 	registryID, err := requireRegistryID(c.Param("registry_id"), "registry_id")
@@ -219,9 +219,9 @@ func appCategories(skills []supermarketclient.CatalogSkill) []supermarketclient.
 // @Param app_id path string true "App ID"
 // @Param skill_id path string true "Skill ID"
 // @Success 200 {object} SupermarketCatalogSkill
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/registries/{registry_id}/apps/{app_id}/skills/{skill_id} [get].
 func (h *SupermarketHandler) GetRegistrySkill(c echo.Context) error {
 	registryID, appID, skillID, err := registrySkillIdentity(
@@ -238,9 +238,9 @@ func (h *SupermarketHandler) GetRegistrySkill(c echo.Context) error {
 // @Tags supermarket
 // @Param digest path string true "SHA-256 digest"
 // @Success 200 {file} binary
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 502 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 502 {object} apperror.Problem
 // @Router /supermarket/artifacts/icon/{digest} [get].
 func (h *SupermarketHandler) GetRegistrySkillIcon(c echo.Context) error {
 	digest := strings.TrimSpace(c.Param("digest"))
@@ -273,7 +273,7 @@ func (h *SupermarketHandler) proxySkillIcon(c echo.Context, digest string) error
 		return c.NoContent(http.StatusNotModified)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return echo.NewHTTPError(resp.StatusCode, "Skill icon unavailable")
+		return upstreamStatusError(resp.StatusCode, "/api/artifacts/icon/"+digest)
 	}
 	contentType := strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0])
 	if contentType != "image/svg+xml" && contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" {

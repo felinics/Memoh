@@ -47,6 +47,19 @@ export const ComputerIcon = withUiStroke(createLucideIcon('Computer', [
   ['path', { d: 'M9 20.1h6M12 16.5v3.6' }],
 ]))
 
+// Keyboard shortcuts as "a shortcut": an arrow that goes straight there,
+// inside the same r=10 circle the settings nav's Account / Appearance / About
+// use, so the Personal group reads as one family instead of one wide keyboard.
+// The arrowhead is a touch shorter and heavier than the shaft so it reads as
+// the point of the glyph at 16px instead of a second, equal-weight corner.
+// Its stroke-width is fixed in viewBox units, so the 1.75 : 2 ratio holds at
+// every size only while callers leave absoluteStrokeWidth off (none use it).
+export const ShortcutIcon = withUiStroke(createLucideIcon('Shortcut', [
+  ['circle', { cx: '12', cy: '12', r: '10' }],
+  ['path', { d: 'M8.75 15.25 15.25 8.75' }],
+  ['path', { 'd': 'M10.5 8.75h4.75v4.75', 'stroke-width': '2' }],
+]))
+
 export const TerminalIcon = withUiStroke(Terminal)
 export const BrowserIcon = withUiStroke(Globe)
 export const SplitRightIcon = withUiStroke(Columns2)
@@ -78,3 +91,18 @@ export const LogoutIcon = withUiStroke(createLucideIcon('Logout', [
   ['path', { d: 'M4.125 12H14.625' }],
   ['path', { d: 'M14.625 19.875H18.125a1.75 1.75 0 0 0 1.75-1.75V5.875a1.75 1.75 0 0 0-1.75-1.75h-3.5' }],
 ]))
+
+// Error mark for every destructive notice and field error. Authored, not
+// lucide circle-alert: shrunk to 12–14px, lucide's stem is short, the dot is
+// no heavier than the stroke and the gap between them is wide, so it reads
+// as a colon. Here the "!" floats centered with air above and below, the stem
+// is parallel-sided and a hair lighter than the ring (it is short, so at the
+// ring's width it read heavier), and the dot is only slightly wider than the
+// stem so both read as one weight. The ring keeps lucide's stroke 2 rather
+// than the shared 1.75: the mark was tuned at 14px against lucide's
+// warning/info glyphs that sit beside it in the same banners.
+export const ErrorIcon = createLucideIcon('Error', [
+  ['circle', { cx: '12', cy: '12', r: '10.29' }],
+  ['rect', { x: '11.06', y: '7.37', width: '1.89', height: '5.66', rx: '0.94', fill: 'currentColor', stroke: 'none' }],
+  ['circle', { cx: '12', cy: '16.29', r: '1.11', fill: 'currentColor', stroke: 'none' }],
+])

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -154,5 +155,75 @@ func TestQQSendStreamShardPostsReplacePayload(t *testing.T) {
 		if captured[key] != wantValue {
 			t.Fatalf("body[%s] = %v, want %v (full body: %v)", key, captured[key], wantValue, captured)
 		}
+	}
+}
+
+func TestQQRetriesOnceAfterUnauthorized(t *testing.T) {
+	t.Parallel()
+
+	var tokenCalls, apiCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/app/getAppAccessToken":
+			tokenCalls.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "token", "expires_in": 7200})
+		case "/gateway":
+			if apiCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"url": "wss://gateway"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := &qqClient{
+		appID:        "1024",
+		clientSecret: "secret",
+		httpClient:   server.Client(),
+		apiBaseURL:   server.URL,
+		tokenURL:     server.URL + "/app/getAppAccessToken",
+		msgSeq:       make(map[string]int),
+	}
+	gateway, err := client.gatewayURL(context.Background())
+	if err != nil {
+		t.Fatalf("gateway: %v", err)
+	}
+	if gateway != "wss://gateway" || apiCalls.Load() != 2 || tokenCalls.Load() != 2 {
+		t.Fatalf("gateway=%q api=%d token=%d, want one refresh and one retry", gateway, apiCalls.Load(), tokenCalls.Load())
+	}
+}
+
+func TestQQDoesNotRetryOtherStatuses(t *testing.T) {
+	t.Parallel()
+
+	var apiCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/app/getAppAccessToken" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "token", "expires_in": 7200})
+			return
+		}
+		apiCalls.Add(1)
+		// The body mentions 401 to prove the decision reads the status code.
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("status=401"))
+	}))
+	defer server.Close()
+
+	client := &qqClient{
+		appID:        "1024",
+		clientSecret: "secret",
+		httpClient:   server.Client(),
+		apiBaseURL:   server.URL,
+		tokenURL:     server.URL + "/app/getAppAccessToken",
+		msgSeq:       make(map[string]int),
+	}
+	if _, err := client.gatewayURL(context.Background()); err == nil {
+		t.Fatal("expected error")
+	}
+	if calls := apiCalls.Load(); calls != 1 {
+		t.Fatalf("api calls = %d, want 1", calls)
 	}
 }

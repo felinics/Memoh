@@ -115,6 +115,7 @@ func ServerModule() fx.Option {
 			provideVideoRegistry,
 			videopkg.NewService,
 			provideAudioTempStore,
+			provideMediaStorage,
 			provideMediaService,
 			provideSessionRunLedger,
 			provideRuntimeFenceActivator,

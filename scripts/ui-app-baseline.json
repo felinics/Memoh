@@ -53,7 +53,6 @@
   "apps/web/src/pages/home/components/thinking-block.vue": 1,
   "apps/web/src/pages/home/components/tool-call-detail-spawn.vue": 2,
   "apps/web/src/pages/home/components/tool-call-inline.vue": 5,
-  "apps/web/src/pages/memory/components/add-memory-provider.vue": 1,
   "apps/web/src/pages/memory/index.vue": 1,
   "apps/web/src/pages/onboarding/steps/Step1Intro.vue": 2,
   "apps/web/src/pages/onboarding/steps/Step3Provider.vue": 13,

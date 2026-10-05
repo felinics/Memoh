@@ -14,24 +14,13 @@
     </template>
 
     <div class="space-y-8">
-      <div class="space-y-4">
-        <div class="relative">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-          <Input
-            v-model="searchInput"
-            :placeholder="$t('supermarket.searchPlaceholder')"
-            class="pl-9"
-            @keydown.enter="applySearch"
-          />
-        </div>
-
-        <SegmentedControl
-          v-if="registryFilterItems.length > 1"
-          :model-value="selectedRegistry"
-          :items="registryFilterItems"
-          :aria-label="$t('supermarket.registryFilter')"
-          class="w-full sm:w-fit"
-          @update:model-value="onRegistryFilterChange"
+      <div class="relative">
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+        <Input
+          v-model="searchInput"
+          :placeholder="$t('supermarket.searchPlaceholder')"
+          class="pl-9"
+          @keydown.enter="applySearch"
         />
       </div>
 
@@ -148,15 +137,11 @@ import {
   InlineLoadingRow,
   Input,
   PageShell,
-  SegmentedControl,
   toast,
-  type SegmentedItem,
 } from '@felinic/ui'
 import {
   getSupermarketApps,
-  getSupermarketRegistries,
   type HandlersSupermarketAppCategory,
-  type HandlersSupermarketRegistry,
   type HandlersSupermarketAppSummary,
 } from '@memohai/sdk'
 import { categoryDisplayName, useAppCategoriesQuery } from '@/composables/api/useApps'
@@ -174,14 +159,11 @@ const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const pageSize = 50
-const allValue = 'all'
 
 const searchInput = ref('')
 const searchQuery = ref('')
 const page = ref(1)
 const total = ref(0)
-const selectedRegistry = ref(allValue)
-const registries = ref<HandlersSupermarketRegistry[]>([])
 const searchResults = ref<HandlersSupermarketAppSummary[]>([])
 const searchLoading = ref(false)
 const sections = ref<CategorySection[]>([])
@@ -191,15 +173,8 @@ const categoriesQuery = useAppCategoriesQuery()
 const categories = computed(() => categoriesQuery.data.value ?? [])
 
 const searching = computed(() => !!searchQuery.value)
-const registryParam = computed(() => (selectedRegistry.value === allValue ? undefined : selectedRegistry.value))
 const hasNextPage = computed(() => page.value * pageSize < total.value)
 const showPagination = computed(() => page.value > 1 || hasNextPage.value)
-const registryFilterItems = computed<SegmentedItem[]>(() => [
-  { value: allValue, label: t('supermarket.allRegistries') },
-  ...registries.value
-    .filter((registry): registry is HandlersSupermarketRegistry & { id: string } => !!registry.id)
-    .map(registry => ({ value: registry.id, label: registry.name || registry.id })),
-])
 
 const defaultBotId = computed(() => {
   const value = route.query.botId
@@ -214,10 +189,7 @@ function openCategory(categoryId: string) {
   router.push({
     name: 'supermarket-category',
     params: { categoryId },
-    query: {
-      ...(registryParam.value ? { registry: registryParam.value } : {}),
-      ...(defaultBotId.value ? { botId: defaultBotId.value } : {}),
-    },
+    query: defaultBotId.value ? { botId: defaultBotId.value } : undefined,
   })
 }
 
@@ -239,23 +211,8 @@ watch(searchInput, () => {
   searchDebounce = setTimeout(applySearch, 300)
 })
 
-function onRegistryFilterChange(value: string | number) {
-  const next = String(value)
-  if (selectedRegistry.value === next) return
-  selectedRegistry.value = next
-}
-
-async function loadRegistries() {
-  try {
-    const { data } = await getSupermarketRegistries({ throwOnError: true })
-    registries.value = data.data ?? []
-  } catch (error) {
-    toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
-  }
-}
-
-// Requests overlap when the query or registry changes quickly; only the
-// newest one may write its result.
+// Requests overlap when the query changes quickly; only the newest one may
+// write its result.
 let searchSequence = 0
 async function loadSearch() {
   const sequence = ++searchSequence
@@ -264,7 +221,6 @@ async function loadSearch() {
     const { data } = await getSupermarketApps({
       query: {
         q: searchQuery.value,
-        registry: registryParam.value,
         page: page.value,
         limit: pageSize,
         sort: 'relevance',
@@ -287,7 +243,7 @@ async function loadSearch() {
 let sectionsSequence = 0
 async function loadSections() {
   const sequence = ++sectionsSequence
-  const visible = browsableCategories(categories.value, registryParam.value ?? '')
+  const visible = browsableCategories(categories.value)
   if (!visible.length) {
     sections.value = []
     sectionsLoading.value = false
@@ -298,7 +254,6 @@ async function loadSections() {
     const loaded = await Promise.all(visible.map(async (category): Promise<CategorySection> => {
       const { data } = await getSupermarketApps({
         query: {
-          registry: registryParam.value,
           category: category.id,
           page: 1,
           limit: SECTION_PREVIEW_LIMIT,
@@ -319,7 +274,7 @@ async function loadSections() {
   }
 }
 
-watch([searchQuery, selectedRegistry], () => {
+watch(searchQuery, () => {
   if (searching.value) {
     if (page.value !== 1) {
       page.value = 1
@@ -331,12 +286,10 @@ watch([searchQuery, selectedRegistry], () => {
 watch(page, () => {
   if (searching.value) void loadSearch()
 })
-watch([categories, selectedRegistry], () => {
+watch(categories, () => {
   void loadSections()
 }, { immediate: true })
 watch(categoriesQuery.error, (error) => {
   if (error) toast.error(resolveApiErrorMessage(error, t('supermarket.loadError')))
 })
-
-void loadRegistries()
 </script>

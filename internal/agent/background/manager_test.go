@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -311,4 +312,51 @@ func TestCleanupRemovesOldTerminalAgentTasks(t *testing.T) {
 	if task := mgr.Get(taskID); task != nil {
 		t.Fatal("cleanup kept an old terminal agent task")
 	}
+}
+
+func TestAdoptOwnsCancellationBeforeWorkerStarts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := New(nil)
+		stopped := make(chan struct{})
+		result := make(chan AdoptResult, 1)
+		id, _ := mgr.SpawnAdopt(t.Context(), "bot", "session", "service", "/tmp", "service", "", result, nil, AdoptOptions{Cancel: func() {
+			select {
+			case <-stopped:
+			default:
+				close(stopped)
+			}
+		}})
+		time.Sleep(3 * time.Hour)
+		if mgr.Get(id).Snapshot().Status != TaskRunning {
+			t.Fatal("service inherited finite budget")
+		}
+		if err := mgr.Kill(id); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-stopped:
+		default:
+			t.Fatal("kill did not reach process")
+		}
+		result <- AdoptResult{Err: context.Canceled}
+		synctest.Wait()
+		if snap := mgr.Get(id).Snapshot(); snap.Status != TaskKilled || strings.Contains(snap.OutputTail, "[error]") {
+			t.Fatalf("intentional stop became an error: %+v", snap)
+		}
+	})
+}
+
+func TestAdoptRetainsOriginalDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		mgr := New(nil)
+		result := make(chan AdoptResult, 1)
+		deadline := time.Now().Add(time.Minute)
+		id, _ := mgr.SpawnAdopt(t.Context(), "bot", "session", "work", "/tmp", "work", "", result, nil, AdoptOptions{Deadline: deadline, Cancel: func() {}})
+		time.Sleep(time.Minute + 6*time.Second)
+		synctest.Wait()
+		snap := mgr.Get(id).Snapshot()
+		if snap.Status != TaskUnknown || !snap.DeadlineAt.Equal(deadline) {
+			t.Fatalf("snapshot=%+v", snap)
+		}
+	})
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/userruntime"
 )
 
@@ -42,9 +43,9 @@ func (h *UserRuntimeHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param request body userruntime.CreateRuntimeRequest true "Runtime configuration"
 // @Success 201 {object} userruntime.Runtime
-// @Failure 400 {object} ErrorResponse
-// @Failure 409 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 409 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/runtimes [post].
 func (h *UserRuntimeHandler) Create(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -57,7 +58,7 @@ func (h *UserRuntimeHandler) Create(c echo.Context) error {
 	}
 	resp, err := h.service.CreateRuntime(c.Request().Context(), userID, req)
 	if err != nil {
-		return runtimeHTTPError(h.log, err)
+		return runtimeHTTPError(err)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -67,7 +68,7 @@ func (h *UserRuntimeHandler) Create(c echo.Context) error {
 // @Tags user-runtimes
 // @Produce json
 // @Success 200 {array} userruntime.Runtime
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/runtimes [get].
 func (h *UserRuntimeHandler) List(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -76,7 +77,7 @@ func (h *UserRuntimeHandler) List(c echo.Context) error {
 	}
 	items, err := h.service.ListRuntimes(c.Request().Context(), userID)
 	if err != nil {
-		return runtimeHTTPError(h.log, err)
+		return runtimeHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -86,9 +87,9 @@ func (h *UserRuntimeHandler) List(c echo.Context) error {
 // @Tags user-runtimes
 // @Param id path string true "Runtime ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /users/me/runtimes/{id} [delete].
 func (h *UserRuntimeHandler) Delete(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -96,12 +97,12 @@ func (h *UserRuntimeHandler) Delete(c echo.Context) error {
 		return err
 	}
 	if err := h.service.RevokeRuntime(c.Request().Context(), userID, strings.TrimSpace(c.Param("id"))); err != nil {
-		return runtimeHTTPError(h.log, err)
+		return runtimeHTTPError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-func runtimeHTTPError(log *slog.Logger, err error) error {
+func runtimeHTTPError(err error) error {
 	if errors.Is(err, userruntime.ErrInvalidInput) || errors.Is(err, userruntime.ErrInvalidKey) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -111,8 +112,5 @@ func runtimeHTTPError(log *slog.Logger, err error) error {
 	if db.IsUniqueViolation(err) {
 		return echo.NewHTTPError(http.StatusConflict, "runtime already exists")
 	}
-	if log != nil {
-		log.Error("runtime request failed", slog.Any("error", err))
-	}
-	return echo.NewHTTPError(http.StatusInternalServerError, "internal server error")
+	return errs.Wrap(err, "runtime request")
 }

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -73,23 +75,23 @@ func (s *Service) ExchangeClaudeCodeAuthorization(ctx context.Context, input, st
 	}
 	resp, err := client.Do(req) //nolint:gosec // The destination is the fixed Claude OAuth token endpoint.
 	if err != nil {
-		return "", err
+		return "", errs.WrapDependency(err, "")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusBadRequest {
 		return "", ErrClaudeCodeAuthorizationCodeInvalid
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("claude code token exchange: status %d", resp.StatusCode)
+		return "", errs.NewDependency(fmt.Sprintf("claude code token exchange: status %d", resp.StatusCode))
 	}
 	var token struct {
 		AccessToken string `json:"access_token"` //nolint:gosec // Provider response is stored encrypted by the authorization service.
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&token); err != nil {
-		return "", err
+		return "", errs.WrapDependency(err, "")
 	}
 	if strings.TrimSpace(token.AccessToken) == "" {
-		return "", errors.New("claude code token exchange returned no access token")
+		return "", errs.NewDependency("claude code token exchange returned no access token")
 	}
 	return strings.TrimSpace(token.AccessToken), nil
 }

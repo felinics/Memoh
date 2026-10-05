@@ -18,7 +18,7 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
-func TestDiscordOutboundStream_PushErrorEventRedactsSecrets(t *testing.T) {
+func TestDiscordOutboundStream_PushErrorEventReply(t *testing.T) {
 	redact.ResetForTest()
 	t.Cleanup(redact.ResetForTest)
 
@@ -26,51 +26,63 @@ func TestDiscordOutboundStream_PushErrorEventRedactsSecrets(t *testing.T) {
 	redact.SetSecrets("test", token)
 	prefixHalf := token[:len(token)/2]
 
-	var sentBody string
-	session, err := discordgo.New("Bot test")
-	if err != nil {
-		t.Fatalf("create session: %v", err)
+	cases := []struct {
+		name  string
+		event channel.PreparedStreamEvent
+		want  []string
+	}{
+		{
+			name:  "coded error shows the copy as it is",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
+			want:  []string{"The workspace is unreachable."},
+		},
+		{
+			name:  "uncoded error is redacted and labelled",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "request failed: " + prefixHalf},
+			want:  []string{"Error: request failed: " + strings.Repeat("*", len(prefixHalf))},
+		},
+		{
+			name:  "blank error sends nothing",
+			event: channel.PreparedStreamEvent{Type: channel.StreamEventError, Error: "  "},
+			want:  nil,
+		},
 	}
-	session.Client = &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			body, _ := io.ReadAll(req.Body)
-			sentBody = string(body)
-			resp := &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(strings.NewReader(`{"id":"msg-1","channel_id":"ch-1"}`)),
-				Header:     http.Header{"Content-Type": []string{"application/json"}},
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent []string
+			session, err := discordgo.New("Bot test")
+			if err != nil {
+				t.Fatalf("create session: %v", err)
 			}
-			return resp, nil
-		}),
-	}
-
-	stream := &discordOutboundStream{
-		adapter: &DiscordAdapter{},
-		target:  "ch-1",
-		session: session,
-	}
-
-	err = stream.Push(context.Background(), channel.PreparedStreamEvent{
-		Type:  channel.StreamEventError,
-		Error: "request failed: " + prefixHalf,
-	})
-	if err != nil {
-		t.Fatalf("push error event: %v", err)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(sentBody), &payload); err != nil {
-		t.Fatalf("decode sent body: %v (body=%q)", err, sentBody)
-	}
-	content, _ := payload["content"].(string)
-	if strings.Contains(content, prefixHalf) {
-		t.Fatalf("expected prefix half to be redacted, got %q", content)
-	}
-	if !strings.Contains(content, "Error: ") {
-		t.Fatalf("expected error prefix, got %q", content)
-	}
-	if !strings.Contains(content, strings.Repeat("*", len(prefixHalf))) {
-		t.Fatalf("expected redaction mask, got %q", content)
+			session.Client = &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					body, _ := io.ReadAll(req.Body)
+					var payload struct {
+						Content string `json:"content"`
+					}
+					if err := json.Unmarshal(body, &payload); err != nil {
+						t.Errorf("decode sent body: %v (body=%q)", err, body)
+					}
+					sent = append(sent, payload.Content)
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       io.NopCloser(strings.NewReader(`{"id":"msg-1","channel_id":"ch-1"}`)),
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+					}, nil
+				}),
+			}
+			stream := &discordOutboundStream{
+				adapter: &DiscordAdapter{},
+				target:  "ch-1",
+				session: session,
+			}
+			if err := stream.Push(context.Background(), tc.event); err != nil {
+				t.Fatalf("push error event: %v", err)
+			}
+			if strings.Join(sent, "|") != strings.Join(tc.want, "|") || len(sent) != len(tc.want) {
+				t.Fatalf("sent messages = %q, want %q", sent, tc.want)
+			}
+		})
 	}
 }
 

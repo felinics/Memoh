@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 // Type is the channel type identifier for WeChat.
@@ -242,13 +243,8 @@ func (a *WeixinAdapter) pollLoop(ctx context.Context, cfg channel.ChannelConfig,
 
 			inbound.BotID = cfg.BotID
 
-			if err := handler(ctx, cfg, inbound); err != nil {
-				a.logger.ErrorContext(ctx, "weixin inbound handler error",
-					slog.String("config_id", cfg.ID),
-					slog.String("from", msg.FromUserID),
-					slog.Any("error", err),
-				)
-			}
+			// The inbound unit writes the result line of the message.
+			_ = handler(ctx, cfg, inbound)
 		}
 	}
 }
@@ -470,15 +466,32 @@ type weixinBlockStream struct {
 	closed      bool
 }
 
-func (s *weixinBlockStream) Push(_ context.Context, event channel.PreparedStreamEvent) error {
+func (s *weixinBlockStream) Push(ctx context.Context, event channel.PreparedStreamEvent) error {
 	if s.closed {
 		return nil
 	}
 	switch event.Type {
+	case channel.StreamEventError:
+		errText := redact.Text(strings.TrimSpace(event.Error))
+		s.textBuilder.Reset()
+		s.attachments = nil
+		s.final = nil
+		if errText == "" {
+			return nil
+		}
+		return s.adapter.Send(ctx, s.cfg, channel.PreparedOutboundMessage{
+			Target: s.target,
+			Message: channel.PreparedMessage{Message: channel.Message{
+				Format: channel.MessageFormatPlain,
+				Text:   channel.ErrorReplyText(event.ErrorCode, errText),
+			}},
+		})
 	case channel.StreamEventDelta:
 		if strings.TrimSpace(event.Delta) != "" && event.Phase != channel.StreamPhaseReasoning {
 			s.textBuilder.WriteString(event.Delta)
 		}
+	case channel.StreamEventReset:
+		s.textBuilder.Reset()
 	case channel.StreamEventAttachment:
 		s.attachments = append(s.attachments, event.Attachments...)
 	case channel.StreamEventFinal:

@@ -36,7 +36,7 @@ func (h *ProviderTemplatesHandler) Register(e *echo.Echo) {
 func (h *ProviderTemplatesHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context(), c.QueryParam("domain"))
 	if err != nil {
-		return err
+		return providerTemplateError(err)
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -54,7 +54,7 @@ func (h *ProviderTemplatesHandler) List(c echo.Context) error {
 func (h *ProviderTemplatesHandler) Get(c echo.Context) error {
 	item, err := h.service.Get(c.Request().Context(), strings.TrimSpace(c.Param("id")), "")
 	if err != nil {
-		return err
+		return providerTemplateError(err)
 	}
 	return c.JSON(http.StatusOK, item)
 }

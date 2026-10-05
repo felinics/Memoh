@@ -22,6 +22,7 @@ var (
 	// ErrTargetSessionGone marks a fire whose stored target session no
 	// longer exists; the trigger path reports it and disables the schedule.
 	ErrTargetSessionGone = errors.New("target session was deleted")
+	ErrExecutionTimeout  = errors.New("schedule execution budget expired")
 	// ErrModelRequired marks a schedule that would open a fresh session with
 	// no model to run it: the bot has no default and none was given.
 	ErrModelRequired = invalidRequest("this bot has no default model, so a scheduled run needs an explicit model")
@@ -46,6 +47,7 @@ func invalidRequestf(format string, args ...any) error {
 // workdir liveness) can only live here where the referenced rows are visible.
 func (s *Service) normalizeExecution(ctx context.Context, botID string, exec ExecutionConfig) (ExecutionConfig, error) {
 	out := ExecutionConfig{
+		MaxRunSeconds:   exec.MaxRunSeconds,
 		RunTarget:       strings.TrimSpace(exec.RunTarget),
 		TargetSessionID: strings.TrimSpace(exec.TargetSessionID),
 		RuntimeType:     strings.TrimSpace(exec.RuntimeType),
@@ -55,6 +57,12 @@ func (s *Service) normalizeExecution(ctx context.Context, botID string, exec Exe
 		ACPModelID:      strings.TrimSpace(exec.ACPModelID),
 		ReasoningEffort: strings.TrimSpace(exec.ReasoningEffort),
 		WorkdirID:       strings.TrimSpace(exec.WorkdirID),
+	}
+	if out.MaxRunSeconds == 0 {
+		out.MaxRunSeconds = 3600
+	}
+	if out.MaxRunSeconds < 300 || out.MaxRunSeconds > 86400 {
+		return ExecutionConfig{}, invalidRequest("max_run_seconds must be between 300 and 86400")
 	}
 	if out.RunTarget == "" {
 		out.RunTarget = RunTargetNewSession

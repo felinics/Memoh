@@ -88,6 +88,7 @@ Reference docs moved out of this file:
 - `docs/database.md` — migration rules and the database table reference
 - `docs/configuration.md` — `config.toml` sections and templates
 - `docs/logging.md` — log record shape, when the Context variants are required, field naming, what must never be logged
+- `docs/errors.md` — public, package and diagnostic errors, the code catalog, HTTP Problem responses, result records and their levels
 - `docs/observability.md` — tracing: what is instrumented, how to enable OTLP export, what it costs when off
 - `docs/agent-runtime.md` — agent runtime internals
 

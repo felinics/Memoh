@@ -240,8 +240,10 @@ type Service interface {
 	ListActiveSince(ctx context.Context, botID string, since time.Time) ([]Message, error)
 	// ListActiveSinceWithinBytes is the byte-budgeted variant of
 	// ListActiveSince (CM-ADM-001): rows are admitted newest-first until
-	// their content byte total crosses maxBytes, so process memory is
-	// bounded by the budget regardless of total history size.
+	// their content byte total crosses maxBytes. Only content is budgeted,
+	// so metadata is returned undecoded in RawMetadata (Metadata stays nil):
+	// callers decode one row at a time instead of holding every row's
+	// decoded metadata, which legacy lifecycle audits can inflate.
 	ListActiveSinceWithinBytes(ctx context.Context, botID string, since time.Time, maxBytes int64) ([]Message, error)
 	ListLatest(ctx context.Context, botID string, limit int32) ([]Message, error)
 	ListBefore(ctx context.Context, botID string, before time.Time, limit int32) ([]Message, error)
@@ -249,9 +251,14 @@ type Service interface {
 	ListSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	ListActiveSinceBySession(ctx context.Context, sessionID string, since time.Time) ([]Message, error)
 	// ListActiveSinceBySessionWithinBytes is the byte-budgeted variant of
-	// ListActiveSinceBySession (CM-ADM-001), same admission semantics as
-	// ListActiveSinceWithinBytes scoped to one session.
+	// ListActiveSinceBySession (CM-ADM-001), same admission semantics and
+	// undecoded metadata as ListActiveSinceWithinBytes, scoped to one session.
 	ListActiveSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error)
+	// ListTurnResponseSourcesSinceBySessionWithinBytes is the same window as
+	// ListActiveSinceBySessionWithinBytes projected to what turn-response
+	// composition reads: ID, role, content, created_at, and Metadata holding
+	// only AgentStepInterruptedMetadataKey. Nothing else is loaded.
+	ListTurnResponseSourcesSinceBySessionWithinBytes(ctx context.Context, sessionID string, since time.Time, maxBytes int64) ([]Message, error)
 	// MeasureActiveBySession aggregates message count and content bytes on
 	// the database side (CM-ADM-001): admission sizes a session's history
 	// without shipping any payload into the process.

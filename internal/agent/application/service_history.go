@@ -133,12 +133,15 @@ func (s *Service) loadHistoryRecords(ctx context.Context, fallback historyfrag.S
 	if err != nil {
 		return nil, err
 	}
+	// The budget covers content only; metadata arrives undecoded. Release each
+	// row once converted so at most one row's metadata is decoded at a time.
 	result := make([]historyfrag.HistoryRecord, 0, len(msgs))
-	for _, m := range msgs {
-		record, err := historyfrag.FromDBMessageWithLogger(s.logger, m, fallback)
+	for i := range msgs {
+		record, err := historyfrag.FromDBMessageWithLogger(s.logger, msgs[i], fallback)
 		if err != nil {
 			return nil, err
 		}
+		msgs[i] = messagepkg.Message{}
 		result = append(result, record)
 	}
 	return result, nil

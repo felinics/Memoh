@@ -41,14 +41,14 @@ func TestPgxTracerClassifiesAnErrorWithoutQuotingIt(t *testing.T) {
 		t.Errorf("db.response.status_code = %q, want the SQLSTATE", got)
 	}
 	for key, value := range attrs(span) {
-		if strings.Contains(value.Emit(), "someone@example.test") {
-			t.Errorf("attribute %s carries the row's value: %s", key, value.Emit())
+		if strings.Contains(value.String(), "someone@example.test") {
+			t.Errorf("attribute %s carries the row's value: %s", key, value.String())
 		}
 	}
 	for _, event := range span.Events() {
 		for _, kv := range event.Attributes {
-			if strings.Contains(kv.Value.Emit(), "someone@example.test") {
-				t.Errorf("event %s carries the row's value: %s", event.Name, kv.Value.Emit())
+			if strings.Contains(kv.Value.String(), "someone@example.test") {
+				t.Errorf("event %s carries the row's value: %s", event.Name, kv.Value.String())
 			}
 		}
 	}

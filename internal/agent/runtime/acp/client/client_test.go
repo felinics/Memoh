@@ -3388,6 +3388,14 @@ func (a *fakeACPAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Pro
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_RELEASE_TERMINAL_WITHOUT_WAIT") == "1" {
 		return a.promptReleaseTerminalAfterOutput(ctx, p)
 	}
+	if raw := os.Getenv("MEMOH_ACP_FAKE_AGENT_USAGE"); raw != "" {
+		var usage acp.Usage
+		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText("usage reported")})
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: &usage}, nil
+	}
 
 	outputPath := filepath.Join(a.cwd, "output.txt")
 	permission, err := a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{

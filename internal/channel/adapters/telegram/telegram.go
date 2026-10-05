@@ -562,9 +562,8 @@ func isTelegramMediaGroupForChat(groupKey string, chatID int64) bool {
 func (a *TelegramAdapter) dispatchInbound(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, msg channel.InboundMessage) {
 	a.logTelegramInbound(ctx, cfg.ID, msg)
 	go func() {
-		if err := handler(ctx, cfg, msg); err != nil && a.logger != nil {
-			a.logger.ErrorContext(ctx, "handle inbound failed", slog.String("config_id", cfg.ID), slog.Any("error", err))
-		}
+		// The inbound unit writes the result line of the message.
+		_ = handler(ctx, cfg, msg)
 	}()
 }
 
@@ -958,21 +957,23 @@ func (a *TelegramAdapter) submitAskUser(ctx context.Context, cfg channel.Channel
 }
 
 func (a *TelegramAdapter) finishAskUserSubmission(ctx context.Context, cfg channel.ChannelConfig, handler channel.InboundHandler, bot *tele.Bot, loc *i18n.Localizer, req userinput.Request, msg channel.InboundMessage, cardChatID int64, cardMsgID int) error {
-	handlerErr := handler(ctx, cfg, msg)
+	// The inbound unit writes the result line of the message, so its error is
+	// not returned here.
+	_ = handler(ctx, cfg, msg)
 	// Ingress can return nil after a permission denial. Only durable acceptance
 	// authorizes a submitted summary, never mere completion of the handler.
 	accepted, err := a.userInput.Get(ctx, req.ID)
 	if err != nil {
-		return errors.Join(handlerErr, err)
+		return err
 	}
 	if accepted.Status != userinput.StatusSubmitted {
-		return handlerErr
+		return nil
 	}
 	if bot != nil && cardChatID != 0 && cardMsgID != 0 {
 		summary := formatAskUserSubmittedSummary(loc, req.UIPayload, req.Interaction)
-		return errors.Join(handlerErr, editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil))
+		return editTelegramMessageTextWithActions(bot, cardChatID, cardMsgID, summary, "", nil)
 	}
-	return handlerErr
+	return nil
 }
 
 func (a *TelegramAdapter) buildAskUserSubmitInbound(cfg channel.ChannelConfig, update *tele.Update, req userinput.Request, cardMsgID int) (channel.InboundMessage, bool) {
@@ -1215,7 +1216,6 @@ func (a *TelegramAdapter) logTelegramInbound(ctx context.Context, configID strin
 		slog.String("chat_id", msg.Conversation.ID),
 		slog.String("user_id", msg.Sender.Attribute("user_id")),
 		slog.String("username", msg.Sender.Attribute("username")),
-		slog.String("text", common.SummarizeText(msg.Message.Text)),
 		slog.Int("attachments", len(msg.Message.Attachments)),
 	)
 }

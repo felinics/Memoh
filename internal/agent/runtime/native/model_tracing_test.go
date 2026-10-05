@@ -317,8 +317,8 @@ func TestModelSpansRecordNothingFromTheConversation(t *testing.T) {
 
 	for _, span := range spansNamed(recorder, spanModelStream) {
 		for _, kv := range span.Attributes() {
-			if kv.Value.Emit() == secret {
-				t.Errorf("attribute %s carries the conversation: %s", kv.Key, kv.Value.Emit())
+			if kv.Value.String() == secret {
+				t.Errorf("attribute %s carries the conversation: %s", kv.Key, kv.Value.String())
 			}
 		}
 	}

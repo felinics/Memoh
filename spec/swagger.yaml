@@ -417,6 +417,19 @@ definitions:
       semantic:
         type: boolean
     type: object
+  adapters.MemoryConfig:
+    properties:
+      embedding_model_id:
+        description: |-
+          EmbeddingModelID optionally maintains the pgvector semantic seed index
+          for graph recall. Empty means graph-only recall.
+        type: string
+    type: object
+  adapters.MemoryConfigUpdateRequest:
+    properties:
+      embedding_model_id:
+        type: string
+    type: object
   adapters.MemoryItem:
     properties:
       agent_id:
@@ -482,106 +495,6 @@ definitions:
       content:
         type: string
       role:
-        type: string
-    type: object
-  adapters.ProviderCollectionStatus:
-    properties:
-      exists:
-        type: boolean
-      health:
-        $ref: '#/definitions/adapters.HealthStatus'
-      name:
-        type: string
-      points:
-        type: integer
-    type: object
-  adapters.ProviderConfigSchema:
-    properties:
-      fields:
-        additionalProperties:
-          $ref: '#/definitions/adapters.ProviderFieldSchema'
-        type: object
-    type: object
-  adapters.ProviderCreateRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      name:
-        type: string
-      provider:
-        $ref: '#/definitions/adapters.ProviderType'
-    type: object
-  adapters.ProviderFieldSchema:
-    properties:
-      description:
-        type: string
-      example: {}
-      required:
-        type: boolean
-      secret:
-        type: boolean
-      title:
-        type: string
-      type:
-        type: string
-    type: object
-  adapters.ProviderGetResponse:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      created_at:
-        type: string
-      id:
-        type: string
-      is_default:
-        type: boolean
-      name:
-        type: string
-      provider:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  adapters.ProviderMeta:
-    properties:
-      config_schema:
-        $ref: '#/definitions/adapters.ProviderConfigSchema'
-      display_name:
-        type: string
-      provider:
-        type: string
-    type: object
-  adapters.ProviderStatusResponse:
-    properties:
-      collections:
-        items:
-          $ref: '#/definitions/adapters.ProviderCollectionStatus'
-        type: array
-      embedding_model_id:
-        type: string
-      memory_mode:
-        type: string
-      provider_type:
-        type: string
-    type: object
-  adapters.ProviderType:
-    enum:
-    - builtin
-    - mem0
-    - openviking
-    type: string
-    x-enum-varnames:
-    - ProviderBuiltin
-    - ProviderMem0
-    - ProviderOpenViking
-  adapters.ProviderUpdateRequest:
-    properties:
-      config:
-        additionalProperties: {}
-        type: object
-      name:
         type: string
     type: object
   adapters.RebuildResult:
@@ -704,16 +617,21 @@ definitions:
         type: string
       detail:
         type: string
+      fault:
+        type: string
       request_id:
         type: string
       status:
         type: integer
+      trace_id:
+        type: string
       type:
         type: string
     required:
     - args
     - code
     - detail
+    - fault
     - status
     - type
     type: object
@@ -2906,6 +2824,32 @@ definitions:
     required:
     - status
     type: object
+  externalagent.CodexUsageResponse:
+    properties:
+      limit_reached:
+        type: boolean
+      windows:
+        items:
+          $ref: '#/definitions/externalagent.CodexUsageWindow'
+        type: array
+    required:
+    - limit_reached
+    - windows
+    type: object
+  externalagent.CodexUsageWindow:
+    properties:
+      resets_at:
+        type: string
+      used_percent:
+        type: integer
+      window_minutes:
+        description: WindowMinutes is 0 when the backend does not report the window
+          length.
+        type: integer
+    required:
+    - used_percent
+    - window_minutes
+    type: object
   fetchproviders.CreateRequest:
     properties:
       config:
@@ -3237,6 +3181,7 @@ definitions:
         - shared
         - image
         - absent
+        - required
         type: string
     type: object
   handlers.AppRemovalPreviewResponse:
@@ -3391,13 +3336,6 @@ definitions:
       user_config_schema:
         $ref: '#/definitions/channel.ConfigSchema'
     type: object
-  handlers.CommandActionError:
-    properties:
-      code:
-        type: string
-      message:
-        type: string
-    type: object
   handlers.CommandActionListItem:
     properties:
       description:
@@ -3433,11 +3371,15 @@ definitions:
     properties:
       action_id:
         type: string
+      code:
+        description: Code and Message describe a command_error; the client renders
+          the code.
+        type: string
       composer_scope:
         type: string
-      error:
-        $ref: '#/definitions/handlers.CommandActionError'
       invocation_id:
+        type: string
+      message:
         type: string
       result:
         $ref: '#/definitions/handlers.CommandActionResult'
@@ -3713,23 +3655,6 @@ definitions:
       reasoning_tokens:
         type: integer
     type: object
-  handlers.ErrorResponse:
-    properties:
-      args:
-        additionalProperties:
-          type: string
-        type: object
-      code:
-        type: string
-      http_status:
-        type: integer
-      i18n_key:
-        type: string
-      message:
-        type: string
-      reason:
-        type: string
-    type: object
   handlers.FSArchiveRequest:
     properties:
       paths:
@@ -3785,6 +3710,10 @@ definitions:
   handlers.FSMkdirRequest:
     properties:
       path:
+        type: string
+      workspace_target_id:
+        description: WorkspaceTargetID overrides the Bot's Primary target for this
+          request.
         type: string
     type: object
   handlers.FSReadResponse:
@@ -4759,6 +4688,13 @@ definitions:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
         type: array
+      memory:
+        description: |-
+          Memory is usage of the memory LLM (extract / decide / compact), which
+          runs outside any session.
+        items:
+          $ref: '#/definitions/handlers.DailyTokenUsage'
+        type: array
       schedule:
         items:
           $ref: '#/definitions/handlers.DailyTokenUsage'
@@ -4846,6 +4782,11 @@ definitions:
         type: string
       name:
         type: string
+      requires:
+        description: Requires lists the dependency IDs installed first when missing.
+        items:
+          type: string
+        type: array
       translations:
         additionalProperties:
           $ref: '#/definitions/handlers.WorkspaceDependencyTranslation'
@@ -4864,6 +4805,17 @@ definitions:
     properties:
       definition_revision:
         type: string
+      prerequisite_revisions:
+        additionalProperties:
+          type: string
+        description: |-
+          PrerequisiteRevisions are the definition revisions the confirmation
+          showed for the dependency's prerequisites, keyed by dependency id. When
+          present, a missing prerequisite installs only from its confirmed
+          revision; one without an entry refuses the operation with
+          workspace_dependency.prerequisites_changed. Omitted, prerequisites
+          resolve when the operation starts, like an omitted definition_revision.
+        type: object
       session_id:
         description: SessionID optionally routes operation progress to its originating
           conversation.
@@ -4960,6 +4912,11 @@ definitions:
         type: array
       registry_id:
         type: string
+      requires:
+        description: Requires lists the dependency IDs installed first when missing.
+        items:
+          type: string
+        type: array
       retired:
         type: boolean
       source:
@@ -5528,6 +5485,30 @@ definitions:
       state:
         type: string
     type: object
+  handlers.sessionInvocationResponse:
+    properties:
+      found:
+        description: |-
+          Found is false when the session has no run for this invocation, which
+          is an ordinary answer (never admitted, or not yet) rather than an error.
+        type: boolean
+      invocation_id:
+        type: string
+      run_id:
+        type: string
+      session_id:
+        type: string
+      state:
+        description: |-
+          State is the durable run state as the ledger records it, e.g.
+          accepted, running, waiting_decision, finishing, completed, aborted,
+          failed or lost.
+        type: string
+      turn_id:
+        type: string
+      turn_position:
+        type: integer
+    type: object
   handlers.sessionQueueResponse:
     properties:
       follow_up:
@@ -5990,10 +5971,13 @@ definitions:
     - ModelTypeVideo
   models.TestResponse:
     properties:
+      code:
+        description: |-
+          Code is the error catalog code for why the test did not pass. It is
+          empty on success and when no catalog code describes the failure.
+        type: string
       latency_ms:
         type: integer
-      message:
-        type: string
       reachable:
         type: boolean
       status:
@@ -6169,10 +6153,13 @@ definitions:
     type: object
   providers.TestResponse:
     properties:
+      code:
+        description: |-
+          Code is the error catalog code for why the test did not pass. It is
+          empty on success and when no catalog code describes the failure.
+        type: string
       latency_ms:
         type: integer
-      message:
-        type: string
       reachable:
         type: boolean
       status:
@@ -6320,6 +6307,10 @@ definitions:
         type: boolean
       max_calls:
         $ref: '#/definitions/schedule.NullableInt'
+      max_run_seconds:
+        description: MaxRunSeconds is the execution budget (300-86400 seconds); zero
+          uses one hour.
+        type: integer
       model_id:
         description: ModelID is a native model UUID override (models.id).
         type: string
@@ -6364,6 +6355,10 @@ definitions:
           BotAgentID selects one persisted BotAgent for a new session. Empty means
           the built-in Native runtime (or the legacy ACP fields below).
         type: string
+      max_run_seconds:
+        description: MaxRunSeconds is the execution budget (300-86400 seconds); zero
+          uses one hour.
+        type: integer
       model_id:
         description: ModelID is a native model UUID override (models.id).
         type: string
@@ -6464,6 +6459,10 @@ definitions:
       id:
         type: string
       max_calls:
+        type: integer
+      max_run_seconds:
+        description: MaxRunSeconds is the execution budget (300-86400 seconds); zero
+          uses one hour.
         type: integer
       model_id:
         description: ModelID is a native model UUID override (models.id).
@@ -6734,7 +6733,15 @@ definitions:
         type: string
       image_model_id:
         type: string
-      memory_provider_id:
+      memory_enabled:
+        description: |-
+          MemoryEnabled reports whether the bot uses Built-in Memory. It is derived
+          from MemoryProviderID, which stays internal to the server.
+        type: boolean
+      memory_llm_model_id:
+        description: |-
+          MemoryLLMModelID is the LLM behind memory extract / decide / compact.
+          Empty falls back to the chat model.
         type: string
       overlay_config:
         additionalProperties: {}
@@ -6856,7 +6863,11 @@ definitions:
         type: string
       image_model_id:
         type: string
-      memory_provider_id:
+      memory_enabled:
+        description: MemoryEnabled turns Built-in Memory on or off; nil keeps the
+          current state.
+        type: boolean
+      memory_llm_model_id:
         type: string
       overlay_config:
         additionalProperties: {}
@@ -7204,6 +7215,24 @@ definitions:
     - name
     - path
     type: object
+  workdir.DirectoriesResponse:
+    properties:
+      directories:
+        items:
+          $ref: '#/definitions/workdir.Directory'
+        type: array
+      path:
+        type: string
+      workspace_target_id:
+        type: string
+    type: object
+  workdir.Directory:
+    properties:
+      name:
+        type: string
+      path:
+        type: string
+    type: object
   workdir.GitBranchResponse:
     properties:
       branch:
@@ -7539,15 +7568,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Login
       tags:
       - auth
@@ -7562,11 +7591,11 @@ paths:
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       security:
       - BearerAuth: []
       summary: Refresh Token
@@ -7588,15 +7617,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List bots
       tags:
       - bots
@@ -7623,11 +7652,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
@@ -7635,7 +7664,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create bot user
       tags:
       - bots
@@ -7664,15 +7693,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Search ACL channel identity candidates
       tags:
       - bots
@@ -7699,15 +7728,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List observed conversations for a channel identity
       tags:
       - bots
@@ -7734,15 +7763,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List observed conversations for a platform type
       tags:
       - bots
@@ -7763,15 +7792,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get bot ACL default effect
       tags:
       - bots
@@ -7795,15 +7824,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Set bot ACL default effect
       tags:
       - bots
@@ -7824,15 +7853,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List bot ACL rules
       tags:
       - bots
@@ -7858,15 +7887,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create ACL rule
       tags:
       - bots
@@ -7890,15 +7919,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete ACL rule
       tags:
       - bots
@@ -7929,15 +7958,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update ACL rule
       tags:
       - bots
@@ -8244,7 +8273,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List a bot's Agents
       tags:
       - bot-agents
@@ -8281,7 +8310,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
@@ -8309,7 +8338,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -8345,7 +8374,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -8388,7 +8417,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -8421,11 +8450,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -8458,11 +8487,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Cancel a pending codex device-code login
       tags:
       - external-agents
@@ -8493,12 +8522,54 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Poll a pending codex device-code login
+      tags:
+      - external-agents
+  /bots/{bot_id}/agents/{id}/codex/usage:
+    get:
+      description: Available to anyone who can chat with the Bot, so the composer
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Bot Agent ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/externalagent.CodexUsageResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get the Codex usage limits of the Agent's ChatGPT account
       tags:
       - external-agents
   /bots/{bot_id}/agents/{id}/credential:
@@ -8679,7 +8750,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -8749,15 +8820,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -8802,7 +8873,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -8844,7 +8915,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -8874,7 +8945,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -8928,7 +8999,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -8986,7 +9057,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9025,7 +9096,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9063,7 +9134,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9091,7 +9162,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -9137,7 +9208,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9175,15 +9246,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Export a full bot backup
       tags:
       - bots
@@ -9205,11 +9276,11 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Summarize what a bot would export
       tags:
       - bots
@@ -9231,15 +9302,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List channel managers
       tags:
       - bots
@@ -9264,15 +9335,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Set a channel manage override
       tags:
       - bots
@@ -9297,15 +9368,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Clear a channel manage override
       tags:
       - bots
@@ -9324,11 +9395,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete compaction logs
       tags:
       - compaction
@@ -9358,11 +9429,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List compaction logs
       tags:
       - compaction
@@ -9383,7 +9454,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9428,7 +9499,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9477,7 +9548,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9527,7 +9598,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9574,7 +9645,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -9616,11 +9687,11 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete workspace for bot
       tags:
       - containerd
@@ -9639,11 +9710,11 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get workspace info for bot
       tags:
       - containerd
@@ -9669,11 +9740,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create workspace for bot
       tags:
       - containerd
@@ -9699,19 +9770,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create browser proxy session for bot workspace
       tags:
       - containerd
@@ -9734,11 +9805,11 @@ paths:
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete browser proxy session
       tags:
       - containerd
@@ -9763,15 +9834,15 @@ paths:
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Keep browser proxy session alive
       tags:
       - containerd
@@ -9791,11 +9862,11 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Restore previously preserved data into workspace
       tags:
       - containerd
@@ -9815,7 +9886,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Check workspace display availability for bot
       tags:
       - containerd
@@ -9839,7 +9910,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Prepare workspace display dependencies
       tags:
       - containerd
@@ -9859,7 +9930,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List active workspace display WebRTC sessions
       tags:
       - containerd
@@ -9882,7 +9953,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Close a workspace display WebRTC session
       tags:
       - containerd
@@ -9908,11 +9979,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a WebRTC answer for bot workspace display
       tags:
       - containerd
@@ -9939,19 +10010,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -9985,19 +10056,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10028,19 +10099,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10072,15 +10143,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10112,23 +10183,23 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10158,15 +10229,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10176,7 +10247,9 @@ paths:
       - containerd
   /bots/{bot_id}/container/fs/mkdir:
     post:
-      description: Creates a directory (and parents) at the given workspace path
+      description: Creates a directory (and parents) at the given workspace path.
+        workspace_target_id selects an explicit target; when omitted, the Bot's Primary
+        target is used.
       parameters:
       - description: Bot ID
         in: path
@@ -10197,15 +10270,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10235,15 +10312,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10274,19 +10351,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10323,15 +10400,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10362,15 +10439,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10394,7 +10471,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get current workspace metrics for bot
       tags:
       - containerd
@@ -10419,11 +10496,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update workspace metrics settings for bot
       tags:
       - containerd
@@ -10449,11 +10526,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
@@ -10461,7 +10538,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10488,19 +10565,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List skills from the bot workspace
       tags:
       - containerd
@@ -10525,11 +10602,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
@@ -10567,11 +10644,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
@@ -10579,7 +10656,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -10607,7 +10684,7 @@ paths:
         "501":
           description: Snapshots currently not supported on this backend
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List snapshots
       tags:
       - containerd
@@ -10632,15 +10709,15 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "501":
           description: Snapshots currently not supported on this backend
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create workspace snapshot for bot
       tags:
       - containerd
@@ -10666,11 +10743,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Roll back workspace to a previous snapshot version
       tags:
       - containerd
@@ -10690,11 +10767,11 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Start workspace for bot
       tags:
       - containerd
@@ -10714,11 +10791,11 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Stop workspace for bot
       tags:
       - containerd
@@ -10738,7 +10815,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Check terminal availability for bot workspace
       tags:
       - containerd
@@ -10770,11 +10847,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Interactive WebSocket terminal for bot workspace
       tags:
       - containerd
@@ -10803,15 +10880,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -10861,7 +10938,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -10914,7 +10991,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -10959,7 +11036,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -11028,7 +11105,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -11082,7 +11159,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
@@ -11118,15 +11195,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -11171,11 +11248,11 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
@@ -11203,15 +11280,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List supported bot hook events
       tags:
       - hooks
@@ -11237,15 +11314,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Run bot hooks for a synthetic event
       tags:
       - hooks
@@ -11260,19 +11337,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List MCP connections
       tags:
       - mcp
@@ -11293,19 +11370,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create MCP connection
       tags:
       - mcp
@@ -11325,15 +11402,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Batch delete MCP connections
       tags:
       - mcp
@@ -11348,15 +11425,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Export MCP connections
       tags:
       - mcp
@@ -11380,15 +11457,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Import MCP connections
       tags:
       - mcp
@@ -11416,15 +11493,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create MCP stdio proxy
       tags:
       - containerd
@@ -11456,15 +11533,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: MCP stdio proxy (JSON-RPC)
       tags:
       - containerd
@@ -11483,19 +11560,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete MCP connection
       tags:
       - mcp
@@ -11515,19 +11592,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get MCP connection
       tags:
       - mcp
@@ -11553,19 +11630,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update MCP connection
       tags:
       - mcp
@@ -11591,11 +11668,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Start OAuth authorization flow
       tags:
       - mcp
@@ -11622,11 +11699,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Discover OAuth configuration for MCP server
       tags:
       - mcp
@@ -11651,7 +11728,7 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Exchange OAuth authorization code for tokens
       tags:
       - mcp
@@ -11672,11 +11749,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get OAuth status for MCP connection
       tags:
       - mcp
@@ -11695,7 +11772,7 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Revoke OAuth tokens for MCP connection
       tags:
       - mcp
@@ -11716,19 +11793,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Probe MCP connection
       tags:
       - mcp
@@ -11760,19 +11837,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete memories
       tags:
       - memory
@@ -11798,19 +11875,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get all memories
       tags:
       - memory
@@ -11840,19 +11917,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Add memory
       tags:
       - memory
@@ -11880,19 +11957,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete a single memory
       tags:
       - memory
@@ -11930,19 +12007,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update a single memory by id
       tags:
       - memory
@@ -11981,23 +12058,23 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "501":
           description: Not Implemented
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Compact memories
       tags:
       - memory
@@ -12020,15 +12097,15 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get memory graph
       tags:
       - memory
@@ -12053,23 +12130,23 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Ingest agent-authored memory markdown into the wiki store
       tags:
       - memory
@@ -12093,23 +12170,23 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Rebuild memories from filesystem
       tags:
       - memory
@@ -12140,23 +12217,23 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Search memory
       tags:
       - memory
@@ -12180,23 +12257,23 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get memory runtime status
       tags:
       - memory
@@ -12219,19 +12296,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get memory usage
       tags:
       - memory
@@ -12252,15 +12329,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete all bot history messages
       tags:
       - messages
@@ -12305,19 +12382,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List session history messages
       tags:
       - messages
@@ -12367,19 +12444,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Locate a bot history message
       tags:
       - messages
@@ -12411,15 +12488,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Execute a Web quick action
       tags:
       - quick-actions
@@ -12440,11 +12517,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List schedules
       tags:
       - schedule
@@ -12470,11 +12547,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create schedule
       tags:
       - schedule
@@ -12498,11 +12575,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete schedule
       tags:
       - schedule
@@ -12527,15 +12604,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get schedule
       tags:
       - schedule
@@ -12566,11 +12643,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update schedule
       tags:
       - schedule
@@ -12606,11 +12683,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List schedule logs by schedule
       tags:
       - schedule
@@ -12629,11 +12706,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete schedule logs
       tags:
       - schedule
@@ -12663,11 +12740,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List schedule logs
       tags:
       - schedule
@@ -12709,11 +12786,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List bot sessions
       tags:
       - sessions
@@ -12738,11 +12815,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a new chat session
       tags:
       - sessions
@@ -12765,11 +12842,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Soft-delete a session
       tags:
       - sessions
@@ -12793,15 +12870,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a session by ID
       tags:
       - sessions
@@ -12831,15 +12908,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
@@ -13113,7 +13190,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Trigger immediate context compaction
       tags:
       - compaction
@@ -13415,20 +13492,65 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Fork a chat session from an assistant reply
+      tags:
+      - sessions
+  /bots/{bot_id}/sessions/{session_id}/invocations/{invocation_id}:
+    get:
+      description: Read-only. Lets a client that lost the acknowledgement of a send
+        learn whether the invocation was admitted and what state its run is in. An
+        unknown invocation returns 200 with found=false.
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Session ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: Client invocation ID
+        in: path
+        name: invocation_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.sessionInvocationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: Look up the run admitted for a client invocation
       tags:
       - sessions
   /bots/{bot_id}/sessions/{session_id}/queue:
@@ -13671,15 +13793,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get session info
       tags:
       - sessions
@@ -13887,15 +14009,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Stream bot-wide sessions activity
       tags:
       - messages
@@ -13915,11 +14037,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Welcome composer model seed
       tags:
       - sessions
@@ -13938,11 +14060,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete user settings
       tags:
       - settings
@@ -13962,11 +14084,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get user settings
       tags:
       - settings
@@ -13996,7 +14118,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -14030,7 +14152,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -14054,19 +14176,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List runtime-safe skills for chat-time skill selection
       tags:
       - skills
@@ -14094,8 +14216,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, discuss, schedule, or acp_agent.
-          acp_agent filters by runtime.'
+      - description: 'Optional session type: chat, discuss, schedule, acp_agent, or
+          memory. acp_agent filters by runtime; memory selects memory LLM calls.'
         in: query
         name: session_type
         type: string
@@ -14107,15 +14229,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get token usage statistics
       tags:
       - token-usage
@@ -14143,8 +14265,8 @@ paths:
         in: query
         name: model_id
         type: string
-      - description: 'Optional session type: chat, discuss, schedule, or acp_agent.
-          acp_agent filters by runtime.'
+      - description: 'Optional session type: chat, discuss, schedule, acp_agent, or
+          memory. acp_agent filters by runtime; memory selects memory LLM calls.'
         in: query
         name: session_type
         type: string
@@ -14167,15 +14289,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List per-call token usage records
       tags:
       - token-usage
@@ -14298,15 +14420,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Unified MCP tools gateway
       tags:
       - containerd
@@ -14338,11 +14460,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Synthesize speech for a bot
       tags:
       - bots
@@ -14364,15 +14486,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List bot user access grants
       tags:
       - bots
@@ -14399,19 +14521,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create bot user access grant
       tags:
       - bots
@@ -14435,19 +14557,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete bot user access grant
       tags:
       - bots
@@ -14478,19 +14600,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update bot user access grant
       tags:
       - bots
@@ -14519,15 +14641,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List grantable workspace members
       tags:
       - bots
@@ -14561,15 +14683,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Send a message to a local channel
       tags:
       - local-channel
@@ -14593,15 +14715,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Subscribe to local channel events via SSE
       tags:
       - local-channel
@@ -14623,15 +14745,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: WebSocket chat endpoint
       tags:
       - local-channel
@@ -14657,11 +14779,11 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List a Bot's workdirs
       tags:
       - workdirs
@@ -14692,19 +14814,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a Bot workdir
       tags:
       - workdirs
@@ -14729,11 +14851,11 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Archive a Bot workdir
       tags:
       - workdirs
@@ -14769,15 +14891,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Rename a Bot workdir
       tags:
       - workdirs
@@ -14862,6 +14984,56 @@ paths:
       summary: Switch a workdir to an existing local Git branch
       tags:
       - workdirs
+  /bots/{bot_id}/workdirs/directories:
+    get:
+      description: 'Lists the child directories of a directory on one workspace target,
+        so a workdir path can be picked instead of typed. An empty path starts at
+        the target''s default directory: the data mount on the native workspace, the
+        reported workspace base on a remote computer.'
+      parameters:
+      - description: Bot ID
+        in: path
+        name: bot_id
+        required: true
+        type: string
+      - description: Workspace target ID; defaults to the native workspace
+        in: query
+        name: workspace_target_id
+        type: string
+      - description: Absolute directory path on that target
+        in: query
+        name: path
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/workdir.DirectoriesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/apperror.Problem'
+      summary: List directories for choosing a workdir path
+      tags:
+      - workdirs
   /bots/{bot_id}/workspace-targets:
     get:
       parameters:
@@ -14880,11 +15052,11 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List a Bot's workspace targets
       tags:
       - workspace-targets
@@ -14908,15 +15080,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete a Remote Runtime workspace target
       tags:
       - workspace-targets
@@ -14949,15 +15121,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update tool approval for one workspace target
       tags:
       - workspace-targets
@@ -14983,15 +15155,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Set a Bot's Primary workspace target
       tags:
       - workspace-targets
@@ -15018,15 +15190,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Add or update a Remote Runtime workspace target
       tags:
       - workspace-targets
@@ -15049,19 +15221,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete bot
       tags:
       - bots
@@ -15081,19 +15253,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get bot details
       tags:
       - bots
@@ -15119,15 +15291,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
@@ -15135,7 +15307,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update bot details
       tags:
       - bots
@@ -15159,15 +15331,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -15196,19 +15368,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get bot channel config
       tags:
       - bots
@@ -15239,19 +15411,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
@@ -15293,19 +15465,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -15343,19 +15515,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -15391,19 +15563,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
@@ -15443,19 +15615,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "503":
           description: Service Unavailable
           schema:
@@ -15480,19 +15652,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List bot runtime checks
       tags:
       - bots
@@ -15519,19 +15691,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Transfer bot owner (admin only)
       tags:
       - bots
@@ -15572,15 +15744,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Import a bot backup
       tags:
       - bots
@@ -15621,11 +15793,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Preview a bot backup import
       tags:
       - bots
@@ -15650,11 +15822,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Check bot name availability
       tags:
       - bots
@@ -15679,11 +15851,11 @@ paths:
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Search workspace member candidates for a bot being created
       tags:
       - bots
@@ -15700,7 +15872,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List channel capabilities and schemas
       tags:
       - channel
@@ -15721,11 +15893,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get channel capabilities and schemas
       tags:
       - channel
@@ -15742,7 +15914,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
@@ -15776,7 +15948,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List fetch providers
       tags:
       - fetch-providers
@@ -15801,11 +15973,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a fetch provider
       tags:
       - fetch-providers
@@ -15828,11 +16000,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete a fetch provider
       tags:
       - fetch-providers
@@ -15856,11 +16028,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a fetch provider
       tags:
       - fetch-providers
@@ -15890,11 +16062,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update a fetch provider
       tags:
       - fetch-providers
@@ -15911,181 +16083,52 @@ paths:
       summary: List fetch provider metadata
       tags:
       - fetch-providers
-  /memory-providers:
+  /memory/config:
     get:
-      description: List configured memory providers
+      description: Get the team-level Built-in Memory configuration
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/adapters.ProviderGetResponse'
-            type: array
+            $ref: '#/definitions/adapters.MemoryConfig'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List memory providers
+            $ref: '#/definitions/apperror.Problem'
+      summary: Get Built-in Memory configuration
       tags:
-      - memory-providers
-    post:
-      consumes:
-      - application/json
-      description: Create a memory provider configuration
-      parameters:
-      - description: Memory provider configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/adapters.ProviderCreateRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/adapters.ProviderGetResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Create a memory provider
-      tags:
-      - memory-providers
-  /memory-providers/{id}:
-    delete:
-      description: Delete memory provider by ID
-      parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Delete a memory provider
-      tags:
-      - memory-providers
-    get:
-      description: Get memory provider by ID
-      parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/adapters.ProviderGetResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get a memory provider
-      tags:
-      - memory-providers
+      - memory
     put:
       consumes:
       - application/json
-      description: Update memory provider by ID
+      description: Update the team-level Built-in Memory configuration
       parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Updated configuration
+      - description: Built-in Memory configuration
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/adapters.ProviderUpdateRequest'
+          $ref: '#/definitions/adapters.MemoryConfigUpdateRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/adapters.ProviderGetResponse'
+            $ref: '#/definitions/adapters.MemoryConfig'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Update a memory provider
+            $ref: '#/definitions/apperror.Problem'
+      summary: Update Built-in Memory configuration
       tags:
-      - memory-providers
-  /memory-providers/{id}/status:
-    get:
-      description: Get runtime status data for a memory provider
-      parameters:
-      - description: Provider ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/adapters.ProviderStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get memory provider status
-      tags:
-      - memory-providers
-  /memory-providers/meta:
-    get:
-      description: List available memory provider types and config schemas
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/adapters.ProviderMeta'
-            type: array
-      summary: List memory provider metadata
-      tags:
-      - memory-providers
+      - memory
   /models:
     get:
       description: Get a list of all configured models, optionally filtered by type
@@ -16110,11 +16153,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List all models
       tags:
       - models
@@ -16135,11 +16178,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a new model
       tags:
       - models
@@ -16158,15 +16201,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete model by internal ID
       tags:
       - models
@@ -16186,15 +16229,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get model by internal ID
       tags:
       - models
@@ -16220,15 +16263,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update model by internal ID
       tags:
       - models
@@ -16254,15 +16297,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Test model connectivity
       tags:
       - models
@@ -16282,11 +16325,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get model count
       tags:
       - models
@@ -16305,15 +16348,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete model by model ID
       tags:
       - models
@@ -16333,15 +16376,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get model by model ID
       tags:
       - models
@@ -16367,15 +16410,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update model by model ID
       tags:
       - models
@@ -16495,7 +16538,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List all LLM providers
       tags:
       - providers
@@ -16520,11 +16563,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a new LLM provider
       tags:
       - providers
@@ -16547,15 +16590,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete provider
       tags:
       - providers
@@ -16579,15 +16622,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get provider by ID
       tags:
       - providers
@@ -16617,15 +16660,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update provider
       tags:
       - providers
@@ -16655,15 +16698,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Import models from provider
       tags:
       - providers
@@ -16690,15 +16733,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List provider models
       tags:
       - providers
@@ -16718,11 +16761,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Start OAuth2 authorization for an LLM provider
       tags:
       - providers-oauth
@@ -16742,11 +16785,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Poll OAuth device authorization for an LLM provider
       tags:
       - providers-oauth
@@ -16766,11 +16809,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get OAuth2 status for an LLM provider
       tags:
       - providers-oauth
@@ -16788,11 +16831,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Revoke stored OAuth2 tokens for an LLM provider
       tags:
       - providers-oauth
@@ -16818,15 +16861,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Test provider connectivity
       tags:
       - providers
@@ -16845,7 +16888,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Count providers
       tags:
       - providers
@@ -16909,15 +16952,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get provider by name
       tags:
       - providers
@@ -16942,7 +16985,7 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: OAuth2 callback for LLM providers
       tags:
       - providers-oauth
@@ -16968,7 +17011,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List search providers
       tags:
       - search-providers
@@ -16993,11 +17036,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a search provider
       tags:
       - search-providers
@@ -17020,11 +17063,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Delete a search provider
       tags:
       - search-providers
@@ -17048,11 +17091,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a search provider
       tags:
       - search-providers
@@ -17082,11 +17125,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update a search provider
       tags:
       - search-providers
@@ -17135,7 +17178,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List all speech models
       tags:
       - speech-models
@@ -17157,7 +17200,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a speech model
       tags:
       - speech-models
@@ -17186,11 +17229,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update a speech model
       tags:
       - speech-models
@@ -17212,7 +17255,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get speech model capabilities
       tags:
       - speech-models
@@ -17243,11 +17286,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Test speech model synthesis
       tags:
       - speech-models
@@ -17267,7 +17310,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List speech providers
       tags:
       - speech-providers
@@ -17290,11 +17333,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get speech provider
       tags:
       - speech-providers
@@ -17320,15 +17363,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Import speech models from provider
       tags:
       - speech-providers
@@ -17353,11 +17396,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List speech models by provider
       tags:
       - speech-providers
@@ -17421,11 +17464,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List Skill Apps across supermarket Registries
       tags:
       - supermarket
@@ -17445,15 +17488,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a mirrored Skill icon
       tags:
       - supermarket
@@ -17472,15 +17515,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List App categories with localized names
       tags:
       - supermarket
@@ -17494,7 +17537,7 @@ paths:
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List Skill Registries from supermarket
       tags:
       - supermarket
@@ -17538,15 +17581,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List Skill Apps in one Registry
       tags:
       - supermarket
@@ -17571,15 +17614,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a namespaced Skill App
       tags:
       - supermarket
@@ -17609,15 +17652,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get an immutable Skill App release
       tags:
       - supermarket
@@ -17647,15 +17690,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a namespaced Registry Skill
       tags:
       - supermarket
@@ -17702,11 +17745,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "502":
           description: Bad Gateway
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List Skills across supermarket Registries
       tags:
       - supermarket
@@ -17726,7 +17769,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List all transcription models
       tags:
       - transcription-models
@@ -17748,7 +17791,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a transcription model
       tags:
       - transcription-models
@@ -17777,11 +17820,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update a transcription model
       tags:
       - transcription-models
@@ -17803,7 +17846,7 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get transcription model capabilities
       tags:
       - transcription-models
@@ -17838,11 +17881,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Test transcription model recognition
       tags:
       - transcription-models
@@ -17862,7 +17905,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List transcription providers
       tags:
       - transcription-providers
@@ -17885,11 +17928,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get speech provider
       tags:
       - speech-providers
@@ -17915,15 +17958,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Import transcription models from provider
       tags:
       - transcription-providers
@@ -17949,11 +17992,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List transcription models by provider
       tags:
       - transcription-providers
@@ -17982,15 +18025,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List users (admin only)
       tags:
       - users
@@ -18011,15 +18054,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create human user (admin only)
       tags:
       - users
@@ -18039,23 +18082,23 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Deactivate member (admin only)
       tags:
       - users
@@ -18075,19 +18118,19 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get user by ID
       tags:
       - users
@@ -18113,23 +18156,23 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update user (admin only)
       tags:
       - users
@@ -18144,15 +18187,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get current user
       tags:
       - users
@@ -18192,7 +18235,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List connected channel identities
       tags:
       - users
@@ -18211,11 +18254,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Disconnect a channel identity
       tags:
       - users
@@ -18237,11 +18280,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Issue an account link code
       tags:
       - users
@@ -18262,15 +18305,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get channel user config
       tags:
       - channel
@@ -18296,11 +18339,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update channel user config
       tags:
       - channel
@@ -18318,11 +18361,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List the caller's bot-to-Computer access grants
       tags:
       - user-runtimes
@@ -18342,11 +18385,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update current user password
       tags:
       - users
@@ -18364,7 +18407,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List Remote Runtime credentials
       tags:
       - user-runtimes
@@ -18389,15 +18432,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Create a Remote Runtime credential
       tags:
       - user-runtimes
@@ -18415,15 +18458,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Revoke a Remote Runtime credential
       tags:
       - user-runtimes
@@ -18441,7 +18484,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List all video models
       tags:
       - video-models
@@ -18463,11 +18506,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get a video model
       tags:
       - video-models
@@ -18496,15 +18539,15 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Update a video model
       tags:
       - video-models
@@ -18523,7 +18566,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List video providers
       tags:
       - video-providers
@@ -18545,11 +18588,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Get video provider
       tags:
       - video-providers
@@ -18573,11 +18616,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: Import video models from provider
       tags:
       - video-providers
@@ -18601,11 +18644,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/apperror.Problem'
       summary: List video models by provider
       tags:
       - video-providers

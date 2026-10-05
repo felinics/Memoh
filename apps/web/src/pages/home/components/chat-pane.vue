@@ -439,19 +439,22 @@
               ref="dockEl"
               :approvals="pendingApprovals"
               :command-panel="composerCommandPanel"
-              :error-message="goalSubmissionBlocked ? goalExecutionBlockedReason : runtimeModeUnavailableReason || composerError"
+              :error-message="composerPanelError"
               :pending-user-input="pendingUserInput"
               :compacting="isCompactingSession"
+              :usage-notice="composerUsageNotice"
               @select-command-item="selectCommandResultItem"
               @dismiss-command="clearCurrentCommandEvent"
+              @dismiss-usage="dismissCodexUsageNotice"
+              @dismiss-error="dismissComposerPanelError"
               @reveal-composer="handleDockRevealComposer"
             >
               <CodexGoalBar
-                v-if="runtimeControls.goal.value || runtimeGoalError"
+                v-if="runtimeControls.goal.value || visibleRuntimeGoalError"
                 :key="runtimeModeScope"
                 class="mx-3 mb-2"
                 :goal="runtimeControls.goal.value"
-                :error="runtimeGoalError"
+                :error="visibleRuntimeGoalError"
                 :disabled="goalControlsDisabled"
                 :resume-disabled="goalResumeDisabled"
                 :resume-disabled-reason="goalExecutionBlockedReason"
@@ -459,6 +462,7 @@
                 @pause="controlGoal('pause')"
                 @clear="controlGoal('clear')"
                 @resume="controlGoal('resume')"
+                @dismiss-error="dismissedRuntimeGoalError = runtimeGoalError"
               />
               <!-- The composer is ALWAYS a two-row card (textarea on top,
                    controls below) — no pill↔multiline morph: a fixed rounded-2xl
@@ -467,7 +471,7 @@
                    Docked (non-welcome) state compresses and quiets: no min
                    height + tighter padding (p-2.5) + a shorter textarea row
                    (min-h-10) pull the two rows together — the centered welcome
-                   card keeps the full presence (min-h-28, p-3); docked it sits
+                   card keeps the full presence (min-h-28, wider --composer-pad); docked it sits
                    under the conversation and should read lighter, with the edge
                    softened to --border-soft (.chat-composer-docked, style.css).
                    Mobile radius is DERIVED from the control circles inside:
@@ -480,9 +484,9 @@
                 ref="composerEl"
                 data-slot="input-group"
                 role="group"
-                class="chat-composer-edge @container/composer relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text max-md:rounded-3xl max-md:p-2.5"
+                class="chat-composer-edge @container/composer relative flex w-full flex-wrap content-between items-end gap-1 rounded-2xl bg-surface-composer cursor-text p-(--composer-pad) max-md:rounded-3xl"
                 :class="[
-                  isWelcome ? 'min-h-28 p-3' : 'p-2.5 chat-composer-docked',
+                  isWelcome ? 'min-h-28' : 'chat-composer-docked',
                   voiceInputState !== 'idle' ? 'chat-composer-voice' : '',
                 ]"
                 @click="handleComposerClick"
@@ -1252,8 +1256,10 @@ import { useWorkdirsStore } from '@/store/workdirs'
 import type { BotWorkdir } from '@/composables/api/useWorkdirs'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { storeToRefs } from 'pinia'
-import { useElementSize, useIntersectionObserver } from '@vueuse/core'
+import { useElementSize, useIntersectionObserver, useLocalStorage } from '@vueuse/core'
 import { useRuntimeControls } from '@/composables/useRuntimeControls'
+import { useCodexUsage } from '@/composables/useCodexUsage'
+import { codexUsageNotice, codexUsageNoticeKey, codexUsageResetTime, codexUsageWindowLabel } from '@/utils/codex-usage'
 import { useQuery } from '@pinia/colada'
 import { getAcpProfiles, getBotsByBotIdAgents, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
@@ -1274,6 +1280,7 @@ import { useChatScroll } from '../composables/useChatScroll'
 import { useComposerPlacementMotion } from '../composables/useComposerPlacementMotion'
 import { useQueueTurnAnchors } from '../composables/useQueueTurnAnchors'
 import { isRuntimeContinuationUserTurn, isRuntimeSteerUserTurn } from '@/store/chat/types'
+import { resolveCommandErrorMessage } from '@/store/chat/messages'
 import BgTaskPill from './bg-task-pill.vue'
 import ForkSourceDivider from './fork-source-divider.vue'
 import ChatForkDialog from './chat-fork-dialog.vue'
@@ -1286,7 +1293,7 @@ import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import ComposerModelMenu from './composer-model-menu.vue'
-import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
+import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, displayedEffort, reconcileStoredEffort } from '@/pages/bots/components/reasoning-effort'
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
@@ -1295,18 +1302,18 @@ import { useComposerPair } from '../composables/useComposerPair'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
 import { provideConnectorLogos } from '../composables/useConnectorLogos'
-import { enqueueSteerQueue, enqueueFollowUpQueue, fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionError, type CommandActionListItem, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
+import { enqueueSteerQueue, enqueueFollowUpQueue, fetchSafeSkillCatalog, fetchSession, type ChatAttachment, type CommandActionListItem, type CommandEventResponse, type RequestedSkillSelection, type UIUserInput } from '@/composables/api/useChat'
 import { parseSessionQueueCommand, SessionQueueSubmissionGate } from './session-queue-submission'
 import { localizeRuntimeControls, localizeRuntimeCommandResult } from '@/utils/runtime-control-presentation'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
-import { captureChatPaneSendContext, clearComposerPairDraft, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft } from './chat-pane-send'
+import { captureChatPaneSendContext, clearComposerPairDraft, composerRestoreForSendResult, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
 import { findMissingRequiredManagedField, readACPAgentConfig } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, normalizeBotAgentRuntime } from '@/utils/bot-agent'
-import { isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
+import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import { workspaceTargetAvailable } from '@/utils/workspace-target'
 import { findLatestPendingChatDecision } from './chat-pending-decision'
@@ -2123,6 +2130,46 @@ const runtimeControls = useRuntimeControls({
   visible: computed(() => isVisible.value && activeUsesExternalAgentComposer.value),
   draftAgentId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? activeBotAgentID.value : ''),
 })
+// Only a ChatGPT sign-in has usage windows; an API-key Codex Agent is billed per token.
+const codexUsageAgentId = computed(() => {
+  if (activeDirectRuntime.value !== BOT_AGENT_RUNTIME_CODEX) return ''
+  const agent = botAgents.value.find(item => item.id === activeBotAgentID.value)
+  return agent?.metadata?.auth === 'chatgpt' && agent.agent_credential_id ? agent.id ?? '' : ''
+})
+const codexUsage = useCodexUsage({
+  botId: computed(() => currentBotId.value ?? ''),
+  botAgentId: codexUsageAgentId,
+  enabled: () => isVisible.value,
+})
+watch(streaming, (now, was) => {
+  if (was && !now && codexUsageAgentId.value && isVisible.value) void codexUsage.refetch()
+})
+// Dismissal holds until the window resets: a new reset time is a new key.
+const dismissedCodexUsageNotices = useLocalStorage<Record<string, string>>('memoh:codex-usage-dismissed', {})
+const codexUsageNoticeState = computed(() => {
+  const notice = codexUsageNotice(codexUsage.data.value)
+  return notice ? { notice, key: codexUsageNoticeKey(codexUsageAgentId.value, notice) } : null
+})
+const composerUsageNotice = computed(() => {
+  const state = codexUsageNoticeState.value
+  if (!state) return null
+  const { exhausted, window } = state.notice
+  if (!exhausted && dismissedCodexUsageNotices.value[codexUsageAgentId.value] === state.key) return null
+  const params = {
+    window: codexUsageWindowLabel(window.window_minutes, t),
+    percent: window.used_percent,
+    time: window.resets_at ? codexUsageResetTime(window.resets_at, locale.value) : '',
+  }
+  const message = exhausted
+    ? t(window.resets_at ? 'chat.codexUsage.exhausted' : 'chat.codexUsage.exhaustedNoReset', params)
+    : t(window.resets_at ? 'chat.codexUsage.warning' : 'chat.codexUsage.warningNoReset', params)
+  return { exhausted, message }
+})
+function dismissCodexUsageNotice() {
+  const state = codexUsageNoticeState.value
+  if (!state || !codexUsageAgentId.value) return
+  dismissedCodexUsageNotices.value = { ...dismissedCodexUsageNotices.value, [codexUsageAgentId.value]: state.key }
+}
 const rawRuntimeControlSnapshot = computed(() => activeIsPendingExternalAgent.value && activeUsesACPRuntime.value ? pendingRuntimeControls.value : runtimeControls.controls.value)
 const runtimeControlSnapshot = computed(() => localizeRuntimeControls(rawRuntimeControlSnapshot.value, runtimeText))
 const composerRuntimeCommands = computed(() =>
@@ -2283,7 +2330,7 @@ async function runPendingPermission(text: string) {
       },
     })
   } catch (error) {
-    complete({ type: 'command_error', terminal: true, error: { code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('chat.modeSwitchFailed')) } })
+    complete({ type: 'command_error', terminal: true, code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('chat.modeSwitchFailed')) })
   }
 }
 
@@ -2390,7 +2437,7 @@ function clearCurrentCommandEvent() {
 
 const commandPanelEvent = computed(() => chatStore.commandEventForScope(currentPaneCommandScope()))
 const commandResult = computed(() => commandPanelEvent.value?.type === 'command_result' ? commandPanelEvent.value.result : null)
-const commandError = computed(() => commandPanelEvent.value?.type === 'command_error' ? commandPanelEvent.value.error : null)
+const commandError = computed(() => commandPanelEvent.value?.type === 'command_error' ? commandPanelEvent.value : null)
 const commandPanelActionID = computed(() => commandPanelEvent.value?.action_id?.trim() ?? '')
 const commandPanelIsError = computed(() => !!commandError.value)
 const presentedCommandResult = computed(() => commandResult.value
@@ -2406,14 +2453,10 @@ const commandPanelTitle = computed(() => {
   if (commandError.value) return t('chat.slash.commandError')
   return presentedCommandResult.value?.title || t('chat.slash.commandResult')
 })
-function localizedCommandErrorMessage(error: CommandActionError): string {
-  const code = error.code.trim()
-  if (code) {
-    const key = `chat.slash.errorMessages.${code}`
-    const translated = t(key)
-    if (translated !== key) return translated
-  }
-  return error.message || t('chat.slash.errorMessages.generic')
+// The chat store's command_error copy, read through vue-i18n so the panel
+// follows a locale switch.
+function localizedCommandErrorMessage(error: CommandEventResponse): string {
+  return resolveCommandErrorMessage(error, key => te(key) || te(key, 'en') ? t(key) : '')
 }
 
 const commandPanelText = computed(() => commandError.value ? localizedCommandErrorMessage(commandError.value) : presentedCommandResult.value?.text || '')
@@ -2545,6 +2588,32 @@ const unavailableRuntimeModes = computed(() => composerModelCatalog.value.unavai
 const runtimeModeUnavailableReason = computed(() => unavailableRuntimeModes.value.includes(currentRuntimeModeId.value)
   ? t('chat.runtimeModeModelUnavailable')
   : '')
+// What the dock's error line shows. Standing reasons (goal blocked by plan
+// mode, runtime mode without a usable model) win over the transient
+// composerError, matching their precedence before dismissal existed.
+const rawComposerPanelError = computed(() => goalSubmissionBlocked.value
+  ? goalExecutionBlockedReason.value
+  : runtimeModeUnavailableReason.value || composerError.value)
+// Every error line can be dismissed, standing reasons included: a user who
+// already understands the reason should not be forced to keep reading it.
+// Dismissal hides that exact message only — a different message, or the same
+// one returning after it went away, shows again. The underlying state (and
+// the send button's disabled state) is untouched.
+const dismissedComposerPanelError = ref('')
+const composerPanelError = computed(() => rawComposerPanelError.value === dismissedComposerPanelError.value ? '' : rawComposerPanelError.value)
+watch(rawComposerPanelError, (message) => {
+  if (!message) dismissedComposerPanelError.value = ''
+})
+function dismissComposerPanelError() {
+  dismissedComposerPanelError.value = rawComposerPanelError.value
+  // A transient error is consumed outright; a standing reason only gets hidden.
+  if (composerError.value === dismissedComposerPanelError.value) composerError.value = ''
+}
+const dismissedRuntimeGoalError = ref('')
+const visibleRuntimeGoalError = computed(() => runtimeGoalError.value === dismissedRuntimeGoalError.value ? '' : runtimeGoalError.value)
+watch(runtimeGoalError, (message) => {
+  if (!message) dismissedRuntimeGoalError.value = ''
+})
 const composerModelProviders = computed(() => composerModelCatalog.value.providers)
 
 // "Default" alone tells the user nothing — resolve what it actually means:
@@ -2795,12 +2864,14 @@ const selectedModelLabel = computed(() => {
   return composerHasNoModel.value ? t('common.none') : composerDefaultModelLabel.value
 })
 
+const nativeDisplayedEffort = computed(() => displayedEffort(overrideReasoningEffort.value, activeModelReasoning.value))
+
 const selectedReasoningLabel = computed(() => {
   if (activeUsesExternalAgentComposer.value) {
     const current = composerReasoningEffort.value
     return composerReasoningOptions.value?.find(option => option.value === current)?.label || current
   }
-  const v = overrideReasoningEffort.value
+  const v = nativeDisplayedEffort.value
   return t(EFFORT_LABELS[v] ?? 'chat.modelDefault')
 })
 
@@ -2810,9 +2881,8 @@ const reasoningActive = computed(() =>
         composerReasoningEffort.value
         && composerReasoningOptions.value?.some(option => option.value === composerReasoningEffort.value),
       )
-    : activeModelSupportsReasoning.value
-      && Boolean(overrideReasoningEffort.value)
-      && overrideReasoningEffort.value !== REASONING_EFFORT_DISABLE,
+    : Boolean(nativeDisplayedEffort.value)
+      && nativeDisplayedEffort.value !== REASONING_EFFORT_DISABLE,
 )
 
 const modelTriggerLabel = computed(() =>
@@ -3115,7 +3185,7 @@ async function setRuntimeMode(modeId: string, modeKind: 'permission' | 'plan' = 
       if (modeKind === 'permission' && activeUsesACPRuntime.value) await setACPMode(modeId)
       else {
         const modes = modeKind === 'plan' ? runtimeControlSnapshot.value?.plan_mode?.available_modes ?? [] : runtimeModes.value
-        if (!modes.some(mode => mode.id === modeId)) throw new Error(t('chat.slash.errorMessages.permission_mode_unavailable'))
+        if (!modes.some(mode => mode.id === modeId)) throw new UserFacingError(t('chat.slash.errorMessages.permission_mode_unavailable'))
         chatStore.setPendingRuntimeMode(modeId, paneTarget.value, modeKind)
       }
     } else await runtimeControls.setMode(modeId, modeKind)
@@ -3382,7 +3452,8 @@ function voiceFileExtension(mimeType: string): string {
 function openTranscriptionSettings() {
   const botName = currentBot.value?.name || currentBot.value?.id || currentBotId.value
   if (!botName) {
-    void router.push({ name: 'voice' })
+    // Voice is a scope of the Providers settings page now (no flat route).
+    void router.push({ name: 'providers', query: { tab: 'voice' } })
     return
   }
   void router.push({
@@ -3968,7 +4039,7 @@ async function handleSend() {
         result: { kind: 'runtime_command', title, ...(Object.keys(result).length ? result : { text: runtimeCommand.completed_text, text_key: 'common.toast.success' }) },
       })
     } catch (error) {
-      complete({ type: 'command_error', terminal: true, error: { code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('errors.runtime_control.failed')) } })
+      complete({ type: 'command_error', terminal: true, code: parseMemohError(error)?.code || 'runtime_control.failed', message: resolveApiErrorMessage(error, t('errors.runtime_control.failed')) })
     }
     return
   }
@@ -4145,19 +4216,19 @@ async function handleSend() {
   })
   pairSend.finish(result.messageSent === true || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
-  if (!result.ok && result.stage === 'startup') {
-    const restoreInput = result.restoreInput ?? text
+  const restore = composerRestoreForSendResult(result, text, t('chat.sendFailed'))
+  if (restore) {
     if (!matchesChatPaneSendContext(
       sentContext,
       paneTarget.value,
       inputDraftKey.value || 'chat',
     )) return
-    inputText.value = restoreInput
-    saveInputDraft(sentDraftKey, restoreInput)
+    inputText.value = restore.input
+    saveInputDraft(sentDraftKey, restore.input)
     pendingFiles.value = files
     requestedSkills.value = skills
     if (commandPanelEvent.value?.type !== 'command_error') {
-      composerError.value = result.error || t('chat.sendFailed')
+      composerError.value = restore.error
     }
     return
   }

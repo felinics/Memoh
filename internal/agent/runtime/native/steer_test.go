@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -42,7 +43,7 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 			provider := agentStreamTestProvider(func(ctx context.Context, params sdk.Request) (<-chan sdk.StreamPart, error) {
 				call := int(calls.Add(1))
 				if mode == "retry" && call == 1 {
-					return closedAgentTestStream(&sdk.ErrorPart{Error: errors.New("unexpected EOF")}), nil
+					return closedAgentTestStream(&sdk.ErrorPart{Error: io.ErrUnexpectedEOF}), nil
 				}
 				call -= retryAttempts
 				if call > interruptions {
@@ -114,6 +115,9 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 					if strings.Contains(e.Error, "SECRET") || (e.Type == EventError && mode != "checkpoint_failure" && mode != "retry") {
 						t.Fatalf("unexpected public error: %+v", e)
 					}
+					if mode == "checkpoint_failure" && e.Type == EventError && e.Code != "runtime_run_failed" {
+						t.Fatalf("checkpoint failure code = %q, want runtime_run_failed", e.Code)
+					}
 					if e.IsTerminal() {
 						terminals++
 						if mode != "checkpoint_failure" && e.Type != EventAgentEnd {
@@ -129,6 +133,13 @@ func TestStreamSteerInterruptsOnlyInvocation(t *testing.T) {
 					t.Fatal("continued after failed persistence")
 				}
 				return
+			}
+			// The provider observer stops forwarding as soon as the model
+			// context is cancelled, without waiting for the provider's stream to
+			// close, so the run can finish before an interrupted invocation's
+			// own goroutine records the disconnect.
+			for deadline := time.Now().Add(2 * time.Second); disconnected.Load() < int32(interruptions) && time.Now().Before(deadline); {
+				time.Sleep(time.Millisecond)
 			}
 			if calls.Load() != int32(interruptions+retryAttempts+1) || disconnected.Load() != int32(interruptions) || starts != 1 || terminals != 1 {
 				t.Fatalf("calls=%d disconnected=%d starts=%d terminals=%d", calls.Load(), disconnected.Load(), starts, terminals)

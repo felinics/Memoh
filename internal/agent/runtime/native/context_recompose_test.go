@@ -8,7 +8,6 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/hooks"
 )
 
@@ -76,7 +75,7 @@ func TestAgentContextRecomposeDoesNotRunTerminalHooks(t *testing.T) {
 				}
 			} else {
 				_, err := agent.Generate(t.Context(), cfg)
-				if !errors.Is(err, ErrContextRecompose) || apperror.CodeOf(err) != "" {
+				if !errors.Is(err, ErrContextRecompose) || errors.Unwrap(err) != nil {
 					t.Errorf("recompose must remain a private control signal, got %v", err)
 				}
 			}

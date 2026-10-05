@@ -7,6 +7,8 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/chat/timeline"
+	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/logger"
 )
 
 const discussIdleTimeout = 10 * time.Minute
@@ -63,7 +65,12 @@ func (d *DiscussDriver) runSession(ctx context.Context, sess *discussSession) {
 	}
 }
 
+// handleReply answers one trigger under a request id of its own. The session
+// worker outlives every message that wakes it, so no request it could inherit
+// an id from names this work; resubmits after a recompose are the same work
+// and share the id.
 func (d *DiscussDriver) handleReply(ctx context.Context, sess *discussSession, rc timeline.RenderedContext, log *slog.Logger) {
+	ctx = logger.ContextWithRequestID(ctx, httpx.NewRequestID())
 	d.handleReplyWithTurn(ctx, sess, rc, log, d.turnServiceSnapshot())
 }
 

@@ -123,7 +123,7 @@ func collectRuntimeContractWSEvents(t *testing.T, script []application.WSStreamE
 		}
 		defer func() { _ = conn.Close() }()
 
-		writer := newWSWriter(conn)
+		writer := newWSWriter(conn, defaultWSHeartbeat.writeTimeout)
 		eventCh := make(chan application.WSStreamEvent, len(script))
 		for _, event := range script {
 			eventCh <- event
@@ -229,12 +229,14 @@ func TestLocalChannelRuntimeContractSendsOnlyErrorsToTheInitiatingSocket(t *test
 
 // An error still reaches the caller when the run produced output first: the
 // published state names the run as failed, but only this frame tells the
-// connection that made the send what went wrong.
+// connection that made the send what went wrong. The frame carries the code
+// the run records, not the error's text.
 func TestLocalChannelRuntimeContractForwardsInterruptedRunError(t *testing.T) {
 	t.Parallel()
 
 	events := collectRuntimeContractWSEvents(t, interruptedRunWSContractScript(t), "error")
-	if len(events) != 1 || events[0]["message"] != "runtime interrupted" {
+	if len(events) != 1 || events[0]["code"] != "runtime_run_failed" ||
+		events[0]["message"] != "The response could not be completed. Please try again." {
 		t.Fatalf("events = %#v, want the interruption reported once", events)
 	}
 }

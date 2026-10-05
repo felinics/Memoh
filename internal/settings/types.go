@@ -19,16 +19,19 @@ const (
 )
 
 type Settings struct {
-	ChatModelID          string `json:"chat_model_id"`
-	DefaultBotAgentID    string `json:"default_bot_agent_id,omitempty"`
-	ChatRuntime          string `json:"chat_runtime"`
-	ChatACPAgentID       string `json:"chat_acp_agent_id,omitempty"`
-	ChatACPProjectPath   string `json:"chat_acp_project_path,omitempty"`
-	ChatACPProjectMode   string `json:"chat_acp_project_mode,omitempty"`
-	ImageModelID         string `json:"image_model_id"`
-	SearchProviderID     string `json:"search_provider_id"`
-	FetchProviderID      string `json:"fetch_provider_id"`
-	MemoryProviderID     string `json:"memory_provider_id"`
+	ChatModelID        string `json:"chat_model_id"`
+	DefaultBotAgentID  string `json:"default_bot_agent_id,omitempty"`
+	ChatRuntime        string `json:"chat_runtime"`
+	ChatACPAgentID     string `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath string `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode string `json:"chat_acp_project_mode,omitempty"`
+	ImageModelID       string `json:"image_model_id"`
+	SearchProviderID   string `json:"search_provider_id"`
+	FetchProviderID    string `json:"fetch_provider_id"`
+	// MemoryEnabled reports whether the bot uses Built-in Memory. It is derived
+	// from MemoryProviderID, which stays internal to the server.
+	MemoryEnabled        bool   `json:"memory_enabled"`
+	MemoryProviderID     string `json:"-"`
 	TtsModelID           string `json:"tts_model_id"`
 	TranscriptionModelID string `json:"transcription_model_id"`
 	VideoModelID         string `json:"video_model_id"`
@@ -37,19 +40,22 @@ type Settings struct {
 	Timezone             string `json:"timezone"`
 	// ReasoningEffort is the single on/off source for reasoning:
 	// models.ReasoningEffortDisable means no reasoning, any other value is a tier.
-	ReasoningEffort         string             `json:"reasoning_effort"`
-	CompactionEnabled       bool               `json:"compaction_enabled"`
-	CompactionThreshold     int                `json:"compaction_threshold"`
-	CompactionTargetPercent *int               `json:"compaction_target_percent" extensions:"x-nullable"`
-	CompactionModelID       string             `json:"compaction_model_id,omitempty"`
-	DiscussProbeModelID     string             `json:"discuss_probe_model_id,omitempty"`
-	PersistFullToolResults  bool               `json:"persist_full_tool_results"`
-	ShowToolCallsInIM       bool               `json:"show_tool_calls_in_im"`
-	ToolApprovalConfig      ToolApprovalConfig `json:"tool_approval_config"`
-	DisplayEnabled          bool               `json:"display_enabled"`
-	OverlayEnabled          bool               `json:"overlay_enabled"`
-	OverlayProvider         string             `json:"overlay_provider,omitempty"`
-	OverlayConfig           map[string]any     `json:"overlay_config,omitempty"`
+	ReasoningEffort         string `json:"reasoning_effort"`
+	CompactionEnabled       bool   `json:"compaction_enabled"`
+	CompactionThreshold     int    `json:"compaction_threshold"`
+	CompactionTargetPercent *int   `json:"compaction_target_percent" extensions:"x-nullable"`
+	CompactionModelID       string `json:"compaction_model_id,omitempty"`
+	// MemoryLLMModelID is the LLM behind memory extract / decide / compact.
+	// Empty falls back to the chat model.
+	MemoryLLMModelID       string             `json:"memory_llm_model_id,omitempty"`
+	DiscussProbeModelID    string             `json:"discuss_probe_model_id,omitempty"`
+	PersistFullToolResults bool               `json:"persist_full_tool_results"`
+	ShowToolCallsInIM      bool               `json:"show_tool_calls_in_im"`
+	ToolApprovalConfig     ToolApprovalConfig `json:"tool_approval_config"`
+	DisplayEnabled         bool               `json:"display_enabled"`
+	OverlayEnabled         bool               `json:"overlay_enabled"`
+	OverlayProvider        string             `json:"overlay_provider,omitempty"`
+	OverlayConfig          map[string]any     `json:"overlay_config,omitempty"`
 }
 
 type UpsertRequest struct {
@@ -58,16 +64,17 @@ type UpsertRequest struct {
 	// service mirrors each into a `<field>_set` SQL flag (same pattern as
 	// FetchProviderID / CompactionModelID); plain strings would make ""
 	// indistinguishable from "not sent".
-	ChatModelID             *string             `json:"chat_model_id,omitempty"`
-	DefaultBotAgentID       *string             `json:"default_bot_agent_id,omitempty"`
-	ChatRuntime             *string             `json:"chat_runtime,omitempty"`
-	ChatACPAgentID          *string             `json:"chat_acp_agent_id,omitempty"`
-	ChatACPProjectPath      *string             `json:"chat_acp_project_path,omitempty"`
-	ChatACPProjectMode      *string             `json:"chat_acp_project_mode,omitempty"`
-	ImageModelID            *string             `json:"image_model_id,omitempty"`
-	SearchProviderID        *string             `json:"search_provider_id,omitempty"`
-	FetchProviderID         *string             `json:"fetch_provider_id,omitempty"`
-	MemoryProviderID        *string             `json:"memory_provider_id,omitempty"`
+	ChatModelID        *string `json:"chat_model_id,omitempty"`
+	DefaultBotAgentID  *string `json:"default_bot_agent_id,omitempty"`
+	ChatRuntime        *string `json:"chat_runtime,omitempty"`
+	ChatACPAgentID     *string `json:"chat_acp_agent_id,omitempty"`
+	ChatACPProjectPath *string `json:"chat_acp_project_path,omitempty"`
+	ChatACPProjectMode *string `json:"chat_acp_project_mode,omitempty"`
+	ImageModelID       *string `json:"image_model_id,omitempty"`
+	SearchProviderID   *string `json:"search_provider_id,omitempty"`
+	FetchProviderID    *string `json:"fetch_provider_id,omitempty"`
+	// MemoryEnabled turns Built-in Memory on or off; nil keeps the current state.
+	MemoryEnabled           *bool               `json:"memory_enabled,omitempty"`
 	TtsModelID              *string             `json:"tts_model_id,omitempty"`
 	TranscriptionModelID    *string             `json:"transcription_model_id,omitempty"`
 	VideoModelID            *string             `json:"video_model_id,omitempty"`
@@ -79,6 +86,7 @@ type UpsertRequest struct {
 	CompactionThreshold     *int                `json:"compaction_threshold,omitempty"`
 	CompactionTargetPercent *int                `json:"compaction_target_percent,omitempty"`
 	CompactionModelID       *string             `json:"compaction_model_id,omitempty"`
+	MemoryLLMModelID        *string             `json:"memory_llm_model_id,omitempty"`
 	DiscussProbeModelID     string              `json:"discuss_probe_model_id,omitempty"`
 	PersistFullToolResults  *bool               `json:"persist_full_tool_results,omitempty"`
 	ShowToolCallsInIM       *bool               `json:"show_tool_calls_in_im,omitempty"`
