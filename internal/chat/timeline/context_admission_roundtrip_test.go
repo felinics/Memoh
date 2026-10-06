@@ -89,3 +89,56 @@ func BenchmarkComposeSourceMessages(b *testing.B) {
 		})
 	}
 }
+
+// An unconsumed batch is either kept whole, or reduced to a contiguous newest
+// suffix with every older input reported; it fails only when the newest input
+// cannot fit even alone.
+func FuzzComposeBatchKeepsNewestSuffixAndReportsOmissions(f *testing.F) {
+	f.Add([]byte{40, 200, 9, 120, 7}, uint8(2), uint16(90))
+	f.Add([]byte{255, 255, 255}, uint8(0), uint16(10))
+	f.Fuzz(func(t *testing.T, sizes []byte, consumed uint8, limit uint16) {
+		if len(sizes) == 0 || len(sizes) > 256 {
+			return
+		}
+		rc := make(RenderedContext, len(sizes))
+		for i, n := range sizes {
+			rc[i] = textSegment(strconv.Itoa(i), int64(i+1), strings.Repeat("x", 8*(int(n)+1)))
+		}
+		after := DiscussCursorPosition{SourceCursor: int64(int(consumed) % len(sizes))}
+		budget := int(limit) + 1
+		composed, admission := ComposeContextWithArtifactsBudgeted(rc, nil, nil, ComposeBudget{MaxTokens: budget, After: &after})
+		newest := strconv.Itoa(len(sizes) - 1)
+		if admission.ProtectedOverflow {
+			if cost := turn.EstimateTokensFromBytes(8 * (int(sizes[len(sizes)-1]) + 1)); cost <= budget {
+				t.Fatalf("overflow although the newest input (%d) fits the budget %d", cost, budget)
+			}
+			return
+		}
+		if composed == nil {
+			t.Fatal("no composition without overflow")
+		}
+		kept := map[string]bool{}
+		for _, message := range composed.Messages {
+			kept[message.Source.ID] = true
+		}
+		if !kept[newest] || admission.SelectedTokens > budget {
+			t.Fatalf("newest kept=%v selected=%d budget=%d", kept[newest], admission.SelectedTokens, budget)
+		}
+		omitted := map[string]bool{}
+		for _, source := range admission.OmittedSources {
+			omitted[source.ID] = true
+		}
+		seenGap := false
+		for i := len(sizes) - 1; i > int(after.SourceCursor)-1; i-- {
+			id := strconv.Itoa(i)
+			switch {
+			case kept[id] && seenGap:
+				t.Fatalf("kept input %s is not part of a contiguous newest suffix", id)
+			case kept[id] == omitted[id]:
+				t.Fatalf("unconsumed input %s kept=%v omitted=%v", id, kept[id], omitted[id])
+			case omitted[id]:
+				seenGap = true
+			}
+		}
+	})
+}
