@@ -151,3 +151,22 @@ export async function reauthorizeConnector(botId: string, connectionId: string, 
   await openConnectorOAuthURL(data.authorization_url, popup)
   await waitForConnectorOAuth(botId, connectionId, popup)
 }
+
+// The missing-OAuth-App copy is several steps long, so its notice stays until
+// the reader dismisses it instead of timing out mid-read.
+export function reauthorizeFailureNotice(
+  error: unknown,
+  t: Translate,
+  role: string,
+  connector: { type?: string },
+  catalog: ReadonlyMap<string, { name?: string }>,
+): { message: string, duration?: number } {
+  const type = connector.type ?? ''
+  const message = connectorErrorMessage(error, t, {
+    role,
+    connector: catalog.get(type)?.name || type,
+    fallback: t('connectors.oauthFailed'),
+  })
+  const persistent = isApiErrorCode(error, 'connector.oauth_client_not_configured')
+  return { message, duration: persistent ? Number.POSITIVE_INFINITY : undefined }
+}

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getConnector: vi.fn(),
@@ -14,6 +14,7 @@ import {
   connectorErrorMessage,
   isConnectorOAuthCancelled,
   reauthorizeConnector,
+  reauthorizeFailureNotice,
   waitForConnectorOAuth,
 } from './useConnectorOAuth'
 
@@ -87,6 +88,9 @@ describe('reauthorizeConnector', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
 
   it('surfaces a missing OAuth App before touching the popup', async () => {
     mocks.reauth.mockRejectedValue(missingOAuthApp)
@@ -106,6 +110,27 @@ describe('reauthorizeConnector', () => {
     const popup = { closed: false, close: vi.fn(), location: { href: 'about:blank' } } as unknown as Window
     await expect(reauthorizeConnector('bot', 'conn', popup)).resolves.toBeUndefined()
     expect(popup.location.href).toBe('https://github.com/login/oauth/authorize')
-    vi.unstubAllGlobals()
+  })
+})
+
+describe('reauthorizeFailureNotice', () => {
+  const catalog = new Map([['github', { name: 'GitHub' }]])
+
+  it.each([
+    ['admin', 'connectors.oauthAppNotConfigured.admin(GitHub)'],
+    ['member', 'connectors.oauthAppNotConfigured.member(GitHub)'],
+  ])('keeps the %s steps for a missing OAuth App until dismissed', (role, message) => {
+    expect(reauthorizeFailureNotice(missingOAuthApp, t, role, { type: 'github' }, catalog))
+      .toEqual({ message, duration: Number.POSITIVE_INFINITY })
+  })
+
+  it('names the connector by its type when the catalog lacks it', () => {
+    expect(reauthorizeFailureNotice(missingOAuthApp, t, 'member', { type: 'gitlab' }, catalog).message)
+      .toBe('connectors.oauthAppNotConfigured.member(gitlab)')
+  })
+
+  it('keeps other failures as a short notice', () => {
+    expect(reauthorizeFailureNotice(new Error('boom'), t, 'admin', { type: 'github' }, catalog))
+      .toEqual({ message: 'connectors.oauthFailed', duration: undefined })
   })
 })

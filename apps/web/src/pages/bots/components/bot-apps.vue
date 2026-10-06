@@ -317,9 +317,9 @@ import {
   type ScriptResponse,
 } from '@/composables/api/useWorkspaceDependencies'
 import {
-  connectorErrorMessage,
   prepareConnectorOAuthPopup,
   reauthorizeConnector,
+  reauthorizeFailureNotice,
 } from '@/composables/useConnectorOAuth'
 import { useDialogMutation } from '@/composables/useDialogMutation'
 import { useWorkspaceDependencyText } from '@/composables/useWorkspaceDependencyText'
@@ -607,11 +607,8 @@ async function reauthorize(connector: AppConnectorItem) {
     toast.success(t('connectors.oauthSuccess'))
   } catch (err) {
     popup?.close()
-    toast.error(connectorErrorMessage(err, t, {
-      role: userStore.userInfo.role,
-      connector: connectorCatalog.value.get(connector.type ?? '')?.name || connector.type || '',
-      fallback: t('connectors.oauthFailed'),
-    }))
+    const notice = reauthorizeFailureNotice(err, t, userStore.userInfo.role, connector, connectorCatalog.value)
+    toast.error(notice.message, { duration: notice.duration })
   } finally {
     connectorPending.value.delete(key)
   }
