@@ -460,7 +460,7 @@ func TestPostgresHistoryResetSubscriberHealsWithoutReleasePass(t *testing.T) {
 }
 
 // A bot-wide clear reaches every session of the bot, not only the first.
-func TestPostgresBotHistoryResetClearsEverySession(t *testing.T) {
+func TestPostgresHistoryResetClearsEveryBotSession(t *testing.T) {
 	first := newWSStepHistoryHarness(t, wsStepHistorySuccess)
 	ctx := context.Background()
 	second := first
