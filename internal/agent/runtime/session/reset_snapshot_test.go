@@ -230,10 +230,13 @@ func TestBeginHistoryResetSnapshotWriteFailureIsDependencyFault(t *testing.T) {
 func TestRedisFinishRunAfterResetDroppedTheProjection(t *testing.T) {
 	url := os.Getenv("MEMOH_TEST_REDIS_URL")
 	if url == "" {
+		url = os.Getenv("MEMOH_TEST_VALKEY_URL")
+	}
+	if url == "" {
 		if os.Getenv("MEMOH_TEST_DISTRIBUTED_REQUIRED") == "1" {
-			t.Fatal("MEMOH_TEST_REDIS_URL required")
+			t.Fatal("MEMOH_TEST_REDIS_URL or MEMOH_TEST_VALKEY_URL required")
 		}
-		t.Skip("set MEMOH_TEST_REDIS_URL")
+		t.Skip("set MEMOH_TEST_REDIS_URL or MEMOH_TEST_VALKEY_URL")
 	}
 	ctx := context.Background()
 	backend, err := NewRedisBackend(ctx, RedisOptions{URL: url, KeyPrefix: uniqueRuntimeBackendPrefix("reset-finish"), StateTTL: time.Minute})
