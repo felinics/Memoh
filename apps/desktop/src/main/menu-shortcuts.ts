@@ -15,16 +15,26 @@ export interface MenuShortcutInput {
 interface MenuShortcutContents {
   on(event: string, listener: (...args: never[]) => void): unknown
   setIgnoreMenuShortcuts(ignore: boolean): void
+  readonly focusedFrame?: { parent: unknown } | null
 }
 
-export function shouldIgnoreMenuShortcuts(
+/**
+ * `page` hands the key to the DOM listener, `menu` lets the native accelerator
+ * fire, `drop` swallows a held key. Close belongs to the page, except while a
+ * subframe has focus: its keys never reach the host DOM, so the menu keeps it.
+ */
+function menuShortcutOwner(
   input: MenuShortcutInput,
   capture: boolean,
   closeAccelerator: string | undefined,
   platform: KeyboardPlatform,
-): boolean {
+  subframeFocused: boolean,
+): 'page' | 'menu' | 'drop' {
+  if (capture || input.isComposing) return 'page'
   const key = { key: input.key, code: input.code, ctrlKey: input.control, metaKey: input.meta, altKey: input.alt, shiftKey: input.shift }
-  return capture || input.isComposing || matchesMenuAccelerator(key, closeAccelerator, platform)
+  if (!matchesMenuAccelerator(key, closeAccelerator, platform)) return 'menu'
+  if (!subframeFocused) return 'page'
+  return input.isAutoRepeat ? 'drop' : 'menu'
 }
 
 export function attachMenuShortcutOwnership(
@@ -33,8 +43,10 @@ export function attachMenuShortcutOwnership(
   platform: KeyboardPlatform,
 ) {
   let capture = false
-  contents.on('before-input-event', (_event: unknown, input: MenuShortcutInput) => {
-    contents.setIgnoreMenuShortcuts(shouldIgnoreMenuShortcuts(input, capture, closeAccelerator(), platform))
+  contents.on('before-input-event', (event: { preventDefault(): void }, input: MenuShortcutInput) => {
+    const owner = menuShortcutOwner(input, capture, closeAccelerator(), platform, contents.focusedFrame?.parent != null)
+    if (owner === 'drop') event.preventDefault()
+    contents.setIgnoreMenuShortcuts(owner !== 'menu')
   })
   contents.on('did-start-navigation', (event: { isMainFrame: boolean, isSameDocument: boolean }) => {
     if (!event.isMainFrame || event.isSameDocument) return

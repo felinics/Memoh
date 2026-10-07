@@ -61,4 +61,22 @@ describe('desktop DOM shortcut ownership', () => {
     closeKey()
     expect(close).toHaveBeenCalledOnce()
   })
+
+  it('runs a menu-delivered Close through the same dialog gate as a key', () => {
+    const registry = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, { name: 'home', path: '/' }))
+    const close = vi.fn(() => true)
+    const closeWindow = vi.fn()
+    registry.register(appKeyboardCommands.closeCurrentWorkspaceTab, close)
+    let deliver: (command: typeof appKeyboardCommands.closeCurrentWorkspaceTab) => void = () => {}
+    disconnect = registry.connect({ onKeyboardCommand: (cb) => { deliver = cb } }, closeWindow)
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    document.body.append(dialog)
+    deliver(appKeyboardCommands.closeCurrentWorkspaceTab)
+    expect(close).not.toHaveBeenCalled()
+    expect(closeWindow).not.toHaveBeenCalled()
+    dialog.remove()
+    deliver(appKeyboardCommands.closeCurrentWorkspaceTab)
+    expect(close).toHaveBeenCalledOnce()
+  })
 })
