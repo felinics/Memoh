@@ -40,6 +40,9 @@ import {
   writeTerminalSnapshot,
 } from '@/composables/useTerminalCache'
 import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
+import { matchesKeyboardShortcut } from '@/lib/browser-keyboard-shortcuts'
+import { detectPlatform } from '@/lib/keyboard-bindings'
+import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
 import { useSettingsStore } from '@/store/settings'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { LOCALHOST_URL_REGEX, tryParseLocalhostHref } from '@/utils/localhost-link'
@@ -56,6 +59,8 @@ const props = withDefaults(defineProps<{
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const tabsStore = useWorkspaceTabsStore()
+const shortcutsStore = useKeyboardShortcutsStore()
+const platform = detectPlatform()
 
 function cssVar(name: string): string {
   if (typeof document === 'undefined') return ''
@@ -218,6 +223,13 @@ onMounted(() => {
   term.loadAddon(fa)
   term.loadAddon(sa)
   term.open(containerRef.value)
+  // Navigation shortcuts leave the shell so focus can get out of the terminal;
+  // every other key, workspace shortcuts included, still reaches the shell.
+  term.attachCustomKeyEventHandler(event => !matchesKeyboardShortcut(
+    event,
+    shortcutsStore.effectiveBindings.filter(binding => binding.escapesTerminal),
+    platform,
+  ))
 
   // Make container-local URLs in command output clickable: clicking opens the
   // workspace browser panel (falling back to an OS tab when it is unavailable),

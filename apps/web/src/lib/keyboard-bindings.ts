@@ -42,6 +42,8 @@ export interface KeyboardBinding extends KeyChord {
   win?: KeyChord
   linux?: KeyChord
   repeat?: boolean
+  /** A focused terminal hands this chord to the workbench instead of the shell. */
+  escapesTerminal?: boolean
   desktop?: DesktopDelivery
   browser: BrowserBehavior
   scope: KeyboardScope
@@ -107,6 +109,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'focusChatInput',
+    escapesTerminal: true,
   },
   {
     command: appKeyboardCommands.showSessions,
@@ -117,6 +120,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSessions',
+    escapesTerminal: true,
   },
   {
     command: appKeyboardCommands.showFiles,
@@ -127,6 +131,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showFiles',
+    escapesTerminal: true,
   },
   {
     command: appKeyboardCommands.showSchedule,
@@ -137,6 +142,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSchedule',
+    escapesTerminal: true,
   },
   {
     command: appKeyboardCommands.showSupermarket,
@@ -147,6 +153,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSupermarket',
+    escapesTerminal: true,
   },
   {
     command: appKeyboardCommands.nextWorkspaceTab,
@@ -157,6 +164,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'nextWorkspaceTab',
+    escapesTerminal: true,
     repeat: true,
   },
   {
@@ -168,6 +176,7 @@ export const keyboardBindings: KeyboardBinding[] = [
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'previousWorkspaceTab',
+    escapesTerminal: true,
     repeat: true,
   },
   {

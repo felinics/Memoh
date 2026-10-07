@@ -42,7 +42,7 @@ function modifierMatches(actual: boolean, expected = false): boolean {
 // `mod` is the platform command key: Command on macOS, Ctrl on Windows/Linux.
 // It is not "meta or ctrl". On macOS Ctrl must be absent for a mod binding
 // and vice versa, so Cmd+Ctrl+S does not satisfy a Cmd+S binding.
-function modMatches(event: BrowserKeyboardShortcutEvent, wantsMod: boolean | undefined, isMac: boolean): boolean {
+function modMatches(event: Omit<BrowserKeyboardShortcutEvent, 'preventDefault'>, wantsMod: boolean | undefined, isMac: boolean): boolean {
   if (!wantsMod) return !event.metaKey && !event.ctrlKey
   return isMac
     ? event.metaKey && !event.ctrlKey
@@ -51,7 +51,7 @@ function modMatches(event: BrowserKeyboardShortcutEvent, wantsMod: boolean | und
 
 function bindingMatchesEvent(
   binding: BrowserKeyboardShortcutBinding,
-  event: BrowserKeyboardShortcutEvent,
+  event: Omit<BrowserKeyboardShortcutEvent, 'preventDefault'>,
   platform: KeyboardPlatform,
 ): boolean {
   const chord = binding[platform] ?? binding
@@ -60,6 +60,20 @@ function bindingMatchesEvent(
     && modMatches(event, chord.mod, platform === 'mac')
     && modifierMatches(event.altKey, chord.alt)
     && modifierMatches(event.shiftKey, chord.shift)
+}
+
+function isShortcutCandidate(event: Omit<BrowserKeyboardShortcutEvent, 'preventDefault'>, platform: KeyboardPlatform): boolean {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return false
+  return !event.getModifierState?.('AltGraph') || (platform === 'mac' && event.metaKey)
+}
+
+/** Whether the dispatcher would consider this key for any of the bindings. */
+export function matchesKeyboardShortcut(
+  event: Omit<BrowserKeyboardShortcutEvent, 'preventDefault'>,
+  bindings: BrowserKeyboardShortcutBinding[],
+  platform: KeyboardPlatform,
+): boolean {
+  return isShortcutCandidate(event, platform) && bindings.some(binding => bindingMatchesEvent(binding, event, platform))
 }
 
 /**
@@ -80,8 +94,7 @@ export function handleBrowserKeyboardShortcut(
   bindings: BrowserKeyboardShortcutBinding[],
   platform: KeyboardPlatform = detectPlatform(),
 ): boolean {
-  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return false
-  if (event.getModifierState?.('AltGraph') && !(platform === 'mac' && event.metaKey)) return false
+  if (!isShortcutCandidate(event, platform)) return false
   for (const binding of bindings) {
     if (!bindingMatchesEvent(binding, event, platform)) continue
     if (event.repeat && !binding.repeat) {
