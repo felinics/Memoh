@@ -165,7 +165,7 @@ describe('workspace keyboard ownership', () => {
     const unregister = registerWorkbenchCommands(registry, store)
     const removeListener = connectBrowserKeyboardShortcutsLive(registry, () => selectWebBindings(keyboardBindings))
     disconnect = () => { unregister(); removeListener() }
-    const key = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, altKey: true, bubbles: true, cancelable: true })
+    const key = new KeyboardEvent('keydown', { key: 'Enter', altKey: true, shiftKey: true, bubbles: true, cancelable: true })
     document.body.dispatchEvent(key)
     expect(key.defaultPrevented).toBe(true)
     expect(store.pendingChatInputFocus).toEqual({ panelId: chat.id, botId: 'bot-a', sessionId: null })

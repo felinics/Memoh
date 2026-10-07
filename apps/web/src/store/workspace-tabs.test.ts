@@ -888,19 +888,21 @@ describe('workspace layout store', () => {
     } as unknown as Document))
     const unregister = registerWorkbenchCommands(registry, store)
     const shortcuts = useKeyboardShortcutsStore()
-    const event = (key: string, repeat = false) => ({ key, ctrlKey: true, metaKey: false, altKey: true, shiftKey: false, repeat, preventDefault: vi.fn() })
-    const press = (key: string, repeat = false) => handleBrowserKeyboardShortcut(event(key, repeat), registry, selectWebBindings(shortcuts.effectiveBindings), 'linux')
-    expect(press('x')).toBe(true)
-    press('x', true)
+    const press = (key: string, modifiers: { ctrlKey?: boolean, shiftKey?: boolean }, repeat = false) => handleBrowserKeyboardShortcut(
+      { key, ctrlKey: false, metaKey: false, altKey: true, shiftKey: false, ...modifiers, repeat, preventDefault: vi.fn() },
+      registry, selectWebBindings(shortcuts.effectiveBindings), 'linux',
+    )
+    expect(press('X', { shiftKey: true })).toBe(true)
+    press('X', { shiftKey: true }, true)
     expect(dock.getPanel('terminal:1')).toBeTruthy()
     expect(dock.getPanel('terminal:2')).toBeUndefined()
     path = '/settings/keyboard'
-    press('x')
+    press('X', { shiftKey: true })
     expect(dock.getPanel('terminal:2')).toBeUndefined()
     path = '/'
     expect(shortcuts.setBinding(appKeyboardCommands.newTerminal, 'Mod+Alt+z').kind).toBe('none')
-    expect(press('x')).toBe(false)
-    expect(press('z')).toBe(true)
+    expect(press('X', { shiftKey: true })).toBe(false)
+    expect(press('z', { ctrlKey: true })).toBe(true)
     expect(dock.getPanel('terminal:2')).toBeTruthy()
     unregister()
   })

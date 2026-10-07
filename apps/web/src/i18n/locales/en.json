@@ -680,7 +680,7 @@
     },
     "keyboard": {
       "title": "Keyboard Shortcuts",
-      "intro": "Click Edit on a row, then press the new key combination. Cmd/Ctrl + W, Q, T, N stay reserved for the browser and OS.",
+      "intro": "Click Edit on a row, then press the new key combination. Cmd/Ctrl + W, Q, T, N stay reserved for the browser and OS. Workspace defaults use ⌘⌥ on macOS, matched by the key positions of a US keyboard, and Alt+Shift on Windows and Linux. If Alt+Shift switches your keyboard layout, assign other keys here.",
       "resetAll": "Reset all",
       "scopes": {
         "workspace": "Workspace",

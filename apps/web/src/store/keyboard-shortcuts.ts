@@ -2,7 +2,9 @@ import { computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
 import {
+  detectPlatform,
   keyboardBindings,
+  resolveKeyboardBinding,
   RESERVED_APP_MENU_COMBOS,
   RESERVED_BROWSER_COMBOS,
   TEXT_EDITING_COMBOS,
@@ -52,12 +54,13 @@ function applyOverride(binding: KeyboardBinding, override: string | undefined): 
 }
 
 export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () => {
+  const platform = detectPlatform()
   const overrides = useStorage<Record<string, string>>('keyboard-shortcuts-overrides', {}, undefined, {
     mergeDefaults: true,
   })
 
   const effectiveBindings = computed<KeyboardBinding[]>(() => {
-    const merged = keyboardBindings.map(binding => applyOverride(binding, overrides.value[binding.command]))
+    const merged = keyboardBindings.map(binding => applyOverride(resolveKeyboardBinding(binding, platform), overrides.value[binding.command]))
     // Narrower scopes come first so a combo shared across scopes resolves to the
     // active narrower one; selectActiveKeyboardBindings drops lightbox bindings
     // while no lightbox is open. Stable sort keeps the table order per scope.

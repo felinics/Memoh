@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { appKeyboardCommands, type KeyboardCommandRegistry } from './keyboard-commands'
-import { keyboardBindings } from './keyboard-bindings'
+import { keyboardBindings, resolveKeyboardBinding } from './keyboard-bindings'
 import { formatKeyCombo, keyComboFromEvent, parseKeyCombo } from './keyboard-combo'
 import {
   connectBrowserKeyboardShortcutsLive,
@@ -150,12 +150,12 @@ describe('browser keyboard shortcuts matcher', () => {
     expect(registry.dispatch).toHaveBeenCalledOnce()
   })
 
-  it('matches the per-platform key override for the active platform', () => {
+  it('matches the per-platform chord for the active platform', () => {
     const registry = createRegistry(true)
     const binding: BrowserKeyboardShortcutBinding = {
       command: appKeyboardCommands.closeCurrentWorkspaceTab,
       key: 'w',
-      win: 'F4',
+      win: { key: 'F4', mod: true },
       mod: true,
     }
     const f4 = createKeyboardEventLike({ key: 'F4', ctrlKey: true })
@@ -201,7 +201,7 @@ describe('macOS Command+Option shortcuts', () => {
     'x': { key: '≈', code: 'KeyX' },
     'o': { key: 'ø', code: 'KeyO' },
   }
-  const defaults = keyboardBindings.filter(binding => binding.mod && binding.alt)
+  const defaults = keyboardBindings.map(binding => resolveKeyboardBinding(binding, 'mac')).filter(binding => binding.mod && binding.alt)
 
   it.each(defaults.map(binding => [binding.command, binding] as const))('dispatches %s from the Option-modified key', (_command, binding) => {
     const registry = createRegistry(true)
@@ -252,6 +252,40 @@ describe('macOS Command+Option shortcuts', () => {
       expect(registry.dispatch).not.toHaveBeenCalled()
       expect(event.preventDefault).not.toHaveBeenCalled()
     }
+  })
+})
+
+describe('Windows and Linux Alt+Shift shortcuts', () => {
+  // Shift+1..4 on each Windows layout (Microsoft KLC tables). Czech and French
+  // need Shift to type digits at all; the others shift to punctuation.
+  const shiftedDigitRows: Record<string, string> = {
+    us: '!@#$', uk: '!"£$', de: '!"§$', fr: '1234', cz: '1234', hu: '\'"+!', ch: '+"*ç', ru: '!"№;', tr: '!\'^+', es: '!"·$',
+  }
+  const showCommands = [appKeyboardCommands.showSessions, appKeyboardCommands.showFiles, appKeyboardCommands.showSchedule, appKeyboardCommands.showSupermarket]
+
+  it.each(['win', 'linux'] as const)('dispatches every %s workspace default from the key event it produces', (platform) => {
+    const defaults = keyboardBindings.map(binding => resolveKeyboardBinding(binding, platform)).filter(binding => binding.alt && binding.shift)
+    expect(defaults.map(binding => binding.command)).toHaveLength(12)
+    for (const binding of defaults) {
+      const digit = /^\d$/.test(binding.key)
+      const event = {
+        ...createKeyboardEventLike({ key: binding.key.length === 1 ? binding.key.toUpperCase() : binding.key, altKey: true, shiftKey: true }),
+        code: digit ? `Digit${binding.key}` : undefined,
+      }
+      const registry = createRegistry(true)
+      expect(handleBrowserKeyboardShortcut(event, registry, defaults, platform), binding.command).toBe(true)
+      expect(registry.dispatch).toHaveBeenCalledWith(binding.command)
+    }
+  })
+
+  it.each(Object.entries(shiftedDigitRows))('reads Alt+Shift+1..4 from the physical digit row on the %s layout', (_layout, row) => {
+    const defaults = keyboardBindings.map(binding => resolveKeyboardBinding(binding, 'win'))
+    ;[...row].forEach((key, index) => {
+      const registry = createRegistry(true)
+      const event = { ...createKeyboardEventLike({ key, altKey: true, shiftKey: true }), code: `Digit${index + 1}` }
+      expect(handleBrowserKeyboardShortcut(event, registry, defaults, 'win')).toBe(true)
+      expect(registry.dispatch).toHaveBeenCalledWith(showCommands[index])
+    })
   })
 })
 

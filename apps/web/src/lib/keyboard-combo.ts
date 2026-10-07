@@ -87,12 +87,14 @@ const CODE_KEYS: Record<string, string> = {
   Semicolon: ';', Quote: '\'', Comma: ',', Period: '.', Slash: '/', Backquote: '`',
 }
 
+// The digit row types a different character with Shift on most layouts (and
+// AZERTY needs Shift for the digit itself), so it is read as its digit.
 // macOS applies Option to `key` even while Command is held (Option+1 is `¡`,
 // Option+N is a dead key), so Command+Option combos are read from the physical key.
 export function shortcutKeyFromEvent(event: KeyboardEventLike, isMac: boolean): string {
+  if (event.code && /^Digit\d$/.test(event.code)) return event.code.slice(5)
   if (!isMac || !event.metaKey || !event.altKey || !event.code) return event.key
   if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase()
-  if (/^Digit\d$/.test(event.code)) return event.code.slice(5)
   return CODE_KEYS[event.code] ?? event.key
 }
 

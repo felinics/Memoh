@@ -137,6 +137,13 @@ describe('keyComboFromEvent', () => {
       .toEqual({ mod: false, alt: true, shift: false, key: 'ArrowLeft' })
   })
 
+  it('records the digit row by its digit when Shift changes the character', () => {
+    expect(keyComboFromEvent({ key: '!', code: 'Digit1', ctrlKey: false, metaKey: false, altKey: true, shiftKey: true }, false))
+      .toEqual({ mod: false, alt: true, shift: true, key: '1' })
+    expect(keyComboFromEvent({ key: '§', code: 'Digit3', ctrlKey: false, metaKey: false, altKey: true, shiftKey: true }, false))
+      .toEqual({ mod: false, alt: true, shift: true, key: '3' })
+  })
+
   it('keeps the produced character for Ctrl+Alt outside macOS', () => {
     expect(keyComboFromEvent({ key: 'ń', code: 'KeyN', ctrlKey: true, metaKey: false, altKey: true, shiftKey: false }, false))
       .toEqual({ mod: true, alt: true, shift: false, key: 'ń' })

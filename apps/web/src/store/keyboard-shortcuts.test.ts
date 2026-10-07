@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useKeyboardShortcutsStore } from './keyboard-shortcuts'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
@@ -9,6 +9,11 @@ beforeEach(() => {
   localStorage.clear()
   setActivePinia(createPinia())
 })
+afterEach(() => { vi.unstubAllGlobals() })
+
+function onPlatform(platform: string) {
+  vi.stubGlobal('navigator', { platform, userAgent: '' })
+}
 
 describe('useKeyboardShortcutsStore', () => {
   it('returns the default table when no overrides exist', () => {
@@ -16,6 +21,16 @@ describe('useKeyboardShortcutsStore', () => {
     const save = store.effectiveBindings.find(b => b.command === appKeyboardCommands.saveActiveFile)
     expect(save).toMatchObject({ key: 's', mod: true })
     expect(store.isOverridden(appKeyboardCommands.saveActiveFile)).toBe(false)
+  })
+
+  it.each([
+    ['MacIntel', { mod: true, alt: true, shift: false, key: 'n' }],
+    ['Win32', { mod: false, alt: true, shift: true, key: 'n' }],
+    ['Linux x86_64', { mod: false, alt: true, shift: true, key: 'n' }],
+  ])('resolves the default chord for %s', (platform, combo) => {
+    onPlatform(platform)
+    const store = useKeyboardShortcutsStore()
+    expect(store.getEffectiveCombo(appKeyboardCommands.newChatSession)).toEqual(combo)
   })
 
   it('overrides a binding key and reports it as overridden', () => {

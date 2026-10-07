@@ -24,21 +24,23 @@ export type KeyboardPlatform = 'mac' | 'win' | 'linux'
  */
 export type KeyboardScope = 'global' | 'workspace' | 'mediaLightbox'
 
-export interface KeyboardBinding {
-  command: AppKeyboardCommand
-  /**
-   * Default key. `mod`-based bindings that use the same key on every platform
-   * only need this. Use per-platform overrides only when a shortcut genuinely
-   * diverges.
-   */
+export interface KeyChord {
   key: string
-  mac?: string
-  win?: string
-  linux?: string
   /** Command on macOS, Ctrl on Windows/Linux. Resolved per platform, not "meta or ctrl". */
   mod?: boolean
   alt?: boolean
   shift?: boolean
+}
+
+export interface KeyboardBinding extends KeyChord {
+  command: AppKeyboardCommand
+  /**
+   * The base chord applies on every platform that does not declare its own.
+   * A platform chord replaces the whole base chord, modifiers included.
+   */
+  mac?: KeyChord
+  win?: KeyChord
+  linux?: KeyChord
   repeat?: boolean
   desktop?: DesktopDelivery
   browser: BrowserBehavior
@@ -89,8 +91,9 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.newChatSession,
     key: 'n',
-    mod: true,
     alt: true,
+    shift: true,
+    mac: { key: 'n', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'newChatSession',
@@ -98,8 +101,9 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.focusChatInput,
     key: 'Enter',
-    mod: true,
     alt: true,
+    shift: true,
+    mac: { key: 'Enter', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'focusChatInput',
@@ -107,8 +111,9 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.showSessions,
     key: '1',
-    mod: true,
     alt: true,
+    shift: true,
+    mac: { key: '1', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSessions',
@@ -116,8 +121,9 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.showFiles,
     key: '2',
-    mod: true,
     alt: true,
+    shift: true,
+    mac: { key: '2', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showFiles',
@@ -125,8 +131,9 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.showSchedule,
     key: '3',
-    mod: true,
     alt: true,
+    shift: true,
+    mac: { key: '3', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSchedule',
@@ -134,17 +141,19 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.showSupermarket,
     key: '4',
-    mod: true,
     alt: true,
+    shift: true,
+    mac: { key: '4', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'showSupermarket',
   },
   {
     command: appKeyboardCommands.nextWorkspaceTab,
-    key: ']',
-    mod: true,
+    key: 'PageDown',
     alt: true,
+    shift: true,
+    mac: { key: ']', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'nextWorkspaceTab',
@@ -152,9 +161,10 @@ export const keyboardBindings: KeyboardBinding[] = [
   },
   {
     command: appKeyboardCommands.previousWorkspaceTab,
-    key: '[',
-    mod: true,
+    key: 'PageUp',
     alt: true,
+    shift: true,
+    mac: { key: '[', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'previousWorkspaceTab',
@@ -162,18 +172,20 @@ export const keyboardBindings: KeyboardBinding[] = [
   },
   {
     command: appKeyboardCommands.splitWorkspaceRight,
-    key: '.',
-    mod: true,
+    key: 'r',
     alt: true,
+    shift: true,
+    mac: { key: '.', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'splitWorkspaceRight',
   },
   {
     command: appKeyboardCommands.splitWorkspaceBelow,
-    key: ',',
-    mod: true,
+    key: 'b',
     alt: true,
+    shift: true,
+    mac: { key: ',', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'splitWorkspaceBelow',
@@ -181,8 +193,9 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.newTerminal,
     key: 'x',
-    mod: true,
     alt: true,
+    shift: true,
+    mac: { key: 'x', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'newTerminal',
@@ -190,8 +203,9 @@ export const keyboardBindings: KeyboardBinding[] = [
   {
     command: appKeyboardCommands.newBrowser,
     key: 'o',
-    mod: true,
     alt: true,
+    shift: true,
+    mac: { key: 'o', mod: true, alt: true },
     browser: 'intercept',
     scope: 'workspace',
     i18nKey: 'newBrowser',
@@ -236,19 +250,23 @@ export const RESERVED_APP_MENU_COMBOS = [
 
 export const TEXT_EDITING_COMBOS = ['Mod+c', 'Mod+v', 'Mod+x', 'Mod+z', 'Mod+Shift+z', 'Mod+a']
 
-/** The effective key for a platform: a per-platform override, else the base key. */
-export function resolveBindingKey(
-  binding: { key: string; mac?: string; win?: string; linux?: string },
-  platform: KeyboardPlatform,
-): string {
-  return binding[platform] ?? binding.key
+/** The binding with its chord for a platform; the platform chords are dropped once applied. */
+export function resolveKeyboardBinding<T extends KeyChord & Partial<Record<KeyboardPlatform, KeyChord>>>(binding: T, platform: KeyboardPlatform): T {
+  const chord = binding[platform]
+  return {
+    ...binding,
+    ...(chord && { key: chord.key, mod: chord.mod, alt: chord.alt, shift: chord.shift }),
+    mac: undefined,
+    win: undefined,
+    linux: undefined,
+  }
 }
 
 /**
  * Best-effort platform detection for the keydown listener. Accepts a
  * navigator-like object for testability; defaults to the global navigator.
- * Only the mac vs non-mac distinction affects `mod`; win vs linux matters only
- * for bindings that declare divergent per-platform keys.
+ * The mac vs non-mac distinction decides `mod`; win and linux differ only where
+ * a binding declares a platform chord.
  */
 export function detectPlatform(
   navigatorLike: { platform?: string; userAgent?: string } | undefined =

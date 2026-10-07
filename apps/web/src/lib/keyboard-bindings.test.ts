@@ -8,7 +8,7 @@ import {
   toElectronAccelerator,
   acceleratorForCommand,
   selectWebBindings,
-  resolveBindingKey,
+  resolveKeyboardBinding,
   detectPlatform,
   RESERVED_BROWSER_COMBOS,
   type KeyboardBinding,
@@ -81,26 +81,42 @@ describe('selectWebBindings', () => {
   })
 })
 
-describe('resolveBindingKey', () => {
-  const base = { command: appKeyboardCommands.saveActiveFile, key: 's' }
+describe('resolveKeyboardBinding', () => {
+  const base = { command: appKeyboardCommands.saveActiveFile, key: 's', mod: true }
 
-  it('returns the base key when no per-platform override is declared', () => {
-    expect(resolveBindingKey(base, 'mac')).toBe('s')
-    expect(resolveBindingKey(base, 'win')).toBe('s')
-    expect(resolveBindingKey(base, 'linux')).toBe('s')
+  it('keeps the base chord when no platform diverges', () => {
+    for (const platform of ['mac', 'win', 'linux'] as const) {
+      expect(resolveKeyboardBinding(base, platform)).toMatchObject({ key: 's', mod: true })
+    }
   })
 
-  it('returns the platform-specific override when declared', () => {
-    const binding = { key: 'w', mac: 'w', win: 'F4', linux: 'w' }
-    expect(resolveBindingKey(binding, 'mac')).toBe('w')
-    expect(resolveBindingKey(binding, 'win')).toBe('F4')
-    expect(resolveBindingKey(binding, 'linux')).toBe('w')
+  it('replaces the whole chord on a platform that declares its own', () => {
+    const binding = { ...base, key: 'n', mod: undefined, alt: true, shift: true, mac: { key: 'n', mod: true, alt: true } }
+    expect(resolveKeyboardBinding(binding, 'mac')).toMatchObject({ key: 'n', mod: true, alt: true, shift: undefined, mac: undefined })
+    expect(resolveKeyboardBinding(binding, 'win')).toMatchObject({ key: 'n', mod: undefined, alt: true, shift: true })
+  })
+})
+
+describe('platform defaults', () => {
+  it.each(['win', 'linux'] as const)('never uses Ctrl+Alt on %s, which Windows reports for AltGr', (platform) => {
+    const altGr = keyboardBindings.map(binding => resolveKeyboardBinding(binding, platform)).filter(binding => binding.mod && binding.alt)
+    expect(altGr).toEqual([])
   })
 
-  it('falls back to the base key when only some platforms are overridden', () => {
-    const binding = { key: 'k', win: 'j' }
-    expect(resolveBindingKey(binding, 'mac')).toBe('k')
-    expect(resolveBindingKey(binding, 'win')).toBe('j')
+  it.each(['win', 'linux'] as const)('leaves the file editor its own Alt+Shift keys on %s', (platform) => {
+    // Monaco 0.52 binds Shift+Alt+arrows (expand selection, copy line), A, F, I, period and F8.
+    const editorKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'a', 'f', 'i', '.', 'F8']
+    const taken = keyboardBindings.map(binding => resolveKeyboardBinding(binding, platform))
+      .filter(binding => binding.alt && binding.shift && !binding.mod && editorKeys.includes(binding.key))
+    expect(taken).toEqual([])
+  })
+
+  it('keeps the workspace defaults on Command+Option on macOS', () => {
+    const workbench = keyboardBindings.filter(binding => binding.alt && binding.shift)
+    expect(workbench).toHaveLength(12)
+    for (const binding of workbench) {
+      expect(resolveKeyboardBinding(binding, 'mac'), binding.command).toMatchObject({ mod: true, alt: true, shift: undefined })
+    }
   })
 })
 
@@ -122,7 +138,7 @@ describe('detectPlatform', () => {
   })
 })
 
-describe('menu bindings do not use per-platform key overrides', () => {
+describe('menu bindings do not use per-platform chords', () => {
   // toElectronAccelerator emits CmdOrCtrl+<base key>; Electron maps the mod per
   // platform natively. A menu binding with divergent per-platform keys would not
   // be reflected in that single accelerator, so it is disallowed (flagged here

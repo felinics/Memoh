@@ -1,5 +1,5 @@
 import type { AppKeyboardCommand, KeyboardCommandRegistry } from './keyboard-commands'
-import { detectPlatform, resolveBindingKey, type KeyboardPlatform } from './keyboard-bindings'
+import { detectPlatform, type KeyChord, type KeyboardPlatform } from './keyboard-bindings'
 import { shortcutKeyFromEvent } from './keyboard-combo'
 
 export interface BrowserKeyboardShortcutEvent {
@@ -18,15 +18,11 @@ export interface BrowserKeyboardShortcutEvent {
 }
 
 /** Matching-relevant subset of a KeyboardBinding. */
-export interface BrowserKeyboardShortcutBinding {
+export interface BrowserKeyboardShortcutBinding extends KeyChord {
   command: AppKeyboardCommand
-  key: string
-  mac?: string
-  win?: string
-  linux?: string
-  mod?: boolean
-  alt?: boolean
-  shift?: boolean
+  mac?: KeyChord
+  win?: KeyChord
+  linux?: KeyChord
   repeat?: boolean
 }
 
@@ -58,11 +54,12 @@ function bindingMatchesEvent(
   event: BrowserKeyboardShortcutEvent,
   platform: KeyboardPlatform,
 ): boolean {
-  const key = normalizeKey(resolveBindingKey(binding, platform))
+  const chord = binding[platform] ?? binding
+  const key = normalizeKey(chord.key)
   return (normalizeKey(event.key) === key || normalizeKey(shortcutKeyFromEvent(event, platform === 'mac')) === key)
-    && modMatches(event, binding.mod, platform === 'mac')
-    && modifierMatches(event.altKey, binding.alt)
-    && modifierMatches(event.shiftKey, binding.shift)
+    && modMatches(event, chord.mod, platform === 'mac')
+    && modifierMatches(event.altKey, chord.alt)
+    && modifierMatches(event.shiftKey, chord.shift)
 }
 
 /**
