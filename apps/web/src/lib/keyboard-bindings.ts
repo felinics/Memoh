@@ -252,12 +252,22 @@ export const keyboardBindings: KeyboardBinding[] = [
  */
 export const RESERVED_BROWSER_COMBOS = new Set<string>(['w', 'q', 't', 'n'])
 
-export const RESERVED_APP_MENU_COMBOS = [
-  'Mod+r', 'Mod+Shift+r', 'Mod+m', 'Mod+h', 'Mod+Alt+h', 'Mod+0',
-  'Mod+=', 'Mod+Plus', 'Mod+Shift+Plus', 'Mod+-', 'Mod+Shift+i', 'Mod+Alt+i',
-]
+const SHARED_APP_MENU_COMBOS = ['Mod+r', 'Mod+Shift+r', 'Mod+m', 'Mod+0', 'Mod+=', 'Mod+Plus', 'Mod+Shift+Plus', 'Mod+-']
 
-export const TEXT_EDITING_COMBOS = ['Mod+c', 'Mod+v', 'Mod+x', 'Mod+z', 'Mod+Shift+z', 'Mod+a']
+/** Accelerators of the desktop app menu roles (Electron 42 menu-item-roles) on each platform. */
+export const RESERVED_APP_MENU_COMBOS: Record<KeyboardPlatform, string[]> = {
+  mac: [...SHARED_APP_MENU_COMBOS, 'Mod+h', 'Mod+Alt+h', 'Mod+Alt+i'],
+  win: [...SHARED_APP_MENU_COMBOS, 'Mod+Shift+i', 'F11'],
+  linux: [...SHARED_APP_MENU_COMBOS, 'Mod+Shift+i', 'F11'],
+}
+
+const SHARED_TEXT_EDITING_COMBOS = ['Mod+c', 'Mod+v', 'Mod+x', 'Mod+z', 'Mod+Shift+z', 'Mod+a']
+
+export const TEXT_EDITING_COMBOS: Record<KeyboardPlatform, string[]> = {
+  mac: SHARED_TEXT_EDITING_COMBOS,
+  win: [...SHARED_TEXT_EDITING_COMBOS, 'Mod+y'],
+  linux: SHARED_TEXT_EDITING_COMBOS,
+}
 
 /** The binding with its chord for a platform; the platform chords are dropped once applied. */
 export function resolveKeyboardBinding<T extends KeyChord & Partial<Record<KeyboardPlatform, KeyChord>>>(binding: T, platform: KeyboardPlatform): T {

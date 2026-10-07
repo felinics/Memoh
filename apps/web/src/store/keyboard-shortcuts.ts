@@ -26,8 +26,6 @@ export interface ConflictResult {
   collidesWith?: AppKeyboardCommand
 }
 
-const appMenuCombos = RESERVED_APP_MENU_COMBOS.map(combo => parseKeyCombo(combo)!)
-const textEditingCombos = TEXT_EDITING_COMBOS.map(combo => parseKeyCombo(combo)!)
 
 function isReservedCombo(combo: ParsedKeyCombo): boolean {
   return combo.mod && !combo.alt && !combo.shift && RESERVED_BROWSER_COMBOS.has(combo.key.toLowerCase())
@@ -55,6 +53,8 @@ function applyOverride(binding: KeyboardBinding, override: string | undefined): 
 
 export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () => {
   const platform = detectPlatform()
+  const appMenuCombos = RESERVED_APP_MENU_COMBOS[platform].map(combo => parseKeyCombo(combo)!)
+  const textEditingCombos = TEXT_EDITING_COMBOS[platform].map(combo => parseKeyCombo(combo)!)
   const overrides = useStorage<Record<string, string>>('keyboard-shortcuts-overrides', {}, undefined, {
     mergeDefaults: true,
   })

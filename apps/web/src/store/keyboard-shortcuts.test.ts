@@ -73,15 +73,29 @@ describe('useKeyboardShortcutsStore', () => {
     expect(store.isOverridden(appKeyboardCommands.newTerminal)).toBe(false)
   })
 
-  it('blocks combos owned by the desktop app menu', () => {
+  it.each([
+    ['MacIntel', ['Mod+h', 'Mod+Alt+h', 'Mod+Alt+i'], ['Mod+Shift+i', 'Mod+y']],
+    ['Win32', ['Mod+Shift+i', 'F11'], ['Mod+h', 'Mod+Alt+h', 'Mod+Alt+i']],
+    ['Linux x86_64', ['Mod+Shift+i', 'F11'], ['Mod+h', 'Mod+Alt+h', 'Mod+Alt+i', 'Mod+y']],
+  ])('on %s blocks only the combos its desktop app menu owns', (platform, owned, free) => {
+    onPlatform(platform)
     const store = useKeyboardShortcutsStore()
-    for (const combo of ['Mod+r', 'Mod+Shift+r', 'Mod+m', 'Mod+h', 'Mod+Alt+h', 'Mod+0', 'Mod+=', 'Mod+Plus', 'Mod+Shift+Plus', 'Mod+-', 'Mod+Shift+i', 'Mod+Alt+i']) {
-      expect(store.setBinding(appKeyboardCommands.newTerminal, combo).kind, combo).toBe('reserved')
+    for (const combo of ['Mod+r', 'Mod+Shift+r', 'Mod+m', 'Mod+0', 'Mod+=', 'Mod+Plus', 'Mod+Shift+Plus', 'Mod+-', ...owned]) {
+      expect(store.detectConflictFromString(appKeyboardCommands.newTerminal, combo).kind, combo).toBe('reserved')
     }
-    expect(store.isOverridden(appKeyboardCommands.newTerminal)).toBe(false)
+    expect(store.detectConflictFromString(appKeyboardCommands.mediaLightboxNext, 'F11').kind).toBe(owned.includes('F11') ? 'reserved' : 'none')
+    for (const combo of free) {
+      expect(store.detectConflictFromString(appKeyboardCommands.newTerminal, combo).kind, combo).toBe('none')
+    }
   })
 
-  it('ships defaults that pass the same checks as a user rebind', () => {
+  it('blocks Ctrl+Y on Windows, where it is redo', () => {
+    onPlatform('Win32')
+    expect(useKeyboardShortcutsStore().setBinding(appKeyboardCommands.newTerminal, 'Mod+y').kind).toBe('editing')
+  })
+
+  it.each(['MacIntel', 'Win32', 'Linux x86_64'])('ships %s defaults that pass the same checks as a user rebind', (platform) => {
+    onPlatform(platform)
     const store = useKeyboardShortcutsStore()
     for (const binding of store.effectiveBindings) {
       const expected = binding.browser === 'passthrough' ? 'reserved' : 'none'
