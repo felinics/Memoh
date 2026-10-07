@@ -67,13 +67,14 @@ function isShortcutCandidate(event: Omit<BrowserKeyboardShortcutEvent, 'preventD
   return !event.getModifierState?.('AltGraph') || (platform === 'mac' && event.metaKey)
 }
 
-/** Whether the dispatcher would consider this key for any of the bindings. */
-export function matchesKeyboardShortcut(
+/** The binding the dispatcher tries first for this key, if any. */
+export function findKeyboardShortcut<T extends BrowserKeyboardShortcutBinding>(
   event: Omit<BrowserKeyboardShortcutEvent, 'preventDefault'>,
-  bindings: BrowserKeyboardShortcutBinding[],
+  bindings: T[],
   platform: KeyboardPlatform,
-): boolean {
-  return isShortcutCandidate(event, platform) && bindings.some(binding => bindingMatchesEvent(binding, event, platform))
+): T | undefined {
+  if (!isShortcutCandidate(event, platform)) return undefined
+  return bindings.find(binding => bindingMatchesEvent(binding, event, platform))
 }
 
 /**

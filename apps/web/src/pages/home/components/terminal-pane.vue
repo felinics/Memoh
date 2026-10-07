@@ -40,8 +40,9 @@ import {
   writeTerminalSnapshot,
 } from '@/composables/useTerminalCache'
 import { sdkAuthQuery, sdkWebSocketUrl } from '@/lib/api-client'
-import { matchesKeyboardShortcut } from '@/lib/browser-keyboard-shortcuts'
+import { findKeyboardShortcut } from '@/lib/browser-keyboard-shortcuts'
 import { detectPlatform } from '@/lib/keyboard-bindings'
+import { selectActiveKeyboardBindings } from '@/lib/keyboard-context'
 import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
 import { useSettingsStore } from '@/store/settings'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
@@ -223,13 +224,10 @@ onMounted(() => {
   term.loadAddon(fa)
   term.loadAddon(sa)
   term.open(containerRef.value)
-  // Navigation shortcuts leave the shell so focus can get out of the terminal;
-  // every other key, workspace shortcuts included, still reaches the shell.
-  term.attachCustomKeyEventHandler(event => !matchesKeyboardShortcut(
-    event,
-    shortcutsStore.effectiveBindings.filter(binding => binding.escapesTerminal),
-    platform,
-  ))
+  // Navigation shortcuts leave the terminal so focus can get out of it. Every
+  // other key goes to the terminal first; only keys it does not send to the
+  // shell (Ctrl+Shift+digit, Command combos on macOS) reach the workbench.
+  term.attachCustomKeyEventHandler(event => !findKeyboardShortcut(event, selectActiveKeyboardBindings(shortcutsStore.effectiveBindings), platform)?.escapesTerminal)
 
   // Make container-local URLs in command output clickable: clicking opens the
   // workspace browser panel (falling back to an OS tab when it is unavailable),

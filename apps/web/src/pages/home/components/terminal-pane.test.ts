@@ -4,6 +4,7 @@ import { createApp, nextTick, type App } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { connectBrowserKeyboardShortcutsLive } from '@/lib/browser-keyboard-shortcuts'
 import { appKeyboardCommands, createKeyboardCommandRegistry, type AppKeyboardCommand } from '@/lib/keyboard-commands'
+import { selectActiveKeyboardBindings } from '@/lib/keyboard-context'
 import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
 
 vi.mock('vue-i18n', async importOriginal => ({
@@ -50,7 +51,7 @@ async function mountTerminal() {
   const ran: AppKeyboardCommand[] = []
   for (const command of Object.values(appKeyboardCommands)) registry.register(command, () => { ran.push(command); return true })
   const shortcuts = useKeyboardShortcutsStore()
-  disconnect = connectBrowserKeyboardShortcutsLive(registry, () => shortcuts.effectiveBindings)
+  disconnect = connectBrowserKeyboardShortcutsLive(registry, () => selectActiveKeyboardBindings(shortcuts.effectiveBindings))
   const TerminalPane = (await import('./terminal-pane.vue')).default
   const root = document.createElement('div')
   document.body.append(root)
@@ -94,5 +95,29 @@ describe('terminal keyboard ownership', () => {
     press({ key: '@', code: 'Digit2', keyCode: 50, altKey: true, shiftKey: true })
     expect(ran).toEqual([appKeyboardCommands.showFiles])
     expect(sent).toEqual(['\x1b@'])
+  })
+
+  it('keeps a key for the shell when the binding that owns it does not leave the terminal', async () => {
+    localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.newBrowser]: 'Alt+Shift+!' }))
+    const { ran, press } = await mountTerminal()
+    press({ key: '!', code: 'Digit1', keyCode: 49, altKey: true, shiftKey: true })
+    expect(ran).toEqual([])
+    expect(sent).toEqual(['\x1b!'])
+  })
+
+  it('ignores a closed lightbox that shares the navigation key', async () => {
+    localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.mediaLightboxPrev]: 'Alt+Shift+PageUp' }))
+    const { ran, press } = await mountTerminal()
+    press({ key: 'PageUp', keyCode: 33, altKey: true, shiftKey: true })
+    expect(ran).toEqual([appKeyboardCommands.previousWorkspaceTab])
+    expect(sent).toEqual([])
+  })
+
+  it('lets the workbench have a shortcut the terminal does not send to the shell', async () => {
+    localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.newBrowser]: 'Mod+Shift+1' }))
+    const { ran, press } = await mountTerminal()
+    press({ key: '!', code: 'Digit1', keyCode: 49, ctrlKey: true, shiftKey: true })
+    expect(sent).toEqual([])
+    expect(ran).toEqual([appKeyboardCommands.newBrowser])
   })
 })
