@@ -688,7 +688,8 @@
         "mediaLightbox": "Media Lightbox"
       },
       "row": {
-        "reset": "Reset to default"
+        "reset": "Reset to default",
+        "ignored": "Saved shortcut {combo} isn't available here, so the default is used."
       },
       "dialog": {
         "title": "Edit shortcut",

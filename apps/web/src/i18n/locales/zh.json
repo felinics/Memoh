@@ -684,7 +684,8 @@
         "mediaLightbox": "媒体灯箱"
       },
       "row": {
-        "reset": "恢复默认"
+        "reset": "恢复默认",
+        "ignored": "已保存的 {combo} 在这里不可用，已改用默认快捷键。"
       },
       "dialog": {
         "title": "修改快捷键",

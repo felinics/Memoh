@@ -4,6 +4,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useKeyboardShortcutsStore } from './keyboard-shortcuts'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { comboFromBinding } from '@/lib/keyboard-combo'
+import { handleBrowserKeyboardShortcut } from '@/lib/browser-keyboard-shortcuts'
+import { detectPlatform, keyboardBindings, resolveKeyboardBinding } from '@/lib/keyboard-bindings'
 
 beforeEach(() => {
   localStorage.clear()
@@ -233,5 +235,62 @@ describe('useKeyboardShortcutsStore', () => {
     const store = useKeyboardShortcutsStore()
     const save = store.effectiveBindings.find(b => b.command === appKeyboardCommands.saveActiveFile)
     expect(save).toMatchObject({ key: 's', mod: true })
+  })
+
+  describe('overrides saved before the current checks', () => {
+    function press(store: ReturnType<typeof useKeyboardShortcutsStore>, init: KeyboardEventInit) {
+      const dispatch = vi.fn(() => true)
+      const event = new KeyboardEvent('keydown', { cancelable: true, ...init })
+      handleBrowserKeyboardShortcut(event, { dispatch }, store.effectiveBindings, 'linux')
+      return { dispatch, event }
+    }
+
+    it('falls back to the default instead of taking over copy, paste and undo', () => {
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({
+        [appKeyboardCommands.newTerminal]: 'Mod+c',
+        [appKeyboardCommands.newBrowser]: 'Mod+v',
+        [appKeyboardCommands.toggleSidebar]: 'Mod+z',
+        [appKeyboardCommands.showFiles]: 'Mod+Alt+Shift+F9',
+      }))
+      const store = useKeyboardShortcutsStore()
+      for (const key of ['c', 'v', 'z']) {
+        const { dispatch, event } = press(store, { key, ctrlKey: true })
+        expect(dispatch, key).not.toHaveBeenCalled()
+        expect(event.defaultPrevented, key).toBe(false)
+      }
+      expect(press(store, { key: 'x', altKey: true, shiftKey: true }).dispatch).toHaveBeenCalledWith(appKeyboardCommands.newTerminal)
+      expect(press(store, { key: 'F9', ctrlKey: true, altKey: true, shiftKey: true }).dispatch).toHaveBeenCalledWith(appKeyboardCommands.showFiles)
+      expect(store.ignoredOverrides).toEqual({
+        [appKeyboardCommands.newTerminal]: 'editing',
+        [appKeyboardCommands.newBrowser]: 'editing',
+        [appKeyboardCommands.toggleSidebar]: 'editing',
+      })
+      expect(store.isOverridden(appKeyboardCommands.newTerminal)).toBe(true)
+      store.resetBinding(appKeyboardCommands.newTerminal)
+      expect(store.ignoredOverrides[appKeyboardCommands.newTerminal]).toBeUndefined()
+    })
+
+    it.each([
+      ['Win32', appKeyboardCommands.newTerminal, 'Mod+y', 'editing'],
+      ['Linux x86_64', appKeyboardCommands.mediaLightboxNext, 'F11', 'reserved'],
+      ['Linux x86_64', appKeyboardCommands.openSettings, 'Mod+r', 'reserved'],
+      ['Linux x86_64', appKeyboardCommands.toggleSidebar, 'b', 'no-modifier'],
+      ['Linux x86_64', appKeyboardCommands.saveActiveFile, 'Mod+Mod', 'invalid'],
+    ])('on %s ignores %s saved as %s (%s)', (platform, command, combo, kind) => {
+      onPlatform(platform)
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [command]: combo }))
+      const store = useKeyboardShortcutsStore()
+      const fallback = store.effectiveBindings.find(binding => binding.command === command)!
+      const shipped = keyboardBindings.find(binding => binding.command === command)!
+      expect(comboFromBinding(fallback)).toEqual(comboFromBinding(resolveKeyboardBinding(shipped, detectPlatform())))
+      expect(store.ignoredOverrides).toEqual({ [command]: kind })
+    })
+
+    it('keeps an override that restates the default, even on a browser-owned combo', () => {
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.closeCurrentWorkspaceTab]: 'Mod+w' }))
+      const store = useKeyboardShortcutsStore()
+      expect(store.ignoredOverrides).toEqual({})
+      expect(store.effectiveBindings.find(binding => binding.command === appKeyboardCommands.closeCurrentWorkspaceTab)?.browser).toBe('passthrough')
+    })
   })
 })
