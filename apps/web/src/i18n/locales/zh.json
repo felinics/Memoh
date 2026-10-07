@@ -685,7 +685,8 @@
       },
       "row": {
         "reset": "恢复默认",
-        "ignored": "已保存的 {combo} 在这里不可用，已改用默认快捷键。"
+        "ignored": "已保存的 {combo} 在这里不可用，已改用默认快捷键。",
+        "shadowed": "{combo} 已分配给“{command}”，这条快捷键暂不生效，请另选组合。"
       },
       "dialog": {
         "title": "修改快捷键",
@@ -696,6 +697,7 @@
         "menuPauseFailed": "无法暂停应用菜单快捷键，录制时它们仍可能被触发。",
         "menuRestoreFailed": "无法恢复应用菜单快捷键，如果它们不再响应，请重新加载窗口。",
         "noModifierError": "该快捷键必须包含 Cmd/Ctrl 或 Alt 修饰键，否则会在普通输入时被触发。",
+        "typingError": "在 macOS 上，Option 加字母或符号会输入字符，请加上 Command。",
         "sameScopeError": "这个组合已用于“{command}”。",
         "crossScopeWarn": "也被 {command} 使用（仅在其作用域内生效）。"
       },

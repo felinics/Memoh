@@ -120,3 +120,43 @@ it('reports a failed menu shortcut pause and a failed restore with their own mes
   await vi.waitFor(() => expect(toastError).toHaveBeenLastCalledWith(i18n.global.t('settings.keyboard.dialog.menuRestoreFailed')))
   expect(i18n.global.t('settings.keyboard.dialog.menuPauseFailed')).not.toBe('settings.keyboard.dialog.menuPauseFailed')
 })
+
+it('blocks a digit-row combo whose typed character is already bound', async () => {
+  localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.newBrowser]: 'Mod+Shift+!' }))
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp({ setup: () => () => h(KeyCaptureDialog, {
+    open: true, command: appKeyboardCommands.newTerminal, i18nKey: 'newTerminal',
+  }) }).use(createPinia()).use(i18n)
+  app.mount(host)
+  await nextTick()
+  const save = () => [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Save')!
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: '!', code: 'Digit1', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))
+  await nextTick()
+  expect(document.body.textContent).toContain(i18n.global.t('settings.keyboard.dialog.sameScopeError', { command: 'New browser' }))
+  expect(save().disabled).toBe(true)
+  localStorage.removeItem('keyboard-shortcuts-overrides')
+})
+
+it('lets a same-scope conflict on the typed character outweigh a cross-scope one on the digit', async () => {
+  localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({
+    [appKeyboardCommands.mediaLightboxPrev]: 'Mod+Shift+1',
+    [appKeyboardCommands.newBrowser]: 'Mod+Shift+!',
+  }))
+  host = document.createElement('div')
+  document.body.append(host)
+  const pinia = createPinia()
+  app = createApp({ setup: () => () => h(KeyCaptureDialog, {
+    open: true, command: appKeyboardCommands.newTerminal, i18nKey: 'newTerminal',
+  }) }).use(pinia).use(i18n)
+  app.mount(host)
+  await nextTick()
+  const save = () => [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Save')!
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: '!', code: 'Digit1', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }))
+  await nextTick()
+  expect(document.body.textContent).toContain(i18n.global.t('settings.keyboard.dialog.sameScopeError', { command: 'New browser' }))
+  expect(save().disabled).toBe(true)
+  save().click()
+  expect(JSON.parse(localStorage.getItem('keyboard-shortcuts-overrides')!)[appKeyboardCommands.newTerminal]).toBeUndefined()
+  localStorage.removeItem('keyboard-shortcuts-overrides')
+})

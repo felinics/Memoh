@@ -21,7 +21,7 @@ const grouped = computed(() => {
     workspace: [],
     mediaLightbox: [],
   }
-  for (const binding of store.effectiveBindings) {
+  for (const binding of store.allBindings) {
     result[binding.scope].push(binding)
   }
   return Object.entries(result).filter(([, bindings]) => bindings.length).map(([scope, bindings]) => ({ scope, bindings }))

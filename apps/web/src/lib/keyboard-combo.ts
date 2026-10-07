@@ -115,6 +115,14 @@ export function keyComboFromEvent(event: KeyboardEventLike, isMac: boolean): Par
   }
 }
 
+/** Every combo the dispatcher matches for this event: the recorded one first, then the typed character when it differs. */
+export function keyCombosFromEvent(event: KeyboardEventLike, isMac: boolean): ParsedKeyCombo[] {
+  const combo = keyComboFromEvent(event, isMac)
+  if (!combo) return []
+  const typed = canonicalKey(event.key)
+  return typed === combo.key ? [combo] : [combo, { ...combo, key: typed }]
+}
+
 export function comboFromBinding(binding: { key: string; mod?: boolean; alt?: boolean; shift?: boolean }): ParsedKeyCombo {
   return {
     mod: binding.mod ?? false,

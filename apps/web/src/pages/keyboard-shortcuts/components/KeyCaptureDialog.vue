@@ -18,7 +18,7 @@ import {
   displayKeyCombo,
   formatKeyCombo,
   isModifierKey,
-  keyComboFromEvent,
+  keyCombosFromEvent,
   type ParsedKeyCombo,
 } from '@/lib/keyboard-combo'
 import { detectPlatform, keyboardBindings } from '@/lib/keyboard-bindings'
@@ -45,6 +45,7 @@ const platform = detectPlatform()
 const isMac = platform === 'mac'
 
 const captured = ref<ParsedKeyCombo | null>(null)
+const typedCombo = ref<ParsedKeyCombo | null>(null)
 const active = ref(true)
 const windowBridge = inject(DesktopWindowKey, undefined)
 
@@ -56,7 +57,10 @@ function setCapture(open: boolean) {
 
 watch(() => props.open, (isOpen) => {
   setCapture(isOpen && active.value)
-  if (!isOpen) captured.value = null
+  if (!isOpen) {
+    captured.value = null
+    typedCombo.value = null
+  }
 }, { immediate: true })
 onScopeDispose(() => setCapture(false))
 onActivated(() => {
@@ -83,13 +87,21 @@ useEventListener(window, 'keydown', (event: KeyboardEvent) => {
   if ((event.key === 'Enter' || event.key === ' ') && event.target instanceof HTMLButtonElement) return
   event.preventDefault()
   event.stopImmediatePropagation()
-  const combo = keyComboFromEvent(event, isMac)
-  if (combo) captured.value = combo
+  const combos = keyCombosFromEvent(event, isMac)
+  if (!combos.length) return
+  captured.value = combos[0]!
+  typedCombo.value = combos[1] ?? null
 }, { capture: true })
 
+// The dispatcher also matches the typed character (Shift+1 types ! on a US
+// layout), so a binding saved under that character takes the same key.
 const conflict = computed<ConflictResult>(() => {
   if (!props.command || !captured.value) return { kind: 'none' }
-  return store.detectConflict(props.command, captured.value)
+  const command = props.command
+  const results = [captured.value, typedCombo.value].filter(combo => combo !== null).map(combo => store.detectConflict(command, combo))
+  return results.find(result => result.kind !== 'none' && result.kind !== 'cross-scope')
+    ?? results.find(result => result.kind === 'cross-scope')
+    ?? { kind: 'none' }
 })
 
 const tokens = computed(() => captured.value ? displayKeyCombo(captured.value, platform) : [])
@@ -105,7 +117,7 @@ const collidedLabel = computed(() => {
 const isBlockingConflict = computed(() => conflict.value.kind !== 'none' && conflict.value.kind !== 'cross-scope')
 
 function handleSave() {
-  if (!props.command || !captured.value) return
+  if (!props.command || !captured.value || isBlockingConflict.value) return
   const result = store.setBinding(props.command, formatKeyCombo(captured.value))
   if (result.kind !== 'none' && result.kind !== 'cross-scope') return
   emit('update:open', false)

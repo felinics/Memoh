@@ -261,9 +261,9 @@ describe('useKeyboardShortcutsStore', () => {
       expect(press(store, { key: 'x', altKey: true, shiftKey: true }).dispatch).toHaveBeenCalledWith(appKeyboardCommands.newTerminal)
       expect(press(store, { key: 'F9', ctrlKey: true, altKey: true, shiftKey: true }).dispatch).toHaveBeenCalledWith(appKeyboardCommands.showFiles)
       expect(store.ignoredOverrides).toEqual({
-        [appKeyboardCommands.newTerminal]: 'editing',
-        [appKeyboardCommands.newBrowser]: 'editing',
-        [appKeyboardCommands.toggleSidebar]: 'editing',
+        [appKeyboardCommands.newTerminal]: { kind: 'editing' },
+        [appKeyboardCommands.newBrowser]: { kind: 'editing' },
+        [appKeyboardCommands.toggleSidebar]: { kind: 'editing' },
       })
       expect(store.isOverridden(appKeyboardCommands.newTerminal)).toBe(true)
       store.resetBinding(appKeyboardCommands.newTerminal)
@@ -276,6 +276,8 @@ describe('useKeyboardShortcutsStore', () => {
       ['Linux x86_64', appKeyboardCommands.openSettings, 'Mod+r', 'reserved'],
       ['Linux x86_64', appKeyboardCommands.toggleSidebar, 'b', 'no-modifier'],
       ['Linux x86_64', appKeyboardCommands.saveActiveFile, 'Mod+Mod', 'invalid'],
+      ['MacIntel', appKeyboardCommands.newTerminal, 'Alt+å', 'typing'],
+      ['MacIntel', appKeyboardCommands.mediaLightboxNext, 'Alt+Dead', 'typing'],
     ])('on %s ignores %s saved as %s (%s)', (platform, command, combo, kind) => {
       onPlatform(platform)
       localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [command]: combo }))
@@ -283,7 +285,77 @@ describe('useKeyboardShortcutsStore', () => {
       const fallback = store.effectiveBindings.find(binding => binding.command === command)!
       const shipped = keyboardBindings.find(binding => binding.command === command)!
       expect(comboFromBinding(fallback)).toEqual(comboFromBinding(resolveKeyboardBinding(shipped, detectPlatform())))
-      expect(store.ignoredOverrides).toEqual({ [command]: kind })
+      expect(store.ignoredOverrides).toEqual({ [command]: { kind } })
+    })
+
+    it('keeps Option combos that type nothing or include Command on macOS', () => {
+      onPlatform('MacIntel')
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({
+        [appKeyboardCommands.mediaLightboxNext]: 'Alt+ArrowRight',
+        [appKeyboardCommands.newTerminal]: 'Mod+Alt+∫',
+      }))
+      const store = useKeyboardShortcutsStore()
+      expect(store.ignoredOverrides).toEqual({})
+    })
+
+    it('keeps a saved override that a new default now uses and turns that default off', () => {
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.newTerminal]: 'Alt+Shift+Enter' }))
+      const store = useKeyboardShortcutsStore()
+      const { dispatch } = press(store, { key: 'Enter', altKey: true, shiftKey: true })
+      expect(dispatch.mock.calls).toEqual([[appKeyboardCommands.newTerminal]])
+      expect(store.shadowedDefaults).toEqual({ [appKeyboardCommands.focusChatInput]: appKeyboardCommands.newTerminal })
+      expect(store.effectiveBindings.map(binding => binding.command)).not.toContain(appKeyboardCommands.focusChatInput)
+      expect(store.allBindings.map(binding => binding.command)).toContain(appKeyboardCommands.focusChatInput)
+
+      expect(store.setBinding(appKeyboardCommands.newTerminal, 'Mod+Alt+Shift+F9').kind).toBe('none')
+      expect(store.shadowedDefaults).toEqual({})
+      expect(press(store, { key: 'Enter', altKey: true, shiftKey: true }).dispatch.mock.calls).toEqual([[appKeyboardCommands.focusChatInput]])
+    })
+
+    it.each([
+      ['MacIntel', { [appKeyboardCommands.focusChatInput]: appKeyboardCommands.newTerminal }],
+      ['Linux x86_64', {}],
+    ])('resolves an override against the defaults of the platform it is read on (%s)', (platform, shadowed) => {
+      onPlatform(platform)
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.newTerminal]: 'Mod+Alt+Enter' }))
+      expect(useKeyboardShortcutsStore().shadowedDefaults).toEqual(shadowed)
+    })
+
+    it('lists every command in table order for settings, whatever is overridden', () => {
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.newTerminal]: 'Alt+Shift+Enter' }))
+      expect(useKeyboardShortcutsStore().allBindings.map(binding => binding.command)).toEqual(keyboardBindings.map(binding => binding.command))
+    })
+
+    it('ignores the later of two saved overrides on one combo', () => {
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({
+        [appKeyboardCommands.newBrowser]: 'Mod+Alt+F9',
+        [appKeyboardCommands.newTerminal]: 'Mod+Alt+F9',
+      }))
+      const store = useKeyboardShortcutsStore()
+      expect(store.ignoredOverrides).toEqual({ [appKeyboardCommands.newBrowser]: { kind: 'same-scope', collidesWith: appKeyboardCommands.newTerminal } })
+      expect(press(store, { key: 'F9', ctrlKey: true, altKey: true }).dispatch.mock.calls).toEqual([[appKeyboardCommands.newTerminal]])
+      expect(press(store, { key: 'O', altKey: true, shiftKey: true }).dispatch.mock.calls).toEqual([[appKeyboardCommands.newBrowser]])
+    })
+
+    it('counts an override that restates its default when two saved overrides share a combo', () => {
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({
+        [appKeyboardCommands.toggleSidebar]: 'Mod+b',
+        [appKeyboardCommands.newBrowser]: 'Mod+b',
+      }))
+      const store = useKeyboardShortcutsStore()
+      expect(store.ignoredOverrides).toEqual({ [appKeyboardCommands.newBrowser]: { kind: 'same-scope', collidesWith: appKeyboardCommands.toggleSidebar } })
+      expect(store.shadowedDefaults).toEqual({})
+      expect(press(store, { key: 'b', ctrlKey: true }).dispatch.mock.calls).toEqual([[appKeyboardCommands.toggleSidebar]])
+      store.resetBinding(appKeyboardCommands.toggleSidebar)
+      expect(store.ignoredOverrides).toEqual({})
+      expect(store.shadowedDefaults).toEqual({ [appKeyboardCommands.toggleSidebar]: appKeyboardCommands.newBrowser })
+      expect(press(store, { key: 'b', ctrlKey: true }).dispatch.mock.calls).toEqual([[appKeyboardCommands.newBrowser]])
+    })
+
+    it('lets an override saved as a shifted digit character win over the digit default', () => {
+      localStorage.setItem('keyboard-shortcuts-overrides', JSON.stringify({ [appKeyboardCommands.newBrowser]: 'Alt+Shift+!' }))
+      const store = useKeyboardShortcutsStore()
+      expect(press(store, { key: '!', code: 'Digit1', altKey: true, shiftKey: true }).dispatch.mock.calls).toEqual([[appKeyboardCommands.newBrowser]])
     })
 
     it('keeps an override that restates the default, even on a browser-owned combo', () => {
