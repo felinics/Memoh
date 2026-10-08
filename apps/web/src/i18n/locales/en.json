@@ -843,7 +843,6 @@
     "showLess": "Show less",
     "actions": {
       "copy": "Copy",
-      "copied": "Copied",
       "edit": "Edit",
       "share": "Share",
       "retry": "Try again",

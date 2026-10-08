@@ -843,7 +843,6 @@
     "showLess": "收起",
     "actions": {
       "copy": "复制",
-      "copied": "已复制",
       "edit": "编辑",
       "share": "分享",
       "retry": "重试",

@@ -827,7 +827,6 @@
     "thinkingDone": "思考完了",
     "actions": {
       "copy": "コピー",
-      "copied": "コピーされました",
       "edit": "編集",
       "share": "共有",
       "retry": "もう一度試す",
