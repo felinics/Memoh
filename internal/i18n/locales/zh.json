@@ -715,10 +715,15 @@
       "load_failed": "无法加载上下文生命周期诊断信息，请稍后重试。"
     },
     "external_runtime": {
-      "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
+      "auth_required": "Codex 账号未连接或登录已失效。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
       "session_resume_failed": "会话无法恢复，请重试或新开会话。",
-      "usage_limited": "外部 Agent 的额度已用完，请稍后再试。"
+      "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。",
+      "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
+      "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
+      "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
+      "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
+      "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。"
     },
     "app": {
       "not_found": "未找到该应用安装记录。",

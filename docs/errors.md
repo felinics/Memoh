@@ -165,9 +165,14 @@ that reports a provider's answer declares `dependency`, including a rejected
 key, an exhausted quota and a rate limit (429); a content
 moderation refusal would be the one `client` code. The codes an external
 agent runtime reports about its own failure declare `dependency` for the same
-reason. A code that some producers raise for this process's own failures,
-such as `external_runtime.unavailable`, declares nothing and is attributed by
-its chain. `workspace.unreachable` is one: the workspace bridge client marks
+reason. The ones where nothing failed and the user has to change something
+answer 4xx and stay `client`: an account that is not signed in
+(`external_runtime.auth_required`), a conversation that no longer fits the
+context window (`external_runtime.context_window_exceeded`) and a request the
+model service's policy refused (`external_runtime.request_blocked`). A code
+that some producers raise for this process's own failures, such as
+`external_runtime.unavailable`, declares nothing and is attributed by its
+chain. `workspace.unreachable` is one: the workspace bridge client marks
 an unreachable workspace runtime with `errs.WrapDependency`, and a failure to
 look up the target in this process stays `server`. A guard test in
 `internal/apperror` lists every declaration and fails when a code under
@@ -177,7 +182,7 @@ look up the target in this process stays `server`. A guard test in
 | --- | --- |
 | `agent.provider_auth_failed`, `agent.provider_permission_denied`, `agent.provider_quota_exhausted`, `agent.provider_rate_limited`, `agent.provider_overloaded`, `agent.provider_request_rejected`, `agent.provider_unreachable` | `dependency` |
 | `agent.response_interrupted`, `agent.response_timeout` | `dependency` |
-| `runtime_prompt_failed`, `external_runtime.session_resume_failed`, `external_runtime.usage_limited`, `acp.config_update_failed` | `dependency` |
+| `runtime_prompt_failed`, `external_runtime.session_resume_failed`, `external_runtime.usage_limited`, `external_runtime.rate_limited`, `external_runtime.overloaded`, `external_runtime.upstream_unreachable`, `acp.config_update_failed` | `dependency` |
 
 ## Attribution across an RPC
 

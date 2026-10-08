@@ -290,6 +290,9 @@ var declaredFaults = map[Code]Fault{
 	CodeExternalRuntimeSessionResumeFailed: FaultDependency,
 	CodeExternalRuntimeUsageLimited:        FaultDependency,
 	CodeACPConfigUpdateFailed:              FaultDependency,
+	CodeExternalRuntimeRateLimited:         FaultDependency,
+	CodeExternalRuntimeOverloaded:          FaultDependency,
+	CodeExternalRuntimeUpstreamUnreachable: FaultDependency,
 }
 
 // providerCodePrefixes name the codes a model provider's answer produces. A

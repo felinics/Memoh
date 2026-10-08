@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -134,7 +136,7 @@ func (c *conn) writeLine(payload any) error {
 	select {
 	case writeErr := <-done:
 		if writeErr != nil {
-			return errors.Join(ErrConnClosed, errs.WrapDependency(writeErr, ""))
+			return c.closedError(errs.WrapDependency(writeErr, ""))
 		}
 		return nil
 	case <-time.After(writeTimeout):
@@ -165,11 +167,48 @@ func (c *conn) closeErr() error {
 	return c.errLocked()
 }
 
+// exitError is the failure of an operation the app-server exited under.
+func (c *conn) exitError(operation string) error {
+	return errs.WrapDependency(c.closeErr(), "codex app-server exited "+operation)
+}
+
 func (c *conn) errLocked() error {
-	if c.err != nil {
-		return errors.Join(ErrConnClosed, c.err)
+	return c.closedError(c.err)
+}
+
+// closedError is the error of a call the closed connection failed. A caller
+// waiting on a response has no other account of a crashed app-server, so the
+// error names how the process ended.
+func (c *conn) closedError(cause error) error {
+	err := ErrConnClosed
+	if cause != nil {
+		err = errors.Join(ErrConnClosed, cause)
 	}
-	return ErrConnClosed
+	if reporter, ok := c.proc.(exitReporter); ok {
+		if detail := processExitDetail(reporter); detail != "" {
+			return fmt.Errorf("%w: %s", err, detail)
+		}
+	}
+	return err
+}
+
+// exitReporter is the part of a process that says how it ended. The
+// app-server process implements it; a test pipe does not.
+type exitReporter interface {
+	Err() error
+	StderrTail() string
+}
+
+// processExitDetail is how a process ended and what it last wrote to stderr.
+func processExitDetail(proc exitReporter) string {
+	var parts []string
+	if err := proc.Err(); err != nil {
+		parts = append(parts, err.Error())
+	}
+	if stderr := proc.StderrTail(); stderr != "" {
+		parts = append(parts, "stderr: "+stderr)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (c *conn) readLoop() {

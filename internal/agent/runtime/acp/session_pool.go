@@ -322,7 +322,7 @@ func newSessionPool(log *slog.Logger, runner sessionRunner, botService botGetter
 		sessionService = sessionServices[0]
 	}
 	return &SessionPool{
-		logger:               log.With(slog.String("service", "acp_session_pool")),
+		logger:               log.With(slog.String("service", "acp_session_pool"), slog.String("runtime", RuntimeType)),
 		runner:               runner,
 		bots:                 botService,
 		store:                sessionService,

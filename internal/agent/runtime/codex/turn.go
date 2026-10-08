@@ -280,7 +280,11 @@ func (t *turnState) handleNotification(decoded any) {
 			return
 		}
 		if params.WillRetry {
-			t.logger.Warn("codex turn error, retrying", slog.String("thread_id", t.threadID), slog.String("message", params.Error.Message))
+			attrs := append([]slog.Attr{
+				slog.String("thread_id", t.threadID),
+				slog.String("message", errs.RedactURLs(turnErrorText(&params.Error))),
+			}, summarizeErrorInfo(params.Error.CodexErrorInfo).attrs()...)
+			t.logger.LogAttrs(t.ctx, slog.LevelWarn, "codex turn error, retrying", attrs...)
 			return
 		}
 		t.mu.Lock()
@@ -699,15 +703,7 @@ func (t *turnState) result() (external.PromptResult, error) {
 	case protocol.TurnStatusInterrupted:
 		return out, nil
 	default:
-		message := "codex turn failed"
-		if turnErr != nil && strings.TrimSpace(turnErr.Message) != "" {
-			message = turnErr.Message
-		}
-		err := errs.NewDependency(message)
-		if turnErr != nil && turnErr.CodexErrorInfo != nil && turnErr.CodexErrorInfo.Unit == protocol.CodexErrorInfoUnitUsageLimitExceeded {
-			return out, external.Fail(external.FailureUsageLimited, err)
-		}
-		return out, err
+		return out, failedTurnError(turnErr)
 	}
 }
 

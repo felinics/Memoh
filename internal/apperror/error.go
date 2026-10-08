@@ -113,6 +113,11 @@ const (
 	CodeExternalRuntimeUnavailable               Code = "external_runtime.unavailable"
 	CodeExternalRuntimeSessionResumeFailed       Code = "external_runtime.session_resume_failed"
 	CodeExternalRuntimeUsageLimited              Code = "external_runtime.usage_limited"
+	CodeExternalRuntimeRateLimited               Code = "external_runtime.rate_limited"
+	CodeExternalRuntimeContextWindowExceeded     Code = "external_runtime.context_window_exceeded"
+	CodeExternalRuntimeOverloaded                Code = "external_runtime.overloaded"
+	CodeExternalRuntimeUpstreamUnreachable       Code = "external_runtime.upstream_unreachable"
+	CodeExternalRuntimeRequestBlocked            Code = "external_runtime.request_blocked"
 	CodeToolApprovalForbidden                    Code = "tool_approval.forbidden"
 	CodeToolApprovalNotFound                     Code = "tool_approval.not_found"
 	CodeToolApprovalExpired                      Code = "tool_approval.expired"
@@ -675,13 +680,42 @@ var catalog = map[Code]Definition{
 		Detail:     "The session could not be resumed. Try again or start a new conversation.",
 		Fault:      FaultDependency,
 	},
-	// The external agent's own account (a Codex plan) has used up its usage
-	// allowance. The user waits for it to reset, so the status asks the client
-	// to back off.
+	// The external agent's own account has no usage left: a plan allowance
+	// that resets, a billing quota that does not, or a plan that does not
+	// include the agent. The agent reports them as one condition, so the copy
+	// covers both waiting and checking the plan.
 	CodeExternalRuntimeUsageLimited: {
 		HTTPStatus: http.StatusTooManyRequests,
-		Detail:     "The external agent's usage limit has been reached. Please try again later.",
+		Detail:     "The external agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing.",
 		Fault:      FaultDependency,
+	},
+	CodeExternalRuntimeRateLimited: {
+		HTTPStatus: http.StatusTooManyRequests,
+		Detail:     "The external agent was rate limited by its model service. Please wait a moment before sending again.",
+		Fault:      FaultDependency,
+	},
+	// Like the native runtime's context.* codes: nothing failed, the
+	// conversation has to shrink before a turn can run.
+	CodeExternalRuntimeContextWindowExceeded: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
+	},
+	CodeExternalRuntimeOverloaded: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The external agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
+		Fault:      FaultDependency,
+	},
+	CodeExternalRuntimeUpstreamUnreachable: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The external agent could not reach its model service, or the connection dropped. Check the network and the agent's service address, then try again.",
+		Fault:      FaultDependency,
+	},
+	// The model service refused the request under its own policy. Nothing
+	// failed, and the same request is refused again, so this is the request's
+	// fault rather than a dependency's.
+	CodeExternalRuntimeRequestBlocked: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "The model service's safety policy blocked this request. Change the request and send it again.",
 	},
 	CodeACPModelSelectionUnsupported: {
 		HTTPStatus: http.StatusBadRequest,
