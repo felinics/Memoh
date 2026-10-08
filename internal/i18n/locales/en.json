@@ -735,6 +735,16 @@
       "busy": "Another operation on this App is in progress.",
       "operation_failed": "The App operation failed."
     },
+    "mcp": {
+      "endpoint_invalid": "Enter either a command (local server) or a URL (remote server), not both.",
+      "name_taken": "An MCP connection with this name already exists.",
+      "oauth_discovery_failed": "Could not discover OAuth settings from this MCP server. Check that the URL is correct and that the server supports OAuth.",
+      "oauth_not_discovered": "Run OAuth discovery for this connection first.",
+      "oauth_client_id_required": "Automatic client registration is unavailable for this server. Enter a client ID from an OAuth app you registered with it."
+    },
+    "oauth": {
+      "state_invalid": "This authorization has expired or is no longer valid. Start the authorization again."
+    },
     "agent_authorization": {
       "expired": "This authorization has expired. Connect your account again.",
       "not_ready": "Finish connecting your account before creating the Bot.",

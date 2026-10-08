@@ -1,13 +1,17 @@
 package handlers
 
 import (
+	"errors"
 	"html/template"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -49,7 +53,7 @@ func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
 	}
 	resp, err := h.service.StartOAuthAuthorization(ctx, providerID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return providerOAuthError(err, "start provider oauth")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -73,7 +77,7 @@ func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
 	}
 	status, err := h.service.PollOAuthAuthorization(ctx, providerID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return providerOAuthError(err, "poll provider oauth")
 	}
 	return c.JSON(http.StatusOK, status)
 }
@@ -97,7 +101,7 @@ func (h *ProviderOAuthHandler) Status(c echo.Context) error {
 	}
 	status, err := h.service.GetOAuthStatus(ctx, providerID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return providerOAuthError(err, "get provider oauth status")
 	}
 	return c.JSON(http.StatusOK, status)
 }
@@ -120,7 +124,7 @@ func (h *ProviderOAuthHandler) Revoke(c echo.Context) error {
 		ctx = oauthctx.WithUserID(ctx, userID)
 	}
 	if err := h.service.RevokeOAuthToken(ctx, providerID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return providerOAuthError(err, "revoke provider oauth")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -144,7 +148,10 @@ func (h *ProviderOAuthHandler) Callback(c echo.Context) error {
 	}
 	providerID, err := h.service.HandleOAuthCallback(c.Request().Context(), state, code)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, providers.ErrOAuthStateInvalid) {
+			return apperror.Wrap(apperror.CodeOAuthStateInvalid, err, nil)
+		}
+		return providerOAuthError(err, "handle provider oauth callback")
 	}
 
 	page := template.Must(template.New("oauth-success").Parse(`<!doctype html>
@@ -169,4 +176,20 @@ func executeHTMLTemplate(tpl *template.Template, data any) string {
 	var b strings.Builder
 	_ = tpl.Execute(&b, data)
 	return b.String()
+}
+
+// providerOAuthError answers a failed provider OAuth step. The provider id
+// is the only request input the service rejects; other failures belong to
+// this process or to the sign-in service it called.
+func providerOAuthError(err error, op string) error {
+	switch {
+	case errors.Is(err, db.ErrInvalidUUID):
+		return apperror.FieldInvalid("id", err)
+	case errors.Is(err, providers.ErrProviderNotFound):
+		return apperror.Wrap(apperror.CodeHTTPNotFound, err, nil)
+	case errors.Is(err, providers.ErrOAuthUnsupported):
+		return apperror.Wrap(apperror.CodeHTTPBadRequest, err, nil)
+	default:
+		return errs.Wrap(err, op)
+	}
 }

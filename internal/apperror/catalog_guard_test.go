@@ -289,6 +289,7 @@ var declaredFaults = map[Code]Fault{
 	CodeAgentResponseTimeout:               FaultDependency,
 	CodeRuntimePromptFailed:                FaultDependency,
 	CodeExternalRuntimeSessionResumeFailed: FaultDependency,
+	CodeMCPOAuthDiscoveryFailed:            FaultDependency,
 	CodeExternalRuntimeUsageLimited:        FaultDependency,
 	CodeACPConfigUpdateFailed:              FaultDependency,
 	CodeExternalRuntimeRateLimited:         FaultDependency,

@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
@@ -95,12 +96,12 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 		}
 	}
 	if serverURL == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "MCP server URL is required for OAuth discovery")
+		return apperror.FieldRequired("url")
 	}
 
 	result, err := h.oauthService.Discover(c.Request().Context(), serverURL)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Wrap(apperror.CodeMCPOAuthDiscoveryFailed, errs.Wrap(err, "discover mcp oauth"), nil)
 	}
 
 	if err := h.oauthService.SaveDiscovery(c.Request().Context(), connID, result); err != nil {
@@ -148,7 +149,7 @@ func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 
 	result, err := h.oauthService.StartAuthorization(c.Request().Context(), connID, req.ClientID, req.ClientSecret, req.CallbackURL)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return mcpStartAuthorizationError(err)
 	}
 
 	return c.JSON(http.StatusOK, result)
@@ -184,7 +185,14 @@ func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 
 	_, err := h.oauthService.HandleCallback(c.Request().Context(), state, code)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "oauth exchange failed").WithInternal(err)
+		switch {
+		case errors.Is(err, mcp.ErrOAuthStateInvalid):
+			return apperror.Wrap(apperror.CodeOAuthStateInvalid, err, nil)
+		case errors.Is(err, mcp.ErrTokenExchange):
+			return apperror.Wrap(apperror.CodeHTTPBadGateway, errs.WrapDependency(err, "exchange mcp oauth code"), nil)
+		default:
+			return errs.Wrap(err, "exchange mcp oauth code")
+		}
 	}
 
 	return c.JSON(http.StatusOK, map[string]bool{"success": true})
@@ -325,4 +333,20 @@ func renderMCPOAuthCallbackResult(c echo.Context, status int, result string, mes
 		"Result":  result,
 		"Message": message,
 	}))
+}
+
+// mcpStartAuthorizationError answers a failed start of the OAuth flow: a
+// connection without saved discovery or a client_id is the caller's to fix,
+// anything else is this process's failure.
+func mcpStartAuthorizationError(err error) error {
+	switch {
+	case errors.Is(err, mcp.ErrOAuthNotDiscovered):
+		return apperror.Wrap(apperror.CodeMCPOAuthNotDiscovered, err, nil)
+	case errors.Is(err, mcp.ErrClientIDRequired):
+		return apperror.Wrap(apperror.CodeMCPOAuthClientIDRequired, err, nil)
+	case errors.Is(err, db.ErrInvalidUUID):
+		return apperror.FieldInvalid("id", err)
+	default:
+		return errs.Wrap(err, "start mcp oauth")
+	}
 }

@@ -255,3 +255,9 @@ external_runtime.request_blocked	422
 external_runtime.upstream_unreachable	502
 request.field_invalid	400
 request.field_required	400
+mcp.endpoint_invalid	400
+mcp.oauth_client_id_required	400
+mcp.oauth_discovery_failed	502
+mcp.oauth_not_discovered	409
+oauth.state_invalid	400
+mcp.name_taken	409

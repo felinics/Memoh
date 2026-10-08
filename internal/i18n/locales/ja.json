@@ -735,6 +735,16 @@
       "busy": "このアプリの別の操作が進行中です。",
       "operation_failed": "アプリの操作に失敗しました。"
     },
+    "mcp": {
+      "endpoint_invalid": "コマンド（ローカルサーバー）または URL（リモートサーバー）のどちらか一方を入力してください。",
+      "name_taken": "同じ名前の MCP 接続がすでに存在します。",
+      "oauth_discovery_failed": "この MCP サーバーから OAuth 設定を検出できませんでした。URL が正しいこと、サーバーが OAuth に対応していることを確認してください。",
+      "oauth_not_discovered": "先にこの接続の OAuth 検出を実行してください。",
+      "oauth_client_id_required": "このサーバーではクライアントの自動登録を利用できません。登録済み OAuth アプリのクライアント ID を入力してください。"
+    },
+    "oauth": {
+      "state_invalid": "この認可は期限切れか無効になっています。もう一度認可を開始してください。"
+    },
     "agent_authorization": {
       "expired": "認証の有効期限が切れました。アカウントを再接続してください。",
       "not_ready": "アカウントを接続してから Bot を作成してください。",

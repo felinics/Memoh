@@ -162,7 +162,7 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, errors.New("name is required")
+		return Connection{}, ErrNameRequired
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
@@ -189,6 +189,9 @@ func (s *ConnectionService) Create(ctx context.Context, botID string, req Upsert
 		AuthType: authType,
 	})
 	if err != nil {
+		if db.IsUniqueViolation(err) {
+			return Connection{}, fmt.Errorf("%w: %w", ErrNameTaken, err)
+		}
 		return Connection{}, err
 	}
 	return normalizeMCPConnection(row)
@@ -209,7 +212,7 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Connection{}, errors.New("name is required")
+		return Connection{}, ErrNameRequired
 	}
 	mcpType, config, err := inferTypeAndConfig(req)
 	if err != nil {
@@ -264,6 +267,9 @@ func (s *ConnectionService) Update(ctx context.Context, botID, id string, req Up
 		AuthType: authType,
 	})
 	if err != nil {
+		if db.IsUniqueViolation(err) {
+			return Connection{}, fmt.Errorf("%w: %w", ErrNameTaken, err)
+		}
 		return Connection{}, err
 	}
 	return normalizeMCPConnection(row)
@@ -293,7 +299,7 @@ func (s *ConnectionService) Import(ctx context.Context, botID string, req Import
 		upsert := entryToUpsertRequest(name, entry)
 		mcpType, config, err := inferTypeAndConfig(upsert)
 		if err != nil {
-			return nil, fmt.Errorf("server %q: %w", name, err)
+			return nil, &ServerError{Name: name, Err: err}
 		}
 		configPayload, err := json.Marshal(config)
 		if err != nil {
@@ -472,10 +478,10 @@ func inferTypeAndConfig(req UpsertRequest) (string, map[string]any, error) {
 	hasURL := strings.TrimSpace(req.URL) != ""
 
 	if !hasCommand && !hasURL {
-		return "", nil, errors.New("command or url is required")
+		return "", nil, fmt.Errorf("%w: command or url is required", ErrEndpointInvalid)
 	}
 	if hasCommand && hasURL {
-		return "", nil, errors.New("command and url are mutually exclusive")
+		return "", nil, fmt.Errorf("%w: command and url are mutually exclusive", ErrEndpointInvalid)
 	}
 
 	config := map[string]any{}
