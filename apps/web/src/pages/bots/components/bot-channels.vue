@@ -17,76 +17,78 @@
           </Button>
         </template>
 
-        <CalloutBanner
-          v-if="needsChatModel"
-          tone="warning"
-          clickable
-          :title="t('bots.channels.modelRequiredTitle')"
-          :description="t('bots.channels.modelRequiredDescription')"
-          @click="openModelSettings"
-        />
-
-        <div
-          v-if="isLoading && configuredChannels.length === 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
-        >
-          <Skeleton
-            v-for="n in 4"
-            :key="n"
-            class="h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]"
+        <div class="space-y-8">
+          <CalloutBanner
+            v-if="needsChatModel"
+            tone="warning"
+            clickable
+            :title="t('bots.channels.modelRequiredTitle')"
+            :description="t('bots.channels.modelRequiredDescription')"
+            @click="openModelSettings"
           />
-        </div>
 
-        <!-- Platforms + a dashed add tile to drop another in -->
-        <div
-          v-else-if="configuredChannels.length > 0"
-          class="grid grid-cols-1 gap-3 sm:grid-cols-2"
-        >
-          <BackendCard
-            v-for="item in configuredChannels"
-            :key="item.meta.type"
-            :name="channelTitle(item.meta)"
-            :subtitle="!item.config?.disabled ? t('bots.channels.statusActive') : t('bots.channels.configured')"
-            :enabled="!item.config?.disabled"
-            @click="openPlatform(item)"
+          <div
+            v-if="isLoading && configuredChannels.length === 0"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <template #leading>
-              <span class="flex size-10 items-center justify-center rounded-full bg-muted">
-                <ChannelIcon
-                  :channel="item.meta.type as string"
-                  size="1.5em"
-                />
-              </span>
-            </template>
-          </BackendCard>
+            <Skeleton
+              v-for="n in 4"
+              :key="n"
+              class="h-[4.5rem] w-full rounded-[var(--radius-menu-shell)]"
+            />
+          </div>
 
-          <button
-            v-if="unconfiguredChannels.length > 0"
-            type="button"
-            class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            @click="addOpen = true"
+          <!-- Platforms + a dashed add tile to drop another in -->
+          <div
+            v-else-if="configuredChannels.length > 0"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
-            <Plus class="size-4" />
-            {{ t('bots.channels.addChannel') }}
-          </button>
-        </div>
+            <BackendCard
+              v-for="item in configuredChannels"
+              :key="item.meta.type"
+              :name="channelTitle(item.meta)"
+              :subtitle="!item.config?.disabled ? t('bots.channels.statusActive') : t('bots.channels.configured')"
+              :enabled="!item.config?.disabled"
+              @click="openPlatform(item)"
+            >
+              <template #leading>
+                <span class="flex size-10 items-center justify-center rounded-full bg-muted">
+                  <ChannelIcon
+                    :channel="item.meta.type as string"
+                    size="1.5em"
+                  />
+                </span>
+              </template>
+            </BackendCard>
 
-        <!-- Empty: a framed box that guides with one line + the add action, no decorative icon -->
-        <SettingsSection v-else>
-          <Empty class="py-16">
-            <EmptyTitle>{{ t('bots.channels.emptyTitle') }}</EmptyTitle>
-            <EmptyDescription>{{ t('bots.channels.emptyDescription') }}</EmptyDescription>
-            <EmptyContent>
-              <Button
-                variant="outline"
-                @click="addOpen = true"
-              >
-                <Plus class="size-4" />
-                {{ t('bots.channels.addChannel') }}
-              </Button>
-            </EmptyContent>
-          </Empty>
-        </SettingsSection>
+            <button
+              v-if="unconfiguredChannels.length > 0"
+              type="button"
+              class="group/add flex min-h-[4.5rem] items-center justify-center gap-2 rounded-[var(--radius-menu-shell)] border border-dashed border-border bg-background text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              @click="addOpen = true"
+            >
+              <Plus class="size-4" />
+              {{ t('bots.channels.addChannel') }}
+            </button>
+          </div>
+
+          <!-- Empty: a framed box that guides with one line + the add action, no decorative icon -->
+          <SettingsSection v-else>
+            <Empty class="py-16">
+              <EmptyTitle>{{ t('bots.channels.emptyTitle') }}</EmptyTitle>
+              <EmptyDescription>{{ t('bots.channels.emptyDescription') }}</EmptyDescription>
+              <EmptyContent>
+                <Button
+                  variant="outline"
+                  @click="addOpen = true"
+                >
+                  <Plus class="size-4" />
+                  {{ t('bots.channels.addChannel') }}
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </SettingsSection>
+        </div>
       </PageShell>
 
       <!-- Platform detail -->
