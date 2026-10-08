@@ -17,6 +17,15 @@
           </Button>
         </template>
 
+        <CalloutBanner
+          v-if="needsChatModel"
+          tone="warning"
+          clickable
+          :title="t('bots.channels.modelRequiredTitle')"
+          :description="t('bots.channels.modelRequiredDescription')"
+          @click="openModelSettings"
+        />
+
         <div
           v-if="isLoading && configuredChannels.length === 0"
           class="grid grid-cols-1 gap-3 sm:grid-cols-2"
@@ -134,17 +143,18 @@
 </template>
 
 <script setup lang="ts">
-import { SettingsSection } from '@felinic/ui'
+import { CalloutBanner, SettingsSection } from '@felinic/ui'
 import { Plus, ChevronLeft } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Button, Skeleton,
   Dialog, DialogContent, DialogHeader, DialogTitle,
   Empty, EmptyTitle, EmptyDescription, EmptyContent,
 } from '@felinic/ui'
 import { useQuery } from '@pinia/colada'
-import { getChannels, getBotsByIdChannelByPlatform } from '@memohai/sdk'
+import { getChannels, getBotsByIdChannelByPlatform, getBotsByBotIdSettings } from '@memohai/sdk'
 import type { HandlersChannelMeta, ChannelChannelConfig } from '@memohai/sdk'
 import { BackendCard, PageShell, SwapTransition } from '@felinic/ui'
 import ChannelSettingsPanel from './channel-settings-panel.vue'
@@ -160,6 +170,8 @@ export interface BotChannelItem {
 
 const props = defineProps<{ botId: string }>()
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 const { view, direction, openDetail, backToList } = useViewSwap()
 const addOpen = ref(false)
@@ -169,6 +181,24 @@ function channelTitle(meta: HandlersChannelMeta) {
 }
 
 const botIdRef = computed(() => props.botId)
+
+const { data: settings } = useQuery({
+  key: () => ['bot-settings', botIdRef.value],
+  query: async () => {
+    const { data } = await getBotsByBotIdSettings({ path: { bot_id: botIdRef.value }, throwOnError: true })
+    return data
+  },
+  enabled: () => !!botIdRef.value,
+})
+
+/** External runtimes select their own models; unloaded settings are not a configuration failure. */
+const needsChatModel = computed(() => settings.value
+  && (settings.value.chat_runtime ?? 'model') === 'model'
+  && !settings.value.chat_model_id?.trim())
+
+function openModelSettings() {
+  void router.push({ query: { ...route.query, tab: 'general', section: 'interaction' } })
+}
 
 const { data: channels, isLoading, refetch } = useQuery({
   key: () => ['bot-channels', botIdRef.value],

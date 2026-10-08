@@ -246,3 +246,4 @@ agent.provider_permission_denied	502
 agent.provider_request_rejected	502
 agent.provider_unreachable	502
 external_runtime.usage_limited	429
+agent.chat_model_not_configured	409

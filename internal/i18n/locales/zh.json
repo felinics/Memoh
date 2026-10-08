@@ -568,7 +568,8 @@
       "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。",
       "provider_request_rejected": "模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。",
       "provider_unreachable": "无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。",
-      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。"
+      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。",
+      "chat_model_not_configured": "尚未选择对话模型。请在 Bot 设置 → 通用中设置默认对话模型，然后重试。"
     },
     "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
     "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",

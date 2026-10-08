@@ -18,6 +18,9 @@ import (
 	"github.com/felinics/memoh/internal/settings"
 )
 
+// errChatModelNotConfigured means no request, conversation, or bot model could be selected.
+var errChatModelNotConfigured = errors.New("chat model not configured: specify model in request or bot settings")
+
 func (s *Service) selectChatModel(ctx context.Context, req ChatRequest, botSettings settings.Settings, sessionPrefModelID string) (models.GetResponse, sqlc.Provider, error) {
 	if s.modelsService == nil {
 		return models.GetResponse{}, sqlc.Provider{}, errors.New("models service not configured")
@@ -42,7 +45,7 @@ func (s *Service) selectChatModel(ctx context.Context, req ChatRequest, botSetti
 	}
 
 	if modelID == "" {
-		return models.GetResponse{}, sqlc.Provider{}, errors.New("chat model not configured: specify model in request or bot settings")
+		return models.GetResponse{}, sqlc.Provider{}, errChatModelNotConfigured
 	}
 
 	if providerFilter == "" {

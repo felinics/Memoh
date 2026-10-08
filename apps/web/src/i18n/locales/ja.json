@@ -161,7 +161,8 @@
       "provider_permission_denied": "モデルプロバイダーがこのモデルまたはリソースへのアクセスを拒否しました。プロバイダーのアカウントがこのモデルを利用できるか確認してください。",
       "provider_request_rejected": "モデルプロバイダーがリクエストを拒否しました。モデル設定を確認するか、別のモデルをお試しください。",
       "provider_unreachable": "Memoh からモデルプロバイダーに接続できませんでした。プロバイダーのアドレスとサービスが稼働中か確認してください。",
-      "tool_timeout": "ツールの進捗が途絶えました。保存済みの結果を確認してから再試行してください。"
+      "tool_timeout": "ツールの進捗が途絶えました。保存済みの結果を確認してから再試行してください。",
+      "chat_model_not_configured": "チャットモデルが選択されていません。Bot 設定 →「一般的な」でデフォルトのチャットモデルを設定してから、もう一度お試しください。"
     },
     "queue_request_invalid": "既存の会話で /steer または /queue の後に内容を入力してください。",
     "queue_no_active_run": "現在の応答は終了しています。内容を新しいメッセージとして送信してください。",
@@ -3081,8 +3082,8 @@
         "interaction": "交流",
         "multimedia": "マルチメディア"
       },
-      "chatModel": "チャットModel",
-      "chatModelDescription": "Memoh Agentが使用するModelです。",
+      "chatModel": "デフォルトのチャットモデル",
+      "chatModelDescription": "Telegram などのチャネルで新しい会話を始める際に Memoh Agent が使用します。Web チャットで選んだモデルは、この設定を変更しません。",
       "chatModelPlaceholder": "Modelを選択",
       "defaultAgent": "デフォルトAgent",
       "defaultAgentDescription": "新しいローカルチャットにのみ適用されます。既存の会話では現在のAgentが引き続き使用されます。",
@@ -3465,7 +3466,9 @@
         "web": "ウェブ",
         "cli": "CLI",
         "local": "地元"
-      }
+      },
+      "modelRequiredTitle": "デフォルトのチャットモデルを設定",
+      "modelRequiredDescription": "チャネルを有効にしても、新しい会話に返信するにはデフォルトのモデルが必要です。クリックして設定してください。"
     },
     "memory": {
       "lastUpdated": "最終更新",

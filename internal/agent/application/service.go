@@ -36,6 +36,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
@@ -932,6 +933,9 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 
 	chatModel, provider, err := s.selectChatModel(ctx, req, botSettings, p.SessionPrefModelID)
 	if err != nil {
+		if errors.Is(err, errChatModelNotConfigured) {
+			err = apperror.Wrap(apperror.CodeAgentChatModelNotConfigured, err, nil)
+		}
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 

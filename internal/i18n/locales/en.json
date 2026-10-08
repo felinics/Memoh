@@ -568,7 +568,8 @@
       "provider_permission_denied": "The model provider denied access to this model or resource. Check that the provider account can use this model.",
       "provider_request_rejected": "The model provider rejected the request. Check the model settings, or try another model.",
       "provider_unreachable": "Memoh could not reach the model provider. Check the provider address and that the service is running.",
-      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying."
+      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying.",
+      "chat_model_not_configured": "No chat model is selected. Set a default chat model in Bot settings → General, then try again."
     },
     "queue_request_invalid": "Enter text after /steer or /queue in an existing conversation.",
     "queue_no_active_run": "The current response has ended. Send this as a new message.",
