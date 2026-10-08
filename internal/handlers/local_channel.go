@@ -44,6 +44,7 @@ import (
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/server"
@@ -230,9 +231,9 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	var req QuickActionExecuteRequest
 	if err := c.Bind(&req); err != nil {
@@ -261,7 +262,7 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 			}
 			supported, supportErr := h.wsSessionSupportsRequestedSkills(c.Request().Context(), sessionID)
 			if supportErr != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, supportErr.Error())
+				return errs.Wrap(supportErr, "check session skills support")
 			}
 			skillActivationAllowed = supported
 		}
@@ -717,9 +718,9 @@ func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -802,9 +803,9 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -828,7 +829,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 		return err
 	}
 	if req.Message.IsEmpty() {
-		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+		return apperror.FieldRequired("message")
 	}
 	workspaceTargetID := strings.TrimSpace(req.WorkspaceTargetID)
 	if workspaceTargetID != "" {
@@ -864,7 +865,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	cfg, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, h.channelType)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "resolve channel config")
 	}
 	routeKey := botID
 	msg := channel.InboundMessage{
@@ -905,7 +906,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 		msg.Metadata["workspace_target_id"] = workspaceTargetID
 	}
 	if err := h.channelManager.HandleInbound(c.Request().Context(), cfg, msg); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "handle inbound message")
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -1264,7 +1265,7 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	}
 	legacy := strings.TrimSpace(legacyMessageID)
 	if legacy == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "turn_id is required")
+		return "", apperror.FieldRequired("turn_id")
 	}
 	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
 	if err != nil {
@@ -1884,9 +1885,9 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	_, perms, err := h.authorizeBotSessionAccess(c.Request().Context(), channelIdentityID, botID)
 	if err != nil {
@@ -1991,7 +1992,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			// it is the one that takes a run_id.
 			runID := strings.TrimSpace(msg.RunID)
 			if runID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, wsTurn("", msg.SessionID), "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "run_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, wsTurn("", msg.SessionID), "ws.runtime_command", apperror.FieldRequired("run_id"))
 				continue
 			}
 			h.abortWSRun(streamBaseCtx, writer, botID, msg, runID)
@@ -2001,21 +2002,21 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			runID := strings.TrimSpace(msg.RunID)
 			ref := wsTurn("", sessionID).withRun(runID)
 			if sessionID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "session_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", apperror.FieldRequired("session_id"))
 				continue
 			}
 			if runID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "run_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", apperror.FieldRequired("run_id"))
 				continue
 			}
 			decisionID := strings.TrimSpace(msg.DecisionID)
 			if decisionID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "decision_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", apperror.FieldRequired("decision_id"))
 				continue
 			}
 			controlID := strings.TrimSpace(msg.ControlID)
 			if controlID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "control_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", apperror.FieldRequired("control_id"))
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
@@ -2067,21 +2068,21 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			runID := strings.TrimSpace(msg.RunID)
 			ref := wsTurn("", sessionID).withRun(runID)
 			if sessionID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "session_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", apperror.FieldRequired("session_id"))
 				continue
 			}
 			if runID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "run_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", apperror.FieldRequired("run_id"))
 				continue
 			}
 			decisionID := strings.TrimSpace(msg.DecisionID)
 			if decisionID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "decision_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", apperror.FieldRequired("decision_id"))
 				continue
 			}
 			controlID := strings.TrimSpace(msg.ControlID)
 			if controlID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", echo.NewHTTPError(http.StatusBadRequest, "control_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.runtime_command", apperror.FieldRequired("control_id"))
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
@@ -2135,7 +2136,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 
 			if ref.InvocationID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", echo.NewHTTPError(http.StatusBadRequest, "invocation_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", apperror.FieldRequired("invocation_id"))
 				continue
 			}
 			if sessionID != "" {
@@ -2548,11 +2549,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			targetTurnID := strings.TrimSpace(msg.TurnID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if ref.InvocationID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.retry_message", echo.NewHTTPError(http.StatusBadRequest, "invocation_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.retry_message", apperror.FieldRequired("invocation_id"))
 				continue
 			}
 			if sessionID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.retry_message", echo.NewHTTPError(http.StatusBadRequest, "session_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.retry_message", apperror.FieldRequired("session_id"))
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
@@ -2625,11 +2626,11 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			targetTurnID := strings.TrimSpace(msg.TurnID)
 			workspaceTargetID := strings.TrimSpace(msg.WorkspaceTargetID)
 			if ref.InvocationID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", echo.NewHTTPError(http.StatusBadRequest, "invocation_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", apperror.FieldRequired("invocation_id"))
 				continue
 			}
 			if sessionID == "" {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", echo.NewHTTPError(http.StatusBadRequest, "session_id is required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", apperror.FieldRequired("session_id"))
 				continue
 			}
 			chatAttachments, attachmentErr := parseWSClientAttachments(msg.Attachments)
@@ -2723,7 +2724,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 			)
 
 		default:
-			failWSRequest(streamBaseCtx, h.logger, writer, botID, wsTurn(msg.InvocationID, msg.SessionID), "ws.unknown_message", echo.NewHTTPError(http.StatusBadRequest, "unknown message type: "+msg.Type))
+			failWSRequest(streamBaseCtx, h.logger, writer, botID, wsTurn(msg.InvocationID, msg.SessionID), "ws.unknown_message", apperror.FieldInvalid("type", nil))
 		}
 	}
 	return nil
@@ -2887,11 +2888,11 @@ func (h *LocalChannelHandler) resolveCurrentUserPermissions(ctx context.Context,
 	}
 	isAdmin, err := h.accountService.IsAdmin(ctx, channelIdentityID)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, errs.Wrap(err, "check admin")
 	}
 	perms, err := h.botService.ResolveUserPermissions(ctx, botID, channelIdentityID, isAdmin)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, errs.Wrap(err, "resolve bot permissions")
 	}
 	return perms, nil
 }

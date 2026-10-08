@@ -16,6 +16,7 @@ import (
 
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
@@ -85,10 +86,7 @@ func TestCreateSessionRejectsUnknownTypeAsBadRequest(t *testing.T) {
 	)
 
 	err := callCreateSession(handler, botID, `{"type":"conversation","title":"bad"}`)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("CreateSession() error = %v, want HTTP 400", err)
-	}
+	requireFieldError(t, err, apperror.CodeRequestFieldInvalid, "type")
 	if queries.createCalled {
 		t.Fatalf("CreateSession should reject unknown type before DB insert")
 	}

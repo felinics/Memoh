@@ -1209,18 +1209,21 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 		message    map[string]any
 		wantCode   string
 		wantDetail string
+		wantField  string
 	}{
 		{
 			name:       "message with a legacy stream id and no invocation",
 			message:    map[string]any{"type": "message", "stream_id": "legacy-stream", "session_id": sessionID, "text": "hello"},
-			wantCode:   "http.bad_request",
-			wantDetail: "The request is invalid.",
+			wantCode:   "request.field_required",
+			wantDetail: "A required field is missing.",
+			wantField:  "invocation_id",
 		},
 		{
 			name:       "abort naming a stream instead of a run",
 			message:    map[string]any{"type": "abort", "stream_id": "legacy-stream", "session_id": sessionID},
-			wantCode:   "http.bad_request",
-			wantDetail: "The request is invalid.",
+			wantCode:   "request.field_required",
+			wantDetail: "A required field is missing.",
+			wantField:  "run_id",
 		},
 	} {
 		if err := client.WriteJSON(tc.message); err != nil {
@@ -1232,6 +1235,9 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 		}
 		if event["type"] != "error" || event["code"] != tc.wantCode || event["message"] != tc.wantDetail {
 			t.Fatalf("%s: event = %#v, want code %q detail %q", tc.name, event, tc.wantCode, tc.wantDetail)
+		}
+		if args, _ := event["args"].(map[string]any); args["field"] != tc.wantField {
+			t.Fatalf("%s: event = %#v, want field %q", tc.name, event, tc.wantField)
 		}
 		data, _ := json.Marshal(event)
 		literal := map[string]string{
@@ -1257,8 +1263,8 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 	if err := client.ReadJSON(&unknownEvent); err != nil {
 		t.Fatalf("unknown message: read ws event: %v", err)
 	}
-	if unknownEvent["type"] != "error" || unknownEvent["code"] != "http.bad_request" || unknownEvent["message"] != "The request is invalid." {
-		t.Fatalf("unknown event = %#v, want http.bad_request with catalog detail", unknownEvent)
+	if unknownEvent["type"] != "error" || unknownEvent["code"] != "request.field_invalid" || unknownEvent["message"] != "A field has an invalid value." {
+		t.Fatalf("unknown event = %#v, want request.field_invalid", unknownEvent)
 	}
 	encoded, _ := json.Marshal(unknownEvent)
 	if strings.Contains(string(encoded), "unknown message type: client_invented_type") {
@@ -1267,8 +1273,7 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 	waitFor(t, "unknown-message ws request record", func() bool {
 		logsText := logs.String()
 		return strings.Contains(logsText, `"operation":"ws.unknown_message"`) &&
-			!strings.Contains(logsText, `"operation":"ws.client_invented_type"`) &&
-			strings.Contains(logsText, `unknown message type: client_invented_type`)
+			!strings.Contains(logsText, `"operation":"ws.client_invented_type"`)
 	})
 }
 

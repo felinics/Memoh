@@ -15,6 +15,7 @@ import (
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 // sessionMessageStreamBuffer sizes the per-subscriber channel for the activity
@@ -45,9 +46,9 @@ func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	bot, perms, err := h.authorizeBotMessageAccess(c, channelIdentityID, botID)
 	if err != nil {
