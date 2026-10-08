@@ -30,11 +30,14 @@ func DSN(cfg config.PostgresConfig) string {
 	return dsn.String()
 }
 
+// ErrInvalidUUID reports an identifier that is not a UUID.
+var ErrInvalidUUID = errors.New("invalid UUID")
+
 // ParseUUID converts a string UUID to pgtype.UUID.
 func ParseUUID(id string) (pgtype.UUID, error) {
 	parsed, err := uuid.Parse(strings.TrimSpace(id))
 	if err != nil {
-		return pgtype.UUID{}, fmt.Errorf("invalid UUID: %w", err)
+		return pgtype.UUID{}, fmt.Errorf("%w: %w", ErrInvalidUUID, err)
 	}
 	var pgID pgtype.UUID
 	pgID.Valid = true

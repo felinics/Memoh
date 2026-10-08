@@ -10,9 +10,9 @@ it('persists the exact created target across a reload without storing credential
   expect(readCreatedBotSession()).toBeNull()
 })
 it('persists a plain Memoh Bot without any Agent fields', () => {
-  const target = { botId: 'bot-2', botName: 'mochi', displayName: 'Mochi', avatarUrl: 'https://a/b.png', setupError: 'workspace setup failed', settings: { chat_model_id: 'm1' } }
+  const target = { botId: 'bot-2', botName: 'mochi', displayName: 'Mochi', avatarUrl: 'https://a/b.png', setupError: 'workspace setup failed', settings: { chat_model_id: 'm1', memory_enabled: false } }
   writeCreatedBotSession(target, true)
-  expect(readCreatedBotSession(true)).toEqual({ ...target, settings: { chat_model_id: 'm1', memory_provider_id: undefined, reasoning_effort: undefined } })
+  expect(readCreatedBotSession(true)).toEqual({ ...target, settings: { chat_model_id: 'm1', memory_enabled: false, reasoning_effort: undefined } })
   expect(readCreatedBotSession()).toBeNull()
 })
 it.each(['{', '{}', '{"botId":"bot","agentId":"agent","runtime":"acp"}', '{"botId":"bot","agentId":1}'])('rejects invalid saved targets: %s', (raw) => {

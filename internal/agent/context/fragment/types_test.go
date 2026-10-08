@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/partmeta"
 )
 
 func TestIsBackgroundSummaryCarrier(t *testing.T) {
@@ -22,7 +24,7 @@ func TestIsBackgroundSummaryCarrier(t *testing.T) {
 		{"non-text part", sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.ImagePart{Image: "data:image/png;base64,abc"}}}, false},
 		{"no prefix", sdk.UserMessage("Currently running background tasks"), false},
 		{"cache control", sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: prefixed, CacheControl: &sdk.CacheControl{Type: "ephemeral"}}}}, false},
-		{"provider metadata", sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: prefixed, ProviderMetadata: map[string]any{"k": "v"}}}}, false},
+		{"provider metadata", sdk.Message{Role: sdk.MessageRoleUser, Content: []sdk.MessagePart{sdk.TextPart{Text: prefixed, ProviderMetadata: partmeta.Fold(map[string]any{"k": "v"})}}}, false},
 	}
 	for _, tc := range cases {
 		if got := IsBackgroundSummaryCarrier(tc.msg); got != tc.want {

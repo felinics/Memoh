@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/logger"
 	"github.com/felinics/memoh/internal/telemetry"
 )
 
@@ -61,13 +65,63 @@ func (m *Manager) handleInbound(ctx context.Context, cfg ChannelConfig, msg Inbo
 		return errors.New("inbound processor not configured")
 	}
 	sender := m.newReplySender(cfg, msg.Channel)
-	if err := m.processor.HandleInbound(ctx, cfg, msg, sender); err != nil {
-		if m.logger != nil {
-			m.logger.ErrorContext(ctx, "inbound processing failed", slog.String("channel", msg.Channel.String()), slog.Any("error", err))
-		}
-		return err
+	return m.processor.HandleInbound(ctx, cfg, msg, sender)
+}
+
+// handleConnectionInbound is the handler a long-lived adapter connection
+// calls for each message. The message is a unit of its own; the connection
+// it arrived on started for an unrelated reason, so nothing is linked.
+func (m *Manager) handleConnectionInbound(ctx context.Context, cfg ChannelConfig, msg InboundMessage) error {
+	return m.runInboundUnit(ctx, telemetry.Trigger{}, cfg, msg)
+}
+
+// withInboundRequestID gives one inbound message a request id of its own. The
+// id a context already carries names something else: the request that
+// enqueued the message, or the configuration request that started the
+// connection it arrived on, which every message on that connection would
+// otherwise report.
+func withInboundRequestID(ctx context.Context) context.Context {
+	return logger.ContextWithRequestID(ctx, httpx.NewRequestID())
+}
+
+// runInboundUnit handles one inbound message under its own trace and writes
+// its one result line. The queue worker and adapter connections both reach
+// the processor through it. It returns the error so that an adapter can act
+// on it (ack, retry, reconnect); an adapter does not log it again.
+//
+// Its own trace, rather than the enqueuing request's: that request was
+// answered before this ran, so a parent-child edge would give the trace a
+// parent that ends before its child. The link keeps the two reachable from
+// each other while letting each report an honest duration.
+func (m *Manager) runInboundUnit(ctx context.Context, trigger telemetry.Trigger, cfg ChannelConfig, msg InboundMessage) error {
+	ctx, span := telemetry.StartLinked(ctx, trigger, "channel.inbound",
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("channel", msg.Channel.String()),
+			attribute.String("agent.bot_id", cfg.BotID),
+		),
+	)
+	defer span.End()
+
+	start := time.Now()
+	err := m.handleInbound(ctx, cfg, msg)
+	if err != nil {
+		span.RecordError(err)
 	}
-	return nil
+	// The unit is async on both paths. The IM platform that delivered the
+	// message is not waiting for its outcome and never receives this error
+	// as a response; an adapter goroutine waiting on a direct call only
+	// acts on it locally. A client fault is therefore this process's fault.
+	result := errlog.Finish(ctx, "channel.inbound", err, errlog.Options{Async: true})
+	if m.logger != nil {
+		attrs := append([]slog.Attr{
+			slog.String("channel", msg.Channel.String()),
+			slog.String("bot_id", cfg.BotID),
+			slog.Duration("latency", time.Since(start)),
+		}, result.Attrs()...)
+		m.logger.LogAttrs(ctx, result.Level, "inbound message", attrs...)
+	}
+	return err
 }
 
 func (m *Manager) startInboundWorkers() {
@@ -93,26 +147,7 @@ func (m *Manager) runInboundWorker(ctx context.Context) {
 	}
 }
 
-// runInboundTask handles one queued message under its own trace.
-//
-// Its own, rather than the enqueuing request's: that request was answered
-// before this ran, so a parent-child edge would give the trace a parent that
-// ends before its child. The link keeps the two reachable from each other
-// while letting each report an honest duration.
+// runInboundTask handles one queued message.
 func (m *Manager) runInboundTask(ctx context.Context, task inboundTask) {
-	ctx, span := telemetry.StartLinked(ctx, task.trigger, "channel.inbound",
-		trace.WithSpanKind(trace.SpanKindConsumer),
-		trace.WithAttributes(
-			attribute.String("channel", task.msg.Channel.String()),
-			attribute.String("agent.bot_id", task.msg.BotID),
-		),
-	)
-	defer span.End()
-
-	if err := m.handleInbound(ctx, task.cfg, task.msg); err != nil {
-		span.RecordError(err)
-		if m.logger != nil {
-			m.logger.ErrorContext(ctx, "inbound processing failed", slog.String("channel", task.msg.Channel.String()), slog.Any("error", err))
-		}
-	}
+	_ = m.runInboundUnit(withInboundRequestID(ctx), task.trigger, task.cfg, task.msg)
 }

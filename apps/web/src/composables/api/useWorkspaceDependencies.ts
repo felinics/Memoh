@@ -53,7 +53,7 @@ export function botDependenciesQueryKey(botId: string): string[] {
   return [BOT_DEPENDENCIES_QUERY_KEY, botId]
 }
 
-export function useBotDependenciesQuery(botId: Ref<string>, forceRefresh?: Ref<boolean>) {
+export function useBotDependenciesQuery(botId: Ref<string>, forceRefresh?: Ref<boolean>, enabled: () => boolean = () => true) {
   return useQuery({
     key: () => botDependenciesQueryKey(botId.value),
     query: async () => {
@@ -66,7 +66,7 @@ export function useBotDependenciesQuery(botId: Ref<string>, forceRefresh?: Ref<b
       })
       return data
     },
-    enabled: () => !!botId.value,
+    enabled: () => !!botId.value && enabled(),
   })
 }
 

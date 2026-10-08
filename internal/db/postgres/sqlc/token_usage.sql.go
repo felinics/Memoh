@@ -12,43 +12,55 @@ import (
 )
 
 const countTokenUsageRecords = `-- name: CountTokenUsageRecords :one
-SELECT COUNT(*)::bigint AS total
-FROM bot_history_messages m
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id AND ps.team_id = public.memoh_current_team_id()
-WHERE m.team_id = public.memoh_current_team_id() AND m.bot_id = $1
-  AND m.usage IS NOT NULL
-  AND m.created_at >= $2
-  AND m.created_at < $3
-  AND ($4::uuid IS NULL OR m.model_id = $4::uuid)
-  AND (
-    $5::text IS NULL
-    OR ($5::text = 'acp_agent' AND COALESCE(
-      NULLIF(m.runtime_type, ''),
-      CASE
-        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
-        ELSE NULLIF(s.runtime_type, '')
-      END,
-      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
-    ) = 'acp_agent')
-    OR ($5::text <> 'acp_agent' AND COALESCE(
-      NULLIF(m.runtime_type, ''),
-      CASE
-        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
-        ELSE NULLIF(s.runtime_type, '')
-      END,
-      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
-    ) <> 'acp_agent' AND COALESCE(
-      COALESCE(
-        NULLIF(m.session_mode, ''),
-        CASE
-          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
-          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
-        END
-      ),
-      'chat'
-    ) = $5::text)
+SELECT (
+  (
+    SELECT COUNT(*)
+    FROM bot_history_messages m
+    LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+    LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id AND ps.team_id = public.memoh_current_team_id()
+    WHERE m.team_id = public.memoh_current_team_id() AND m.bot_id = $1
+      AND m.usage IS NOT NULL
+      AND m.created_at >= $2
+      AND m.created_at < $3
+      AND ($4::uuid IS NULL OR m.model_id = $4::uuid)
+      AND (
+        $5::text IS NULL
+        OR ($5::text = 'acp_agent' AND COALESCE(
+          NULLIF(m.runtime_type, ''),
+          CASE
+            WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+            ELSE NULLIF(s.runtime_type, '')
+          END,
+          CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+        ) = 'acp_agent')
+        OR ($5::text <> 'acp_agent' AND COALESCE(
+          NULLIF(m.runtime_type, ''),
+          CASE
+            WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+            ELSE NULLIF(s.runtime_type, '')
+          END,
+          CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+        ) <> 'acp_agent' AND COALESCE(
+          COALESCE(
+            NULLIF(m.session_mode, ''),
+            CASE
+              WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+              ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+            END
+          ),
+          'chat'
+        ) = $5::text)
+      )
+  ) + (
+    SELECT COUNT(*)
+    FROM bot_memory_usage mu
+    WHERE mu.team_id = public.memoh_current_team_id() AND mu.bot_id = $1
+      AND mu.created_at >= $2
+      AND mu.created_at < $3
+      AND ($4::uuid IS NULL OR mu.model_id = $4::uuid)
+      AND ($5::text IS NULL OR $5::text = 'memory')
   )
+)::bigint AS total
 `
 
 type CountTokenUsageRecordsParams struct {
@@ -70,6 +82,128 @@ func (q *Queries) CountTokenUsageRecords(ctx context.Context, arg CountTokenUsag
 	var total int64
 	err := row.Scan(&total)
 	return total, err
+}
+
+const getMemoryTokenUsageByDay = `-- name: GetMemoryTokenUsageByDay :many
+SELECT
+  date_trunc('day', mu.created_at)::date AS day,
+  COALESCE(SUM((mu.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
+  COALESCE(SUM((mu.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens,
+  COALESCE(SUM((mu.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint), 0)::bigint AS cache_read_tokens,
+  COALESCE(SUM((mu.usage->'outputTokenDetails'->>'reasoningTokens')::bigint), 0)::bigint AS reasoning_tokens
+FROM bot_memory_usage mu
+WHERE mu.team_id = public.memoh_current_team_id() AND mu.bot_id = $1
+  AND mu.created_at >= $2
+  AND mu.created_at < $3
+  AND ($4::uuid IS NULL OR mu.model_id = $4::uuid)
+GROUP BY day
+ORDER BY day
+`
+
+type GetMemoryTokenUsageByDayParams struct {
+	BotID    pgtype.UUID        `json:"bot_id"`
+	FromTime pgtype.Timestamptz `json:"from_time"`
+	ToTime   pgtype.Timestamptz `json:"to_time"`
+	ModelID  pgtype.UUID        `json:"model_id"`
+}
+
+type GetMemoryTokenUsageByDayRow struct {
+	Day             pgtype.Date `json:"day"`
+	InputTokens     int64       `json:"input_tokens"`
+	OutputTokens    int64       `json:"output_tokens"`
+	CacheReadTokens int64       `json:"cache_read_tokens"`
+	ReasoningTokens int64       `json:"reasoning_tokens"`
+}
+
+func (q *Queries) GetMemoryTokenUsageByDay(ctx context.Context, arg GetMemoryTokenUsageByDayParams) ([]GetMemoryTokenUsageByDayRow, error) {
+	rows, err := q.db.Query(ctx, getMemoryTokenUsageByDay,
+		arg.BotID,
+		arg.FromTime,
+		arg.ToTime,
+		arg.ModelID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetMemoryTokenUsageByDayRow
+	for rows.Next() {
+		var i GetMemoryTokenUsageByDayRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.ReasoningTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getMemoryTokenUsageByModel = `-- name: GetMemoryTokenUsageByModel :many
+SELECT
+  mu.model_id,
+  COALESCE(mo.model_id, 'unknown') AS model_slug,
+  COALESCE(mo.name, mo.model_id, 'Unknown') AS model_name,
+  COALESCE(lp.name, 'Unknown') AS provider_name,
+  COALESCE(SUM((mu.usage->>'inputTokens')::bigint), 0)::bigint AS input_tokens,
+  COALESCE(SUM((mu.usage->>'outputTokens')::bigint), 0)::bigint AS output_tokens
+FROM bot_memory_usage mu
+LEFT JOIN models mo ON mo.id = mu.model_id AND mo.team_id = public.memoh_current_team_id()
+LEFT JOIN providers lp ON lp.id = mo.provider_id AND lp.team_id = public.memoh_current_team_id()
+WHERE mu.team_id = public.memoh_current_team_id() AND mu.bot_id = $1
+  AND mu.created_at >= $2
+  AND mu.created_at < $3
+GROUP BY mu.model_id, mo.model_id, mo.name, lp.name
+ORDER BY input_tokens DESC
+`
+
+type GetMemoryTokenUsageByModelParams struct {
+	BotID    pgtype.UUID        `json:"bot_id"`
+	FromTime pgtype.Timestamptz `json:"from_time"`
+	ToTime   pgtype.Timestamptz `json:"to_time"`
+}
+
+type GetMemoryTokenUsageByModelRow struct {
+	ModelID      pgtype.UUID `json:"model_id"`
+	ModelSlug    string      `json:"model_slug"`
+	ModelName    string      `json:"model_name"`
+	ProviderName string      `json:"provider_name"`
+	InputTokens  int64       `json:"input_tokens"`
+	OutputTokens int64       `json:"output_tokens"`
+}
+
+func (q *Queries) GetMemoryTokenUsageByModel(ctx context.Context, arg GetMemoryTokenUsageByModelParams) ([]GetMemoryTokenUsageByModelRow, error) {
+	rows, err := q.db.Query(ctx, getMemoryTokenUsageByModel, arg.BotID, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetMemoryTokenUsageByModelRow
+	for rows.Next() {
+		var i GetMemoryTokenUsageByModelRow
+		if err := rows.Scan(
+			&i.ModelID,
+			&i.ModelSlug,
+			&i.ModelName,
+			&i.ProviderName,
+			&i.InputTokens,
+			&i.OutputTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getTokenUsageByDayAndType = `-- name: GetTokenUsageByDayAndType :many
@@ -287,78 +421,103 @@ func (q *Queries) GetTokenUsageByModel(ctx context.Context, arg GetTokenUsageByM
 }
 
 const listTokenUsageRecords = `-- name: ListTokenUsageRecords :many
-SELECT
-  m.id,
-  m.created_at,
-  m.session_id,
-  m.runtime_type::text AS harness,
-  CASE
-    WHEN COALESCE(
-      NULLIF(m.runtime_type, ''),
-      CASE
-        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
-        ELSE NULLIF(s.runtime_type, '')
-      END,
-      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
-    ) = 'acp_agent' THEN 'acp_agent'
-    ELSE COALESCE(
-      COALESCE(
-        NULLIF(m.session_mode, ''),
+SELECT id, created_at, session_id, harness, session_type, model_id, model_slug, model_name, provider_name, input_tokens, output_tokens, cache_read_tokens, reasoning_tokens FROM (
+  SELECT
+    m.id,
+    m.created_at,
+    m.session_id,
+    m.runtime_type::text AS harness,
+    CASE
+      WHEN COALESCE(
+        NULLIF(m.runtime_type, ''),
         CASE
-          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
-          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
-        END
-      ),
-      'chat'
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+          ELSE NULLIF(s.runtime_type, '')
+        END,
+        CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+      ) = 'acp_agent' THEN 'acp_agent'
+      ELSE COALESCE(
+        COALESCE(
+          NULLIF(m.session_mode, ''),
+          CASE
+            WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+            ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+          END
+        ),
+        'chat'
+      )
+    END::text AS session_type,
+    m.model_id,
+    COALESCE(mo.model_id, 'unknown')::text AS model_slug,
+    COALESCE(mo.name, mo.model_id, 'Unknown')::text AS model_name,
+    COALESCE(lp.name, 'Unknown')::text AS provider_name,
+    COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
+    COALESCE((m.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,
+    COALESCE((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
+    COALESCE((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
+  FROM bot_history_messages m
+  LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
+  LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id AND ps.team_id = public.memoh_current_team_id()
+  LEFT JOIN models mo ON mo.id = m.model_id AND mo.team_id = public.memoh_current_team_id()
+  LEFT JOIN providers lp ON lp.id = mo.provider_id AND lp.team_id = public.memoh_current_team_id()
+  WHERE m.team_id = public.memoh_current_team_id() AND m.bot_id = $1
+    AND m.usage IS NOT NULL
+    AND m.created_at >= $2
+    AND m.created_at < $3
+    AND ($4::uuid IS NULL OR m.model_id = $4::uuid)
+    AND (
+      $5::text IS NULL
+      OR ($5::text = 'acp_agent' AND COALESCE(
+        NULLIF(m.runtime_type, ''),
+        CASE
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+          ELSE NULLIF(s.runtime_type, '')
+        END,
+        CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+      ) = 'acp_agent')
+      OR ($5::text <> 'acp_agent' AND COALESCE(
+        NULLIF(m.runtime_type, ''),
+        CASE
+          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
+          ELSE NULLIF(s.runtime_type, '')
+        END,
+        CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
+      ) <> 'acp_agent' AND COALESCE(
+        COALESCE(
+          NULLIF(m.session_mode, ''),
+          CASE
+            WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
+            ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
+          END
+        ),
+        'chat'
+      ) = $5::text)
     )
-  END::text AS session_type,
-  m.model_id,
-  COALESCE(mo.model_id, 'unknown')::text AS model_slug,
-  COALESCE(mo.name, mo.model_id, 'Unknown')::text AS model_name,
-  COALESCE(lp.name, 'Unknown')::text AS provider_name,
-  COALESCE((m.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
-  COALESCE((m.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,
-  COALESCE((m.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
-  COALESCE((m.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
-FROM bot_history_messages m
-LEFT JOIN bot_sessions s ON s.id = m.session_id AND s.team_id = public.memoh_current_team_id()
-LEFT JOIN bot_sessions ps ON ps.id = s.parent_session_id AND ps.team_id = public.memoh_current_team_id()
-LEFT JOIN models mo ON mo.id = m.model_id AND mo.team_id = public.memoh_current_team_id()
-LEFT JOIN providers lp ON lp.id = mo.provider_id AND lp.team_id = public.memoh_current_team_id()
-WHERE m.team_id = public.memoh_current_team_id() AND m.bot_id = $1
-  AND m.usage IS NOT NULL
-  AND m.created_at >= $2
-  AND m.created_at < $3
-  AND ($4::uuid IS NULL OR m.model_id = $4::uuid)
-  AND (
-    $5::text IS NULL
-    OR ($5::text = 'acp_agent' AND COALESCE(
-      NULLIF(m.runtime_type, ''),
-      CASE
-        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
-        ELSE NULLIF(s.runtime_type, '')
-      END,
-      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
-    ) = 'acp_agent')
-    OR ($5::text <> 'acp_agent' AND COALESCE(
-      NULLIF(m.runtime_type, ''),
-      CASE
-        WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN NULLIF(ps.runtime_type, '')
-        ELSE NULLIF(s.runtime_type, '')
-      END,
-      CASE WHEN s.type = 'acp_agent' THEN 'acp_agent' ELSE '' END
-    ) <> 'acp_agent' AND COALESCE(
-      COALESCE(
-        NULLIF(m.session_mode, ''),
-        CASE
-          WHEN COALESCE(NULLIF(s.type, ''), '') = 'subagent' THEN COALESCE(NULLIF(ps.session_mode, ''), NULLIF(ps.type, ''), 'chat')
-          ELSE COALESCE(NULLIF(s.session_mode, ''), NULLIF(s.type, ''), 'chat')
-        END
-      ),
-      'chat'
-    ) = $5::text)
-  )
-ORDER BY m.created_at DESC, m.id DESC
+  UNION ALL
+  SELECT
+    mu.id,
+    mu.created_at,
+    NULL::uuid AS session_id,
+    ''::text AS harness,
+    'memory'::text AS session_type,
+    mu.model_id,
+    COALESCE(mo.model_id, 'unknown')::text AS model_slug,
+    COALESCE(mo.name, mo.model_id, 'Unknown')::text AS model_name,
+    COALESCE(lp.name, 'Unknown')::text AS provider_name,
+    COALESCE((mu.usage->>'inputTokens')::bigint, 0)::bigint AS input_tokens,
+    COALESCE((mu.usage->>'outputTokens')::bigint, 0)::bigint AS output_tokens,
+    COALESCE((mu.usage->'inputTokenDetails'->>'cacheReadTokens')::bigint, 0)::bigint AS cache_read_tokens,
+    COALESCE((mu.usage->'outputTokenDetails'->>'reasoningTokens')::bigint, 0)::bigint AS reasoning_tokens
+  FROM bot_memory_usage mu
+  LEFT JOIN models mo ON mo.id = mu.model_id AND mo.team_id = public.memoh_current_team_id()
+  LEFT JOIN providers lp ON lp.id = mo.provider_id AND lp.team_id = public.memoh_current_team_id()
+  WHERE mu.team_id = public.memoh_current_team_id() AND mu.bot_id = $1
+    AND mu.created_at >= $2
+    AND mu.created_at < $3
+    AND ($4::uuid IS NULL OR mu.model_id = $4::uuid)
+    AND ($5::text IS NULL OR $5::text = 'memory')
+) AS usage_records
+ORDER BY created_at DESC, id DESC
 LIMIT $7
 OFFSET $6
 `
@@ -389,6 +548,8 @@ type ListTokenUsageRecordsRow struct {
 	ReasoningTokens int64              `json:"reasoning_tokens"`
 }
 
+// Memory LLM calls (bot_memory_usage) are not chat messages; they join the
+// list as session_type 'memory' so one page/offset spans both sources.
 func (q *Queries) ListTokenUsageRecords(ctx context.Context, arg ListTokenUsageRecordsParams) ([]ListTokenUsageRecordsRow, error) {
 	rows, err := q.db.Query(ctx, listTokenUsageRecords,
 		arg.BotID,

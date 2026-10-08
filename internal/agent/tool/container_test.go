@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
 	workspacepkg "github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -203,7 +204,7 @@ func TestContainerExecDescriptionUsesRemoteWindowsCommands(t *testing.T) {
 			t.Fatalf("Windows exec description does not contain %q:\n%s", expected, tool.Description)
 		}
 	}
-	params, ok := tool.Parameters.(map[string]any)
+	params, ok := toolexec.SchemaValue(tool.Parameters), tool.Parameters != nil
 	if !ok {
 		t.Fatalf("exec parameters = %T, want map[string]any", tool.Parameters)
 	}
@@ -247,7 +248,7 @@ func TestContainerToolsDescribeOptionalExecutionLocationTarget(t *testing.T) {
 	_ = toolByNameForTest(t, toolList, ToolListExecutionLocations())
 	for _, toolName := range []ToolName{ToolRead(), ToolWrite(), ToolList(), ToolEdit(), ToolApplyPatch(), ToolExec()} {
 		tool := toolByNameForTest(t, toolList, toolName)
-		params, ok := tool.Parameters.(map[string]any)
+		params, ok := toolexec.SchemaValue(tool.Parameters), tool.Parameters != nil
 		if !ok {
 			t.Fatalf("%s parameters = %T", tool.Name, tool.Parameters)
 		}
@@ -293,11 +294,11 @@ func TestListExecutionLocationsReadsCurrentBotTargetsAtExecutionTime(t *testing.
 	}
 
 	tool := toolByNameForTest(t, toolList, ToolListExecutionLocations())
-	raw, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, nil)
+	raw, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(nil))
 	if err != nil {
 		t.Fatalf("list_execution_locations error = %v", err)
 	}
-	result, ok := raw.(listExecutionLocationsResult)
+	result, ok := decodeListExecutionLocations(t, raw), raw.IsJSON()
 	if !ok {
 		t.Fatalf("list_execution_locations result = %T", raw)
 	}
@@ -318,11 +319,11 @@ func TestListExecutionLocationsReadsCurrentBotTargetsAtExecutionTime(t *testing.
 
 	targetProvider.targets[1].Online = true
 	targetProvider.targets[1].Status = workspacepkg.WorkspaceTargetStatusOnline
-	raw, err = tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, nil)
+	raw, err = tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(nil))
 	if err != nil {
 		t.Fatalf("second list_execution_locations error = %v", err)
 	}
-	result = raw.(listExecutionLocationsResult)
+	result = decodeListExecutionLocations(t, raw)
 	if targetProvider.listCalls != 2 || !result.Locations[1].Available {
 		t.Fatalf("second call did not refresh live status: calls=%d location=%#v", targetProvider.listCalls, result.Locations[1])
 	}
@@ -361,11 +362,11 @@ func TestListExecutionLocationsUsesRequestOverrideAsDefault(t *testing.T) {
 	if !strings.Contains(tool.Description, "current turn's default") {
 		t.Fatalf("list_execution_locations description = %q", tool.Description)
 	}
-	raw, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, nil)
+	raw, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(nil))
 	if err != nil {
 		t.Fatalf("list_execution_locations error = %v", err)
 	}
-	result := raw.(listExecutionLocationsResult)
+	result := decodeListExecutionLocations(t, raw)
 	if len(result.Locations) != 2 || result.Locations[0].Default || !result.Locations[1].Default {
 		t.Fatalf("request defaults = %#v", result.Locations)
 	}
@@ -387,7 +388,7 @@ func TestContainerProviderResolvesOneCanonicalTargetPerInvocation(t *testing.T) 
 		},
 	}}
 	provider := NewContainerProvider(nil, targetProvider, nil, "")
-	resolved, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1", WorkspaceTargetID: "request-default"}, map[string]any{"target_id": "requested-target"})
+	resolved, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1", WorkspaceTargetID: "request-default"}, "requested-target")
 	if err != nil {
 		t.Fatalf("resolveToolTarget() error = %v", err)
 	}
@@ -414,7 +415,7 @@ func TestContainerProviderUsesRequestTargetWhenToolTargetIsOmitted(t *testing.T)
 	resolved, err := provider.resolveToolTarget(context.Background(), SessionContext{
 		BotID:             "bot-1",
 		WorkspaceTargetID: "request-target",
-	}, nil)
+	}, "")
 	if err != nil {
 		t.Fatalf("resolveToolTarget() error = %v", err)
 	}
@@ -445,7 +446,7 @@ func TestContainerProviderHooksUseResolvedRemoteTarget(t *testing.T) {
 	recorder := &recordingWorkspaceHookService{}
 	provider.hookService = recorder
 
-	target, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{"target_id": "remote-target"})
+	target, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1"}, "remote-target")
 	if err != nil {
 		t.Fatalf("resolveToolTarget() error = %v", err)
 	}
@@ -480,7 +481,7 @@ func TestContainerProviderExplainsHowToRecoverFromMissingTarget(t *testing.T) {
 
 	targetProvider := &containerTestTargetProvider{resolveErr: workspacepkg.ErrWorkspaceTargetNotFound}
 	provider := NewContainerProvider(nil, targetProvider, nil, "")
-	_, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{"target_id": "server_workspace"})
+	_, err := provider.resolveToolTarget(context.Background(), SessionContext{BotID: "bot-1"}, "server_workspace")
 	if err == nil {
 		t.Fatal("resolveToolTarget() returned nil error")
 	}
@@ -499,9 +500,7 @@ func TestContainerReadLargeFileErrorDoesNotReferenceSiblingTools(t *testing.T) {
 
 	client := newLargeReadTestClient(t, 17*1024*1024)
 	provider := NewContainerProvider(nil, containerTestBridgeProvider{client: client}, nil, "")
-	_, err := provider.execRead(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{
-		"path": "/data/large.log",
-	})
+	_, err := provider.execRead(context.Background(), SessionContext{BotID: "bot-1"}, readArgs{Path: "/data/large.log"})
 	if err == nil {
 		t.Fatal("expected large file read to fail")
 	}
@@ -545,4 +544,15 @@ func TestDetectBlockedSleep(t *testing.T) {
 			t.Errorf("expected %q to be allowed, but got: %s", tt.command, result)
 		}
 	}
+}
+
+// decodeListExecutionLocations reads the tool's JSON output back into the
+// struct the handler returned; the executor encodes every non-text output.
+func decodeListExecutionLocations(t *testing.T, raw sdk.ToolOutput) listExecutionLocationsResult {
+	t.Helper()
+	var result listExecutionLocationsResult
+	if err := json.Unmarshal(raw.JSON, &result); err != nil {
+		t.Fatalf("decode list_execution_locations output: %v", err)
+	}
+	return result
 }

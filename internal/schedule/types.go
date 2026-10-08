@@ -29,6 +29,8 @@ const (
 // means "new session with all bot defaults" — exactly the pre-parameter
 // behavior.
 type ExecutionConfig struct {
+	// MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.
+	MaxRunSeconds int `json:"max_run_seconds,omitempty"`
 	// RunTarget is new_session (default) or existing_session.
 	RunTarget string `json:"run_target,omitempty"`
 	// TargetSessionID names the session reused by existing_session mode.

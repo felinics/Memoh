@@ -30,6 +30,22 @@ type statTestContainerService struct {
 	dirs  map[string]bool
 	seen  []string
 	files map[string]bool
+	// listings maps a directory to its flat entries; listErrs fails a listing.
+	listings map[string][]*pb.FileEntry
+	listErrs map[string]codes.Code
+	listed   []string
+}
+
+func (s *statTestContainerService) ListDir(_ context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
+	s.listed = append(s.listed, req.GetPath())
+	if code, ok := s.listErrs[req.GetPath()]; ok {
+		return nil, status.Error(code, "list failed")
+	}
+	entries, ok := s.listings[req.GetPath()]
+	if !ok {
+		return nil, status.Error(codes.NotFound, "not found")
+	}
+	return &pb.ListDirResponse{Entries: entries}, nil
 }
 
 func (s *statTestContainerService) Stat(_ context.Context, req *pb.StatRequest) (*pb.StatResponse, error) {

@@ -7,8 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/felinics/twilight/sdk"
-
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/mcp"
@@ -83,7 +82,7 @@ func newMemoryWriteProvider(t *testing.T, threads []session.Thread) (*MemoryProv
 	return NewMemoryProvider(slog.New(slog.DiscardHandler), registry, memoryWriteSettings{}, fakeHistorySessionLister{sessions: threads}), backing
 }
 
-func memoryTool(t *testing.T, p *MemoryProvider, session SessionContext, name string) sdk.Tool {
+func memoryTool(t *testing.T, p *MemoryProvider, session SessionContext, name string) toolexec.Tool {
 	t.Helper()
 	tools, err := p.Tools(context.Background(), session)
 	if err != nil {
@@ -95,7 +94,7 @@ func memoryTool(t *testing.T, p *MemoryProvider, session SessionContext, name st
 		}
 	}
 	t.Fatalf("tool %s is not on the memory surface", name)
-	return sdk.Tool{}
+	return toolexec.Tool{}
 }
 
 func TestMemoryWriteToolsAreOnTheSurface(t *testing.T) {
@@ -118,11 +117,11 @@ func TestCreateMemoryKeysProfileToUserWithoutSessionUserID(t *testing.T) {
 	})
 	tool := memoryTool(t, p, SessionContext{BotID: "bot-1", SessionID: "session-1", ChannelIdentityID: "identity-1"}, ToolCreateMemory().String())
 
-	if _, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+	if _, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{
 		"memory": "Prefers Chinese for PR descriptions.",
 		"layer":  "preference",
 		"topic":  "language",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("create_memory error: %v", err)
 	}
 	if len(backing.added) != 1 {
@@ -148,7 +147,7 @@ func TestCreateMemoryPrefersSessionUserOverThreadCreator(t *testing.T) {
 	})
 	tool := memoryTool(t, p, SessionContext{BotID: "bot-1", SessionID: "session-1", UserID: "speaker"}, ToolCreateMemory().String())
 
-	if _, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{"memory": "A durable fact."}); err != nil {
+	if _, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{"memory": "A durable fact."})); err != nil {
 		t.Fatalf("create_memory error: %v", err)
 	}
 	if got := backing.added[0].Metadata["profile_ref"]; got != "user:speaker" {
@@ -165,9 +164,9 @@ func TestMemoryWriteHookDenyBlocksTheWrite(t *testing.T) {
 			p.hookService = hook
 			tool := memoryTool(t, p, SessionContext{BotID: "bot-1", SessionID: "session-1"}, name)
 
-			_, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+			_, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{
 				"id": "mem-1", "memory": "should never be stored",
-			})
+			}))
 			if err == nil {
 				t.Fatal("a denied memory write must be reported to the agent, not silently dropped")
 			}
@@ -193,7 +192,7 @@ func TestMemoryWriteRunsBeforeAndAfterHooks(t *testing.T) {
 	p.hookService = hook
 	tool := memoryTool(t, p, SessionContext{BotID: "bot-1", SessionID: "session-1"}, ToolCreateMemory().String())
 
-	if _, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{"memory": "A durable fact."}); err != nil {
+	if _, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{"memory": "A durable fact."})); err != nil {
 		t.Fatalf("create_memory error: %v", err)
 	}
 	want := []string{hooks.EventBeforeMemoryWrite, hooks.EventAfterMemoryWrite}
@@ -209,7 +208,7 @@ func TestMemoryWriteSurvivesBrokenHook(t *testing.T) {
 	p.hookService = &recordingHookService{err: errors.New("hook exploded")}
 	tool := memoryTool(t, p, SessionContext{BotID: "bot-1", SessionID: "session-1"}, ToolCreateMemory().String())
 
-	if _, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{"memory": "A durable fact."}); err != nil {
+	if _, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{"memory": "A durable fact."})); err != nil {
 		t.Fatalf("create_memory error: %v", err)
 	}
 	if len(backing.added) != 1 {
@@ -223,9 +222,9 @@ func TestUpdateAndDeleteMemoryReachTheStore(t *testing.T) {
 	sess := SessionContext{BotID: "bot-1", SessionID: "session-1"}
 
 	update := memoryTool(t, p, sess, ToolUpdateMemory().String())
-	if _, err := update.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+	if _, err := update.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{
 		"id": "mem-1", "memory": "Lives in Shanghai.",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("update_memory error: %v", err)
 	}
 	if len(backing.updated) != 1 || backing.updated[0].BotID != "bot-1" || backing.updated[0].MemoryID != "mem-1" || backing.updated[0].Memory != "Lives in Shanghai." {
@@ -233,7 +232,7 @@ func TestUpdateAndDeleteMemoryReachTheStore(t *testing.T) {
 	}
 
 	del := memoryTool(t, p, sess, ToolDeleteMemory().String())
-	if _, err := del.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{"id": "mem-1"}); err != nil {
+	if _, err := del.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{"id": "mem-1"})); err != nil {
 		t.Fatalf("delete_memory error: %v", err)
 	}
 	if len(backing.deleted) != 1 || backing.deleted[0] != "mem-1" || backing.deleteBots[0] != "bot-1" {
@@ -246,9 +245,9 @@ func TestMemoryWriteRejectsTranscriptSizedBody(t *testing.T) {
 	p, backing := newMemoryWriteProvider(t, nil)
 	tool := memoryTool(t, p, SessionContext{BotID: "bot-1"}, ToolCreateMemory().String())
 
-	if _, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+	if _, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{
 		"memory": strings.Repeat("x", maxMemoryToolBodyRunes+1),
-	}); err == nil {
+	})); err == nil {
 		t.Fatal("an oversized body must be rejected, not stored as a transcript")
 	}
 	if len(backing.added) != 0 {
@@ -261,9 +260,9 @@ func TestMemoryWriteIgnoresUnknownLayer(t *testing.T) {
 	p, backing := newMemoryWriteProvider(t, nil)
 	tool := memoryTool(t, p, SessionContext{BotID: "bot-1"}, ToolCreateMemory().String())
 
-	if _, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{
+	if _, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{
 		"memory": "Deploys run on Fridays.", "layer": "not-a-layer",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("create_memory error: %v", err)
 	}
 	if _, ok := backing.added[0].Metadata["layer"]; ok {
@@ -286,7 +285,7 @@ func TestPublicMCPHeadersCannotAdoptPrivateMemoryIdentity(t *testing.T) {
 		t.Fatalf("untrusted routing became authority: %+v", sess)
 	}
 	tool := memoryTool(t, p, sess, ToolCreateMemory().String())
-	if _, err := tool.Execute(&sdk.ToolExecContext{Context: context.Background()}, map[string]any{"memory": "caller preference"}); err != nil {
+	if _, err := tool.Execute(&toolexec.ToolExecContext{Context: context.Background()}, toolexec.ArgumentsFromValue(map[string]any{"memory": "caller preference"})); err != nil {
 		t.Fatal(err)
 	}
 	if got := backing.added[0].Metadata["profile_ref"]; got != "user:caller" {

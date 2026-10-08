@@ -23,6 +23,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/toolcontext"
@@ -111,14 +112,14 @@ func NewRunner(log *slog.Logger, workspace Workspace) *Runner {
 
 func (r *Runner) WorkspaceInfo(ctx context.Context, botID string) (bridge.WorkspaceInfo, error) {
 	if r == nil || r.workspace == nil {
-		return bridge.WorkspaceInfo{}, errors.New("ACP workspace provider is not configured")
+		return bridge.WorkspaceInfo{}, errs.New("ACP workspace provider is not configured")
 	}
 	return r.workspace.WorkspaceInfo(ctx, botID)
 }
 
 func (r *Runner) MCPClient(ctx context.Context, botID string) (*bridge.Client, error) {
 	if r == nil || r.workspace == nil {
-		return nil, errors.New("ACP workspace provider is not configured")
+		return nil, errs.New("ACP workspace provider is not configured")
 	}
 	return r.workspace.MCPClient(ctx, botID)
 }
@@ -134,7 +135,7 @@ func (r *Runner) MCPClient(ctx context.Context, botID string) (*bridge.Client, e
 //nolint:contextcheck // lifecycle close intentionally uses background ctx.
 func (r *Runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if strings.TrimSpace(req.Task) == "" {
-		return RunResult{}, errors.New("task is required")
+		return RunResult{}, errs.New("task is required")
 	}
 
 	timeout := req.Timeout
@@ -181,7 +182,6 @@ type clientCallbacks struct {
 	client         *bridge.Client
 	logger         *slog.Logger
 	root           string
-	cwd            string
 	approval       ToolApprovalService
 	userInput      UserInputService
 	toolGateway    *mcp.ToolGatewayService
@@ -275,7 +275,6 @@ func newClientCallbacks(ctx context.Context, client *bridge.Client, root, cwd st
 	return &clientCallbacks{
 		client:      client,
 		root:        root,
-		cwd:         cwd,
 		approval:    approval,
 		toolGateway: toolGateway,
 		baseSession: toolSession,
@@ -429,7 +428,7 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 		return acp.ReadTextFileResponse{}, err
 	}
 	if !approval.Approved {
-		err := errors.New(c.limitedApprovalRejectionMessage("read", approval))
+		err := errs.New(c.limitedApprovalRejectionMessage("read", approval))
 		c.emitToolCallEnd(toolID, "read", input, toolErrorResult(err), err)
 		return acp.ReadTextFileResponse{}, err
 	}
@@ -462,11 +461,11 @@ func (c *clientCallbacks) ReadTextFile(ctx context.Context, p acp.ReadTextFileRe
 	}
 	resp, err := c.client.ReadFile(ctx, path, line, limit)
 	if err != nil {
-		toolErr = err
-		return acp.ReadTextFileResponse{}, err
+		toolErr = errs.WrapDependency(err, "")
+		return acp.ReadTextFileResponse{}, toolErr
 	}
 	if resp.GetBinary() {
-		toolErr = fmt.Errorf("path %q is binary; ACP text file reads only support text", p.Path)
+		toolErr = errs.New(fmt.Sprintf("path %q is binary; ACP text file reads only support text", p.Path))
 		return acp.ReadTextFileResponse{}, toolErr
 	}
 	content := resp.GetContent()
@@ -508,7 +507,7 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		return acp.WriteTextFileResponse{}, err
 	}
 	if !approval.Approved {
-		err := errors.New(c.limitedApprovalRejectionMessage("write", approval))
+		err := errs.New(c.limitedApprovalRejectionMessage("write", approval))
 		c.emitToolCallEnd(toolID, "write", input, toolErrorResult(err), err)
 		return acp.WriteTextFileResponse{}, err
 	}
@@ -532,8 +531,8 @@ func (c *clientCallbacks) WriteTextFile(ctx context.Context, p acp.WriteTextFile
 		return acp.WriteTextFileResponse{}, err
 	}
 	if err := c.client.WriteFile(ctx, path, []byte(p.Content)); err != nil {
-		toolErr = err
-		return acp.WriteTextFileResponse{}, err
+		toolErr = errs.WrapDependency(err, "")
+		return acp.WriteTextFileResponse{}, toolErr
 	}
 	return acp.WriteTextFileResponse{}, nil
 }
@@ -1180,17 +1179,17 @@ var errUnsupportedOptionKind = errors.New("permission option kind is unsupported
 
 func approvalOptionsFromACP(options []acp.PermissionOption) ([]toolapproval.PermissionOption, error) {
 	if len(options) == 0 {
-		return nil, errors.New("permission options must not be empty")
+		return nil, errs.New("permission options must not be empty")
 	}
 	converted := make([]toolapproval.PermissionOption, 0, len(options))
 	seen := make(map[string]struct{}, len(options))
 	for _, option := range options {
 		id := string(option.OptionId)
 		if strings.TrimSpace(id) == "" {
-			return nil, errors.New("permission option id must not be empty")
+			return nil, errs.New("permission option id must not be empty")
 		}
 		if _, duplicate := seen[id]; duplicate {
-			return nil, fmt.Errorf("permission option id %q is duplicated", id)
+			return nil, errs.New(fmt.Sprintf("permission option id %q is duplicated", id))
 		}
 		seen[id] = struct{}{}
 		kind := string(normalizeACPOptionKind(option.Kind))

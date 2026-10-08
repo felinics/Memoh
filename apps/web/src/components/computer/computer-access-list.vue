@@ -168,15 +168,18 @@ const { t } = useI18n()
 
 const subject = computed<'runtime' | 'bot'>(() => (props.runtime ? 'runtime' : 'bot'))
 
-const { grants, isLoading: grantsLoading, error: grantsError, refetch: refetchGrants } = useComputerAccessGrants()
-const { data: botsData, isLoading: botsLoading, error: botsError, refetch: refetchBots } = useQuery(getBotsQuery())
-const { runtimes, isLoading: runtimesLoading, error: runtimesError, refetch: refetchRuntimes } = useAccountRuntimes()
+const { grants, isPending: grantsPending, error: grantsError, refetch: refetchGrants } = useComputerAccessGrants()
+const { data: botsData, isPending: botsPending, error: botsError, refetch: refetchBots } = useQuery(getBotsQuery())
+const { runtimes, isPending: runtimesPending, error: runtimesError, refetch: refetchRuntimes } = useAccountRuntimes()
 const { grantAccess, revokeAccess } = useComputerAccessActions()
 
+// Pending means no response yet. isLoading is also true on every refetch, and
+// an empty grant list after the first toggle would otherwise swap the whole
+// list for a loading row until that refetch lands.
 const initialLoading = computed(() => (
-  (grantsLoading.value && !grants.value.length)
-  || (subject.value === 'runtime' && botsLoading.value && !botsData.value)
-  || (subject.value === 'bot' && runtimesLoading.value && !runtimes.value)
+  grantsPending.value
+  || (subject.value === 'runtime' && botsPending.value)
+  || (subject.value === 'bot' && runtimesPending.value)
 ))
 const loadFailed = computed(() => (
   (!!grantsError.value && !grants.value.length)

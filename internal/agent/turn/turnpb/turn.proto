@@ -43,6 +43,9 @@ message RunResponse {
 
 message Started {
   string run_id = 1;
+  // Set when the run's event stream ends with a run_terminal event for every
+  // run that reaches a terminal state.
+  bool reports_run_terminal = 2;
 }
 
 message EventResponse {

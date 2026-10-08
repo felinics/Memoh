@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/apps"
 	"github.com/felinics/memoh/internal/supermarket"
@@ -71,7 +72,7 @@ func TestCapabilityInstallKeepsReleaseAndDependencySnapshotAcrossApproval(t *tes
 	var progress []any
 	for _, tool := range available {
 		if tool.Name == ToolAppManage().String() {
-			result, err = tool.Execute(&sdk.ToolExecContext{Context: t.Context(), SendProgress: func(value any) { progress = append(progress, value) }}, map[string]any{"action": "install", "registry_id": "memoh", "app_id": "node"})
+			result, err = tool.Execute(&toolexec.ToolExecContext{Context: t.Context(), SendProgress: func(value sdk.ToolOutput) { progress = append(progress, toolexec.OutputValue(value)) }}, toolexec.ArgumentsFromValue(map[string]any{"action": "install", "registry_id": "memoh", "app_id": "node"}))
 		}
 	}
 	if err != nil {
@@ -136,7 +137,7 @@ func TestCapabilityAppDoesNotExecuteChangedPlanAfterApproval(t *testing.T) {
 					service.item.Installation = &apps.Installation{ID: "installation", Revision: "changed", UpdatedAt: time.Now()}
 				}
 			}
-			_, err := p.manageApp(&sdk.ToolExecContext{Context: t.Context()}, session, map[string]any{"action": action, "installation_id": "installation"})
+			_, err := p.manageApp(&toolexec.ToolExecContext{Context: t.Context()}, session, map[string]any{"action": action, "installation_id": "installation"})
 			public, ok := apperror.PublicFrom(err, "")
 			if !ok || public.Code != apperror.CodeCapabilityRequestInvalid || service.removed || service.resumed {
 				t.Fatalf("changed plan executed: err=%v removed=%v resumed=%v", err, service.removed, service.resumed)
@@ -154,10 +155,36 @@ func TestCapabilityAppRefreshInvalidatesConnectorDiscoveryAfterAuthorization(t *
 	p.opts.Apps = &capabilityTestApps{}
 	invalidated := ""
 	p.opts.Invalidate = func(bot string) { invalidated = bot }
-	if _, err := p.manageApp(&sdk.ToolExecContext{Context: t.Context()}, session, map[string]any{"action": "list", "refresh": true}); err != nil {
+	if _, err := p.manageApp(&toolexec.ToolExecContext{Context: t.Context()}, session, map[string]any{"action": "list", "refresh": true}); err != nil {
 		t.Fatal(err)
 	}
 	if invalidated != session.BotID {
 		t.Fatal("authorization refresh left connector discovery cached")
+	}
+}
+
+func TestCapabilityReviewListsPrerequisiteRevisions(t *testing.T) {
+	p, _, _, _ := capabilityFixture(t)
+	p.opts.FreezeDependencies = func(ctx context.Context) (context.Context, []catalog.Dependency, error) {
+		return ctx, []catalog.Dependency{
+			{ID: "pandoc", Revision: "r-pandoc", Requires: []string{"python", "micromamba"}},
+			{ID: "micromamba", Revision: "r-mamba", Requires: []string{"python"}},
+			{ID: "python", Revision: "r-python"},
+		}, nil
+	}
+	_, revisions, prerequisites, err := p.freeze(t.Context(), []string{"pandoc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 1 || revisions["pandoc"] != "r-pandoc" {
+		t.Fatalf("dependencies = %v", revisions)
+	}
+	if len(prerequisites) != 2 || prerequisites["micromamba"] != "r-mamba" || prerequisites["python"] != "r-python" {
+		t.Fatalf("prerequisites = %v, want the transitive requires with their frozen revisions", prerequisites)
+	}
+	// A prerequisite the App also references directly is listed once, as a dependency.
+	_, revisions, prerequisites, err = p.freeze(t.Context(), []string{"pandoc", "python"})
+	if err != nil || len(revisions) != 2 || len(prerequisites) != 1 || prerequisites["micromamba"] != "r-mamba" {
+		t.Fatalf("dependencies = %v, prerequisites = %v, err = %v", revisions, prerequisites, err)
 	}
 }

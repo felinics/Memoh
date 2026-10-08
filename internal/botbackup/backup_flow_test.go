@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -197,9 +198,12 @@ func TestDecodeBundle(t *testing.T) {
 }
 
 func TestImportStateItemErr(t *testing.T) {
+	svc := &Service{logger: slog.New(slog.DiscardHandler)}
+	ctx := context.Background()
+
 	// Create mode: an item failure is fatal so the caller can roll back.
 	create := &importState{createMode: true}
-	if err := create.itemErr("acl rule", errString("boom")); err == nil {
+	if err := svc.itemErr(ctx, create, "acl_rule", "acl rule skipped", errString("boom")); err == nil {
 		t.Fatal("create mode itemErr should be fatal")
 	}
 	if len(create.warnings) != 0 {
@@ -207,12 +211,13 @@ func TestImportStateItemErr(t *testing.T) {
 	}
 
 	// Overwrite mode: the same failure degrades to a warning and continues.
+	// The warning names the item and leaves the cause out.
 	overwrite := &importState{createMode: false}
-	if err := overwrite.itemErr("acl rule", errString("boom")); err != nil {
+	if err := svc.itemErr(ctx, overwrite, "acl_rule", "acl rule skipped", errString("boom")); err != nil {
 		t.Fatalf("overwrite mode itemErr should not be fatal, got %v", err)
 	}
-	if len(overwrite.warnings) != 1 || !strings.Contains(overwrite.warnings[0], "acl rule") {
-		t.Fatalf("overwrite warnings = %v, want one mentioning 'acl rule'", overwrite.warnings)
+	if len(overwrite.warnings) != 1 || overwrite.warnings[0] != "acl rule skipped" {
+		t.Fatalf("overwrite warnings = %q, want [\"acl rule skipped\"]", overwrite.warnings)
 	}
 }
 

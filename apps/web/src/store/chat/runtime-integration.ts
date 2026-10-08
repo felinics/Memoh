@@ -2,22 +2,28 @@ import { ref, type Ref } from 'vue'
 import type { UIStreamEvent } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { isGuiToolName } from '@/utils/gui-tools'
-import { createInvocationId } from '../chat-list.normalize'
+import { createInvocationId, stringRecord } from '../chat-list.normalize'
 import { provisionalSessionTitle } from '../chat-list.utils'
 import type { createAssistantStreamRegistry } from './assistant-streams'
 import type { createChatDecisions } from './decisions'
 import type { createChatRealtimeController } from './realtime'
 import type { RuntimeProjectionChange } from './runtime-client'
 import { isRuntimeRunActive } from './runtime-projection'
+import { fillRunErrorDetails } from './runtime-transcript-merge'
 import type { createSessionList } from './session-list'
-import { CommandStreamError, StreamFailureError } from './send'
+import { commandActionErrorMessage } from './messages'
+import { CommandStreamError, StreamFailureError, failureStage } from './send'
 import type {
   ChatAssistantTurn,
   ChatMessage,
   ChatViewTarget,
-  SendMessageStage,
 } from './types'
 import type { createChatViewRegistry } from './view-registry'
+
+// The catalog code of a WS failure frame.
+export function wsFrameErrorCode(event: { code?: string }): string {
+  return event.code?.trim() ?? ''
+}
 
 type AssistantStreams = ReturnType<typeof createAssistantStreamRegistry>
 type Decisions = ReturnType<typeof createChatDecisions>
@@ -233,9 +239,11 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         event,
         event.message || deps.sendFailedMessage(),
       )
-      const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
+      const stage = failureStage(
         rejected.assistantTurn,
-      ) ? 'stream' : 'startup'
+        rejected.replacesTurn,
+        deps.hasVisibleAssistantBlocks(rejected.assistantTurn),
+      )
       if (!deps.hasVisibleAssistantBlocks(rejected.assistantTurn)) {
         deps.removeTurnFromSession(
           rejected.botId,
@@ -262,7 +270,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (event.type === 'command_error' && invocationId && pending) {
         deps.assistantStreams.rejectAssistantStream(
           invocationId,
-          new CommandStreamError(event.error?.message || 'slash command failed'),
+          new CommandStreamError(commandActionErrorMessage(event), event),
         )
       }
       return
@@ -270,15 +278,36 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     if (event.type === 'error') {
       const invocationId = deps.assistantStreams.invocationIdForEvent(event)
       const pending = deps.assistantStreams.getAssistantStream(invocationId)
-      if (!pending) return
       const message = resolveApiErrorMessage(
         event,
         event.message || deps.sendFailedMessage(),
       )
-      const stage: SendMessageStage = deps.hasVisibleAssistantBlocks(
+      if (!pending) {
+        const sessionId = event.session_id?.trim() ?? ''
+        if (!sourceBotId || !sessionId) return
+        const view = deps.chatViews.getSession(sourceBotId, sessionId)
+        if (view) fillRunErrorDetails(view.transcript.messages, event.run_id ?? '', {
+          code: wsFrameErrorCode(event) || undefined,
+          content: message,
+          args: stringRecord(event.args),
+        })
+        return
+      }
+      const stage = failureStage(
         pending.assistantTurn,
-      ) ? 'stream' : 'startup'
-      if (!deps.hasVisibleAssistantBlocks(pending.assistantTurn) && !event.code) {
+        pending.replacesTurn,
+        deps.hasVisibleAssistantBlocks(pending.assistantTurn),
+      )
+      // History keeps a turn the server accepted and failed with a code; a
+      // send refused before acceptance is not in history and returns to the
+      // composer without leaving a turn behind.
+      const acceptedWithCode = Boolean(pending.assistantTurn.runtimeRunId?.trim())
+        && Boolean(wsFrameErrorCode(event))
+      if (
+        stage === 'startup'
+        && !deps.hasVisibleAssistantBlocks(pending.assistantTurn)
+        && !acceptedWithCode
+      ) {
         deps.removeTurnFromSession(
           pending.botId,
           pending.sessionId,
@@ -287,7 +316,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       }
       deps.assistantStreams.rejectAssistantStream(
         invocationId,
-        new StreamFailureError(message, stage, event.feedback ?? event),
+        new StreamFailureError(message, stage, event),
       )
     }
   }
@@ -385,19 +414,18 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (currentRun.status === 'completed') {
         deps.assistantStreams.resolveAssistantStream(invocationId)
       } else {
-        const message = resolveApiErrorMessage(
-          currentRun,
-          currentRun.error || deps.sendFailedMessage(),
-        )
+        const message = resolveApiErrorMessage(currentRun, deps.sendFailedMessage())
         if (currentRun.status === 'aborted') {
           const aborted = new Error(message)
           aborted.name = 'AbortError'
           deps.assistantStreams.rejectAssistantStream(invocationId, aborted)
         } else {
-          const stage: SendMessageStage = currentRun.messages.some(message => message.type !== 'status')
-            || Boolean(currentRun.error_code)
-            ? 'stream'
-            : 'startup'
+          const stage = failureStage(
+            pending.assistantTurn,
+            pending.replacesTurn,
+            currentRun.messages.some(message => message.type !== 'status')
+              || Boolean(currentRun.error_code),
+          )
           deps.assistantStreams.rejectAssistantStream(
             invocationId,
             new StreamFailureError(message, stage, currentRun),

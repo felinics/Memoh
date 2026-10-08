@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func TestFinishRunObservesAuthoritativeLedgerTerminal(t *testing.T) {
 		observed = append(observed, run)
 	})
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored, "provider.unavailable"); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusErrored); err != nil {
 		t.Fatal(err)
 	}
 	if len(observed) != 1 {
@@ -37,7 +38,7 @@ func TestFinishRunObservesAuthoritativeLedgerTerminal(t *testing.T) {
 	want := TerminalRun{
 		RunID: admission.RunID, BotID: testBotID, SessionID: testSessionID,
 		FencingToken: admission.Handle.FencingToken, State: string(ledger.StateFailed),
-		ErrorCode: "runtime_run_failed", ErrorMessage: "provider.unavailable",
+		ErrorCode: "runtime_run_failed", Applied: true,
 	}
 	if observed[0] != want {
 		t.Fatalf("terminal observation = %+v, want %+v", observed[0], want)
@@ -52,7 +53,7 @@ func TestFinishRunWithErrorCodePersistsStableCodeWithoutDiagnostic(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if err := fixture.manager.FinishRunWithErrorCode(
+	if _, err := fixture.manager.FinishRunWithErrorCode(
 		context.Background(), admission.Handle, RunStatusErrored, "agent.response_timeout",
 	); err != nil {
 		t.Fatal(err)
@@ -62,8 +63,8 @@ func TestFinishRunWithErrorCodePersistsStableCodeWithoutDiagnostic(t *testing.T)
 	if len(writes) != 1 {
 		t.Fatalf("terminal writes = %d, want 1", len(writes))
 	}
-	if writes[0].ErrorCode != "agent.response_timeout" || writes[0].ErrorMessage != "" {
-		t.Fatalf("terminal error = code:%q message:%q", writes[0].ErrorCode, writes[0].ErrorMessage)
+	if writes[0].ErrorCode != "agent.response_timeout" {
+		t.Fatalf("terminal error code = %q", writes[0].ErrorCode)
 	}
 }
 
@@ -85,7 +86,7 @@ func TestFinishRunRetriesTransientDurableFailuresWhileRetainingOwnership(t *test
 				fixture.runs.SetFinalizeErr(transient)
 			}
 
-			err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, "")
+			_, err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted)
 			if err == nil || !strings.Contains(err.Error(), transient.Error()) {
 				t.Fatalf("first finish error = %v, want transient durable failure", err)
 			}
@@ -123,7 +124,7 @@ func TestFinishRunStopsDurableRetryAfterBudget(t *testing.T) {
 	}
 	fixture.runs.SetPrepareErr(errors.New("database remains unavailable"))
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err == nil {
 		t.Fatal("FinishRun() error = nil, want initial durable failure")
 	}
 	deadline := time.Now().Add(time.Second)
@@ -179,7 +180,7 @@ func TestMemoryRuntimeReaperConvergesExhaustedDurableFinish(t *testing.T) {
 				}
 				runs.SetFinalizeErr(transient)
 			}
-			if err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err == nil {
+			if _, err := manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err == nil {
 				t.Fatal("FinishRun() error = nil, want initial durable failure")
 			}
 
@@ -218,7 +219,7 @@ func TestFinishRunRejectsOwnerProposedLostWithoutRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusLost, "owner guessed it was lost")
+	_, err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusLost)
 	if !errors.Is(err, errInvalidOwnerTerminalState) {
 		t.Fatalf("FinishRun() error = %v, want errInvalidOwnerTerminalState", err)
 	}
@@ -255,7 +256,7 @@ func TestAgentTerminalProposalFailureDefersOutcomeToFinish(t *testing.T) {
 	}
 
 	fixture.runs.SetPrepareErr(nil)
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err != nil {
 		t.Fatalf("FinishRun() after recovery: %v", err)
 	}
 	if got := fixture.runs.State(admission.RunID); got != ledger.StateCompleted {
@@ -279,11 +280,11 @@ func TestUnnamedFinishCarriesProjectedStableErrorCodeToLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, ""); err != nil {
 		t.Fatal(err)
 	}
 	writes := fixture.runs.TerminalWrites()
-	if len(writes) != 1 || writes[0].ErrorCode != "agent.response_interrupted" || writes[0].ErrorMessage != "" {
+	if len(writes) != 1 || writes[0].ErrorCode != "agent.response_interrupted" {
 		t.Fatalf("terminal writes = %#v", writes)
 	}
 }
@@ -305,11 +306,11 @@ func TestFinishRunReplaysAlreadyTerminalLedgerOutcome(t *testing.T) {
 		observed = append(observed, run)
 	})
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if len(observed) != 1 || observed[0].State != string(ledger.StateCompleted) {
-		t.Fatalf("terminal observations = %+v, want completed replay", observed)
+	if len(observed) != 1 || observed[0].State != string(ledger.StateCompleted) || observed[0].Applied {
+		t.Fatalf("terminal observations = %+v, want an unapplied completed replay", observed)
 	}
 }
 
@@ -336,7 +337,7 @@ func TestAgentTerminalEventReplaysMatchingTerminalLedgerOutcome(t *testing.T) {
 	if snapshot.CurrentRunView == nil || snapshot.CurrentRunView.Status != RunStatusFinishing || snapshot.CurrentRunView.ProposedTerminalStatus != RunStatusCompleted {
 		t.Fatalf("live run after terminal replay = %#v, want finishing/completed", snapshot.CurrentRunView)
 	}
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err != nil {
 		t.Fatalf("FinishRun() after terminal replay = %v", err)
 	}
 }
@@ -393,11 +394,12 @@ func TestFinishRunObservesTerminalNewerFenceButRejectsStaleOwner(t *testing.T) {
 		observed = append(observed, run)
 	})
 
-	err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted, "")
+	_, err = fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted)
 	if !errors.Is(err, ErrRunOwnershipLost) {
 		t.Fatalf("FinishRun() error = %v, want ErrRunOwnershipLost", err)
 	}
-	if len(observed) != 1 || observed[0].State != string(ledger.StateAborted) || observed[0].FencingToken != newToken {
+	if len(observed) != 1 || observed[0].State != string(ledger.StateAborted) || observed[0].FencingToken != newToken ||
+		observed[0].Applied {
 		t.Fatalf("terminal observations = %+v, want authoritative newer aborted row", observed)
 	}
 	if fixture.manager.localControlForHandle(admission.Handle) != nil {
@@ -428,7 +430,7 @@ func TestFinishRunDoesNotObserveWaitingDecision(t *testing.T) {
 		observed = append(observed, run)
 	})
 
-	if err := fixture.manager.FinishRun(context.Background(), admission.Handle, "", ""); err != nil {
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, ""); err != nil {
 		t.Fatal(err)
 	}
 	if len(observed) != 0 {
@@ -436,5 +438,69 @@ func TestFinishRunDoesNotObserveWaitingDecision(t *testing.T) {
 	}
 	if got := fixture.runs.State(admission.RunID); got != ledger.StateWaitingDecision {
 		t.Fatalf("ledger state = %q, want waiting_decision", got)
+	}
+}
+
+// Every observation of a run's end reaches the terminal observer, and exactly
+// one of them applied the transition. A durable finish retry whose first
+// write failed, and a reaper that later finds the run, observe it without
+// applying anything.
+func TestTerminalObservationsApplyOnceAcrossRetryAndReaper(t *testing.T) {
+	fixture := newAdmitFixture(t)
+	admission, err := fixture.manager.Admit(context.Background(), fixture.input("inv-applied-once", `{"text":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var observed []TerminalRun
+	observe := func(_ context.Context, run TerminalRun) {
+		mu.Lock()
+		defer mu.Unlock()
+		observed = append(observed, run)
+	}
+	fixture.manager.SetTerminalObserver(observe)
+	if _, err := fixture.manager.HandleAgentEvent(context.Background(), admission.Handle, native.StreamEvent{Type: native.EventAgentEnd}); err != nil {
+		t.Fatalf("prepare terminal event: %v", err)
+	}
+	fixture.runs.SetFinalizeErr(errors.New("database temporarily unavailable"))
+	if _, err := fixture.manager.FinishRun(context.Background(), admission.Handle, RunStatusCompleted); err == nil {
+		t.Fatal("first finish succeeded, want a transient durable failure")
+	}
+	fixture.runs.SetFinalizeErr(nil)
+	// The retry observes the run after its write commits; wait for that
+	// observation, not only for the row.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		retried := len(observed) > 0
+		mu.Unlock()
+		if retried {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	run, err := fixture.runs.Get(context.Background(), admission.RunID)
+	if err != nil || run.State != ledger.StateCompleted {
+		t.Fatalf("ledger run = %+v, %v; want completed after the retry", run, err)
+	}
+
+	live := newFakeLiveness(run.LiveGeneration)
+	live.setCandidates(LeaseCandidate{
+		Key: Key{BotID: testBotID, SessionID: testSessionID}, RunID: admission.RunID, FencingToken: admission.Handle.FencingToken,
+	})
+	reaper := newTestReaperWithLiveness(t, fixture.runs, live, run.LiveGeneration)
+	reaper.SetTerminalObserver(observe)
+	reaper.tick(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	applied := 0
+	for _, run := range observed {
+		if run.Applied {
+			applied++
+		}
+	}
+	if len(observed) < 2 || applied != 1 {
+		t.Fatalf("terminal observations = %+v, want the retry and the reaper with one applied", observed)
 	}
 }

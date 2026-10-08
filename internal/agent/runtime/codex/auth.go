@@ -3,7 +3,6 @@ package codex
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"path"
 	"strings"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agentcredential"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -42,15 +42,15 @@ func materializeChatGPTCredential(ctx context.Context, client *bridge.Client, bo
 	}
 	home := codexHome(botAgentID)
 	if err := client.Mkdir(ctx, home); err != nil {
-		return err
+		return errs.WrapDependency(err, "")
 	}
-	return client.WriteFile(ctx, path.Join(home, "auth.json"), append(payload, '\n'))
+	return errs.WrapDependency(client.WriteFile(ctx, path.Join(home, "auth.json"), append(payload, '\n')), "")
 }
 
 func readChatGPTCredential(ctx context.Context, client *bridge.Client, botAgentID string) (chatGPTCredential, error) {
 	response, err := client.ReadFile(ctx, path.Join(codexHome(botAgentID), "auth.json"), 0, 0)
 	if err != nil {
-		return chatGPTCredential{}, err
+		return chatGPTCredential{}, errs.WrapDependency(err, "")
 	}
 	var payload struct {
 		AuthMode    string            `json:"auth_mode"`
@@ -58,7 +58,7 @@ func readChatGPTCredential(ctx context.Context, client *bridge.Client, botAgentI
 		LastRefresh string            `json:"last_refresh"`
 	}
 	if err := json.Unmarshal([]byte(response.GetContent()), &payload); err != nil {
-		return chatGPTCredential{}, err
+		return chatGPTCredential{}, errs.WrapDependency(err, "")
 	}
 	credential := chatGPTCredential{
 		accessToken:  strings.TrimSpace(payload.Tokens["access_token"]),
@@ -68,7 +68,7 @@ func readChatGPTCredential(ctx context.Context, client *bridge.Client, botAgentI
 	}
 	credential.lastRefresh, _ = time.Parse(time.RFC3339Nano, strings.TrimSpace(payload.LastRefresh))
 	if payload.AuthMode != "chatgpt" || credential.accessToken == "" || credential.idToken == "" || credential.refreshToken == "" || credential.accountID == "" {
-		return chatGPTCredential{}, errors.New("codex auth.json does not contain a complete ChatGPT credential")
+		return chatGPTCredential{}, errs.NewDependency("codex auth.json does not contain a complete ChatGPT credential")
 	}
 	return credential, nil
 }

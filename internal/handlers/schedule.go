@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/workdir"
@@ -50,8 +51,8 @@ func (h *ScheduleHandler) Register(e *echo.Echo) {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body schedule.CreateRequest true "Schedule payload"
 // @Success 201 {object} schedule.Schedule
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule [post].
 func (h *ScheduleHandler) Create(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -82,8 +83,8 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 // @Tags schedule
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} schedule.ListResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule [get].
 func (h *ScheduleHandler) List(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -111,9 +112,9 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Schedule ID"
 // @Success 200 {object} schedule.Schedule
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/{id} [get].
 func (h *ScheduleHandler) Get(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -149,8 +150,8 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 // @Param id path string true "Schedule ID"
 // @Param payload body schedule.UpdateRequest true "Schedule payload"
 // @Success 200 {object} schedule.Schedule
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/{id} [put].
 func (h *ScheduleHandler) Update(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -193,8 +194,8 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Schedule ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/{id} [delete].
 func (h *ScheduleHandler) Delete(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -233,8 +234,8 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 // @Param limit query int false "Limit" default(50)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} schedule.ListLogsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/logs [get].
 func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -266,8 +267,8 @@ func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 // @Param limit query int false "Limit" default(50)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} schedule.ListLogsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/{id}/logs [get].
 func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -300,8 +301,8 @@ func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
 // @Tags schedule
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/schedule/logs [delete].
 func (h *ScheduleHandler) DeleteLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -332,6 +333,9 @@ func (h *ScheduleHandler) authorizeBotAccess(ctx context.Context, userID, botID 
 // scheduleServiceError maps schedule domain errors onto HTTP status codes:
 // user-correctable validation failures answer 400, everything else stays 500.
 func scheduleServiceError(err error) error {
+	if errors.Is(err, schedule.ErrExecutionTimeout) {
+		return apperror.Wrap(apperror.CodeScheduleExecutionTimeout, err, nil)
+	}
 	if botAgentErr := botAgentHTTPError(err); botAgentErr != nil {
 		return botAgentErr
 	}

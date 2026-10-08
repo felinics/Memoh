@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -46,7 +47,6 @@ const (
 )
 
 type processOptions struct {
-	Backend          WorkspaceBackend
 	BotID            string
 	AgentID          string
 	SetupMode        SetupMode
@@ -58,20 +58,16 @@ type processOptions struct {
 }
 
 type bridgeProcess struct {
-	stream       *bridge.ExecStream
-	stdin        *io.PipeWriter
-	stdout       *io.PipeReader
-	tail         *stderrTail
-	done         chan struct{}
-	lifecycleCtx context.Context
-	env          []string
-	toolEnv      []string
-	unsetEnv     []string
-	lease        *runtimeLease
-	logger       *slog.Logger
+	stream   *bridge.ExecStream
+	stdin    *io.PipeWriter
+	stdout   *io.PipeReader
+	tail     *stderrTail
+	done     chan struct{}
+	toolEnv  []string
+	unsetEnv []string
+	lease    *runtimeLease
+	logger   *slog.Logger
 
-	stateMu      sync.Mutex
-	activated    bool
 	closeOnce    sync.Once
 	finalizeOnce sync.Once
 	finalizeDone chan struct{}
@@ -80,15 +76,15 @@ type bridgeProcess struct {
 
 func startBridgeProcess(ctx context.Context, client *bridge.Client, command string, args []string, workDir string, timeout time.Duration, opts processOptions) (*bridgeProcess, error) {
 	if client == nil {
-		return nil, errors.New("workspace bridge client is required")
+		return nil, errs.New("workspace bridge client is required")
 	}
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return nil, errors.New("ACP command is required")
+		return nil, errs.New("ACP command is required")
 	}
 	if strings.Contains(filepath.ToSlash(workDir), noProjectWorkDirPart) {
 		if err := client.Mkdir(ctx, workDir); err != nil {
-			return nil, fmt.Errorf("prepare ACP cwd: %w", err)
+			return nil, errs.WrapDependency(err, "prepare ACP cwd")
 		}
 	}
 	timeoutSeconds := int32(timeout.Seconds())
@@ -123,7 +119,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = lease.finalize(cleanupCtx)
-		return nil, err
+		return nil, errs.WrapDependency(err, "")
 	}
 
 	stdinR, stdinW := io.Pipe()
@@ -134,8 +130,6 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 		stdout:       stdoutR,
 		tail:         &stderrTail{},
 		done:         make(chan struct{}),
-		lifecycleCtx: ctx,
-		env:          append([]string(nil), env...),
 		toolEnv:      append([]string(nil), lease.toolEnv...),
 		unsetEnv:     append([]string(nil), lease.unsetEnv...),
 		lease:        lease,
@@ -150,7 +144,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 			n, readErr := stdinR.Read(buf)
 			if n > 0 {
 				if sendErr := execStream.SendStdin(buf[:n]); sendErr != nil {
-					_ = stdoutW.CloseWithError(sendErr)
+					_ = stdoutW.CloseWithError(errs.WrapDependency(sendErr, ""))
 					return
 				}
 			}
@@ -166,7 +160,7 @@ func startBridgeProcess(ctx context.Context, client *bridge.Client, command stri
 			output, recvErr := execStream.Recv()
 			if recvErr != nil {
 				if !errors.Is(recvErr, io.EOF) {
-					_ = stdoutW.CloseWithError(recvErr)
+					_ = stdoutW.CloseWithError(errs.WrapDependency(recvErr, ""))
 				} else {
 					_ = stdoutW.Close()
 				}
@@ -276,10 +270,14 @@ func resolveCommandOnce(ctx context.Context, client *bridge.Client, command, wor
 }
 
 func checkCommand(ctx context.Context, client *bridge.Client, check, workDir string, env []string, opts processOptions) (*bridge.ExecResult, error) {
-	return client.ExecWithOptions(ctx, check, workDir, 10, nil, bridge.ExecOptions{
+	result, err := client.ExecWithOptions(ctx, check, workDir, 10, nil, bridge.ExecOptions{
 		Env:      env,
 		UnsetEnv: opts.UnsetEnv,
 	})
+	if err != nil {
+		return nil, errs.WrapDependency(err, "")
+	}
+	return result, nil
 }
 
 // CommandNotFoundError reports a launch command that resolves neither on the
@@ -344,21 +342,10 @@ func (p *bridgeProcess) Close() error {
 	select {
 	case <-p.done:
 	case <-timer.C:
-		return errors.New("ACP process did not exit before the cleanup deadline")
+		return errs.NewDependency("ACP process did not exit before the cleanup deadline")
 	}
 	<-p.finalizeDone
 	return p.finalizeErr
-}
-
-// Activate marks a fully initialized ACP process. Startup failures call
-// Close before activation and only remove their process-local directory.
-func (p *bridgeProcess) Activate() {
-	if p == nil {
-		return
-	}
-	p.stateMu.Lock()
-	p.activated = true
-	p.stateMu.Unlock()
 }
 
 func (p *bridgeProcess) finalizeAfterExit(parent context.Context) {

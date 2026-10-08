@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"log/slog"
+	"net"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -16,9 +17,10 @@ import (
 )
 
 type Server struct {
-	echo   *echo.Echo
-	addr   string
-	logger *slog.Logger
+	stopRequests context.CancelFunc
+	echo         *echo.Echo
+	addr         string
+	logger       *slog.Logger
 }
 
 type Handler interface {
@@ -45,8 +47,12 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	}
 
 	e := echo.New()
+	requestCtx, stopRequests := context.WithCancel(context.Background())
+	baseContext := func(net.Listener) context.Context { return requestCtx }
+	e.Server.BaseContext = baseContext
+	e.TLSServer.BaseContext = baseContext
 	e.HideBanner = true
-	e.HTTPErrorHandler = newHTTPErrorHandler(log, e.DefaultHTTPErrorHandler)
+	e.HTTPErrorHandler = NewHTTPErrorHandler(log)
 	e.Use(middleware.RequestID())
 	// Directly after RequestID: everything below, and every handler, logs with
 	// a context that carries the id.
@@ -54,7 +60,9 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	// After RequestIDContext so the span can carry the id the client is given,
 	// and before everything else so the span covers the work they do.
 	e.Use(telemetry.EchoServer)
-	e.Use(middleware.Recover())
+	// Directly after the span: the result record is logged with it, and a
+	// panic or error anywhere below is answered and recorded here.
+	e.Use(AccessLog(log))
 	e.Use(middleware.BodyLimitWithConfig(middleware.BodyLimitConfig{
 		Limit: "1M",
 		Skipper: func(c echo.Context) bool {
@@ -64,29 +72,10 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins:  []string{"*"},
 		AllowMethods:  []string{echo.GET, echo.HEAD, echo.POST, echo.PUT, echo.PATCH, echo.DELETE, echo.OPTIONS},
-		AllowHeaders:  []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID},
+		AllowHeaders:  []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, echo.HeaderXRequestID, "Idempotency-Key"},
 		ExposeHeaders: []string{echo.HeaderXRequestID},
 	}))
-	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-		HandleError: true,
-		LogStatus:   true,
-		LogURI:      true,
-		LogMethod:   true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			// InfoContext, not Info: the request's context is what carries the
-			// id and any trace identity, and request_id is no longer written
-			// by hand here — one source for it, on every record rather than
-			// just this one.
-			log.InfoContext(c.Request().Context(), "request",
-				slog.String("method", v.Method),
-				slog.String("uri", httpx.SafeRequestLogURI(c.Request().URL, v.URI)),
-				slog.Int("status", v.Status),
-				slog.Duration("latency", v.Latency),
-				slog.String("remote_ip", c.RealIP()),
-			)
-			return nil
-		},
-	}))
+	e.Use(recordUpgradeStatus)
 	e.Use(auth.JWTMiddleware(jwtSecret, func(c echo.Context) bool {
 		return shouldSkipJWT(c.Request().URL.Path)
 	}, validateSession))
@@ -98,7 +87,7 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	}
 
 	return &Server{
-		echo:   e,
+		stopRequests: stopRequests, echo: e,
 		addr:   addr,
 		logger: log.With(slog.String("component", "server")),
 	}
@@ -109,11 +98,17 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Stop(ctx context.Context) error {
+	// Agent interruption is recorded by the earlier lifecycle hook. Cancel
+	// request contexts now so SSE handlers release before their hubs are closed
+	// by later hooks; otherwise HTTP drain consumes the whole shutdown budget.
+	if s.stopRequests != nil {
+		s.stopRequests()
+	}
 	return s.echo.Shutdown(ctx)
 }
 
 func shouldSkipJWT(path string) bool {
-	if path == "/" || path == "/ping" || path == "/health" || path == "/api/swagger.json" || path == "/auth/login" || path == "/runtimes/connect" {
+	if path == "/" || path == "/ping" || path == "/health" || path == "/ready" || path == "/api/swagger.json" || path == "/auth/login" || path == "/runtimes/connect" {
 		return true
 	}
 	if strings.HasPrefix(path, "/assets/") {

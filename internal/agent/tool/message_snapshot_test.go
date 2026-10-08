@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestMessageSnapshotIsImmutableAndProviderNeutral(t *testing.T) {
@@ -13,13 +16,13 @@ func TestMessageSnapshotIsImmutableAndProviderNeutral(t *testing.T) {
 			sdk.TextPart{
 				Text:             "answer",
 				CacheControl:     &sdk.CacheControl{Type: "ephemeral"},
-				ProviderMetadata: map[string]any{"signature": "provider-only"},
+				ProviderMetadata: partmeta.Fold(map[string]any{"signature": "provider-only"}),
 			},
 			sdk.ToolCallPart{
 				ToolCallID:       "call-1",
 				ToolName:         "read",
-				Input:            map[string]any{"path": "a.txt"},
-				ProviderMetadata: map[string]any{"opaque": "value"},
+				Input:            toolexec.ArgumentsFromValue(map[string]any{"path": "a.txt"}),
+				ProviderMetadata: partmeta.Fold(map[string]any{"opaque": "value"}),
 			},
 		},
 	}}

@@ -5,7 +5,16 @@
       v-else
       class="flex-1 bg-card"
     >
-      <PanePlaceholder :title="t('chat.selectBot')">
+      <PanePlaceholder
+        v-if="missingBotName"
+        :title="t('bots.notFound')"
+      >
+        {{ t('bots.notFoundDescription') }}
+      </PanePlaceholder>
+      <PanePlaceholder
+        v-else
+        :title="t('chat.selectBot')"
+      >
         {{ t('chat.selectBotHint') }}
       </PanePlaceholder>
     </div>
@@ -14,12 +23,13 @@
 
 <script setup lang="ts">
 import { normalizeAgentID } from '@/utils/external-agent'
-import { watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { useTitle } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getBotsByBotIdAgents, getBotsById } from '@memohai/sdk'
+import { fetchBot } from '@/composables/api/useBot'
 import { PanePlaceholder } from '@felinic/ui'
 import { useChatStore } from '@/store/chat-list'
 import { routeConversationLabel } from '@/store/chat-list.utils'
@@ -37,17 +47,15 @@ const { currentBotId, bots, activeSession } = storeToRefs(chatStore)
 
 // Resolve a bot UUID from a URL name slug. Prefers the already-loaded bot list,
 // falling back to the API (which accepts both name and UUID identifiers).
+// Returns null when the server reports no such bot; throws on other failures
+// so a transient error isn't mistaken for a missing bot.
 async function resolveBotIdFromName(nameOrId: string): Promise<string | null> {
   const value = nameOrId.trim()
   if (!value) return null
   const cached = bots.value.find((b) => b.name === value || b.id === value)
   if (cached?.id) return cached.id
-  try {
-    const { data } = await getBotsById({ path: { id: value }, throwOnError: true })
-    return data?.id ?? null
-  } catch {
-    return null
-  }
+  const bot = await fetchBot(value)
+  return bot?.id ?? null
 }
 
 // Resolve a URL name slug from a bot UUID, preferring the loaded bot list.
@@ -65,6 +73,10 @@ async function resolveBotNameFromId(botId: string): Promise<string | null> {
 }
 
 let suppressUrlSync = false
+
+// The URL's bot identifier when the server has no such bot. While set, the
+// pane shows the not-found state and the URL is left as the user typed it.
+const missingBotName = ref('')
 
 // home is now mounted persistently (via main-container, which App.vue keeps
 // alive across chat↔settings) rather than torn down when leaving chat. So these
@@ -136,14 +148,35 @@ async function maybeStartExternalAgentSession() {
 async function syncStoreFromUrl(rawName: string) {
   const urlName = rawName.trim()
   if (!urlName) {
+    missingBotName.value = ''
     if (!currentBotId.value) {
       await chatStore.initializeWithRecovery()
     }
     await maybeStartExternalAgentSession()
     return
   }
-  const resolvedId = await resolveBotIdFromName(urlName)
-  if (!resolvedId) return
+  let resolvedId: string | null
+  try {
+    resolvedId = await resolveBotIdFromName(urlName)
+  } catch {
+    return
+  }
+  if (!resolvedId) {
+    // The URL may have moved on while the lookup was in flight; only the
+    // current URL may clear the selection.
+    if (((route.params.botName as string) ?? '').trim() !== urlName) return
+    missingBotName.value = urlName
+    // Drop the previously selected bot rather than showing its chat under
+    // this URL. Clearing the selection resets the chat store, bot list
+    // included, so reload the list for the bot switcher afterwards.
+    if (currentBotId.value) {
+      currentBotId.value = null
+      await nextTick()
+    }
+    void chatStore.refreshBots()
+    return
+  }
+  missingBotName.value = ''
   if (resolvedId !== (currentBotId.value ?? '').trim()) {
     suppressUrlSync = true
     try {
@@ -190,6 +223,7 @@ watch(currentBotId, async (newBotId) => {
   if (!isChatRoute()) return
   const storeBot = (newBotId ?? '').trim()
   if (!storeBot) {
+    if (missingBotName.value) return
     if (route.name !== 'home') {
       void router.replace({ name: 'home' })
     }

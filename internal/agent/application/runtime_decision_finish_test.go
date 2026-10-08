@@ -133,7 +133,7 @@ func TestParkDoesNotFinalizeDecisions(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.FinishRun(context.Background(), handle, "", ""); err != nil {
+	if _, err := manager.FinishRun(context.Background(), handle, ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -233,7 +233,7 @@ func TestInlineFinishReconcilesClosedDecisionsAndRetriesPublication(t *testing.T
 				}
 				return service.finalizeRuntimeDecisions(ctx, h)
 			})
-			err := manager.FinishRun(t.Context(), handle, "", "")
+			_, err := manager.FinishRun(t.Context(), handle, "")
 			if failPublish && !errors.Is(err, backend.err) {
 				t.Fatalf("publication failure not propagated: %v", err)
 			}
@@ -317,6 +317,21 @@ func TestRuntimeFailureEventKeepsStableCodePrivateCause(t *testing.T) {
 	}
 }
 
+func TestRuntimeFailureEventCarriesPublicArgs(t *testing.T) {
+	cause := apperror.Wrap(apperror.CodeAgentDependencyMissing, errors.New("SECRET"), map[string]string{"dep_id": "python", "secret": "SECRET"})
+	ev := runtimeFailureEvent(cause)
+	if ev.Code != string(apperror.CodeAgentDependencyMissing) || len(ev.Args) != 1 || ev.Args["dep_id"] != "python" {
+		t.Fatalf("runtime failure event = %+v, want %s with dep_id", ev, apperror.CodeAgentDependencyMissing)
+	}
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"args":{"dep_id":"python"}`) || strings.Contains(string(raw), "SECRET") {
+		t.Fatalf("runtime failure event wire = %s", raw)
+	}
+}
+
 func TestFinishRereadsConcurrentUserDecision(t *testing.T) {
 	q := &finishDecisionQueries{row: sqlc.UserInputRequest{ID: db.ParseUUIDOrEmpty("44444444-4444-4444-8444-444444444444"), BotID: db.ParseUUIDOrEmpty(lifecycleTestBotID), SessionID: db.ParseUUIDOrEmpty(lifecycleTestSessionID), RunID: db.ParseUUIDOrEmpty(lifecycleTestRunID), Status: userinput.StatusPending, RuntimeFencingToken: pgtype.Int8{Int64: 7, Valid: true}}}
 	input := &fakeUserInputService{cancelErr: userinput.ErrAlreadyDecided, target: userinput.Request{ID: q.row.ID.String(), Status: userinput.StatusSubmitted}}
@@ -330,5 +345,17 @@ func TestFinishRereadsConcurrentUserDecision(t *testing.T) {
 	input.target.Status = userinput.StatusPending
 	if err := service.finalizeRuntimeDecisions(t.Context(), sessionruntime.RunHandle{BotID: lifecycleTestBotID, SessionID: lifecycleTestSessionID, RunID: lifecycleTestRunID, FencingToken: 7}); err == nil {
 		t.Fatal("unresolved decision allowed finish")
+	}
+}
+
+func TestPublishedRuntimeFailureKeepsPublicArgs(t *testing.T) {
+	cause := apperror.Wrap(apperror.CodeAgentDependencyMissing, errors.New("SECRET"), map[string]string{"dep_id": "python"})
+	ev := publicAgentStreamEvent(runtimeFailureEvent(cause))
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.Code != string(apperror.CodeAgentDependencyMissing) || ev.Args["dep_id"] != "python" || strings.Contains(string(raw), "SECRET") {
+		t.Fatalf("published runtime failure = %s, want %s with dep_id and no cause", raw, apperror.CodeAgentDependencyMissing)
 	}
 }

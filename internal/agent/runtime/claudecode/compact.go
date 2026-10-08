@@ -2,10 +2,10 @@ package claudecode
 
 import (
 	"context"
-	"errors"
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var _ external.Compactor = (*Driver)(nil)
@@ -28,7 +28,7 @@ func (d *Driver) Compact(ctx context.Context, input external.PromptInput) (exter
 		return external.CompactionResult{}, ctx.Err()
 	}
 	if !result.TurnCompleted {
-		return external.CompactionResult{}, errors.New("claude compaction did not complete")
+		return external.CompactionResult{}, errs.NewDependency("claude compaction did not complete")
 	}
-	return external.CompactionResult{RuntimeMetadata: result.RuntimeMetadata, Checkpoint: result.Checkpoint}, nil
+	return external.CompactionResult{RuntimeMetadata: result.RuntimeMetadata}, nil
 }

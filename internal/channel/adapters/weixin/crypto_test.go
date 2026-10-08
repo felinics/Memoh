@@ -126,7 +126,7 @@ func TestUploadToCDNSendsContentLength(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := uploadToCDN(server.URL, "upload-param", "file-key", plaintext, aesKey)
+	got, err := uploadToCDN(server.URL, &GetUploadURLResponse{UploadParam: "upload-param"}, "file-key", plaintext, aesKey)
 	if err != nil {
 		t.Fatalf("upload: %v", err)
 	}

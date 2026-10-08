@@ -9,6 +9,8 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
+	"github.com/felinics/memoh/internal/agent/partmeta"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestToolExecutionMetadataRegistryAnnotatesToolCall(t *testing.T) {
@@ -23,9 +25,9 @@ func TestToolExecutionMetadataRegistryAnnotatesToolCall(t *testing.T) {
 	registry := newToolExecutionMetadataRegistry(func(_ sdk.ToolCall, metadata map[string]any) {
 		update = metadata
 	})
-	handler := registry.wrap(func(context.Context, sdk.ToolCall) (sdk.ToolApprovalResult, error) {
-		return sdk.ToolApprovalResult{
-			Decision: sdk.ToolApprovalDecisionApproved,
+	handler := registry.wrap(func(context.Context, sdk.ToolCall) (toolexec.ToolApprovalResult, error) {
+		return toolexec.ToolApprovalResult{
+			Decision: toolexec.ToolApprovalDecisionApproved,
 			Metadata: map[string]any{
 				toolapproval.ExecutionLocationMetadataKey: location,
 				"unrelated": "not persisted",
@@ -36,7 +38,7 @@ func TestToolExecutionMetadataRegistryAnnotatesToolCall(t *testing.T) {
 	_, err := handler(context.Background(), sdk.ToolCall{
 		ToolCallID: "call-1",
 		ToolName:   "exec",
-		Input:      map[string]any{"command": "pwd"},
+		Input:      toolexec.ArgumentsFromValue(map[string]any{"command": "pwd"}),
 	})
 	if err != nil {
 		t.Fatalf("approval handler error = %v", err)
@@ -53,8 +55,8 @@ func TestToolExecutionMetadataRegistryAnnotatesToolCall(t *testing.T) {
 		Content: []sdk.MessagePart{sdk.ToolCallPart{
 			ToolCallID:       "call-1",
 			ToolName:         "exec",
-			Input:            map[string]any{"command": "pwd"},
-			ProviderMetadata: map[string]any{"provider": "kept"},
+			Input:            toolexec.ArgumentsFromValue(map[string]any{"command": "pwd"}),
+			ProviderMetadata: partmeta.Fold(map[string]any{"provider": "kept"}),
 		}},
 	}}
 	annotated := registry.annotate(messages)
@@ -62,14 +64,14 @@ func TestToolExecutionMetadataRegistryAnnotatesToolCall(t *testing.T) {
 	if !ok {
 		t.Fatalf("annotated part = %#v, want ToolCallPart", annotated[0].Content[0])
 	}
-	if call.ProviderMetadata["provider"] != "kept" {
+	if partmeta.Unfold(call.ProviderMetadata)["provider"] != "kept" {
 		t.Fatalf("provider metadata was not preserved: %#v", call.ProviderMetadata)
 	}
-	if call.ProviderMetadata[toolapproval.ExecutionLocationMetadataKey] != location {
+	if got, ok := partmeta.Object(call.ProviderMetadata, toolapproval.ExecutionLocationMetadataKey); !ok || got["kind"] != location.Kind || got["name"] != location.Name {
 		t.Fatalf("execution location = %#v, want %#v", call.ProviderMetadata, location)
 	}
 	original := messages[0].Content[0].(sdk.ToolCallPart)
-	if _, ok := original.ProviderMetadata[toolapproval.ExecutionLocationMetadataKey]; ok {
+	if partmeta.Has(original.ProviderMetadata, toolapproval.ExecutionLocationMetadataKey) {
 		t.Fatalf("annotate mutated original messages: %#v", original.ProviderMetadata)
 	}
 	encoded, err := json.Marshal(annotated)

@@ -110,8 +110,8 @@ export const useChatStore = defineStore('chat', () => {
   }
   const restoreTailFromOptimistic = (botId: string, targetSessionId: string, optimisticUserTurn: ChatUserTurn | null, assistantTurn: ChatAssistantTurn, replacedTurns: ChatMessage[]) => sessionTranscript(botId, targetSessionId).restoreTailFromOptimistic(botId, targetSessionId, optimisticUserTurn, assistantTurn, replacedTurns)
   const hasVisibleAssistantBlocks = (turn: ChatAssistantTurn) => transcriptForTurn(turn)?.hasVisibleAssistantBlocks(turn) ?? false
-  const finalizeStreamFailure = (assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error) => {
-    transcriptForTurn(assistantTurn)?.finalizeStreamFailure(assistantTurn, botId, targetSessionId, error)
+  const finalizeStreamFailure = (assistantTurn: ChatAssistantTurn, botId: string, targetSessionId: string, error: Error, keepTurn = false) => {
+    transcriptForTurn(assistantTurn)?.finalizeStreamFailure(assistantTurn, botId, targetSessionId, error, keepTurn)
   }
   const {
     trackAssistantStream, discardAssistantStream,

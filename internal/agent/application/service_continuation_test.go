@@ -11,7 +11,38 @@ import (
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 )
+
+type continuationTurnRequestResolverService struct {
+	messagepkg.Service
+	requestMessageID string
+}
+
+func (s *continuationTurnRequestResolverService) GetVisibleHistoryTurnRequestMessageIDByTurn(context.Context, string, string) (string, error) {
+	return s.requestMessageID, nil
+}
+
+func TestContinuationTurnRequestMessageIDUsesAdmittedTurn(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{messageService: &continuationTurnRequestResolverService{
+		requestMessageID: "request-message-id",
+	}}
+	got, err := service.continuationTurnRequestMessageID(
+		context.Background(),
+		"session-id",
+		sessionruntime.RunHandle{TurnID: "turn-id"},
+	)
+	if err != nil {
+		t.Fatalf("continuationTurnRequestMessageID() error = %v", err)
+	}
+	if got != "request-message-id" {
+		t.Fatalf("continuation request message ID = %q, want %q", got, "request-message-id")
+	}
+}
 
 func TestPrepareContinuationRunConfigReplacesStaleContextAndSetsCapabilities(t *testing.T) {
 	t.Parallel()
@@ -90,5 +121,14 @@ func TestPrepareContinuationRunConfigPropagatesArtifactProjectionFailure(t *test
 	}
 	if got.Query != "" || len(got.Messages) != 0 || len(got.ContextFrags) != 0 {
 		t.Fatalf("failed continuation returned partial config: %#v", got)
+	}
+}
+
+func TestPendingRuntimeDecisionsFailsClosedOnRuntimeLookupFailure(t *testing.T) {
+	sentinel := errors.New("session unavailable")
+	service := &Service{queries: &abortLifecycleQueries{pending: true}, sessionService: &fakeBackgroundSessionService{getFn: func(context.Context, string) (sessionpkg.Thread, error) { return sessionpkg.Thread{}, sentinel }}}
+	got, err := service.PendingRuntimeDecisions(t.Context(), "00000000-0000-0000-0000-000000000001")
+	if !errors.Is(err, sentinel) || got != nil {
+		t.Fatalf("runtime lookup error treated as native: %v %v", got, err)
 	}
 }

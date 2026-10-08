@@ -10,13 +10,19 @@ type Public struct {
 	RequestID string            `json:"request_id,omitempty"`
 }
 
+// Problem is the RFC 9457 body of an HTTP error response. Fault and TraceID
+// are filled by the HTTP boundary: fault is its attribution of the error
+// (client, server, dependency or canceled), which a client uses to choose
+// generic copy for a code it does not know.
 type Problem struct {
 	Type      string            `json:"type" validate:"required"`
 	Status    int               `json:"status" validate:"required"`
 	Detail    string            `json:"detail" validate:"required"`
 	Code      string            `json:"code" validate:"required"`
 	Args      map[string]string `json:"args" validate:"required"`
+	Fault     string            `json:"fault" validate:"required"`
 	RequestID string            `json:"request_id,omitempty"`
+	TraceID   string            `json:"trace_id,omitempty"`
 }
 
 func PublicFrom(err error, requestID string) (Public, bool) {

@@ -18,6 +18,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/background"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
 	workspacepkg "github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -31,6 +32,7 @@ var blockedSleepPattern = regexp.MustCompile(`^sleep\s+(\d+(?:\.\d+)?)(?:\s*[;&]
 const (
 	defaultContainerExecWorkDir  = "/data"
 	remoteBackgroundOutputLogDir = "/data/.memoh/background"
+	minCommandExecBudgetSeconds  = 30
 )
 
 // containerOpTimeout is the maximum time allowed for individual file
@@ -150,10 +152,26 @@ func (*ContainerProvider) Usage(_ context.Context, session SessionContext, avail
 			parts = append(parts, text)
 		}
 	}
+	// Workspace links are a Web/Desktop affordance, not a portable channel URL.
+	// Other execution locations must not be advertised as the native workspace.
+	// Any workspace that reports a native target gets these instructions, a
+	// hosted sandbox included, so its file viewer and localhost preview must
+	// open these links.
+	if (session.CurrentPlatform == "local" || session.CurrentPlatform == "web") && !sessionUsesRemoteWorkspaceTarget(session) {
+		if len(available.Refs(ToolRead(), ToolWrite(), ToolEdit(), ToolApplyPatch())) > 0 {
+			parts = append(parts, "In Memoh Web/Desktop, link to files on the native Server Workspace using Markdown with the real absolute path, for example [View source](/data/project/index.html). Encode spaces in link destinations. Memoh renders link icons; do not add emoji or icon characters to link labels. These links open the workspace file viewer, not a running web page. Do not prefix paths with the Memoh site URL or file://, and do not use this format for files on another computer.")
+		}
+		if _, ok := available.Ref(ToolExec()); ok {
+			parts = append(parts, "When delivering a web app running on the native Server Workspace, provide a Markdown link with its verified HTTP localhost URL and explicit port, for example [Try it](http://localhost:5173/). Memoh opens it through its workspace preview proxy; the user does not need to configure port forwarding for this in-app preview. Public HTTP(S) links open in the user's browser. Workspace links are not public share URLs; never invent a proxy address or claim a service is running without checking it.")
+		}
+		if len(available.Refs(ToolRead(), ToolWrite(), ToolEdit(), ToolApplyPatch(), ToolExec())) > 0 {
+			parts = append(parts, "Lead with what was delivered. For a simple result, weave Markdown links into one or two natural sentences, using labels such as \"Try it\", \"View source\", or \"Download report\" instead of \"click here\" or bare paths. Include checks and limitations only when useful; only claim checks actually performed. Avoid headings and setup details unless they help the user. Keep preview, source, and download links for the same deliverable in the same sentence by default, not in separate list items. Use a list only when introducing multiple independent deliverables.")
+		}
+	}
 	return usageSection("Basic Tools", parts)
 }
 
-func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	workspace := p.resolveToolWorkspace(ctx, session)
 	// Tool descriptions tell the model where relative paths land; with a
 	// workdir bound, that is the working directory.
@@ -162,82 +180,45 @@ func (p *ContainerProvider) Tools(ctx context.Context, session SessionContext) (
 		wd = workspace.workdirPath
 	}
 	sess := session
-	targetParameter := p.workspaceTargetParameter(sess)
+	targetShape := toolexec.Describe("target_id", workspaceTargetDescription(sess))
+	filePathShape := toolexec.Describe("path", fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription))
 
 	readDesc := fmt.Sprintf("Read file content %s. Reads the full file by default; use line_offset and n_lines for pagination. Files up to ~16 MB are supported.", workspace.locationDescription)
 	if sess.SupportsImageInput {
 		readDesc += " Also supports reading image files (PNG, JPEG, GIF, WebP) — binary images are loaded into model context automatically."
 	}
 
-	toolList := []sdk.Tool{
-		{
-			Name:        ToolRead().String(),
-			Description: readDesc,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id":   targetParameter,
-					"path":        map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"line_offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed). Default: 1.", "minimum": 1, "default": 1},
-					"n_lines":     map[string]any{"type": "integer", "description": "Number of lines to read. Default: read entire file.", "minimum": 1},
-				},
-				"required": []string{"path"},
+	toolList := []toolexec.Tool{
+		toolexec.Define(ToolRead().String(), readDesc,
+			func(ctx *toolexec.ToolExecContext, args readArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execRead(ctx.Context, sess, args))
 			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execRead(ctx.Context, sess, inputAsMap(input))
+			targetShape, filePathShape,
+			toolexec.Minimum("line_offset", 1), toolexec.Default("line_offset", 1),
+			toolexec.Minimum("n_lines", 1),
+		),
+		toolexec.Define(ToolWrite().String(), fmt.Sprintf("Write file content %s. Creates parent directories automatically. Handles files of any size.", workspace.locationDescription),
+			func(ctx *toolexec.ToolExecContext, args writeArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execWrite(ctx.Context, sess, args))
 			},
-		},
-		{
-			Name:        ToolWrite().String(),
-			Description: fmt.Sprintf("Write file content %s. Creates parent directories automatically. Handles files of any size.", workspace.locationDescription),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id": targetParameter,
-					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"content":   map[string]any{"type": "string", "description": "File content"},
-				},
-				"required": []string{"path", "content"},
+			targetShape, filePathShape,
+		),
+		toolexec.Define(ToolList().String(), fmt.Sprintf("List directory entries %s. Supports pagination. Max %d entries per call. In recursive mode, subdirectories with >%d items are collapsed to a summary.", workspace.locationDescription, listMaxEntries, listCollapseThreshold),
+			func(ctx *toolexec.ToolExecContext, args listArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execList(ctx.Context, sess, args))
 			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWrite(ctx.Context, sess, inputAsMap(input))
+			targetShape,
+			toolexec.Describe("path", fmt.Sprintf("Directory path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)),
+			toolexec.Minimum("offset", 0), toolexec.Default("offset", 0),
+			toolexec.Describe("limit", fmt.Sprintf("Max entries to return per call. Default: %d. Max: %d.", listMaxEntries, listMaxEntries)),
+			toolexec.Range("limit", 1, listMaxEntries), toolexec.Default("limit", listMaxEntries),
+		),
+		toolexec.Define(ToolEdit().String(), fmt.Sprintf("Replace exact text in a file %s.", workspace.locationDescription),
+			func(ctx *toolexec.ToolExecContext, args editArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execEdit(ctx.Context, sess, args))
 			},
-		},
-		{
-			Name:        ToolList().String(),
-			Description: fmt.Sprintf("List directory entries %s. Supports pagination. Max %d entries per call. In recursive mode, subdirectories with >%d items are collapsed to a summary.", workspace.locationDescription, listMaxEntries, listCollapseThreshold),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id": targetParameter,
-					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("Directory path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"recursive": map[string]any{"type": "boolean", "description": "List recursively"},
-					"offset":    map[string]any{"type": "integer", "description": "Entry offset to start from (0-indexed). Default: 0.", "minimum": 0, "default": 0},
-					"limit":     map[string]any{"type": "integer", "description": fmt.Sprintf("Max entries to return per call. Default: %d. Max: %d.", listMaxEntries, listMaxEntries), "minimum": 1, "maximum": listMaxEntries, "default": listMaxEntries},
-				},
-				"required": []string{"path"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execList(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolEdit().String(),
-			Description: fmt.Sprintf("Replace exact text in a file %s.", workspace.locationDescription),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id": targetParameter,
-					"path":      map[string]any{"type": "string", "description": fmt.Sprintf("File path (relative to %s or absolute %s)", wd, workspace.absolutePathDescription)},
-					"old_text":  map[string]any{"type": "string", "description": "Exact text to find"},
-					"new_text":  map[string]any{"type": "string", "description": "Replacement text"},
-				},
-				"required": []string{"path", "old_text", "new_text"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execEdit(ctx.Context, sess, inputAsMap(input))
-			},
-		},
+			targetShape, filePathShape,
+		),
 		{
 			Name: ToolApplyPatch().String(),
 			Description: fmt.Sprintf(`Apply a structured patch %s. This is a Memoh/Codex-style patch format, not a standard unified diff or git patch.
@@ -284,21 +265,14 @@ Delete a file:
 *** Delete File: obsolete.txt
 *** End Patch
 `, workspace.locationDescription),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id": targetParameter,
-					"patch":     map[string]any{"type": "string", "description": "Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."},
-				},
-				"required": []string{"patch"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execApplyPatch(ctx.Context, sess, input)
+			Parameters: toolexec.SchemaFor[applyPatchArgs](targetShape),
+			// apply_patch keeps the raw arguments: a JSON string document
+			// carrying the patch text is accepted as well as the object.
+			Execute: func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execApplyPatch(ctx.Context, sess, input))
 			},
 		},
-		{
-			Name: ToolExec().String(),
-			Description: fmt.Sprintf(`Execute a %s command %s. Runs in %s by default.
+		toolexec.Define(ToolExec().String(), fmt.Sprintf(`Execute a %s command %s. Runs in %s by default.
 
 # Instructions
 %s
@@ -313,36 +287,32 @@ Delete a file:
   - Do not retry failing commands in a delay loop — diagnose the root cause.
   - If waiting for a background task, use wait_until(task_id).
 %s`, workspace.shellDescription, workspace.locationDescription, wd, workspace.platformInstructions, background.MaxExecTimeout, background.DefaultExecTimeout, workspace.delayInstruction),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_id":         targetParameter,
-					"command":           map[string]any{"type": "string", "description": fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)},
-					"work_dir":          map[string]any{"type": "string", "description": fmt.Sprintf("Working directory (default: %s)", wd)},
-					"description":       map[string]any{"type": "string", "description": workspace.descriptionExamples},
-					"timeout":           map[string]any{"type": "integer", "description": fmt.Sprintf("Timeout in seconds (default: %d, max: %d). Only applies to foreground execution. Commands that exceed this timeout are automatically moved to background.", background.DefaultExecTimeout, background.MaxExecTimeout), "minimum": 1, "maximum": background.MaxExecTimeout},
-					"run_in_background": map[string]any{"type": "boolean", "description": "If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."},
-				},
-				"required": []string{"command"},
+			func(ctx *toolexec.ToolExecContext, args execArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execExec(ctx.Context, sess, args))
 			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execExec(ctx.Context, sess, inputAsMap(input))
-			},
-		},
+			targetShape,
+			toolexec.Describe("command", fmt.Sprintf("Command to run (e.g. %s)", workspace.commandExamples)),
+			toolexec.Describe("work_dir", fmt.Sprintf("Working directory (default: %s)", wd)),
+			toolexec.Describe("description", workspace.descriptionExamples),
+			toolexec.Describe("timeout", fmt.Sprintf("Maximum foreground wait in seconds (default: %d, max: %d). A command still running afterward moves to the background; handoff may happen earlier to preserve max_duration_seconds.", background.DefaultExecTimeout, background.MaxExecTimeout)),
+			toolexec.Range("timeout", 1, float64(background.MaxExecTimeout)),
+			toolexec.Range("max_duration_seconds", minCommandExecBudgetSeconds, float64(background.MaxBackgroundExecTimeout)),
+			toolexec.EnumStrings("background_mode", []string{"task", "service"}),
+		),
 	}
 	if resolver, ok := p.clients.(workspaceTargetResolver); ok {
-		locationTool := sdk.Tool{
+		locationTool := toolexec.Tool{
 			Name: ToolListExecutionLocations().String(),
 			Description: "List the execution locations configured for this Bot for file operations and command execution, with current availability and status. " +
 				"The default field identifies the current turn's default (the request-selected target when present, otherwise the Bot's Primary). " +
 				"Use the returned target_id with file and command tools when a non-default location is needed. " +
 				"The available field says whether a location can currently be used. This tool does not change the default location or starting folder.",
-			Parameters: emptyObjectSchema(),
-			Execute: func(ctx *sdk.ToolExecContext, _ any) (any, error) {
+			Parameters: toolexec.SchemaFromValue(emptyObjectSchema()),
+			Execute: func(ctx *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
 				ctx.Context = workspaceContextForSession(ctx.Context, sess)
 				targets, err := resolver.ListWorkspaceTargets(ctx.Context, sess.BotID)
 				if err != nil {
-					return nil, fmt.Errorf("list execution locations: %w", err)
+					return sdk.ToolOutput{}, fmt.Errorf("list execution locations: %w", err)
 				}
 				locations := make([]executionLocation, 0, len(targets))
 				for _, target := range targets {
@@ -351,12 +321,59 @@ Delete a file:
 					}
 					locations = append(locations, executionLocationFromTarget(target, sess.WorkspaceTargetID))
 				}
-				return listExecutionLocationsResult{Locations: locations}, nil
+				return toolexec.OutputFromValue(listExecutionLocationsResult{Locations: locations}), nil
 			},
 		}
-		toolList = append([]sdk.Tool{locationTool}, toolList...)
+		toolList = append([]toolexec.Tool{locationTool}, toolList...)
 	}
 	return toolList, nil
+}
+
+// Workspace tool arguments. target_id is described per session (see
+// workspaceTargetDescription), path text names the working directory, so
+// both are set by shape functions rather than tags.
+type readArgs struct {
+	TargetID   string `json:"target_id,omitempty"`
+	Path       string `json:"path"`
+	LineOffset *int   `json:"line_offset,omitempty" jsonschema:"Line number to start reading from (1-indexed). Default: 1."`
+	NLines     *int   `json:"n_lines,omitempty" jsonschema:"Number of lines to read. Default: read entire file."`
+}
+
+type writeArgs struct {
+	TargetID string `json:"target_id,omitempty"`
+	Path     string `json:"path"`
+	Content  string `json:"content" jsonschema:"File content"`
+}
+
+type listArgs struct {
+	TargetID  string `json:"target_id,omitempty"`
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"List recursively"`
+	Offset    *int   `json:"offset,omitempty" jsonschema:"Entry offset to start from (0-indexed). Default: 0."`
+	Limit     *int   `json:"limit,omitempty"`
+}
+
+type editArgs struct {
+	TargetID string `json:"target_id,omitempty"`
+	Path     string `json:"path"`
+	OldText  string `json:"old_text" jsonschema:"Exact text to find"`
+	NewText  string `json:"new_text" jsonschema:"Replacement text"`
+}
+
+type applyPatchArgs struct {
+	TargetID string `json:"target_id,omitempty"`
+	Patch    string `json:"patch" jsonschema:"Patch body using the apply_patch format. Paths are relative to the workspace by default, or absolute paths supported by the workspace backend."`
+}
+
+type execArgs struct {
+	TargetID           string `json:"target_id,omitempty"`
+	Command            string `json:"command"`
+	WorkDir            string `json:"work_dir,omitempty"`
+	Description        string `json:"description,omitempty"`
+	Timeout            *int   `json:"timeout,omitempty"`
+	MaxDurationSeconds *int   `json:"max_duration_seconds,omitempty" jsonschema:"Total budget for a finite command, including time spent in foreground. Minimum 30 seconds; default 7200; max 86400. Backgrounding does not restart it."`
+	BackgroundMode     string `json:"background_mode,omitempty" jsonschema:"task (default) uses the execution budget; service runs until explicitly stopped or the workspace closes. service requires run_in_background=true and no max_duration_seconds."`
+	RunInBackground    bool   `json:"run_in_background,omitempty" jsonschema:"If true, run the command in the background. Returns immediately with a task ID. Use wait_until(task_id), then get_background_status(task_id) to inspect result. Use for long-running commands (installs, builds, test suites) and for processes that never exit (dev servers, watch mode). You do not need to use '&' at the end of the command."`
 }
 
 type toolWorkspace struct {
@@ -468,7 +485,7 @@ func toolWorkspaceFromInfo(info bridge.WorkspaceInfo, fallbackWorkDir, workdirPa
 	return workspace
 }
 
-func (*ContainerProvider) workspaceTargetParameter(session SessionContext) map[string]any {
+func workspaceTargetDescription(session SessionContext) string {
 	description := "Exact target_id returned by list_execution_locations. Do not pass a location name, type, or runtime ID. Omit to use the default location for the current turn."
 	if sessionIsWorkdirBound(session) {
 		// A bound session's directory only exists on one machine, so the
@@ -476,10 +493,7 @@ func (*ContainerProvider) workspaceTargetParameter(session SessionContext) map[s
 		// rejecting it at execution time.
 		description = "Exact target_id returned by list_execution_locations. This chat has a fixed working directory, which pins its execution location: omit this parameter. The only other accepted value is native, for reading files Browser Use and Computer Use leave on the Server Workspace; any other target_id is rejected."
 	}
-	return map[string]any{
-		"type":        "string",
-		"description": description,
-	}
+	return description
 }
 
 // sessionIsWorkdirBound reports whether the session derives its working
@@ -570,9 +584,9 @@ func executionLocationFromTarget(target workspacepkg.WorkspaceTarget, requestTar
 	}
 }
 
-func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session SessionContext, args map[string]any) (resolvedToolTarget, error) {
+func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session SessionContext, requestedTargetID string) (resolvedToolTarget, error) {
 	ctx = workspaceContextForSession(ctx, session)
-	targetID := StringArg(args, "target_id")
+	targetID := strings.TrimSpace(requestedTargetID)
 	if err := ensureWorkdirPinnedTarget(session, targetID); err != nil {
 		return resolvedToolTarget{}, err
 	}
@@ -586,12 +600,6 @@ func (p *ContainerProvider) resolveToolTarget(ctx context.Context, session Sessi
 		}
 		if resolved.Client == nil {
 			return resolvedToolTarget{}, errors.New("workspace target is not reachable: client is unavailable")
-		}
-		// Keep the canonical target on the original input map. Besides making
-		// retries deterministic if the Bot Primary changes, this also leaves an
-		// unambiguous target_id in the persisted tool-call history.
-		if args != nil {
-			args["target_id"] = strings.TrimSpace(resolved.TargetID)
 		}
 		return resolvedToolTarget{
 			id:        resolved.TargetID,
@@ -750,34 +758,30 @@ func (p *ContainerProvider) getClient(ctx context.Context, botID string) (*bridg
 	return client, nil
 }
 
-func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext, args readArgs) (any, error) {
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, args)
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
+	filePath := target.workspace.resolveToolPath(strings.TrimSpace(args.Path))
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
 
 	lineOffset := 1
-	if offset, ok, err := IntArg(args, "line_offset"); err != nil {
-		return nil, fmt.Errorf("invalid line_offset: %w", err)
-	} else if ok {
-		if offset < 1 {
+	if args.LineOffset != nil {
+		if *args.LineOffset < 1 {
 			return nil, errors.New("line_offset must be >= 1")
 		}
-		lineOffset = offset
+		lineOffset = *args.LineOffset
 	}
 	nLines := 0 // 0 = read entire file
-	if n, ok, err := IntArg(args, "n_lines"); err != nil {
-		return nil, fmt.Errorf("invalid n_lines: %w", err)
-	} else if ok && n > 0 {
-		nLines = n
+	if args.NLines != nil && *args.NLines > 0 {
+		nLines = *args.NLines
 	}
 
 	// Pre-check file size to avoid loading excessively large files into
@@ -853,17 +857,17 @@ func (p *ContainerProvider) execRead(ctx context.Context, session SessionContext
 	return map[string]any{"content": content, "total_lines": totalLines}, nil
 }
 
-func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execWrite(ctx context.Context, session SessionContext, args writeArgs) (any, error) {
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, args)
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
-	content := StringArg(args, "content")
+	filePath := target.workspace.resolveToolPath(strings.TrimSpace(args.Path))
+	content := strings.TrimSpace(args.Content)
 	if filePath == "" {
 		return nil, errors.New("path is required")
 	}
@@ -962,25 +966,24 @@ func readFileForDiff(ctx context.Context, client *bridge.Client, filePath string
 	return string(raw), true
 }
 
-func (p *ContainerProvider) execList(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execList(ctx context.Context, session SessionContext, args listArgs) (any, error) {
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, args)
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	dirPath := target.workspace.resolveToolPath(StringArg(args, "path"))
+	dirPath := target.workspace.resolveToolPath(strings.TrimSpace(args.Path))
 	if dirPath == "" {
 		dirPath = "."
 	}
-	recursive, _, _ := BoolArg(args, "recursive")
+	recursive := args.Recursive
 
 	offset := int32(0)
-	if v, ok, err := IntArg(args, "offset"); err != nil {
-		return nil, fmt.Errorf("invalid offset: %w", err)
-	} else if ok {
+	if args.Offset != nil {
+		v := *args.Offset
 		if v < 0 {
 			return nil, errors.New("offset must be >= 0")
 		}
@@ -991,9 +994,8 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 	}
 
 	limit := int32(listMaxEntries)
-	if v, ok, err := IntArg(args, "limit"); err != nil {
-		return nil, fmt.Errorf("invalid limit: %w", err)
-	} else if ok {
+	if args.Limit != nil {
+		v := *args.Limit
 		if v < 1 {
 			return nil, errors.New("limit must be >= 1")
 		}
@@ -1035,18 +1037,18 @@ func (p *ContainerProvider) execList(ctx context.Context, session SessionContext
 	}, nil
 }
 
-func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext, args editArgs) (any, error) {
 	opCtx, opCancel := context.WithTimeout(ctx, containerOpTimeout)
 	defer opCancel()
 
-	target, err := p.resolveToolTarget(opCtx, session, args)
+	target, err := p.resolveToolTarget(opCtx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	filePath := target.workspace.resolveToolPath(StringArg(args, "path"))
-	oldText := StringArg(args, "old_text")
-	newText := StringArg(args, "new_text")
+	filePath := target.workspace.resolveToolPath(strings.TrimSpace(args.Path))
+	oldText := strings.TrimSpace(args.OldText)
+	newText := strings.TrimSpace(args.NewText)
 	if filePath == "" || oldText == "" {
 		return nil, errors.New("path, old_text and new_text are required")
 	}
@@ -1107,17 +1109,17 @@ func (p *ContainerProvider) execEdit(ctx context.Context, session SessionContext
 	return result, nil
 }
 
-func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	target, err := p.resolveToolTarget(ctx, session, args)
+func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext, args execArgs) (any, error) {
+	target, err := p.resolveToolTarget(ctx, session, args.TargetID)
 	if err != nil {
 		return nil, err
 	}
 	client := target.client
-	command := strings.TrimSpace(StringArg(args, "command"))
+	command := strings.TrimSpace(args.Command)
 	if command == "" {
 		return nil, errors.New("command is required")
 	}
-	workDir := strings.TrimSpace(StringArg(args, "work_dir"))
+	workDir := strings.TrimSpace(args.WorkDir)
 	switch {
 	case workDir != "":
 		// A relative work_dir resolves against the working directory like
@@ -1128,15 +1130,14 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	default:
 		workDir = target.workspace.defaultWorkDir
 	}
-	description := strings.TrimSpace(StringArg(args, "description"))
+	description := strings.TrimSpace(args.Description)
 	hookWorkspace := target.hookWorkspaceInfo(p.execWorkDir)
 	backgroundOutputDir := target.backgroundOutputDir()
 
 	// Parse timeout (default 30s, max 600s).
 	timeout := background.DefaultExecTimeout
-	if t, ok, err := IntArg(args, "timeout"); err != nil {
-		return nil, fmt.Errorf("invalid timeout: %w", err)
-	} else if ok {
+	if args.Timeout != nil {
+		t := *args.Timeout
 		if t < 1 {
 			return nil, errors.New("timeout must be >= 1")
 		}
@@ -1148,7 +1149,11 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	}
 
 	// Block sleep N (N>=2) in foreground — nudge model toward run_in_background.
-	runInBg, _, _ := BoolArg(args, "run_in_background")
+	runInBg := args.RunInBackground
+	budget, err := execBudget(args.MaxDurationSeconds, args.BackgroundMode, runInBg)
+	if err != nil {
+		return nil, err
+	}
 	if !runInBg {
 		if reason := detectBlockedSleep(command); reason != "" {
 			return nil, fmt.Errorf("blocked: %s. Run blocking commands in the background with run_in_background: true, then use wait_until(task_id) and get_background_status(task_id). If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds", reason)
@@ -1158,7 +1163,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	// Background execution path.
 	if runInBg && p.bgManager != nil {
 		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, true, func() (any, error) {
-			return p.execExecBackground(ctx, session, client, command, workDir, description, backgroundOutputDir)
+			return p.execExecBackground(ctx, session, client, command, workDir, description, backgroundOutputDir, budget)
 		})
 	}
 
@@ -1166,7 +1171,7 @@ func (p *ContainerProvider) execExec(ctx context.Context, session SessionContext
 	// to background on timeout without killing the process.
 	if p.bgManager != nil {
 		return p.execWithWorkspaceHooks(ctx, session, hookWorkspace, command, workDir, timeout, false, func() (any, error) {
-			return p.execExecWithFlip(ctx, session, client, command, workDir, description, backgroundOutputDir, timeout)
+			return p.execExecWithFlip(ctx, session, client, command, workDir, description, backgroundOutputDir, timeout, budget)
 		})
 	}
 
@@ -1217,9 +1222,13 @@ func (p *ContainerProvider) execWithWorkspaceHooks(ctx context.Context, session 
 const backgroundReplayBytes = 4096
 
 type backgroundExecStreamReader struct {
-	resultCh chan background.AdoptResult
-	logger   *slog.Logger
-	command  string
+	resultCh        chan background.AdoptResult
+	logger          *slog.Logger
+	command         string
+	deadline        time.Time
+	cancel          context.CancelFunc
+	lastLiveness    time.Time
+	livenessHandler func(time.Time)
 
 	mu             sync.Mutex
 	stdout         strings.Builder
@@ -1240,6 +1249,26 @@ func startBackgroundExecStreamReader(log *slog.Logger, stream *bridge.ExecStream
 
 func (r *backgroundExecStreamReader) run(stream *bridge.ExecStream, cancel context.CancelFunc) {
 	defer cancel()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				r.mu.Lock()
+				last := r.lastLiveness
+				r.mu.Unlock()
+				if !last.IsZero() && time.Since(last) > 90*time.Second {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	var exitCode int32
 	var exitReceived bool
 	for {
@@ -1264,6 +1293,15 @@ func (r *backgroundExecStreamReader) run(stream *bridge.ExecStream, cancel conte
 			return
 		}
 		switch msg.GetStream() {
+		case pb.ExecOutput_HEARTBEAT:
+			r.mu.Lock()
+			r.lastLiveness = time.Now()
+			handler := r.livenessHandler
+			at := r.lastLiveness
+			r.mu.Unlock()
+			if handler != nil {
+				handler(at)
+			}
 		case pb.ExecOutput_STDOUT:
 			r.appendChunk("stdout", string(msg.GetData()))
 		case pb.ExecOutput_STDERR:
@@ -1345,22 +1383,26 @@ func tailText(value string, maxBytes int) string {
 // agent gets an immediate "auto_backgrounded" response.
 func (p *ContainerProvider) execExecWithFlip(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description, outputDir string, softTimeout int32,
+	command, workDir, description, outputDir string, softTimeout int32, budgets ...time.Duration,
 ) (any, error) {
 	// Start streaming exec with a large container-side timeout so the process
 	// keeps running even after we stop reading in the foreground.
 	// Use a fully independent context (not derived from the agent request ctx)
 	// so the gRPC stream is never cancelled when the foreground session ends.
-	streamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(background.BackgroundExecTimeout)*time.Second)
-	stream, err := client.ExecStream(streamCtx, command, workDir, background.BackgroundExecTimeout)
+	streamCtx, streamCancel := execBudgetContext(ctx, budgets)
+	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true})
 	if err != nil {
 		streamCancel()
 		return nil, err
 	}
 	reader := startBackgroundExecStreamReader(p.logger, stream, streamCancel, command)
+	reader.deadline, _ = streamCtx.Deadline()
+	reader.cancel = streamCancel
 
-	// Wait for either the result or soft timeout.
-	timer := time.NewTimer(time.Duration(softTimeout) * time.Second)
+	// Leave time to hand the stream to the background manager before its hard
+	// deadline. This also applies when an ancestor budget ends sooner.
+	foregroundWait := foregroundWaitBeforeBudget(streamCtx, softTimeout)
+	timer := time.NewTimer(foregroundWait)
 	defer timer.Stop()
 
 	select {
@@ -1374,12 +1416,13 @@ func (p *ContainerProvider) execExecWithFlip(
 		return map[string]any{"stdout": stdout, "stderr": stderr, "exit_code": r.ExitCode}, nil
 
 	case <-timer.C:
-		// Soft timeout fired — flip the running stream to background.
+		// Foreground waiting ended, possibly early to preserve the hard budget.
 		// The container process is still alive; we hand off the stream reader
 		// goroutine to the background manager.
-		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, outputDir, softTimeout)
+		return p.flipToBackground(ctx, session, client, reader, command, workDir, description, outputDir, foregroundWait)
 
 	case <-ctx.Done():
+		streamCancel()
 		return nil, ctx.Err()
 	}
 }
@@ -1390,7 +1433,7 @@ func (p *ContainerProvider) flipToBackground(
 	ctx context.Context,
 	session SessionContext, client *bridge.Client,
 	reader *backgroundExecStreamReader,
-	command, workDir, description, outputDir string, softTimeout int32,
+	command, workDir, description, outputDir string, foregroundWait time.Duration,
 ) (any, error) {
 	writeFn := func(ctx context.Context, path string, data []byte) error {
 		return client.WriteFile(ctx, path, data)
@@ -1399,10 +1442,11 @@ func (p *ContainerProvider) flipToBackground(
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
 		session.BotID, session.SessionID, command, workDir, description, outputDir,
-		reader.Result(), writeFn,
+		reader.Result(), writeFn, background.AdoptOptions{Deadline: reader.deadline, Cancel: reader.cancel},
 	)
 	// SetChunkHandler replays output collected during the foreground phase
 	// into the task buffer, so the tail below already contains it.
+	reader.SetLivenessHandler(func(at time.Time) { p.bgManager.RecordLiveness(taskID, at) })
 	reader.SetChunkHandler(func(stream, chunk string) {
 		p.bgManager.RecordOutput(taskID, stream, chunk)
 	})
@@ -1410,7 +1454,7 @@ func (p *ContainerProvider) flipToBackground(
 	p.logger.InfoContext(ctx, "foreground exec flipped to background",
 		slog.String("task_id", taskID),
 		slog.String("command", truncateStr(command, 120)),
-		slog.Int("soft_timeout_seconds", int(softTimeout)),
+		slog.Duration("foreground_wait", foregroundWait),
 	)
 
 	result := map[string]any{
@@ -1418,12 +1462,12 @@ func (p *ContainerProvider) flipToBackground(
 		"task_id":     taskID,
 		"output_file": outputFile,
 		"message": fmt.Sprintf(
-			"Command exceeded the foreground timeout (%ds) and has been moved to the background with task ID: %s. "+
+			"Command moved to the background after %s of foreground waiting with task ID: %s. "+
 				"The process is still running — no work was lost; output collected so far is in output_tail. "+
 				"Use wait_until(task_id) to keep observing: it returns when the task finishes, stalls, or goes quiet (reason 'idle') — for servers, a ready message in output_tail means it is up. "+
 				"The full log is written to %s after the task ends. "+
 				"For long-running commands, use run_in_background: true from the start to avoid this delay.",
-			softTimeout, taskID, outputFile,
+			foregroundWait.Round(time.Second), taskID, outputFile,
 		),
 	}
 	if task := p.bgManager.Get(taskID); task != nil {
@@ -1452,15 +1496,17 @@ func detectBlockedSleep(command string) string {
 // execExecBackground spawns the command as a background task and returns immediately.
 func (p *ContainerProvider) execExecBackground(
 	ctx context.Context, session SessionContext, client *bridge.Client,
-	command, workDir, description, outputDir string,
+	command, workDir, description, outputDir string, budgets ...time.Duration,
 ) (any, error) {
-	streamCtx, streamCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(background.BackgroundExecTimeout)*time.Second)
-	stream, err := client.ExecStream(streamCtx, command, workDir, background.BackgroundExecTimeout)
+	streamCtx, streamCancel := execBudgetContext(ctx, budgets)
+	stream, err := client.ExecStreamWithOptions(streamCtx, command, workDir, -1, bridge.ExecOptions{ReportLiveness: true})
 	if err != nil {
 		streamCancel()
 		return nil, err
 	}
 	reader := startBackgroundExecStreamReader(p.logger, stream, streamCancel, command)
+	reader.deadline, _ = streamCtx.Deadline()
+	reader.cancel = streamCancel
 
 	writeFn := func(ctx context.Context, path string, data []byte) error {
 		return client.WriteFile(ctx, path, data)
@@ -1468,8 +1514,9 @@ func (p *ContainerProvider) execExecBackground(
 	taskID, outputFile := p.bgManager.SpawnAdopt(
 		ctx,
 		session.BotID, session.SessionID, command, workDir, description, outputDir,
-		reader.Result(), writeFn,
+		reader.Result(), writeFn, background.AdoptOptions{Deadline: reader.deadline, Cancel: reader.cancel},
 	)
+	reader.SetLivenessHandler(func(at time.Time) { p.bgManager.RecordLiveness(taskID, at) })
 	reader.SetChunkHandler(func(stream, chunk string) {
 		p.bgManager.RecordOutput(taskID, stream, chunk)
 	})
@@ -1505,4 +1552,77 @@ func addLineNumbers(content string, startLine int) string {
 		fmt.Fprintf(&out, "%6d\t%s\n", startLine+i, line)
 	}
 	return out.String()
+}
+
+func (r *backgroundExecStreamReader) SetLivenessHandler(handler func(time.Time)) {
+	r.mu.Lock()
+	r.livenessHandler = handler
+	at := r.lastLiveness
+	r.mu.Unlock()
+	if handler != nil && !at.IsZero() {
+		handler(at)
+	}
+}
+
+func execBudget(maxDurationSeconds *int, backgroundMode string, backgroundRun bool) (time.Duration, error) {
+	mode := strings.TrimSpace(backgroundMode)
+	if mode != "" && mode != "task" && mode != "service" {
+		return 0, errors.New("background_mode must be task or service")
+	}
+	if mode == "service" {
+		if !backgroundRun || maxDurationSeconds != nil {
+			return 0, errors.New("service mode requires run_in_background=true and no max_duration_seconds")
+		}
+		return 0, nil
+	}
+	return finiteTaskBudget(maxDurationSeconds, minCommandExecBudgetSeconds)
+}
+
+// Video monitoring has no foreground-to-background transition and retains its
+// existing one-second minimum.
+func videoMonitorBudget(maxDurationSeconds *int) (time.Duration, error) {
+	return finiteTaskBudget(maxDurationSeconds, 1)
+}
+
+func finiteTaskBudget(maxDurationSeconds *int, minimum int) (time.Duration, error) {
+	seconds := int(background.BackgroundExecTimeout)
+	if maxDurationSeconds != nil {
+		seconds = *maxDurationSeconds
+	}
+	if seconds < minimum || seconds > int(background.MaxBackgroundExecTimeout) {
+		return 0, fmt.Errorf("max_duration_seconds must be between %d and 86400", minimum)
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
+func foregroundWaitBeforeBudget(ctx context.Context, softTimeout int32) time.Duration {
+	wait := time.Duration(softTimeout) * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline) - time.Second; remaining < wait {
+			wait = remaining
+		}
+	}
+	if wait < 0 {
+		return 0
+	}
+	return wait
+}
+
+func execBudgetContext(parent context.Context, budgets []time.Duration) (context.Context, context.CancelFunc) {
+	budget := time.Duration(background.BackgroundExecTimeout) * time.Second
+	if len(budgets) > 0 {
+		budget = budgets[0]
+	}
+	deadline, hasDeadline := parent.Deadline()
+	if budget > 0 {
+		candidate := time.Now().Add(budget)
+		if !hasDeadline || candidate.Before(deadline) {
+			deadline = candidate
+			hasDeadline = true
+		}
+	}
+	if hasDeadline {
+		return context.WithDeadline(context.WithoutCancel(parent), deadline)
+	}
+	return context.WithCancel(context.WithoutCancel(parent))
 }

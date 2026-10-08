@@ -35,7 +35,7 @@ func TestMemoryProviderFiltersSourceRefsByHistoryVisibility(t *testing.T) {
 	filtered := provider.filterSourceRefs(context.Background(), SessionContext{
 		BotID: "bot-1", SessionID: "session-current", UserID: "user-1",
 	}, output).(map[string]any)
-	refs := filtered["results"].([]map[string]any)[0]["source_refs"].([]map[string]any)
+	refs := asMapSlice(t, asMapSlice(t, filtered["results"])[0]["source_refs"])
 	if len(refs) != 3 {
 		t.Fatalf("source refs = %v, want only current, same-route, and same-user refs", refs)
 	}
@@ -84,7 +84,7 @@ func TestMemoryProviderOmitsSourceRefsWithoutScopeLister(t *testing.T) {
 	filtered := provider.filterSourceRefs(context.Background(), SessionContext{
 		BotID: "bot-1", SessionID: "session-current",
 	}, output).(map[string]any)
-	if _, ok := filtered["results"].([]map[string]any)[0]["source_refs"]; ok {
+	if _, ok := asMapSlice(t, filtered["results"])[0]["source_refs"]; ok {
 		t.Fatalf("unverified source refs must be omitted: %v", filtered)
 	}
 }
@@ -107,7 +107,7 @@ func TestMemoryProviderFiltersJSONDecodedSourceRefs(t *testing.T) {
 		BotID: "bot-1", SessionID: "session-current",
 	}, output).(map[string]any)
 	result := filtered["results"].([]any)[0].(map[string]any)
-	refs := result["source_refs"].([]map[string]any)
+	refs := asMapSlice(t, result["source_refs"])
 	if len(refs) != 1 || refs[0]["message_id"] != "message-current" {
 		t.Fatalf("JSON-decoded source refs were not scoped: %v", refs)
 	}

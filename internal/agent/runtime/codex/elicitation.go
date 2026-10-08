@@ -253,9 +253,9 @@ func (t *turnState) runElicitationFlow(ctx context.Context, input any) (userinpu
 // conversation so the user knows a tool asked for input Memoh could not show.
 func (t *turnState) emitElicitationDeclinedNotice(reason string) {
 	t.emit(event.StreamEvent{
-		Type:  event.RuntimeNotice,
-		Code:  "elicitation_declined",
-		Delta: "A tool asked for user input that could not be shown: " + reason,
+		Type:       event.RuntimeNotice,
+		NoticeKind: event.NoticeElicitationDeclined,
+		Delta:      "A tool asked for user input that could not be shown: " + reason,
 	})
 }
 

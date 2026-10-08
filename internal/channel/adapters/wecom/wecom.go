@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/redact"
 )
 
 const Type channel.ChannelType = "wecom"
@@ -294,6 +295,12 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.textBuilder.WriteString(event.Delta)
 		s.mu.Unlock()
 		return s.pushPreview(ctx)
+	case channel.StreamEventReset:
+		// The next preview replaces the failed attempt's text on the same stream.
+		s.mu.Lock()
+		s.textBuilder.Reset()
+		s.mu.Unlock()
+		return nil
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
 			return nil
@@ -312,13 +319,13 @@ func (s *wecomOutboundStream) Push(ctx context.Context, event channel.PreparedSt
 		s.mu.Unlock()
 		return s.flush(ctx)
 	case channel.StreamEventError:
-		text := strings.TrimSpace(event.Error)
+		text := redact.Text(strings.TrimSpace(event.Error))
 		if text == "" {
 			return nil
 		}
 		s.mu.Lock()
 		s.final = &channel.PreparedMessage{
-			Message: channel.Message{Format: channel.MessageFormatPlain, Text: "Error: " + text},
+			Message: channel.Message{Format: channel.MessageFormatPlain, Text: channel.ErrorReplyText(event.ErrorCode, text)},
 		}
 		s.mu.Unlock()
 		return s.flush(ctx)

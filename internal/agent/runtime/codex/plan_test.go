@@ -35,7 +35,7 @@ func TestCompletedPlanBecomesAssistantTranscript(t *testing.T) {
 	turn.handleNotification(&protocol.ItemCompletedNotification{ThreadID: "thread", TurnID: "old", Item: item})
 	turn.handleNotification(&protocol.ItemCompletedNotification{ThreadID: "thread", TurnID: "current", Item: item})
 	turn.handleNotification(&protocol.TurnCompletedNotification{ThreadID: "thread", Turn: protocol.Turn{ID: "current", Status: protocol.TurnStatusCompleted}})
-	result, err := turn.result("")
+	result, err := turn.result()
 	if err != nil {
 		t.Fatal(err)
 	}

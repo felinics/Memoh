@@ -25,8 +25,9 @@ describe('buildModelConfig', () => {
     expect(buildModelConfig({
       type: 'chat',
       description: '   ',
-      compatibilities: ['vision'],
+      compatibilities: ['vision', 'reasoning'],
       contextWindow: 128000,
+      reasoningEfforts: ['high', 'low'],
       existing: {
         description: 'Old description',
         thinking_mode: 'adaptive',
@@ -34,7 +35,7 @@ describe('buildModelConfig', () => {
       },
     })).toEqual({
       description: '',
-      compatibilities: ['vision'],
+      compatibilities: ['vision', 'reasoning'],
       context_window: 128000,
       thinking_mode: 'adaptive',
       reasoning_efforts: ['low', 'high'],

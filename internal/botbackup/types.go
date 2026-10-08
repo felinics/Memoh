@@ -244,7 +244,6 @@ type backupDependencies struct {
 	Models          any `json:"models,omitempty"`
 	SearchProviders any `json:"search_providers,omitempty"`
 	FetchProviders  any `json:"fetch_providers,omitempty"`
-	MemoryProviders any `json:"memory_providers,omitempty"`
 }
 
 type backupHistory struct {

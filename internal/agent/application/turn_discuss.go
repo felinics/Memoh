@@ -20,6 +20,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
+	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/models"
 )
 
@@ -52,7 +53,7 @@ func (s *Service) startDiscussTurn(runCtx context.Context, cmd turn.StartTurnCom
 	return h, nil
 }
 
-func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc, runID string, finishRun func(status string, cause error)) *discussHandle {
+func newDiscussHandle(ctx context.Context, cmd turn.StartTurnCommand, cancel context.CancelFunc, runID string, finishRun func(RunOutcome) sessionruntime.TerminalRun) *discussHandle {
 	return &discussHandle{
 		runHandle: runHandle{
 			id:        runID,
@@ -120,8 +121,20 @@ func (h *discussHandle) emitErr(err error) bool {
 }
 
 func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h *discussHandle) {
+	// Registered first so it runs last: the span covers the run's terminal
+	// write and reports what the run finished with.
+	runCtx := ctx
+	ctx, endTurn := startSelfCanceledTurnSpan(ctx, ChatRequest{BotID: cmd.BotID, ThreadID: cmd.ThreadID})
+	defer func() { endTurn(discussTurnSpanCause(runCtx, h)) }()
+	consumerGone := false
 	defer close(h.events)
 	defer close(h.errs)
+	defer func() {
+		// A consumer that canceled the run does not read tail events.
+		if !consumerGone {
+			h.sendTerminal(h.teamID, h.sessionID, h.seq+1)
+		}
+	}()
 	defer func() {
 		if h.contentLightTerminal && !h.failed.Load() && h.streamErr == nil && !s.usesDurableTerminalObserver() {
 			s.EnsureTerminalContextLifecycle(ctx, h.id, cmd.BotID, cmd.ThreadID, nil)
@@ -133,6 +146,7 @@ func (s *Service) pumpDiscuss(ctx context.Context, cmd turn.StartTurnCommand, h 
 		// stream; record it before cancel() masks the distinction.
 		if h.ctx.Err() != nil {
 			h.failed.Store(true)
+			consumerGone = true
 		}
 		h.cancel()
 	}()
@@ -289,59 +303,33 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, imageParts)
 	runConfig = runConfig.RefreshContextFrag()
 	terminal := s.contextLifecycleTerminal(ctx, runConfig)
-	var lifecycleCause error
-	var lifecycleDeferred bool
-	defer func() {
-		if !lifecycleDeferred {
-			terminal(lifecycleCause)
-		}
-	}()
+	outcome := newOutcomeRecorder(ctx)
+	defer outcome.finishLifecycle(terminal)
 
 	reasoningTiming := newReasoningTimingTracker(nil)
 	configureNativeReasoningTiming(&runConfig, reasoningTiming, nil)
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
+	outcome.watchIdle(idleCtx, idleCancel)
 	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
 
 	var finalMessages json.RawMessage
 	var finalReasoningTiming []messagepkg.ReasoningTimingSegment
 	var terminalEvent native.StreamEvent
 	var terminalPayload []byte
-	var hasTerminalEvent bool
 	for event := range eventCh {
-		idleCancel.Reset()
-		if event.Type == native.EventToolCallStart {
-			idleCancel.RecordToolCall()
-		}
-		if eventErr := agentStreamLifecycleError(event); eventErr != nil && lifecycleCause == nil {
-			lifecycleCause = eventErr
-		}
-		terminal := event.Type == native.EventAgentEnd || event.Type == native.EventAgentAbort
-		if terminal {
+		idleCancel.Observe(event)
+		_ = outcome.observe(event)
+		if event.IsTerminal() {
 			finalMessages = event.Messages
 			finalReasoningTiming = takeTerminalReasoningTiming(reasoningTiming, event.Type)
-			terminalEvent = event
-			terminalPayload, _ = json.Marshal(event)
-			hasTerminalEvent = true
-			lifecycleDeferred = strings.TrimSpace(event.ApprovalID) != ""
-			if !lifecycleDeferred {
-				switch event.Type {
-				case native.EventAgentEnd:
-					lifecycleCause = nil
-				case native.EventAgentAbort:
-					if idleCancel.DidFire() {
-						lifecycleCause = context.Cause(idleCtx)
-					} else if context.Cause(ctx) != nil || lifecycleCause == nil {
-						lifecycleCause = agentAbortCause(ctx)
-					}
-				}
-			}
+			terminalEvent = outcome.stampTerminal(event)
+			terminalPayload, _ = json.Marshal(terminalEvent)
 			continue
 		}
 		if h.publishAgentEvent != nil {
 			if publishErr := h.publishAgentEvent(ctx, publicAgentStreamEvent(event)); publishErr != nil {
-				lifecycleCause = publishErr
-				lifecycleDeferred = false
+				outcome.setCause(publishErr)
 				h.emitErr(publishErr)
 				return
 			}
@@ -351,27 +339,23 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 			continue
 		}
 		if !h.emit(string(event.Type), payload) {
-			if lifecycleCause == nil {
-				lifecycleCause = context.Cause(ctx)
-			}
+			outcome.recordCause(context.Cause(ctx))
 			return
 		}
 	}
+	hasTerminalEvent := outcome.terminalSeen
 	timedOut := idleCancel.DidFire()
 	if timedOut {
-		lifecycleCause = context.Cause(idleCtx)
-		lifecycleDeferred = false
+		outcome.setCause(context.Cause(idleCtx))
 	}
 	if !hasTerminalEvent && !timedOut {
-		if lifecycleCause == nil {
-			if ctx.Err() != nil {
-				lifecycleCause = context.Cause(ctx)
-			} else {
-				lifecycleCause = errors.New("native discuss stream ended without a terminal event")
-			}
+		if ctx.Err() != nil {
+			outcome.recordCause(context.Cause(ctx))
+		} else {
+			outcome.recordCause(errors.New("native discuss stream ended without a terminal event"))
 		}
 		if ctx.Err() == nil {
-			h.emitErr(lifecycleCause)
+			h.emitErr(outcome.cause)
 		}
 		return
 	}
@@ -384,19 +368,18 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	if hasTerminalEvent || timedOut {
 		var failureCode apperror.Code
 		if timedOut {
-			failureCode = snapshotFailureCode(true, lifecycleCause)
+			failureCode = snapshotFailureCode(true, outcome.cause)
 		}
 		if storeErr := s.persistDiscussTerminalSnapshot(terminalCtx, runConfig, cmd, resolved.ModelID, finalMessages, finalReasoningTiming, failureCode); storeErr != nil {
 			historyErr := runtimeHistoryError(storeErr)
-			lifecycleCause = historyErr
-			lifecycleDeferred = false
+			outcome.setCause(historyErr)
 			h.emitErr(historyErr)
 			return
 		}
 	}
 
 	if timedOut {
-		failureEvent := agentFailureStreamEvent(lifecycleCause)
+		failureEvent := agentFailureStreamEvent(outcome.cause)
 		if h.publishAgentEvent != nil {
 			if publishErr := h.publishAgentEvent(terminalCtx, failureEvent); publishErr != nil {
 				h.emitErr(publishErr)
@@ -406,13 +389,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		if payload, marshalErr := json.Marshal(failureEvent); marshalErr == nil {
 			h.emit(string(failureEvent.Type), payload)
 		}
-		h.emitErr(lifecycleCause)
+		h.emitErr(outcome.cause)
 		return
 	}
 	if hasTerminalEvent && h.publishAgentEvent != nil {
 		if publishErr := h.publishAgentEvent(terminalCtx, terminalEvent); publishErr != nil {
-			lifecycleCause = publishErr
-			lifecycleDeferred = false
+			outcome.setCause(publishErr)
 			h.emitErr(publishErr)
 			return
 		}
@@ -771,19 +753,12 @@ func discussMessagesToSDK(messages []turn.DiscussMessage) []sdk.Message {
 	result := make([]sdk.Message, 0, len(messages))
 	for _, m := range messages {
 		if len(m.RawContent) > 0 {
-			raw, err := json.Marshal(struct {
-				Role    string          `json:"role"`
-				Content json.RawMessage `json:"content"`
-			}{
-				Role:    m.Role,
-				Content: m.RawContent,
-			})
-			if err == nil {
-				var msg sdk.Message
-				if json.Unmarshal(raw, &msg) == nil {
-					result = append(result, msg)
-					continue
-				}
+			// RawContent is the stored content shape (arguments object, output
+			// value, nested annotations); the codec types it for the SDK.
+			msg := messageconv.ModelMessageToSDKMessage(turn.ModelMessage{Role: m.Role, Content: m.RawContent})
+			if msg.Role != "" && len(msg.Content) > 0 {
+				result = append(result, msg)
+				continue
 			}
 		}
 		switch m.Role {

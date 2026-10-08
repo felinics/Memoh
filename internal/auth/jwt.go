@@ -93,6 +93,17 @@ func UserIDFromContext(c echo.Context) (string, error) {
 	return "", echo.NewHTTPError(http.StatusUnauthorized, "user id missing")
 }
 
+// RawTokenFromContext returns the token the middleware validated, as it
+// arrived, whether from the Authorization header or the token query parameter.
+// It is empty when the request carries no valid token.
+func RawTokenFromContext(c echo.Context) string {
+	token, ok := c.Get("user").(*jwt.Token)
+	if !ok || token == nil || !token.Valid {
+		return ""
+	}
+	return token.Raw
+}
+
 // GenerateToken creates a signed JWT for the user.
 func GenerateToken(userID, secret string, expiresIn time.Duration) (string, time.Time, error) {
 	if strings.TrimSpace(userID) == "" {

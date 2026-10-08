@@ -10,6 +10,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestAgentGenerateLimitsToolOutputBeforeNextModelCall(t *testing.T) {
@@ -17,15 +18,15 @@ func TestAgentGenerateLimitsToolOutputBeforeNextModelCall(t *testing.T) {
 
 	large := "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL"
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 			switch call {
 			case 1:
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-big",
 						ToolName:   "big_tool",
-						Input:      map[string]any{},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{}),
 					}},
 				}, nil
 			case 2:
@@ -33,7 +34,7 @@ func TestAgentGenerateLimitsToolOutputBeforeNextModelCall(t *testing.T) {
 				if !ok {
 					t.Fatalf("second model call missing big_tool result: %#v", params.Messages)
 				}
-				structured, ok := result.Result.(map[string]any)
+				structured, ok := toolexec.OutputValue(result.Result).(map[string]any)
 				if !ok {
 					t.Fatalf("tool result = %#v, want map", result.Result)
 				}
@@ -47,13 +48,13 @@ func TestAgentGenerateLimitsToolOutputBeforeNextModelCall(t *testing.T) {
 				if !strings.Contains(content, "[memoh pruned]") {
 					t.Fatalf("tool output missing prune marker:\n%s", content)
 				}
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					Text:         "ok",
 					FinishReason: sdk.FinishReasonStop,
 				}, nil
 			default:
 				t.Fatalf("unexpected model call %d", call)
-				return nil, nil
+				return sdk.ModelResult{}, nil
 			}
 		},
 	}
@@ -61,14 +62,14 @@ func TestAgentGenerateLimitsToolOutputBeforeNextModelCall(t *testing.T) {
 	a := New(Deps{Limits: Limits{ToolOutputMaxBytes: 512, ToolOutputMaxLines: 80}})
 	a.SetToolProviders([]agenttools.ToolProvider{
 		staticToolProvider{
-			tools: []sdk.Tool{{
+			tools: []toolexec.Tool{{
 				Name:       "big_tool",
 				Parameters: &jsonschema.Schema{Type: "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return map[string]any{
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue(map[string]any{
 						"content": large,
 						"ok":      true,
-					}, nil
+					}), nil
 				},
 			}},
 		},
@@ -95,11 +96,11 @@ func TestAgentExecuteToolLimitsToolError(t *testing.T) {
 	a := New(Deps{Limits: Limits{ToolOutputMaxBytes: 512, ToolOutputMaxLines: 80}})
 	a.SetToolProviders([]agenttools.ToolProvider{
 		staticToolProvider{
-			tools: []sdk.Tool{{
+			tools: []toolexec.Tool{{
 				Name:       "broken_tool",
 				Parameters: &jsonschema.Schema{Type: "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return nil, errors.New(largeErr)
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return sdk.ToolOutput{}, errors.New(largeErr)
 				},
 			}},
 		},
@@ -112,7 +113,7 @@ func TestAgentExecuteToolLimitsToolError(t *testing.T) {
 	}, sdk.ToolCall{
 		ToolCallID: "call-broken",
 		ToolName:   "broken_tool",
-		Input:      map[string]any{},
+		Input:      toolexec.ArgumentsFromValue(map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("ExecuteTool() error = %v", err)
@@ -120,7 +121,7 @@ func TestAgentExecuteToolLimitsToolError(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("ExecuteTool() IsError = false, want true")
 	}
-	text, ok := result.Result.(string)
+	text, ok := toolexec.OutputValue(result.Result).(string)
 	if !ok {
 		t.Fatalf("ExecuteTool() Result = %#v, want string", result.Result)
 	}

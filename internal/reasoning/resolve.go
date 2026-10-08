@@ -148,6 +148,9 @@ func pickEffort(requested, stored string, levels []string) string {
 	if e := strings.TrimSpace(stored); e != "" && !IsDisabled(e) && hasEffort(levels, e) {
 		return e
 	}
+	if hasEffort(levels, EffortEnabled) {
+		return EffortEnabled
+	}
 	if hasEffort(levels, EffortMedium) {
 		return EffortMedium
 	}

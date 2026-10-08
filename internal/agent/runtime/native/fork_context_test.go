@@ -10,6 +10,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 type forkSnapshotToolProvider struct {
@@ -17,37 +18,37 @@ type forkSnapshotToolProvider struct {
 	snapshots [][]sdk.Message
 }
 
-func (p *forkSnapshotToolProvider) Tools(_ context.Context, session agenttools.SessionContext) ([]sdk.Tool, error) {
-	return []sdk.Tool{{
+func (p *forkSnapshotToolProvider) Tools(_ context.Context, session agenttools.SessionContext) ([]toolexec.Tool, error) {
+	return []toolexec.Tool{{
 		Name:       "capture_fork_context",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
 			messages, err := session.ForkContext.Messages()
 			if err != nil {
-				return nil, err
+				return sdk.ToolOutput{}, err
 			}
 			p.mu.Lock()
 			p.snapshots = append(p.snapshots, messages)
 			p.mu.Unlock()
-			return map[string]any{"captured": len(messages)}, nil
+			return toolexec.OutputFromValue(map[string]any{"captured": len(messages)}), nil
 		},
 	}}, nil
 }
 
 func TestForkContextTracksMessagesBeforeEachToolCallingStep(t *testing.T) {
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 			if call <= 2 {
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: fmt.Sprintf("capture-call-%d", call),
 						ToolName:   "capture_fork_context",
-						Input:      map[string]any{},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{}),
 					}},
 				}, nil
 			}
-			return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	capture := &forkSnapshotToolProvider{}

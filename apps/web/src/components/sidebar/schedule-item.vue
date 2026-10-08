@@ -106,6 +106,12 @@ defineEmits<{
 // The sidebar is a deliberately local row system (see ui-owners), so this card
 // carries its own hover — on the sidebar's own rung of the overlay ladder, the
 // same token session-item.vue and folders-section.vue use, never a baked tint.
+// The hairline stays in BOTH modes. The surface rule drops dark-mode borders
+// because a card's fill separates it from the page (card 0.21 on background
+// 0.122, Δ≈0.088 lightness); this row sits on the sidebar surface instead
+// (sidebar 0.185, Δ≈0.025), where the fill alone does not read as a card —
+// the `bordered` case of surfaceEdgeClass (dialogs keep their dark border for
+// the same reason). Do not "fix" this back to dark:border-0.
 const cardClass = 'group/card relative flex cursor-pointer items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card transition-colors hover:bg-[color:var(--sidebar-hover)] focus-visible:outline-none' /* ui-allow-style: sidebar rows are a local row system (see ui-owners) — same hover token as session-item.vue */
 
 const { t } = useI18n()

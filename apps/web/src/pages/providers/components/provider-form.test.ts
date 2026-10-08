@@ -42,7 +42,6 @@ vi.mock('@/composables/useProviderModelCatalog', () => ({
 }))
 
 vi.mock('lucide-vue-next', () => ({
-  AlertCircle: () => h('span'),
   KeyRound: () => h('span'),
   RefreshCw: () => h('span'),
 }))
@@ -204,6 +203,37 @@ describe('provider OAuth model sync', () => {
     })
     expect(mocks.ensureProvider.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.getAuthorize.mock.invocationCallOrder[0]!)
+
+    app.unmount()
+    root.remove()
+  })
+
+  it('does not toast the text of a failed authorization', async () => {
+    mocks.getAuthorize.mockRejectedValueOnce(new Error('dial tcp 10.0.0.5:443: connect: connection refused'))
+    const providerForm = (await import('./provider-form.vue')).default
+    const root = document.createElement('div')
+    document.body.append(root)
+    // eslint-disable-next-line vue/one-component-per-file -- The object is root props, not a component definition.
+    const app = createApp(providerForm, {
+      provider: {
+        provider_template_id: 'template-copilot',
+        name: 'GitHub Copilot',
+        client_type: 'github-copilot',
+        enable: false,
+        config: {},
+      },
+      editLoading: false,
+      ensureProvider: mocks.ensureProvider,
+      saveProvider: mocks.saveProvider,
+    })
+    app.config.globalProperties.$t = translate
+    app.mount(root)
+    await flushPromises()
+
+    ;(root.querySelector('button') as HTMLButtonElement).click()
+    await flushPromises()
+
+    expect(mocks.toastError).toHaveBeenCalledWith('provider.oauth.authorizeFailed')
 
     app.unmount()
     root.remove()

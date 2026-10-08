@@ -678,3 +678,15 @@ func TestValidateSelectedChatModelAllowsGoogleImageOutputModel(t *testing.T) {
 		t.Fatalf("validateSelectedChatModel() error = %v, want nil", err)
 	}
 }
+
+func TestResolveOpenCodeGoReasoningKeepsProviderPolicy(t *testing.T) {
+	for id, effort := range map[string]string{"gpt-6-luna": "max", "gpt-5.6-luna": "max", "glm-5.3": "max", "qwen3.8-flash": "xhigh"} {
+		model := models.GetResponse{Model: models.Model{ModelID: id, Config: models.ModelConfig{
+			ThinkingMode: reasoning.ModeToggle, ReasoningEfforts: []string{"low", "medium", effort},
+		}}}
+		cfg := resolveReasoningConfig(model, settings.Settings{}, effort, "", string(models.ClientTypeOpenCodeGo))
+		if cfg == nil || cfg.Effort != effort || cfg.Adaptive {
+			t.Fatalf("%s: %+v", id, cfg)
+		}
+	}
+}

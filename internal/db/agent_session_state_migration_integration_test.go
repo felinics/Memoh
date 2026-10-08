@@ -16,8 +16,13 @@ func TestAgentSessionStateMigrationAndCanonicalSchema(t *testing.T) {
 		dsn := teamMigrationDSN(t)
 		pool := freshMigratedDB(t)
 
-		assertAgentSessionStateSchema(t, ctx, pool, "agent")
+		assertAgentSessionStateSchema(t, ctx, pool, "native")
 		assertSessionRunCandidateIndex(t, ctx, pool, true, true)
+
+		// Removing snapshots is reversible at the schema level. The downgrade
+		// restores empty snapshot tables and marks surviving heads non-resumable.
+		migrateTo(t, dsn, 155)
+		assertAgentSessionStateSchema(t, ctx, pool, "agent")
 
 		// 0145 renames the ACP-scoped checkpoint tables to agent_session_*;
 		// rolling below it must restore the acp_* names with all structures.
@@ -40,7 +45,7 @@ func TestAgentSessionStateMigrationAndCanonicalSchema(t *testing.T) {
 		migrateTo(t, dsn, 144)
 		assertAgentSessionStateSchema(t, ctx, pool, "acp")
 		migrateUpAll(t, dsn)
-		assertAgentSessionStateSchema(t, ctx, pool, "agent")
+		assertAgentSessionStateSchema(t, ctx, pool, "native")
 		assertSessionRunCandidateIndex(t, ctx, pool, true, true)
 	})
 
@@ -49,7 +54,7 @@ func TestAgentSessionStateMigrationAndCanonicalSchema(t *testing.T) {
 		dsn := teamMigrationDSN(t)
 		pool := resetToEmpty(t)
 		applyCanonicalInitOnly(t, dsn)
-		assertAgentSessionStateSchema(t, ctx, pool, "agent")
+		assertAgentSessionStateSchema(t, ctx, pool, "native")
 		assertSessionRunCandidateIndex(t, ctx, pool, true, true)
 	})
 }
@@ -185,6 +190,15 @@ func assertAgentSessionStateSchema(t *testing.T, ctx context.Context, pool *pgxp
 	}
 
 	switch wantPrefix {
+	case "native":
+		if agentGen.states || agentGen.lines || !agentGen.publications {
+			t.Fatalf("native persistence retained snapshots or lost publication: %+v", agentGen)
+		}
+		assertAbsent("acp", acpGen)
+		var resetColumn bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'agent_session_publications' AND column_name = 'checkpoint_reset')`).Scan(&resetColumn); err != nil || resetColumn {
+			t.Fatalf("obsolete checkpoint discriminator: %v, %v", resetColumn, err)
+		}
 	case "agent":
 		assertPresent("agent", agentGen)
 		assertAbsent("acp", acpGen)

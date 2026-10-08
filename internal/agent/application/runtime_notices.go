@@ -5,7 +5,36 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/apperror"
 )
+
+// runtimeNoticeCodes are the public codes of the notices runtimes report.
+var runtimeNoticeCodes = map[event.NoticeKind]apperror.Code{
+	event.NoticeNativeHistoryLost:   apperror.CodeRuntimeNativeHistoryLost,
+	event.NoticeToolsUnavailable:    apperror.CodeRuntimeToolsUnavailable,
+	event.NoticeElicitationDeclined: apperror.CodeRuntimeElicitationDeclined,
+	event.NoticeSteerFailed:         apperror.CodeRuntimeControlSteerFailed,
+}
+
+// publicRuntimeNotice gives a runtime notice its public code before the event
+// reaches any consumer. A notice without text takes the code's catalog detail.
+func publicRuntimeNotice(ev event.StreamEvent) event.StreamEvent {
+	if ev.Type != event.RuntimeNotice || ev.NoticeKind == "" {
+		return ev
+	}
+	code, ok := runtimeNoticeCodes[ev.NoticeKind]
+	if !ok {
+		return ev
+	}
+	ev.Code = string(code)
+	if ev.Delta == "" {
+		if public, ok := apperror.PublicFrom(apperror.New(code, nil), ""); ok {
+			ev.Delta = public.Detail
+		}
+	}
+	ev.NoticeKind = ""
+	return ev
+}
 
 // runtimeNotices belongs to the application invocation, not the driver's turn
 // recorder: startup notices can arrive before a driver creates its turn.

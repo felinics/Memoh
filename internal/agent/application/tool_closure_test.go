@@ -6,7 +6,9 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/event"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestRepairToolCallClosures_AppendsSyntheticToolResultForDanglingAssistantCall(t *testing.T) {
@@ -20,7 +22,7 @@ func TestRepairToolCallClosures_AppendsSyntheticToolResultForDanglingAssistantCa
 				sdk.ToolCallPart{
 					ToolCallID: "web_fetch:10",
 					ToolName:   "web_fetch",
-					Input:      map[string]any{"url": "https://example.com"},
+					Input:      toolexec.ArgumentsFromValue(map[string]any{"url": "https://example.com"}),
 				},
 			},
 		},
@@ -58,7 +60,7 @@ func TestRepairToolCallClosures_DropsOrphanToolMessage(t *testing.T) {
 		sdk.ToolMessage(sdk.ToolResultPart{
 			ToolCallID: "web_fetch:10",
 			ToolName:   "web_fetch",
-			Result:     "orphan",
+			Result:     toolexec.OutputFromValue("orphan"),
 		}),
 	})[0]
 
@@ -87,14 +89,14 @@ func TestRepairToolCallClosures_PreservesValidAssistantToolPair(t *testing.T) {
 				sdk.ToolCallPart{
 					ToolCallID: "web_search:1",
 					ToolName:   "web_search",
-					Input:      map[string]any{"query": "memoh"},
+					Input:      toolexec.ArgumentsFromValue(map[string]any{"query": "memoh"}),
 				},
 			},
 		},
 		sdk.ToolMessage(sdk.ToolResultPart{
 			ToolCallID: "web_search:1",
 			ToolName:   "web_search",
-			Result:     map[string]any{"results": []any{}},
+			Result:     toolexec.OutputFromValue(map[string]any{"results": []any{}}),
 		}),
 	})
 
@@ -115,10 +117,10 @@ func projectedAskUserCall(id string) sdk.Message {
 			sdk.ToolCallPart{
 				ToolCallID: id,
 				ToolName:   "ask_user",
-				Input:      map[string]any{"questions": []any{}},
-				ProviderMetadata: map[string]any{
+				Input:      toolexec.ArgumentsFromValue(map[string]any{"questions": []any{}}),
+				ProviderMetadata: partmeta.Fold(map[string]any{
 					"user_input": map[string]any{"user_input_id": "input-1", "status": "pending"},
-				},
+				}),
 			},
 		},
 	}
@@ -139,7 +141,7 @@ func TestRepairToolCallClosures_DoesNotMatchReusedIDAcrossUserTurns(t *testing.T
 		sdk.ToolMessage(sdk.ToolResultPart{
 			ToolCallID: "ask-1",
 			ToolName:   "ask_user",
-			Result:     map[string]any{"status": "submitted"},
+			Result:     toolexec.OutputFromValue(map[string]any{"status": "submitted"}),
 		}),
 		{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{sdk.TextPart{Text: "second turn done"}}},
 	})
@@ -175,10 +177,10 @@ func TestRepairToolCallClosures_UsesResolvedUserInputResult(t *testing.T) {
 
 	call := projectedAskUserCall("ask-1")
 	part := call.Content[0].(sdk.ToolCallPart)
-	part.ProviderMetadata["user_input"] = map[string]any{
+	part.ProviderMetadata = partmeta.Set(part.ProviderMetadata, partmeta.KeyUserInput, map[string]any{
 		"status":  "submitted",
 		"answers": []any{map[string]any{"question_id": "q1"}},
-	}
+	})
 	call.Content[0] = part
 	messages := sdkMessagesToModelMessages([]sdk.Message{
 		call,
@@ -190,7 +192,7 @@ func TestRepairToolCallClosures_UsesResolvedUserInputResult(t *testing.T) {
 	if len(results) != 1 || results[0].IsError {
 		t.Fatalf("resolved ask_user result = %#v", results)
 	}
-	result, ok := results[0].Result.(map[string]any)
+	result, ok := toolexec.OutputValue(results[0].Result).(map[string]any)
 	if !ok || result["status"] != "submitted" || result["answers"] == nil {
 		t.Fatalf("resolved ask_user payload = %#v", results[0].Result)
 	}
@@ -220,7 +222,7 @@ func TestRepairPermissionDecisionKeepsExecutionOutcomeSeparate(t *testing.T) {
 				t.Fatalf("wrong consent outcome: %#v", consent)
 			}
 			if status != "pending" {
-				value, ok := consent.Result.(map[string]any)
+				value, ok := toolexec.OutputValue(consent.Result).(map[string]any)
 				if !ok || value["status"] != status {
 					t.Fatalf("decision lost: %#v", consent)
 				}

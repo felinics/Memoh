@@ -23,7 +23,10 @@ func (a *WeComAdapter) handleFrame(ctx context.Context, cfg channel.ChannelConfi
 			return nil
 		}
 		a.rememberCallback(cfg.ID, body.MsgID, frame.Headers.ReqID, body.ResponseURL, body.ChatID, body.From.UserID)
-		return handler(ctx, cfg, msg)
+		// The inbound unit writes the result line of the message; the frame
+		// itself was handled.
+		_ = handler(ctx, cfg, msg)
+		return nil
 	case WSCmdEventCallback:
 		if handler == nil {
 			return nil
@@ -37,7 +40,10 @@ func (a *WeComAdapter) handleFrame(ctx context.Context, cfg channel.ChannelConfi
 			return nil
 		}
 		a.rememberCallback(cfg.ID, body.MsgID, frame.Headers.ReqID, body.ResponseURL, body.ChatID, body.From.UserID)
-		return handler(ctx, cfg, msg)
+		// The inbound unit writes the result line of the message; the frame
+		// itself was handled.
+		_ = handler(ctx, cfg, msg)
+		return nil
 	default:
 		return nil
 	}

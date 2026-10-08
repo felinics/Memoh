@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -125,13 +126,31 @@ func buildCDNUploadURL(cdnBaseURL, uploadParam, filekey string) string {
 		"&filekey=" + url.QueryEscape(filekey)
 }
 
+// resolveCDNURL picks the server-built URL when iLink sent one, else builds it
+// from the configured CDN base. Server URLs must be https: they arrive inside
+// message payloads and are fetched server-side.
+func resolveCDNURL(fullURL string, build func() string) (string, error) {
+	fullURL = strings.TrimSpace(fullURL)
+	if fullURL == "" {
+		return build(), nil
+	}
+	parsed, err := url.Parse(fullURL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", errors.New("cdn: refusing non-https full url")
+	}
+	return fullURL, nil
+}
+
 // downloadAndDecrypt fetches encrypted bytes from the CDN and decrypts with AES-128-ECB.
-func downloadAndDecrypt(cdnBaseURL, encryptedQueryParam, aesKeyBase64 string) ([]byte, error) {
+func downloadAndDecrypt(cdnBaseURL, encryptedQueryParam, fullURL, aesKeyBase64 string) ([]byte, error) {
 	key, err := parseAESKey(aesKeyBase64)
 	if err != nil {
 		return nil, err
 	}
-	u := buildCDNDownloadURL(encryptedQueryParam, cdnBaseURL)
+	u, err := resolveCDNURL(fullURL, func() string { return buildCDNDownloadURL(encryptedQueryParam, cdnBaseURL) })
+	if err != nil {
+		return nil, err
+	}
 	encrypted, err := fetchURL(u)
 	if err != nil {
 		return nil, fmt.Errorf("cdn download: %w", err)
@@ -140,8 +159,11 @@ func downloadAndDecrypt(cdnBaseURL, encryptedQueryParam, aesKeyBase64 string) ([
 }
 
 // downloadPlain fetches unencrypted bytes from the CDN.
-func downloadPlain(cdnBaseURL, encryptedQueryParam string) ([]byte, error) {
-	u := buildCDNDownloadURL(encryptedQueryParam, cdnBaseURL)
+func downloadPlain(cdnBaseURL, encryptedQueryParam, fullURL string) ([]byte, error) {
+	u, err := resolveCDNURL(fullURL, func() string { return buildCDNDownloadURL(encryptedQueryParam, cdnBaseURL) })
+	if err != nil {
+		return nil, err
+	}
 	return fetchURL(u)
 }
 
@@ -159,12 +181,16 @@ func fetchURL(u string) ([]byte, error) {
 }
 
 // uploadToCDN encrypts and uploads bytes to the WeChat CDN, returning the download param.
-func uploadToCDN(cdnBaseURL, uploadParam, filekey string, plaintext, aesKey []byte) (string, error) {
+// upload is the getuploadurl response; its UploadFullURL wins over UploadParam.
+func uploadToCDN(cdnBaseURL string, upload *GetUploadURLResponse, filekey string, plaintext, aesKey []byte) (string, error) {
 	ciphertext, err := encryptAESECB(plaintext, aesKey)
 	if err != nil {
 		return "", fmt.Errorf("cdn encrypt: %w", err)
 	}
-	u := buildCDNUploadURL(cdnBaseURL, uploadParam, filekey)
+	u, err := resolveCDNURL(upload.UploadFullURL, func() string { return buildCDNUploadURL(cdnBaseURL, upload.UploadParam, filekey) })
+	if err != nil {
+		return "", err
+	}
 
 	req, err := http.NewRequest(http.MethodPost, u, bytes.NewReader(ciphertext)) //nolint:noctx
 	if err != nil {

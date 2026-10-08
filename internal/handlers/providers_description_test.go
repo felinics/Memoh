@@ -71,6 +71,49 @@ func TestImportedCompatibilitiesRequireExplicitDefaultsForUnknownModels(t *testi
 	}
 }
 
+func TestPresetMetadataDisablesImplicitCapabilityDefaults(t *testing.T) {
+	t.Parallel()
+
+	unknown := providers.RemoteModel{ID: "provider-only-model"}
+	provider := providers.GetResponse{
+		Metadata: map[string]any{
+			"preset": map[string]any{"source": "openai.yaml"},
+		},
+	}
+	if got := importedCompatibilities(
+		unknown,
+		models.ModelTypeChat,
+		[]string{models.CompatToolCall, models.CompatReasoning},
+		allowCustomModelCapabilityDefaults(provider),
+	); len(got) != 0 {
+		t.Fatalf("preset mismatch capabilities = %#v, want none", got)
+	}
+
+	custom := providers.GetResponse{}
+	if got := importedCompatibilities(
+		unknown,
+		models.ModelTypeChat,
+		[]string{models.CompatToolCall},
+		allowCustomModelCapabilityDefaults(custom),
+	); len(got) != 1 || got[0] != models.CompatToolCall {
+		t.Fatalf("custom provider defaults = %#v, want explicit default", got)
+	}
+}
+
+func TestProviderTemplateIDDisablesImplicitCapabilityDefaults(t *testing.T) {
+	t.Parallel()
+
+	providersWithTemplates := []providers.GetResponse{
+		{ProviderTemplateID: "template-id"},
+		{Metadata: map[string]any{"registry": map[string]any{"source": "deepseek.yaml"}}},
+	}
+	for _, provider := range providersWithTemplates {
+		if allowCustomModelCapabilityDefaults(provider) {
+			t.Fatal("template provider must not receive implicit capability defaults")
+		}
+	}
+}
+
 func TestMergeManagedDiscoveredConfigReplacesCapabilities(t *testing.T) {
 	t.Parallel()
 

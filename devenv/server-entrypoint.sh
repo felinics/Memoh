@@ -32,7 +32,11 @@ if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
 fi
 
 mkdir -p /run/containerd
-containerd &
+# OTEL_* in this environment configures Memoh, and containerd reads the same
+# variables: with an endpoint set it starts exporting its own spans, by
+# default over http/protobuf and under Memoh's OTEL_SERVICE_NAME. Against
+# Memoh's default gRPC collector port that fails on every export.
+OTEL_SDK_DISABLED=true containerd &
 CONTAINERD_PID=$!
 
 echo "Waiting for containerd..."
@@ -89,7 +93,15 @@ echo "Bridge binary ready."
 
 echo "Starting server..."
 
-trap 'kill ${SERVER_PID:-0} 2>/dev/null || true; kill ${CONTAINERD_PID:-0} 2>/dev/null || true; wait' TERM INT
+shutdown() {
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+  kill "$CONTAINERD_PID" 2>/dev/null || true
+  wait "$CONTAINERD_PID" 2>/dev/null || true
+}
+trap shutdown TERM INT
 
 "$@" &
 SERVER_PID=$!

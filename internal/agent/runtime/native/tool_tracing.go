@@ -1,11 +1,15 @@
 package native
 
 import (
+	"context"
+
 	"github.com/felinics/twilight/sdk"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/telemetry"
 )
 
@@ -25,11 +29,11 @@ import (
 // contents, shell commands, and whatever the user asked for, which is the
 // material docs/logging.md keeps out of log records. The name of the tool and
 // whether it failed is what a trace needs; the rest is in the conversation.
-func wrapToolTracing(sdkTools []sdk.Tool) []sdk.Tool {
+func wrapToolTracing(sdkTools []toolexec.Tool) []toolexec.Tool {
 	if len(sdkTools) == 0 {
 		return sdkTools
 	}
-	wrapped := make([]sdk.Tool, len(sdkTools))
+	wrapped := make([]toolexec.Tool, len(sdkTools))
 	copy(wrapped, sdkTools)
 	for i := range wrapped {
 		execute := wrapped[i].Execute
@@ -37,7 +41,7 @@ func wrapToolTracing(sdkTools []sdk.Tool) []sdk.Tool {
 			continue
 		}
 		name := wrapped[i].Name
-		wrapped[i].Execute = func(execCtx *sdk.ToolExecContext, input any) (any, error) {
+		wrapped[i].Execute = func(execCtx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
 			if execCtx == nil {
 				return execute(execCtx, input)
 			}
@@ -54,12 +58,19 @@ func wrapToolTracing(sdkTools []sdk.Tool) []sdk.Tool {
 			scoped.Context = ctx
 
 			output, err := execute(&scoped, input)
-			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, "")
-			}
+			markToolSpan(ctx, span, err)
 			return output, err
 		}
 	}
 	return wrapped
+}
+
+// markToolSpan marks a tool call's span failed when the call failed. A tool its
+// caller cancelled did not fail, for the reason endCallSpan gives for a model
+// call.
+func markToolSpan(ctx context.Context, span trace.Span, err error) {
+	if err != nil && !errs.CallerEnded(ctx) {
+		span.RecordError(spanFailure(ctx, err))
+		span.SetStatus(codes.Error, "")
+	}
 }

@@ -140,7 +140,6 @@
                   @update:model-value="handleChange"
                 >
                   <SelectTrigger
-                    size="sm"
                     class="w-full sm:w-auto sm:min-w-36"
                   >
                     <SelectValue :placeholder="$t('provider.promptCache.label')" />
@@ -189,11 +188,11 @@
                 v-else-if="testStatus === 'ok'"
                 class="size-4 text-success"
               />
-              <AlertCircle
+              <ErrorIcon
                 v-else-if="testStatus === 'unverified'"
                 class="size-4 text-warning"
               />
-              <AlertCircle
+              <ErrorIcon
                 v-else-if="testStatus === 'error'"
                 class="size-4 text-destructive"
               />
@@ -209,8 +208,8 @@
             class="w-80 text-xs whitespace-pre-wrap break-words"
             :class="testStatus === 'unverified' ? '' : 'text-destructive'"
           >
-            <!-- unverified 不是失败:引导文案为主信息(正文色),上游细节
-                 降为次要点色自成一行,不和文案挤在一句里。 -->
+            <!-- unverified 不是失败:引导文案为主信息(正文色),原因文案
+                 降为次要点色自成一行,不和引导挤在一句里。 -->
             <template v-if="testStatus === 'unverified'">
               <p>{{ $t('provider.testUnverifiedHint') }}</p>
               <p class="mt-1.5 text-muted-foreground">
@@ -378,7 +377,8 @@ import {
   SelectValue,
   Spinner,
 } from '@felinic/ui'
-import { AlertCircle, KeyRound, RefreshCw } from 'lucide-vue-next'
+import { KeyRound, RefreshCw } from 'lucide-vue-next'
+import { ErrorIcon } from '@memohai/icon/ui'
 import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
 import LoadingButton from '@/components/loading-button/index.vue'
 import {
@@ -408,7 +408,7 @@ import { useProviderModelCatalog } from '@/composables/useProviderModelCatalog'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { providerPresets } from '@/constants/provider-presets'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { syncProviderModelCatalog } = useProviderModelCatalog()
 
 type ProviderWithAuth = Partial<ProvidersGetResponse>
@@ -471,26 +471,12 @@ const cacheDescription = computed(() =>
     : t('provider.promptCache.description'),
 )
 
-function truncateError(text: string): string {
-  const max = 220
-  return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text
-}
-
-// The probe detail can embed the raw upstream response inside `[body: …]`. When
-// a Base URL points at a website instead of an API the body is a full HTML page;
-// its visible text is page prose ("Example Domain … Learn more"), never an
-// actionable API error — and stripping tags leaves dead, unclickable text. Drop
-// HTML bodies entirely and keep only the status head; non-HTML bodies (real
-// JSON API errors) are still shown.
-function formatTestError(raw: string | undefined): string {
-  const text = (raw ?? '').trim()
-  if (!text) return t('provider.unreachable')
-  const bodyStart = text.indexOf('[body:')
-  if (bodyStart === -1) return truncateError(text)
-  const head = text.slice(0, bodyStart).trim()
-  const body = text.slice(bodyStart + '[body:'.length).replace(/\]\s*$/, '').trim()
-  if (/<!doctype|<\/?[a-z][^>]*>/i.test(body)) return truncateError(head)
-  return truncateError(body ? `${head} · ${body}` : head)
+// A failed probe names its reason only by catalog code. A code this client has
+// no copy for falls back to the generic failure copy.
+function testFailureText(result: ProvidersTestResponse | null): string {
+  const key = result?.code ? `errors.${result.code}` : ''
+  if (key && te(key)) return t(key)
+  return result?.reachable === false ? t('provider.unreachable') : t('provider.testFailed')
 }
 
 async function runTest() {
@@ -507,12 +493,11 @@ async function runTest() {
     if (generation !== testGeneration) return
     testResult.value = data ?? null
     if (testResult.value?.status !== 'ok') {
-      testError.value = formatTestError(testResult.value?.message)
+      testError.value = testFailureText(testResult.value)
     }
   } catch (err: unknown) {
     if (generation !== testGeneration) return
-    const message = err instanceof Error ? err.message : ''
-    testError.value = message ? formatTestError(message) : t('provider.testFailed')
+    testError.value = resolveApiErrorMessage(err, t('provider.testFailed'))
   } finally {
     testLoading.value = false
   }
@@ -670,7 +655,7 @@ watch(
   },
 )
 
-const onSubmit = form.handleSubmit(async (value) => {
+function buildPayload(value: ProviderFormValues): Record<string, unknown> {
   const config: Record<string, unknown> = {}
   if (value.base_url && value.base_url.trim() !== '') {
     config.base_url = value.base_url.trim()
@@ -682,7 +667,7 @@ const onSubmit = form.handleSubmit(async (value) => {
     config.prompt_cache_ttl = normalizeCacheTtl(value.prompt_cache_ttl)
   }
   const payload: Record<string, unknown> = {
-    name: value.name.trim(),
+    name: value.name?.trim() ?? '',
     client_type: value.client_type,
     config,
   }
@@ -696,6 +681,20 @@ const onSubmit = form.handleSubmit(async (value) => {
     payload.metadata = metadata
   }
   if (isDraft.value) payload.enable = props.provider?.enable ?? true
+  return payload
+}
+
+// A template draft can be materialized from outside the form (adding a model).
+// It must be created from what is on screen, not from the template defaults,
+// or unsaved edits are dropped when the form re-syncs to the new provider.
+// Validation is skipped on purpose: a model can be added before the API key.
+defineExpose({
+  draftPayload: () => buildPayload(form.values),
+})
+
+const onSubmit = form.handleSubmit(async (value) => {
+  const payload = buildPayload(value)
+  const config = payload.config as Record<string, unknown>
 
   try {
     await props.saveProvider(payload)
@@ -804,7 +803,7 @@ async function pollOAuthAuthorization(notifyOnSuccess = false) {
     }
   } catch (error) {
     clearDevicePollTimer()
-    toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
+    toast.error(resolveApiErrorMessage(error, t('provider.oauth.authorizeFailed')))
   }
 }
 
@@ -862,7 +861,7 @@ async function handleAuthorize() {
       device: result.device,
     }
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : t('provider.oauth.authorizeFailed'))
+    toast.error(resolveApiErrorMessage(error, t('provider.oauth.authorizeFailed')))
   } finally {
     authorizeLoading.value = false
   }
@@ -880,7 +879,7 @@ async function handleRevoke() {
     toast.success(t('provider.oauth.revokeSuccess'))
     await fetchOAuthStatus()
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : t('provider.oauth.revokeFailed'))
+    toast.error(resolveApiErrorMessage(error, t('provider.oauth.revokeFailed')))
   } finally {
     revokeLoading.value = false
   }

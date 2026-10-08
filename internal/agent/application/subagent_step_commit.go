@@ -16,6 +16,7 @@ import (
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/runtimefence"
@@ -40,8 +41,8 @@ func (s *Service) SubagentStepCommit(
 	contextLifecycle *contextfrag.LifecycleHolder,
 	onPersisted func(),
 ) (
-	func(context.Context, int, *sdk.StepResult) error,
-	func(context.Context, int, *sdk.StepResult) error,
+	func(context.Context, int, *step.Record) error,
+	func(context.Context, int, *step.Record) error,
 ) {
 	if s == nil || s.messageService == nil {
 		return nil, nil
@@ -104,16 +105,16 @@ type subagentStepCommitter struct {
 	nextStep int // In-process ordering guard, not a durable replay cursor.
 }
 
-func (c *subagentStepCommitter) commit(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-	return c.persist(ctx, stepIndex, step, false)
+func (c *subagentStepCommitter) commit(ctx context.Context, stepIndex int, record *step.Record) error {
+	return c.persist(ctx, stepIndex, record, false)
 }
 
-func (c *subagentStepCommitter) interrupt(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
-	return c.persist(ctx, stepIndex, step, true)
+func (c *subagentStepCommitter) interrupt(ctx context.Context, stepIndex int, record *step.Record) error {
+	return c.persist(ctx, stepIndex, record, true)
 }
 
-func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step *sdk.StepResult, interrupted bool) error {
-	if c == nil || step == nil {
+func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, record *step.Record, interrupted bool) error {
+	if c == nil || record == nil {
 		return errors.New("agent step is missing")
 	}
 	persistCtx, ownershipErr := stepPersistenceContext(ctx, c.ownerContext)
@@ -126,8 +127,8 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 	if stepIndex != c.nextStep {
 		return fmt.Errorf("unexpected agent step %d, want %d", stepIndex, c.nextStep)
 	}
-	inputs := make([]messagepkg.PersistInput, 0, len(step.Messages))
-	for _, msg := range step.Messages {
+	inputs := make([]messagepkg.PersistInput, 0, len(record.Messages))
+	for _, msg := range record.Messages {
 		if msg.Role == sdk.MessageRoleUser {
 			continue
 		}
@@ -192,15 +193,23 @@ func (c *subagentStepCommitter) persist(ctx context.Context, stepIndex int, step
 	return nil
 }
 
+// SubagentFailure is the error a spawned attempt that ended with event reports
+// to the spawn provider: the run's public failure, named as for any native run,
+// with the event's cause in its chain.
+func (*Service) SubagentFailure(event native.StreamEvent) error {
+	return agentStreamFailure(event)
+}
+
 // SubagentRunObserver returns a per-event publisher that feeds one spawned
 // agent run's stream into the session runtime, or nil when there is nothing to
 // publish to — no runtime configured, or a context without an admitted handle.
 //
 // The returned function mirrors forwardWSStreamEvents' publishing discipline:
-// events are published on a context that survives the run's cancellation
-// (an aborted run's final events are exactly the ones a subscriber must see),
-// and a lost ownership stops publishing outright because every later event
-// would fail identically.
+// events leave as publicAgentStreamEvent makes them, so a failed spawned run
+// is named like any other native run; they are published on a context that
+// survives the run's cancellation (an aborted run's final events are exactly
+// the ones a subscriber must see); and a lost ownership stops publishing
+// outright because every later event would fail identically.
 func (s *Service) SubagentRunObserver(ctx context.Context) native.SpawnRunObserver {
 	if s == nil || s.decisionRuntime == nil {
 		return nil
@@ -215,7 +224,7 @@ func (s *Service) SubagentRunObserver(ctx context.Context) native.SpawnRunObserv
 		if lost.Load() {
 			return native.SpawnRunObservation{}
 		}
-		_, status, err := s.decisionRuntime.HandleAgentEventWithStatus(publishCtx, handle, event)
+		_, status, err := s.decisionRuntime.HandleAgentEventWithStatus(publishCtx, handle, publicAgentStreamEvent(event))
 		if err != nil {
 			if errors.Is(err, sessionruntime.ErrRunOwnershipLost) {
 				lost.Store(true)

@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -170,6 +169,7 @@ type reasoningPolicyQueries struct {
 	botID          pgtype.UUID
 	currentModelID pgtype.UUID
 	defaultAgentID pgtype.UUID
+	memoryProvider pgtype.UUID
 	storedEffort   string
 	upsertCalls    int
 	lastUpsert     sqlc.UpsertBotSettingsParams
@@ -214,6 +214,7 @@ func (q *reasoningPolicyQueries) GetSettingsByBotID(context.Context, pgtype.UUID
 		ReasoningEffort:        q.storedEffort,
 		ChatModelID:            q.currentModelID,
 		DefaultBotAgentID:      q.defaultAgentID,
+		MemoryProviderID:       q.memoryProvider,
 		ChatRuntime:            ChatRuntimeModel,
 		ChatAcpProjectPath:     DefaultACPProjectPath,
 		ChatAcpProjectMode:     DefaultACPProjectMode,
@@ -240,6 +241,10 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 	if arg.DefaultBotAgentIDSet {
 		defaultAgentID = arg.DefaultBotAgentID
 	}
+	memoryProvider := q.memoryProvider
+	if arg.MemoryProviderIDSet {
+		memoryProvider = arg.MemoryProviderID
+	}
 	return sqlc.UpsertBotSettingsRow{
 		BotID:               q.botID,
 		CommandUiLanguage:   arg.CommandUiLanguage,
@@ -248,6 +253,7 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 		CompactionThreshold: arg.CompactionThreshold,
 		ChatModelID:         modelID,
 		DefaultBotAgentID:   defaultAgentID,
+		MemoryProviderID:    memoryProvider,
 		ChatRuntime:         arg.ChatRuntime,
 		ChatAcpAgentID:      arg.ChatAcpAgentID,
 		ChatAcpProjectPath:  arg.ChatAcpProjectPath,
@@ -255,6 +261,107 @@ func (q *reasoningPolicyQueries) UpsertBotSettings(_ context.Context, arg sqlc.U
 		ToolApprovalConfig:  arg.ToolApprovalConfig,
 		OverlayConfig:       arg.OverlayConfig,
 	}, nil
+}
+
+type fakeBuiltinMemory struct {
+	id    string
+	calls int
+}
+
+func (f *fakeBuiltinMemory) EnsureBuiltinID(context.Context) (string, error) {
+	f.calls++
+	return f.id, nil
+}
+
+func TestUpsertBotMemorySwitch(t *testing.T) {
+	t.Parallel()
+
+	botID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000750"), Valid: true}
+	builtinID := uuid.MustParse("00000000-0000-0000-0000-000000000751")
+	existingID := pgtype.UUID{Bytes: uuid.MustParse("00000000-0000-0000-0000-000000000752"), Valid: true}
+	enabled, disabled := true, false
+
+	cases := []struct {
+		name         string
+		current      pgtype.UUID
+		req          UpsertRequest
+		wantSet      bool
+		wantProvider pgtype.UUID
+		wantEnabled  bool
+		wantResolves int
+	}{
+		{
+			name:         "enable points at the team builtin row",
+			req:          UpsertRequest{MemoryEnabled: &enabled},
+			wantSet:      true,
+			wantProvider: pgtype.UUID{Bytes: builtinID, Valid: true},
+			wantEnabled:  true,
+			wantResolves: 1,
+		},
+		{
+			name:        "enable keeps an existing builtin reference",
+			current:     existingID,
+			req:         UpsertRequest{MemoryEnabled: &enabled},
+			wantEnabled: true,
+		},
+		{
+			name:    "disable clears the reference",
+			current: existingID,
+			req:     UpsertRequest{MemoryEnabled: &disabled},
+			wantSet: true,
+		},
+		{
+			name:        "omitted switch keeps the current state",
+			current:     existingID,
+			req:         UpsertRequest{},
+			wantEnabled: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			queries := &reasoningPolicyQueries{botID: botID, memoryProvider: tc.current}
+			resolver := &fakeBuiltinMemory{id: builtinID.String()}
+			service := NewService(slog.Default(), queries, nil, nil)
+			service.SetBuiltinMemoryResolver(resolver)
+
+			got, err := service.UpsertBot(context.Background(), uuid.UUID(botID.Bytes).String(), tc.req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if queries.lastUpsert.MemoryProviderIDSet != tc.wantSet {
+				t.Fatalf("MemoryProviderIDSet = %v, want %v", queries.lastUpsert.MemoryProviderIDSet, tc.wantSet)
+			}
+			if tc.wantSet && queries.lastUpsert.MemoryProviderID != tc.wantProvider {
+				t.Fatalf("MemoryProviderID = %#v, want %#v", queries.lastUpsert.MemoryProviderID, tc.wantProvider)
+			}
+			if got.MemoryEnabled != tc.wantEnabled {
+				t.Fatalf("MemoryEnabled = %v, want %v", got.MemoryEnabled, tc.wantEnabled)
+			}
+			if resolver.calls != tc.wantResolves {
+				t.Fatalf("EnsureBuiltinID calls = %d, want %d", resolver.calls, tc.wantResolves)
+			}
+		})
+	}
+}
+
+func TestSettingsJSONHidesMemoryProviderID(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(Settings{MemoryEnabled: true, MemoryProviderID: "00000000-0000-0000-0000-000000000753"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["memory_provider_id"]; ok {
+		t.Fatalf("settings JSON exposes memory_provider_id: %s", raw)
+	}
+	if decoded["memory_enabled"] != true {
+		t.Fatalf("memory_enabled = %v, want true", decoded["memory_enabled"])
+	}
 }
 
 func TestUpsertBotSettingsRechecksDefaultAgentAfterBotLock(t *testing.T) {
@@ -524,33 +631,25 @@ func TestValidateChatRuntimeSettings(t *testing.T) {
 		ChatACPProjectPath: DefaultACPProjectPath,
 		ChatACPProjectMode: DefaultACPProjectMode,
 	}
-	if err := validateChatRuntimeSettings(metadata, valid); err != nil {
+	if err := validateChatRuntimeSettings(metadata, valid, legacyACPSetup); err != nil {
 		t.Fatalf("validateChatRuntimeSettings(valid) error = %v", err)
 	}
 
 	noModel := valid
 	noModel.ChatModelID = ""
-	if err := validateChatRuntimeSettings(metadata, noModel); err != nil {
+	if err := validateChatRuntimeSettings(metadata, noModel, legacyACPSetup); err != nil {
 		t.Fatalf("validateChatRuntimeSettings without chat model error = %v, want nil", err)
 	}
 
 	disabled := valid
-	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":false}}}}`), disabled); feedbackCode(err) != agentfeedback.CodeAgentNotEnabled {
-		t.Fatalf("validateChatRuntimeSettings disabled agent code = %q, want %q", feedbackCode(err), agentfeedback.CodeAgentNotEnabled)
+	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":false}}}}`), disabled, legacyACPSetup); !errors.Is(err, ErrACPAgentNotEnabled) {
+		t.Fatalf("validateChatRuntimeSettings disabled agent error = %v, want ErrACPAgentNotEnabled", err)
 	}
 
 	missingKey := valid
-	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":true,"setup_mode":"api_key","managed":{}}}}}`), missingKey); feedbackCode(err) != agentfeedback.CodeAgentNotConfigured {
-		t.Fatalf("validateChatRuntimeSettings missing api key code = %q, want %q", feedbackCode(err), agentfeedback.CodeAgentNotConfigured)
+	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":true,"setup_mode":"api_key","managed":{}}}}}`), missingKey, legacyACPSetup); !errors.Is(err, ErrACPAgentNotConfigured) {
+		t.Fatalf("validateChatRuntimeSettings missing api key error = %v, want ErrACPAgentNotConfigured", err)
 	}
-}
-
-func feedbackCode(err error) string {
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) {
-		return feedback.Code
-	}
-	return ""
 }
 
 func TestUpsertRequestShowToolCallsInIM_PointerSemantics(t *testing.T) {
@@ -591,8 +690,8 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 	}
 	for name, ptr := range map[string]*string{
 		"chat_model_id": omitted.ChatModelID, "image_model_id": omitted.ImageModelID,
-		"search_provider_id": omitted.SearchProviderID, "memory_provider_id": omitted.MemoryProviderID,
-		"tts_model_id": omitted.TtsModelID, "transcription_model_id": omitted.TranscriptionModelID,
+		"search_provider_id": omitted.SearchProviderID,
+		"tts_model_id":       omitted.TtsModelID, "transcription_model_id": omitted.TranscriptionModelID,
 		"video_model_id": omitted.VideoModelID,
 	} {
 		if ptr != nil {
@@ -601,12 +700,11 @@ func TestUpsertRequestClearableFields_JSONSemantics(t *testing.T) {
 	}
 
 	var cleared UpsertRequest
-	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":"","memory_provider_id":""}`), &cleared); err != nil {
+	if err := json.Unmarshal([]byte(`{"chat_model_id":"","search_provider_id":""}`), &cleared); err != nil {
 		t.Fatal(err)
 	}
 	for name, ptr := range map[string]*string{
 		"chat_model_id": cleared.ChatModelID, "search_provider_id": cleared.SearchProviderID,
-		"memory_provider_id": cleared.MemoryProviderID,
 	} {
 		if ptr == nil || *ptr != "" {
 			t.Fatalf("%s: explicit empty string must decode to a non-nil empty pointer", name)

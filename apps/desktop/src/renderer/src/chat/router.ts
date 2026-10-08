@@ -5,7 +5,7 @@ import {
   type RouteRecordRaw,
 } from 'vue-router'
 import { createAppRoutes } from '@memohai/web/routes'
-import { ensureOnboarding } from '@memohai/web/router-guards/onboarding'
+import { ensureOnboarding, hasOnboardingInProgress } from '@memohai/web/router-guards/onboarding'
 import { useUserStore } from '@memohai/web/store/user'
 import { installBackHistory } from '@memohai/web/composables/useBackOr'
 
@@ -67,6 +67,7 @@ router.beforeEach(async (to: RouteLocationNormalized) => {
 
   // Onboarding: redirect completed users away, let incomplete users through
   if (to.path === '/onboarding') {
+    if (hasOnboardingInProgress()) return true
     const completed = await ensureOnboarding()
     return completed ? { path: '/' } : true
   }

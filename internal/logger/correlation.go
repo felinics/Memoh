@@ -33,6 +33,15 @@ func ContextWithRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, requestIDContextKey{}, id)
 }
 
+// ContextWithoutRequestID returns ctx without the request identifier it
+// carries, for work that outlives the request and is not part of it.
+func ContextWithoutRequestID(ctx context.Context) context.Context {
+	if RequestIDFromContext(ctx) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, requestIDContextKey{}, "")
+}
+
 // RequestIDFromContext reports the request identifier ctx carries, or "".
 func RequestIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(requestIDContextKey{}).(string)

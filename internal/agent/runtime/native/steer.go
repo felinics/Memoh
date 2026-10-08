@@ -3,43 +3,27 @@ package native
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync"
 
 	sdk "github.com/felinics/twilight/sdk"
-
-	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 )
 
 var errModelSteered = errors.New("model invocation steered")
 
-// The commit callback and PrepareStep run serially on the SDK loop. Reading
-// here avoids a sender/forwarder race with an immediately following tool step.
-func prepareQueuedSteer(prepare func(*sdk.GenerateParams) *sdk.GenerateParams, cfg RunConfig) func(*sdk.GenerateParams) *sdk.GenerateParams {
-	if cfg.NextModelInputs == nil {
-		return prepare
-	}
-	return func(params *sdk.GenerateParams) *sdk.GenerateParams {
-		if prepare != nil {
-			if override := prepare(params); override != nil {
-				params = override
-			}
-		}
-		if len(*cfg.NextModelInputs) > 0 {
-			cfg.ContextMutations.Record(contextfrag.MutationInjectedMessage, fmt.Sprintf("messages=%d", len(*cfg.NextModelInputs)))
-			params.Messages = append(params.Messages, *cfg.NextModelInputs...)
-			*cfg.NextModelInputs = nil
-		}
-		return params
-	}
-}
-
-// modelSteerGate serializes interruption with provider output BEFORE the SDK
+// modelSteerGate serializes interruption with provider output BEFORE the loop
 // can execute tools or commit a completed step. Consumer-side stream flags are
 // too late: provider events may already be buffered ahead of the UI consumer.
+//
+// The gate covers one model call at a time. arm points it at that call's
+// cancellation, begin opens the sampling window, and observe closes the window
+// at the first part that signals tools or a finished step.
 type modelSteerGate struct {
-	mu       sync.Mutex
+	mu sync.Mutex
+	// call identifies the armed model call. A pending-steer probe spans a call
+	// boundary, so the watcher carries the generation it probed for and a stale
+	// decision is refused instead of cancelling the call that replaced it.
+	call     uint64
 	sampling bool
 	stopped  bool
 	cancel   context.CancelCauseFunc
@@ -57,6 +41,7 @@ func (a *Agent) watchSteer(ctx context.Context, cfg RunConfig, gate *modelSteerG
 		case <-cfg.SteerWake:
 		case <-gate.ready:
 		}
+		call := gate.generation()
 		pending, err := cfg.PendingSteer(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
@@ -64,26 +49,43 @@ func (a *Agent) watchSteer(ctx context.Context, cfg RunConfig, gate *modelSteerG
 			}
 			continue
 		}
-		if pending && gate.interrupt() {
-			return
+		if pending {
+			// An interrupted call is checkpointed and the loop continues in
+			// place, so the watcher stays for the calls that follow. The next
+			// arm/begin pair reopens the window and republishes ready.
+			gate.interrupt(call)
 		}
 	}
 }
 
-// SDK output omits inputs inserted by PrepareStep. Rebuild the committed
-// transcript with their admitted provenance so a later steer cannot forget
-// an earlier steer/read_media input. Initial inputs already live in cfg.Messages.
-func steerContinuationMessages(cfg RunConfig, steps []sdk.StepResult, capture *stepMessageCapture) []sdk.Message {
-	var messages []sdk.Message
-	for i, step := range steps {
-		inputs := capture.messages(i)
-		if i == 0 {
-			inputs = inputs[min(len(cfg.initialStepInputs), len(inputs)):]
-		}
-		messages = append(messages, inputs...)
-		messages = append(messages, step.Messages...)
+// arm binds the gate to the model call that is about to start. Each call owns
+// its own cancellation, so a steer stops sampling without ending the run.
+func (g *modelSteerGate) arm(cancel context.CancelCauseFunc) {
+	if g == nil {
+		return
 	}
-	return messages
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.call++
+	g.cancel = cancel
+	g.sampling = false
+	g.stopped = false
+	// The previous call may have left an unread notification behind. It carries
+	// no generation, so drop it rather than spend a probe on it.
+	select {
+	case <-g.ready:
+	default:
+	}
+}
+
+// generation reports the armed call a pending-steer probe is about to run for.
+func (g *modelSteerGate) generation() uint64 {
+	if g == nil {
+		return 0
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.call
 }
 
 func (g *modelSteerGate) begin() {
@@ -110,19 +112,19 @@ func (g *modelSteerGate) observe(part sdk.StreamPart) bool {
 	}
 	switch part.(type) {
 	case *sdk.ToolInputStartPart, *sdk.ToolInputDeltaPart, *sdk.ToolInputEndPart,
-		*sdk.StreamToolCallPart, *sdk.FinishStepPart, *sdk.ErrorPart, *sdk.AbortPart:
+		*sdk.StreamToolCallPart, *sdk.FinishStepPart, *sdk.ErrorPart:
 		g.sampling = false
 	}
 	return true
 }
 
-func (g *modelSteerGate) interrupt() bool {
+func (g *modelSteerGate) interrupt(call uint64) bool {
 	if g == nil {
 		return false
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if !g.sampling || g.stopped {
+	if g.call != call || !g.sampling || g.stopped || g.cancel == nil {
 		return false
 	}
 	g.stopped = true

@@ -15,7 +15,7 @@ type BeforeChatRequest struct {
 // BeforeChatResult contains memory context to inject into the conversation.
 type BeforeChatResult struct {
 	ContextText    string // formatted text to inject as a user message
-	RetrievalMode  string // graph, file_fallback, mem0, etc.
+	RetrievalMode  string // graph, file_fallback, etc.
 	FallbackReason string // non-empty when the provider degraded to another retrieval path
 	ResultCount    int    // number of memory items represented in ContextText; zero when item metadata is unavailable
 	ResultRefs     []string
@@ -232,25 +232,12 @@ type MemoryStatusResponse struct {
 	RetryQueueDepth int  `json:"retry_queue_depth"`
 }
 
-// Memory provider admin types.
+// Memory provider storage types. Built-in Memory is the only provider type;
+// memory_providers rows store the team's Built-in Memory configuration, and a
+// bot's memory_provider_id is non-null exactly when its memory is enabled.
 type ProviderType string
 
-const (
-	ProviderBuiltin    ProviderType = "builtin"
-	ProviderMem0       ProviderType = "mem0"
-	ProviderOpenViking ProviderType = "openviking"
-)
-
-type ProviderCreateRequest struct {
-	Name     string         `json:"name"`
-	Provider ProviderType   `json:"provider"`
-	Config   map[string]any `json:"config,omitempty"`
-}
-
-type ProviderUpdateRequest struct {
-	Name   *string        `json:"name,omitempty"`
-	Config map[string]any `json:"config,omitempty"`
-}
+const ProviderBuiltin ProviderType = "builtin"
 
 type ProviderGetResponse struct {
 	ID        string         `json:"id"`
@@ -262,35 +249,15 @@ type ProviderGetResponse struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
-type ProviderConfigSchema struct {
-	Fields map[string]ProviderFieldSchema `json:"fields"`
+// MemoryConfig is the team-level Built-in Memory configuration.
+type MemoryConfig struct {
+	// EmbeddingModelID optionally maintains the pgvector semantic seed index
+	// for graph recall. Empty means graph-only recall.
+	EmbeddingModelID string `json:"embedding_model_id"`
 }
 
-type ProviderFieldSchema struct {
-	Type        string `json:"type"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Required    bool   `json:"required,omitempty"`
-	Secret      bool   `json:"secret,omitempty"`
-	Example     any    `json:"example,omitempty"`
-}
-
-type ProviderMeta struct {
-	Provider     string               `json:"provider"`
-	DisplayName  string               `json:"display_name"`
-	ConfigSchema ProviderConfigSchema `json:"config_schema"`
-}
-
-type ProviderCollectionStatus struct {
-	Name   string       `json:"name"`
-	Exists bool         `json:"exists"`
-	Points int          `json:"points"`
-	Health HealthStatus `json:"health"`
-}
-
-type ProviderStatusResponse struct {
-	ProviderType     string                     `json:"provider_type"`
-	MemoryMode       string                     `json:"memory_mode,omitempty"`
-	EmbeddingModelID string                     `json:"embedding_model_id,omitempty"`
-	Collections      []ProviderCollectionStatus `json:"collections,omitempty"`
+// MemoryConfigUpdateRequest updates the team-level Built-in Memory
+// configuration: nil keeps the current value, "" clears it.
+type MemoryConfigUpdateRequest struct {
+	EmbeddingModelID *string `json:"embedding_model_id,omitempty"`
 }

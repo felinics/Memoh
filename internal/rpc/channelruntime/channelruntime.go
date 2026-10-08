@@ -4,13 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/rpc"
 	runtimeRpc "github.com/felinics/memoh/internal/rpc/runtime"
 	"github.com/felinics/memoh/internal/webhooktunnel"
 )
@@ -93,37 +92,15 @@ func (c *Client) Status() webhooktunnel.Status {
 	return out
 }
 
-// reasonSentinels maps wire reason strings back to channel sentinels.
-var reasonSentinels = map[string]error{
-	reasonConfigNotFound:     channel.ErrChannelConfigNotFound,
-	reasonDiscoveryFailed:    channel.ErrChannelDiscoveryFailed,
-	reasonEnableFailed:       channel.ErrEnableChannelFailed,
-	reasonInvalidWebhook:     channel.ErrInvalidWebhookEndpoint,
-	reasonWebhookUnsupported: channel.ErrWebhookEndpointUnsupported,
+// reasons is the wire table of the channel sentinels, read by the server
+// encoding and the client decoding. Entries are matched in order.
+var reasons = rpc.Reasons{
+	{Err: channel.ErrChannelConfigNotFound, Reason: reasonConfigNotFound, Code: codes.NotFound, Message: "channel config not found"},
+	{Err: channel.ErrChannelDiscoveryFailed, Reason: reasonDiscoveryFailed, Code: codes.FailedPrecondition, Message: "channel discovery failed"},
+	{Err: channel.ErrEnableChannelFailed, Reason: reasonEnableFailed, Code: codes.FailedPrecondition, Message: "channel enable failed"},
+	{Err: channel.ErrInvalidWebhookEndpoint, Reason: reasonInvalidWebhook, Code: codes.InvalidArgument, Message: "invalid channel webhook endpoint"},
+	{Err: channel.ErrWebhookEndpointUnsupported, Reason: reasonWebhookUnsupported, Code: codes.Unimplemented, Message: "channel webhook endpoint unsupported"},
 }
-
-// reasonDetailSep separates the stable reason token from the original error
-// text on the wire. A non-printable unit separator cannot collide with
-// error message content.
-const reasonDetailSep = "\x1f"
-
-// channelReasonError restores a sentinel identity plus the original error
-// text after crossing the internal RPC, so operators keep seeing the
-// platform-side cause (e.g. the getMe failure behind a discovery error)
-// exactly as the in-process path rendered it.
-type channelReasonError struct {
-	sentinel error
-	text     string
-}
-
-func (e *channelReasonError) Error() string {
-	if e.text != "" {
-		return e.text
-	}
-	return e.sentinel.Error()
-}
-
-func (e *channelReasonError) Unwrap() error { return e.sentinel }
 
 func (c *Client) call(ctx context.Context, method string, input, output any) error {
 	err := c.rpc.Call(ctx, method, input, output)
@@ -133,43 +110,26 @@ func (c *Client) call(ctx context.Context, method string, input, output any) err
 	return restoreChannelError(err)
 }
 
-// restoreChannelError maps a wire error back to its channel sentinel,
-// keeping any transported cause text.
+// restoreChannelError maps a wire error back to its channel sentinel from the
+// error envelope, keeping any transported cause text so operators keep seeing
+// the platform-side cause (e.g. the getMe failure behind a discovery error).
+// A status without the envelope is returned unchanged.
 func restoreChannelError(err error) error {
-	message := status.Convert(err).Message()
-	for reason, sentinel := range reasonSentinels {
-		if message == reason {
-			return sentinel
-		}
-		if detail, ok := strings.CutPrefix(message, reason+reasonDetailSep); ok {
-			return &channelReasonError{sentinel: sentinel, text: detail}
-		}
+	if restored := reasons.Decode(err); restored != nil {
+		return restored
 	}
 	return err
 }
 
+// safeChannelError encodes a channel sentinel as its reason, with the full
+// original error text as the adapter message, letting the peer restore both
+// the sentinel identity and the pre-split message.
 func safeChannelError(err error) error {
-	switch {
-	case errors.Is(err, channel.ErrChannelConfigNotFound):
-		return reasonStatus(codes.NotFound, reasonConfigNotFound, err)
-	case errors.Is(err, channel.ErrChannelDiscoveryFailed):
-		return reasonStatus(codes.FailedPrecondition, reasonDiscoveryFailed, err)
-	case errors.Is(err, channel.ErrEnableChannelFailed):
-		return reasonStatus(codes.FailedPrecondition, reasonEnableFailed, err)
-	case errors.Is(err, channel.ErrInvalidWebhookEndpoint):
-		return reasonStatus(codes.InvalidArgument, reasonInvalidWebhook, err)
-	case errors.Is(err, channel.ErrWebhookEndpointUnsupported):
-		return reasonStatus(codes.Unimplemented, reasonWebhookUnsupported, err)
-	default:
+	entry, ok := reasons.Lookup(err)
+	if !ok {
 		return err
 	}
-}
-
-// reasonStatus encodes a sentinel as its stable reason token followed by
-// the full original error text, letting the peer restore both the sentinel
-// identity and the pre-split message.
-func reasonStatus(code codes.Code, reason string, err error) error {
-	return status.Error(code, reason+reasonDetailSep+err.Error())
+	return entry.Status(err.Error())
 }
 
 func Handlers(channelRuntime channel.Runtime, tunnel *webhooktunnel.Manager) map[string]runtimeRpc.Handler {

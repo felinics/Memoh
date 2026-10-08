@@ -8,9 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/agent/application"
-	"github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 )
@@ -125,35 +123,17 @@ func (h *SessionHandler) ExecuteRuntimeCommand(c echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
+// runtimeControlError keeps client-side Echo errors and otherwise defers to the shared runtime control
+// translation, which also covers driver calls that bypass the service.
 func runtimeControlError(err error) error {
 	if apperror.CodeOf(err) != "" {
 		return err
-	}
-	if feedback := externalAgentFeedbackHTTPError(err); feedback != nil {
-		return feedback
 	}
 	var httpErr *echo.HTTPError
 	if errors.As(err, &httpErr) && httpErr.Code < 500 {
 		return err
 	}
-	code := apperror.CodeRuntimeControlFailed
-	switch {
-	case errors.Is(err, approval.ErrForbidden):
-		code = apperror.CodeRuntimeControlForbidden
-	case errors.Is(err, sessionruntime.ErrSessionBusy):
-		code = apperror.CodeSessionBusy
-	case errors.Is(err, external.ErrControlUnsupported):
-		code = apperror.CodeRuntimeControlUnsupported
-	case errors.Is(err, external.ErrCommandUnavailable):
-		code = apperror.CodeRuntimeControlCommandUnavailable
-	case errors.Is(err, external.ErrModeUnavailable):
-		code = apperror.CodeRuntimeControlModeUnavailable
-	case errors.Is(err, external.ErrThreadUnavailable):
-		code = apperror.CodeRuntimeControlThreadUnavailable
-	case errors.Is(err, external.ErrAuthRequired):
-		code = apperror.CodeExternalRuntimeAuthRequired
-	}
-	return apperror.Wrap(code, err, nil)
+	return application.RuntimeControlError(err)
 }
 
 type RuntimeGoalRequest struct {

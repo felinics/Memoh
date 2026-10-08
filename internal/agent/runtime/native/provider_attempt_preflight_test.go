@@ -15,6 +15,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -133,11 +134,11 @@ func TestAgentGenerateInitialHookProviderAttemptModes(t *testing.T) {
 			ledger := contextfrag.NewMutationLedger()
 			plan := contextfrag.ContextBudgetPlan{Window: 8192, OutputReserve: 256}
 			var selectorCalls atomic.Int32
-			var providerParams sdk.GenerateParams
+			var providerParams sdk.Request
 			modelProvider := &atomicMockProvider{
-				handler: func(_ int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+				handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
 					providerParams = cloneGenerateParams(params)
-					return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+					return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 				},
 			}
 			applierMessageCount := 0
@@ -219,11 +220,11 @@ func TestAgentGenerateInitialHookWindowZeroRunsPreflightWithoutBudgetEnforcement
 	bridgeProvider, hookService := newBeforeModelCallHook(t, marker+"\n"+strings.Repeat("large ", 1000))
 	ledger := contextfrag.NewMutationLedger()
 	var selectorCalls atomic.Int32
-	var providerParams sdk.GenerateParams
+	var providerParams sdk.Request
 	modelProvider := &atomicMockProvider{
-		handler: func(_ int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
 			providerParams = cloneGenerateParams(params)
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	a := New(Deps{
@@ -305,8 +306,8 @@ func TestPrepareProviderAttemptStepZeroWindowZeroAppliesSuffixHygiene(t *testing
 		false,
 		len(prefix),
 		0,
-		preparedMessageProvenance{},
-		&sdk.GenerateParams{Messages: messages},
+		nil,
+		&sdk.Request{Messages: messages},
 	)
 	if err := handoff.publish(*params); err != nil {
 		t.Fatalf("publish provider attempt: %v", err)
@@ -334,25 +335,25 @@ func TestAgentGenerateSnapshotHashesResolvedMapToolSchema(t *testing.T) {
 	t.Parallel()
 
 	ledger := contextfrag.NewMutationLedger()
-	var providerParams sdk.GenerateParams
+	var providerParams sdk.Request
 	modelProvider := &atomicMockProvider{
-		handler: func(_ int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
 			providerParams = cloneGenerateParams(params)
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	a := New(Deps{})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name: "lookup",
-		Parameters: map[string]any{
+		Parameters: toolexec.SchemaFromValue(map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"query": map[string]any{"type": "string"},
 			},
 			"required": []string{"query"},
-		},
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-			return nil, nil
+		}),
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return sdk.ToolOutput{}, nil
 		},
 	}}}})
 
@@ -369,8 +370,19 @@ func TestAgentGenerateSnapshotHashesResolvedMapToolSchema(t *testing.T) {
 	if len(providerParams.Tools) != 1 {
 		t.Fatalf("provider tools = %#v, want one", providerParams.Tools)
 	}
-	if _, ok := providerParams.Tools[0].Parameters.(*jsonschema.Schema); !ok {
-		t.Fatalf("provider schema type = %T, want resolved *jsonschema.Schema", providerParams.Tools[0].Parameters)
+	// The request carries the resolved JSON Schema document, not the caller's
+	// map literal: the frozen definition is what the digest and the provider
+	// both see.
+	var schema struct {
+		Type       string         `json:"type"`
+		Properties map[string]any `json:"properties"`
+		Required   []string       `json:"required"`
+	}
+	if data, err := json.Marshal(providerParams.Tools[0].Parameters); err != nil || json.Unmarshal(data, &schema) != nil {
+		t.Fatalf("provider schema parameters = %s, want a resolved JSON Schema document: %v", providerParams.Tools[0].Parameters, err)
+	}
+	if schema.Type != "object" || len(schema.Properties) != 1 || len(schema.Required) != 1 {
+		t.Fatalf("provider schema = %s, want the resolved map schema with one property and one required entry", providerParams.Tools[0].Parameters)
 	}
 
 	steps := ledger.StepSnapshots()
@@ -398,21 +410,21 @@ func TestAgentGenerateHookStaysGovernedAcrossAnthropicProviderSteps(t *testing.T
 	marker := "round8-multistep-hook"
 	bridgeProvider, hookService := newBeforeModelCallHook(t, marker)
 	ledger := contextfrag.NewMutationLedger()
-	var callParams []sdk.GenerateParams
+	var callParams []sdk.Request
 	modelProvider := &atomicMockProvider{
-		handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 			callParams = append(callParams, cloneGenerateParams(params))
 			if call == 1 {
-				return &sdk.GenerateResult{
+				return sdk.ModelResult{
 					FinishReason: sdk.FinishReasonToolCalls,
 					ToolCalls: []sdk.ToolCall{{
 						ToolCallID: "call-round8",
 						ToolName:   "lookup",
-						Input:      map[string]any{"q": "one"},
+						Input:      toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 					}},
 				}, nil
 			}
-			return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+			return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 		},
 	}
 	a := New(Deps{
@@ -422,11 +434,11 @@ func TestAgentGenerateHookStaysGovernedAcrossAnthropicProviderSteps(t *testing.T
 			return cfg, nil
 		},
 	})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-			return map[string]any{"answer": "ok"}, nil
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(map[string]any{"answer": "ok"}), nil
 		},
 	}}}})
 

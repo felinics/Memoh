@@ -11,6 +11,70 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptSessionRunDecisionContinuation = `-- name: AcceptSessionRunDecisionContinuation :one
+UPDATE session_runs
+SET state = 'running',
+    input_json = jsonb_set(input_json, '{decision_continuations}',
+      COALESCE(input_json->'decision_continuations', '{}'::jsonb) ||
+      jsonb_build_object($1::text,
+        jsonb_build_object('kind', $2::text, 'phase', 'accepted')), true),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $3 AND session_id = $4
+  AND run_id = $5 AND fencing_token = $6
+  AND state IN ('running', 'waiting_decision') AND abort_requested_at IS NULL
+RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
+`
+
+type AcceptSessionRunDecisionContinuationParams struct {
+	DecisionID   string      `json:"decision_id"`
+	DecisionKind string      `json:"decision_kind"`
+	BotID        pgtype.UUID `json:"bot_id"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	RunID        pgtype.UUID `json:"run_id"`
+	FencingToken int64       `json:"fencing_token"`
+}
+
+// Called in the same fenced transaction that accepts the decision. A committed
+// answer is executing work, even before the resumed producer's agent_start.
+func (q *Queries) AcceptSessionRunDecisionContinuation(ctx context.Context, arg AcceptSessionRunDecisionContinuationParams) (SessionRun, error) {
+	row := q.db.QueryRow(ctx, acceptSessionRunDecisionContinuation,
+		arg.DecisionID,
+		arg.DecisionKind,
+		arg.BotID,
+		arg.SessionID,
+		arg.RunID,
+		arg.FencingToken,
+	)
+	var i SessionRun
+	err := row.Scan(
+		&i.RunID,
+		&i.TeamID,
+		&i.BotID,
+		&i.SessionID,
+		&i.InvocationID,
+		&i.TurnID,
+		&i.TurnPosition,
+		&i.State,
+		&i.InputJson,
+		&i.InputFingerprint,
+		&i.OwnerID,
+		&i.FencingToken,
+		&i.OwnerSince,
+		&i.LiveGeneration,
+		&i.AbortRequestedAt,
+		&i.ProposedTerminalState,
+		&i.ProposedErrorCode,
+		&i.ProposedErrorMessage,
+		&i.FinishProposedAt,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const admitLockedSessionRun = `-- name: AdmitLockedSessionRun :one
 WITH target_session AS MATERIALIZED (
   SELECT s.id AS session_id
@@ -248,15 +312,17 @@ WHERE team_id = public.memoh_current_team_id()
   AND run_id = $4
   AND fencing_token = $5
   AND state IN ('accepted', 'running', 'waiting_decision', 'finishing')
+  AND ($6::text IS NULL OR state = $6::text)
 RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
 `
 
 type FinalizeSessionRunParams struct {
-	State        string      `json:"state"`
-	ErrorCode    pgtype.Text `json:"error_code"`
-	ErrorMessage pgtype.Text `json:"error_message"`
-	RunID        pgtype.UUID `json:"run_id"`
-	FencingToken int64       `json:"fencing_token"`
+	State         string      `json:"state"`
+	ErrorCode     pgtype.Text `json:"error_code"`
+	ErrorMessage  pgtype.Text `json:"error_message"`
+	RunID         pgtype.UUID `json:"run_id"`
+	FencingToken  int64       `json:"fencing_token"`
+	ExpectedState pgtype.Text `json:"expected_state"`
 }
 
 // Fenced idempotent terminal write, shared by the owner (completed / aborted /
@@ -269,6 +335,7 @@ func (q *Queries) FinalizeSessionRun(ctx context.Context, arg FinalizeSessionRun
 		arg.ErrorMessage,
 		arg.RunID,
 		arg.FencingToken,
+		arg.ExpectedState,
 	)
 	var i SessionRun
 	err := row.Scan(
@@ -460,6 +527,26 @@ func (q *Queries) GetSessionRunByInvocation(ctx context.Context, arg GetSessionR
 	return i, err
 }
 
+const isInterruptedSessionRunLatest = `-- name: IsInterruptedSessionRunLatest :one
+SELECT EXISTS (
+ SELECT 1 FROM session_runs source
+ WHERE source.team_id = public.memoh_current_team_id() AND source.run_id = $1
+  AND source.state = 'lost' AND source.error_code = 'session_runtime.interrupted'
+  AND source.abort_requested_at IS NULL AND source.input_json ? 'resume'
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = source.team_id
+   AND later.session_id = source.session_id AND later.turn_position > source.turn_position)
+)::boolean
+`
+
+// Called under the same parent lock as admission. A newer accepted turn must
+// supersede recovery even if it has already completed since discovery.
+func (q *Queries) IsInterruptedSessionRunLatest(ctx context.Context, runID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, isInterruptedSessionRunLatest, runID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listActiveSessionRunsByBot = `-- name: ListActiveSessionRunsByBot :many
 SELECT run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
 FROM session_runs
@@ -471,6 +558,65 @@ ORDER BY session_id, run_id
 
 func (q *Queries) ListActiveSessionRunsByBot(ctx context.Context, botID pgtype.UUID) ([]SessionRun, error) {
 	rows, err := q.db.Query(ctx, listActiveSessionRunsByBot, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SessionRun
+	for rows.Next() {
+		var i SessionRun
+		if err := rows.Scan(
+			&i.RunID,
+			&i.TeamID,
+			&i.BotID,
+			&i.SessionID,
+			&i.InvocationID,
+			&i.TurnID,
+			&i.TurnPosition,
+			&i.State,
+			&i.InputJson,
+			&i.InputFingerprint,
+			&i.OwnerID,
+			&i.FencingToken,
+			&i.OwnerSince,
+			&i.LiveGeneration,
+			&i.AbortRequestedAt,
+			&i.ProposedTerminalState,
+			&i.ProposedErrorCode,
+			&i.ProposedErrorMessage,
+			&i.FinishProposedAt,
+			&i.ErrorCode,
+			&i.ErrorMessage,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInterruptedSessionRuns = `-- name: ListInterruptedSessionRuns :many
+SELECT r.run_id, r.team_id, r.bot_id, r.session_id, r.invocation_id, r.turn_id, r.turn_position, r.state, r.input_json, r.input_fingerprint, r.owner_id, r.fencing_token, r.owner_since, r.live_generation, r.abort_requested_at, r.proposed_terminal_state, r.proposed_error_code, r.proposed_error_message, r.finish_proposed_at, r.error_code, r.error_message, r.created_at, r.updated_at FROM session_runs r
+JOIN bot_sessions s ON s.team_id = r.team_id AND s.id = r.session_id
+JOIN bots b ON b.team_id = r.team_id AND b.id = r.bot_id
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.state = 'lost' AND r.error_code = 'session_runtime.interrupted'
+  AND r.input_json ? 'resume' AND s.deleted_at IS NULL AND b.status <> 'deleting'
+  AND r.run_id > $1::uuid
+  AND NOT EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
+    AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
+ORDER BY r.run_id LIMIT 100
+`
+
+// A later user turn supersedes the old intent. Admission's existing unique
+// invocation index arbitrates concurrent startup workers without another lease.
+func (q *Queries) ListInterruptedSessionRuns(ctx context.Context, afterRunID pgtype.UUID) ([]SessionRun, error) {
+	rows, err := q.db.Query(ctx, listInterruptedSessionRuns, afterRunID)
 	if err != nil {
 		return nil, err
 	}
@@ -770,6 +916,43 @@ func (q *Queries) LockSessionRunForAgentStepCommit(ctx context.Context, arg Lock
 	return run_id, err
 }
 
+const markSessionRunDecisionExecuting = `-- name: MarkSessionRunDecisionExecuting :execrows
+UPDATE session_runs
+SET input_json = jsonb_set(input_json,
+      ARRAY['decision_continuations', $1::text, 'phase'],
+      '"executing"'::jsonb, false),
+    updated_at = now()
+WHERE team_id = public.memoh_current_team_id()
+  AND bot_id = $2 AND session_id = $3
+  AND run_id = $4 AND fencing_token = $5
+  AND state = 'running' AND abort_requested_at IS NULL
+  AND input_json->'decision_continuations'->($1::text)->>'phase' = 'accepted'
+`
+
+type MarkSessionRunDecisionExecutingParams struct {
+	DecisionID   string      `json:"decision_id"`
+	BotID        pgtype.UUID `json:"bot_id"`
+	SessionID    pgtype.UUID `json:"session_id"`
+	RunID        pgtype.UUID `json:"run_id"`
+	FencingToken int64       `json:"fencing_token"`
+}
+
+// Checkpoint before invoking an approved tool; interruption is an uncertain
+// result, never authorization to execute the approved operation a second time.
+func (q *Queries) MarkSessionRunDecisionExecuting(ctx context.Context, arg MarkSessionRunDecisionExecutingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markSessionRunDecisionExecuting,
+		arg.DecisionID,
+		arg.BotID,
+		arg.SessionID,
+		arg.RunID,
+		arg.FencingToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const nextSessionRunFencingToken = `-- name: NextSessionRunFencingToken :one
 SELECT nextval('session_runtime_fencing_token_seq')::bigint AS token
 `
@@ -873,6 +1056,7 @@ SET owner_id = $1,
 WHERE team_id = public.memoh_current_team_id()
   AND run_id = $4
   AND state = 'waiting_decision'
+  AND abort_requested_at IS NULL
   AND fencing_token = $5
   AND fencing_token < $2
 RETURNING run_id, team_id, bot_id, session_id, invocation_id, turn_id, turn_position, state, input_json, input_fingerprint, owner_id, fencing_token, owner_since, live_generation, abort_requested_at, proposed_terminal_state, proposed_error_code, proposed_error_message, finish_proposed_at, error_code, error_message, created_at, updated_at
@@ -1015,6 +1199,64 @@ func (q *Queries) ResumeSessionRun(ctx context.Context, arg ResumeSessionRunPara
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const retireInterruptedSessionRun = `-- name: RetireInterruptedSessionRun :execrows
+UPDATE session_runs SET input_json = input_json - 'resume'
+WHERE team_id = public.memoh_current_team_id() AND run_id = $1
+  AND state = 'lost' AND error_code = 'session_runtime.interrupted' AND input_json ? 'resume'
+`
+
+// Drops a resume intent that can never continue: its budget expired, its saved
+// context is unsupported, or its credential scope was revoked.
+func (q *Queries) RetireInterruptedSessionRun(ctx context.Context, runID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, retireInterruptedSessionRun, runID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retireSupersededInterruptedSessionRuns = `-- name: RetireSupersededInterruptedSessionRuns :execrows
+UPDATE session_runs r SET input_json = r.input_json - 'resume'
+WHERE r.team_id = public.memoh_current_team_id()
+  AND r.state = 'lost' AND r.error_code = 'session_runtime.interrupted' AND r.input_json ? 'resume'
+  AND (EXISTS (SELECT 1 FROM session_runs later WHERE later.team_id = r.team_id
+      AND later.session_id = r.session_id AND later.turn_position > r.turn_position)
+    OR EXISTS (SELECT 1 FROM bot_sessions s WHERE s.team_id = r.team_id
+      AND s.id = r.session_id AND s.deleted_at IS NOT NULL))
+`
+
+// Drops the resume intent of interrupted runs a later turn has answered or whose
+// session was deleted. Interrupted runs stay lost forever; retiring the intent
+// keeps idx_session_runs_resume_pending limited to work that can still continue.
+func (q *Queries) RetireSupersededInterruptedSessionRuns(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, retireSupersededInterruptedSessionRuns)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const saveSessionRunResumeContext = `-- name: SaveSessionRunResumeContext :execrows
+UPDATE session_runs SET input_json = jsonb_set(input_json, '{resume}', $1::jsonb), updated_at = now()
+WHERE team_id = public.memoh_current_team_id() AND run_id = $2
+  AND fencing_token = $3 AND state = 'running'
+`
+
+type SaveSessionRunResumeContextParams struct {
+	ResumeContext []byte      `json:"resume_context"`
+	RunID         pgtype.UUID `json:"run_id"`
+	FencingToken  int64       `json:"fencing_token"`
+}
+
+// Credentials are represented by verified claim scopes, never bearer tokens.
+func (q *Queries) SaveSessionRunResumeContext(ctx context.Context, arg SaveSessionRunResumeContextParams) (int64, error) {
+	result, err := q.db.Exec(ctx, saveSessionRunResumeContext, arg.ResumeContext, arg.RunID, arg.FencingToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setSessionRunWaitingDecision = `-- name: SetSessionRunWaitingDecision :one

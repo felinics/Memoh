@@ -10,6 +10,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/step"
 )
 
 func TestCheckpointDistinguishesUserAbortFromRevokedOwner(t *testing.T) {
@@ -19,7 +20,7 @@ func TestCheckpointDistinguishesUserAbortFromRevokedOwner(t *testing.T) {
 			owner, cancel := context.WithCancelCause(context.Background())
 			committer := &agentStepCommitter{service: &Service{}, persister: store, ownerContext: owner, req: ChatRequest{BotID: "bot", ThreadID: "session", RunID: "run", UserMessagePersisted: true}, rc: resolvedContext{runConfig: native.RunConfig{ContextLifecycle: contextfrag.NewLifecycleHolder()}}}
 			cancel(cause)
-			err := committer.interrupt(context.WithoutCancel(owner), 0, &sdk.StepResult{Messages: []sdk.Message{sdk.AssistantMessage("partial")}})
+			err := committer.interrupt(context.WithoutCancel(owner), 0, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("partial")}})
 			if errors.Is(cause, sessionruntime.ErrRunOwnershipLost) {
 				if !errors.Is(err, cause) || len(store.steps) != 0 {
 					t.Fatalf("revoked checkpoint: writes=%d err=%v", len(store.steps), err)
@@ -40,7 +41,7 @@ func TestSubagentRejectsRevokedCheckpointWithDetachedCallback(t *testing.T) {
 		t.Fatal("missing checkpoint callback")
 	}
 	cancel(sessionruntime.ErrRunOwnershipLost)
-	err := checkpoint(context.WithoutCancel(owner), 0, &sdk.StepResult{Messages: []sdk.Message{sdk.AssistantMessage("late")}})
+	err := checkpoint(context.WithoutCancel(owner), 0, &step.Record{Messages: []sdk.Message{sdk.AssistantMessage("late")}})
 	if !errors.Is(err, sessionruntime.ErrRunOwnershipLost) || len(store.steps) != 0 {
 		t.Fatalf("revoked subagent checkpoint: writes=%d err=%v", len(store.steps), err)
 	}

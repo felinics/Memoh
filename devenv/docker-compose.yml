@@ -117,6 +117,7 @@ services:
     restart: unless-stopped
 
   server:
+    stop_grace_period: 45s
     build:
       context: ..
       dockerfile: devenv/Dockerfile.server
@@ -222,7 +223,6 @@ services:
       - ..:/workspace
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
-      - memoh_data:/opt/memoh/data
     ports:
       - "${MEMOH_DEV_CHANNEL_PORT:-18081}:8081"
     healthcheck:

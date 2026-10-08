@@ -74,6 +74,7 @@ type fakeAdapter struct {
 	mu          sync.Mutex
 	started     []ChannelConfig
 	connectCtxs []context.Context
+	handlers    []InboundHandler
 	sent        []OutboundMessage
 	stops       int
 }
@@ -96,13 +97,14 @@ func (*fakeAdapter) ResolveTarget(channelIdentityConfig map[string]any) (string,
 
 func (*fakeAdapter) NormalizeTarget(raw string) string { return strings.TrimSpace(raw) }
 
-func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, _ InboundHandler) (Connection, error) {
+func (f *fakeAdapter) Connect(ctx context.Context, cfg ChannelConfig, handler InboundHandler) (Connection, error) {
 	if f.connectErr != nil {
 		return nil, f.connectErr
 	}
 	f.mu.Lock()
 	f.started = append(f.started, cfg)
 	f.connectCtxs = append(f.connectCtxs, ctx)
+	f.handlers = append(f.handlers, handler)
 	f.mu.Unlock()
 	stop := func(context.Context) error {
 		f.mu.Lock()

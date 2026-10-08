@@ -9,19 +9,44 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
 )
 
-func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *readMediaDecorationState) {
-	if len(tools) == 0 {
-		return tools, nil
-	}
-
-	clientType := models.ResolveClientType(model)
+func decorateReadMediaTools(model *sdk.Model, tools []toolexec.Tool) ([]toolexec.Tool, *readMediaDecorationState) {
+	// The state exists even when the initial set has no read tool, or no
+	// tool at all: a capability refresh that adds one wraps it over this same
+	// state, so media it reads reaches the model instead of the raw base64
+	// envelope.
 	state := &readMediaDecorationState{
 		pendingMedia: make(map[string]sdk.MessagePart),
 	}
-	wrapped := make([]sdk.Tool, 0, len(tools))
+	if len(tools) == 0 {
+		return tools, state
+	}
+	return decorateReadMediaToolsWithState(model, tools, state), state
+}
+
+// readMediaToolPresent reports whether the set carries an executable read tool.
+func readMediaToolPresent(tools []toolexec.Tool) bool {
+	for _, tool := range tools {
+		if tool.Name == agenttools.ReadMediaToolName().String() && tool.Execute != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// decorateReadMediaToolsWithState wraps the read tool over an existing state,
+// which is how a capability refresh keeps the media captured so far while the
+// tool set is rebuilt. A nil state or a set without the read tool returns the
+// tools unchanged.
+func decorateReadMediaToolsWithState(model *sdk.Model, tools []toolexec.Tool, state *readMediaDecorationState) []toolexec.Tool {
+	if len(tools) == 0 || state == nil {
+		return tools
+	}
+	clientType := models.ResolveClientType(model)
+	wrapped := make([]toolexec.Tool, 0, len(tools))
 	found := false
 
 	for _, tool := range tools {
@@ -33,7 +58,7 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 		found = true
 		originalExecute := tool.Execute
 		toolCopy := tool
-		toolCopy.Execute = func(ctx *sdk.ToolExecContext, input any) (any, error) {
+		toolCopy.Execute = func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
 			output, err := originalExecute(ctx, input)
 			if err != nil {
 				return output, err
@@ -57,43 +82,28 @@ func decorateReadMediaTools(model *sdk.Model, tools []sdk.Tool) ([]sdk.Tool, *re
 	}
 
 	if !found {
-		return tools, nil
+		return tools
 	}
-
-	return wrapped, state
+	return wrapped
 }
 
 type readMediaDecorationState struct {
 	mu           sync.Mutex
 	pendingOrder []string
 	pendingMedia map[string]sdk.MessagePart
-	prepareCalls int
-	injections   []readMediaInjection
-	ledger       *contextfrag.MutationLedger
 }
 
-type readMediaInjection struct {
-	afterStep    int
-	messageIndex int
-	durableIndex int
-	message      sdk.Message
-	admitted     bool
-}
-
-func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.GenerateParams {
-	if s == nil || params == nil {
+// takePendingParts drains the media captured by completed read_media calls, in
+// call order, clearing the pending set.
+func (s *readMediaDecorationState) takePendingParts() []sdk.MessagePart {
+	if s == nil {
 		return nil
 	}
-
-	afterStep := s.prepareCalls
-	s.prepareCalls++
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.pendingOrder) == 0 {
 		return nil
 	}
-
 	parts := make([]sdk.MessagePart, 0, len(s.pendingOrder))
 	for _, toolCallID := range s.pendingOrder {
 		media, ok := s.pendingMedia[toolCallID]
@@ -104,129 +114,38 @@ func (s *readMediaDecorationState) prepareStep(params *sdk.GenerateParams) *sdk.
 		parts = append(parts, media)
 	}
 	s.pendingOrder = s.pendingOrder[:0]
+	return parts
+}
 
+// drainReadMediaMessage converts the pending read-media parts into one user
+// message appended to the thread at the current step boundary, tracked as a
+// loop-owned dynamic input.
+func drainReadMediaMessage(
+	state *readMediaDecorationState,
+	dynamic *loopDynamicInputs,
+	ledger *contextfrag.MutationLedger,
+	_ int,
+	messages []sdk.Message,
+) []sdk.Message {
+	parts := state.takePendingParts()
 	if len(parts) == 0 {
-		return nil
+		return messages
 	}
-
-	s.ledger.Record(contextfrag.MutationReadMedia, fmt.Sprintf("images=%d", len(parts)))
-
+	ledger.Record(contextfrag.MutationReadMedia, fmt.Sprintf("images=%d", len(parts)))
 	message := sdk.Message{
 		Role:    sdk.MessageRoleUser,
 		Content: parts,
 	}
-	s.injections = append(s.injections, readMediaInjection{
-		afterStep:    afterStep,
-		messageIndex: len(params.Messages),
-		message:      message,
-	})
-
-	next := *params
-	next.Messages = append(append([]sdk.Message(nil), params.Messages...), message)
-	return &next
+	dynamic.append(message, true, "", len(messages))
+	return append(messages, message)
 }
 
-func (s *readMediaDecorationState) mergeMessagesWithOrigins(steps []sdk.StepResult, fallback []sdk.Message, interruptedDurableStep int) ([]sdk.Message, []int) {
-	if s == nil {
-		return fallback, nil
+func normalizeReadMediaOutput(output sdk.ToolOutput, clientType string) (sdk.ToolOutput, sdk.MessagePart, bool) {
+	value, ok := agenttools.DecodeReadMediaToolOutput(output)
+	if !ok {
+		return sdk.ToolOutput{}, nil, false
 	}
-	s.mu.Lock()
-	injections := append([]readMediaInjection(nil), s.injections...)
-	s.mu.Unlock()
-	if len(injections) == 0 {
-		return fallback, nil
-	}
-	if len(steps) == 0 {
-		return fallback, nil
-	}
-
-	var feedbackIndexes []int
-	merged := make([]sdk.Message, 0, len(fallback)+len(injections))
-	injectionIndex := 0
-	for stepIndex, step := range steps {
-		merged = append(merged, step.Messages...)
-		for injectionIndex < len(injections) && injections[injectionIndex].afterStep == stepIndex {
-			if shouldMergeReadMediaInjection(injections[injectionIndex], len(steps), interruptedDurableStep) {
-				feedbackIndexes = append(feedbackIndexes, len(merged))
-				merged = append(merged, injections[injectionIndex].message)
-			}
-			injectionIndex++
-		}
-	}
-	for injectionIndex < len(injections) {
-		if shouldMergeReadMediaInjection(injections[injectionIndex], len(steps), interruptedDurableStep) {
-			feedbackIndexes = append(feedbackIndexes, len(merged))
-			merged = append(merged, injections[injectionIndex].message)
-		}
-		injectionIndex++
-	}
-	return merged, feedbackIndexes
-}
-
-func shouldMergeReadMediaInjection(injection readMediaInjection, completedStepCount, interruptedDurableStep int) bool {
-	// A persisted interrupted checkpoint is decorated with the same admitted
-	// input, so terminal fallback must not add that carrier a second time.
-	targetStep := injection.afterStep + 1
-	return injection.admitted && targetStep >= 0 && targetStep < completedStepCount && targetStep != interruptedDurableStep
-}
-
-func (s *readMediaDecorationState) reconcilePreparedMessages(step int, admissions []admittedPreparedMessage) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.injections {
-		if s.injections[i].afterStep+1 != step {
-			continue
-		}
-		s.injections[i].admitted = false
-		for ordinal, admission := range admissions {
-			if admission.index == s.injections[i].messageIndex {
-				s.injections[i].admitted = true
-				s.injections[i].durableIndex = ordinal
-				break
-			}
-		}
-	}
-}
-
-func (s *readMediaDecorationState) durableInjections(completedStepCount, interruptedDurableStep int) []readMediaInjection {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]readMediaInjection, 0, len(s.injections))
-	for _, injection := range s.injections {
-		if shouldMergeReadMediaInjection(injection, completedStepCount, interruptedDurableStep) {
-			out = append(out, injection)
-		}
-	}
-	return out
-}
-
-func preparedAdmissionsContainIndex(admissions []admittedPreparedMessage, index int) bool {
-	for _, admission := range admissions {
-		if admission.index == index {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeReadMediaOutput(output any, clientType string) (any, sdk.MessagePart, bool) {
-	switch value := output.(type) {
-	case agenttools.ReadMediaToolOutput:
-		return value.Public, buildReadMediaPart(clientType, value), true
-	case *agenttools.ReadMediaToolOutput:
-		if value == nil {
-			return nil, nil, false
-		}
-		return value.Public, buildReadMediaPart(clientType, *value), true
-	default:
-		return nil, nil, false
-	}
+	return toolexec.OutputFromValue(value.Public), buildReadMediaPart(clientType, value), true
 }
 
 // buildReadMediaPart converts a read-media tool output into the message part
@@ -256,7 +175,7 @@ func mediaPartHasContent(part sdk.MessagePart) bool {
 	}
 }
 
-func publicReadMediaToolResult(output any) any {
+func publicReadMediaToolResult(output sdk.ToolOutput) sdk.ToolOutput {
 	publicResult, _, ok := normalizeReadMediaOutput(output, "")
 	if !ok {
 		return output

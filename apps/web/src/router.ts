@@ -3,7 +3,7 @@ import {
   createWebHistory,
 } from 'vue-router'
 import { useUserStore } from '@/store/user'
-import { ensureOnboarding } from '@/router-guards/onboarding'
+import { ensureOnboarding, hasOnboardingInProgress } from '@/router-guards/onboarding'
 import { installBackHistory } from '@/composables/useBackOr'
 import { createAppRoutes, prefetchSettingsPages } from './routes'
 
@@ -65,6 +65,7 @@ router.beforeEach(async (to) => {
   }
 
   if (to.path === '/onboarding') {
+    if (hasOnboardingInProgress()) return true
     const completed = await ensureOnboarding()
     return completed ? { path: '/' } : true
   }

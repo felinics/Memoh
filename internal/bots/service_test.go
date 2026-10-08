@@ -15,6 +15,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -399,11 +400,13 @@ type fakeWorkspaceIntents struct {
 	awaitErr error
 }
 
-func (f *fakeWorkspaceIntents) EnsurePresent(_ context.Context, botID, image string) (int64, error) {
+func (f *fakeWorkspaceIntents) RecordPresent(_ context.Context, _ dbstore.Queries, botID, image string) error {
 	f.ensured = append(f.ensured, botID)
 	f.images = append(f.images, image)
-	return int64(len(f.ensured)), nil
+	return nil
 }
+
+func (*fakeWorkspaceIntents) Wake(context.Context) {}
 
 func (f *fakeWorkspaceIntents) RequestAbsent(_ context.Context, botID string, preserve bool) (int64, error) {
 	f.absent = append(f.absent, botID)
@@ -549,5 +552,15 @@ func TestRunDeleteLifecycleRevertsToPreviousStatusWhenWorkspaceLingers(t *testin
 	svc.runDeleteLifecycle(context.Background(), botID, BotStatusFailed)
 	if len(exec) != 1 || exec[0] != "status:"+BotStatusFailed {
 		t.Fatalf("a failed bot whose deletion lingers must revert to failed, not ready, and not be deleted; exec=%v", exec)
+	}
+}
+
+func TestAwaitCreatedAnswersWithTheWorkspaceFailure(t *testing.T) {
+	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(&fakeDBTX{})))
+	svc.SetWorkspaceIntents(&fakeWorkspaceIntents{outcome: WorkspaceOutcome{Observed: WorkspaceObservedFailed, LastErrorPhase: WorkspacePhaseBootstrap, LastError: "write AGENTS.md: permission denied"}})
+
+	_, err := svc.AwaitCreated(context.Background(), Bot{ID: "00000000-0000-0000-0000-000000000002"}, CreateBotRequest{WaitForReady: true})
+	if !errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
+		t.Fatalf("err = %v; a resend with wait_for_ready must get the failure its first attempt would have", err)
 	}
 }

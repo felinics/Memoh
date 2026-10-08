@@ -233,6 +233,36 @@ describe('useBotCreateProgressStore', () => {
     expect(store.lines.at(-1)).toMatchObject({ kind: 'error', status: 'error' })
   })
 
+  it('resends a create whose response was lost under the same Idempotency-Key', async () => {
+    const bot = { id: 'bot-1', name: 'ada' }
+    postBotsStream
+      .mockResolvedValueOnce(brokenStreamOf([], new Error('Failed to fetch')))
+      .mockResolvedValueOnce(streamOf([{ type: 'bot_created', bot }, { type: 'ready', bot }]))
+
+    const store = useBotCreateProgressStore()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+    expect(store.status).toBe('error')
+    await store.retry()
+
+    const [first, resent] = postBotsStream.mock.calls.map(([options]) => options.headers['Idempotency-Key'])
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(resent).toBe(first)
+    expect(store.status).toBe('ready')
+    expect(store.bot).toEqual(bot)
+  })
+
+  it('gives every create from the form its own Idempotency-Key', async () => {
+    postBotsStream.mockImplementation(async () => brokenStreamOf([], new Error('Failed to fetch')))
+
+    const store = useBotCreateProgressStore()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+    store.reset()
+    await store.start({ name: 'ada', display_name: 'Ada' })
+
+    const [first, second] = postBotsStream.mock.calls.map(([options]) => options.headers['Idempotency-Key'])
+    expect(second).not.toBe(first)
+  })
+
   it('keeps the stable code when bot creation returns an HTTP problem', async () => {
     postBotsStream.mockResolvedValue({
       stream: (async function* (): AsyncGenerator<BotCreateStreamEvent, void, unknown> {
@@ -268,7 +298,7 @@ describe('useBotCreateProgressStore', () => {
 
     expect(store.status).toBe('error')
     expect(store.errorCode).toBe('bot.name_taken')
-    expect(store.setupError).toBe('bot name already taken')
+    expect(store.setupError).toBe('The request conflicts with the current state. Refresh and try again.')
   })
 
   it('applies model and memory settings after the bot is ready', async () => {
@@ -281,12 +311,12 @@ describe('useBotCreateProgressStore', () => {
     const store = useBotCreateProgressStore()
     const result = await store.start(
       { name: 'ada', display_name: 'Ada' },
-      { settings: { chat_model_id: 'm1', memory_provider_id: 'p1' } },
+      { settings: { chat_model_id: 'm1', memory_enabled: true } },
     )
 
     expect(putBotsByBotIdSettings).toHaveBeenCalledWith(expect.objectContaining({
       path: { bot_id: 'bot-1' },
-      body: { chat_model_id: 'm1', memory_provider_id: 'p1' },
+      body: { chat_model_id: 'm1', memory_enabled: true },
     }))
     expect(store.status).toBe('ready')
     expect(result.settingsApplied).toBe(true)
@@ -417,7 +447,7 @@ describe('useBotCreateProgressStore', () => {
       return new Promise((_, reject) => { failInstall = reject })
     })
     const store = useBotCreateProgressStore()
-    const creation = store.start({ name: 'ada' }, { settings: { memory_provider_id: 'memory-1' }, agent: { name: runtime, provider: runtime, authorizationId: 'stage' } })
+    const creation = store.start({ name: 'ada' }, { settings: { memory_enabled: true }, agent: { name: runtime, provider: runtime, authorizationId: 'stage' } })
     await installing.promise
     expect(store.status).toBe('creating')
     expect(store.lines.at(-1)).toMatchObject({ kind: 'installing-agent', status: 'running', message: runtime === 'codex' ? 'Codex' : 'Claude Code' })
@@ -501,7 +531,7 @@ describe('useBotCreateProgressStore', () => {
     expect(store.status).toBe('error')
     expect(store.bot).toBeNull()
     expect(store.canRetry).toBe(false)
-    expect(store.setupError).toBe('bot not found')
+    expect(store.setupError).toBe('The requested resource was not found.')
     expect(readCreatedBotSession()).toBeNull()
   })
 

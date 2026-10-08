@@ -10,6 +10,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	audiopkg "github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/messaging"
 	"github.com/felinics/memoh/internal/settings"
@@ -71,7 +72,7 @@ func (*TTSProvider) Usage(_ context.Context, session SessionContext, available A
 	})
 }
 
-func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.settings == nil || p.audio == nil || p.sender == nil || p.resolver == nil {
 		return nil, nil
 	}
@@ -86,27 +87,32 @@ func (p *TTSProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.
 	if strings.TrimSpace(botSettings.TtsModelID) == "" {
 		return nil, nil
 	}
+	return p.speakTools(session), nil
+}
+
+type speakArgs struct {
+	Text     string `json:"text" jsonschema:"The text to convert to speech (max 500 characters)"`
+	Platform string `json:"platform,omitempty"`
+	Target   string `json:"target,omitempty"`
+	ReplyTo  string `json:"reply_to,omitempty" jsonschema:"Message ID to reply to. The voice message will reference this message on the platform."`
+}
+
+// speakTools builds the speak tool for a session that has passed the
+// settings gate; the platform/target text and the required set follow the
+// session.
+func (p *TTSProvider) speakTools(session SessionContext) []toolexec.Tool {
 	sess := session
 	description, platformDescription, targetDescription, required := speakToolPromptMetadata(session)
-	return []sdk.Tool{
-		{
-			Name:        ToolSpeak().String(),
-			Description: description,
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"text":     map[string]any{"type": "string", "description": "The text to convert to speech (max 500 characters)"},
-					"platform": map[string]any{"type": "string", "description": platformDescription},
-					"target":   map[string]any{"type": "string", "description": targetDescription},
-					"reply_to": map[string]any{"type": "string", "description": "Message ID to reply to. The voice message will reference this message on the platform."},
-				},
-				"required": required,
+	return []toolexec.Tool{
+		toolexec.Define(ToolSpeak().String(), description,
+			func(execCtx *toolexec.ToolExecContext, args speakArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execSpeak(execCtx.Context, sess, execCtx.ToolCallID, args))
 			},
-			Execute: func(execCtx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execSpeak(execCtx.Context, sess, execCtx.ToolCallID, inputAsMap(input))
-			},
-		},
-	}, nil
+			toolexec.Describe("platform", platformDescription),
+			toolexec.Describe("target", targetDescription),
+			toolexec.Require(required...),
+		),
+	}
 }
 
 func speakToolPromptMetadata(session SessionContext) (description string, platformDescription string, targetDescription string, required []string) {
@@ -122,25 +128,25 @@ func speakToolPromptMetadata(session SessionContext) (description string, platfo
 		[]string{"text", "platform", "target"}
 }
 
-func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, toolCallID string, args map[string]any) (any, error) {
+func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, toolCallID string, args speakArgs) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
 	}
-	text := strings.TrimSpace(StringArg(args, "text"))
+	text := strings.TrimSpace(args.Text)
 	if text == "" {
 		return nil, errors.New("text is required")
 	}
 	if len([]rune(text)) > ttsMaxTextLen {
 		return nil, errors.New("text too long, max 500 characters")
 	}
-	channelType, err := p.resolvePlatform(args, session)
+	channelType, err := p.resolvePlatform(args.Platform, session)
 	if err != nil {
 		return nil, err
 	}
-	target := FirstStringArg(args, "target")
+	target := strings.TrimSpace(args.Target)
 	if target == "" {
-		target = defaultSpeakTargetForPlatform(args, session, channelType)
+		target = defaultSpeakTargetForPlatform(args.Platform, session, channelType)
 	}
 	if target == "" {
 		return nil, errors.New("target is required for cross-conversation speak")
@@ -181,7 +187,7 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, too
 	msg := messaging.Message{
 		Attachments: []messaging.Attachment{{Type: messaging.AttachmentVoice, URL: dataURL, Mime: contentType, Size: int64(len(audioData))}},
 	}
-	if replyTo := FirstStringArg(args, "reply_to"); replyTo != "" {
+	if replyTo := strings.TrimSpace(args.ReplyTo); replyTo != "" {
 		msg.Reply = &messaging.ReplyRef{MessageID: replyTo}
 	}
 	if err := p.sender.Send(ctx, botID, channelType, messaging.SendRequest{Target: target, Message: msg}); err != nil {
@@ -193,18 +199,18 @@ func (p *TTSProvider) execSpeak(ctx context.Context, session SessionContext, too
 	}, nil
 }
 
-func defaultSpeakTargetForPlatform(args map[string]any, session SessionContext, channelType messaging.Platform) string {
+func defaultSpeakTargetForPlatform(requestedPlatform string, session SessionContext, channelType messaging.Platform) string {
 	if !session.CanOmitMessagingTarget() {
 		return ""
 	}
-	if FirstStringArg(args, "platform") != "" && !strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) {
+	if strings.TrimSpace(requestedPlatform) != "" && !strings.EqualFold(channelType.String(), strings.TrimSpace(session.CurrentPlatform)) {
 		return ""
 	}
 	return strings.TrimSpace(session.ReplyTarget)
 }
 
-func (p *TTSProvider) resolvePlatform(args map[string]any, session SessionContext) (messaging.Platform, error) {
-	platform := FirstStringArg(args, "platform")
+func (p *TTSProvider) resolvePlatform(requested string, session SessionContext) (messaging.Platform, error) {
+	platform := strings.TrimSpace(requested)
 	if platform == "" {
 		platform = strings.TrimSpace(session.CurrentPlatform)
 	}

@@ -1,11 +1,13 @@
 package native
 
 import (
+	"encoding/json"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 
 	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 // recordUIOutput stores a tool's UI-only payload (the allowlisted keys under
@@ -42,24 +44,26 @@ func (r *toolExecutionMetadataRegistry) recordUIOutput(toolCallID string, values
 // payload out of the model in the current turn and in rebuilt history alike.
 // Apply it innermost (before output limits and hook wrappers) so the payload
 // is recorded whole and never counts against the model's output budget.
-func (r *toolExecutionMetadataRegistry) wrapToolUIOutput(sdkTools []sdk.Tool) []sdk.Tool {
+func (r *toolExecutionMetadataRegistry) wrapToolUIOutput(sdkTools []toolexec.Tool) []toolexec.Tool {
 	if r == nil || len(sdkTools) == 0 {
 		return sdkTools
 	}
-	wrapped := make([]sdk.Tool, len(sdkTools))
+	wrapped := make([]toolexec.Tool, len(sdkTools))
 	copy(wrapped, sdkTools)
 	for i := range wrapped {
 		execute := wrapped[i].Execute
 		if execute == nil {
 			continue
 		}
-		wrapped[i].Execute = func(ctx *sdk.ToolExecContext, input any) (any, error) {
+		wrapped[i].Execute = func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
 			output, err := execute(ctx, input)
-			if err != nil {
+			if err != nil || !output.IsJSON() {
 				return output, err
 			}
-			outputMap, ok := output.(map[string]any)
-			if !ok {
+			// Only an object output can carry the reserved key; any other JSON
+			// document passes through untouched.
+			var outputMap map[string]any
+			if json.Unmarshal(output.JSON, &outputMap) != nil || outputMap == nil {
 				return output, nil
 			}
 			raw, ok := outputMap[tools.UIOutputMetadataKey]
@@ -73,13 +77,8 @@ func (r *toolExecutionMetadataRegistry) wrapToolUIOutput(sdkTools []sdk.Tool) []
 				}
 				r.recordUIOutput(callID, values)
 			}
-			cleaned := make(map[string]any, len(outputMap)-1)
-			for key, value := range outputMap {
-				if key != tools.UIOutputMetadataKey {
-					cleaned[key] = value
-				}
-			}
-			return cleaned, nil
+			delete(outputMap, tools.UIOutputMetadataKey)
+			return toolexec.OutputFromValue(outputMap), nil
 		}
 	}
 	return wrapped

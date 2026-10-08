@@ -149,6 +149,22 @@ func (s *qqOutboundStream) Push(ctx context.Context, event channel.PreparedStrea
 		// and the final flush falls back to a regular message.
 		_ = s.pushShard(ctx, qqStreamInputGenerating, content)
 		return nil
+	case channel.StreamEventReset:
+		s.mu.Lock()
+		s.buffer.Reset()
+		opened := s.streamSend != nil && s.streamIndex > 0
+		s.mu.Unlock()
+		if opened {
+			// Replace mode only accepts content prefixed by what QQ already
+			// shows, so the regenerated reply cannot continue this stream.
+			// Retire it where it stands and deliver the reply through the
+			// buffer-till-final path.
+			s.finishStream(context.WithoutCancel(ctx))
+			s.mu.Lock()
+			s.streamSend = nil
+			s.mu.Unlock()
+		}
+		return nil
 	case channel.StreamEventAttachment:
 		if len(event.Attachments) == 0 {
 			return nil
@@ -164,7 +180,7 @@ func (s *qqOutboundStream) Push(ctx context.Context, event channel.PreparedStrea
 		}
 		return s.flush(ctx, channel.PreparedMessage{
 			Message: channel.Message{
-				Text: "Error: " + errText,
+				Text: channel.ErrorReplyText(event.ErrorCode, errText),
 			},
 		})
 	case channel.StreamEventFinal:

@@ -9,6 +9,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/step"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
@@ -106,14 +107,14 @@ func TestConfigureNativeReasoningTimingKeepsCompletedStepsAcrossProviderCalls(t 
 	cfg.OnProviderStreamEventObserved(native.StreamEvent{Type: native.EventRetry})
 	cfg.OnProviderStreamEventObserved(native.StreamEvent{Type: native.EventReasoningDelta, Delta: "first step"})
 	clock.advance(2 * time.Second)
-	if err := cfg.OnStepCommitted(context.Background(), 0, &sdk.StepResult{}); err != nil {
+	if _, err := cfg.OnStepCommitted(context.Background(), 0, &step.Record{}); err != nil {
 		t.Fatalf("commit first timing checkpoint: %v", err)
 	}
 
 	cfg.OnProviderStreamEventObserved(native.StreamEvent{Type: native.EventRetry})
 	cfg.OnProviderStreamEventObserved(native.StreamEvent{Type: native.EventReasoningDelta, Delta: "second step"})
 	clock.advance(3 * time.Second)
-	if err := cfg.OnStepCommitted(context.Background(), 1, &sdk.StepResult{}); err != nil {
+	if _, err := cfg.OnStepCommitted(context.Background(), 1, &step.Record{}); err != nil {
 		t.Fatalf("commit second timing checkpoint: %v", err)
 	}
 

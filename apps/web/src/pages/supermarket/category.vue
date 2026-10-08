@@ -86,7 +86,6 @@ const apps = ref<HandlersSupermarketAppSummary[]>([])
 const loading = ref(false)
 
 const categoryId = computed(() => String(route.params.categoryId ?? ''))
-const registryId = computed(() => (typeof route.query.registry === 'string' ? route.query.registry : ''))
 const botId = computed(() => (typeof route.query.botId === 'string' ? route.query.botId : ''))
 
 const categoriesQuery = useAppCategoriesQuery()
@@ -108,7 +107,6 @@ async function loadApps() {
   try {
     const { data } = await getSupermarketApps({
       query: {
-        registry: registryId.value || undefined,
         category: categoryId.value,
         page: page.value,
         limit: pageSize,
@@ -129,7 +127,7 @@ async function loadApps() {
   }
 }
 
-watch([categoryId, registryId], () => {
+watch(categoryId, () => {
   if (page.value !== 1) {
     page.value = 1
     return

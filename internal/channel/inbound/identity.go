@@ -163,6 +163,13 @@ func (r *IdentityResolver) Resolve(ctx context.Context, cfg channel.ChannelConfi
 		}
 		state.Identity.UserID = userID
 	}
+	if strings.TrimSpace(state.Identity.UserID) == "" {
+		ownerUserID, err := r.ownerOnlyUserID(ctx, botID, msg)
+		if err != nil {
+			return state, err
+		}
+		state.Identity.UserID = ownerUserID
+	}
 	state.Identity.DisplayName = displayName
 	state.Identity.AvatarURL = avatarURL
 
@@ -279,6 +286,23 @@ func extractDisplayName(msg channel.InboundMessage) string {
 		return value
 	}
 	return ""
+}
+
+// ownerOnlyUserID resolves the account principal of an unlinked sender on an
+// owner-only channel. Every sender there is the bot owner by construction, so
+// the identity is settled here once instead of each downstream gate (chat ACL,
+// write commands, workspace exec, external runtime actor, approvals) carrying
+// its own owner-only exemption and the next new gate forgetting one. A sender
+// who did /link keeps their linked account; this only fills the gap.
+func (r *IdentityResolver) ownerOnlyUserID(ctx context.Context, botID string, msg channel.InboundMessage) (string, error) {
+	if r.registry == nil || r.policy == nil || !r.registry.IsOwnerOnly(msg.Channel) {
+		return "", nil
+	}
+	ownerUserID, err := r.policy.BotOwnerUserID(ctx, botID)
+	if err != nil {
+		return "", fmt.Errorf("resolve owner-only channel sender: %w", err)
+	}
+	return strings.TrimSpace(ownerUserID), nil
 }
 
 func (r *IdentityResolver) configlessUserID(msg channel.InboundMessage) string {

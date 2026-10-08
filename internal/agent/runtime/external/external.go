@@ -113,26 +113,6 @@ func (drivers Drivers) ModelCatalog(ctx context.Context, runtimeType string, req
 	return ModelCatalog{}, ErrModelCatalogUnavailable
 }
 
-// CheckpointOutcome reports what a driver did about its native session
-// checkpoint during the turn. Drivers that checkpoint stage the snapshot
-// themselves at turn end (the run is still active and the persistence fence
-// still holds); the application then publishes the matching head in the same
-// transaction as the round's messages.
-type CheckpointOutcome int
-
-const (
-	// CheckpointNone: the runtime does not checkpoint (or has no store); no
-	// publication head is written for the round.
-	CheckpointNone CheckpointOutcome = iota
-	// CheckpointStaged: the turn's native state is durably staged under the
-	// run; the round publishes a resumable checkpoint head.
-	CheckpointStaged
-	// CheckpointDeclined: the runtime checkpoints but this turn could not
-	// stage (nothing to snapshot, or the capture diverged); the round
-	// publishes an explicit reset head.
-	CheckpointDeclined
-)
-
 // RoundRollbackHandler is implemented by drivers that must repair runtime
 // state when a completed turn's round definitively rolled back (the runtime
 // remembers a turn the visible history lost). Drivers whose durable state is
@@ -149,7 +129,7 @@ type RoundRollbackHandler interface {
 // identifies the fork — only the driver-owned session keys — which the
 // caller overlays on the source session's runtime metadata.
 type ThreadForker interface {
-	ForkThread(ctx context.Context, botID, botAgentID, sourceThreadID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error)
+	ForkThread(ctx context.Context, botID, botAgentID string, runtimeMetadata map[string]any, lastTurnID string) (map[string]any, error)
 }
 
 // ModelCatalog is the runtime-owned model picker contract.
@@ -305,9 +285,9 @@ type PromptResult struct {
 	// TurnCompleted reports whether the runtime finished the turn (as opposed
 	// to an interrupt or failure part-way).
 	TurnCompleted bool
-	// Checkpoint reports the turn's native-state checkpoint outcome; the
-	// application publishes the matching head with the round.
-	Checkpoint CheckpointOutcome
+	// PublishHead asks the application to publish a completed round's run ID
+	// with its messages so warm runtimes can detect another process's progress.
+	PublishHead bool
 	// RoundMetadata carries driver-owned keys merged into the round's
 	// assistant-message metadata (provenance such as the ACP agent id).
 	RoundMetadata map[string]any

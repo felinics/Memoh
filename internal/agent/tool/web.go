@@ -24,6 +24,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/redact"
 	"github.com/felinics/memoh/internal/searchproviders"
@@ -47,31 +48,24 @@ func NewWebProvider(log *slog.Logger, settingsSvc *settings.Service, searchSvc *
 	}
 }
 
-func (p *WebProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *WebProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.settings == nil || p.searchProviders == nil {
 		return nil, nil
 	}
 	sess := session
-	return []sdk.Tool{
+	return []toolexec.Tool{
 		{
 			Name:        ToolWebSearch().String(),
 			Description: "Search web results via configured search provider.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{"type": "string", "description": "Search query"},
-					"count": map[string]any{"type": "integer", "description": "Number of results, default 5"},
-				},
-				"required": []string{"query"},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execWebSearch(ctx.Context, sess, inputAsMap(input))
-			},
+			Parameters:  toolexec.SchemaFor[webSearchArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args webSearchArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execWebSearch(ctx.Context, sess, args))
+			}),
 		},
 	}, nil
 }
 
-func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext, args webSearchArgs) (any, error) {
 	botID := strings.TrimSpace(session.BotID)
 	if botID == "" {
 		return nil, errors.New("bot_id is required")
@@ -93,15 +87,13 @@ func (p *WebProvider) execWebSearch(ctx context.Context, session SessionContext,
 	}
 	registerSearchProviderSecrets(provider)
 
-	query := strings.TrimSpace(StringArg(args, "query"))
+	query := strings.TrimSpace(args.Query)
 	if query == "" {
 		return nil, errors.New("query is required")
 	}
 	count := 5
-	if value, ok, err := IntArg(args, "count"); err != nil {
-		return nil, err
-	} else if ok && value > 0 {
-		count = value
+	if args.Count != nil && *args.Count > 0 {
+		count = *args.Count
 	}
 	if count > 20 {
 		count = 20
@@ -910,4 +902,9 @@ func parseYandexXML(data []byte) ([]map[string]any, error) {
 		results = append(results, map[string]any{"title": string(group.Doc.Title), "url": string(group.Doc.URL), "description": snippet})
 	}
 	return results, nil
+}
+
+type webSearchArgs struct {
+	Count *int   `json:"count,omitempty" jsonschema:"Number of results, default 5"`
+	Query string `json:"query" jsonschema:"Search query"`
 }

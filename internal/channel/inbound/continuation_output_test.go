@@ -58,6 +58,9 @@ func TestAcceptanceReceiptPrecedesFailedContinuation(t *testing.T) {
 			if strings.Contains(event.Error, "SECRET") {
 				t.Fatal("private cause leaked")
 			}
+			if event.ErrorCode != "agent.response_interrupted" || event.Error != "The model response was interrupted. Please try again." {
+				t.Fatalf("failure feedback = %+v, want the response_interrupted copy", event)
+			}
 		}
 	}
 	if !found {

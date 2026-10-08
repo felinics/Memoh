@@ -1342,32 +1342,14 @@ WITH invalidated_session AS MATERIALIZED (
     AND id = $1
     AND deleted_at IS NULL
   RETURNING id
-),
-deleted_acp_states AS (
-  DELETE FROM agent_session_states state
-  USING invalidated_session invalidated
-  WHERE state.team_id = public.memoh_current_team_id()
-    AND state.session_id = invalidated.id
-  RETURNING state.session_id
-),
-deleted_acp_lines AS (
-  DELETE FROM agent_session_state_lines line
-  USING invalidated_session invalidated
-  WHERE line.team_id = public.memoh_current_team_id()
-    AND line.session_id = invalidated.id
-  RETURNING line.session_id
 )
 DELETE FROM agent_session_publications publication
 USING invalidated_session invalidated
 WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id
-  AND (SELECT count(*) FROM deleted_acp_states) >= 0
-  AND (SELECT count(*) FROM deleted_acp_lines) >= 0
 `
 
-// ACP state is removed in full: soft delete never fires the hard-delete FK
-// cascades, so headers, the shared line set, and the publication head must
-// all be dropped here or they orphan forever.
+// Soft delete does not fire FK cascades; remove the runtime publication head.
 func (q *Queries) SoftDeleteSession(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, softDeleteSession, id)
 	return err
@@ -1393,27 +1375,11 @@ invalidated_sessions AS MATERIALIZED (
   WHERE session.team_id = public.memoh_current_team_id()
     AND session.id = target.id
   RETURNING session.id
-),
-deleted_acp_states AS (
-  DELETE FROM agent_session_states state
-  USING invalidated_sessions invalidated
-  WHERE state.team_id = public.memoh_current_team_id()
-    AND state.session_id = invalidated.id
-  RETURNING state.session_id
-),
-deleted_acp_lines AS (
-  DELETE FROM agent_session_state_lines line
-  USING invalidated_sessions invalidated
-  WHERE line.team_id = public.memoh_current_team_id()
-    AND line.session_id = invalidated.id
-  RETURNING line.session_id
 )
 DELETE FROM agent_session_publications publication
 USING invalidated_sessions invalidated
 WHERE publication.team_id = public.memoh_current_team_id()
   AND publication.session_id = invalidated.id
-  AND (SELECT count(*) FROM deleted_acp_states) >= 0
-  AND (SELECT count(*) FROM deleted_acp_lines) >= 0
 `
 
 func (q *Queries) SoftDeleteSessionsByBot(ctx context.Context, botID pgtype.UUID) error {

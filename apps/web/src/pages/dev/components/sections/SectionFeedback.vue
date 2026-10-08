@@ -1,19 +1,19 @@
 <script setup lang="ts">
-// Feedback: alerts, toasts, empty states. The global <Toaster> already lives
+// Feedback: notices, toasts, empty states. The global <Toaster> already lives
 // in App.vue, so this just fires toast() — no extra mount here.
 import {
-  Alert, AlertDescription, AlertTitle,
   Button,
+  CalloutBanner,
   Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle,
   Progress,
 } from '@felinic/ui'
 import { toast } from '@felinic/ui'
-import { AlertCircle, Inbox, Terminal } from 'lucide-vue-next'
+import { ErrorIcon } from '@memohai/icon/ui'
+import { CircleAlert, Inbox } from 'lucide-vue-next'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import SectionShell from '../components/SectionShell.vue'
 import Specimen from '../components/Specimen.vue'
-import VariantMatrix from '../components/VariantMatrix.vue'
-import { variantSpecs } from '../lib/variant-specs'
+import ComposerPanel from '@/pages/home/components/composer-panel.vue'
 
 // Fire a burst so the stack reads as a quiet, fully-readable column — newest on
 // top, every card's content visible (no depth stacking that hides prior messages).
@@ -39,35 +39,153 @@ onMounted(() => {
   }, 900)
 })
 onBeforeUnmount(() => clearInterval(progressTimer))
+
+const noticeTones = ['neutral', 'warning', 'destructive'] as const
+
+// Real ComposerPanel fed canned state, so the dock's error / command-error
+// sections render exactly as in chat without reproducing a failure.
+const composerError = 'Model "gpt-5.5" is unavailable for this provider. Pick another model and try again.'
+const commandErrorPanel = {
+  isError: true,
+  title: '/model',
+  text: 'Unknown model "claude-x". Run /model to list available models.',
+  items: [],
+}
+const rawChatError = 'Upstream 429: rate limit exceeded for organization org_7Hq2 (retry after 38s)'
 </script>
 
 <template>
   <SectionShell
     id="feedback"
     label="Feedback"
-    description="Alerts, toast notifications, and empty states."
+    description="Notices, toast notifications, and empty states."
   >
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div class="lg:col-span-2">
-        <Specimen label="<Alert :variant>">
-          <VariantMatrix
-            :variants="variantSpecs.alert.variants"
-            class="w-full"
-          >
-            <template #default="{ variant }">
-              <Alert
-                :variant="variant"
-                class="max-w-md"
-              >
-                <AlertCircle v-if="variant === 'destructive'" />
-                <Terminal v-else />
-                <AlertTitle>{{ variant }} alert</AlertTitle>
-                <AlertDescription>This is an alert with the {{ variant }} variant.</AlertDescription>
-              </Alert>
-            </template>
-          </VariantMatrix>
+        <Specimen
+          label="<CalloutBanner :tone>"
+          note="the ONE framed notice (errors, warnings, neutral info). Tone lives in the icon + surface wash only; text stays foreground / muted. The icon centers on the first line at any wrap count."
+        >
+          <div class="grid w-full grid-cols-1 gap-3 lg:grid-cols-3">
+            <CalloutBanner
+              v-for="tone in noticeTones"
+              :key="tone"
+              :tone="tone"
+              :title="`${tone.charAt(0).toUpperCase()}${tone.slice(1)} notice`"
+              description="A sentence that explains what happened and what to do next."
+            />
+          </div>
         </Specimen>
       </div>
+
+      <Specimen
+        label="<CalloutBanner tone=&quot;destructive&quot; :description> + #details"
+        note="description-only promotes the message to the first-line rung; #details carries the raw backend error in mono caption"
+      >
+        <div class="flex w-full flex-col gap-3">
+          <CalloutBanner
+            tone="destructive"
+            description="Failed to load dependency script."
+          />
+          <CalloutBanner
+            tone="destructive"
+            title="Installation failed"
+            description="Open the log for the full output, or retry."
+          >
+            <template #details>
+              exit status 1: npm ERR! code ERESOLVE
+            </template>
+          </CalloutBanner>
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="<CalloutBanner> + actions · clickable"
+        note="default slot = trailing actions (stack under the text on narrow widths); clickable makes the whole surface the button"
+      >
+        <div class="flex w-full flex-col gap-3">
+          <CalloutBanner
+            tone="destructive"
+            title="Cannot reach provider"
+            description="Check the base URL and network, then retry."
+          >
+            <Button
+              variant="outline"
+              size="sm"
+            >
+              Retry
+            </Button>
+          </CalloutBanner>
+          <CalloutBanner
+            tone="warning"
+            clickable
+            title="3 checks failing"
+            description="View diagnostics for details."
+          />
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="chat transcript — <CalloutBanner size=&quot;sm&quot;>"
+        note="inline error / notice blocks in an assistant turn (message-item.vue)"
+      >
+        <div class="flex w-full flex-col gap-2">
+          <p class="text-control text-foreground">
+            Let me fetch the latest release notes for you.
+          </p>
+          <CalloutBanner
+            tone="destructive"
+            size="sm"
+            :description="rawChatError"
+          />
+          <CalloutBanner
+            tone="warning"
+            size="sm"
+            description="Web search is unavailable for this turn; answering from memory."
+          />
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="error glyph — <ErrorIcon> (@memohai/icon/ui) vs lucide CircleAlert"
+        note="12 / 14 / 16px, top row the error glyph every destructive notice and field error uses, bottom row the lucide original it replaced"
+      >
+        <div class="flex flex-col gap-3 text-destructive">
+          <div class="flex items-center gap-4">
+            <ErrorIcon class="size-3" />
+            <ErrorIcon class="size-3.5" />
+            <ErrorIcon class="size-4" />
+          </div>
+          <div class="flex items-center gap-4">
+            <CircleAlert class="size-3" />
+            <CircleAlert class="size-3.5" />
+            <CircleAlert class="size-4" />
+          </div>
+        </div>
+      </Specimen>
+
+      <Specimen
+        label="composer dock — <ComposerPanel> (real component)"
+        note="send / model-switch error and a failed command result, stacked above a docked composer; the capsule edge follows the composer's tier via the dock ancestor"
+      >
+        <div class="chat-composer-dock flex w-full flex-col gap-2">
+          <ComposerPanel
+            :approvals="[]"
+            :command-panel="commandErrorPanel"
+            :error-message="composerError"
+          />
+          <!-- Reference only: mirrors the docked composer's chrome classes in
+               chat-pane.vue so the two edges can be compared side by side. -->
+          <div
+            data-slot="input-group"
+            class="chat-composer-edge chat-composer-docked rounded-2xl bg-surface-composer p-(--composer-pad)"
+          >
+            <p class="pl-2 pr-1 pt-2 pb-1.5 text-base text-muted-foreground">
+              Ask anything…
+            </p>
+          </div>
+        </div>
+      </Specimen>
 
       <div class="lg:col-span-2">
         <Specimen

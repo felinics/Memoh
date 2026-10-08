@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Alert, AlertDescription, AlertTitle, Button, Dialog, DialogBody,
+  Button, CalloutBanner, Dialog, DialogBody,
   DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogTitle, toast,
 } from '@felinic/ui'
 import type { ConnectitConnector } from '@memohai/sdk'
@@ -58,10 +58,12 @@ function authorized() {
           :catalog="catalog"
           @authorized="authorized"
         />
-        <Alert v-else>
-          <AlertTitle>{{ t('apps.connector.unavailableTitle') }}</AlertTitle>
-          <AlertDescription>{{ t('apps.connector.unavailableDescription') }}</AlertDescription>
-        </Alert>
+        <CalloutBanner
+          v-else
+          tone="neutral"
+          :title="t('apps.connector.unavailableTitle')"
+          :description="t('apps.connector.unavailableDescription')"
+        />
       </DialogBody>
       <DialogFooter>
         <Button

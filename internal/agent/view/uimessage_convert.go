@@ -11,6 +11,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/turn"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
+	"github.com/felinics/memoh/internal/messageconv"
 	"github.com/felinics/memoh/internal/textutil"
 )
 
@@ -90,13 +91,18 @@ type uiDecodedModelMessage struct {
 
 // ConvertRawModelMessagesToUIAssistantMessages converts terminal stream payload
 // messages into frontend-friendly assistant UI messages.
+// ConvertRawModelMessagesToUIAssistantMessages converts the Messages payload
+// of a step or terminal stream event. That payload is a serialized
+// []sdk.Message, whose tool input and provider metadata are shaped for the
+// SDK, so it goes through the stored-shape codec before the extraction below
+// reads it the way it reads persisted rows.
 func ConvertRawModelMessagesToUIAssistantMessages(raw json.RawMessage) []UIMessage {
 	if len(raw) == 0 {
 		return nil
 	}
 
-	var messages []turn.ModelMessage
-	if err := json.Unmarshal(raw, &messages); err != nil {
+	messages, err := messageconv.SDKMessagesJSONToModelMessages(raw)
+	if err != nil {
 		return nil
 	}
 	return ConvertModelMessagesToUIAssistantMessages(messages)
@@ -343,17 +349,11 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 
 			// A persisted turn_id is the only grouping key. Plain-text assistant
 			// messages and tool calls with that same id remain one reply.
-			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 && len(notices) == 0 {
-				if code := persistedHistoryErrorCode(raw.Metadata); code != "" {
-					if pending == nil {
-						pending = newPendingAssistantTurn(raw)
-					}
-					appendPendingAssistantMessage(pending, UIMessage{
-						Type:    UIMessageError,
-						Code:    code,
-						Content: persistedHistoryErrorDetail(raw.Metadata),
-					})
-				}
+			// A row that recorded a failure keeps its error block after whatever
+			// output it already had, so a partially answered turn still shows why
+			// it stopped once history is reloaded.
+			errorCode := persistedHistoryErrorCode(raw.Metadata)
+			if len(toolCalls) == 0 && text == "" && len(reasonings) == 0 && len(attachments) == 0 && len(commands) == 0 && len(notices) == 0 && errorCode == "" {
 				continue
 			}
 
@@ -391,6 +391,13 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 					ID:          pending.NextID,
 					Type:        UIMessageAttachments,
 					Attachments: attachments,
+				})
+			}
+			if errorCode != "" {
+				appendPendingAssistantMessage(pending, UIMessage{
+					Type:    UIMessageError,
+					Code:    errorCode,
+					Content: persistedHistoryErrorDetail(raw.Metadata),
 				})
 			}
 

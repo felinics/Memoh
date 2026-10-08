@@ -38,6 +38,8 @@ Memoh/
 │   │   │   ├── session/        #       Per-thread runtime state and control
 │   │   │   └── toolmount/      #       Memoh tool gateway mounts for direct runtimes
 │   │   ├── sessionmode/        #     Session mode resolution
+│   │   ├── partmeta/           #     Memoh annotations (approval, user input, execution location) on sdk.ProviderMetadata, plus the stored-shape fold/unfold
+│   │   ├── step/               #     Runtime-neutral step record (model result, tool results, messages, deferred approval)
 │   │   ├── tool/               #     Native tool providers (package name remains tools)
 │   │       ├── message.go      #       Send message tool
 │   │       ├── contacts.go     #       Contact list tool
@@ -62,6 +64,7 @@ Memoh/
 │   │       ├── prune.go        #       Pruning tool
 │   │       ├── history.go      #       History access tool
 │   │       └── read_media.go   #       Media reading tool
+│   │   ├── toolexec/           #     Tool executor copied from the twilight SDK before felinics/twilight#53 removed it: Tool, ExecuteTools, approvals, step assembly
 │   │   └── turn/               #     Pure Turn port plus authenticated gRPC transport
 │   ├── attachment/             #   Attachment normalization (MIME types, base64)
 │   ├── audio/                  #   Audio/TTS processing utilities
@@ -195,7 +198,7 @@ Memoh/
 
 The codebase has grown beyond the original agent/channel/container core. When working near these areas, read the local `AGENTS.md` and treat the corresponding `internal/` package as the source of truth; do not guess tool or schema details.
 
-- **External coding-agent runtimes (`internal/agent/runtime/external/`, `codex/`, `claudecode/`)** — the neutral `external.Driver` port plus the direct Codex and Claude Code runtimes (pinned protocol assets, device-code/OAuth login, native thread resume/fork, Memoh tool gateway mounts via `toolmount/`). **ACP (`internal/agent/runtime/acp/`)** is the generic channel for custom user-supplied ACP agents (single generic profile with a managed launch command), folded into the same driver port. Stable user-facing runtime errors live in `internal/agent/decision/feedback/`.
+- **External coding-agent runtimes (`internal/agent/runtime/external/`, `codex/`, `claudecode/`)** — the neutral `external.Driver` port plus the direct Codex and Claude Code runtimes (pinned protocol assets, device-code/OAuth login, native thread resume/fork, Memoh tool gateway mounts via `toolmount/`). **ACP (`internal/agent/runtime/acp/`)** is the generic channel for custom user-supplied ACP agents (single generic profile with a managed launch command), folded into the same driver port. The errors users can act on are package errors that `internal/agent/application` translates into catalog codes (`ExternalAgentError`).
 - **Workspace dependencies (`internal/workspacedeps/`)** — per-bot installation of agent CLIs and other managed dependencies into `/data`. The permission invariants (read-only launcher resolution, Manage-authorized install confirmation, no remote runtime support) are normative rules — see `AGENTS.md` → Container / Workspace Management. The Server/image upgrade boundary is documented in `docs/workspace-dependencies-upgrade.md`.
 - **Apps (`internal/apps/`, `internal/supermarket/`)** — Supermarket App discovery and installation state. Installed Apps expand into immutable Registry Skills in the selected workspace target.
 - **User input / `ask_user` (`internal/agent/decision/input/`)** — lets the in-process agent ask the user a question mid-conversation and wait for an answer.

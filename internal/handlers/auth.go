@@ -56,9 +56,9 @@ func (h *AuthHandler) Register(e *echo.Echo) {
 // @Tags auth
 // @Param payload body LoginRequest true "Login request"
 // @Success 200 {object} LoginResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 401 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 401 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /auth/login [post].
 func (h *AuthHandler) Login(c echo.Context) error {
 	if h.accountService == nil {
@@ -119,8 +119,8 @@ type RefreshResponse struct {
 // @Tags auth
 // @Security BearerAuth
 // @Success 200 {object} RefreshResponse
-// @Failure 401 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 401 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /auth/refresh [post].
 func (h *AuthHandler) Refresh(c echo.Context) error {
 	if strings.TrimSpace(h.jwtSecret) == "" {

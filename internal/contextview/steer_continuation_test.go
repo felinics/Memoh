@@ -3,21 +3,19 @@ package contextview
 import (
 	"context"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	native "github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/step"
 )
 
 func TestFinalSteerSurvivesProductionContextCompilationAndStepCapture(t *testing.T) {
-	var continueAfter atomic.Bool
-	var next []sdk.Message
 	var indexes []int
 	var captured [][]sdk.Message
-	provider := &envelopeProbeProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	provider := &envelopeProbeProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		if call == 2 {
 			var text strings.Builder
 			for _, message := range params.Messages {
@@ -34,21 +32,21 @@ func TestFinalSteerSurvivesProductionContextCompilationAndStepCapture(t *testing
 				t.Errorf("typed context dropped the steer: %q", text.String())
 			}
 		}
-		return &sdk.GenerateResult{Text: "answer", FinishReason: sdk.FinishReasonStop}, nil
+		return sdk.ModelResult{Text: "answer", FinishReason: sdk.FinishReasonStop}, nil
 	}}
 	cfg := native.RunConfig{
 		Model: &sdk.Model{ID: "model", Provider: provider}, Messages: []sdk.Message{sdk.UserMessage("original")},
 		ContextSourceFrags:     []contextfrag.ContextFrag{currentMessageFrag("message.000", "original")},
 		ContextBudgetMaxTokens: 200000, ContextQueryMaterialized: true,
-		ContinueAfterFinal: &continueAfter, NextModelInputs: &next,
-		OnStepCommitted: func(_ context.Context, index int, step *sdk.StepResult) error {
+		OnStepCommitted: func(_ context.Context, index int, record *step.Record) (native.StepDirective, error) {
 			indexes = append(indexes, index)
-			captured = append(captured, step.Messages)
+			captured = append(captured, record.Messages)
 			if index == 0 {
-				next = []sdk.Message{sdk.UserMessage("new direction")}
-				continueAfter.Store(true)
+				return native.StepDirective{
+					NextInputs: []native.DirectiveInput{{ID: "steer-1", Text: "new direction"}},
+				}, nil
 			}
-			return nil
+			return native.StepDirective{}, nil
 		},
 	}
 	if _, err := native.New(native.Deps{ContextViewApplier: ProviderRunConfigApplier(nil)}).Generate(context.Background(), cfg); err != nil {

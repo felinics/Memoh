@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -100,8 +102,8 @@ func (h *ModelsHandler) Register(e *echo.Echo) {
 // @Tags models
 // @Param payload body models.AddRequest true "Model configuration"
 // @Success 201 {object} models.AddResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models [post].
 func (h *ModelsHandler) Create(c echo.Context) error {
 	var req models.AddRequest
@@ -113,6 +115,9 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 	if err != nil {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
+		}
+		if errors.Is(err, models.ErrValidation) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -126,8 +131,8 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 // @Param type query string false "Model type (chat, embedding)"
 // @Param client_type query string false "Provider client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)"
 // @Success 200 {array} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models [get].
 func (h *ModelsHandler) List(c echo.Context) error {
 	modelType := c.QueryParam("type")
@@ -161,9 +166,9 @@ func (h *ModelsHandler) List(c echo.Context) error {
 // @Tags models
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models/{id} [get].
 func (h *ModelsHandler) GetByID(c echo.Context) error {
 	id := c.Param("id")
@@ -184,9 +189,9 @@ func (h *ModelsHandler) GetByID(c echo.Context) error {
 // @Tags models
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models/model/{modelId} [get].
 func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
@@ -219,9 +224,9 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 // @Param id path string true "Model internal ID (UUID)"
 // @Param payload body models.UpdateRequest true "Updated model configuration"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models/{id} [put].
 func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 	id := c.Param("id")
@@ -239,6 +244,9 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
+		if errors.Is(err, models.ErrValidation) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
@@ -251,9 +259,9 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Param payload body models.UpdateRequest true "Updated model configuration"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models/model/{modelId} [put].
 func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
@@ -276,6 +284,9 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
+		if errors.Is(err, models.ErrValidation) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		if errors.Is(err, models.ErrModelIDAmbiguous) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
@@ -293,9 +304,9 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 // @Tags models
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models/{id} [delete].
 func (h *ModelsHandler) DeleteByID(c echo.Context) error {
 	id := c.Param("id")
@@ -315,9 +326,9 @@ func (h *ModelsHandler) DeleteByID(c echo.Context) error {
 // @Tags models
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models/model/{modelId} [delete].
 func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
@@ -350,9 +361,9 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 200 {object} models.TestResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models/{id}/test [post].
 func (h *ModelsHandler) Test(c echo.Context) error {
 	id := c.Param("id")
@@ -367,10 +378,23 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid") {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, db.ErrInvalidUUID) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid model id").WithInternal(err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "model not found").WithInternal(err)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to test model").WithInternal(err)
+	}
+	if resp.Cause != nil {
+		// The response carries only the code; this event is where the cause
+		// is kept.
+		failure := probeError(resp.Cause, resp.Status == models.TestStatusAuthError)
+		result := errlog.Event(ctx, "model.test", failure, errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "model test failed", append([]slog.Attr{
+			slog.String("model_id", id), slog.String("status", string(resp.Status)),
+		}, result.Attrs()...)...)
+		resp.Code = string(apperror.CodeOf(failure))
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -382,8 +406,8 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 // @Tags models
 // @Param type query string false "Model type (chat, embedding)"
 // @Success 200 {object} models.CountResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /models/count [get].
 func (h *ModelsHandler) Count(c echo.Context) error {
 	modelType := c.QueryParam("type")

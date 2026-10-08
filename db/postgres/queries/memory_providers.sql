@@ -4,8 +4,13 @@ SELECT * FROM memory_providers WHERE team_id = public.memoh_current_team_id() OR
 -- name: GetMemoryProviderByID :one
 SELECT * FROM memory_providers WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
--- name: GetDefaultMemoryProvider :one
-SELECT * FROM memory_providers WHERE team_id = public.memoh_current_team_id() AND is_default = true LIMIT 1;
+-- name: GetBuiltinMemoryProvider :one
+-- The team's Built-in Memory configuration row: the earliest builtin row,
+-- matching the one the memory settings page has always edited.
+SELECT * FROM memory_providers
+WHERE team_id = public.memoh_current_team_id() AND provider = 'builtin'
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
 
 -- name: CreateMemoryProvider :one
 INSERT INTO memory_providers (name, provider, config, is_default)
@@ -19,9 +24,6 @@ SET name = $2,
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
 RETURNING *;
-
--- name: DeleteMemoryProvider :exec
-DELETE FROM memory_providers WHERE team_id = public.memoh_current_team_id() AND id = $1;
 
 -- name: CountMemoryProvidersByDefault :one
 SELECT COUNT(*) FROM memory_providers WHERE team_id = public.memoh_current_team_id() AND is_default = true;

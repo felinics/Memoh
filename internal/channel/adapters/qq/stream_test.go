@@ -14,11 +14,12 @@ import (
 
 func preparedQQEvent(event channel.StreamEvent) channel.PreparedStreamEvent {
 	prepared := channel.PreparedStreamEvent{
-		Type:   event.Type,
-		Delta:  event.Delta,
-		Error:  event.Error,
-		Status: event.Status,
-		Phase:  event.Phase,
+		Type:      event.Type,
+		Delta:     event.Delta,
+		Error:     event.Error,
+		ErrorCode: event.ErrorCode,
+		Status:    event.Status,
+		Phase:     event.Phase,
 	}
 	if len(event.Attachments) > 0 {
 		prepared.Attachments = make([]channel.PreparedAttachment, 0, len(event.Attachments))
@@ -206,7 +207,7 @@ func TestQQOutboundStreamRejectsAfterClose(t *testing.T) {
 	}
 }
 
-func TestQQOutboundStreamErrorRedactsRegisteredTokenFragments(t *testing.T) {
+func TestQQOutboundStreamErrorReply(t *testing.T) {
 	redact.ResetForTest()
 	t.Cleanup(redact.ResetForTest)
 
@@ -214,24 +215,44 @@ func TestQQOutboundStreamErrorRedactsRegisteredTokenFragments(t *testing.T) {
 	redact.SetSecrets("test", token)
 	prefixHalf := token[:len(token)/2]
 
-	var sent []channel.OutboundMessage
-	stream := &qqOutboundStream{
-		target: "c2c:user-openid",
-		send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
-			sent = append(sent, msg.LogicalMessage())
-			return nil
+	cases := []struct {
+		name  string
+		event channel.StreamEvent
+		want  []string
+	}{
+		{
+			name:  "coded error shows the copy as it is",
+			event: channel.StreamEvent{Type: channel.StreamEventError, Error: "The workspace is unreachable.", ErrorCode: "workspace.unreachable"},
+			want:  []string{"The workspace is unreachable."},
+		},
+		{
+			name:  "uncoded error is redacted and labelled",
+			event: channel.StreamEvent{Type: channel.StreamEventError, Error: "failed: " + prefixHalf},
+			want:  []string{"Error: failed: " + strings.Repeat("*", len(prefixHalf))},
+		},
+		{
+			name:  "blank error sends nothing",
+			event: channel.StreamEvent{Type: channel.StreamEventError, Error: "  "},
+			want:  nil,
 		},
 	}
-
-	err := stream.Push(context.Background(), preparedQQEvent(channel.StreamEvent{Type: channel.StreamEventError, Error: "failed: " + prefixHalf}))
-	if err != nil {
-		t.Fatalf("push error: %v", err)
-	}
-	if len(sent) != 1 {
-		t.Fatalf("expected one outbound message, got %d", len(sent))
-	}
-	if got := sent[0].Message.PlainText(); strings.Contains(got, prefixHalf) {
-		t.Fatalf("expected redacted token fragment, got %q", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent []string
+			stream := &qqOutboundStream{
+				target: "c2c:user-openid",
+				send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
+					sent = append(sent, msg.LogicalMessage().Message.PlainText())
+					return nil
+				},
+			}
+			if err := stream.Push(context.Background(), preparedQQEvent(tc.event)); err != nil {
+				t.Fatalf("push error: %v", err)
+			}
+			if len(sent) != len(tc.want) || strings.Join(sent, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("sent messages = %q, want %q", sent, tc.want)
+			}
+		})
 	}
 }
 
@@ -529,5 +550,54 @@ func TestQQOutboundStreamFinalShardFailureRetiresStreamBeforeFallback(t *testing
 	}
 	if len(sent) != 1 || sent[0].Message.PlainText() != "半截回复，完整结尾" {
 		t.Fatalf("fallback must still carry the complete text, got %+v", sent)
+	}
+}
+
+func TestQQOutboundStreamC2CResetRetiresStreamAndSendsRegeneratedReply(t *testing.T) {
+	t.Parallel()
+
+	var shards []qqStreamShardRequest
+	var sent []channel.OutboundMessage
+	stream := &qqOutboundStream{
+		target:         "c2c:user-openid",
+		streamInterval: 0,
+		now:            time.Now,
+		send: func(_ context.Context, msg channel.PreparedOutboundMessage) error {
+			sent = append(sent, msg.LogicalMessage())
+			return nil
+		},
+		streamSend: func(_ context.Context, req qqStreamShardRequest) (qqStreamShardResponse, error) {
+			shards = append(shards, req)
+			return qqStreamShardResponse{ID: "sm-1"}, nil
+		},
+	}
+
+	ctx := context.Background()
+	events := []channel.StreamEvent{
+		{Type: channel.StreamEventDelta, Delta: "失败的半截"},
+		{Type: channel.StreamEventReset},
+		{Type: channel.StreamEventDelta, Delta: "重试后的回复"},
+		{Type: channel.StreamEventFinal, Final: &channel.StreamFinalizePayload{}},
+	}
+	for _, event := range events {
+		if err := stream.Push(ctx, preparedQQEvent(event)); err != nil {
+			t.Fatalf("push %s: %v", event.Type, err)
+		}
+	}
+	if err := stream.Close(ctx); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if len(shards) != 2 {
+		t.Fatalf("expected the failed attempt's shard plus its closing shard, got %d: %+v", len(shards), shards)
+	}
+	if closing := shards[1]; closing.InputState != qqStreamInputDone || closing.ContentRaw != "失败的半截" {
+		t.Fatalf("reset must retire the stream at its last content, got %+v", closing)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("expected one regular send for the regenerated reply, got %d", len(sent))
+	}
+	if got := sent[0].Message.PlainText(); got != "重试后的回复" {
+		t.Fatalf("regenerated reply = %q, want only the surviving attempt's text", got)
 	}
 }

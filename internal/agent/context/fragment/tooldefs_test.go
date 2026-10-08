@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"testing"
 
-	sdk "github.com/felinics/twilight/sdk"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestToolDefAccountingForMeasuresSerializedDefinition(t *testing.T) {
 	t.Parallel()
 
-	tool := sdk.Tool{
+	tool := toolexec.Tool{
 		Name:        "send_message",
 		Description: "Send a message to the current conversation.",
-		Parameters:  map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
+		Parameters:  toolexec.SchemaFromValue(map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}}),
 	}
 	got := ToolDefAccountingFor("native", tool)
 

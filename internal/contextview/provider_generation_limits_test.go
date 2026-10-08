@@ -70,10 +70,10 @@ func TestGenerateReservesExactlyTheMaxTokensItSends(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			var seen sdk.GenerateParams
-			probe := &envelopeProbeProvider{handler: func(_ int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+			var seen sdk.Request
+			probe := &envelopeProbeProvider{handler: func(_ int, params sdk.Request) (sdk.ModelResult, error) {
 				seen = params
-				return &sdk.GenerateResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
+				return sdk.ModelResult{Text: "ok", FinishReason: sdk.FinishReasonStop}, nil
 			}}
 			agent := agentpkg.New(agentpkg.Deps{ContextViewApplier: ProviderRunConfigApplier(nil)})
 			currentIndex := 0

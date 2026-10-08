@@ -19,6 +19,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/event"
 	acpprofile "github.com/felinics/memoh/internal/agent/runtime/acp/profile"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/toolcontext"
 	"github.com/felinics/memoh/internal/version"
@@ -96,7 +97,6 @@ type PromptOptions struct {
 }
 
 type Session struct {
-	logger                    *slog.Logger
 	proc                      *bridgeProcess
 	callbacks                 *clientCallbacks
 	conn                      *clientConnection
@@ -129,13 +129,13 @@ type Session struct {
 //nolint:contextcheck // startup failure closes the owned process through its lifecycle API.
 func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventSink) (*Session, error) {
 	if r == nil || r.workspace == nil {
-		return nil, errors.New("ACP workspace provider is not configured")
+		return nil, errs.New("ACP workspace provider is not configured")
 	}
 	if strings.TrimSpace(req.BotID) == "" {
-		return nil, errors.New("bot_id is required")
+		return nil, errs.New("bot_id is required")
 	}
 	if strings.TrimSpace(req.AgentID) == "" {
-		return nil, errors.New("ACP agent id is required")
+		return nil, errs.New("ACP agent id is required")
 	}
 
 	info, err := r.workspace.WorkspaceInfo(ctx, req.BotID)
@@ -150,7 +150,7 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		projectPath = strings.TrimSpace(req.Resolved.ProjectPath)
 		backend = req.Resolved.Backend
 		if root == "" || projectPath == "" {
-			return nil, errors.New("resolved ACP session context is incomplete")
+			return nil, errs.New("resolved ACP session context is incomplete")
 		}
 	} else {
 		root, projectPath, backend, err = resolveWorkspacePaths(info, req.ProjectPath)
@@ -221,9 +221,9 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			}
 			if sink != nil {
 				sink.EmitStreamEvent(event.StreamEvent{
-					Type:  event.RuntimeNotice,
-					Code:  "tools_unavailable",
-					Delta: "Memoh tools are unavailable for this session: tool bridge failed to start",
+					Type:       event.RuntimeNotice,
+					NoticeKind: event.NoticeToolsUnavailable,
+					Delta:      "Memoh tools are unavailable for this session: tool bridge failed to start",
 				})
 			}
 			toolHTTPURL = ""
@@ -233,7 +233,6 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 	}
 
 	proc, err := startBridgeProcess(lifecycleCtx, client, command, args, projectPath, timeout, processOptions{
-		Backend:          backend,
 		BotID:            req.BotID,
 		AgentID:          req.AgentID,
 		SetupMode:        req.SetupMode,
@@ -300,11 +299,11 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 			toolHTTPStop()
 		}
 		cancel()
-		return nil, fmt.Errorf(
+		return nil, errs.NewDependency(fmt.Sprintf(
 			"initialize ACP agent: unsupported protocol version %d (client supports %d)",
 			initResp.ProtocolVersion,
 			acp.ProtocolVersionNumber,
-		)
+		))
 	}
 
 	mcpServers := []acp.McpServer{}
@@ -358,7 +357,6 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		return nil, err
 	}
 	clientSession := &Session{
-		logger:                    r.logger,
 		proc:                      proc,
 		callbacks:                 callbacks,
 		conn:                      conn,
@@ -398,7 +396,6 @@ func (r *Runner) StartSession(ctx context.Context, req StartRequest, sink EventS
 		}
 	}
 
-	proc.Activate()
 	finishStartup()
 	return clientSession, nil
 }
@@ -420,7 +417,7 @@ func startSession(
 		return sessionResponse{}, fmt.Errorf("create ACP session: %w", err)
 	}
 	if strings.TrimSpace(string(resp.SessionId)) == "" {
-		return sessionResponse{}, errors.New("create ACP session: agent returned an empty session id")
+		return sessionResponse{}, errs.NewDependency("create ACP session: agent returned an empty session id")
 	}
 	return resp, nil
 }
@@ -436,7 +433,7 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 		return nil
 	}
 	if modes == nil {
-		return fmt.Errorf("pin ACP session mode %q: agent did not report session modes", desired)
+		return errs.NewDependency(fmt.Sprintf("pin ACP session mode %q: agent did not report session modes", desired))
 	}
 	if string(modes.CurrentModeId) == desired {
 		return nil
@@ -455,7 +452,7 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 				slog.String("desired_mode", desired),
 				slog.String("current_mode", string(modes.CurrentModeId)))
 		}
-		return fmt.Errorf("pin ACP session mode %q: mode is not advertised by agent", desired)
+		return errs.NewDependency(fmt.Sprintf("pin ACP session mode %q: mode is not advertised by agent", desired))
 	}
 	if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
 		SessionId: sessionID,
@@ -476,7 +473,7 @@ func pinSessionMode(ctx context.Context, conn *clientConnection, sessionID acp.S
 
 func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client *bridge.Client, route string, handler http.Handler) (*bridge.Client, func(), error) {
 	if client == nil {
-		return nil, nil, errors.New("workspace bridge client is required")
+		return nil, nil, errs.New("workspace bridge client is required")
 	}
 	current := client
 	var lastErr error
@@ -485,9 +482,9 @@ func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client
 		if err == nil {
 			return current, stop, nil
 		}
-		lastErr = err
-		if ctx.Err() != nil || !isClosingBridgeClientError(err) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
-			return current, nil, err
+		lastErr = errs.WrapDependency(err, "")
+		if ctx.Err() != nil || !errors.Is(err, bridge.ErrUnavailable) || r == nil || r.workspace == nil || strings.TrimSpace(botID) == "" {
+			return current, nil, lastErr
 		}
 		_ = current.Close()
 		if err := sleepContext(ctx, time.Duration(attempt+1)*150*time.Millisecond); err != nil {
@@ -500,16 +497,6 @@ func (r *Runner) startMemohToolsBridge(ctx context.Context, botID string, client
 		current = next
 	}
 	return current, nil, lastErr
-}
-
-func isClosingBridgeClientError(err error) bool {
-	if err == nil {
-		return false
-	}
-	lower := strings.ToLower(err.Error())
-	return strings.Contains(lower, "client connection is closing") ||
-		strings.Contains(lower, "transport is closing") ||
-		strings.Contains(lower, "use of closed network connection")
 }
 
 func sleepContext(ctx context.Context, d time.Duration) error {
@@ -525,7 +512,7 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 
 func guardToolHTTPHandler(rawURL string, handler http.Handler) (string, string, http.Handler, error) {
 	if handler == nil {
-		return "", "", nil, errors.New("tool HTTP handler is required")
+		return "", "", nil, errs.New("tool HTTP handler is required")
 	}
 	guardedURL, guardPath, err := guardedToolHTTPURL(rawURL)
 	if err != nil {
@@ -546,7 +533,7 @@ func guardedToolHTTPURL(rawURL string) (string, string, error) {
 		return "", "", err
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return "", "", fmt.Errorf("invalid Memoh tools URL %q", rawURL)
+		return "", "", errs.New(fmt.Sprintf("invalid Memoh tools URL %q", rawURL))
 	}
 	basePath := strings.TrimRight(u.Path, "/")
 	if basePath == "" {
@@ -744,13 +731,20 @@ func promptUsageFromACP(usage *acp.Usage) *sdk.Usage {
 		OutputTokens: usage.OutputTokens,
 		TotalTokens:  usage.TotalTokens,
 	}
+	read, write := 0, 0
 	if usage.CachedReadTokens != nil {
-		out.CachedInputTokens = *usage.CachedReadTokens
-		out.InputTokenDetails.CacheReadTokens = *usage.CachedReadTokens
+		read = *usage.CachedReadTokens
 	}
 	if usage.CachedWriteTokens != nil {
-		out.InputTokenDetails.CacheWriteTokens = *usage.CachedWriteTokens
+		write = *usage.CachedWriteTokens
 	}
+	// ACP leaves open whether inputTokens includes the cache counters;
+	// claude-agent-acp reports them beside it and counts them in totalTokens.
+	if cached := read + write; cached > 0 && (usage.TotalTokens == usage.InputTokens+usage.OutputTokens+cached || usage.InputTokens < cached) {
+		out.InputTokens += cached
+	}
+	out.CachedInputTokens = read
+	out.InputTokenDetails = sdk.InputTokenDetail{NoCacheTokens: out.InputTokens - read - write, CacheReadTokens: read, CacheWriteTokens: write}
 	if usage.ThoughtTokens != nil {
 		out.ReasoningTokens = *usage.ThoughtTokens
 		out.OutputTokenDetails.ReasoningTokens = *usage.ThoughtTokens

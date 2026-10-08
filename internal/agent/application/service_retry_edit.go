@@ -64,19 +64,19 @@ type EditLatestMessageInput struct {
 	OnModelPreferenceSettled func()
 }
 
-func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) (RunOutcome, error) {
 	sessionID := strings.TrimSpace(input.SessionID)
 	turn, cutoffMessageID, err := s.prepareRetryLatestTurnOperation(ctx, sessionID, strings.TrimSpace(input.TargetTurnID))
 	if err != nil {
-		return err
+		return RunOutcome{}, err
 	}
 	requestMessageID := strings.TrimSpace(turn.RequestMessageID)
 	requestMessage, err := s.messageService.GetByIDBySession(ctx, sessionID, requestMessageID)
 	if err != nil {
-		return err
+		return RunOutcome{}, err
 	}
 	if !strings.EqualFold(requestMessage.Role, "user") {
-		return errors.New("retry target request is not a user message")
+		return RunOutcome{}, errors.New("retry target request is not a user message")
 	}
 
 	req := ChatRequest{
@@ -113,16 +113,16 @@ func (s *Service) RetryLatestMessageWS(ctx context.Context, input RetryLatestMes
 	return s.streamReplacementWS(ctx, req, turn.ID, requestMessage.ID, "retry", eventCh, abortCh)
 }
 
-func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) error {
+func (s *Service) EditLatestMessageWS(ctx context.Context, input EditLatestMessageInput, eventCh chan<- WSStreamEvent, abortCh <-chan struct{}) (RunOutcome, error) {
 	sessionID := strings.TrimSpace(input.SessionID)
 	text := strings.TrimSpace(input.Text)
 	if text == "" && len(input.Attachments) == 0 {
-		return errors.New("message text or attachments required")
+		return RunOutcome{}, errors.New("message text or attachments required")
 	}
 
 	turn, err := s.prepareEditLatestTurnOperation(ctx, sessionID, strings.TrimSpace(input.TargetTurnID))
 	if err != nil {
-		return err
+		return RunOutcome{}, err
 	}
 
 	req := ChatRequest{
@@ -295,7 +295,7 @@ func (s *Service) streamReplacementWS(
 	reason string,
 	eventCh chan<- WSStreamEvent,
 	abortCh <-chan struct{},
-) error {
+) (RunOutcome, error) {
 	replacement := &messagepkg.TurnReplacement{
 		OldTurnID:               strings.TrimSpace(oldTurnID),
 		ReplacementTurnID:       strings.TrimSpace(req.TurnID),
@@ -307,7 +307,7 @@ func (s *Service) streamReplacementWS(
 		replacement.SessionMetadata = update.metadata
 	}
 	req.TurnReplacement = replacement
-	_, err := s.streamChatWSResultWithHooks(
+	_, outcome, err := s.streamChatWSResultWithHooks(
 		ctx,
 		req,
 		eventCh,
@@ -319,7 +319,7 @@ func (s *Service) streamReplacementWS(
 			return s.replacePersistedTurn(ctx, req, oldTurnID, requestMessageID, reason, persisted)
 		},
 	)
-	return err
+	return outcome, err
 }
 
 func (s *Service) replacePersistedTurn(

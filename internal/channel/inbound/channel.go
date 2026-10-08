@@ -19,7 +19,6 @@ import (
 	"unicode"
 
 	"github.com/felinics/memoh/internal/acl"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
@@ -33,6 +32,7 @@ import (
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimekind"
@@ -434,7 +434,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		p.logger.DebugContext(ctx, "inbound handle start",
 			slog.String("channel", msg.Channel.String()),
 			slog.String("message_id", strings.TrimSpace(msg.Message.ID)),
-			slog.String("query", strings.TrimSpace(text)),
 			slog.Int("attachments", len(msg.Message.Attachments)),
 			slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
 			slog.String("conversation_id", strings.TrimSpace(msg.Conversation.ID)),
@@ -585,9 +584,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 		var outMsg channel.Message
 		if err != nil {
-			if p.logger != nil {
-				p.logger.WarnContext(ctx, "command execution failed", slog.Any("error", err))
-			}
+			p.recordCommandFailure(ctx, msg, identity, err)
 			outMsg = plainTextMessage(friendlyOps(loc, "ops.verb.completeCommand"), caps)
 		} else {
 			outMsg = renderResult(result, RenderContext{Caps: caps, T: loc})
@@ -758,7 +755,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
 				}
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, specErr)
+				return p.sendExternalAgentError(ctx, sender, msg, identity, specErr)
 			}
 			defaultSpec = spec
 			defaultSpecShouldCreate = shouldCreate
@@ -811,7 +808,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
 				}
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, specErr)
+				return p.sendExternalAgentError(ctx, sender, msg, identity, specErr)
 			}
 		}
 		if shouldCreate {
@@ -823,7 +820,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				if p.logger != nil {
 					p.logger.WarnContext(ctx, "auto-create session failed", slog.Any("error", createErr))
 				}
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, createErr)
+				return p.sendExternalAgentError(ctx, sender, msg, identity, createErr)
 			}
 			sessionID = sess.ID
 			sessionType = sess.Type
@@ -842,12 +839,12 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			err = p.requireWorkspaceExecForPrincipal(ctx, identity.BotID, ownerPrincipal)
 		}
 		if err == nil && sessionRequiresExternalRuntimeActor(runtimeSession) && (shouldTrigger || isDirectedAtBot(msg)) {
-			err = p.requireExternalRuntimeActor(ctx, identity, ownerPrincipal)
+			err = requireExternalRuntimeActor(identity, ownerPrincipal)
 		}
 		if err != nil {
 			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 			if shouldTrigger || isDirectedAtBot(msg) {
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, err)
+				return p.sendExternalAgentError(ctx, sender, msg, identity, err)
 			}
 			return nil
 		}
@@ -937,7 +934,6 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				slog.Bool("is_mentioned", metadataBool(msg.Metadata, "is_mentioned")),
 				slog.Bool("is_reply_to_bot", metadataBool(msg.Metadata, "is_reply_to_bot")),
 				slog.String("conversation_type", strings.TrimSpace(msg.Conversation.Type)),
-				slog.String("query", strings.TrimSpace(text)),
 				slog.Int("attachments", len(attachments)),
 			)
 		}
@@ -1195,18 +1191,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			return nil
 		}
-		if p.logger != nil {
-			p.logger.ErrorContext(ctx,
-				"start turn failed",
-				slog.String("channel", msg.Channel.String()),
-				slog.String("channel_identity_id", identity.ChannelIdentityID),
-				slog.Any("error", startErr),
-			)
-		}
-		_ = stream.Push(ctx, channel.StreamEvent{
-			Type:  channel.StreamEventError,
-			Error: startErr.Error(),
-		})
+		_ = stream.Push(ctx, channel.ErrorEvent(p.localizer(ctx, identity.BotID), startErr))
 		if statusNotifier != nil {
 			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, startErr); notifyErr != nil {
 				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
@@ -1221,6 +1206,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 
 	chunkCh, streamErrCh := handle.Events(), handle.Errs()
 
+	// A run that ends with run_terminal is answered from it: error events are
+	// held back and the one failure reply carries the copy for the run's code.
+	failures := runFailureReply{reportsTerminal: turn.ReportsRunTerminal(handle)}
+	loc := p.localizer(ctx, identity.BotID)
 	var (
 		finalMessages []turn.ModelMessage
 		streamErr     error
@@ -1233,7 +1222,10 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				chunkCh = nil
 				continue
 			}
-			events, messages, parseErr := mapStreamChunkToChannelEvents(turnEvent.Payload)
+			if failures.observeTerminal(turnEvent) {
+				continue
+			}
+			events, messages, parseErr := mapStreamChunkToChannelEvents(turnEvent.Payload, loc)
 			if parseErr != nil {
 				if p.logger != nil {
 					p.logger.WarnContext(ctx,
@@ -1248,7 +1240,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			for i, event := range events {
 				if isUserInputEvent(&events[i]) {
-					events[i].ToolCall.Locale = p.localizer(ctx, identity.BotID).Locale()
+					events[i].ToolCall.Locale = loc.Locale()
 				}
 				if event.Type == channel.StreamEventAttachment && len(event.Attachments) > 0 {
 					ingested := p.ingestOutboundAttachments(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Attachments)
@@ -1261,6 +1253,9 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 				}
 				if event.Type == channel.StreamEventSpeech && len(event.Speeches) > 0 {
 					p.synthesizeAndPushVoice(ctx, strings.TrimSpace(identity.BotID), msg.Channel, event.Speeches, stream, assets)
+					continue
+				}
+				if failures.hold(events[i]) {
 					continue
 				}
 				if pushErr := stream.Push(ctx, events[i]); pushErr != nil {
@@ -1293,39 +1288,49 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		}
 	}
 
-	if streamErr != nil {
-		if p.logger != nil {
-			p.logger.ErrorContext(ctx,
-				"chat gateway stream failed",
-				slog.String("channel", msg.Channel.String()),
-				slog.String("channel_identity_id", identity.ChannelIdentityID),
-				slog.String("user_id", identity.UserID),
-				slog.Any("error", streamErr),
-			)
+	if !pushBroken {
+		for _, held := range failures.release() {
+			if pushErr := stream.Push(ctx, held); pushErr != nil {
+				if streamErr == nil {
+					streamErr = pushErr
+				}
+				break
+			}
 		}
-		if feedback := externalAgentFeedbackFromError(streamErr); feedback != nil {
-			_ = stream.Push(ctx, channel.StreamEvent{
-				Type:  channel.StreamEventError,
-				Error: strings.TrimSpace(feedback.Message),
-			})
+	}
+	failureReply, hasFailureReply := failures.reply(loc, streamErr)
+	if streamErr != nil {
+		if public := externalAgentError(streamErr); public != nil {
+			if !hasFailureReply {
+				failureReply = channel.StreamEvent{
+					Type:      channel.StreamEventError,
+					Error:     externalAgentErrorText(public, loc),
+					ErrorCode: string(apperror.CodeOf(public)),
+				}
+			}
+			_ = stream.Push(ctx, failureReply)
 			if statusNotifier != nil {
 				if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
 					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 				}
 			}
-			_ = p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
 			return streamErr
 		}
-		_ = stream.Push(ctx, channel.StreamEvent{
-			Type:  channel.StreamEventError,
-			Error: streamErr.Error(),
-		})
+		if !hasFailureReply {
+			failureReply = channel.ErrorEvent(loc, streamErr)
+		}
+		_ = stream.Push(ctx, failureReply)
 		if statusNotifier != nil {
 			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
 				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 			}
 		}
 		return streamErr
+	}
+	if hasFailureReply {
+		if err := stream.Push(ctx, failureReply); err != nil {
+			return err
+		}
 	}
 
 	sentTexts, suppressReplies := collectMessageToolContext(p.registry, finalMessages, msg.Channel, target)
@@ -1694,6 +1699,19 @@ func channelSlashAliases(msg channel.InboundMessage, identity InboundIdentity) [
 	return out
 }
 
+// recordCommandFailure records the cause of a command call that failed. The
+// reply carries only the generic copy and the message is answered, so this is
+// where the cause is recorded.
+func (p *ChannelInboundProcessor) recordCommandFailure(ctx context.Context, msg channel.InboundMessage, identity InboundIdentity, err error) {
+	if p.logger == nil {
+		return
+	}
+	result := errlog.Event(ctx, "channel.command", err, errlog.Options{})
+	p.logger.LogAttrs(ctx, result.Level, "command failed", append([]slog.Attr{
+		slog.String("bot_id", strings.TrimSpace(identity.BotID)), slog.String("channel", msg.Channel.String()),
+	}, result.Attrs()...)...)
+}
+
 func (p *ChannelInboundProcessor) sendSlashError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, code string) error {
 	if code == "" {
 		code = slash.CodeUnknownSlash
@@ -1756,6 +1774,14 @@ func slashChannelMessageKey(code string) string {
 		return "slash.error.invalidQuickActionScope"
 	case slash.CodePermissionDenied:
 		return "slash.error.permissionDenied"
+	case slash.CodePermissionSessionRequired:
+		return "slash.error.permissionSessionRequired"
+	case slash.CodePermissionModeUnsupported:
+		return "slash.error.permissionModeUnsupported"
+	case slash.CodePermissionModeUnavailable:
+		return "slash.error.permissionModeUnavailable"
+	case slash.CodePermissionModeFailed:
+		return "slash.error.permissionModeFailed"
 	case slash.CodeReservedSkillMetadata:
 		return "slash.error.reservedSkillMetadata"
 	case QueueCommandCodeNoActiveRun:
@@ -2181,6 +2207,7 @@ func contentPartText(part turn.ContentPart) string {
 type agentStreamEnvelope struct {
 	Type     string              `json:"type"`
 	Delta    string              `json:"delta"`
+	Code     string              `json:"code"`
 	Error    string              `json:"error"`
 	Message  string              `json:"message"`
 	Data     json.RawMessage     `json:"data"`
@@ -2200,7 +2227,10 @@ type agentStreamEnvelope struct {
 	Speeches    json.RawMessage `json:"speeches"`
 }
 
-func mapStreamChunkToChannelEvents(chunk json.RawMessage) ([]channel.StreamEvent, []turn.ModelMessage, error) {
+// mapStreamChunkToChannelEvents converts one agent stream chunk. An error
+// event whose code has copy in t is shown with that copy; any other error keeps
+// its own text.
+func mapStreamChunkToChannelEvents(chunk json.RawMessage, t *i18n.Localizer) ([]channel.StreamEvent, []turn.ModelMessage, error) {
 	if len(chunk) == 0 {
 		return nil, nil, nil
 	}
@@ -2359,6 +2389,12 @@ func mapStreamChunkToChannelEvents(chunk json.RawMessage) ([]channel.StreamEvent
 				},
 			},
 		}, finalMessages, nil
+	case "retry":
+		// The agent discards the failed attempt and regenerates the reply;
+		// the terminal messages carry only the surviving attempt.
+		return []channel.StreamEvent{
+			{Type: channel.StreamEventReset},
+		}, finalMessages, nil
 	case "processing_started":
 		return []channel.StreamEvent{
 			{Type: channel.StreamEventProcessingStarted},
@@ -2379,19 +2415,19 @@ func mapStreamChunkToChannelEvents(chunk json.RawMessage) ([]channel.StreamEvent
 			},
 		}, finalMessages, nil
 	case "error":
-		streamError := strings.TrimSpace(envelope.Error)
-		if streamError == "" {
-			streamError = strings.TrimSpace(envelope.Message)
+		code := apperror.Code(strings.TrimSpace(envelope.Code))
+		if text, ok := channel.ErrorCodeText(t, code, nil); ok {
+			return []channel.StreamEvent{
+				{
+					Type:      channel.StreamEventError,
+					Error:     text,
+					ErrorCode: string(code),
+				},
+			}, finalMessages, nil
 		}
-		if streamError == "" {
-			streamError = "stream error"
-		}
-		return []channel.StreamEvent{
-			{
-				Type:  channel.StreamEventError,
-				Error: streamError,
-			},
-		}, finalMessages, nil
+		// Without a catalogued code the event is a failed run; its own text is
+		// never shown.
+		return []channel.StreamEvent{channel.RunFailureEvent(t, apperror.CodeRuntimeRunFailed, nil)}, finalMessages, nil
 	default:
 		return nil, finalMessages, nil
 	}
@@ -3879,6 +3915,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 		close(errCh)
 	}()
 
+	loc := p.localizer(ctx, identity.BotID)
 	var finalMessages []turn.ModelMessage
 	var continuationErr error
 	accepted := false
@@ -3900,7 +3937,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 				}
 				continue
 			}
-			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk)
+			events, messages, parseErr := mapStreamChunkToChannelEvents(chunk, loc)
 			if parseErr != nil {
 				if p.logger != nil {
 					p.logger.WarnContext(ctx, "approval stream chunk parse failed", slog.Any("error", parseErr))
@@ -3912,7 +3949,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 			}
 			for _, event := range events {
 				if isUserInputEvent(&event) {
-					event.ToolCall.Locale = p.localizer(ctx, identity.BotID).Locale()
+					event.ToolCall.Locale = loc.Locale()
 				}
 				// Approval continuations should not flash transient "running"
 				// tool messages in IM. If tool visibility is enabled, the
@@ -3942,14 +3979,13 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 
 	if continuationErr != nil {
 		if !accepted {
-			_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: p.localizer(ctx, identity.BotID).T("cmd.userInput.submitFailed")})
+			_ = stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: loc.T("cmd.userInput.submitFailed")})
 			return continuationErr
 		}
 		if p.logger != nil {
 			p.logger.WarnContext(ctx, "accepted decision delivery interrupted", slog.Any("error", continuationErr))
 		}
-		public, _ := apperror.PublicFrom(apperror.Wrap(apperror.CodeAgentResponseInterrupted, continuationErr, nil), "")
-		if err := stream.Push(ctx, channel.StreamEvent{Type: channel.StreamEventError, Error: public.Detail}); err != nil {
+		if err := stream.Push(ctx, channel.RunFailureEvent(loc, apperror.CodeAgentResponseInterrupted, nil)); err != nil {
 			return err
 		}
 		return closeStream()
@@ -4123,7 +4159,7 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 		mode = sessionpkg.TypeChat
 		agentID = firstNewSessionAgentArg(args)
 		if agentID != "" && isGroupConversation(msg) {
-			return NewSessionSpec{}, groupChatExternalAgentUnsupportedFeedback()
+			return NewSessionSpec{}, apperror.New(apperror.CodeGroupChatACPUnsupported, nil)
 		}
 	case "discuss":
 		if isLocalChannelType(msg.Channel) {
@@ -4187,14 +4223,7 @@ func resolveNewSessionSpecParsed(parsed command.ParsedCommand, msg channel.Inbou
 	}
 	profile := resolveACPProfile(profiles, agentID)
 	if !profile.Known {
-		return NewSessionSpec{}, agentfeedback.New(
-			agentfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotFound",
-			fmt.Sprintf("Unknown ACP agent %q.", agentID),
-			map[string]string{"agent_id": agentID},
-		)
+		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
 	}
 	agentID = profile.ID
 	spec.Runtime = sessionpkg.RuntimeACPAgent
@@ -4264,8 +4293,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	parsed := invocation.Parsed
 	spec, err := resolveNewSessionSpecParsed(parsed, msg, p.acpProfiles)
 	if err != nil {
-		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+		if public := externalAgentError(err); public != nil {
+			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -4274,23 +4303,23 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	spec, err = p.applyDefaultChatRuntimeToNewSessionSpec(ctx, identity, msg, spec)
 	if err != nil {
-		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+		if public := externalAgentError(err); public != nil {
+			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 		}
 		return err
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent {
 		if err := p.validateACPNewSessionSpec(ctx, identity, spec); err != nil {
-			if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+			if public := externalAgentError(err); public != nil {
+				return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 			}
 			return err
 		}
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
 		if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
-			if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-				return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+			if public := externalAgentError(err); public != nil {
+				return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 			}
 			return err
 		}
@@ -4355,8 +4384,8 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		if p.logger != nil {
 			p.logger.WarnContext(ctx, "create new session via /new command failed", slog.Any("error", err))
 		}
-		if feedback := externalAgentFeedbackFromError(err); feedback != nil {
-			return p.sendExternalAgentFeedbackError(ctx, sender, msg, identity, feedback)
+		if public := externalAgentError(err); public != nil {
+			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
 		}
 		return sender.Send(ctx, channel.OutboundMessage{
 			Target:  target,
@@ -4514,17 +4543,10 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 		agentID = defaultRuntime
 	}
 	if agentID == "" {
-		return NewSessionSpec{}, agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_agent_id",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			"External agent is selected as the default chat runtime, but no agent is configured.",
-			nil,
-		)
+		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	if p.permissionChecker == nil {
-		return NewSessionSpec{}, p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
+		return NewSessionSpec{}, externalAgentExecDenied("permission_checker_unavailable")
 	}
 	if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
 		return NewSessionSpec{}, err
@@ -4549,14 +4571,7 @@ func (p *ChannelInboundProcessor) applyDefaultChatRuntimeToNewSessionSpec(ctx co
 
 	profile := resolveACPProfile(p.acpProfiles, agentID)
 	if !profile.Known {
-		return NewSessionSpec{}, agentfeedback.New(
-			agentfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotFound",
-			"Configured ACP agent was not found.",
-			map[string]string{"agent_id": agentID},
-		)
+		return NewSessionSpec{}, apperror.New(apperror.CodeACPAgentNotFound, nil)
 	}
 	agentID = profile.ID
 	projectMode := strings.TrimSpace(defaults.ProjectMode)
@@ -4633,39 +4648,18 @@ func metadataString(metadata map[string]any, key string) string {
 func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context, identity InboundIdentity, spec NewSessionSpec) error {
 	agentID := acpNewSessionAgentID(spec)
 	if agentID == "" {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_agent_id",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			"ACP agent id is required for external-agent sessions.",
-			nil,
-		)
+		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	profile := resolveACPProfile(p.acpProfiles, agentID)
 	if !profile.Known {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotFound,
-			"unknown_agent",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotFound",
-			"Configured ACP agent was not found.",
-			map[string]string{"agent_id": agentID},
-		)
+		return apperror.New(apperror.CodeACPAgentNotFound, nil)
 	}
 	projectPath := strings.TrimSpace(metadataString(spec.Metadata, "project_path"))
 	if projectPath == "" {
 		projectPath = sessionpkg.DefaultACPProjectPath
 	}
 	if !strings.HasPrefix(projectPath, "/") {
-		return agentfeedback.New(
-			agentfeedback.CodeProjectPathInvalid,
-			"project_path_must_be_absolute",
-			http.StatusBadRequest,
-			"chat.externalAgent.projectPathInvalid",
-			"ACP project path must be absolute.",
-			map[string]string{"agent_id": agentID},
-		)
+		return apperror.New(apperror.CodeACPProjectPathInvalid, nil)
 	}
 	projectMode := strings.TrimSpace(metadataString(spec.Metadata, "acp_project_mode"))
 	if projectMode == "" {
@@ -4674,23 +4668,9 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	switch projectMode {
 	case sessionpkg.DefaultACPProjectMode:
 	case "none":
-		return agentfeedback.New(
-			agentfeedback.CodeProjectModeInvalid,
-			"none_not_supported_for_new_session",
-			http.StatusBadRequest,
-			"chat.externalAgent.projectModeInvalid",
-			"acp_project_mode=none is not supported for channel-created ACP sessions.",
-			map[string]string{"agent_id": agentID, "project_mode": projectMode},
-		)
+		return apperror.New(apperror.CodeACPProjectModeInvalid, nil)
 	default:
-		return agentfeedback.New(
-			agentfeedback.CodeProjectModeInvalid,
-			"unknown_project_mode",
-			http.StatusBadRequest,
-			"chat.externalAgent.projectModeInvalid",
-			"Unknown ACP project mode.",
-			map[string]string{"agent_id": agentID, "project_mode": projectMode},
-		)
+		return apperror.New(apperror.CodeACPProjectModeInvalid, nil)
 	}
 	if p == nil || p.acpAgentSetup == nil {
 		return nil
@@ -4699,26 +4679,15 @@ func (p *ChannelInboundProcessor) validateACPNewSessionSpec(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	setup := p.acpProfiles.ResolveACPSetupPreflight(profile.ID, metadata)
+	setup, err := p.acpProfiles.ResolveACPSetupPreflight(ctx, identity.BotID, spec.BotAgentID, profile.ID, metadata)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(spec.BotAgentID) == "" && !setup.Enabled {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotEnabled,
-			"agent_not_enabled",
-			http.StatusForbidden,
-			"chat.externalAgent.agentNotEnabled",
-			"ACP agent is not enabled for this bot.",
-			map[string]string{"agent_id": agentID},
-		)
+		return apperror.New(apperror.CodeACPAgentNotEnabled, nil)
 	}
 	if field := setup.MissingManagedField; field != nil {
-		return agentfeedback.New(
-			agentfeedback.CodeAgentNotConfigured,
-			"missing_managed_field",
-			http.StatusBadRequest,
-			"chat.externalAgent.agentNotConfigured",
-			"ACP agent setup is incomplete.",
-			map[string]string{"agent_id": agentID, "field_id": field.ID, "field_label": field.Label},
-		)
+		return apperror.New(apperror.CodeACPAgentNotConfigured, nil)
 	}
 	return nil
 }
@@ -4729,35 +4698,35 @@ func (p *ChannelInboundProcessor) requireWorkspaceExecForExternalAgent(ctx conte
 
 func (p *ChannelInboundProcessor) requireWorkspaceExecForPrincipal(ctx context.Context, botID, accountUserID string) error {
 	if p.permissionChecker == nil {
-		return p.missingWorkspaceExecFeedback("permission_checker_unavailable", "Current identity cannot be verified for workspace execution.")
+		return externalAgentExecDenied("permission_checker_unavailable")
 	}
 	accountUserID = strings.TrimSpace(accountUserID)
 	if accountUserID == "" {
-		return p.missingWorkspaceExecFeedback("account_user_unbound", "Current identity is not linked to an account with workspace execution permission.")
+		return externalAgentExecDenied("account_user_unbound")
 	}
 	allowed, err := p.permissionChecker.HasBotPermission(ctx, strings.TrimSpace(botID), accountUserID, bots.PermissionWorkspaceExec)
 	if err != nil {
 		return err
 	}
 	if !allowed {
-		return p.missingWorkspaceExecFeedback("missing_workspace_exec", "Current identity does not have workspace execution permission, so it cannot use an external agent as the chat runtime.")
+		return externalAgentExecDenied("missing_workspace_exec")
 	}
 	return nil
 }
 
-func (p *ChannelInboundProcessor) requireExternalRuntimeActor(_ context.Context, identity InboundIdentity, runtimeOwnerAccountID string) error {
+func requireExternalRuntimeActor(identity InboundIdentity, runtimeOwnerAccountID string) error {
 	actorUserID := strings.TrimSpace(identity.UserID)
 	runtimeOwnerAccountID = strings.TrimSpace(runtimeOwnerAccountID)
 	if runtimeOwnerAccountID == "" {
 		return sessionpkg.ErrACPRuntimeOwnerMissing
 	}
 	if actorUserID == "" {
-		return p.missingWorkspaceExecFeedback("account_user_unbound", "Current identity is not linked to an account with workspace execution permission.")
+		return externalAgentExecDenied("account_user_unbound")
 	}
 	if actorUserID == runtimeOwnerAccountID {
 		return nil
 	}
-	return p.missingWorkspaceExecFeedback("runtime_owner_mismatch", "This ACP runtime belongs to another user.")
+	return externalAgentExecDenied("runtime_owner_mismatch")
 }
 
 // sessionUsesExternalRuntime reports a session that runs on an agent runtime with
@@ -4798,31 +4767,25 @@ func isGroupConversation(msg channel.InboundMessage) bool {
 	return !isLocalChannelType(msg.Channel) && !channel.IsPrivateConversationType(msg.Conversation.Type)
 }
 
-func groupChatExternalAgentUnsupportedFeedback() *agentfeedback.Error {
-	return agentfeedback.New(
-		agentfeedback.CodeGroupChatUnsupported,
-		"group_chat_acp_unsupported",
-		http.StatusBadRequest,
-		"chat.externalAgent.groupChatUnsupported",
-		"Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex to create a discuss external-agent session.",
-		nil,
-	)
+// externalAgentExecDenied is the error for a caller that may not run an
+// External Agent in the bot's workspace. reason stays in the cause for the
+// logs; an identity that is not linked to an account is pointed at /link.
+func externalAgentExecDenied(reason string) error {
+	cause := errors.New("workspace execution denied: " + reason)
+	if reason == "account_user_unbound" {
+		// The bot owner's IM identity is usually just not linked yet; a bare
+		// "no permission" leaves them nothing to act on, so point at /link.
+		return apperror.Wrap(apperror.CodeExternalAgentAccountUnbound, cause, map[string]string{"link": command.CmdRef("link")})
+	}
+	return apperror.Wrap(apperror.CodeNoWorkspaceExec, cause, nil)
 }
 
-func (*ChannelInboundProcessor) missingWorkspaceExecFeedback(reason, message string) *agentfeedback.Error {
-	return agentfeedback.New(
-		agentfeedback.CodeNoWorkspaceExec,
-		reason,
-		http.StatusForbidden,
-		"chat.externalAgent.noWorkspaceExec",
-		message,
-		nil,
-	)
-}
-
-func (p *ChannelInboundProcessor) sendExternalAgentFeedbackError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
-	feedback := externalAgentFeedbackFromError(err)
-	if feedback == nil {
+// sendExternalAgentError replies with the External Agent error err carries,
+// rendered from the channel copy for its code. Any other error is returned
+// unchanged.
+func (p *ChannelInboundProcessor) sendExternalAgentError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
+	public := externalAgentError(err)
+	if public == nil {
 		return err
 	}
 	target := strings.TrimSpace(msg.ReplyTarget)
@@ -4830,36 +4793,38 @@ func (p *ChannelInboundProcessor) sendExternalAgentFeedbackError(ctx context.Con
 		return err
 	}
 	loc := p.localizer(ctx, identity.BotID)
-	out := renderResult(&command.Result{
-		Text:          strings.TrimSpace(feedback.Message),
-		Locale:        loc.Locale(),
-		FeedbackError: feedback,
-	}, RenderContext{Caps: p.channelCaps(msg.Channel), T: loc})
+	out := applyMessageFormat(channel.Message{Text: externalAgentErrorText(public, loc)}, p.channelCaps(msg.Channel))
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
-func externalAgentFeedbackFromError(err error) *agentfeedback.Error {
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) {
-		return feedback
+// externalAgentError returns err as an External Agent error, translating the
+// thread errors a session create or lookup ends with, or nil when err is not
+// one.
+func externalAgentError(err error) error {
+	if code := apperror.CodeOf(err); code != "" {
+		if apperror.IsExternalAgentCode(code) {
+			return err
+		}
+		return nil
 	}
+	var code apperror.Code
 	switch {
-	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired):
-		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "missing_agent_id", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
+	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired),
+		errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
+		code = apperror.CodeACPAgentNotConfigured
 	case errors.Is(err, sessionpkg.ErrACPUnknownAgent):
-		return agentfeedback.New(agentfeedback.CodeAgentNotFound, "unknown_agent", http.StatusBadRequest, "chat.externalAgent.agentNotFound", err.Error(), nil)
+		code = apperror.CodeACPAgentNotFound
 	case errors.Is(err, sessionpkg.ErrACPAgentNotEnabled):
-		return agentfeedback.New(agentfeedback.CodeAgentNotEnabled, "agent_not_enabled", http.StatusForbidden, "chat.externalAgent.agentNotEnabled", err.Error(), nil)
-	case errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
-		return agentfeedback.New(agentfeedback.CodeAgentNotConfigured, "agent_not_configured", http.StatusBadRequest, "chat.externalAgent.agentNotConfigured", err.Error(), nil)
+		code = apperror.CodeACPAgentNotEnabled
 	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
-		return agentfeedback.New(agentfeedback.CodeRuntimeOwnerMissing, "missing_runtime_owner", http.StatusForbidden, "chat.externalAgent.runtimeOwnerMissing", err.Error(), nil)
+		code = apperror.CodeACPRuntimeOwnerMissing
 	default:
 		return nil
 	}
+	return apperror.Wrap(code, err, nil)
 }
 
 func currentContextForNewSessionSpec(cc command.CurrentContext, spec NewSessionSpec, profiles turn.ACPProfileResolver) command.CurrentContext {
@@ -5030,9 +4995,7 @@ func (p *ChannelInboundProcessor) handleStatusCommand(
 		SessionID:         sessionID,
 	})
 	if execErr != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "execute /status command failed", slog.Any("error", execErr))
-		}
+		p.recordCommandFailure(ctx, msg, identity, execErr)
 		reply = friendlyOps(loc, "ops.verb.loadStatus")
 	}
 

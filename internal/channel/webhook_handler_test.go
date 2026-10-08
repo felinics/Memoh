@@ -14,6 +14,7 @@ import (
 type fakeWebhookAdapter struct {
 	channelType        ChannelType
 	ackDisabledWebhook bool
+	err                error
 	calls              []struct {
 		cfg    ChannelConfig
 		method string
@@ -35,6 +36,9 @@ func (a *fakeWebhookAdapter) HandleWebhook(ctx context.Context, cfg ChannelConfi
 		cfg    ChannelConfig
 		method string
 	}{cfg: cfg, method: r.Method})
+	if a.err != nil {
+		return a.err
+	}
 	if handler != nil {
 		if err := handler(ctx, cfg, InboundMessage{
 			Channel: cfg.ChannelType,

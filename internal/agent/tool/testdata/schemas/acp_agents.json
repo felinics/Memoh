@@ -1,0 +1,11 @@
+{
+  "list_acp_agents": {
+    "properties": {
+      "agent_id": {
+        "description": "Optional ACP agent id from the catalog. When set, the response includes that agent's models and reasoning efforts.",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

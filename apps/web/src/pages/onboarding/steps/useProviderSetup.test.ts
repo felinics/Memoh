@@ -18,7 +18,11 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({
+    t: (key: string) => key,
+    // Only the probe failure codes have copy in this mock.
+    te: (key: string) => key.startsWith('errors.agent.provider_'),
+  }),
 }))
 
 vi.mock('@pinia/colada', async () => {
@@ -161,6 +165,29 @@ describe('useProviderSetup', () => {
       body: { default_compatibilities: ['tool-call', 'reasoning'] },
       throwOnError: true,
     })
+    app.unmount()
+  })
+
+  it.each([
+    [{ status: 'auth_error', reachable: true, code: 'agent.provider_auth_failed' }, 'authError', 'errors.agent.provider_auth_failed'],
+    [{ status: 'error', reachable: false, code: 'agent.provider_unreachable' }, 'unreachable', 'errors.agent.provider_unreachable'],
+    [{ status: 'error', reachable: true, code: 'provider.future_code' }, 'http', ''],
+    [{ status: 'error', reachable: false }, 'unreachable', ''],
+  ])('names a failed test %j by its code copy only', async (result, state, detail) => {
+    mocks.getProviderTemplates.mockResolvedValue({
+      data: [{ id: 'template-id', domain: 'llm', key: 'deepseek' }],
+    })
+    mocks.postProviderFromTemplate.mockResolvedValue({ data: { id: 'provider-id' } })
+    mocks.testProvider.mockResolvedValue({ data: result })
+    const { app, ready, setup } = mountSetup(preset)
+    setup.formValues.value.api_key = 'sk-test'
+
+    await setup.saveAndNext()
+
+    expect(ready).not.toHaveBeenCalled()
+    expect(mocks.importModels).not.toHaveBeenCalled()
+    expect(setup.errorState.value).toBe(state)
+    expect(setup.errorDetail.value).toBe(detail)
     app.unmount()
   })
 

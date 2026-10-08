@@ -17,8 +17,6 @@ const (
 	MethodThreadResume          = "thread/resume"
 	MethodThreadSettingsUpdate  = "thread/settings/update"
 	MethodThreadFork            = "thread/fork"
-	MethodThreadRead            = "thread/read"
-	MethodThreadUnsubscribe     = "thread/unsubscribe"
 	MethodThreadGoalSet         = "thread/goal/set"
 	MethodThreadGoalGet         = "thread/goal/get"
 	MethodThreadGoalClear       = "thread/goal/clear"
@@ -90,10 +88,6 @@ func NewResponseForMethod(method string) (resp any, ok bool) {
 		return new(ThreadSettingsUpdateResponse), true
 	case "thread/fork":
 		return new(ThreadForkResponse), true
-	case "thread/read":
-		return new(ThreadReadResponse), true
-	case "thread/unsubscribe":
-		return new(ThreadUnsubscribeResponse), true
 	case "thread/goal/set":
 		return new(ThreadGoalSetResponse), true
 	case "thread/goal/get":

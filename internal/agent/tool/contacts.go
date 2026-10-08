@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/messaging"
 )
 
@@ -52,36 +53,26 @@ func (*ContactsProvider) Usage(_ context.Context, session SessionContext, availa
 	return usageSection("Contacts & Messaging", parts)
 }
 
-func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p.contacts == nil {
 		return nil, nil
 	}
 	sess := session
-	return []sdk.Tool{
+	return []toolexec.Tool{
 		{
 			Name:        ToolGetContacts().String(),
 			Description: "List all known contacts and conversations for the current bot. Returns platform, conversation type, reply target, and metadata for each route.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"platform": map[string]any{
-						"type":        "string",
-						"description": "Filter by channel platform (e.g. telegram, feishu). Returns all platforms when omitted.",
-					},
-				},
-				"required": []string{},
-			},
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				args := inputAsMap(input)
+			Parameters:  toolexec.SchemaFor[getContactsArgs](),
+			Execute: toolexec.Typed(func(ctx *toolexec.ToolExecContext, args getContactsArgs) (sdk.ToolOutput, error) {
 				botID := strings.TrimSpace(sess.BotID)
 				if botID == "" {
-					return nil, errors.New("bot_id is required")
+					return sdk.ToolOutput{}, errors.New("bot_id is required")
 				}
 				routes, err := p.contacts.ListContacts(ctx.Context, botID)
 				if err != nil {
-					return nil, err
+					return sdk.ToolOutput{}, err
 				}
-				platformFilter := strings.ToLower(strings.TrimSpace(FirstStringArg(args, "platform")))
+				platformFilter := strings.ToLower(strings.TrimSpace(args.Platform))
 				contacts := make([]map[string]any, 0, len(routes))
 				for _, r := range routes {
 					if platformFilter != "" && !strings.EqualFold(r.Platform, platformFilter) {
@@ -108,13 +99,17 @@ func (p *ContactsProvider) Tools(_ context.Context, session SessionContext) ([]s
 					}
 					contacts = append(contacts, entry)
 				}
-				return map[string]any{
+				return toolexec.OutputFromValue(map[string]any{
 					"ok":       true,
 					"bot_id":   botID,
 					"count":    len(contacts),
 					"contacts": contacts,
-				}, nil
-			},
+				}), nil
+			}),
 		},
 	}, nil
+}
+
+type getContactsArgs struct {
+	Platform string `json:"platform,omitempty" jsonschema:"Filter by channel platform (e.g. telegram, feishu). Returns all platforms when omitted."`
 }

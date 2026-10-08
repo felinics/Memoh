@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/embedded"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type EmbeddedWebHandler struct {
@@ -86,7 +87,8 @@ func (h *EmbeddedWebHandler) serveKnownGzip(c echo.Context, targetPath, contentT
 	content, err := fs.ReadFile(h.webFS, gzipPath)
 	if err != nil {
 		if targetPath == "index.html" {
-			h.log.ErrorContext(c.Request().Context(), "read embedded index.html.gz failed", slog.Any("error", err))
+			// The build embeds the index; without it no page can be served.
+			return errs.Wrap(err, "read embedded index.html.gz")
 		}
 		return echo.ErrNotFound
 	}

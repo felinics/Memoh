@@ -37,6 +37,7 @@ func Open(ctx context.Context, logger *slog.Logger, cfg config.PGVectorConfig) (
 	if err != nil {
 		return nil, fmt.Errorf("pgvector: connect: %w", err)
 	}
+	telemetry.RecordPoolStats(pool)
 	return &Store{
 		pool:    pool,
 		queries: pgvectorsqlc.New(pool),

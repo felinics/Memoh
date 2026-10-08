@@ -12,6 +12,7 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -67,12 +68,12 @@ func TestToolApprovalHandlerLimitsForcedApprovalRejectionReason(t *testing.T) {
 	result, err := handler(native.ContextWithHookForcedApproval(context.Background(), large), sdk.ToolCall{
 		ToolCallID: "call-1",
 		ToolName:   "write",
-		Input:      map[string]any{},
+		Input:      toolexec.ArgumentsFromValue(map[string]any{}),
 	})
 	if err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
-	if result.Decision != sdk.ToolApprovalDecisionRejected {
+	if result.Decision != toolexec.ToolApprovalDecisionRejected {
 		t.Fatalf("decision = %q, want rejected", result.Decision)
 	}
 	if len(result.Reason) >= len(large) {
@@ -98,12 +99,12 @@ func TestToolApprovalPolicyDenyWinsOverHookForcedApproval(t *testing.T) {
 	result, err := handler(native.ContextWithHookForcedApproval(context.Background(), "hook asks for review"), sdk.ToolCall{
 		ToolCallID: "call-1",
 		ToolName:   "read",
-		Input:      map[string]any{"path": "/data/file.txt"},
+		Input:      toolexec.ArgumentsFromValue(map[string]any{"path": "/data/file.txt"}),
 	})
 	if err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
-	if result.Decision != sdk.ToolApprovalDecisionRejected || result.Reason != toolapproval.PolicyDeniedReason {
+	if result.Decision != toolexec.ToolApprovalDecisionRejected || result.Reason != toolapproval.PolicyDeniedReason {
 		t.Fatalf("result = %+v, want policy rejection", result)
 	}
 }
@@ -138,16 +139,16 @@ func TestToolApprovalHandlerOnlyRecoversMissingWorkspaceTarget(t *testing.T) {
 			result, err := handler(context.Background(), sdk.ToolCall{
 				ToolCallID: "call-1",
 				ToolName:   "exec",
-				Input: map[string]any{
+				Input: toolexec.ArgumentsFromValue(map[string]any{
 					"command":   "node --version",
 					"target_id": "server_workspace",
-				},
+				}),
 			})
 			if tt.wantApproved {
 				if err != nil {
 					t.Fatalf("handler returned error: %v", err)
 				}
-				if result.Decision != sdk.ToolApprovalDecisionApproved {
+				if result.Decision != toolexec.ToolApprovalDecisionApproved {
 					t.Fatalf("decision = %q, want approved", result.Decision)
 				}
 				return
@@ -279,5 +280,54 @@ func TestServiceLimitToolResultTextUsesAgentLimits(t *testing.T) {
 	}
 	if !strings.Contains(got, "[memoh pruned]") {
 		t.Fatalf("tool result text missing prune marker:\n%s", got)
+	}
+}
+
+type workspaceTargetPolicyStubResolver struct {
+	policy toolapproval.WorkspaceTargetPolicy
+}
+
+func (r workspaceTargetPolicyStubResolver) ResolveWorkspaceTargetPolicy(context.Context, string, string) (toolapproval.WorkspaceTargetPolicy, error) {
+	return r.policy, nil
+}
+
+// The policy resolves the workspace target on a copy of the call arguments.
+// A bypass must hand that copy back so the tool executes on the target the
+// policy evaluated and the persisted call names it.
+func TestToolApprovalHandlerPinsWorkspaceTargetOnBypass(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.DiscardHandler)
+	approvalService := toolapproval.NewService(log, nil, nil)
+	approvalService.SetWorkspaceTargetPolicyResolver(workspaceTargetPolicyStubResolver{policy: toolapproval.WorkspaceTargetPolicy{
+		TargetID: "canonical-target",
+		Kind:     "remote",
+		Name:     "Office Mac",
+		Config:   toolapproval.PolicyConfig{Enabled: true, Read: toolapproval.FilePolicy{Mode: toolapproval.PolicyModeAllow}},
+	}})
+	resolver := &Service{toolApproval: approvalService, logger: log}
+	handler := resolver.buildToolApprovalHandler(baseRunConfigParams{
+		BotID:       "bot-1",
+		SessionID:   "session-1",
+		SessionType: sessionmode.Chat,
+	})
+
+	result, err := handler(context.Background(), sdk.ToolCall{
+		ToolCallID: "call-1",
+		ToolName:   "read",
+		Input:      toolexec.ArgumentsFromValue(map[string]any{"path": "/data/file.txt", "target_id": "requested-target"}),
+	})
+	if err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if result.Decision != toolexec.ToolApprovalDecisionApproved {
+		t.Fatalf("decision = %q, want approved", result.Decision)
+	}
+	if result.Input == nil {
+		t.Fatal("approval did not hand back the evaluated arguments")
+	}
+	args, _ := toolexec.ArgumentsValue(*result.Input).(map[string]any)
+	if args["target_id"] != "canonical-target" || args["path"] != "/data/file.txt" {
+		t.Fatalf("approved arguments = %#v, want the canonical target pinned", args)
 	}
 }

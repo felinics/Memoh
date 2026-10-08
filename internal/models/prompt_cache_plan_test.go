@@ -7,6 +7,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func anthropicTestModel() *sdk.Model {
@@ -19,7 +20,7 @@ func TestApplyPromptCacheZeroPlanMatchesLegacy(t *testing.T) {
 
 	model := anthropicTestModel()
 	messages := []sdk.Message{sdk.UserMessage("hello"), sdk.AssistantMessage("hi")}
-	tools := []sdk.Tool{{Name: "calc"}}
+	tools := []toolexec.Tool{{Name: "calc"}}
 
 	legacySystem, legacyMessages, legacyTools := ApplyPromptCache(model, "5m", "system", messages, tools)
 	planSystem, planMessages, planTools, _, _ := ApplyPromptCacheWithPlan(model, "5m", contextfrag.CachePlan{}, "system", messages, tools)
@@ -90,7 +91,7 @@ func TestApplyPromptCachePlanSkipsUnsupportedLastPartAndFindsEarlierBreakpoint(t
 	model := anthropicTestModel()
 	messages := []sdk.Message{
 		sdk.UserMessage("stable text message"),
-		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "search", Result: "ok"}),
+		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "search", Result: toolexec.OutputFromValue("ok")}),
 		sdk.UserMessage("volatile question"),
 	}
 	// StableMessageCount=2 marks messages[0:2] stable; messages[1] ends in a
@@ -123,10 +124,10 @@ func TestApplyPromptCachePlanNoEligibleMessageReportsZero(t *testing.T) {
 		{
 			Role: sdk.MessageRoleAssistant,
 			Content: []sdk.MessagePart{
-				sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "search", Input: map[string]any{}},
+				sdk.ToolCallPart{ToolCallID: "call-1", ToolName: "search", Input: toolexec.ArgumentsFromValue(map[string]any{})},
 			},
 		},
-		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "search", Result: "ok"}),
+		sdk.ToolMessage(sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "search", Result: toolexec.OutputFromValue("ok")}),
 	}
 	plan := contextfrag.CachePlan{StableMessageCount: 2}
 

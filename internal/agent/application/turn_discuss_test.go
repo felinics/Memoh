@@ -12,8 +12,10 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/partmeta"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -55,8 +57,8 @@ type countingDiscussLifecycleProvider struct {
 
 func (p *countingDiscussLifecycleProvider) DoStream(
 	_ context.Context,
-	params sdk.GenerateParams,
-) (*sdk.StreamResult, error) {
+	params sdk.Request,
+) (<-chan sdk.StreamPart, error) {
 	p.mu.Lock()
 	p.calls++
 	p.params = params
@@ -931,4 +933,50 @@ func (f *burstAgentStreamer) Stream(ctx context.Context, _ native.RunConfig) <-c
 		}
 	}()
 	return ch
+}
+
+// Discuss rows carry the stored content shape (argument objects, output
+// values, nested annotations). They are typed through the codec, never
+// decoded as SDK JSON.
+func TestDiscussMessagesToSDKTypesStoredShape(t *testing.T) {
+	t.Parallel()
+
+	messages := discussMessagesToSDK([]turn.DiscussMessage{
+		{Role: "assistant", Content: "fallback", RawContent: json.RawMessage(`[{"type":"tool-call","toolCallId":"call-1","toolName":"exec","input":{"command":"ls && pwd"},"providerMetadata":{"approval":{"approval_id":"a1","status":"approved"}}}]`)},
+		{Role: "tool", Content: "fallback", RawContent: json.RawMessage(`[{"type":"tool-result","toolCallId":"call-1","toolName":"exec","result":{"stdout":"ok"}}]`)},
+		{Role: "user", Content: "plain"},
+	})
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d, want 3", len(messages))
+	}
+	call, ok := messages[0].Content[0].(sdk.ToolCallPart)
+	if !ok {
+		t.Fatalf("first part = %#v, want a tool call", messages[0].Content[0])
+	}
+	if args, _ := toolexec.ArgumentsValue(call.Input).(map[string]any); args["command"] != "ls && pwd" {
+		t.Fatalf("tool call input = %#v", toolexec.ArgumentsValue(call.Input))
+	}
+	if approval, ok := partmeta.Object(call.ProviderMetadata, partmeta.KeyApproval); !ok || approval["status"] != "approved" {
+		t.Fatalf("approval annotation = %#v, want the stored annotation typed", call.ProviderMetadata)
+	}
+	result, ok := messages[1].Content[0].(sdk.ToolResultPart)
+	if !ok {
+		t.Fatalf("second part = %#v, want a tool result", messages[1].Content[0])
+	}
+	if out, _ := toolexec.OutputValue(result.Result).(map[string]any); out["stdout"] != "ok" {
+		t.Fatalf("tool result output = %#v", toolexec.OutputValue(result.Result))
+	}
+	if messages[2].Role != sdk.MessageRoleUser || messageContentTextForTest(messages[2]) != "plain" {
+		t.Fatalf("plain message = %#v", messages[2])
+	}
+}
+
+func messageContentTextForTest(message sdk.Message) string {
+	var b strings.Builder
+	for _, part := range message.Content {
+		if text, ok := part.(sdk.TextPart); ok {
+			b.WriteString(text.Text)
+		}
+	}
+	return b.String()
 }

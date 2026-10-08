@@ -97,10 +97,7 @@ func newWriteDiffTestClient(t *testing.T, svc *writeDiffTestContainerService) *b
 func execWriteForTest(t *testing.T, svc *writeDiffTestContainerService, path, content string) map[string]any {
 	t.Helper()
 	provider := NewContainerProvider(nil, containerTestBridgeProvider{client: newWriteDiffTestClient(t, svc)}, nil, "")
-	out, err := provider.execWrite(context.Background(), SessionContext{BotID: "bot-1"}, map[string]any{
-		"path":    path,
-		"content": content,
-	})
+	out, err := provider.execWrite(context.Background(), SessionContext{BotID: "bot-1"}, writeArgs{Path: path, Content: content})
 	if err != nil {
 		t.Fatalf("execWrite error = %v", err)
 	}

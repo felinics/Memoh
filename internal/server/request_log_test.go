@@ -115,3 +115,81 @@ func TestServerRequestLogOmitsQuery(t *testing.T) {
 		})
 	}
 }
+
+// latency is the field an operator sorts by to find a slow request. Echo only
+// measures it when asked, and without that every line reads 0s.
+func TestServerRequestLogReportsLatency(t *testing.T) {
+	var logs bytes.Buffer
+	srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", requestLogTestHandler{
+		handle: func(c echo.Context) error {
+			time.Sleep(20 * time.Millisecond)
+			return c.NoContent(http.StatusNoContent)
+		},
+	})
+	srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	var entry struct {
+		Msg     string `json:"msg"`
+		Latency int64  `json:"latency"`
+	}
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if err := json.Unmarshal([]byte(line), &entry); err == nil && entry.Msg == "request" {
+			break
+		}
+	}
+	if entry.Msg != "request" {
+		t.Fatalf("no request line in %s", logs.String())
+	}
+	if got := time.Duration(entry.Latency); got < 20*time.Millisecond {
+		t.Errorf("latency = %v, want at least the 20ms the handler took", got)
+	}
+}
+
+type routeLogTestHandler struct{}
+
+func (routeLogTestHandler) Register(e *echo.Echo) {
+	e.GET("/bots/:bot_id/media/:asset_id", func(c echo.Context) error {
+		return c.NoContent(http.StatusNoContent)
+	})
+}
+
+// route is what an operator groups the access log by: the template the router
+// matched, not the concrete path with its IDs. A request that matched nothing
+// has no template to report.
+func TestServerRequestLogReportsRoute(t *testing.T) {
+	cases := []struct {
+		name      string
+		path      string
+		wantRoute string
+		wantField bool
+	}{
+		{name: "matched", path: "/bots/bot-1/media/file-1", wantRoute: "/bots/:bot_id/media/:asset_id", wantField: true},
+		{name: "unmatched", path: "/no-such-route/bot-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			srv := NewServer(logger.New(&logs, "info", "json"), ":0", "test-secret", routeLogTestHandler{})
+			srv.echo.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, tc.path, nil))
+
+			var entry map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var candidate map[string]any
+				if err := json.Unmarshal([]byte(line), &candidate); err == nil && candidate["msg"] == "request" {
+					entry = candidate
+					break
+				}
+			}
+			if entry == nil {
+				t.Fatalf("no request line in %s", logs.String())
+			}
+			route, ok := entry["route"]
+			if ok != tc.wantField || (ok && route != tc.wantRoute) {
+				t.Fatalf("route = %v (present %v), want %q (present %v)", route, ok, tc.wantRoute, tc.wantField)
+			}
+			if entry["uri"] != tc.path {
+				t.Fatalf("uri = %v, want %q", entry["uri"], tc.path)
+			}
+		})
+	}
+}

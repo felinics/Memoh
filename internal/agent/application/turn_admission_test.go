@@ -33,8 +33,8 @@ func (f *fakeTurnAdmitter) Admit(_ context.Context, input sessionruntime.AdmitIn
 	}, nil
 }
 
-func (*fakeTurnAdmitter) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) error {
-	return nil
+func (*fakeTurnAdmitter) FinishRunWithErrorCode(context.Context, sessionruntime.RunHandle, string, string) (sessionruntime.TerminalRun, error) {
+	return sessionruntime.TerminalRun{}, nil
 }
 
 func (*fakeTurnAdmitter) MarkInlineDecisionRun(string, string, string) {}

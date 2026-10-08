@@ -126,7 +126,7 @@ func TestResolveToolTargetRejectsTargetSwitchForWorkdirBoundSession(t *testing.T
 		WorkspaceTargetID: "workdir-computer",
 		WorkdirPath:       "/data/proj",
 	}
-	_, err := provider.resolveToolTarget(context.Background(), session, map[string]any{"target_id": "other-computer"})
+	_, err := provider.resolveToolTarget(context.Background(), session, "other-computer")
 	if err == nil {
 		t.Fatal("resolveToolTarget() with a foreign target_id must fail for a workdir-bound session")
 	}
@@ -154,7 +154,7 @@ func TestResolveToolTargetAllowsPinnedTargetForWorkdirBoundSession(t *testing.T)
 		WorkspaceTargetID: "workdir-computer",
 		WorkdirPath:       "/workspace/proj",
 	}
-	resolved, err := provider.resolveToolTarget(context.Background(), session, map[string]any{"target_id": "workdir-computer"})
+	resolved, err := provider.resolveToolTarget(context.Background(), session, "workdir-computer")
 	if err != nil {
 		t.Fatalf("resolveToolTarget() with the pinned target error = %v", err)
 	}
@@ -181,7 +181,7 @@ func TestResolveToolTargetAllowsNativeReadbackWithoutWorkdirPath(t *testing.T) {
 		WorkspaceTargetID: "workdir-computer",
 		WorkdirPath:       `C:\Users\alice\proj`,
 	}
-	resolved, err := provider.resolveToolTarget(context.Background(), session, map[string]any{"target_id": workspacepkg.WorkspaceTargetNative})
+	resolved, err := provider.resolveToolTarget(context.Background(), session, workspacepkg.WorkspaceTargetNative)
 	if err != nil {
 		t.Fatalf("resolveToolTarget() to the native workspace error = %v", err)
 	}
@@ -197,11 +197,11 @@ func TestWorkdirBoundToolDescriptionsTellTheModelTargetIsPinned(t *testing.T) {
 	t.Parallel()
 
 	provider := NewContainerProvider(nil, nil, nil, "")
-	bound := provider.workspaceTargetParameter(SessionContext{WorkdirPath: "/data/proj"})["description"].(string)
+	bound := workspaceTargetDescription(SessionContext{WorkdirPath: "/data/proj"})
 	if !strings.Contains(bound, "omit this parameter") {
 		t.Fatalf("workdir-bound target_id description = %q, want it to ask for omission", bound)
 	}
-	unbound := provider.workspaceTargetParameter(SessionContext{})["description"].(string)
+	unbound := workspaceTargetDescription(SessionContext{})
 	if strings.Contains(unbound, "bound to a workdir") {
 		t.Fatalf("unbound target_id description must not mention a workdir, got %q", unbound)
 	}

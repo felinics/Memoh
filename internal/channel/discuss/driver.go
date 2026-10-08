@@ -7,7 +7,6 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/channel"
-	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -31,7 +30,7 @@ type DiscussStreamBroadcaster interface {
 // DiscussDriverDeps holds dependencies injected into the DiscussDriver.
 type DiscussDriverDeps struct {
 	Turn           turn.Service
-	MessageService messagepkg.Service
+	MessageService HistoryReader
 	CursorStore    DiscussCursorStore
 	Artifacts      DiscussArtifactProvider
 	Broadcaster    DiscussStreamBroadcaster

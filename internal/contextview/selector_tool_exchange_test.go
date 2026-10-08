@@ -8,6 +8,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func historyMessageFrag(id string, msg sdk.Message) contextfrag.ContextFrag {
@@ -71,7 +72,7 @@ func continuationTailFixture() []contextfrag.ContextFrag {
 	parked := sdk.Message{Role: sdk.MessageRoleAssistant, Content: []sdk.MessagePart{
 		sdk.ReasoningPart{Format: sdk.ReasoningFormatOpenAIChat, Text: "need to touch the file"},
 		sdk.TextPart{Text: "creating it now"},
-		sdk.ToolCallPart{ToolCallID: "exec-1", ToolName: "exec", Input: map[string]any{"command": "touch /tmp/x"}},
+		sdk.ToolCallPart{ToolCallID: "exec-1", ToolName: "exec", Input: toolexec.ArgumentsFromValue(map[string]any{"command": "touch /tmp/x"})},
 	}}
 	return []contextfrag.ContextFrag{
 		historyMessageFrag("h0", sdk.UserMessage("earlier question")),

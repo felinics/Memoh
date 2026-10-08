@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // maxLineBytes bounds one NDJSON line from the app-server. Turn payloads can
@@ -87,13 +87,13 @@ func (c *conn) Call(ctx context.Context, method string, params any, result any) 
 			return c.closeErr()
 		}
 		if resp.Err != nil {
-			return resp.Err
+			return errs.WrapDependency(resp.Err, "")
 		}
 		if result == nil {
 			return nil
 		}
 		if err := json.Unmarshal(resp.Result, result); err != nil {
-			return fmt.Errorf("codex: decoding %s response: %w", method, err)
+			return errs.WrapDependency(err, "codex: decoding "+method+" response")
 		}
 		return nil
 	}
@@ -134,11 +134,11 @@ func (c *conn) writeLine(payload any) error {
 	select {
 	case writeErr := <-done:
 		if writeErr != nil {
-			return errors.Join(ErrConnClosed, writeErr)
+			return errors.Join(ErrConnClosed, errs.WrapDependency(writeErr, ""))
 		}
 		return nil
 	case <-time.After(writeTimeout):
-		c.shutdown(errors.New("app-server stdio write stalled"))
+		c.shutdown(errs.NewDependency("app-server stdio write stalled"))
 		return c.closeErr()
 	}
 }
@@ -210,7 +210,7 @@ func (c *conn) readLoop() {
 			c.handler.HandleNotification(ctx, inbound)
 		}
 	}
-	scanErr := scanner.Err()
+	scanErr := errs.WrapDependency(scanner.Err(), "")
 	if scanErr == nil {
 		scanErr = io.EOF
 	}

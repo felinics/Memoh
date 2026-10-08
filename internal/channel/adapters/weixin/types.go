@@ -3,12 +3,16 @@
 
 package weixin
 
+import "encoding/json"
+
 // WeChat iLink protocol types.
 // Mirrors the JSON structures used by the getupdates / sendmessage / getuploadurl / getconfig / sendtyping APIs.
 
 // BaseInfo is common metadata attached to every outgoing API request.
 type BaseInfo struct {
 	ChannelVersion string `json:"channel_version,omitempty"`
+	// BotAgent names the host application, UA-style; see botAgent.
+	BotAgent string `json:"bot_agent,omitempty"`
 }
 
 // MessageItemType constants for message items.
@@ -54,6 +58,9 @@ type CDNMedia struct {
 	EncryptQueryParam string `json:"encrypt_query_param,omitempty"`
 	AESKey            string `json:"aes_key,omitempty"`
 	EncryptType       int    `json:"encrypt_type,omitempty"`
+	// FullURL is a server-built download URL; when present it replaces the
+	// URL built from EncryptQueryParam and the configured CDN base.
+	FullURL string `json:"full_url,omitempty"`
 }
 
 type TextItem struct {
@@ -120,8 +127,10 @@ type MessageItem struct {
 
 // WeixinMessage is a unified message from the getupdates response.
 type WeixinMessage struct {
-	Seq          int           `json:"seq,omitempty"`
-	MessageID    int64         `json:"message_id,omitempty"`
+	Seq int `json:"seq,omitempty"`
+	// MessageID is a uint64 on the wire. json.Number keeps it lossless: values
+	// above MaxInt64 would otherwise fail to decode the whole getupdates batch.
+	MessageID    json.Number   `json:"message_id,omitempty"`
 	FromUserID   string        `json:"from_user_id,omitempty"`
 	ToUserID     string        `json:"to_user_id,omitempty"`
 	ClientID     string        `json:"client_id,omitempty"`
@@ -158,6 +167,24 @@ type SendMessageRequest struct {
 	BaseInfo BaseInfo      `json:"base_info,omitempty"`
 }
 
+// SendMessageResponse is the sendmessage response body.
+type SendMessageResponse struct {
+	MessageID json.Number `json:"message_id,omitempty"`
+	Ret       int         `json:"ret"`
+	ErrMsg    string      `json:"errmsg,omitempty"`
+}
+
+// NotifyLifecycleRequest is the notifystart / notifystop request body.
+type NotifyLifecycleRequest struct {
+	BaseInfo BaseInfo `json:"base_info"`
+}
+
+// NotifyLifecycleResponse is the notifystart / notifystop response body.
+type NotifyLifecycleResponse struct {
+	Ret    int    `json:"ret"`
+	ErrMsg string `json:"errmsg,omitempty"`
+}
+
 // GetUploadURLRequest is the getuploadurl request body.
 type GetUploadURLRequest struct {
 	FileKey       string   `json:"filekey,omitempty"`
@@ -178,6 +205,9 @@ type GetUploadURLRequest struct {
 type GetUploadURLResponse struct {
 	UploadParam      string `json:"upload_param,omitempty"`
 	ThumbUploadParam string `json:"thumb_upload_param,omitempty"`
+	// UploadFullURL is a server-built upload URL; when present it replaces the
+	// URL built from UploadParam and the configured CDN base.
+	UploadFullURL string `json:"upload_full_url,omitempty"`
 }
 
 // GetConfigRequest is the getconfig request body.
@@ -202,6 +232,11 @@ type SendTypingRequest struct {
 	BaseInfo     BaseInfo `json:"base_info,omitempty"`
 }
 
+// QRCodeRequest is the get_bot_qrcode request body.
+type QRCodeRequest struct {
+	LocalTokenList []string `json:"local_token_list"`
+}
+
 // QRCodeResponse from get_bot_qrcode.
 type QRCodeResponse struct {
 	QRCode           string `json:"qrcode"`
@@ -210,9 +245,14 @@ type QRCodeResponse struct {
 
 // QRStatusResponse from get_qrcode_status.
 type QRStatusResponse struct {
-	Status      string `json:"status"` // wait, scanned, confirmed, expired
-	BotToken    string `json:"bot_token,omitempty"`
-	ILinkBotID  string `json:"ilink_bot_id,omitempty"`
-	BaseURL     string `json:"baseurl,omitempty"`
-	ILinkUserID string `json:"ilink_user_id,omitempty"`
+	// Status is one of wait, scanned (wire: scaned), scaned_but_redirect,
+	// need_verifycode, verify_code_blocked, binded_redirect, confirmed, expired.
+	Status   string `json:"status"`
+	BotToken string `json:"bot_token,omitempty"`
+	// RedirectHost accompanies scaned_but_redirect: polling continues on
+	// https://{RedirectHost}.
+	RedirectHost string `json:"redirect_host,omitempty"`
+	ILinkBotID   string `json:"ilink_bot_id,omitempty"`
+	BaseURL      string `json:"baseurl,omitempty"`
+	ILinkUserID  string `json:"ilink_user_id,omitempty"`
 }

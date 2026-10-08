@@ -15,6 +15,7 @@ export const EFFORT_LABELS: Record<string, string> = {
   [REASONING_EFFORT_ADAPTIVE]: 'chat.reasoningAdaptive',
   // Under the same label as off, not a second one.
   [REASONING_EFFORT_LEGACY_OFF]: 'chat.reasoningOff',
+  enabled: 'chat.reasoningOn',
   minimal: 'chat.reasoningMinimal',
   low: 'chat.reasoningLow',
   medium: 'chat.reasoningMedium',
@@ -27,6 +28,7 @@ export const EFFORT_OPACITY: Record<string, number> = {
   [REASONING_EFFORT_DISABLE]: 0.1,
   [REASONING_EFFORT_ADAPTIVE]: 0.25,
   [REASONING_EFFORT_LEGACY_OFF]: 0.1,
+  enabled: 1,
   minimal: 0.25,
   low: 0.4,
   medium: 0.6,
@@ -73,4 +75,10 @@ export function reconcileStoredEffort(stored: string, options?: ReasoningOptions
     return options.can_disable ? REASONING_EFFORT_DISABLE : fallback
   }
   return tiers.includes(stored) ? stored : fallback
+}
+
+// A dormant preference is retained for model switches, but must not be shown as
+// the current state of a model that offers no manual control.
+export function displayedEffort(stored: string, options?: ReasoningOptions | null): string {
+  return selectableEfforts(options).length ? reconcileStoredEffort(stored, options) : ''
 }

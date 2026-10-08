@@ -14,31 +14,32 @@ import (
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/mcp"
 	sched "github.com/felinics/memoh/internal/schedule"
 )
 
 func TestNativeToolSourceAllowlistAndCall(t *testing.T) {
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{
+		tools: []toolexec.Tool{
 			{
 				Name:        ToolRead().String(),
 				Description: "Safe tool",
-				Parameters:  map[string]any{"type": "object"},
-				Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-					args, _ := input.(map[string]any)
-					return map[string]any{
+				Parameters:  toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+				Execute: func(ctx *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
+					args := inputAsMap(input)
+					return toolexec.OutputFromValue(map[string]any{
 						"tool":  ctx.ToolName,
 						"value": args["value"],
-					}, nil
+					}), nil
 				},
 			},
 			{
 				Name:        ToolExec().String(),
 				Description: "Blocked tool",
-				Parameters:  map[string]any{"type": "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return "blocked", nil
+				Parameters:  toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue("blocked"), nil
 				},
 			},
 		},
@@ -101,12 +102,12 @@ func TestMCPSessionRoundTripPreservesReasoningIntent(t *testing.T) {
 
 func TestNativeToolSourceAllowlistIgnoresUnknownNames(t *testing.T) {
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:        "safe_tool",
 			Description: "Safe tool",
-			Parameters:  map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return "ok", nil
+			Parameters:  toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue("ok"), nil
 			},
 		}},
 	}
@@ -129,12 +130,12 @@ func TestNativeToolSourceAllowlistIgnoresUnknownNames(t *testing.T) {
 
 func TestNativeToolSourceDefaultsToDenyAll(t *testing.T) {
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:        "safe_tool",
 			Description: "Safe tool",
-			Parameters:  map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return "ok", nil
+			Parameters:  toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue("ok"), nil
 			},
 		}},
 	}
@@ -154,21 +155,21 @@ func TestNativeToolSourceDefaultsToDenyAll(t *testing.T) {
 
 func TestNativeToolSourceAllowAllOnlyAllowsBuiltIns(t *testing.T) {
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{
+		tools: []toolexec.Tool{
 			{
 				Name:        "unknown_dynamic_tool",
 				Description: "Unknown dynamic tool",
-				Parameters:  map[string]any{"type": "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return "unknown", nil
+				Parameters:  toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue("unknown"), nil
 				},
 			},
 			{
 				Name:        ToolRead().String(),
 				Description: "Built-in tool",
-				Parameters:  map[string]any{"type": "object"},
-				Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-					return map[string]any{"ok": true}, nil
+				Parameters:  toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+				Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+					return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 				},
 			},
 		},
@@ -274,11 +275,11 @@ func TestNativeToolSourcePassesSupportsImageInputToProviders(t *testing.T) {
 
 func TestNativeToolSourcePassesContextBudgetToProviders(t *testing.T) {
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:       ToolRead().String(),
-			Parameters: map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return "ok", nil
+			Parameters: toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue("ok"), nil
 			},
 		}},
 	}
@@ -305,11 +306,11 @@ func TestNativeToolSourcePassesContextBudgetToProviders(t *testing.T) {
 
 func TestNativeToolSourceReadMediaReturnsPublicResultOnly(t *testing.T) {
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:       ToolRead().String(),
-			Parameters: map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return ReadMediaToolOutput{
+			Parameters: toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(ReadMediaToolOutput{
 					Public: ReadMediaToolResult{
 						OK:   true,
 						Path: "/workspace/image.png",
@@ -318,7 +319,7 @@ func TestNativeToolSourceReadMediaReturnsPublicResultOnly(t *testing.T) {
 					},
 					ImageBase64:    "secret-image-bytes",
 					ImageMediaType: "image/png",
-				}, nil
+				}), nil
 			},
 		}},
 	}
@@ -350,14 +351,14 @@ func TestNativeToolSourceStripsUIOnlyMetadata(t *testing.T) {
 	// so publicNativeToolResult must drop it — otherwise external runtimes
 	// receive the full diff in model context on every write/edit.
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:       ToolWrite().String(),
-			Parameters: map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{
+			Parameters: toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{
 					"ok":                true,
 					UIOutputMetadataKey: map[string]any{"diff": "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n"},
-				}, nil
+				}), nil
 			},
 		}},
 	}
@@ -389,14 +390,14 @@ func TestNativeToolSourceStripsUIOnlyMetadata(t *testing.T) {
 func TestNativeToolSourceLimitsToolOutput(t *testing.T) {
 	large := "HEAD\n" + strings.Repeat("0123456789", 200) + "\nTAIL"
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:       ToolRead().String(),
-			Parameters: map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-				return map[string]any{
+			Parameters: toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{
 					"content": large,
 					"ok":      true,
-				}, nil
+				}), nil
 			},
 		}},
 	}
@@ -420,13 +421,13 @@ func TestNativeToolSourceLimitsToolOutput(t *testing.T) {
 func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 	executed := false
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:       ToolExec().String(),
-			Parameters: map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, input any) (any, error) {
+			Parameters: toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, input sdk.ToolArguments) (sdk.ToolOutput, error) {
 				executed = true
-				args, _ := input.(map[string]any)
-				return map[string]any{"command": args["command"]}, nil
+				args := inputAsMap(input)
+				return toolexec.OutputFromValue(map[string]any{"command": args["command"]}), nil
 			},
 		}},
 	}
@@ -493,11 +494,11 @@ func TestNativeToolSourceWaitsForApprovalAndPublishesRequest(t *testing.T) {
 func TestNativeToolSourceRechecksRuntimeGuardAfterApproval(t *testing.T) {
 	guardErr := errors.New("runtime ownership lost")
 	executed := false
-	provider := &nativeSourceTestProvider{tools: []sdk.Tool{{
-		Name: ToolExec().String(), Parameters: map[string]any{"type": "object"},
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+	provider := &nativeSourceTestProvider{tools: []toolexec.Tool{{
+		Name: ToolExec().String(), Parameters: toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
 			executed = true
-			return "executed", nil
+			return toolexec.OutputFromValue("executed"), nil
 		},
 	}}}
 	approval := &nativeSourceApproval{decision: toolapproval.Request{
@@ -525,12 +526,12 @@ func TestNativeToolSourceRechecksRuntimeGuardAfterApproval(t *testing.T) {
 func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 	executed := false
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:       ToolWrite().String(),
-			Parameters: map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+			Parameters: toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
 				executed = true
-				return "wrote", nil
+				return toolexec.OutputFromValue("wrote"), nil
 			},
 		}},
 	}
@@ -581,12 +582,12 @@ func TestNativeToolSourceRejectedApprovalDoesNotExecute(t *testing.T) {
 func TestNativeToolSourceApprovalNotDeliveredRejectsWithoutWaiting(t *testing.T) {
 	executed := false
 	provider := &nativeSourceTestProvider{
-		tools: []sdk.Tool{{
+		tools: []toolexec.Tool{{
 			Name:       ToolWrite().String(),
-			Parameters: map[string]any{"type": "object"},
-			Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
+			Parameters: toolexec.SchemaFromValue(map[string]any{"type": "object"}),
+			Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
 				executed = true
-				return "wrote", nil
+				return toolexec.OutputFromValue("wrote"), nil
 			},
 		}},
 	}
@@ -1073,11 +1074,11 @@ func firstQuestionText(t *testing.T, input any) string {
 }
 
 type nativeSourceTestProvider struct {
-	tools   []sdk.Tool
+	tools   []toolexec.Tool
 	session SessionContext
 }
 
-func (p *nativeSourceTestProvider) Tools(_ context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *nativeSourceTestProvider) Tools(_ context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	p.session = session
 	return p.tools, nil
 }
@@ -1106,22 +1107,22 @@ func (nativeSourceTestScheduler) Delete(context.Context, string) error {
 
 type nativeSourceUsageProvider struct{}
 
-func (*nativeSourceUsageProvider) Tools(context.Context, SessionContext) ([]sdk.Tool, error) {
-	return []sdk.Tool{
+func (*nativeSourceUsageProvider) Tools(context.Context, SessionContext) ([]toolexec.Tool, error) {
+	return []toolexec.Tool{
 		{
 			Name:        ToolSpawnAgent().String(),
 			Description: "Create one managed subagent.",
-			Parameters:  emptyObjectSchema(),
-			Execute: func(*sdk.ToolExecContext, any) (any, error) {
-				return map[string]any{"ok": true}, nil
+			Parameters:  toolexec.SchemaFromValue(emptyObjectSchema()),
+			Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 			},
 		},
 		{
 			Name:        ToolSendMessage().String(),
 			Description: "Send a follow-up message.",
-			Parameters:  emptyObjectSchema(),
-			Execute: func(*sdk.ToolExecContext, any) (any, error) {
-				return map[string]any{"ok": true}, nil
+			Parameters:  toolexec.SchemaFromValue(emptyObjectSchema()),
+			Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+				return toolexec.OutputFromValue(map[string]any{"ok": true}), nil
 			},
 		},
 	}, nil

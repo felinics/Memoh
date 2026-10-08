@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/settings"
 )
 
@@ -51,8 +52,8 @@ type synthesizeResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param request body synthesizeRequest true "Text to synthesize"
 // @Success 200 {object} synthesizeResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/tts/synthesize [post].
 func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
@@ -75,8 +76,7 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 
 	botSettings, err := h.settingsService.GetBot(c.Request().Context(), botID)
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "failed to load bot settings", slog.String("bot_id", botID), slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load bot settings")
+		return errs.Wrap(err, "load bot settings", slog.String("bot_id", botID))
 	}
 	if botSettings.TtsModelID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "bot has no TTS model configured")
@@ -84,21 +84,18 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 
 	tempID, f, err := h.tempStore.Create()
 	if err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "failed to create temp file", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create temp file")
+		return errs.Wrap(err, "create temp file")
 	}
 
 	contentType, streamErr := h.audioService.StreamToFile(c.Request().Context(), botSettings.TtsModelID, text, f)
 	closeErr := f.Close()
 	if streamErr != nil {
-		h.logger.ErrorContext(c.Request().Context(), "speech synthesis failed", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID), slog.Any("error", streamErr))
 		h.tempStore.Delete(tempID)
-		return echo.NewHTTPError(http.StatusInternalServerError, streamErr.Error())
+		return errs.Wrap(streamErr, "synthesize speech", slog.String("bot_id", botID), slog.String("model_id", botSettings.TtsModelID))
 	}
 	if closeErr != nil {
-		h.logger.ErrorContext(c.Request().Context(), "failed to finalize audio file", slog.String("bot_id", botID), slog.Any("error", closeErr))
 		h.tempStore.Delete(tempID)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to finalize audio file")
+		return errs.Wrap(closeErr, "finalize audio file", slog.String("bot_id", botID))
 	}
 
 	size, _ := h.tempStore.FileSize(tempID)

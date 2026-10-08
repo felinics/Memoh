@@ -2,7 +2,9 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
@@ -17,57 +20,93 @@ import (
 	"github.com/felinics/memoh/internal/settings"
 )
 
-func TestAgentStreamEventErrorConversion(t *testing.T) {
+func TestAgentStreamFailureConversion(t *testing.T) {
 	t.Parallel()
 
-	t.Run("non-error event", func(t *testing.T) {
-		if err := agentStreamEventError(native.StreamEvent{Type: native.EventTextDelta}); err != nil {
-			t.Fatalf("agentStreamEventError() = %v, want nil", err)
-		}
-	})
-	t.Run("stable application code", func(t *testing.T) {
-		event := native.StreamEvent{
-			Type: native.EventError, Code: string(apperror.CodeContextBudgetUnsatisfied),
-			Error: "untrusted backend fallback",
-		}
-		err := agentStreamEventError(event)
-		if got := apperror.CodeOf(err); got != apperror.CodeContextBudgetUnsatisfied {
-			t.Fatalf("error code = %q, want %q", got, apperror.CodeContextBudgetUnsatisfied)
-		}
-		if err.Error() != string(apperror.CodeContextBudgetUnsatisfied) {
-			t.Fatalf("coded stream identity = %q", err)
-		}
-	})
-	t.Run("legacy detail", func(t *testing.T) {
-		err := agentStreamEventError(native.StreamEvent{Type: native.EventError, Error: " provider stopped "})
-		if err == nil || err.Error() != "provider stopped" || apperror.CodeOf(err) != "" {
-			t.Fatalf("agentStreamEventError() = %v", err)
-		}
-		lifecycleErr := agentStreamLifecycleError(native.StreamEvent{Type: native.EventError, Error: " provider stopped "})
-		if apperror.CodeOf(lifecycleErr) != apperror.CodeAgentResponseInterrupted {
-			t.Fatalf("lifecycle code = %q", apperror.CodeOf(lifecycleErr))
-		}
-		if cause := apperror.CauseOf(lifecycleErr); cause == nil || cause.Error() != "provider stopped" {
-			t.Fatalf("private diagnostic cause = %v", cause)
-		}
-	})
-	t.Run("empty legacy detail", func(t *testing.T) {
-		err := agentStreamEventError(native.StreamEvent{Type: native.EventError})
-		if err == nil || err.Error() != "agent stream failed" || apperror.CodeOf(err) != "" {
-			t.Fatalf("agentStreamEventError() = %v", err)
-		}
-	})
+	overloaded := &sdk.APIError{Provider: "anthropic-messages", StatusCode: 529, Kind: sdk.KindServerError, Message: "SECRET overloaded"}
+	for _, tc := range []struct {
+		name  string
+		event native.StreamEvent
+		code  apperror.Code
+	}{
+		{
+			name:  "catalogued code",
+			event: native.StreamEvent{Type: native.EventError, Code: string(apperror.CodeContextBudgetUnsatisfied), Cause: overloaded},
+			code:  apperror.CodeContextBudgetUnsatisfied,
+		},
+		{
+			name:  "uncatalogued code",
+			event: native.StreamEvent{Type: native.EventError, Code: "not.a.code", Cause: overloaded},
+			code:  apperror.CodeAgentProviderOverloaded,
+		},
+		{
+			name:  "provider answer",
+			event: native.StreamEvent{Type: native.EventError, Cause: overloaded},
+			code:  apperror.CodeAgentProviderOverloaded,
+		},
+		{
+			name:  "protected context overflow",
+			event: native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("prepare context view: %w", contextfrag.ErrProtectedContextOverflow)},
+			code:  apperror.CodeContextProtectedOverflow,
+		},
+		{
+			name:  "budget unsatisfied",
+			event: native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("prepare context view: %w", contextfrag.ErrBudgetUnsatisfied)},
+			code:  apperror.CodeContextBudgetUnsatisfied,
+		},
+		{
+			// Only compacting or another model helps, whatever else the chain holds.
+			name:  "context overflow over a provider answer",
+			event: native.StreamEvent{Type: native.EventError, Cause: fmt.Errorf("%w: %w", contextfrag.ErrProtectedContextOverflow, overloaded)},
+			code:  apperror.CodeContextProtectedOverflow,
+		},
+		{
+			name:  "runtime failure",
+			event: native.StreamEvent{Type: native.EventError, Cause: errors.New("checkpoint steered model call: SECRET")},
+			code:  apperror.CodeAgentResponseInterrupted,
+		},
+		{
+			name:  "no cause",
+			event: native.StreamEvent{Type: native.EventError},
+			code:  apperror.CodeAgentResponseInterrupted,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			failure := agentStreamFailure(tc.event)
+			if got := apperror.CodeOf(failure); got != tc.code {
+				t.Fatalf("code = %q, want %q", got, tc.code)
+			}
+			if cause := apperror.CauseOf(failure); !errors.Is(cause, tc.event.Cause) {
+				t.Fatalf("cause = %v, want the event's cause %v", cause, tc.event.Cause)
+			}
+		})
+	}
+	if err := agentStreamFailure(native.StreamEvent{Type: native.EventTextDelta}); err != nil {
+		t.Fatalf("agentStreamFailure(text delta) = %v, want nil", err)
+	}
 }
 
+// The cause of a failure never leaves the application: the published event
+// carries the code and its catalog detail, and nothing of the cause.
 func TestPublicAgentStreamEventRedactsPrivateFailure(t *testing.T) {
-	event := publicAgentStreamEvent(native.StreamEvent{
-		Type: native.EventError, Error: "SECRET provider payload",
-	})
-	if event.Code != string(apperror.CodeAgentResponseInterrupted) {
-		t.Fatalf("public code = %q", event.Code)
-	}
-	if strings.Contains(event.Error, "SECRET") {
-		t.Fatalf("private detail leaked: %q", event.Error)
+	for _, cause := range []error{
+		errors.New("SECRET provider payload"),
+		&sdk.APIError{Provider: "openai-completions", StatusCode: 401, Kind: sdk.KindAuthentication, Message: "Incorrect API key provided: SECRET", RequestID: "req_SECRET"},
+		fmt.Errorf("SECRET window: %w", contextfrag.ErrBudgetUnsatisfied),
+	} {
+		event := publicAgentStreamEvent(native.StreamEvent{Type: native.EventError, Cause: cause})
+		definition, ok := apperror.Lookup(apperror.Code(event.Code))
+		if !ok || event.Error != definition.Detail || event.Cause != nil {
+			t.Fatalf("public event = %#v, want a catalogued code with its detail", event)
+		}
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Fatalf("marshal public event: %v", err)
+		}
+		if strings.Contains(string(data), "SECRET") {
+			t.Fatalf("private detail leaked: %s", data)
+		}
 	}
 }
 
@@ -181,6 +220,10 @@ func (*recordingMessageService) ListActiveSinceWithinBytes(context.Context, stri
 	return nil, nil
 }
 
+func (*recordingMessageService) ListTurnResponseSourcesSinceBySessionWithinBytes(context.Context, string, time.Time, int64) ([]messagepkg.Message, error) {
+	return nil, nil
+}
+
 func (*recordingMessageService) MeasureActiveBySession(context.Context, string, time.Time) (messagepkg.ActiveMessagesMeasure, error) {
 	return messagepkg.ActiveMessagesMeasure{}, nil
 }
@@ -260,7 +303,7 @@ func TestStreamChatWSResultRejectsTurnReplacementForACP(t *testing.T) {
 	preflightCalled := false
 	postPersistCalled := false
 
-	_, err := resolver.streamChatWSResultWithHooks(
+	_, _, err := resolver.streamChatWSResultWithHooks(
 		context.Background(),
 		ChatRequest{BotID: "bot-1", ThreadID: "session-1"},
 		make(chan WSStreamEvent, 1),

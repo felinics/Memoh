@@ -7,6 +7,7 @@ import { executeQuickAction } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX } from '@/utils/bot-agent'
 import { createInvocationId } from '../chat-list.normalize'
+import { commandActionErrorMessage } from './messages'
 import type { ExternalAgentSessionInput, ActiveChatTarget, ChatViewTarget } from './types'
 import type { WebCommandResult } from './send'
 
@@ -178,7 +179,7 @@ export function createChatCommands(deps: ChatCommandDeps) {
     if (event.type === 'command_error') {
       return {
         kind: 'error',
-        message: event.error?.message || deps.commandErrorMessage('generic'),
+        message: commandActionErrorMessage(event),
       }
     }
     if (actionId === 'permission' && sessionId) {

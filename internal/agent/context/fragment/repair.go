@@ -107,7 +107,7 @@ func syntheticToolClosureFrag(callID, toolName string, index int, scope Scope, c
 		Content: []sdk.MessagePart{sdk.ToolResultPart{
 			ToolCallID: callID,
 			ToolName:   toolName,
-			Result:     ToolClosureRepairText,
+			Result:     sdk.TextOutput(ToolClosureRepairText),
 			IsError:    true,
 		}},
 	}

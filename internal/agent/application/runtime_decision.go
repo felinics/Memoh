@@ -19,7 +19,6 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
@@ -90,10 +89,12 @@ func (s *Service) PendingRuntimeDecisions(ctx context.Context, runID string) ([]
 	// Recovery decides by session runtime whether the parked run is
 	// resumable at all; every pending decision here shares one session.
 	if len(out) > 0 && s.sessionService != nil {
-		if sess, sessErr := s.sessionService.Get(ctx, out[0].SessionID); sessErr == nil {
-			for i := range out {
-				out[i].SessionRuntime = sess.RuntimeType
-			}
+		sess, sessErr := s.sessionService.Get(ctx, out[0].SessionID)
+		if sessErr != nil {
+			return nil, fmt.Errorf("read waiting-decision session runtime: %w", sessErr)
+		}
+		for i := range out {
+			out[i].SessionRuntime = sess.RuntimeType
 		}
 	}
 	return out, nil
@@ -410,11 +411,15 @@ func (s *Service) continueRuntimeDecision(
 	}
 	var outputSeq int64
 	var outputCause error
+	// failurePublished records that the continuation's own failure event
+	// reached the output, so the run's failure is not appended a second time.
+	var failurePublished bool
 	defer func() {
-		if outputCause != nil {
+		if outputCause != nil && !failurePublished {
 			raw, _ := json.Marshal(agentFailureStreamEvent(outputCause))
-			outputSeq++
-			_ = s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq, raw)
+			if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, raw); err == nil {
+				outputSeq++
+			}
 		}
 		if err := s.decisionRuntime.PublishDecisionOutput(context.WithoutCancel(ctx), command, outputSeq+1, nil); err != nil {
 			if s.logger != nil {
@@ -428,7 +433,6 @@ func (s *Service) continueRuntimeDecision(
 
 	if err := s.decisionRuntime.WaitDecisionContinuationReady(ctx, command); err != nil {
 		outputCause = err
-		s.logRuntimeDecisionContinuationFailure(command, err)
 		s.recoverContextLifecycleFromAssistantMetadata(ctx, command.RunID, command.BotID, command.SessionID, err)
 		s.finishRuntimeDecision(ctx, handle, err)
 		return
@@ -458,7 +462,8 @@ func (s *Service) continueRuntimeDecision(
 		if err := json.Unmarshal(raw, &event); err != nil {
 			continue
 		}
-		if eventErr := agentStreamLifecycleError(event); eventErr != nil && eventCause == nil {
+		eventErr := agentStreamFailure(event)
+		if eventErr != nil && eventCause == nil {
 			eventCause = eventErr
 		}
 		if event.IsTerminal() {
@@ -479,11 +484,13 @@ func (s *Service) continueRuntimeDecision(
 			cancel()
 			continue
 		}
-		outputSeq++
-		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq, raw); err != nil {
+		if err := s.decisionRuntime.PublishDecisionOutput(runCtx, command, outputSeq+1, raw); err != nil {
 			publishErr = err
 			cancel()
+			continue
 		}
+		outputSeq++
+		failurePublished = failurePublished || eventErr != nil
 	}
 	runErr := <-runDone
 	lifecycleDeferred = lifecycleDeferred || lifecycle.deferred
@@ -495,45 +502,22 @@ func (s *Service) continueRuntimeDecision(
 	}
 	if runErr != nil {
 		outputCause = runErr
-		s.logRuntimeDecisionContinuationFailure(command, lifecycleCause)
 		s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
 		s.finishRuntimeDecision(ctx, handle, runErr)
 		return
 	}
 	if lifecycleDeferred {
-		_ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "", "")
+		_, _ = s.decisionRuntime.FinishRun(context.WithoutCancel(ctx), handle, "")
 		return
 	}
 	s.persistRuntimeDecisionLifecycle(ctx, command, lifecycle, lifecycleCause)
-	s.logRuntimeDecisionContinuationFailure(command, lifecycleCause)
 	s.finishRuntimeDecision(ctx, handle, lifecycleCause)
 }
 
-// logRuntimeDecisionContinuationFailure records the private provider,
-// persistence, or ownership cause after a durably answered decision resumes a
-// run. The websocket and session ledger deliberately retain only the stable
-// public error code; without this log an operator cannot distinguish those
-// failure classes from the generic agent.response_interrupted response.
-func (s *Service) logRuntimeDecisionContinuationFailure(command sessionruntime.Command, cause error) {
-	if s == nil || s.logger == nil || cause == nil {
-		return
-	}
-	privateCause := apperror.CauseOf(cause)
-	if privateCause == nil {
-		privateCause = cause
-	}
-	s.logger.Error("runtime decision continuation failed",
-		slog.Any("error", privateCause),
-		slog.String("run_id", command.RunID),
-		slog.String("decision_id", command.TargetID),
-		slog.String("command_type", command.Type),
-	)
-}
-
-// logContinuationStreamError records the private detail of a native error
-// event observed while a decision continuation streams. publicAgentStreamEvent
-// replaces that detail with a stable code before the event leaves the
-// application, so this is the only place the original text is retained.
+// logContinuationStreamError records the cause of a native error event
+// observed while a decision continuation streams. publicAgentStreamEvent
+// replaces the event with its code before it leaves the application, so this
+// is the only place the cause is retained.
 func (s *Service) logContinuationStreamError(runID string, event native.StreamEvent) {
 	if s == nil || s.logger == nil {
 		return
@@ -542,7 +526,7 @@ func (s *Service) logContinuationStreamError(runID string, event native.StreamEv
 		slog.String("run_id", strings.TrimSpace(runID)),
 		slog.String("event_type", string(event.Type)),
 		slog.String("code", strings.TrimSpace(event.Code)),
-		slog.String("error", strings.TrimSpace(event.Error)),
+		slog.Any("error", event.Cause),
 	)
 }
 
@@ -592,7 +576,7 @@ func (s *Service) persistRuntimeDecisionLifecycle(
 }
 
 func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionruntime.RunHandle, cause error) {
-	status, message := runtimeDecisionTerminal(ctx, cause)
+	outcome := runtimeDecisionTerminal(ctx, cause)
 	lifecycleCtx := frozenContextCause(ctx)
 	minimal := minimalContextLifecycleSnapshot()
 	staged := s.stageContextLifecycleCandidate(
@@ -604,7 +588,8 @@ func (s *Service) finishRuntimeDecision(ctx context.Context, handle sessionrunti
 		cause,
 		contextLifecycleCandidateMinimal,
 	)
-	if err := s.decisionRuntime.FinishRun(context.WithoutCancel(nonNilContext(ctx)), handle, status, message); err == nil && !staged {
+	finishCtx := WithRunOutcome(context.WithoutCancel(nonNilContext(ctx)), handle.RunID, outcome)
+	if _, err := s.decisionRuntime.FinishRunWithErrorCode(finishCtx, handle, outcome.Status, outcome.ErrorCode()); err == nil && !staged {
 		s.EnsureTerminalContextLifecycle(
 			lifecycleCtx,
 			handle.RunID,
@@ -627,12 +612,15 @@ func frozenContextCause(ctx context.Context) context.Context {
 	return frozen
 }
 
-func runtimeDecisionTerminal(ctx context.Context, cause error) (string, string) {
+// runtimeDecisionTerminal is the outcome a decision continuation reports: a
+// failure unless the continuation was explicitly canceled, in which case the
+// session runtime resolves it from the abort intent recorded against the run.
+func runtimeDecisionTerminal(ctx context.Context, cause error) RunOutcome {
 	explicitlyCanceled := ctx != nil &&
 		errors.Is(cause, context.Canceled) &&
 		errors.Is(context.Cause(ctx), context.Canceled)
 	if cause != nil && !explicitlyCanceled {
-		return sessionruntime.RunStatusErrored, string(apperror.CodeOf(cause))
+		return RunOutcome{Status: sessionruntime.RunStatusErrored, Cause: cause}
 	}
-	return "", ""
+	return RunOutcome{}
 }

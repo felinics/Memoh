@@ -9,16 +9,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/decision/approval"
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
-	dbpkg "github.com/felinics/memoh/internal/db"
-	"github.com/felinics/memoh/internal/db/postgres/sqlc"
-	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/workspace"
 )
@@ -241,41 +237,9 @@ func (s *Service) ExecuteRuntimeCommand(ctx context.Context, request RuntimeCont
 			return err
 		}
 		_, err = s.sessionService.MergeRuntimeMetadata(ctx, sess.ID, sess.RuntimeType, result.RuntimeMetadata)
-		if err != nil || result.Checkpoint == external.CheckpointNone {
-			return err
-		}
-		return s.publishRuntimeOperation(ctx, input, result.Checkpoint)
+		return err
 	})
 	return turn.RuntimeCommandResult{}, err
-}
-
-// Operations publish native state under their own run without inserting a
-// user/assistant message. The same guarded publication query serves chat rounds.
-func (s *Service) publishRuntimeOperation(ctx context.Context, input external.PromptInput, checkpoint external.CheckpointOutcome) error {
-	botID, err := dbpkg.ParseUUID(input.BotID)
-	if err != nil {
-		return err
-	}
-	sessionID, err := dbpkg.ParseUUID(input.ThreadID)
-	if err != nil {
-		return err
-	}
-	runID, err := dbpkg.ParseUUID(input.RunID)
-	if err != nil {
-		return err
-	}
-	return runtimefence.InTransaction(ctx, s.queries, input.BotID, input.ThreadID, func(queries dbstore.Queries) error {
-		moved, err := queries.UpsertAgentSessionPublication(ctx, sqlc.UpsertAgentSessionPublicationParams{
-			BotID: botID, SessionID: sessionID, RunID: runID, CheckpointReset: checkpoint != external.CheckpointStaged,
-		})
-		if err != nil {
-			return err
-		}
-		if moved == 0 {
-			return runtimefence.ErrStale
-		}
-		return nil
-	})
 }
 
 func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlRequest, run func(context.Context, session.Thread, external.Driver, external.PromptInput) error) (resultErr error) {
@@ -298,11 +262,16 @@ func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlR
 			Cancel: func() { cancel(context.Canceled) }, OwnershipCancel: cancel,
 		},
 	})
+	// The session runtime is this adapter's port; callers outside it only see
+	// the turn sentinel.
+	if errors.Is(err, sessionruntime.ErrSessionBusy) {
+		return turn.ErrSessionBusy
+	}
 	if err != nil {
 		return err
 	}
 	if !admission.Started {
-		return sessionruntime.ErrSessionBusy
+		return turn.ErrSessionBusy
 	}
 	handle := admission.Handle
 	runCtx = runtimefence.WithContext(runCtx, runtimefence.Fence{BotID: handle.BotID, SessionID: handle.SessionID, Token: handle.FencingToken})
@@ -314,9 +283,10 @@ func (s *Service) runRuntimeControl(ctx context.Context, request RuntimeControlR
 		if errors.Is(resultErr, context.Canceled) || runCtx.Err() != nil {
 			status = sessionruntime.RunStatusAborted
 		}
-		finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(runCtx), terminalWriteTimeout)
+		outcome := RunOutcome{Status: status, Cause: resultErr}
+		finishCtx, finishCancel := context.WithTimeout(WithRunOutcome(context.WithoutCancel(runCtx), handle.RunID, outcome), terminalWriteTimeout)
 		defer finishCancel()
-		if err := s.sessionRuntime.FinishRunWithErrorCode(finishCtx, handle, status, string(apperror.CodeOf(publicRuntimeControlError(resultErr)))); err != nil {
+		if _, err := s.sessionRuntime.FinishRunWithErrorCode(finishCtx, handle, status, string(apperror.CodeOf(publicRuntimeControlError(resultErr)))); err != nil {
 			resultErr = errors.Join(resultErr, err)
 		}
 	}()
@@ -345,34 +315,14 @@ func (s *Service) runtimeControlContext(ctx context.Context, request RuntimeCont
 	return ctx, nil
 }
 
+// publicRuntimeControlError keeps the team routing sentinel intact for its
+// own transports; everything else goes through the shared runtime control
+// translation.
 func publicRuntimeControlError(err error) error {
-	if err == nil || apperror.CodeOf(err) != "" {
+	if errors.Is(err, turn.ErrTeamNotServed) {
 		return err
 	}
-	var feedback *agentfeedback.Error
-	if errors.As(err, &feedback) || errors.Is(err, turn.ErrTeamNotServed) {
-		return err
-	}
-	code := apperror.CodeRuntimeControlFailed
-	switch {
-	case errors.Is(err, context.Canceled):
-		code = apperror.CodeRuntimeControlCancelled
-	case errors.Is(err, approval.ErrForbidden):
-		code = apperror.CodeRuntimeControlForbidden
-	case errors.Is(err, sessionruntime.ErrSessionBusy):
-		code = apperror.CodeSessionBusy
-	case errors.Is(err, external.ErrControlUnsupported):
-		code = apperror.CodeRuntimeControlUnsupported
-	case errors.Is(err, external.ErrCommandUnavailable):
-		code = apperror.CodeRuntimeControlCommandUnavailable
-	case errors.Is(err, external.ErrModeUnavailable):
-		code = apperror.CodeRuntimeControlModeUnavailable
-	case errors.Is(err, external.ErrThreadUnavailable):
-		code = apperror.CodeRuntimeControlThreadUnavailable
-	case errors.Is(err, external.ErrAuthRequired):
-		code = apperror.CodeExternalRuntimeAuthRequired
-	}
-	return apperror.Wrap(code, err, nil)
+	return RuntimeControlError(err)
 }
 
 func (s *Service) ControlRuntimeGoal(ctx context.Context, request RuntimeControlRequest, action string) (err error) {

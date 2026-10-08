@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	tools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestGenerateAppliesContextViewBeforeProviderOptions(t *testing.T) {
@@ -65,25 +67,25 @@ func TestGenerateAppliesContextViewBeforeProviderOptions(t *testing.T) {
 func TestGenerateFinalInputHashTracksLastProviderStep(t *testing.T) {
 	t.Parallel()
 	ledger := contextfrag.NewMutationLedger()
-	var lastParams sdk.GenerateParams
-	modelProvider := &atomicMockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	var lastParams sdk.Request
+	modelProvider := &atomicMockProvider{handler: func(call int, params sdk.Request) (sdk.ModelResult, error) {
 		if call == 1 {
-			return &sdk.GenerateResult{
+			return sdk.ModelResult{
 				FinishReason: sdk.FinishReasonToolCalls,
 				ToolCalls:    []sdk.ToolCall{{ToolCallID: "hash-call", ToolName: "hash_tool"}},
 			}, nil
 		}
 		lastParams = params
-		return &sdk.GenerateResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
+		return sdk.ModelResult{Text: "done", FinishReason: sdk.FinishReasonStop}, nil
 	}}
 	a := New(Deps{ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
 		cfg.ContextMutations = ledger
 		return cfg, nil
 	}})
-	a.SetToolProviders([]tools.ToolProvider{staticToolProvider{tools: []sdk.Tool{{
+	a.SetToolProviders([]tools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{{
 		Name: "hash_tool",
-		Execute: func(*sdk.ToolExecContext, any) (any, error) {
-			return "ok", nil
+		Execute: func(*toolexec.ToolExecContext, sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue("ok"), nil
 		},
 	}}}})
 
@@ -154,22 +156,22 @@ func (*preflightCountingProvider) Name() string { return "preflight-counting" }
 
 func (*preflightCountingProvider) ListModels(context.Context) ([]sdk.Model, error) { return nil, nil }
 
-func (*preflightCountingProvider) Test(context.Context) *sdk.ProviderTestResult {
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK}
+func (*preflightCountingProvider) Test(context.Context) error {
+	return nil
 }
 
 func (*preflightCountingProvider) TestModel(context.Context, string) (*sdk.ModelTestResult, error) {
 	return &sdk.ModelTestResult{Supported: true}, nil
 }
 
-func (p *preflightCountingProvider) DoGenerate(context.Context, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (p *preflightCountingProvider) DoGenerate(context.Context, sdk.Request) (sdk.ModelResult, error) {
 	p.mu.Lock()
 	p.generateCalls++
 	p.mu.Unlock()
-	return &sdk.GenerateResult{Text: "unexpected", FinishReason: sdk.FinishReasonStop}, nil
+	return sdk.ModelResult{Text: "unexpected", FinishReason: sdk.FinishReasonStop}, nil
 }
 
-func (p *preflightCountingProvider) DoStream(context.Context, sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (p *preflightCountingProvider) DoStream(context.Context, sdk.Request) (<-chan sdk.StreamPart, error) {
 	p.mu.Lock()
 	p.streamCalls++
 	p.mu.Unlock()
@@ -186,24 +188,54 @@ func budgetErrorApplier(err error) ContextViewApplier {
 	return func(_ context.Context, cfg RunConfig) (RunConfig, error) { return cfg, err }
 }
 
-func TestContextViewStreamErrorUsesStablePublicContract(t *testing.T) {
+// A context the budget cannot fit is reported with its cause alone: the
+// application names the budget sentinels. Any other preparation failure is
+// the runtime's own and names runtime_run_failed. Neither carries text.
+func TestContextViewStreamErrorCarriesOnlyItsCause(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct {
 		err      error
-		wantCode string
-		wantText string
+		sentinel error
+		code     string
 	}{
-		{fmt.Errorf("%w: private cost", contextfrag.ErrProtectedContextOverflow), "context.protected_overflow", "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."},
-		{fmt.Errorf("%w: private math", contextfrag.ErrBudgetUnsatisfied), "context.budget_unsatisfied", "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window."},
-		{errors.New("private collector failure"), "", publicContextPreparationError},
+		{fmt.Errorf("%w: private cost", contextfrag.ErrProtectedContextOverflow), contextfrag.ErrProtectedContextOverflow, ""},
+		{fmt.Errorf("%w: private math", contextfrag.ErrBudgetUnsatisfied), contextfrag.ErrBudgetUnsatisfied, ""},
+		{errors.New("private collector failure"), nil, "runtime_run_failed"},
 	} {
 		event := contextViewStreamError(tt.err)
-		if event.Type != EventError || event.Code != tt.wantCode || event.Error != tt.wantText {
-			t.Fatalf("contextViewStreamError(%v) = %#v", tt.err, event)
+		if event.Type != EventError || event.Code != tt.code || event.Error != "" || !errors.Is(event.Cause, tt.err) {
+			t.Fatalf("contextViewStreamError(%v) = %#v, want an error event with code %q and its cause", tt.err, event, tt.code)
 		}
-		if strings.Contains(event.Error, tt.err.Error()) {
-			t.Fatalf("public event leaked private error: %#v", event)
+		if tt.sentinel != nil && !errors.Is(event.Cause, tt.sentinel) {
+			t.Fatalf("contextViewStreamError(%v) cause = %v, want %v in the chain", tt.err, event.Cause, tt.sentinel)
+		}
+	}
+}
+
+// A context preparation failure is recorded once, by the run's result record
+// at the boundary; the runtime publishes it and logs nothing of its own.
+func TestStreamContextViewFailureLeavesTheRecordToTheBoundary(t *testing.T) {
+	t.Parallel()
+
+	handler := &lifecycleRecordingHandler{}
+	a := New(Deps{Logger: slog.New(handler), ContextViewApplier: budgetErrorApplier(errors.New("private collector failure"))})
+	errorEvents := 0
+	for event := range a.Stream(context.Background(), RunConfig{
+		Model: &sdk.Model{ID: "context-view-log", Provider: &preflightCountingProvider{}, Type: sdk.ModelTypeChat},
+	}) {
+		if event.Type == EventError {
+			errorEvents++
+		}
+	}
+	if errorEvents != 1 {
+		t.Fatalf("error events = %d, want 1", errorEvents)
+	}
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	for _, record := range handler.records {
+		if record.Level >= slog.LevelWarn {
+			t.Fatalf("record %q at %v, want the failure left to the run's result record", record.Message, record.Level)
 		}
 	}
 }
@@ -238,7 +270,7 @@ func TestGenerateContextBudgetErrorStopsBeforeProvider(t *testing.T) {
 	}
 }
 
-func TestStreamContextBudgetErrorIsPublicAndStopsBeforeProvider(t *testing.T) {
+func TestStreamContextBudgetErrorCarriesItsSentinelAndStopsBeforeProvider(t *testing.T) {
 	t.Parallel()
 
 	provider := &preflightCountingProvider{}
@@ -251,12 +283,8 @@ func TestStreamContextBudgetErrorIsPublicAndStopsBeforeProvider(t *testing.T) {
 			events = append(events, event)
 		}
 	}
-	if len(events) != 1 || events[0].Code != "context.budget_unsatisfied" ||
-		events[0].Error != "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window." {
-		t.Fatalf("error events = %#v", events)
-	}
-	if strings.Contains(events[0].Error, "window=31") {
-		t.Fatalf("public event leaked private error: %#v", events[0])
+	if len(events) != 1 || events[0].Code != "" || events[0].Error != "" || !errors.Is(events[0].Cause, wantErr) {
+		t.Fatalf("error events = %#v, want one event whose cause is the budget failure", events)
 	}
 	if generate, stream := provider.calls(); generate != 0 || stream != 0 {
 		t.Fatalf("provider calls = %d/%d, want zero", generate, stream)

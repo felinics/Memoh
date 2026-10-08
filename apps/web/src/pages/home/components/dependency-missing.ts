@@ -1,4 +1,5 @@
 import type { ContentBlock, ErrorBlock } from '@/store/chat/types'
+import { errorBlockText, type HasTranslation, type Translate } from './error-block'
 
 // Stable runtime feedback code for a workspace dependency the agent needs but
 // the workspace does not have: the Server rejects the turn without installing.
@@ -23,4 +24,18 @@ export function dependencyMissingArgs(block: ErrorBlock): Record<string, string>
 /** Only an accepted operation may be described as installing. */
 export function dependencyInstallationInProgress(args: Record<string, string>): boolean {
   return !!args.install_task_id || args.operation_in_progress === 'true'
+}
+
+/**
+ * The description of a missing dependency. While an accepted install runs it
+ * says the dependency is installing; otherwise it is the copy for the code,
+ * which names the dependency when the block has its id. A block loaded from
+ * history keeps the code alone.
+ */
+export function dependencyMissingText(block: ErrorBlock, t: Translate, te: HasTranslation): string {
+  const args = dependencyMissingArgs(block)
+  if (args.dep_id && dependencyInstallationInProgress(args)) {
+    return t('chat.externalAgent.dependencyMissing', args)
+  }
+  return errorBlockText({ ...block, args }, t, te)
 }

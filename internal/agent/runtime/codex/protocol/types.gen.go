@@ -1657,16 +1657,6 @@ const (
 
 type ThreadId = string
 
-type ThreadReadParams struct {
-	// When true, include turns and their items from rollout history. Full-history hydration is deprecated for paginated threads; prefer a metadata-only read and page with `thread/turns/list` and `thread/items/list`.
-	IncludeTurns *bool  `json:"includeTurns,omitempty"`
-	ThreadID     string `json:"threadId"`
-}
-
-type ThreadReadResponse struct {
-	Thread Thread `json:"thread"`
-}
-
 type ThreadResumeInitialTurnsPageParams struct {
 	// How much item detail to include for each returned turn; defaults to summary.
 	ItemsView *TurnItemsView `json:"itemsView,omitempty"`
@@ -1873,22 +1863,6 @@ type ThreadTokenUsageUpdatedNotification struct {
 	TokenUsage ThreadTokenUsage `json:"tokenUsage"`
 	TurnID     string           `json:"turnId"`
 }
-
-type ThreadUnsubscribeParams struct {
-	ThreadID string `json:"threadId"`
-}
-
-type ThreadUnsubscribeResponse struct {
-	Status ThreadUnsubscribeStatus `json:"status"`
-}
-
-type ThreadUnsubscribeStatus string
-
-const (
-	ThreadUnsubscribeStatusNotLoaded     ThreadUnsubscribeStatus = "notLoaded"
-	ThreadUnsubscribeStatusNotSubscribed ThreadUnsubscribeStatus = "notSubscribed"
-	ThreadUnsubscribeStatusUnsubscribed  ThreadUnsubscribeStatus = "unsubscribed"
-)
 
 type TokenUsageBreakdown struct {
 	CacheWriteInputTokens *int64 `json:"cacheWriteInputTokens,omitempty"`

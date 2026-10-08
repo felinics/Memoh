@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,16 +16,21 @@ import (
 	"testing"
 )
 
-// updateGolden rewrites testdata/codes.golden from the current catalog. Run it
-// after adding a code: go test ./internal/apperror -run TestCatalogGolden -update-golden.
-var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/codes.golden from the catalog")
+// updateGolden adds the codes missing from testdata/codes.golden and leaves
+// every recorded status as it is. Run it after adding a code:
+// go test ./internal/apperror -run TestCatalogGolden -update-golden.
+var updateGolden = flag.Bool("update-golden", false, "add missing codes to testdata/codes.golden")
 
 const goldenPath = "testdata/codes.golden"
 
+// localeFiles are the Web and IM copy; both carry errors.* for every code.
 var localeFiles = []string{
 	"../../apps/web/src/i18n/locales/en.json",
 	"../../apps/web/src/i18n/locales/zh.json",
 	"../../apps/web/src/i18n/locales/ja.json",
+	"../i18n/locales/en.json",
+	"../i18n/locales/zh.json",
+	"../i18n/locales/ja.json",
 }
 
 // declaredCodes parses error.go and returns every constant declared with type
@@ -163,36 +169,60 @@ func collectLeaves(node map[string]any, prefix string, out map[string]struct{}) 
 	}
 }
 
+// statusRestatement is a published status that was changed: codes.golden keeps
+// from, the catalog declares to.
+type statusRestatement struct {
+	from, to int
+}
+
+// restatedStatuses are the published codes whose HTTP status was changed. A
+// status is changed only when no client depends on it.
+var restatedStatuses = map[Code]statusRestatement{
+	// No HTTP route returned either code; WebSocket and IM frames carry no
+	// status, and the RPC envelope is decoded by code.
+	CodeAgentProviderAuthFailed:     {from: http.StatusUnauthorized, to: http.StatusBadGateway},
+	CodeAgentProviderQuotaExhausted: {from: http.StatusPaymentRequired, to: http.StatusBadGateway},
+}
+
 // codes.golden is the append-only record of the public contract: a code and
-// its HTTP status, once published, are never renamed, removed, or restated
-// with a different status. Adding a code requires appending a line (run with
-// -update-golden); any other difference fails.
+// the status it was published with are never renamed or removed, and a
+// status that differs from the record must be listed in restatedStatuses.
+// Adding a code requires appending a line (run with -update-golden); any
+// other difference fails.
 func TestCatalogGolden(t *testing.T) {
+	golden := make(map[Code]int)
+	raw, err := os.ReadFile(goldenPath)
+	switch {
+	case err == nil:
+		for lineNo, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			fields := strings.Split(line, "\t")
+			if len(fields) != 2 {
+				t.Fatalf("%s:%d: want \"code\\tstatus\", got %q", goldenPath, lineNo+1, line)
+			}
+			status, err := strconv.Atoi(fields[1])
+			if err != nil {
+				t.Fatalf("%s:%d: status %q is not a number", goldenPath, lineNo+1, fields[1])
+			}
+			golden[Code(fields[0])] = status
+		}
+	case !*updateGolden || !os.IsNotExist(err):
+		t.Fatalf("read golden: %v (run with -update-golden to create it)", err)
+	}
 	if *updateGolden {
 		var b strings.Builder
+		b.Write(raw)
+		if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+			b.WriteByte('\n')
+		}
 		for _, code := range sortedCatalogCodes() {
-			fmt.Fprintf(&b, "%s\t%d\n", code, catalog[code].HTTPStatus)
+			if _, ok := golden[code]; !ok {
+				fmt.Fprintf(&b, "%s\t%d\n", code, catalog[code].HTTPStatus)
+			}
 		}
 		if err := os.WriteFile(goldenPath, []byte(b.String()), 0o600); err != nil {
 			t.Fatalf("write golden: %v", err)
 		}
 		return
-	}
-	raw, err := os.ReadFile(goldenPath)
-	if err != nil {
-		t.Fatalf("read golden: %v (run with -update-golden to create it)", err)
-	}
-	golden := make(map[Code]int)
-	for lineNo, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		fields := strings.Split(line, "\t")
-		if len(fields) != 2 {
-			t.Fatalf("%s:%d: want \"code\\tstatus\", got %q", goldenPath, lineNo+1, line)
-		}
-		status, err := strconv.Atoi(fields[1])
-		if err != nil {
-			t.Fatalf("%s:%d: status %q is not a number", goldenPath, lineNo+1, fields[1])
-		}
-		golden[Code(fields[0])] = status
 	}
 	for code, status := range golden {
 		definition, ok := catalog[code]
@@ -200,8 +230,16 @@ func TestCatalogGolden(t *testing.T) {
 			t.Errorf("published code %q was removed from the catalog; keep it and mark it Deprecated instead", code)
 			continue
 		}
-		if definition.HTTPStatus != status {
-			t.Errorf("published code %q changed HTTP status %d -> %d; add a new code instead", code, status, definition.HTTPStatus)
+		if definition.HTTPStatus == status {
+			continue
+		}
+		if restated := restatedStatuses[code]; restated.from != status || restated.to != definition.HTTPStatus {
+			t.Errorf("published code %q changed HTTP status %d -> %d; add a new code instead, or list the change in restatedStatuses if no client depends on %d", code, status, definition.HTTPStatus, status)
+		}
+	}
+	for code, restated := range restatedStatuses {
+		if golden[code] != restated.from || catalog[code].HTTPStatus != restated.to {
+			t.Errorf("restatedStatuses lists %q as %d -> %d, but codes.golden records %d and the catalog declares %d", code, restated.from, restated.to, golden[code], catalog[code].HTTPStatus)
 		}
 	}
 	var missing []string
@@ -212,5 +250,81 @@ func TestCatalogGolden(t *testing.T) {
 	}
 	if len(missing) > 0 {
 		t.Errorf("new codes are not recorded in %s; append these lines (or run with -update-golden):\n%s", goldenPath, strings.Join(missing, "\n"))
+	}
+}
+
+// sessionCodes are the codes that answer 401. The Web client signs out on a
+// 401, so only a missing or invalid Memoh session answers with it.
+var sessionCodes = map[Code]struct{}{
+	CodeHTTPUnauthorized:                       {},
+	CodeContextLifecycleAuthenticationRequired: {},
+}
+
+func TestCatalogUnauthorizedIsSessionOnly(t *testing.T) {
+	t.Parallel()
+	for code, definition := range catalog {
+		_, session := sessionCodes[code]
+		if definition.HTTPStatus == http.StatusUnauthorized && !session {
+			t.Errorf("catalog entry %q answers 401, which signs the Web client out; only a Memoh session failure may", code)
+		}
+		if session && definition.HTTPStatus != http.StatusUnauthorized {
+			t.Errorf("session code %q answers %d, want 401", code, definition.HTTPStatus)
+		}
+	}
+}
+
+// declaredFaults is every catalog entry that declares its fault, and the fault
+// it declares. A code whose status gives the wrong attribution is listed here;
+// the reasons are in the catalog comments and docs/errors.md.
+var declaredFaults = map[Code]Fault{
+	CodeAgentProviderAuthFailed:            FaultDependency,
+	CodeAgentProviderPermissionDenied:      FaultDependency,
+	CodeAgentProviderQuotaExhausted:        FaultDependency,
+	CodeAgentProviderRateLimited:           FaultDependency,
+	CodeAgentProviderOverloaded:            FaultDependency,
+	CodeAgentProviderRequestRejected:       FaultDependency,
+	CodeAgentProviderUnreachable:           FaultDependency,
+	CodeAgentResponseInterrupted:           FaultDependency,
+	CodeAgentResponseTimeout:               FaultDependency,
+	CodeRuntimePromptFailed:                FaultDependency,
+	CodeExternalRuntimeSessionResumeFailed: FaultDependency,
+	CodeExternalRuntimeUsageLimited:        FaultDependency,
+	CodeACPConfigUpdateFailed:              FaultDependency,
+}
+
+// providerCodePrefixes name the codes a model provider's answer produces. A
+// provider is a dependency whatever status it answers with, so a new code
+// under these prefixes must declare its fault rather than take the client
+// fault its 4xx status would give.
+var providerCodePrefixes = []string{"agent.provider_", "agent.response_"}
+
+func TestCatalogDeclaredFaults(t *testing.T) {
+	t.Parallel()
+	for code, definition := range catalog {
+		switch definition.Fault {
+		case "", FaultClient, FaultServer, FaultDependency:
+		default:
+			t.Errorf("catalog entry %q declares unknown fault %q", code, definition.Fault)
+		}
+		if want, listed := declaredFaults[code]; definition.Fault != want {
+			if listed {
+				t.Errorf("catalog entry %q declares fault %q, want %q", code, definition.Fault, want)
+			} else {
+				t.Errorf("catalog entry %q declares fault %q; add it to declaredFaults", code, definition.Fault)
+			}
+		}
+		if definition.Fault == FaultDependency && definition.HTTPStatus < http.StatusInternalServerError && definition.HTTPStatus != http.StatusTooManyRequests {
+			t.Errorf("dependency code %q answers %d; a dependency's failure answers 5xx, or 429 when the client should back off", code, definition.HTTPStatus)
+		}
+		for _, prefix := range providerCodePrefixes {
+			if strings.HasPrefix(string(code), prefix) && definition.Fault != FaultDependency {
+				t.Errorf("provider code %q declares fault %q, want %q", code, definition.Fault, FaultDependency)
+			}
+		}
+	}
+	for code := range declaredFaults {
+		if _, ok := catalog[code]; !ok {
+			t.Errorf("declaredFaults lists %q, which is not in the catalog", code)
+		}
 	}
 }

@@ -20,6 +20,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 	"github.com/gorilla/websocket"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	displaypkg "github.com/felinics/memoh/internal/display"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -118,7 +119,7 @@ func (*BrowserProvider) Usage(_ context.Context, session SessionContext, availab
 	}, parts...))
 }
 
-func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]sdk.Tool, error) {
+func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]toolexec.Tool, error) {
 	if p == nil || p.settings == nil {
 		return nil, nil
 	}
@@ -133,101 +134,160 @@ func (p *BrowserProvider) Tools(ctx context.Context, session SessionContext) ([]
 	if !botSettings.DisplayEnabled {
 		return nil, nil
 	}
-	sess := session
-	return []sdk.Tool{
-		{
-			Name:        ToolBrowserAction().String(),
-			Description: "Operate the current workspace browser tab. Prefer element refs from an observation result over CSS selectors; use selectors only as a fallback. Use fill to replace input values, type to append text, and press for shortcuts or submit keys. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
-			Parameters: browserObjectSchema(map[string]any{
-				"action":          map[string]any{"type": "string", "enum": []string{"navigate", "click", "double_click", "focus", "type", "fill", "press", "hover", "select", "check", "uncheck", "scroll", "scroll_into_view", "drag", "upload", "wait", "go_back", "go_forward", "reload", "tab_new", "tab_select", "tab_close"}, "description": "Browser action to perform. Compatibility aliases dblclick, scrollintoview, keyboard_type, and keyboard_inserttext are also accepted; keydown and keyup dispatch a single raw key event."},
-				"url":             map[string]any{"type": "string", "description": "URL to open for navigate or tab_new."},
-				"ref":             map[string]any{"type": "string", "description": "Element ref such as e12 from a browser observation snapshot or screenshot annotation. Preferred over selector."},
-				"selector":        map[string]any{"type": "string", "description": "CSS selector for the target element when no ref is available."},
-				"text":            map[string]any{"type": "string", "description": "Text for type or fill."},
-				"key":             map[string]any{"type": "string", "description": "Key or key chord for press, e.g. Enter, Tab, Escape, Control+a."},
-				"value":           map[string]any{"type": "string", "description": "Option value for select."},
-				"target_ref":      map[string]any{"type": "string", "description": "Drop target ref for drag, preferred over target_selector."},
-				"target_selector": map[string]any{"type": "string", "description": "Drop target CSS selector for drag when no target_ref is available."},
-				"files":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Workspace file paths to upload."},
-				"tab_index":       map[string]any{"type": "integer", "minimum": 0, "description": "Tab index for tab_select or tab_close."},
-				"direction":       map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}, "description": "Scroll direction. Defaults to down."},
-				"amount":          map[string]any{"type": "integer", "minimum": 1, "maximum": 5000, "default": 500, "description": "Scroll amount in pixels."},
-				"timeout":         map[string]any{"type": "integer", "minimum": 1, "maximum": 45000, "default": 1000, "description": "Timeout in milliseconds for wait or navigation readiness."},
-			}, []string{"action"}),
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execBrowserAction(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolBrowserObserve().String(),
-			Description: "Inspect the current workspace browser without changing page state. Prefer snapshot for interactive elements and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are saved to a workspace path and are not attached automatically.",
-			Parameters: browserObjectSchema(map[string]any{
-				"observe":   map[string]any{"type": "string", "enum": []string{"snapshot", "get_content", "screenshot_annotate", "screenshot", "get_html", "evaluate", "get_url", "get_title", "pdf", "tab_list"}, "description": "What to observe from the page."},
-				"ref":       map[string]any{"type": "string", "description": "Element ref from snapshot or screenshot_annotate. Scopes get_content/get_html and evaluate helper use."},
-				"selector":  map[string]any{"type": "string", "description": "CSS selector to scope get_content or get_html when no ref is available."},
-				"script":    map[string]any{"type": "string", "description": "JavaScript expression to evaluate. Keep it short and read-only unless the task requires otherwise."},
-				"full_page": map[string]any{"type": "boolean", "default": false, "description": "Capture a full-page screenshot for screenshot."},
-			}, []string{"observe"}),
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execBrowserObserve(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolComputerObserve().String(),
-			Description: "Inspect the workspace desktop without changing state. Use snapshot for an accessibility-tree listing of interactive UI elements with refs for later desktop actions. Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and is not attached automatically.",
-			Parameters: browserObjectSchema(map[string]any{
-				"observe": map[string]any{"type": "string", "enum": []string{"snapshot", "screenshot"}, "description": "What to observe from the desktop."},
-			}, []string{"observe"}),
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execComputerObserve(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolComputerAction().String(),
-			Description: "Drive the workspace desktop. Prefer refs from a desktop observation snapshot for click/double_click/type/fill/scroll; coordinates (x, y) are only a fallback when no ref applies (native dialogs, raw drags, pointer hovers). For in-page browser targets, prefer browser-specific actions when they are available.",
-			Parameters: browserObjectSchema(map[string]any{
-				"action":      map[string]any{"type": "string", "enum": []string{"click", "double_click", "type", "fill", "key", "scroll", "drag", "wait", "mouse_move", "pointer"}, "description": "Desktop action to perform."},
-				"ref":         map[string]any{"type": "string", "description": "Element ref such as e3 from a desktop observation snapshot. Preferred over coordinates for click/double_click/type/fill/scroll."},
-				"x":           map[string]any{"type": "integer", "minimum": 0, "description": "X coordinate in desktop pixels (used when no ref is provided or as fallback)."},
-				"y":           map[string]any{"type": "integer", "minimum": 0, "description": "Y coordinate in desktop pixels (used when no ref is provided or as fallback)."},
-				"to_x":        map[string]any{"type": "integer", "minimum": 0, "description": "Destination X coordinate for drag."},
-				"to_y":        map[string]any{"type": "integer", "minimum": 0, "description": "Destination Y coordinate for drag."},
-				"button":      map[string]any{"type": "string", "enum": []string{"left", "middle", "right"}, "description": "Mouse button. Defaults to left."},
-				"button_mask": map[string]any{"type": "integer", "minimum": 0, "maximum": 255, "description": "Raw RFB button mask for pointer actions."},
-				"direction":   map[string]any{"type": "string", "enum": []string{"up", "down", "left", "right"}, "description": "Scroll direction. Defaults to down."},
-				"amount":      map[string]any{"type": "integer", "minimum": 1, "maximum": 10000, "default": 500, "description": "Scroll amount or wait duration in milliseconds."},
-				"key":         map[string]any{"type": "string", "description": "Key or key chord, e.g. Enter, Escape, Control+a."},
-				"text":        map[string]any{"type": "string", "description": "Text to type or fill into the target."},
-			}, []string{"action"}),
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execComputerAction(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-		{
-			Name:        ToolBrowserRemoteSession().String(),
-			Description: "Advanced escape hatch for code-driven automation. Exposes the workspace Chrome CDP endpoint for chromium.connectOverCDP or other CDP clients.",
-			Parameters: browserObjectSchema(map[string]any{
-				"action":     map[string]any{"type": "string", "enum": []string{"create", "close", "status"}, "description": "Session action to perform."},
-				"session_id": map[string]any{"type": "string", "description": "Target/session ID returned by create or status."},
-				"url":        map[string]any{"type": "string", "description": "Optional URL to open when creating a target."},
-			}, []string{"action"}),
-			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
-				return p.execRemoteSession(ctx.Context, sess, inputAsMap(input))
-			},
-		},
-	}, nil
+	return p.browserTools(session), nil
 }
 
-func browserObjectSchema(properties map[string]any, required []string) map[string]any {
-	schema := map[string]any{
-		"type":                 "object",
-		"properties":           properties,
-		"additionalProperties": false,
+// browserActionArgs is the wire shape of browser_action. The action list and
+// the numeric bounds are shape functions; every field is trimmed on the way
+// into browserCommand.
+type browserActionArgs struct {
+	Action         string   `json:"action" jsonschema:"Browser action to perform. Compatibility aliases dblclick, scrollintoview, keyboard_type, and keyboard_inserttext are also accepted; keydown and keyup dispatch a single raw key event."`
+	URL            string   `json:"url,omitempty" jsonschema:"URL to open for navigate or tab_new."`
+	Ref            string   `json:"ref,omitempty" jsonschema:"Element ref such as e12 from a browser observation snapshot or screenshot annotation. Preferred over selector."`
+	Selector       string   `json:"selector,omitempty" jsonschema:"CSS selector for the target element when no ref is available."`
+	Text           string   `json:"text,omitempty" jsonschema:"Text for type or fill."`
+	Key            string   `json:"key,omitempty" jsonschema:"Key or key chord for press, e.g. Enter, Tab, Escape, Control+a."`
+	Value          string   `json:"value,omitempty" jsonschema:"Option value for select."`
+	TargetRef      string   `json:"target_ref,omitempty" jsonschema:"Drop target ref for drag, preferred over target_selector."`
+	TargetSelector string   `json:"target_selector,omitempty" jsonschema:"Drop target CSS selector for drag when no target_ref is available."`
+	Files          []string `json:"files,omitempty" jsonschema:"Workspace file paths to upload."`
+	TabIndex       *int     `json:"tab_index,omitempty" jsonschema:"Tab index for tab_select or tab_close."`
+	Direction      string   `json:"direction,omitempty" jsonschema:"Scroll direction. Defaults to down."`
+	Amount         *int     `json:"amount,omitempty" jsonschema:"Scroll amount in pixels."`
+	Timeout        *int     `json:"timeout,omitempty" jsonschema:"Timeout in milliseconds for wait or navigation readiness."`
+}
+
+func (a browserActionArgs) command() browserCommand {
+	return browserCommand{
+		Action: a.Action, URL: a.URL, Ref: a.Ref, Selector: a.Selector, Text: a.Text, Key: a.Key, Value: a.Value,
+		TargetRef: a.TargetRef, TargetSelector: a.TargetSelector, Files: a.Files, TabIndex: a.TabIndex,
+		Direction: a.Direction, Amount: a.Amount, Timeout: a.Timeout,
+	}.trimmed()
+}
+
+type browserObserveArgs struct {
+	Observe  string `json:"observe" jsonschema:"What to observe from the page."`
+	Ref      string `json:"ref,omitempty" jsonschema:"Element ref from snapshot or screenshot_annotate. Scopes get_content/get_html and evaluate helper use."`
+	Selector string `json:"selector,omitempty" jsonschema:"CSS selector to scope get_content or get_html when no ref is available."`
+	Script   string `json:"script,omitempty" jsonschema:"JavaScript expression to evaluate. Keep it short and read-only unless the task requires otherwise."`
+	FullPage bool   `json:"full_page,omitempty" jsonschema:"Capture a full-page screenshot for screenshot."`
+}
+
+func (a browserObserveArgs) command() browserCommand {
+	return browserCommand{Action: a.Observe, Ref: a.Ref, Selector: a.Selector, Script: a.Script, FullPage: a.FullPage}.trimmed()
+}
+
+type browserRemoteSessionArgs struct {
+	Action    string `json:"action" jsonschema:"Session action to perform."`
+	SessionID string `json:"session_id,omitempty" jsonschema:"Target/session ID returned by create or status."`
+	URL       string `json:"url,omitempty" jsonschema:"Optional URL to open when creating a target."`
+}
+
+type computerObserveArgs struct {
+	Observe string `json:"observe" jsonschema:"What to observe from the desktop."`
+}
+
+type computerActionArgs struct {
+	Action     string `json:"action" jsonschema:"Desktop action to perform."`
+	Ref        string `json:"ref,omitempty" jsonschema:"Element ref such as e3 from a desktop observation snapshot. Preferred over coordinates for click/double_click/type/fill/scroll."`
+	X          *int   `json:"x,omitempty" jsonschema:"X coordinate in desktop pixels (used when no ref is provided or as fallback)."`
+	Y          *int   `json:"y,omitempty" jsonschema:"Y coordinate in desktop pixels (used when no ref is provided or as fallback)."`
+	ToX        *int   `json:"to_x,omitempty" jsonschema:"Destination X coordinate for drag."`
+	ToY        *int   `json:"to_y,omitempty" jsonschema:"Destination Y coordinate for drag."`
+	Button     string `json:"button,omitempty" jsonschema:"Mouse button. Defaults to left."`
+	ButtonMask *int   `json:"button_mask,omitempty" jsonschema:"Raw RFB button mask for pointer actions."`
+	Direction  string `json:"direction,omitempty" jsonschema:"Scroll direction. Defaults to down."`
+	Amount     *int   `json:"amount,omitempty" jsonschema:"Scroll amount or wait duration in milliseconds."`
+	Key        string `json:"key,omitempty" jsonschema:"Key or key chord, e.g. Enter, Escape, Control+a."`
+	Text       string `json:"text,omitempty" jsonschema:"Text to type or fill into the target."`
+}
+
+// browserCommand is what the CDP dispatchers run: browser_action and
+// browser_observe both decode into it, so the two tools share one code path.
+type browserCommand struct {
+	Action, URL, Ref, Selector, Text, Key, Value string
+	TargetRef, TargetSelector                    string
+	Files                                        []string
+	TabIndex, Amount, Timeout                    *int
+	Direction, Script                            string
+	FullPage                                     bool
+}
+
+func (c browserCommand) trimmed() browserCommand {
+	c.Action = strings.TrimSpace(c.Action)
+	c.URL = strings.TrimSpace(c.URL)
+	c.Ref = strings.TrimSpace(c.Ref)
+	c.Selector = strings.TrimSpace(c.Selector)
+	c.Text = strings.TrimSpace(c.Text)
+	c.Key = strings.TrimSpace(c.Key)
+	c.Value = strings.TrimSpace(c.Value)
+	c.TargetRef = strings.TrimSpace(c.TargetRef)
+	c.TargetSelector = strings.TrimSpace(c.TargetSelector)
+	c.Direction = strings.TrimSpace(c.Direction)
+	c.Script = strings.TrimSpace(c.Script)
+	c.Files = trimmedStrings(c.Files)
+	return c
+}
+
+func (c browserCommand) target() browserTarget {
+	return browserTarget{Selector: c.Selector, Ref: normalizeBrowserRef(c.Ref)}
+}
+
+func (c browserCommand) dropTarget() browserTarget {
+	return browserTarget{Selector: c.TargetSelector, Ref: normalizeBrowserRef(c.TargetRef)}
+}
+
+var browserDirections = []any{"up", "down", "left", "right"}
+
+func (p *BrowserProvider) browserTools(session SessionContext) []toolexec.Tool {
+	sess := session
+	return []toolexec.Tool{
+		toolexec.Define(ToolBrowserAction().String(), "Operate the current workspace browser tab. Prefer element refs from an observation result over CSS selectors; use selectors only as a fallback. Use fill to replace input values, type to append text, and press for shortcuts or submit keys. After navigation or UI-changing actions, observe again only when the next step depends on the changed state.",
+			func(ctx *toolexec.ToolExecContext, args browserActionArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execBrowserAction(ctx.Context, sess, args))
+			},
+			toolexec.Enum("action", "navigate", "click", "double_click", "focus", "type", "fill", "press", "hover", "select", "check", "uncheck", "scroll", "scroll_into_view", "drag", "upload", "wait", "go_back", "go_forward", "reload", "tab_new", "tab_select", "tab_close"),
+			toolexec.Minimum("tab_index", 0),
+			toolexec.Enum("direction", browserDirections...),
+			toolexec.Range("amount", 1, 5000), toolexec.Default("amount", 500),
+			toolexec.Range("timeout", 1, 45000), toolexec.Default("timeout", 1000),
+			toolexec.Strict(),
+		),
+		toolexec.Define(ToolBrowserObserve().String(), "Inspect the current workspace browser without changing page state. Prefer snapshot for interactive elements and get_content for readable text. Use screenshot_annotate only when visual layout matters or you need rendered-page refs. Use evaluate only for small DOM queries or page-state checks. Screenshots are saved to a workspace path and are not attached automatically.",
+			func(ctx *toolexec.ToolExecContext, args browserObserveArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execBrowserObserve(ctx.Context, sess, args))
+			},
+			toolexec.Enum("observe", "snapshot", "get_content", "screenshot_annotate", "screenshot", "get_html", "evaluate", "get_url", "get_title", "pdf", "tab_list"),
+			toolexec.Default("full_page", false),
+			toolexec.Strict(),
+		),
+		toolexec.Define(ToolComputerObserve().String(), "Inspect the workspace desktop without changing state. Use snapshot for an accessibility-tree listing of interactive UI elements with refs for later desktop actions. Use screenshot only when accessibility is unavailable or you need visual layout; the image is saved to a workspace path and is not attached automatically.",
+			func(ctx *toolexec.ToolExecContext, args computerObserveArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execComputerObserve(ctx.Context, sess, args))
+			},
+			toolexec.Enum("observe", "snapshot", "screenshot"),
+			toolexec.Strict(),
+		),
+		toolexec.Define(ToolComputerAction().String(), "Drive the workspace desktop. Prefer refs from a desktop observation snapshot for click/double_click/type/fill/scroll; coordinates (x, y) are only a fallback when no ref applies (native dialogs, raw drags, pointer hovers). For in-page browser targets, prefer browser-specific actions when they are available.",
+			func(ctx *toolexec.ToolExecContext, args computerActionArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execComputerAction(ctx.Context, sess, args))
+			},
+			toolexec.Enum("action", "click", "double_click", "type", "fill", "key", "scroll", "drag", "wait", "mouse_move", "pointer"),
+			toolexec.Minimum("x", 0), toolexec.Minimum("y", 0), toolexec.Minimum("to_x", 0), toolexec.Minimum("to_y", 0),
+			toolexec.Enum("button", "left", "middle", "right"),
+			toolexec.Range("button_mask", 0, 255),
+			toolexec.Enum("direction", browserDirections...),
+			toolexec.Range("amount", 1, 10000), toolexec.Default("amount", 500),
+			toolexec.Strict(),
+		),
+		toolexec.Define(ToolBrowserRemoteSession().String(), "Advanced escape hatch for code-driven automation. Exposes the workspace Chrome CDP endpoint for chromium.connectOverCDP or other CDP clients.",
+			func(ctx *toolexec.ToolExecContext, args browserRemoteSessionArgs) (sdk.ToolOutput, error) {
+				return toolexec.OutputPair(p.execRemoteSession(ctx.Context, sess, args))
+			},
+			toolexec.Enum("action", "create", "close", "status"),
+			toolexec.Strict(),
+		),
 	}
-	if len(required) > 0 {
-		schema["required"] = required
-	}
-	return schema
 }
 
 func sessionBotID(session SessionContext) (string, error) {
@@ -238,7 +298,23 @@ func sessionBotID(session SessionContext) (string, error) {
 	return botID, nil
 }
 
-func (p *BrowserProvider) execBrowserAction(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *BrowserProvider) execBrowserAction(ctx context.Context, session SessionContext, args browserActionArgs) (any, error) {
+	cmd := args.command()
+	if cmd.Action == "" {
+		return nil, errors.New("action is required")
+	}
+	return p.runBrowserCommand(ctx, session, cmd)
+}
+
+func (p *BrowserProvider) execBrowserObserve(ctx context.Context, session SessionContext, args browserObserveArgs) (any, error) {
+	cmd := args.command()
+	if cmd.Action == "" {
+		return nil, errors.New("observe is required")
+	}
+	return p.runBrowserCommand(ctx, session, cmd)
+}
+
+func (p *BrowserProvider) runBrowserCommand(ctx context.Context, session SessionContext, cmd browserCommand) (any, error) {
 	botID, err := sessionBotID(session)
 	if err != nil {
 		return nil, err
@@ -246,37 +322,16 @@ func (p *BrowserProvider) execBrowserAction(ctx context.Context, session Session
 	if err := p.ensureDisplayEnabled(ctx, botID); err != nil {
 		return nil, err
 	}
-	action := StringArg(args, "action")
-	if action == "" {
-		return nil, errors.New("action is required")
-	}
 	runCtx, cancel := context.WithTimeout(ctx, browserToolTimeout)
 	defer cancel()
-	data, err := p.runCDPAction(runCtx, botID, args)
+	data, err := p.runCDPAction(runCtx, botID, cmd)
 	if err != nil {
 		return nil, err
 	}
 	return p.browserActionResult(ctx, botID, data), nil
 }
 
-func (p *BrowserProvider) execBrowserObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	observe := StringArg(args, "observe")
-	if observe == "" {
-		return nil, errors.New("observe is required")
-	}
-	payload := map[string]any{"action": observe}
-	for _, key := range []string{"ref", "selector", "script"} {
-		if v := StringArg(args, key); v != "" {
-			payload[key] = v
-		}
-	}
-	if v, ok, _ := BoolArg(args, "full_page"); ok {
-		payload["full_page"] = v
-	}
-	return p.execBrowserAction(ctx, session, payload)
-}
-
-func (p *BrowserProvider) execRemoteSession(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *BrowserProvider) execRemoteSession(ctx context.Context, session SessionContext, args browserRemoteSessionArgs) (any, error) {
 	botID, err := sessionBotID(session)
 	if err != nil {
 		return nil, err
@@ -288,10 +343,10 @@ func (p *BrowserProvider) execRemoteSession(ctx context.Context, session Session
 	if err != nil {
 		return nil, err
 	}
-	action := StringArg(args, "action")
+	action := strings.TrimSpace(args.Action)
 	switch action {
 	case "create":
-		targetURL := StringArg(args, "url")
+		targetURL := strings.TrimSpace(args.URL)
 		target, err := p.createOrActiveTarget(ctx, client, targetURL)
 		if err != nil {
 			return nil, err
@@ -318,7 +373,7 @@ func (p *BrowserProvider) execRemoteSession(ctx context.Context, session Session
 			"targets":          publicTargets(targets),
 		}, nil
 	case "close":
-		sessionID := StringArg(args, "session_id")
+		sessionID := strings.TrimSpace(args.SessionID)
 		if sessionID == "" {
 			return nil, errors.New("session_id is required for close")
 		}
@@ -328,8 +383,8 @@ func (p *BrowserProvider) execRemoteSession(ctx context.Context, session Session
 	}
 }
 
-func (p *BrowserProvider) execComputerObserve(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
-	observe := strings.TrimSpace(StringArg(args, "observe"))
+func (p *BrowserProvider) execComputerObserve(ctx context.Context, session SessionContext, args computerObserveArgs) (any, error) {
+	observe := strings.TrimSpace(args.Observe)
 	if observe == "" {
 		return nil, errors.New("observe is required")
 	}
@@ -377,30 +432,28 @@ func (p *BrowserProvider) execComputerSnapshot(ctx context.Context, session Sess
 	}, nil
 }
 
-func (p *BrowserProvider) execComputerAction(ctx context.Context, session SessionContext, args map[string]any) (any, error) {
+func (p *BrowserProvider) execComputerAction(ctx context.Context, session SessionContext, args computerActionArgs) (any, error) {
 	botID, err := p.requireComputerDisplay(session)
 	if err != nil {
 		return nil, err
 	}
-	action := StringArg(args, "action")
+	action := strings.TrimSpace(args.Action)
 	if action == "" {
 		return nil, errors.New("action is required")
 	}
 	if _, err := p.ensureComputerDisplay(ctx, botID); err != nil {
 		return nil, err
 	}
-	ref := normalizeBrowserRef(StringArg(args, "ref"))
+	ref := normalizeBrowserRef(args.Ref)
 	switch action {
 	case "mouse_move", "pointer":
-		x, y, err := requiredPoint(args)
+		x, y, err := requiredPoint(args.X, args.Y)
 		if err != nil {
 			return nil, err
 		}
 		mask := byte(0)
-		if value, ok, err := IntArg(args, "button_mask"); err != nil {
-			return nil, err
-		} else if ok {
-			mask = clampByte(value)
+		if args.ButtonMask != nil {
+			mask = clampByte(*args.ButtonMask)
 		}
 		if err := p.sendDisplayInputs(ctx, botID, displaypkg.ControlInput{Type: "pointer", X: x, Y: y, ButtonMask: mask}); err != nil {
 			return nil, err
@@ -420,11 +473,11 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 				return result, nil
 			}
 		}
-		x, y, err := requiredPoint(args)
+		x, y, err := requiredPoint(args.X, args.Y)
 		if err != nil {
 			return nil, fmt.Errorf("click requires ref or x/y: %w", err)
 		}
-		mask := mouseButtonMask(StringArg(args, "button"))
+		mask := mouseButtonMask(strings.TrimSpace(args.Button))
 		for i := 0; i < count; i++ {
 			if err := p.pointerClick(ctx, botID, x, y, mask); err != nil {
 				return nil, err
@@ -432,7 +485,7 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		}
 		return map[string]any{"clicked": true, "x": x, "y": y, "button": buttonName(mask), "click_count": count}, nil
 	case "type", "fill":
-		text := StringArg(args, "text")
+		text := strings.TrimSpace(args.Text)
 		if text == "" {
 			return nil, errors.New("text is required")
 		}
@@ -454,39 +507,36 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		}
 		return out, nil
 	case "drag":
-		x, y, err := requiredPoint(args)
+		x, y, err := requiredPoint(args.X, args.Y)
 		if err != nil {
 			return nil, err
 		}
-		toX, toY, err := requiredTargetPoint(args)
+		toX, toY, err := requiredTargetPoint(args.ToX, args.ToY)
 		if err != nil {
 			return nil, err
 		}
-		if err := p.pointerDrag(ctx, botID, x, y, toX, toY, mouseButtonMask(StringArg(args, "button"))); err != nil {
+		if err := p.pointerDrag(ctx, botID, x, y, toX, toY, mouseButtonMask(strings.TrimSpace(args.Button))); err != nil {
 			return nil, err
 		}
 		return map[string]any{"dragged": true, "x": x, "y": y, "to_x": toX, "to_y": toY}, nil
 	case "scroll":
-		x, y := optionalPoint(args, defaultComputerWidth/2, defaultComputerHeight/2)
+		x, y := optionalPoint(args.X, args.Y, defaultComputerWidth/2, defaultComputerHeight/2)
 		if ref != "" {
 			if entry, err := lookupComputerRef(ctx, p.containers, botID, ref); err == nil && entry != nil {
 				x, y = entry.CenterX, entry.CenterY
 			}
 		}
-		direction := StringArg(args, "direction")
+		direction := strings.TrimSpace(args.Direction)
 		if direction == "" {
 			direction = "down"
 		}
-		amount, err := intArgOr(args, "amount", 500)
-		if err != nil {
-			return nil, err
-		}
+		amount := intOr(args.Amount, 500)
 		if err := p.pointerScroll(ctx, botID, x, y, direction, amount); err != nil {
 			return nil, err
 		}
 		return map[string]any{"scrolled": direction, "amount": amount, "x": x, "y": y}, nil
 	case "key":
-		key := StringArg(args, "key")
+		key := strings.TrimSpace(args.Key)
 		if key == "" {
 			return nil, errors.New("key is required")
 		}
@@ -495,10 +545,7 @@ func (p *BrowserProvider) execComputerAction(ctx context.Context, session Sessio
 		}
 		return map[string]any{"pressed": key}, nil
 	case "wait":
-		amount, err := intArgOr(args, "amount", 1000)
-		if err != nil {
-			return nil, err
-		}
+		amount := intOr(args.Amount, 1000)
 		if err := sleepContext(ctx, time.Duration(amount)*time.Millisecond); err != nil {
 			return nil, err
 		}
@@ -986,14 +1033,14 @@ func (p *BrowserProvider) connectPage(ctx context.Context, botID string) (*bridg
 	return client, target, page, nil
 }
 
-func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args map[string]any) (map[string]any, error) {
-	action := normalizeBrowserAction(StringArg(args, "action"))
+func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, cmd browserCommand) (map[string]any, error) {
+	action := normalizeBrowserAction(cmd.Action)
 	if isCDPTabAction(action) {
 		client, err := p.ensureCDP(ctx, botID)
 		if err != nil {
 			return nil, err
 		}
-		return p.runCDPTabAction(ctx, client, action, args)
+		return p.runCDPTabAction(ctx, client, action, cmd)
 	}
 	_, _, page, err := p.connectPage(ctx, botID)
 	if err != nil {
@@ -1003,7 +1050,7 @@ func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args m
 
 	switch action {
 	case "navigate":
-		targetURL := StringArg(args, "url")
+		targetURL := cmd.URL
 		if targetURL == "" {
 			return nil, errors.New("url is required for navigate")
 		}
@@ -1011,14 +1058,14 @@ func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args m
 		if err != nil {
 			return nil, err
 		}
-		_ = page.waitReady(ctx, timeoutArg(args, 30000))
+		_ = page.waitReady(ctx, intOr(cmd.Timeout, 30000))
 		nav := map[string]any{}
 		_ = json.Unmarshal(result, &nav)
 		currentURL, _ := page.evaluateString(ctx, "location.href")
 		nav["url"] = currentURL
 		return nav, nil
 	case "click", "double_click":
-		target := browserTargetArg(args, "selector", "ref")
+		target := cmd.target()
 		if err := target.require(action); err != nil {
 			return nil, err
 		}
@@ -1035,7 +1082,7 @@ func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args m
 		}
 		return target.withResult(map[string]any{"clicked": target.label(), "x": point.X, "y": point.Y, "click_count": count}), nil
 	case "focus":
-		target := browserTargetArg(args, "selector", "ref")
+		target := cmd.target()
 		if err := target.require("focus"); err != nil {
 			return nil, err
 		}
@@ -1045,8 +1092,8 @@ func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args m
 		}
 		return target.withResult(map[string]any{"focused": target.label()}), nil
 	case "type":
-		target := browserTargetArg(args, "selector", "ref")
-		text := StringArg(args, "text")
+		target := cmd.target()
+		text := cmd.Text
 		if err := target.require("type"); err != nil {
 			return nil, err
 		}
@@ -1061,8 +1108,8 @@ func (p *BrowserProvider) runCDPAction(ctx context.Context, botID string, args m
 		}
 		return target.withResult(map[string]any{"typed": text}), nil
 	case "fill":
-		target := browserTargetArg(args, "selector", "ref")
-		text := StringArg(args, "text")
+		target := cmd.target()
+		text := cmd.Text
 		if err := target.require("fill"); err != nil {
 			return nil, err
 		}
@@ -1086,7 +1133,7 @@ return true;
 		}
 		return target.withResult(map[string]any{"filled": text}), nil
 	case "press":
-		key := StringArg(args, "key")
+		key := cmd.Key
 		if key == "" {
 			return nil, errors.New("key is required for press")
 		}
@@ -1095,7 +1142,7 @@ return true;
 		}
 		return map[string]any{"pressed": key}, nil
 	case "keyboard_type", "keyboard_inserttext":
-		text := StringArg(args, "text")
+		text := cmd.Text
 		if text == "" {
 			return nil, fmt.Errorf("text is required for %s", action)
 		}
@@ -1104,7 +1151,7 @@ return true;
 		}
 		return map[string]any{"inserted_text": text}, nil
 	case "keydown", "keyup":
-		key := StringArg(args, "key")
+		key := cmd.Key
 		if key == "" {
 			return nil, fmt.Errorf("key is required for %s", action)
 		}
@@ -1113,7 +1160,7 @@ return true;
 		}
 		return map[string]any{action: key}, nil
 	case "hover":
-		target := browserTargetArg(args, "selector", "ref")
+		target := cmd.target()
 		if err := target.require("hover"); err != nil {
 			return nil, err
 		}
@@ -1126,8 +1173,8 @@ return true;
 		}
 		return target.withResult(map[string]any{"hovered": target.label(), "x": point.X, "y": point.Y}), nil
 	case "select":
-		target := browserTargetArg(args, "selector", "ref")
-		value := StringArg(args, "value")
+		target := cmd.target()
+		value := cmd.Value
 		if err := target.require("select"); err != nil {
 			return nil, err
 		}
@@ -1146,7 +1193,7 @@ return el.value;
 		}
 		return target.withResult(map[string]any{"selected": result}), nil
 	case "check", "uncheck":
-		target := browserTargetArg(args, "selector", "ref")
+		target := cmd.target()
 		if err := target.require(action); err != nil {
 			return nil, err
 		}
@@ -1163,7 +1210,7 @@ return true;
 		}
 		return target.withResult(map[string]any{action + "ed": target.label()}), nil
 	case "screenshot":
-		fullPage, _, _ := BoolArg(args, "full_page")
+		fullPage := cmd.FullPage
 		b64, err := page.captureScreenshot(ctx, fullPage)
 		if err != nil {
 			return nil, err
@@ -1190,7 +1237,7 @@ return true;
 		}
 		return map[string]any{"snapshot": snapshot}, nil
 	case "get_content":
-		target := browserTargetArg(args, "selector", "ref")
+		target := cmd.target()
 		expr := `document.body ? document.body.innerText : ""`
 		if target.present() {
 			expr = fmt.Sprintf(`mustTarget(%s, %s).innerText`, jsQuote(target.Selector), jsQuote(target.Ref))
@@ -1201,7 +1248,7 @@ return true;
 		}
 		return target.withResult(map[string]any{"content": text}), nil
 	case "get_html":
-		target := browserTargetArg(args, "selector", "ref")
+		target := cmd.target()
 		expr := `document.documentElement ? document.documentElement.outerHTML : ""`
 		if target.present() {
 			expr = fmt.Sprintf(`mustTarget(%s, %s).innerHTML`, jsQuote(target.Selector), jsQuote(target.Ref))
@@ -1212,7 +1259,7 @@ return true;
 		}
 		return target.withResult(map[string]any{"html": html}), nil
 	case "evaluate":
-		script := StringArg(args, "script")
+		script := cmd.Script
 		if script == "" {
 			return nil, errors.New("script is required for evaluate")
 		}
@@ -1222,15 +1269,12 @@ return true;
 		}
 		return map[string]any{"result": result}, nil
 	case "scroll":
-		direction := StringArg(args, "direction")
+		direction := cmd.Direction
 		if direction == "" {
 			direction = "down"
 		}
-		amount, err := intArgOr(args, "amount", 500)
-		if err != nil {
-			return nil, err
-		}
-		target := browserTargetArg(args, "selector", "ref")
+		amount := intOr(cmd.Amount, 500)
+		target := cmd.target()
 		if target.present() {
 			_, err = page.evaluate(ctx, fmt.Sprintf(`(() => {
 const el = mustTarget(%s, %s);
@@ -1247,7 +1291,7 @@ return true;
 		}
 		return target.withResult(map[string]any{"scrolled": direction, "amount": amount}), nil
 	case "scroll_into_view":
-		target := browserTargetArg(args, "selector", "ref")
+		target := cmd.target()
 		if err := target.require("scroll_into_view"); err != nil {
 			return nil, err
 		}
@@ -1257,8 +1301,8 @@ return true;
 		}
 		return target.withResult(map[string]any{"scrolled_into_view": target.label()}), nil
 	case "drag":
-		sourceTarget := browserTargetArg(args, "selector", "ref")
-		dropTarget := browserTargetArg(args, "target_selector", "target_ref")
+		sourceTarget := cmd.target()
+		dropTarget := cmd.dropTarget()
 		if err := sourceTarget.require("drag source"); err != nil {
 			return nil, err
 		}
@@ -1278,11 +1322,11 @@ return true;
 		}
 		return map[string]any{"dragged": sourceTarget.label(), "target": dropTarget.label(), "ref": sourceTarget.Ref, "selector": sourceTarget.Selector, "target_ref": dropTarget.Ref, "target_selector": dropTarget.Selector}, nil
 	case "upload":
-		target := browserTargetArg(args, "selector", "ref")
+		target := cmd.target()
 		if err := target.require("upload"); err != nil {
 			return nil, err
 		}
-		files := stringSliceArg(args, "files")
+		files := cmd.Files
 		if len(files) == 0 {
 			return nil, errors.New("files is required for upload")
 		}
@@ -1291,8 +1335,8 @@ return true;
 		}
 		return target.withResult(map[string]any{"uploaded": files}), nil
 	case "wait":
-		target := browserTargetArg(args, "selector", "ref")
-		timeout := timeoutArg(args, 1000)
+		target := cmd.target()
+		timeout := intOr(cmd.Timeout, 1000)
 		if target.present() {
 			if err := page.waitTarget(ctx, target, timeout); err != nil {
 				return nil, err
@@ -1313,7 +1357,7 @@ return true;
 		if _, err := page.conn.Call(ctx, "Page.reload", nil); err != nil {
 			return nil, err
 		}
-		_ = page.waitReady(ctx, timeoutArg(args, 30000))
+		_ = page.waitReady(ctx, intOr(cmd.Timeout, 30000))
 		currentURL, _ := page.evaluateString(ctx, "location.href")
 		return map[string]any{"url": currentURL}, nil
 	case "get_url":
@@ -1354,10 +1398,10 @@ func isCDPTabAction(action string) bool {
 	}
 }
 
-func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Client, action string, args map[string]any) (map[string]any, error) {
+func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Client, action string, cmd browserCommand) (map[string]any, error) {
 	switch action {
 	case "tab_new":
-		targetURL := StringArg(args, "url")
+		targetURL := cmd.URL
 		newTarget, err := p.createTarget(ctx, client, targetURL)
 		if err != nil {
 			return nil, err
@@ -1365,13 +1409,10 @@ func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Cl
 		targets, _ := p.listTargets(ctx, client)
 		return map[string]any{"tab_index": targetIndex(targets, newTarget.ID), "target": newTarget.publicMap(), "url": newTarget.URL}, nil
 	case "tab_select":
-		tabIndex, ok, err := IntArg(args, "tab_index")
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
+		if cmd.TabIndex == nil {
 			return nil, errors.New("tab_index is required for tab_select")
 		}
+		tabIndex := *cmd.TabIndex
 		targets, err := p.listTargets(ctx, client)
 		if err != nil {
 			return nil, err
@@ -1389,13 +1430,9 @@ func (p *BrowserProvider) runCDPTabAction(ctx context.Context, client *bridge.Cl
 		if err != nil {
 			return nil, err
 		}
-		tabIndex, ok, err := IntArg(args, "tab_index")
-		if err != nil {
-			return nil, err
-		}
 		var closeTarget cdpTarget
-		if ok {
-			closeTarget, err = pageTargetAt(targets, tabIndex)
+		if cmd.TabIndex != nil {
+			closeTarget, err = pageTargetAt(targets, *cmd.TabIndex)
 			if err != nil {
 				return nil, err
 			}
@@ -1512,13 +1549,6 @@ func remoteObjectValue(obj remoteObject) any {
 type browserTarget struct {
 	Selector string
 	Ref      string
-}
-
-func browserTargetArg(args map[string]any, selectorKey, refKey string) browserTarget {
-	return browserTarget{
-		Selector: StringArg(args, selectorKey),
-		Ref:      normalizeBrowserRef(StringArg(args, refKey)),
-	}
 }
 
 func normalizeBrowserRef(ref string) string {
@@ -2097,46 +2127,29 @@ func (p *BrowserProvider) sendDisplayInputs(ctx context.Context, botID string, e
 	return p.display.ControlInputs(ctx, botID, events)
 }
 
-func requiredPoint(args map[string]any) (int, int, error) {
-	x, okX, err := IntArg(args, "x")
-	if err != nil {
-		return 0, 0, err
-	}
-	y, okY, err := IntArg(args, "y")
-	if err != nil {
-		return 0, 0, err
-	}
-	if !okX || !okY {
+func requiredPoint(x, y *int) (int, int, error) {
+	if x == nil || y == nil {
 		return 0, 0, errors.New("x and y are required")
 	}
-	return x, y, nil
+	return *x, *y, nil
 }
 
-func requiredTargetPoint(args map[string]any) (int, int, error) {
-	x, okX, err := IntArg(args, "to_x")
-	if err != nil {
-		return 0, 0, err
-	}
-	y, okY, err := IntArg(args, "to_y")
-	if err != nil {
-		return 0, 0, err
-	}
-	if !okX || !okY {
+func requiredTargetPoint(x, y *int) (int, int, error) {
+	if x == nil || y == nil {
 		return 0, 0, errors.New("to_x and to_y are required")
 	}
-	return x, y, nil
+	return *x, *y, nil
 }
 
-func optionalPoint(args map[string]any, fallbackX, fallbackY int) (int, int) {
-	x, okX, _ := IntArg(args, "x")
-	y, okY, _ := IntArg(args, "y")
-	if !okX {
-		x = fallbackX
+func optionalPoint(x, y *int, fallbackX, fallbackY int) (int, int) {
+	outX, outY := fallbackX, fallbackY
+	if x != nil {
+		outX = *x
 	}
-	if !okY {
-		y = fallbackY
+	if y != nil {
+		outY = *y
 	}
-	return x, y
+	return outX, outY
 }
 
 func mouseButtonMask(button string) byte {
@@ -2313,23 +2326,13 @@ func normalizeBrowserAction(action string) string {
 	}
 }
 
-func timeoutArg(args map[string]any, fallback int) int {
-	value, ok, err := IntArg(args, "timeout")
-	if err != nil || !ok || value <= 0 {
+// intOr reads an optional positive integer, falling back when it is absent
+// or not positive.
+func intOr(value *int, fallback int) int {
+	if value == nil || *value <= 0 {
 		return fallback
 	}
-	return value
-}
-
-func intArgOr(args map[string]any, key string, fallback int) (int, error) {
-	value, _, err := IntArg(args, key)
-	if err != nil {
-		return 0, err
-	}
-	if value <= 0 {
-		return fallback, nil
-	}
-	return value, nil
+	return *value
 }
 
 func scrollDeltaX(direction string, amount int) int {
@@ -2354,25 +2357,17 @@ func scrollDeltaY(direction string, amount int) int {
 	}
 }
 
-func stringSliceArg(args map[string]any, key string) []string {
-	raw, ok := args[key]
-	if !ok || raw == nil {
+func trimmedStrings(values []string) []string {
+	if len(values) == 0 {
 		return nil
 	}
-	switch values := raw.(type) {
-	case []string:
-		return values
-	case []any:
-		out := make([]string, 0, len(values))
-		for _, value := range values {
-			if s := strings.TrimSpace(fmt.Sprintf("%v", value)); s != "" {
-				out = append(out, s)
-			}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if s := strings.TrimSpace(value); s != "" {
+			out = append(out, s)
 		}
-		return out
-	default:
-		return nil
 	}
+	return out
 }
 
 func pageTargetAt(targets []cdpTarget, index int) (cdpTarget, error) {

@@ -14,7 +14,12 @@ function writeExecutable(path: string, content: string): void {
   chmodSync(path, 0o755)
 }
 
-function runEntrypoint(backend?: string, configPath = '/app/config.toml', ctrStatus = 1) {
+function runEntrypoint(
+  backend?: string,
+  configPath = '/app/config.toml',
+  ctrStatus = 1,
+  { shutdown = false, env = [] }: { shutdown?: boolean, env?: string[] } = {},
+) {
   const tempDir = mkdtempSync(join(tmpdir(), 'memoh-server-entrypoint-'))
   const appDir = join(tempDir, 'app')
   const configDir = join(tempDir, 'config')
@@ -34,6 +39,13 @@ function runEntrypoint(backend?: string, configPath = '/app/config.toml', ctrSta
     writeFileSync(hostConfigPath, `[container]\n${backendConfig}`)
     writeExecutable(join(appDir, 'memoh-server'), `#!/bin/sh
 printf 'memoh-server %s\n' "$*" >> "$ENTRYPOINT_TEST_LOG"
+printf 'memoh-server env OTEL_SDK_DISABLED=%s\n' "$OTEL_SDK_DISABLED" >> "$ENTRYPOINT_TEST_LOG"
+if [ "$ENTRYPOINT_TEST_SHUTDOWN" = 1 ]; then
+  entrypoint_pid=$PPID
+  trap '/bin/sleep 0.1; printf "interrupt-saved\\n" >> "$ENTRYPOINT_TEST_LOG"; exit 0' TERM INT
+  (/bin/sleep 0.1; kill -TERM "$entrypoint_pid") &
+  while :; do /bin/sleep 0.01; done
+fi
 `)
 
     const fakeCommand = `#!/bin/sh
@@ -41,6 +53,7 @@ command_name=\${0##*/}
 printf '%s %s\n' "$command_name" "$*" >> "$ENTRYPOINT_TEST_LOG"
 case "$command_name" in
   containerd)
+    printf 'containerd env OTEL_SDK_DISABLED=%s\n' "$OTEL_SDK_DISABLED" >> "$ENTRYPOINT_TEST_LOG"
     trap 'printf "containerd-stopped\\n" >> "$ENTRYPOINT_TEST_LOG"; exit 0' TERM INT
     : > "$ENTRYPOINT_TEST_CONTAINERD_READY"
     while :; do /bin/sleep 0.05; done
@@ -80,12 +93,15 @@ exit 0
       '--env',
       'ENTRYPOINT_TEST_LOG=/test/state/calls.log',
       '--env',
+      `ENTRYPOINT_TEST_SHUTDOWN=${shutdown ? 1 : 0}`,
+      '--env',
       `ENTRYPOINT_TEST_CTR_STATUS=${ctrStatus}`,
       '--env',
       'ENTRYPOINT_TEST_CONTAINERD_READY=/test/state/containerd.ready',
       '--env',
       'PATH=/test/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
       ...(configPath === '/app/config.toml' ? [] : ['--env', `CONFIG_PATH=${configPath}`]),
+      ...env.flatMap(value => ['--env', value]),
       '--entrypoint',
       '/bin/sh',
       TEST_IMAGE,
@@ -134,4 +150,23 @@ test('omitted backend preserves embedded containerd setup and cleanup', () => {
   expect(calls).toMatch(/^ctr version$/m)
   expect(calls).toMatch(/^memoh-server serve$/m)
   expect(calls).toMatch(/^containerd-stopped$/m)
+})
+
+
+test('SIGTERM preserves containerd until the server saves its interruption marker', () => {
+  const { calls, result } = runEntrypoint(undefined, '/app/config.toml', 0, { shutdown: true })
+  expect(result.error).toBeUndefined()
+  expect(calls).toMatch(/interrupt-saved/)
+  expect(calls).toMatch(/containerd-stopped/)
+  expect(calls.indexOf('interrupt-saved')).toBeLessThan(calls.indexOf('containerd-stopped'))
+})
+
+test('embedded containerd does not export the OpenTelemetry settings meant for the server', () => {
+  const { calls, result } = runEntrypoint(undefined, '/app/config.toml', 0, {
+    env: ['OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4317'],
+  })
+
+  expect(result.status, result.stderr || result.stdout).toBe(0)
+  expect(calls).toMatch(/^containerd env OTEL_SDK_DISABLED=true$/m)
+  expect(calls).toMatch(/^memoh-server env OTEL_SDK_DISABLED=$/m)
 })

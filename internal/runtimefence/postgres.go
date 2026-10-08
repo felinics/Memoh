@@ -59,6 +59,10 @@ type waitingDecisionRunReclaimer interface {
 	ReclaimWaitingDecisionSessionRun(ctx context.Context, arg sqlc.ReclaimWaitingDecisionSessionRunParams) (sqlc.SessionRun, error)
 }
 
+type waitingDecisionResetReader interface {
+	GetEffectiveSessionRuntimeReset(context.Context, sqlc.GetEffectiveSessionRuntimeResetParams) (sqlc.GetEffectiveSessionRuntimeResetRow, error)
+}
+
 // Activate is the persistence ownership cutover. Redis may already reserve the
 // successor as admitting, but a writer holding the previous token still
 // linearizes before this transaction if it acquired the session lock first.
@@ -157,6 +161,22 @@ func ActivateWithOptions(ctx context.Context, queries dbstore.Queries, fence Fen
 			return ErrStale
 		case current == fence.Token:
 			return nil
+		}
+		if reclaim := options.ReclaimWaitingDecision; reclaim != nil && current != reclaim.PreviousToken {
+			return ErrStale
+		}
+		if options.ReclaimWaitingDecision != nil {
+			resets, ok := txQueries.(waitingDecisionResetReader)
+			if !ok {
+				return errors.New("persistence store does not support waiting-decision reset checks")
+			}
+			_, err := resets.GetEffectiveSessionRuntimeReset(ctx, sqlc.GetEffectiveSessionRuntimeResetParams{BotID: pgBotID, SessionID: pgSessionID})
+			if err == nil {
+				return ErrStale
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("check waiting-decision reset: %w", err)
+			}
 		}
 		for _, preserved := range options.PreserveDecisions {
 			if err := claimPreservedDecision(ctx, txQueries, preserved, pgBotID, pgSessionID, fence.Token); err != nil {

@@ -55,7 +55,7 @@ func (h *ConnectorsHandler) Register(e *echo.Echo) {
 // @Param connection_id path string true "Connect-It connection ID"
 // @Success 200 {object} connectors.Connector
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
@@ -98,7 +98,7 @@ type ConnectorEnabledRequest struct {
 // @Tags connectors
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} connectors.ListResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
@@ -121,7 +121,7 @@ func (h *ConnectorsHandler) List(c echo.Context) error {
 // @Description List providers available from the configured Connect-It deployment.
 // @Tags connectors
 // @Success 200 {array} connectsdk.Connector
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
 // @Failure 503 {object} apperror.Problem
 // @Router /connectors/catalog [get].
@@ -145,7 +145,7 @@ func (h *ConnectorsHandler) ListCatalog(c echo.Context) error {
 // @Param payload body ConnectorEnabledRequest true "Enabled state"
 // @Success 204
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
 // @Failure 502 {object} apperror.Problem
@@ -179,7 +179,7 @@ func (h *ConnectorsHandler) SetEnabled(c echo.Context) error {
 // @Param connection_id path string true "Connect-It connection ID"
 // @Success 204
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem
@@ -207,7 +207,7 @@ func (h *ConnectorsHandler) Delete(c echo.Context) error {
 // @Param connection_id path string true "Connect-It connection ID"
 // @Success 200 {object} connectsdk.OAuthAuthorization
 // @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} apperror.Problem
 // @Failure 404 {object} apperror.Problem
 // @Failure 409 {object} apperror.Problem
 // @Failure 500 {object} apperror.Problem

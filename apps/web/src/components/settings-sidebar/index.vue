@@ -107,26 +107,21 @@
 </template>
 
 <script setup lang="ts">
-import { ComputerIcon } from '@memohai/icon/ui'
+import { ComputerIcon, ShortcutIcon } from '@memohai/icon/ui'
 import { computed, inject, onBeforeUnmount, ref, type Component } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  AudioLines,
+  Blocks,
   Box,
-  ChartNoAxesColumn,
   ChevronLeft,
   CircleUserRound,
-  Database,
-  Globe,
+  Gauge,
   Info,
-  Keyboard,
   MousePointer2,
-  Store,
-  Users,
-  Video,
+  UsersRound,
 } from 'lucide-vue-next'
 import AppearanceIcon from './appearance-icon.vue'
 import { NavItem } from '@felinic/ui'
@@ -244,6 +239,8 @@ function isItemActive(name: string): boolean {
   if (name === 'supermarket') {
     return route.path.startsWith('/settings/supermarket')
   }
+  // The provider family's four scopes all live ON the 'providers' route
+  // (?tab=), so the plain name check below already covers every scope.
   return route.name === name
 }
 
@@ -262,48 +259,35 @@ function filterItems(items: NavItem[]): NavItem[] {
   })
 }
 
-// Four groups, ordered by what the user came here to do: the things they own
-// (bots, computers, the market they install from), the service providers those
-// things draw on, the org-level view (who is in it, what it consumes), and
-// their own preferences. `providers`/`memory` sit with search/voice/video
-// because all six are the same page: a provider gallery you configure once and
-// then pick from inside a bot — splitting them across groups only hid that.
-// Groups that end up empty after filtering drop out entirely.
+// Bots lead, followed by what they run on (providers, computers) and app
+// discovery, all without a group label: two resource items are too few to
+// earn a heading of their own. Team administration and personal settings
+// follow; empty groups are hidden after filtering.
 const navGroups = computed<NavGroup[]>(() => [
   {
     key: 'workspace',
     items: [
       { title: t('sidebar.bots'), name: 'bots', icon: MousePointer2, flipX: true },
-      { title: t('sidebar.runtimes'), name: 'runtimes', icon: ComputerIcon },
-      { title: t('sidebar.supermarket'), name: 'supermarket', icon: Store },
-    ],
-  },
-  {
-    key: 'capabilities',
-    label: t('sidebar.group.capabilities'),
-    items: [
       { title: t('sidebar.providers'), name: 'providers', icon: Box },
-      { title: t('sidebar.memory'), name: 'memory', icon: Database },
-      { title: t('sidebar.webSearch'), name: 'web-search', icon: Globe },
-      { title: t('sidebar.voice'), name: 'voice', icon: AudioLines },
-      { title: t('sidebar.video'), name: 'video', icon: Video },
+      { title: t('sidebar.runtimes'), name: 'runtimes', icon: ComputerIcon },
+      { title: t('sidebar.supermarket'), name: 'supermarket', icon: Blocks },
     ],
   },
   {
     key: 'team',
     label: t('sidebar.group.team'),
     items: [
-      { title: t('sidebar.people'), name: 'people', icon: Users, adminOnly: true },
-      { title: t('sidebar.usage'), name: 'usage', icon: ChartNoAxesColumn },
+      { title: t('sidebar.people'), name: 'people', icon: UsersRound, adminOnly: true },
+      { title: t('sidebar.usage'), name: 'usage', icon: Gauge },
     ],
   },
   {
-    key: 'preferences',
-    label: t('sidebar.group.preferences'),
+    key: 'personal',
+    label: t('sidebar.group.personal'),
     items: [
-      { title: t('sidebar.appearance'), name: 'appearance', icon: AppearanceIcon },
-      { title: t('sidebar.keyboard'), name: 'keyboard', icon: Keyboard },
       { title: t('sidebar.profile'), name: 'profile', icon: CircleUserRound },
+      { title: t('sidebar.appearance'), name: 'appearance', icon: AppearanceIcon },
+      { title: t('sidebar.keyboard'), name: 'keyboard', icon: ShortcutIcon },
       { title: t('sidebar.about'), name: 'about', icon: Info },
     ],
   },

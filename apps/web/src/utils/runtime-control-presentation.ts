@@ -1,5 +1,6 @@
 import type { ExternalControls, TurnRuntimeCommand, TurnRuntimeMode } from '@memohai/sdk'
 import type { CommandActionResult } from '@/composables/api/useChat'
+import { codexUsageResetTime } from './codex-usage'
 
 type Translate = (key: string, fallback: string) => string
 
@@ -72,7 +73,10 @@ function commandSummary(command: string, data: unknown, t: Translate, locale: st
     for (const key of ['primary', 'secondary']) {
       const window = record(limits?.[key])
       if (typeof window?.usedPercent === 'number') {
-        lines.push(`${t(`runtime.result.fields.${key}`, key)}: ${scalar(window.usedPercent)}%`)
+        const resets = typeof window.resetsAt === 'number'
+          ? ` · ${t('runtime.result.resets', '{time}').replace('{time}', codexUsageResetTime(new Date(window.resetsAt * 1000).toISOString(), locale))}`
+          : ''
+        lines.push(`${t(`runtime.result.fields.${key}`, key)}: ${scalar(window.usedPercent)}%${resets}`)
       }
     }
     return lines.length ? lines.join('\n') : undefined

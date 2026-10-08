@@ -2,11 +2,16 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
+
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/botworkspace"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -42,14 +47,45 @@ func TestUpdateBotHTTPErrorMapsNameConflictToStableCode(t *testing.T) {
 	}
 }
 
+// bridgeUnavailable is the error the bridge client returns when the
+// workspace runtime cannot be reached.
+func bridgeUnavailable() error {
+	return errs.WrapDependency(fmt.Errorf("%w: connection refused", bridge.ErrUnavailable), "")
+}
+
 func TestFSHTTPErrorKeepsUnavailableCausePrivate(t *testing.T) {
-	cause := errors.Join(bridge.ErrUnavailable, errors.New("connection refused"))
+	cause := bridgeUnavailable()
 	err := fsHTTPError(cause)
 	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceUnreachable {
 		t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceUnreachable)
 	}
 	if got := apperror.CauseOf(err); !errors.Is(got, bridge.ErrUnavailable) {
 		t.Fatalf("cause = %v, want bridge unavailable", got)
+	}
+	if got := errs.FaultOf(err); got != errs.FaultDependency {
+		t.Fatalf("fault = %q, want dependency", got)
+	}
+}
+
+func TestFSHTTPErrorReturnsUnexpectedCause(t *testing.T) {
+	cause := errors.New("grpc Internal: open /data/a.txt: input/output error")
+	err := fsHTTPError(cause)
+	var httpErr *echo.HTTPError
+	if errors.As(err, &httpErr) || !errors.Is(err, cause) {
+		t.Fatalf("error = %v, want the cause without an HTTP status", err)
+	}
+	if got := errs.FaultOf(err); got != errs.FaultServer {
+		t.Fatalf("fault = %q, want server", got)
+	}
+}
+
+func TestWorkspaceDependencyErrorAttributesUnreachableToDependency(t *testing.T) {
+	err := workspaceDependencyError(bridgeUnavailable())
+	if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceUnreachable {
+		t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceUnreachable)
+	}
+	if got := errs.FaultOf(err); got != errs.FaultDependency {
+		t.Fatalf("fault = %q, want dependency", got)
 	}
 }
 
@@ -61,9 +97,6 @@ func TestDisplayPrepareAppErrorUsesSharedWorkspaceCode(t *testing.T) {
 	)
 	if event.Code != string(apperror.CodeWorkspaceUnreachable) {
 		t.Fatalf("code = %q", event.Code)
-	}
-	if event.I18nKey != "" {
-		t.Fatalf("new AppError event exposed i18n_key = %q", event.I18nKey)
 	}
 	if event.Message != "The workspace could not be reached." {
 		t.Fatalf("message = %q", event.Message)
@@ -93,20 +126,18 @@ func TestDisplayPrepareStreamBreakUsesPrepareFailedCode(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSetupAppErrorKeepsBootstrapDiagnosticPrivate(t *testing.T) {
-	cause := errors.Join(
-		workspace.ErrWorkspaceTemplateBootstrapFailed,
-		errors.New("write /data/AGENTS.md: permission denied"),
-	)
-	event, ok := newWorkspaceSetupAppError(cause, "req-bootstrap")
-	if !ok {
-		t.Fatal("newWorkspaceSetupAppError() did not recognize bootstrap error")
-	}
+func TestWorkspaceSetupFailureKeepsBootstrapDiagnosticPrivate(t *testing.T) {
+	var event createContainerErrorEvent
+	recorded := sendWorkspaceFailure(func(payload any) bool {
+		event, _ = payload.(createContainerErrorEvent)
+		return true
+	}, botworkspace.Workspace{
+		Observed:       botworkspace.ObservedFailed,
+		LastErrorPhase: botworkspace.PhaseBootstrap,
+		LastError:      "write /data/AGENTS.md: permission denied",
+	}, "req-bootstrap")
 	if event.Code != string(apperror.CodeWorkspaceTemplateBootstrapFailed) {
 		t.Fatalf("code = %q", event.Code)
-	}
-	if event.I18nKey != "" {
-		t.Fatalf("i18n_key = %q, want empty", event.I18nKey)
 	}
 	if event.Detail != "The workspace files could not be initialized." {
 		t.Fatalf("detail = %q", event.Detail)
@@ -119,5 +150,8 @@ func TestWorkspaceSetupAppErrorKeepsBootstrapDiagnosticPrivate(t *testing.T) {
 	}
 	if event.RequestID != "req-bootstrap" {
 		t.Fatalf("request_id = %q", event.RequestID)
+	}
+	if apperror.CodeOf(recorded) != apperror.CodeWorkspaceTemplateBootstrapFailed || !strings.Contains(apperror.CauseOf(recorded).Error(), "/data/AGENTS.md") {
+		t.Fatalf("recorded = %v, want %s carrying the backend's text", recorded, apperror.CodeWorkspaceTemplateBootstrapFailed)
 	}
 }

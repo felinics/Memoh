@@ -8,142 +8,193 @@ import (
 	"testing"
 
 	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
-func TestBuildReasoningOptionsDeepSeekChatCompletionsCompat(t *testing.T) {
+func TestApplyReasoningToRequestDeepSeekChatCompletionsCompat(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		config   *ReasoningConfig
-		wantOpts int
+		name       string
+		config     *ReasoningConfig
+		wantEffort bool
 	}{
 		{
-			name:     "disabled sends explicit none effort",
-			config:   &ReasoningConfig{Disabled: true},
-			wantOpts: 1,
+			name:       "disabled sends explicit none effort",
+			config:     &ReasoningConfig{Disabled: true},
+			wantEffort: true,
 		},
 		{
-			name:     "active with effort forwards effort",
-			config:   &ReasoningConfig{Active: true, Effort: "high"},
-			wantOpts: 1,
+			name:       "active with effort forwards effort",
+			config:     &ReasoningConfig{Active: true, Effort: "high"},
+			wantEffort: true,
 		},
 		{
-			name:     "active without effort leaves effort unset for model default",
-			config:   &ReasoningConfig{Active: true},
-			wantOpts: 0,
+			name:       "active without effort leaves effort unset for model default",
+			config:     &ReasoningConfig{Active: true},
+			wantEffort: false,
 		},
 		{
-			name:     "nil config produces no options",
-			config:   nil,
-			wantOpts: 0,
+			name:       "nil config leaves effort unset",
+			config:     nil,
+			wantEffort: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			opts := BuildReasoningOptions(SDKModelConfig{
+			requireReasoningEffort(t, SDKModelConfig{
 				ClientType:            string(ClientTypeOpenAICompletions),
 				ChatCompletionsCompat: ChatCompletionsCompatDeepSeek,
 				ReasoningConfig:       tt.config,
-			})
-			if len(opts) != tt.wantOpts {
-				t.Fatalf("expected %d options, got %d", tt.wantOpts, len(opts))
-			}
+			}, tt.wantEffort)
 		})
 	}
 }
 
-func TestBuildReasoningOptionsOpenAIDisable(t *testing.T) {
+func TestApplyReasoningToRequestOpenAIDisable(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		config   *ReasoningConfig
-		wantOpts int
+		name       string
+		config     *ReasoningConfig
+		wantEffort bool
 	}{
 		{
 			// Toggle model advertising only low/medium/high: OffEffort is empty,
 			// so reasoning_effort must be omitted. Sending a real tier (e.g. low)
 			// would enable thinking (OpenRouter maps it to Anthropic thinking).
-			name:     "disabled with empty off effort omits reasoning_effort",
-			config:   &ReasoningConfig{Disabled: true, OffEffort: ""},
-			wantOpts: 0,
+			name:       "disabled with empty off effort omits reasoning_effort",
+			config:     &ReasoningConfig{Disabled: true, OffEffort: ""},
+			wantEffort: false,
 		},
 		{
-			name:     "disabled with none off effort sends none",
-			config:   &ReasoningConfig{Disabled: true, OffEffort: ReasoningEffortNone},
-			wantOpts: 1,
+			name:       "disabled with none off effort sends none",
+			config:     &ReasoningConfig{Disabled: true, OffEffort: ReasoningEffortNone},
+			wantEffort: true,
 		},
 		{
-			name:     "disabled with minimal off effort sends minimal",
-			config:   &ReasoningConfig{Disabled: true, OffEffort: ReasoningEffortMinimal},
-			wantOpts: 1,
+			name:       "disabled with minimal off effort sends minimal",
+			config:     &ReasoningConfig{Disabled: true, OffEffort: ReasoningEffortMinimal},
+			wantEffort: true,
 		},
 		{
-			name:     "active sends effort",
-			config:   &ReasoningConfig{Active: true, Effort: ReasoningEffortHigh},
-			wantOpts: 1,
+			name:       "active sends effort",
+			config:     &ReasoningConfig{Active: true, Effort: ReasoningEffortHigh},
+			wantEffort: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			opts := BuildReasoningOptions(SDKModelConfig{
+			requireReasoningEffort(t, SDKModelConfig{
 				ClientType:      string(ClientTypeOpenAICompletions),
 				ReasoningConfig: tt.config,
-			})
-			if len(opts) != tt.wantOpts {
-				t.Fatalf("expected %d options, got %d", tt.wantOpts, len(opts))
-			}
+			}, tt.wantEffort)
 		})
 	}
 }
 
-func TestBuildReasoningOptionsMiniMaxChatCompletionsCompat(t *testing.T) {
+func TestApplyReasoningToRequestMiniMaxChatCompletionsCompat(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		config   *ReasoningConfig
-		wantOpts int
+		name       string
+		config     *ReasoningConfig
+		wantEffort bool
 	}{
 		{
-			name:     "disabled sends explicit none effort",
-			config:   &ReasoningConfig{Disabled: true},
-			wantOpts: 1,
+			name:       "disabled sends explicit none effort",
+			config:     &ReasoningConfig{Disabled: true},
+			wantEffort: true,
 		},
 		{
-			name:     "active without effort forwards nothing (provider default applies)",
-			config:   &ReasoningConfig{Active: true},
-			wantOpts: 0,
+			name:       "active without effort forwards nothing (provider default applies)",
+			config:     &ReasoningConfig{Active: true},
+			wantEffort: false,
 		},
 		{
-			name:     "active with effort forwards effort",
-			config:   &ReasoningConfig{Active: true, Effort: "high"},
-			wantOpts: 1,
+			name:       "active with effort forwards effort",
+			config:     &ReasoningConfig{Active: true, Effort: "high"},
+			wantEffort: true,
 		},
 		{
-			name:     "nil config produces no options",
-			config:   nil,
-			wantOpts: 0,
+			name:       "nil config leaves effort unset",
+			config:     nil,
+			wantEffort: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			opts := BuildReasoningOptions(SDKModelConfig{
+			requireReasoningEffort(t, SDKModelConfig{
 				ClientType:            string(ClientTypeOpenAICompletions),
 				ChatCompletionsCompat: ChatCompletionsCompatMiniMax,
 				ReasoningConfig:       tt.config,
-			})
-			if len(opts) != tt.wantOpts {
-				t.Fatalf("expected %d options, got %d", tt.wantOpts, len(opts))
-			}
+			}, tt.wantEffort)
 		})
 	}
+}
+
+// requireReasoningEffort applies cfg through the request path and asserts it
+// agrees with ReasoningEffortParam about whether an effort is sent at all.
+func requireReasoningEffort(t *testing.T, cfg SDKModelConfig, wantEffort bool) {
+	t.Helper()
+	req := sdk.Request{}
+	ApplyReasoningToRequest(&req, cfg)
+	effort, ok := ReasoningEffortParam(cfg)
+	if !wantEffort {
+		if req.ReasoningEffort != nil || ok {
+			t.Fatalf("effort = %v (ok=%v), want unset", req.ReasoningEffort, ok)
+		}
+		return
+	}
+	if !ok || req.ReasoningEffort == nil || *req.ReasoningEffort != effort {
+		t.Fatalf("effort = %v (ok=%v), want %q", req.ReasoningEffort, ok, effort)
+	}
+}
+
+func TestApplyReasoningToRequestSetsReasoningEffortParam(t *testing.T) {
+	t.Parallel()
+
+	tests := []SDKModelConfig{
+		{
+			ClientType:            string(ClientTypeOpenAICompletions),
+			ChatCompletionsCompat: ChatCompletionsCompatDeepSeek,
+			ReasoningConfig:       &ReasoningConfig{Disabled: true},
+		},
+		{
+			ClientType:            string(ClientTypeOpenAICompletions),
+			ChatCompletionsCompat: ChatCompletionsCompatDeepSeek,
+			ReasoningConfig:       &ReasoningConfig{Active: true},
+		},
+		{
+			ClientType:      string(ClientTypeOpenAICompletions),
+			ReasoningConfig: &ReasoningConfig{Active: true, Effort: ReasoningEffortMax},
+		},
+		{
+			ClientType:      string(ClientTypeAnthropicMessages),
+			ReasoningConfig: &ReasoningConfig{Disabled: true},
+		},
+	}
+	for _, cfg := range tests {
+		req := sdk.Request{}
+		ApplyReasoningToRequest(&req, cfg)
+		effort, ok := ReasoningEffortParam(cfg)
+		if !ok {
+			if req.ReasoningEffort != nil {
+				t.Fatalf("ApplyReasoningToRequest set effort %q, want unset", *req.ReasoningEffort)
+			}
+			continue
+		}
+		if req.ReasoningEffort == nil || *req.ReasoningEffort != effort {
+			t.Fatalf("ApplyReasoningToRequest effort = %v (ok=%v), want %q", req.ReasoningEffort, ok, effort)
+		}
+	}
+	ApplyReasoningToRequest(nil, SDKModelConfig{})
 }
 
 func TestNewSDKChatModelDeepSeekChatCompletionsCompatDisablesThinking(t *testing.T) {
@@ -188,14 +239,12 @@ func TestNewSDKChatModelDeepSeekChatCompletionsCompatDisablesThinking(t *testing
 		t.Fatalf("expected openai completions provider, got %+v", model.Provider)
 	}
 
-	_, err := sdk.GenerateTextResult(
-		context.Background(),
-		sdk.WithModel(model),
-		sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
-		sdk.WithReasoningEffort(ReasoningEffortNone),
-	)
-	if err != nil {
-		t.Fatalf("generate text: %v", err)
+	effort := ReasoningEffortNone
+	if _, err := model.Generate(context.Background(), sdk.Request{
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningEffort: &effort,
+	}); err != nil {
+		t.Fatalf("generate: %v", err)
 	}
 
 	if body.ReasoningEffort != nil {
@@ -246,18 +295,15 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatDisablesThinking(t *testing.
 		t.Fatal("expected a model, got nil")
 	}
 
-	opts := []sdk.GenerateOption{
-		sdk.WithModel(model),
-		sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
-	}
-	opts = append(opts, BuildReasoningOptions(SDKModelConfig{
+	cfg := SDKModelConfig{
 		ClientType:            string(ClientTypeOpenAICompletions),
 		ChatCompletionsCompat: compat,
 		ReasoningConfig:       &ReasoningConfig{Disabled: true},
-	})...)
-	_, err := sdk.GenerateTextResult(context.Background(), opts...)
-	if err != nil {
-		t.Fatalf("generate text: %v", err)
+	}
+	req := sdk.Request{Messages: []sdk.Message{sdk.UserMessage("hi")}}
+	ApplyReasoningToRequest(&req, cfg)
+	if _, err := model.Generate(context.Background(), req); err != nil {
+		t.Fatalf("generate: %v", err)
 	}
 
 	if !body.ReasoningSplit {
@@ -311,18 +357,15 @@ func TestNewSDKChatModelMiniMaxChatCompletionsCompatEnablesThinking(t *testing.T
 		t.Fatal("expected a model, got nil")
 	}
 
-	opts := []sdk.GenerateOption{
-		sdk.WithModel(model),
-		sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
-	}
-	opts = append(opts, BuildReasoningOptions(SDKModelConfig{
+	cfg := SDKModelConfig{
 		ClientType:            string(ClientTypeOpenAICompletions),
 		ChatCompletionsCompat: compat,
 		ReasoningConfig:       &ReasoningConfig{Active: true, Effort: "high"},
-	})...)
-	_, err := sdk.GenerateTextResult(context.Background(), opts...)
-	if err != nil {
-		t.Fatalf("generate text: %v", err)
+	}
+	req := sdk.Request{Messages: []sdk.Message{sdk.UserMessage("hi")}}
+	ApplyReasoningToRequest(&req, cfg)
+	if _, err := model.Generate(context.Background(), req); err != nil {
+		t.Fatalf("generate: %v", err)
 	}
 
 	if !body.ReasoningSplit {
@@ -367,19 +410,14 @@ func TestNewSDKChatModelOpenAIWireMapsMaxEffortToXHigh(t *testing.T) {
 		APIKey:     "test-key",
 	})
 
-	opts := BuildReasoningOptions(SDKModelConfig{
+	cfg := SDKModelConfig{
 		ClientType:      string(ClientTypeOpenAICompletions),
 		ReasoningConfig: &ReasoningConfig{Active: true, Effort: ReasoningEffortMax},
-	})
-	_, err := sdk.GenerateTextResult(
-		context.Background(),
-		append([]sdk.GenerateOption{
-			sdk.WithModel(model),
-			sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
-		}, opts...)...,
-	)
-	if err != nil {
-		t.Fatalf("generate text: %v", err)
+	}
+	req := sdk.Request{Messages: []sdk.Message{sdk.UserMessage("hi")}}
+	ApplyReasoningToRequest(&req, cfg)
+	if _, err := model.Generate(context.Background(), req); err != nil {
+		t.Fatalf("generate: %v", err)
 	}
 
 	if body.ReasoningEffort == nil || *body.ReasoningEffort != ReasoningEffortXHigh {
@@ -472,12 +510,10 @@ func TestNewSDKChatModelAnthropicThinkingWire(t *testing.T) {
 				t.Fatal("expected a model, got nil")
 			}
 
-			opts := append([]sdk.GenerateOption{
-				sdk.WithModel(model),
-				sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
-			}, BuildReasoningOptions(cfg)...)
-			if _, err := sdk.GenerateTextResult(context.Background(), opts...); err != nil {
-				t.Fatalf("generate text: %v", err)
+			req := sdk.Request{Messages: []sdk.Message{sdk.UserMessage("hi")}}
+			ApplyReasoningToRequest(&req, cfg)
+			if _, err := model.Generate(context.Background(), req); err != nil {
+				t.Fatalf("generate: %v", err)
 			}
 
 			if tt.wantType == "" {
@@ -647,32 +683,33 @@ func TestNewSDKChatModelKimiCompatIsExplicitForEveryCompletionsBranch(t *testing
 				ChatCompletionsCompat: ChatCompletionsCompatKimi,
 				APIKey:                "test-key",
 			})
-			_, err := sdk.GenerateTextResult(
-				context.Background(),
-				sdk.WithModel(model),
-				sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
-				sdk.WithTools([]sdk.Tool{{
-					Name: "attach_file",
-					Parameters: map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"attachment": map[string]any{
-								"type": "object",
-								"anyOf": []any{
-									map[string]any{
-										"properties": map[string]any{"path": map[string]any{"type": "string"}},
-									},
-									map[string]any{
-										"properties": map[string]any{"url": map[string]any{"type": "string"}},
-									},
+			tools, err := toolexec.ToolDefinitionsFromTools([]toolexec.Tool{{
+				Name: "attach_file",
+				Parameters: toolexec.SchemaFromValue(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"attachment": map[string]any{
+							"type": "object",
+							"anyOf": []any{
+								map[string]any{
+									"properties": map[string]any{"path": map[string]any{"type": "string"}},
+								},
+								map[string]any{
+									"properties": map[string]any{"url": map[string]any{"type": "string"}},
 								},
 							},
 						},
 					},
-				}}),
-			)
+				}),
+			}})
 			if err != nil {
-				t.Fatalf("generate text: %v", err)
+				t.Fatalf("tool definitions: %v", err)
+			}
+			if _, err := model.Generate(context.Background(), sdk.Request{
+				Messages: []sdk.Message{sdk.UserMessage("hi")},
+				Tools:    tools,
+			}); err != nil {
+				t.Fatalf("generate: %v", err)
 			}
 
 			properties, ok := parameters["properties"].(map[string]any)

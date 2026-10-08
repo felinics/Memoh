@@ -1,0 +1,18 @@
+{
+  "generate_image": {
+    "properties": {
+      "prompt": {
+        "description": "Detailed description of the image to generate",
+        "type": "string"
+      },
+      "size": {
+        "description": "Optional image size, e.g. 1024x1024, 1792x1024, 1024x1792. Leave empty to use the provider default.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "type": "object"
+  }
+}

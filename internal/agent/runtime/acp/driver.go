@@ -2,7 +2,7 @@
 // sits at the same level as the other out-of-process external agent runtimes
 // (codex, claude-code) and the application keeps one turn orchestration for
 // all of them. The pool keeps owning everything ACP-specific — warm process
-// handles, runtime storage, checkpoint capture, fencing — while this adapter
+// handles, runtime storage, publication fencing — while this adapter
 // owns only the contract translation.
 package acp
 
@@ -10,13 +10,10 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"net/http"
 	"strings"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/acp/client"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/runtimekind"
 )
 
@@ -61,6 +58,17 @@ func (d *Driver) OnRoundRolledBack(_ context.Context, _, threadID string) {
 	}
 }
 
+// ResetBotAgent implements external.BotAgentResetter: an instance's warm
+// processes were launched from its previous setup.
+func (d *Driver) ResetBotAgent(botID, botAgentID string) {
+	if strings.TrimSpace(botAgentID) == "" {
+		return
+	}
+	if closer, ok := d.pool.(interface{ CloseBotAgentRuntimes(string, string) error }); ok {
+		_ = closer.CloseBotAgentRuntimes(botID, botAgentID)
+	}
+}
+
 // Prompt implements external.Driver: one pooled ACP turn.
 func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
 	agentID := driverMetadataString(input.RuntimeMetadata, metadataAgentIDKey)
@@ -74,6 +82,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	sink := client.EventSinkFunc(input.Sink.EmitStreamEvent)
 	result, err := d.pool.Prompt(ctx, PromptInput{
 		BotID:                    input.BotID,
+		BotAgentID:               input.BotAgentID,
 		ChatID:                   input.ChatID,
 		SessionID:                input.ThreadID,
 		RunID:                    input.RunID,
@@ -122,7 +131,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 }
 
 // DriverPromptResult maps a pool result onto the port result: transcript
-// fallback from events, checkpoint outcome, and round provenance. Exported
+// fallback from events, publication request, and round provenance. Exported
 // so tests can hold the mapping fixed while exercising the unified flow.
 func DriverPromptResult(result client.PromptResult, agentID string) external.PromptResult {
 	if len(result.Output) == 0 {
@@ -133,10 +142,10 @@ func DriverPromptResult(result client.PromptResult, agentID string) external.Pro
 		Text:       result.Text,
 		Usage:      result.Usage,
 		StopReason: result.StopReason,
-		// Every ACP turn participates in publication with a reset head: no
+		// Every completed ACP turn publishes its run ID: no
 		// runtime snapshots are captured, but pool fencing still compares warm
 		// handles against the canonical head watermark.
-		Checkpoint: external.CheckpointDeclined,
+		PublishHead: true,
 	}
 	if agentID != "" {
 		out.RoundMetadata = map[string]any{metadataAgentIDKey: agentID}
@@ -144,58 +153,37 @@ func DriverPromptResult(result client.PromptResult, agentID string) external.Pro
 	return out
 }
 
-// normalizePromptError translates pool errors into the port's stable error
-// shapes: user-facing feedback for input-class failures, apperror codes for
-// configuration-class failures, and the raw error otherwise.
+// PromptError is a pool failure that rejects the turn's configuration before
+// the agent runs it: an unknown command, a model or reasoning choice the agent
+// cannot apply, or a configuration update the agent refused. Err is the pool
+// error, and the application chooses the public error from it. Like a public
+// error, PromptError hides Err from errors.Is and errors.As; diagnostics reach
+// it through Cause.
+type PromptError struct {
+	Err error
+}
+
+func (e *PromptError) Error() string { return e.Err.Error() }
+
+// Cause returns the pool error.
+func (e *PromptError) Cause() error { return e.Err }
+
+// normalizePromptError marks the pool failures that reject the turn's
+// configuration as a PromptError and returns any other error unchanged.
+// Input-class failures (a stale command, an image the agent cannot read) stay
+// package errors for the application to translate.
 func normalizePromptError(err error) error {
 	var commandNotFound *client.CommandNotFoundError
 	switch {
-	case errors.As(err, &commandNotFound):
-		return apperror.Wrap(apperror.CodeACPCommandNotFound, err, map[string]string{"command": commandNotFound.Command})
-	case errors.Is(err, ErrAgentCommandUnavailable):
-		// The runtime that admission matched was replaced (or updated its
-		// command set) before the prompt; the turn fails closed exactly like
-		// admission would have.
-		return agentfeedback.New(
-			agentfeedback.CodeAgentCommandStale,
-			"agent_command_stale",
-			http.StatusConflict,
-			"chat.externalAgent.agentCommandStale",
-			"The agent no longer offers this command. Reopen the command picker and try again.",
-			nil,
-		)
-	case errors.Is(err, client.ErrImagePromptUnsupported):
-		return agentfeedback.New(
-			agentfeedback.CodeImageInputUnsupported,
-			"image_input_unsupported",
-			http.StatusBadRequest,
-			"chat.externalAgent.imageInputUnsupported",
-			"This external agent cannot read the attached image.",
-			nil,
-		)
-	case errors.Is(err, client.ErrInvalidPromptImage):
-		return agentfeedback.New(
-			agentfeedback.CodeAttachmentInvalid,
-			"invalid_image_data",
-			http.StatusBadRequest,
-			"chat.externalAgent.attachmentInvalid",
-			"The attachment is invalid. Please attach it again.",
-			nil,
-		)
-	case errors.Is(err, client.ErrModelSelectionUnsupported):
-		return apperror.New(apperror.CodeACPModelSelectionUnsupported, nil)
-	case errors.Is(err, client.ErrModelIDRequired):
-		return apperror.New(apperror.CodeACPModelIDRequired, nil)
-	case errors.Is(err, client.ErrModelUnavailable):
-		return apperror.New(apperror.CodeACPModelUnavailable, nil)
-	case errors.Is(err, client.ErrReasoningSelectionUnsupported):
-		return apperror.New(apperror.CodeACPReasoningUnsupported, nil)
-	case errors.Is(err, client.ErrReasoningEffortRequired):
-		return apperror.New(apperror.CodeACPReasoningEffortRequired, nil)
-	case errors.Is(err, client.ErrReasoningEffortUnavailable):
-		return apperror.New(apperror.CodeACPReasoningUnavailable, nil)
-	case errors.Is(err, ErrRuntimeConfigUpdateFailed):
-		return apperror.Wrap(apperror.CodeACPConfigUpdateFailed, err, nil)
+	case errors.As(err, &commandNotFound),
+		errors.Is(err, client.ErrModelSelectionUnsupported),
+		errors.Is(err, client.ErrModelIDRequired),
+		errors.Is(err, client.ErrModelUnavailable),
+		errors.Is(err, client.ErrReasoningSelectionUnsupported),
+		errors.Is(err, client.ErrReasoningEffortRequired),
+		errors.Is(err, client.ErrReasoningEffortUnavailable),
+		errors.Is(err, ErrRuntimeConfigUpdateFailed):
+		return &PromptError{Err: err}
 	default:
 		return err
 	}

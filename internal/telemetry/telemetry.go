@@ -1,12 +1,15 @@
-// Package telemetry assembles OpenTelemetry tracing for a Memoh process.
+// Package telemetry assembles OpenTelemetry tracing and metrics for a Memoh
+// process.
 //
 // Tracing answers the question logs cannot: where the time went, and which
 // step of a request failed. A record says "workspace snapshot failed"; a trace
 // says the turn spent eleven seconds waiting for the model and then failed on
-// the third tool call.
+// the third tool call. Metrics answer the aggregate version of the same
+// question — which endpoint is slow, for everyone, over the last hour — which
+// a sampled set of traces cannot.
 //
 // Nothing here is on by default. With no collector configured the process
-// installs no provider at all, leaving OpenTelemetry's global no-op in place,
+// installs no provider at all, leaving OpenTelemetry's global no-ops in place,
 // and the only thing this package contributes is context propagation — which
 // costs nothing and must be unconditional (see Setup).
 package telemetry
@@ -17,14 +20,21 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 
+	"github.com/google/uuid"
+	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
@@ -43,11 +53,12 @@ type Service struct {
 	// Name is the service.name every span is attributed to: "memoh-server",
 	// "memoh-channel". A backend groups by it, so it has to be stable.
 	Name string
-	// InstanceID distinguishes replicas of the same service. Optional.
+	// InstanceID distinguishes replicas of the same service. Optional: when
+	// empty, each process gets a random one.
 	InstanceID string
 }
 
-// Shutdown flushes pending spans and releases the exporter.
+// Shutdown flushes pending spans and metrics and releases the exporters.
 type Shutdown func(context.Context) error
 
 // Tracer returns the tracer for spans created by this repository's own code.
@@ -57,8 +68,12 @@ func Tracer() trace.Tracer {
 }
 
 // Setup installs context propagation and, when a collector is configured, a
-// tracer provider exporting to it. The returned Shutdown is always safe to
-// call.
+// tracer provider and a meter provider exporting to it. The returned Shutdown
+// is always safe to call.
+//
+// Metrics go to the same collector as traces, over the same transport, unless
+// OTEL_METRICS_EXPORTER=none says otherwise: that is the standard way to tell
+// a process its collector only accepts traces.
 //
 // Propagation is installed even when export is off, and that is deliberate.
 // A propagator only reads and writes the traceparent header; with no provider
@@ -104,32 +119,59 @@ func Setup(ctx context.Context, cfg config.TelemetryConfig, svc Service, log *sl
 	if err != nil {
 		return nil, err
 	}
+	// Both exporters are built before either provider is installed, so a
+	// failure leaves the process with neither rather than with half.
+	var metricExporter sdkmetric.Exporter
+	metrics := metricsEnabled()
+	if metrics {
+		if metricExporter, err = newMetricExporter(ctx, cfg); err != nil {
+			return nil, errors.Join(err, exporter.Shutdown(ctx))
+		}
+	}
 
-	provider := sdktrace.NewTracerProvider(
+	res := newResource(cfg, svc)
+	tracerProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
-		sdktrace.WithResource(newResource(cfg, svc)),
+		sdktrace.WithResource(res),
 		// ParentBased: a request that arrives already sampled stays sampled,
 		// whatever the local ratio says. Deciding locally would cut traces in
 		// half at process boundaries, which is worse than either keeping or
 		// dropping them whole.
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(clampRatio(cfg.SampleRatio)))),
 	)
-	otel.SetTracerProvider(provider)
+	otel.SetTracerProvider(tracerProvider)
+	shutdown := tracerProvider.Shutdown
+
+	if metrics {
+		// The reader's interval is left to the SDK, which reads
+		// OTEL_METRIC_EXPORT_INTERVAL itself.
+		meterProvider := newMeterProvider(sdkmetric.NewPeriodicReader(metricExporter), res)
+		otel.SetMeterProvider(meterProvider)
+		// A failure here is one missing group of gauges, not a reason to
+		// export nothing else.
+		if err := startRuntimeMetrics(meterProvider); err != nil {
+			otel.Handle(err)
+		}
+		shutdown = func(ctx context.Context) error {
+			return errors.Join(tracerProvider.Shutdown(ctx), meterProvider.Shutdown(ctx))
+		}
+	}
 
 	// tls is reported because it is the setting most likely to be wrong and
 	// the one whose failure says least: an exporter talking TLS to a
 	// plaintext collector reports a handshake error, not a configuration
 	// problem.
 	//logctx:plain
-	log.Info("tracing enabled",
+	log.Info("telemetry enabled",
 		slog.String("endpoint", safeEndpoint(cfg.Endpoint)),
 		slog.String("protocol", protocolOf(cfg)),
 		slog.Bool("tls", !useInsecure(cfg)),
 		slog.Float64("sample_ratio", clampRatio(cfg.SampleRatio)),
+		slog.Bool("metrics", metrics),
 		slog.String("service_name", serviceName(cfg, svc)),
 	)
 
-	return provider.Shutdown, nil
+	return shutdown, nil
 }
 
 func newExporter(ctx context.Context, cfg config.TelemetryConfig) (*otlptrace.Exporter, error) {
@@ -137,7 +179,7 @@ func newExporter(ctx context.Context, cfg config.TelemetryConfig) (*otlptrace.Ex
 	insecure := useInsecure(cfg)
 	switch protocolOf(cfg) {
 	case config.TelemetryProtocolHTTP:
-		opts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(withScheme(endpoint, insecure))}
+		opts := []otlptracehttp.Option{otlptracehttp.WithEndpointURL(signalURL(endpoint, insecure, "/v1/traces"))}
 		if insecure {
 			opts = append(opts, otlptracehttp.WithInsecure())
 		}
@@ -158,6 +200,77 @@ func newExporter(ctx context.Context, cfg config.TelemetryConfig) (*otlptrace.Ex
 		return nil, fmt.Errorf("telemetry: unknown protocol %q, want %q or %q",
 			cfg.Protocol, config.TelemetryProtocolGRPC, config.TelemetryProtocolHTTP)
 	}
+}
+
+// metricsEnabled honours OTEL_METRICS_EXPORTER=none. Other values name
+// exporters this process does not build — console, prometheus — and are read
+// as the default, OTLP, rather than claimed.
+func metricsEnabled() bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("OTEL_METRICS_EXPORTER")), "none")
+}
+
+// newMetricExporter resolves the collector exactly as newExporter does, so
+// the two signals cannot disagree about where the collector is or whether it
+// speaks TLS.
+func newMetricExporter(ctx context.Context, cfg config.TelemetryConfig) (sdkmetric.Exporter, error) {
+	endpoint := strings.TrimSpace(cfg.Endpoint)
+	insecure := useInsecure(cfg)
+	switch protocolOf(cfg) {
+	case config.TelemetryProtocolHTTP:
+		opts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpointURL(signalURL(endpoint, insecure, "/v1/metrics"))}
+		if insecure {
+			opts = append(opts, otlpmetrichttp.WithInsecure())
+		}
+		if len(cfg.Headers) > 0 {
+			opts = append(opts, otlpmetrichttp.WithHeaders(cfg.Headers))
+		}
+		return otlpmetrichttp.New(ctx, opts...)
+	case config.TelemetryProtocolGRPC:
+		opts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(hostPort(endpoint))}
+		if insecure {
+			opts = append(opts, otlpmetricgrpc.WithInsecure())
+		}
+		if len(cfg.Headers) > 0 {
+			opts = append(opts, otlpmetricgrpc.WithHeaders(cfg.Headers))
+		}
+		return otlpmetricgrpc.New(ctx, opts...)
+	default:
+		return nil, fmt.Errorf("telemetry: unknown protocol %q, want %q or %q",
+			cfg.Protocol, config.TelemetryProtocolGRPC, config.TelemetryProtocolHTTP)
+	}
+}
+
+// httpServerDurationBounds are the request-duration buckets, in seconds. The
+// first fourteen are the ones the HTTP semantic conventions recommend, which
+// stop at 10 s: everything slower would land in +Inf, and every quantile above
+// it would read as 10 s. The rest cover requests of up to five minutes, which
+// is how long a slow chat turn can take.
+var httpServerDurationBounds = []float64{
+	0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10,
+	15, 30, 60, 120, 300,
+}
+
+func newMeterProvider(reader sdkmetric.Reader, res *resource.Resource) *sdkmetric.MeterProvider {
+	return sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(reader),
+		sdkmetric.WithResource(res),
+		sdkmetric.WithView(sdkmetric.NewView(
+			sdkmetric.Instrument{Name: semconv.HTTPServerRequestDurationName},
+			sdkmetric.Stream{Aggregation: sdkmetric.AggregationExplicitBucketHistogram{Boundaries: httpServerDurationBounds}},
+		)),
+	)
+}
+
+// startRuntimeMetrics records the Go runtime metrics — go.goroutine.count,
+// go.memory.used, go.memory.gc.goal and the rest of the runtime semantic
+// conventions — on the given provider. They are read from runtime/metrics
+// when the reader collects, so between exports they cost nothing.
+//
+// The provider is passed explicitly and Start is called once per provider:
+// the instrumentation has no Stop, and a second Start on the same provider
+// would register its callback twice.
+func startRuntimeMetrics(provider metric.MeterProvider) error {
+	return otelruntime.Start(otelruntime.WithMeterProvider(provider))
 }
 
 // useInsecure decides transport security the way the OTLP specification does:
@@ -225,6 +338,22 @@ func hostPort(endpoint string) string {
 	return endpoint
 }
 
+// signalURL is the URL the http exporter posts one signal to. The endpoint
+// is the collector's base address, shared by traces and metrics, so when it
+// has no path the signal's standard one is appended. The exporters did that
+// themselves until v1.45.0; since then WithEndpointURL posts to exactly the
+// URL it is given, which for a bare base address is "/", and a collector
+// rejects that. A path that was written is used as it is.
+func signalURL(endpoint string, insecure bool, signalPath string) string {
+	raw := withScheme(endpoint, insecure)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Path != "" {
+		return raw
+	}
+	parsed.Path = signalPath
+	return parsed.String()
+}
+
 // withScheme supplies the scheme the http exporter needs to build a URL when
 // the endpoint was written as a bare host:port.
 func withScheme(endpoint string, insecure bool) string {
@@ -242,9 +371,18 @@ func newResource(cfg config.TelemetryConfig, svc Service) *resource.Resource {
 		semconv.ServiceName(serviceName(cfg, svc)),
 		semconv.ServiceVersion(version.Version),
 	}
-	if id := strings.TrimSpace(svc.InstanceID); id != "" {
-		attrs = append(attrs, semconv.ServiceInstanceID(id))
+	// service.instance.id is always set. Metrics are exported as running
+	// totals, and a backend tells one process's series from another's by the
+	// resource: two replicas, or a process and the one replacing it during a
+	// rollout, that share a resource write into one series, and the totals
+	// interleave into resets that were never there. The conventions require
+	// the id to be unique per instance and suggest a random UUID when nothing
+	// better is configured.
+	id := strings.TrimSpace(svc.InstanceID)
+	if id == "" {
+		id = uuid.NewString()
 	}
+	attrs = append(attrs, semconv.ServiceInstanceID(id))
 	// resource.Merge reports a schema-URL conflict as an error while still
 	// returning a usable resource; the merged result is what we want either
 	// way, so the mismatch is not worth failing startup over.

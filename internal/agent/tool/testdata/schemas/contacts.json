@@ -1,0 +1,11 @@
+{
+  "get_contacts": {
+    "properties": {
+      "platform": {
+        "description": "Filter by channel platform (e.g. telegram, feishu). Returns all platforms when omitted.",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

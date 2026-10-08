@@ -27,12 +27,11 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errlog"
 	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/mcp"
-	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	modelpkg "github.com/felinics/memoh/internal/models"
 	providerpkg "github.com/felinics/memoh/internal/providers"
-	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/schedule"
 	searchpkg "github.com/felinics/memoh/internal/searchproviders"
 	"github.com/felinics/memoh/internal/settings"
@@ -65,7 +64,6 @@ type Service struct {
 	models          *modelpkg.Service
 	searchProviders *searchpkg.Service
 	fetchProviders  *fetchpkg.Service
-	memoryProviders *memprovider.Service
 	workspace       WorkspaceData
 	acpRuntimes     ACPRuntimeCloser
 	workdirs        dbstore.BotWorkdirStore
@@ -73,12 +71,11 @@ type Service struct {
 
 const agentCredentialsWarning = "External Agent credentials were excluded from bot/profile.json; re-enter them after import" // #nosec G101 -- user-facing warning text, not a credential.
 
-// Agent checkpoints are intentionally not part of backup schema v1. They are
-// versioned against process-run rows and native session files, while history
-// import remaps sessions, turns, and messages without recreating those runs.
-// Keeping a promotion watermark without its matching checkpoint would make an
-// imported transcript claim resumability that the bundle cannot provide.
-const acpCheckpointBackupWarning = "Agent runtime checkpoints are not included in bot backups; imported agent sessions keep their visible history but start a fresh runtime conversation" // #nosec G101 -- user-facing warning text, not a credential.
+// Operations of the events that record why a backup step was skipped.
+const (
+	exportOperation = "bot_backup.export"
+	importOperation = "bot_backup.import"
+)
 
 type Params struct {
 	Logger          *slog.Logger
@@ -94,7 +91,6 @@ type Params struct {
 	Models          *modelpkg.Service
 	SearchProviders *searchpkg.Service
 	FetchProviders  *fetchpkg.Service
-	MemoryProviders *memprovider.Service
 	Workspace       WorkspaceData
 	ACPRuntimes     ACPRuntimeCloser
 	Workdirs        dbstore.BotWorkdirStore
@@ -119,11 +115,23 @@ func New(params Params) *Service {
 		models:          params.Models,
 		searchProviders: params.SearchProviders,
 		fetchProviders:  params.FetchProviders,
-		memoryProviders: params.MemoryProviders,
 		workspace:       params.Workspace,
 		acpRuntimes:     params.ACPRuntimes,
 		workdirs:        params.Workdirs,
 	}
+}
+
+// recordSkipped records the cause of a step that an export or import skipped
+// and reported as a warning. The warning reaches the client, and an export
+// also writes it into the backup file, so it names the step and never carries
+// the cause; this event is where the cause is kept.
+func (s *Service) recordSkipped(ctx context.Context, operation, botID, step string, err error) {
+	result := errlog.Event(ctx, operation, err, errlog.Options{})
+	attrs := []slog.Attr{slog.String("operation", operation), slog.String("step", step)}
+	if botID != "" {
+		attrs = append(attrs, slog.String("bot_id", botID))
+	}
+	s.logger.LogAttrs(ctx, result.Level, "bot backup step skipped", append(attrs, result.Attrs()...)...)
 }
 
 func NormalizeExportOptions(opts ExportOptions) ExportOptions {
@@ -215,9 +223,6 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 		if err := writer.writeJSON("dependencies/fetch_providers.json", "fetch_providers", data.Dependencies.FetchProviders, opts); err != nil {
 			return err
 		}
-		if err := writer.writeJSON("dependencies/memory_providers.json", "memory_providers", data.Dependencies.MemoryProviders, opts); err != nil {
-			return err
-		}
 	}
 	if opts.wants(SectionHistory) {
 		if err := writer.writeJSON("history/sessions.json", "bot_sessions", data.History.Sessions, opts); err != nil {
@@ -240,7 +245,8 @@ func (s *Service) Export(ctx context.Context, botID string, opts ExportOptions, 
 	}
 	if opts.wants(SectionWorkspace) && s.workspace != nil {
 		if err := writer.writeWorkspace(ctx, botID, s.workspace, opts); err != nil {
-			manifest.Warnings = append(manifest.Warnings, "workspace export failed: "+err.Error())
+			manifest.Warnings = append(manifest.Warnings, "workspace export failed")
+			s.recordSkipped(ctx, exportOperation, botID, "workspace", err)
 		}
 	}
 	manifest.Checksums = writer.checksum
@@ -299,7 +305,8 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 	if limits, err := s.collectWorkspaceResourceLimits(ctx, botID); err == nil {
 		data.WorkspaceResourceLimits = &limits
 	} else {
-		warnings = append(warnings, "workspace resource limits export failed: "+err.Error())
+		warnings = append(warnings, "workspace resource limits export failed")
+		s.recordSkipped(ctx, exportOperation, botID, "workspace_resource_limits", err)
 	}
 	if workdirs, skippedRemote, err := s.collectWorkdirs(ctx, botID); err == nil {
 		data.Workdirs = workdirs
@@ -307,38 +314,43 @@ func (s *Service) collect(ctx context.Context, botID string, opts ExportOptions)
 			warnings = append(warnings, fmt.Sprintf("%d remote computer workdir(s) were not exported: they reference machines outside this backup", skippedRemote))
 		}
 	} else {
-		warnings = append(warnings, "workdir export failed: "+err.Error())
+		warnings = append(warnings, "workdir export failed")
+		s.recordSkipped(ctx, exportOperation, botID, "workdirs", err)
 	}
 
 	if s.acl != nil {
 		if rows, err := s.acl.ListRules(ctx, botID); err == nil {
 			data.ACLRules = rows
 		} else {
-			warnings = append(warnings, "acl export failed: "+err.Error())
+			warnings = append(warnings, "acl export failed")
+			s.recordSkipped(ctx, exportOperation, botID, "acl", err)
 		}
 	}
 	if s.channels != nil {
 		if rows, err := s.channels.ListConfigs(ctx, botID); err == nil {
 			data.Channels = rows
 		} else {
-			warnings = append(warnings, "channel config export failed: "+err.Error())
+			warnings = append(warnings, "channel config export failed")
+			s.recordSkipped(ctx, exportOperation, botID, "channels", err)
 		}
 	}
 	if s.mcp != nil {
 		if rows, err := s.mcp.ListByBot(ctx, botID); err == nil {
 			data.MCP = rows
 		} else {
-			warnings = append(warnings, "mcp export failed: "+err.Error())
+			warnings = append(warnings, "mcp export failed")
+			s.recordSkipped(ctx, exportOperation, botID, "mcp", err)
 		}
 	}
 	if s.schedules != nil {
 		if rows, err := s.schedules.List(ctx, botID); err == nil {
 			data.Schedules = rows
 		} else {
-			warnings = append(warnings, "schedule export failed: "+err.Error())
+			warnings = append(warnings, "schedule export failed")
+			s.recordSkipped(ctx, exportOperation, botID, "schedules", err)
 		}
 	}
-	deps, depWarnings := s.collectDependencies(ctx, cfg)
+	deps, depWarnings := s.collectDependencies(ctx, botID, cfg)
 	data.Dependencies = deps
 	warnings = append(warnings, depWarnings...)
 	if opts.wants(SectionHistory) || opts.wants(SectionAssets) {
@@ -413,7 +425,7 @@ func backupWorkspaceResourceLimitsFromRow(row dbsqlc.BotWorkspaceResourceLimit) 
 	}
 }
 
-func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings) (backupDependencies, []string) {
+func (s *Service) collectDependencies(ctx context.Context, botID string, cfg settings.Settings) (backupDependencies, []string) {
 	var warnings []string
 	modelIDs := uniqueStrings([]string{
 		cfg.ChatModelID,
@@ -421,6 +433,7 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 		cfg.TtsModelID,
 		cfg.TranscriptionModelID,
 		cfg.CompactionModelID,
+		cfg.MemoryLLMModelID,
 		cfg.DiscussProbeModelID,
 	})
 	models := make([]modelpkg.GetResponse, 0, len(modelIDs))
@@ -432,6 +445,7 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 		model, err := s.models.GetByID(ctx, id)
 		if err != nil {
 			warnings = append(warnings, "model dependency missing: "+id)
+			s.recordSkipped(ctx, exportOperation, botID, "model_dependency", err)
 			continue
 		}
 		models = append(models, model)
@@ -445,6 +459,7 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 		provider, err := s.providers.Get(ctx, id)
 		if err != nil {
 			warnings = append(warnings, "provider dependency missing: "+id)
+			s.recordSkipped(ctx, exportOperation, botID, "provider_dependency", err)
 			continue
 		}
 		providers = append(providers, provider)
@@ -455,6 +470,7 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 			searchProviders = append(searchProviders, item)
 		} else {
 			warnings = append(warnings, "search provider dependency missing: "+cfg.SearchProviderID)
+			s.recordSkipped(ctx, exportOperation, botID, "search_provider_dependency", err)
 		}
 	}
 	fetchProviders := []fetchpkg.GetResponse{}
@@ -463,14 +479,7 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 			fetchProviders = append(fetchProviders, item)
 		} else {
 			warnings = append(warnings, "fetch provider dependency missing: "+cfg.FetchProviderID)
-		}
-	}
-	memoryProviders := []memprovider.ProviderGetResponse{}
-	if s.memoryProviders != nil && cfg.MemoryProviderID != "" {
-		if item, err := s.memoryProviders.Get(ctx, cfg.MemoryProviderID); err == nil {
-			memoryProviders = append(memoryProviders, item)
-		} else {
-			warnings = append(warnings, "memory provider dependency missing: "+cfg.MemoryProviderID)
+			s.recordSkipped(ctx, exportOperation, botID, "fetch_provider_dependency", err)
 		}
 	}
 	return backupDependencies{
@@ -478,7 +487,6 @@ func (s *Service) collectDependencies(ctx context.Context, cfg settings.Settings
 		Models:          models,
 		SearchProviders: searchProviders,
 		FetchProviders:  fetchProviders,
-		MemoryProviders: memoryProviders,
 	}, warnings
 }
 
@@ -488,36 +496,31 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
-		return backupHistory{}, []string{err.Error()}
+		s.recordSkipped(ctx, exportOperation, botID, "history", err)
+		return backupHistory{}, []string{"history export failed"}
 	}
 	var warnings []string
 	var history backupHistory
 	if sessions, err := s.queries.ListSessionsByBot(ctx, pgBotID); err == nil {
 		history.Sessions = sessions
 	} else {
-		warnings = append(warnings, "sessions export failed: "+err.Error())
+		warnings = append(warnings, "sessions export failed")
+		s.recordSkipped(ctx, exportOperation, botID, "sessions", err)
 	}
 	if cursors, err := s.queries.ListSessionDiscussCursorsByBot(ctx, pgBotID); err == nil {
 		history.DiscussCursors = cursors
 	} else {
-		warnings = append(warnings, "discuss cursors export failed: "+err.Error())
+		warnings = append(warnings, "discuss cursors export failed")
+		s.recordSkipped(ctx, exportOperation, botID, "discuss_cursors", err)
 	}
 	if events, err := s.queries.ListSessionEventsByBot(ctx, pgBotID); err == nil {
 		history.SessionEvents = events
 	} else {
-		warnings = append(warnings, "session events export failed: "+err.Error())
+		warnings = append(warnings, "session events export failed")
+		s.recordSkipped(ctx, exportOperation, botID, "session_events", err)
 	}
 	if messages, err := s.queries.ListAllMessagesForBackup(ctx, pgBotID); err == nil {
 		history.Messages = messages
-		// Agent runtime publication heads and JSONL snapshots live outside
-		// the backup schema, so exported agent history (ACP and direct
-		// runtimes alike) is never runtime-resumable.
-		for _, message := range messages {
-			if runtimekind.IsExternal(message.RuntimeType) {
-				warnings = appendWarningOnce(warnings, acpCheckpointBackupWarning)
-				break
-			}
-		}
 		if includeAssets {
 			messageIDs := make([]pgtype.UUID, 0, len(messages))
 			for _, message := range messages {
@@ -526,11 +529,13 @@ func (s *Service) collectHistory(ctx context.Context, botID string, includeAsset
 			if assets, assetErr := s.queries.ListMessageAssetsBatch(ctx, messageIDs); assetErr == nil {
 				history.Assets = assets
 			} else {
-				warnings = append(warnings, "message assets export failed: "+assetErr.Error())
+				warnings = append(warnings, "message assets export failed")
+				s.recordSkipped(ctx, exportOperation, botID, "message_assets", assetErr)
 			}
 		}
 	} else {
-		warnings = append(warnings, "messages export failed: "+err.Error())
+		warnings = append(warnings, "messages export failed")
+		s.recordSkipped(ctx, exportOperation, botID, "messages", err)
 	}
 	return history, warnings
 }

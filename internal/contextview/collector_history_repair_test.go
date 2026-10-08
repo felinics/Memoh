@@ -8,6 +8,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestHistoryCollectorRepairsDanglingToolCalls(t *testing.T) {
@@ -74,14 +75,14 @@ func assistantToolCallMessage(callID, toolName, text string) sdk.Message {
 	parts = append(parts, sdk.ToolCallPart{
 		ToolCallID: callID,
 		ToolName:   toolName,
-		Input:      map[string]any{},
+		Input:      toolexec.ArgumentsFromValue(map[string]any{}),
 	})
 	return sdk.Message{Role: sdk.MessageRoleAssistant, Content: parts}
 }
 
 func toolResultMessage(callID, toolName, value string) sdk.Message {
 	return sdk.Message{Role: sdk.MessageRoleTool, Content: []sdk.MessagePart{
-		sdk.ToolResultPart{ToolCallID: callID, ToolName: toolName, Result: value},
+		sdk.ToolResultPart{ToolCallID: callID, ToolName: toolName, Result: toolexec.OutputFromValue(value)},
 	}}
 }
 

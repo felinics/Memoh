@@ -17,7 +17,9 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	sdk "github.com/felinics/twilight/sdk"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
@@ -426,6 +428,75 @@ func TestStartMemohToolsBridgeRetriesClosingWorkspaceClient(t *testing.T) {
 	if workspace.calls != 1 {
 		t.Fatalf("workspace MCPClient calls = %d, want retry once", workspace.calls)
 	}
+}
+
+func TestStartMemohToolsBridgeRetriesUnavailableWorkspaceBridge(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	unavailable := newUnavailableBridgeClient(t)
+	fresh := newTestBridgeClient(t, root)
+	workspace := &rotatingTestWorkspace{
+		info: bridge.WorkspaceInfo{
+			Backend:        bridge.WorkspaceBackendContainer,
+			DefaultWorkDir: "/data",
+			ToolsHTTPURL:   "http://127.0.0.1:18732/mcp",
+		},
+		clients: []*bridge.Client{fresh},
+	}
+	runner := NewRunner(nil, workspace)
+
+	gotClient, stop, err := runner.startMemohToolsBridge(context.Background(), "bot-1", unavailable, "/mcp/test", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	if err != nil {
+		t.Fatalf("startMemohToolsBridge() error = %v", err)
+	}
+	defer stop()
+	if gotClient != fresh {
+		t.Fatalf("startMemohToolsBridge() client = %#v, want fresh client", gotClient)
+	}
+	if workspace.calls != 1 {
+		t.Fatalf("workspace MCPClient calls = %d, want retry once", workspace.calls)
+	}
+}
+
+func TestStartMemohToolsBridgeDoesNotRetryOtherBridgeErrors(t *testing.T) {
+	t.Parallel()
+
+	denied := newFailingStreamBridgeClient(t, status.Error(codes.PermissionDenied, "transport is closing"))
+	workspace := &rotatingTestWorkspace{clients: []*bridge.Client{newTestBridgeClient(t, t.TempDir())}}
+	runner := NewRunner(nil, workspace)
+
+	_, _, err := runner.startMemohToolsBridge(context.Background(), "bot-1", denied, "/mcp/test", http.NotFoundHandler())
+	if !errors.Is(err, bridge.ErrForbidden) {
+		t.Fatalf("startMemohToolsBridge() error = %v, want bridge.ErrForbidden", err)
+	}
+	if workspace.calls != 0 {
+		t.Fatalf("workspace MCPClient calls = %d, want no retry", workspace.calls)
+	}
+}
+
+// newUnavailableBridgeClient returns a client whose streams fail with the
+// status grpc-go reports for a broken transport.
+func newUnavailableBridgeClient(t *testing.T) *bridge.Client {
+	t.Helper()
+	return newFailingStreamBridgeClient(t, status.Error(codes.Unavailable, "connection error: desc = \"error reading server preface\""))
+}
+
+func newFailingStreamBridgeClient(t *testing.T, streamErr error) *bridge.Client {
+	t.Helper()
+	conn, err := grpc.NewClient("passthrough:///acpclient-failing-stream-test",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStreamInterceptor(func(context.Context, *grpc.StreamDesc, *grpc.ClientConn, string, grpc.Streamer, ...grpc.CallOption) (grpc.ClientStream, error) {
+			return nil, streamErr
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return bridge.NewClientFromConn(conn)
 }
 
 func TestRunnerStartSessionSupportsReleaseTerminalWithoutWait(t *testing.T) {
@@ -1184,7 +1255,6 @@ func TestRequestPermissionUsesMemohToolApproval(t *testing.T) {
 	}
 	callbacks := &clientCallbacks{
 		root:     "/data",
-		cwd:      "/data",
 		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:             "bot-1",
@@ -1288,7 +1358,6 @@ func TestReadTextFileUsesPromptToolOutputLimit(t *testing.T) {
 			callbacks := &clientCallbacks{
 				client:   newTestBridgeClient(t, root),
 				root:     root,
-				cwd:      root,
 				events:   &toolEventEmitter{},
 				approval: &fakeACPToolApproval{evaluation: toolapproval.Evaluation{Decision: toolapproval.DecisionBypass}},
 				baseSession: ToolSessionContext{
@@ -1511,7 +1580,6 @@ func TestRequestPermissionCorrelatesSparseCodexMCPUpdate(t *testing.T) {
 	approval := &fakeACPToolApproval{}
 	callbacks := &clientCallbacks{
 		root:        "/data",
-		cwd:         "/data",
 		approval:    approval,
 		toolGateway: testACPToolGateway("ask_user"),
 		baseSession: ToolSessionContext{
@@ -1750,7 +1818,6 @@ func TestRequestPermissionUnmappedToolAllowsWithoutApproval(t *testing.T) {
 			approval := &fakeACPToolApproval{}
 			callbacks := &clientCallbacks{
 				root:        "/data",
-				cwd:         "/data",
 				approval:    approval,
 				toolGateway: tc.toolGateway,
 				baseSession: ToolSessionContext{
@@ -1793,7 +1860,6 @@ func TestRequestPermissionAnswersStoppedTurnToolCallAsCancelled(t *testing.T) {
 	approval := &fakeACPToolApproval{}
 	callbacks := &clientCallbacks{
 		root:       "/data",
-		cwd:        "/data",
 		approval:   approval,
 		toolMapper: newACPToolEventMapper(acpprofile.DefaultToolQuirks()),
 		baseSession: ToolSessionContext{
@@ -1880,7 +1946,6 @@ func TestRequestPermissionForcesReviewOnGenericLane(t *testing.T) {
 			}}
 			callbacks := &clientCallbacks{
 				root:        "/data",
-				cwd:         "/data",
 				approval:    approval,
 				toolGateway: testACPToolGateway("native_tool"),
 				baseSession: ToolSessionContext{
@@ -2010,7 +2075,6 @@ func TestRequestPermissionUnsupportedOptionKindCancels(t *testing.T) {
 	approval := &fakeACPToolApproval{}
 	callbacks := &clientCallbacks{
 		root:     "/data",
-		cwd:      "/data",
 		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:     "bot-1",
@@ -2058,7 +2122,6 @@ func TestRequestPermissionNormalizesOptionKindCase(t *testing.T) {
 	}
 	callbacks := &clientCallbacks{
 		root:     "/data",
-		cwd:      "/data",
 		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:     "bot-1",
@@ -2103,7 +2166,6 @@ func TestRequestPermissionNonInteractiveCancels(t *testing.T) {
 	approval := &fakeACPToolApproval{}
 	callbacks := &clientCallbacks{
 		root:     "/data",
-		cwd:      "/data",
 		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:             "bot-1",
@@ -2148,7 +2210,6 @@ func TestRequestPermissionRejectedByMemohToolApprovalSelectsRejectOption(t *test
 	}
 	callbacks := &clientCallbacks{
 		root:     "/data",
-		cwd:      "/data",
 		approval: approval,
 		baseSession: ToolSessionContext{
 			BotID:     "bot-1",
@@ -2719,7 +2780,6 @@ func TestRequestPermissionScopeRejectsOutOfRootPaths(t *testing.T) {
 			approval := &fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}}
 			callbacks := &clientCallbacks{
 				root:     "/data",
-				cwd:      "/data",
 				approval: approval,
 				baseSession: ToolSessionContext{
 					BotID:             "bot-1",
@@ -2753,7 +2813,6 @@ func TestRequestPermissionScopeRejectsOutOfRootPaths(t *testing.T) {
 		approval := &fakeACPToolApproval{decision: toolapproval.Request{Status: toolapproval.StatusApproved}}
 		callbacks := &clientCallbacks{
 			root:     "/data",
-			cwd:      "/data",
 			approval: approval,
 			baseSession: ToolSessionContext{
 				BotID:             "bot-1",
@@ -3296,38 +3355,11 @@ func TestFakeACPAgentHelper(_ *testing.T) {
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT") != "1" {
 		return
 	}
-	if err := captureFakeAgentEnv(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
 	agent := &fakeACPAgent{}
 	conn := acp.NewAgentSideConnection(agent, os.Stdout, os.Stdin)
 	agent.conn = conn
 	<-conn.Done()
 	os.Exit(0)
-}
-
-func captureFakeAgentEnv() error {
-	path := os.Getenv("MEMOH_ACP_FAKE_AGENT_CAPTURE_ENV_FILE")
-	if path == "" {
-		return nil
-	}
-	captured := map[string]string{}
-	for _, key := range []string{
-		"GOOGLE_API_KEY",
-		"GEMINI_API_KEY",
-		"OPENROUTER_API_KEY",
-		"OPENAI_API_KEY",
-	} {
-		if value, ok := os.LookupEnv(key); ok {
-			captured[key] = value
-		}
-	}
-	raw, err := json.Marshal(captured)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, raw, 0o600) //nolint:gosec // test helper writes to env-provided temp path.
 }
 
 type fakeACPAgent struct {
@@ -3356,9 +3388,6 @@ func (*fakeACPAgent) Initialize(context.Context, acp.InitializeRequest) (acp.Ini
 	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MCP_HTTP") == "1" {
 		capabilities.McpCapabilities.Http = true
-	}
-	if os.Getenv("MEMOH_ACP_FAKE_AGENT_MCP_ACP") == "1" {
-		capabilities.McpCapabilities.Acp = true
 	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_CLOSE") == "1" {
 		capabilities.SessionCapabilities.Close = &acp.SessionCloseCapabilities{}
@@ -3417,16 +3446,6 @@ func (a *fakeACPAgent) NewSession(_ context.Context, p acp.NewSessionRequest) (a
 }
 
 func (a *fakeACPAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
-	if auth := os.Getenv("MEMOH_ACP_FAKE_AGENT_REFRESH_AUTH"); auth != "" {
-		home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-		if home == "" {
-			return acp.PromptResponse{}, errors.New("fake Codex agent missing CODEX_HOME")
-		}
-		if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(auth), 0o600); err != nil { //nolint:gosec // test helper writes only to the lease-owned home.
-			return acp.PromptResponse{}, err
-		}
-		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
-	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_HANG_PROMPT") == "1" {
 		if path := os.Getenv("MEMOH_ACP_PROMPT_STARTED_FILE"); path != "" {
 			_ = os.WriteFile(path, []byte("started"), 0o600) //nolint:gosec // test helper writes to env-provided temp path.
@@ -3439,6 +3458,14 @@ func (a *fakeACPAgent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.Pro
 	}
 	if os.Getenv("MEMOH_ACP_FAKE_AGENT_RELEASE_TERMINAL_WITHOUT_WAIT") == "1" {
 		return a.promptReleaseTerminalAfterOutput(ctx, p)
+	}
+	if raw := os.Getenv("MEMOH_ACP_FAKE_AGENT_USAGE"); raw != "" {
+		var usage acp.Usage
+		if err := json.Unmarshal([]byte(raw), &usage); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText("usage reported")})
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: &usage}, nil
 	}
 
 	outputPath := filepath.Join(a.cwd, "output.txt")
@@ -3599,7 +3626,7 @@ func captureFakeSessionLifecycle(method, sessionID string, meta map[string]any) 
 	return os.WriteFile(path, raw, 0o600) //nolint:gosec // test helper writes to an env-provided temporary capture.
 }
 
-func (a *fakeACPAgent) SetSessionConfigOption(ctx context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+func (a *fakeACPAgent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	if p.ValueId == nil || p.ValueId.SessionId != acp.SessionId("fake-session") {
 		return acp.SetSessionConfigOptionResponse{}, errors.New("unexpected config request")
 	}
@@ -3636,15 +3663,6 @@ func (a *fakeACPAgent) SetSessionConfigOption(ctx context.Context, p acp.SetSess
 		return acp.SetSessionConfigOptionResponse{}, errors.New("forced config failure after apply")
 	}
 	options := a.configOptions()
-	if os.Getenv("MEMOH_ACP_FAKE_AGENT_REASONING_NOTIFY") == "1" {
-		_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{
-			SessionId: p.ValueId.SessionId,
-			Update: acp.SessionUpdate{ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{
-				SessionUpdate: "config_option_update",
-				ConfigOptions: options,
-			}},
-		})
-	}
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: options}, nil
 }
 

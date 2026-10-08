@@ -13,6 +13,8 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 )
 
@@ -57,8 +59,8 @@ type oauthDiscoverRequest struct {
 // @Param id path string true "MCP connection ID"
 // @Param payload body oauthDiscoverRequest false "Optional URL override"
 // @Success 200 {object} mcp.DiscoveryResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/discover [post].
 func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -101,8 +103,7 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 	}
 
 	if err := h.oauthService.SaveDiscovery(c.Request().Context(), connID, result); err != nil {
-		h.logger.ErrorContext(c.Request().Context(), "failed to save discovery result", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save discovery result")
+		return errs.Wrap(err, "save discovery result")
 	}
 
 	return c.JSON(http.StatusOK, result)
@@ -121,8 +122,8 @@ type oauthAuthorizeRequest struct {
 // @Param id path string true "MCP connection ID"
 // @Param payload body oauthAuthorizeRequest false "Optional client_id"
 // @Success 200 {object} mcp.AuthorizeResult
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/authorize [post].
 func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -160,7 +161,7 @@ type oauthExchangeRequest struct {
 // @Tags mcp
 // @Param payload body oauthExchangeRequest true "Authorization code and state"
 // @Success 200 {object} map[string]bool
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/exchange [post].
 func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 	var req oauthExchangeRequest
@@ -176,8 +177,7 @@ func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 
 	_, err := h.oauthService.HandleCallback(c.Request().Context(), state, code)
 	if err != nil {
-		h.logger.WarnContext(c.Request().Context(), "oauth exchange failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest, "oauth exchange failed").WithInternal(err)
 	}
 
 	return c.JSON(http.StatusOK, map[string]bool{"success": true})
@@ -214,8 +214,12 @@ func (h *MCPOAuthHandler) Callback(c echo.Context) error {
 	}
 
 	if _, err := h.oauthService.HandleCallback(c.Request().Context(), state, code); err != nil {
-		h.logger.WarnContext(c.Request().Context(), "oauth callback failed", slog.Any("error", err))
-		return renderMCPOAuthCallbackResult(c, http.StatusBadRequest, "error", err.Error())
+		// The callback answers the browser with a page, not an error, so the
+		// cause is recorded as an event and kept out of the page.
+		ctx := c.Request().Context()
+		result := errlog.Event(ctx, "mcp.oauth_callback", errs.Wrap(err, "handle MCP OAuth callback"), errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "oauth callback failed", result.Attrs()...)
+		return renderMCPOAuthCallbackResult(c, http.StatusBadRequest, "error", "authorization could not be completed")
 	}
 	return renderMCPOAuthCallbackResult(c, http.StatusOK, "success", "")
 }
@@ -226,8 +230,8 @@ func (h *MCPOAuthHandler) Callback(c echo.Context) error {
 // @Tags mcp
 // @Param id path string true "MCP connection ID"
 // @Success 200 {object} mcp.OAuthStatus
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 404 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/status [get].
 func (h *MCPOAuthHandler) Status(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -257,7 +261,7 @@ func (h *MCPOAuthHandler) Status(c echo.Context) error {
 // @Tags mcp
 // @Param id path string true "MCP connection ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
 // @Router /bots/{bot_id}/mcp/{id}/oauth/token [delete].
 func (h *MCPOAuthHandler) RevokeToken(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)

@@ -11,22 +11,24 @@ Use this skill when the task involves `twilight-ai`, especially:
 
 - implementing or refactoring SDK APIs in `sdk/`
 - adding or updating providers under `provider/`
-- working on `GenerateText`, `GenerateTextResult`, `StreamText`, `Embed`, or `EmbedMany`
-- adding tool-calling, streaming, reasoning, or embedding support
+- working on `Model.Generate`, `Model.Stream`, `Embed`, `EmbedMany`, `GenerateImage`, or `EditImage`
+- adding tool-calling, streaming, reasoning, embedding, or image generation support
 - writing examples, docs, or usage guidance for this library
 
 ## Project Snapshot
 
 Twilight AI is a lightweight Go AI SDK with a provider-agnostic core API.
 
-- Text generation: `sdk.GenerateText`, `sdk.GenerateTextResult`, `sdk.StreamText`
+- Text generation: build an `sdk.Request` and call `Model.Generate` or `Model.Stream`; one call, one `ModelResult`
+- Image generation: `sdk.GenerateImage`, `sdk.EditImage`
 - Embeddings: `sdk.Embed`, `sdk.EmbedMany`
-- Tool calling: `sdk.Tool`, `sdk.NewTool[T]`, `WithMaxSteps`, approval flow
-- MCP tool integration: `sdk.CreateMCPClient`, `sdk.MCPClient`, `sdk.MCPClientConfig`
+- Tool calling: `sdk.ToolDefinition` (or `sdk.NewToolDefinition[T]`), typed `sdk.ToolCall` / `sdk.ToolArguments` / `sdk.ToolOutput`
 - Streaming: typed `StreamPart` events over Go channels
 - Current providers:
   - `provider/openai/completions`
   - `provider/openai/responses`
+  - `provider/openai/codex`
+  - `provider/openai/images`
   - `provider/anthropic/messages`
   - `provider/google/generativeai`
   - `provider/openai/embedding`
@@ -38,19 +40,20 @@ Prefer the high-level SDK API first, then drop to provider details only when nee
 
 - `sdk.Model` binds a chat model to a `sdk.Provider`
 - `sdk.EmbeddingModel` binds an embedding model to an `sdk.EmbeddingProvider`
-- The client orchestrates tool loops, callbacks, approvals, and streaming lifecycle
-- MCP clients can load remote MCP tools and turn them into ordinary `sdk.Tool` values
+- `sdk.ImageGenerationModel` binds an image generation model to an `sdk.ImageGenerationProvider`
+- `sdk.ImageEditModel` binds an image edit model to an `sdk.ImageEditProvider`
+- A runtime drives `Model.Generate` or `Model.Stream` with an `sdk.Request`, runs the returned `ToolCalls`, and appends the assistant and tool messages of the step to the next request
 - Providers handle backend-specific HTTP, request mapping, response parsing, and SSE translation
 
 ## Core API Guidance
 
 Choose the narrowest API that matches the task:
 
-- Need only final text: use `sdk.GenerateText`
-- Need usage, finish reason, steps, sources, files, or tool details: use `sdk.GenerateTextResult`
-- Need live output: use `sdk.StreamText`
+- Need one model call and its result: use `Model.Generate` or `Model.Stream` with an `sdk.Request`
 - Need one vector: use `sdk.Embed`
 - Need multiple vectors or embedding token usage: use `sdk.EmbedMany`
+- Need image generation from a text prompt: use `sdk.GenerateImage`
+- Need image editing or inpainting: use `sdk.EditImage`
 
 If the task introduces examples or docs, prefer simple end-to-end snippets that start with:
 
@@ -63,8 +66,10 @@ If the task introduces examples or docs, prefer simple end-to-end snippets that 
 
 - Use `openai/completions` for broad OpenAI-compatible support such as DeepSeek, Groq, Ollama, Azure-style compatible endpoints, and generic `/chat/completions` backends.
 - Use `openai/responses` when the task needs OpenAI Responses API features such as first-class reasoning models, reasoning summaries, URL citation annotations, or flat input mapping.
+- Use `openai/codex` when the task needs OpenAI Codex coding agent models (gpt-5.x-codex series) with ChatGPT access token authentication and encrypted reasoning content.
 - Use `anthropic/messages` for Claude and Anthropic extended thinking via `WithThinking`.
 - Use `google/generativeai` for Gemini chat, tool calling, vision, streaming, and Gemini reasoning.
+- Use `openai/images` for image generation (dall-e-2, dall-e-3, gpt-image-1) and image editing via the OpenAI Images API.
 - Use `openai/embedding` or `google/embedding` for embeddings. Keep embedding-provider work separate from chat-provider work.
 
 ## Implementation Rules
@@ -77,14 +82,14 @@ If adding or changing a chat provider, preserve the `sdk.Provider` contract:
 - `ListModels(ctx)`
 - `Test(ctx)`
 - `TestModel(ctx, modelID)`
-- `DoGenerate(ctx, params)`
-- `DoStream(ctx, params)`
+- `DoGenerate(ctx, req sdk.Request) (sdk.ModelResult, error)`
+- `DoStream(ctx, req sdk.Request) (<-chan sdk.StreamPart, error)`
 
 Keep provider responsibilities focused:
 
 - translate SDK messages/options into backend request format
-- parse backend responses into `sdk.GenerateResult`
-- map backend streaming events into typed `sdk.StreamPart` values
+- parse backend responses into `sdk.ModelResult`
+- map backend streaming events into typed `sdk.StreamPart` values; the SDK core assembles them into a `ModelResult`
 - report usage, finish reasons, reasoning, tool calls, sources, and files when supported
 
 ### Embedding Providers
@@ -98,43 +103,29 @@ When updating embeddings:
 - preserve `Usage.Tokens`
 - only expose dimensions/task-type behavior when the backend supports it
 
+### Image Providers
+
+Image providers are separate from chat, embedding, and speech providers. Use `sdk.ImageGenerationProvider` and/or `sdk.ImageEditProvider`.
+
+When updating image providers:
+
+- keep `sdk.GenerateImage` for generation convenience
+- keep `sdk.EditImage` for editing convenience
+- preserve `ImageUsage` token details when the backend supports them
+- support both multipart file upload and JSON reference modes for edit inputs
+
 ### Tool Calling
 
-Prefer `sdk.NewTool[T]` for new tool examples and integrations. It gives typed input and inferred JSON Schema.
+Prefer `sdk.NewToolDefinition[T]` for new tool examples: typed arguments and an inferred JSON Schema.
 
 Use these defaults unless the task requires something else:
 
-- `WithToolChoice("auto")` for normal use
-- `WithMaxSteps(0)` for inspection-only tool calls
-- `WithMaxSteps(N)` for automatic execution loops
-- `RequireApproval: true` only for sensitive side effects
+- `Request.ToolChoice` left zero (auto) for normal use; `sdk.ToolChoice{Mode: sdk.ToolChoiceRequired}` or `{Mode: sdk.ToolChoiceTool, Tool: name}` to force a call
+- one `Generate` per step; the caller runs the returned `ToolCalls` and decides how many steps to take
+- a call's arguments are `sdk.ToolArguments`; decode with `Unmarshal`, never assume a `map[string]any`; `Valid()` false means answer the model with an error result instead of running the tool
+- a tool's result is a `sdk.ToolResultPart` whose `Result` is `sdk.TextOutput` or `sdk.JSONOutput`; the replayed assistant message keeps the reasoning parts and each part's `ProviderMetadata`
 
-When streaming with tools, ensure the implementation can emit:
-
-- tool input construction parts
-- tool execution parts
-- progress updates
-- denial/error events when applicable
-
-### MCP Tool Calling
-
-Use MCP when the task needs remote tools exposed by an MCP server rather than locally implemented `Execute` handlers.
-
-Default guidance:
-
-- use `sdk.CreateMCPClient(ctx, &sdk.MCPClientConfig{...})`
-- use `sdk.MCPTransportHTTP` for streamable HTTP MCP servers
-- use `sdk.MCPTransportSSE` only when the server exposes legacy SSE transport
-- for stdio, build the transport with the official MCP Go SDK and pass `Transport: ...`
-- call `mcpClient.Tools(ctx)` and pass the result into `sdk.WithTools(...)`
-- call `defer mcpClient.Close()` after successful creation
-
-Important behavior:
-
-- MCP tools become ordinary `sdk.Tool` values from the caller's perspective
-- Twilight AI converts MCP `InputSchema` into `*jsonschema.Schema`
-- MCP tool execution is delegated to `tools/call` on the remote server
-- remote MCP text output becomes the tool result visible to the model
+When streaming with tools, the stream emits tool input construction parts and one `StreamToolCallPart` per completed call.
 
 ### Streaming
 
@@ -142,9 +133,9 @@ Twilight AI streaming is channel-first and type-safe. Prefer type switches over 
 
 Important expectations:
 
-- `StreamText` returns `*sdk.StreamResult`
-- `sr.Stream` must be consumed before relying on `sr.Steps` or `sr.Messages`
-- `Text()` and `ToResult()` are the convenience paths when callers do not want manual event handling
+- `Model.Stream` returns an `sdk.ModelStream`: `Parts` is the channel of `sdk.StreamPart` values, `Result()` is valid once `Parts` is drained
+- `sdk.CollectStream` is the convenience path when callers do not want manual event handling
+- a stream is one model call; it carries no tool execution events
 
 ### Messages And Results
 
@@ -162,7 +153,7 @@ Use this structure:
 
 1. pick the correct provider package
 2. create provider with explicit options
-3. create model via `ChatModel` or `EmbeddingModel`
+3. create model via `ChatModel`, `EmbeddingModel`, `GenerationModel`, or `EditModel`
 4. call the top-level `sdk` function
 5. show minimal but idiomatic result handling
 
@@ -196,7 +187,7 @@ When writing Twilight AI docs or README content:
 - use Go examples, not pseudocode, unless explaining an interface contract
 - keep examples small and runnable in spirit
 - mention exact package paths for imports
-- explain when to choose Completions vs Responses when OpenAI is involved
+- explain when to choose Completions vs Responses vs Codex when OpenAI is involved
 - keep embeddings, tool calling, and streaming as separate concerns unless the example truly combines them
 
 ## Terminology
@@ -205,22 +196,25 @@ Use these terms consistently:
 
 - Provider: backend implementation for chat generation
 - Embedding provider: backend implementation for embeddings
+- Image generation provider: backend implementation for image generation
+- Image edit provider: backend implementation for image editing
 - Model: provider-bound chat model
 - Embedding model: provider-bound embedding model
+- Image generation model: provider-bound image generation model
+- Image edit model: provider-bound image edit model
 - Tool calling: model requests a tool invocation
-- Multi-step execution: automatic tool loop controlled by `WithMaxSteps`
-- Stream part: a typed event from `StreamText`
+- Step: one model call plus the tool calls it made; the caller assembles the assistant and tool messages
+- Stream part: a typed event from the model seam (`sdk.StreamPart`), delivered by `Model.Stream`
 
 ## Quick Checklist
 
 Before finishing work in this repo, verify:
 
 - the chosen provider package matches the intended backend capabilities
-- chat and embedding concerns are not mixed accidentally
+- chat, embedding, and image concerns are not mixed accidentally
 - public examples use top-level `sdk` APIs unless lower-level behavior is the point
 - streaming logic uses typed `StreamPart` handling
-- tool-calling changes cover both inspection mode and multi-step mode when relevant
-- MCP examples show both transport setup and normal `WithTools(...)` usage when relevant
+- tool-calling examples build the replayed assistant and tool messages by hand
 - provider work includes health checks or model discovery behavior if the backend supports them
 
 ## Additional Resources

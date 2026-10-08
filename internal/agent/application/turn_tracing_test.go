@@ -2,17 +2,21 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"testing"
 	"time"
 
+	sdk "github.com/felinics/twilight/sdk"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/felinics/memoh/internal/agent/runtime/native"
 )
 
 func recordTurnSpans(t *testing.T) *tracetest.SpanRecorder {
@@ -86,7 +90,7 @@ func TestTurnSpanCoversTheTurnNotItsSetup(t *testing.T) {
 	inTurn := make(chan struct{})
 	release := make(chan struct{})
 	go func() {
-		_, _ = service.streamChatWSResultWithHooks(context.Background(),
+		_, _, _ = service.streamChatWSResultWithHooks(context.Background(),
 			ChatRequest{BotID: "b", ThreadID: "s"}, nil, nil,
 			func(context.Context) error {
 				close(inTurn)
@@ -169,7 +173,7 @@ func TestTurnSpanCoversTheWebSocketEntryPoint(t *testing.T) {
 	recorder := recordTurnSpans(t)
 	service := newTracingTestService()
 
-	if _, err := service.streamChatWSResultWithHooks(context.Background(),
+	if _, _, err := service.streamChatWSResultWithHooks(context.Background(),
 		ChatRequest{BotID: "b", ThreadID: "s"}, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected this harness to fail the turn")
 	}
@@ -246,5 +250,86 @@ func TestFailDoesNotBlockOnASecondError(t *testing.T) {
 	}
 	if turnErr.Error() != "first" {
 		t.Errorf("turnErr = %q, want the first error", turnErr)
+	}
+}
+
+// A discuss turn has a turn span, as the chat entry points do, and it reaches
+// the conclusion the run's result record reaches. The pump cancels its own
+// context on the way out, which must not turn every discuss run into a stop.
+func TestTurnSpanCoversTheDiscussPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		events      []native.StreamEvent
+		wantState   string
+		wantOutcome string
+		wantStatus  codes.Code
+	}{
+		{
+			name: "completed",
+			events: []native.StreamEvent{
+				{Type: native.EventAgentStart},
+				{Type: native.EventAgentEnd, Messages: json.RawMessage(`[]`)},
+			},
+			wantState: "completed", wantOutcome: "completed", wantStatus: codes.Unset,
+		},
+		{
+			name: "failed",
+			events: []native.StreamEvent{
+				{Type: native.EventAgentStart},
+				{Type: native.EventError, Cause: charExhausted(charProviderErr(503, sdk.KindServerError))},
+				{Type: native.EventAgentAbort, Messages: json.RawMessage(`[]`)},
+			},
+			wantState: "failed", wantOutcome: "errored", wantStatus: codes.Error,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := recordTurnSpans(t)
+
+			got := runDiscussCharacterization(t, tt.events...)
+
+			if got.ledger[0] != tt.wantState {
+				t.Fatalf("session_runs state = %q, want %q", got.ledger[0], tt.wantState)
+			}
+			span := turnSpan(t, recorder)
+			if got := spanAttr(span, "agent.bot_id").AsString(); got != "bot-1" {
+				t.Errorf("agent.bot_id = %q, want bot-1", got)
+			}
+			if got := spanAttr(span, "agent.turn.outcome").AsString(); got != tt.wantOutcome {
+				t.Errorf("outcome = %q, want %q", got, tt.wantOutcome)
+			}
+			if span.Status().Code != tt.wantStatus {
+				t.Errorf("status = %v, want %v", span.Status().Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
+// A turn that cancels its own context on the way out concludes from the error
+// it is closed with: the stop it reports is aborted, and its own cancellation
+// is not.
+func TestSelfCanceledTurnSpanConcludesFromItsError(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantOutcome string
+	}{
+		{name: "completed", wantOutcome: "completed"},
+		{name: "stopped", err: context.Canceled, wantOutcome: "aborted"},
+		{name: "failed", err: errors.New("provider failed"), wantOutcome: "errored"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := recordTurnSpans(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			_, endTurn := startSelfCanceledTurnSpan(ctx, ChatRequest{BotID: "b", ThreadID: "s"})
+			cancel()
+
+			endTurn(tt.err)
+
+			if got := spanAttr(turnSpan(t, recorder), "agent.turn.outcome").AsString(); got != tt.wantOutcome {
+				t.Fatalf("outcome = %q, want %q", got, tt.wantOutcome)
+			}
+		})
 	}
 }

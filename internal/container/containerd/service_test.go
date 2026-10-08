@@ -2,8 +2,11 @@ package containerd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/containerd/errdefs"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -46,5 +49,17 @@ func TestSpecOptsFromResourceLimitsSkipsUnlimitedValues(t *testing.T) {
 	opts := specOptsFromResourceLimits(ResourceLimits{})
 	if len(opts) != 0 {
 		t.Fatalf("spec opts count = %d, want 0", len(opts))
+	}
+}
+
+func TestMapContainerdErrMarksUnavailable(t *testing.T) {
+	err := mapContainerdErr(fmt.Errorf("connect containerd: %w", errdefs.ErrUnavailable))
+	if !errors.Is(err, ErrUnavailable) || !errors.Is(err, ErrRuntime) {
+		t.Fatalf("mapContainerdErr(unavailable) = %v, want ErrUnavailable and ErrRuntime", err)
+	}
+
+	err = mapContainerdErr(errors.New("snapshot unpack failed"))
+	if errors.Is(err, ErrUnavailable) || !errors.Is(err, ErrRuntime) {
+		t.Fatalf("mapContainerdErr(other) = %v, want ErrRuntime only", err)
 	}
 }

@@ -12,33 +12,34 @@ import (
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	agenttools "github.com/felinics/memoh/internal/agent/tool"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 func TestAgentGenerateActivePreflightBlocksSerializedOverflowFromNoopSelector(t *testing.T) {
 	t.Parallel()
 
-	lookupTool := sdk.Tool{
+	lookupTool := toolexec.Tool{
 		Name:       "lookup",
 		Parameters: &jsonschema.Schema{Type: "object"},
-		Execute: func(_ *sdk.ToolExecContext, _ any) (any, error) {
-			return strings.Repeat("large-result ", 1_000), nil
+		Execute: func(_ *toolexec.ToolExecContext, _ sdk.ToolArguments) (sdk.ToolOutput, error) {
+			return toolexec.OutputFromValue(strings.Repeat("large-result ", 1_000)), nil
 		},
 	}
-	modelProvider := &atomicMockProvider{handler: func(call int, _ sdk.GenerateParams) (*sdk.GenerateResult, error) {
+	modelProvider := &atomicMockProvider{handler: func(call int, _ sdk.Request) (sdk.ModelResult, error) {
 		if call != 1 {
-			return nil, fmt.Errorf("unexpected provider call %d after serialized overflow", call)
+			return sdk.ModelResult{}, fmt.Errorf("unexpected provider call %d after serialized overflow", call)
 		}
-		return &sdk.GenerateResult{
+		return sdk.ModelResult{
 			FinishReason: sdk.FinishReasonToolCalls,
 			ToolCalls: []sdk.ToolCall{{
-				ToolCallID: "call-envelope", ToolName: "lookup", Input: map[string]any{"q": "one"},
+				ToolCallID: "call-envelope", ToolName: "lookup", Input: toolexec.ArgumentsFromValue(map[string]any{"q": "one"}),
 			}},
 		}, nil
 	}}
 	a := New(Deps{ContextViewApplier: func(_ context.Context, cfg RunConfig) (RunConfig, error) {
 		return cfg, nil
 	}})
-	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []sdk.Tool{lookupTool}}})
+	a.SetToolProviders([]agenttools.ToolProvider{staticToolProvider{tools: []toolexec.Tool{lookupTool}}})
 	plan := contextfrag.ContextBudgetPlan{Window: 2_000, OutputReserve: 100}
 
 	_, err := a.Generate(context.Background(), RunConfig{

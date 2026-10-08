@@ -154,10 +154,14 @@
     "agent": {
       "response_timeout": "モデルから時間内に応答がありませんでした。もう一度お試しください。",
       "response_interrupted": "モデルの応答が中断されました。もう一度お試しください。",
-      "provider_overloaded": "モデルプロバイダーが混雑しています。しばらくしてからお試しください。",
+      "provider_overloaded": "モデルプロバイダーは現在利用できないか、過負荷の状態です。しばらくしてからもう一度お試しください。",
       "provider_rate_limited": "モデルプロバイダーのレート制限に達しました。少し待ってから送信してください。",
       "provider_quota_exhausted": "モデルプロバイダーのアカウントに残高またはクォータが残っていません。",
-      "provider_auth_failed": "モデルプロバイダーが認証情報を拒否しました。プロバイダーの API キーを確認してください。"
+      "provider_auth_failed": "モデルプロバイダーが認証情報を拒否しました。プロバイダーの API キーを確認してください。",
+      "provider_permission_denied": "モデルプロバイダーがこのモデルまたはリソースへのアクセスを拒否しました。プロバイダーのアカウントがこのモデルを利用できるか確認してください。",
+      "provider_request_rejected": "モデルプロバイダーがリクエストを拒否しました。モデル設定を確認するか、別のモデルをお試しください。",
+      "provider_unreachable": "Memoh からモデルプロバイダーに接続できませんでした。プロバイダーのアドレスとサービスが稼働中か確認してください。",
+      "tool_timeout": "ツールの進捗が途絶えました。保存済みの結果を確認してから再試行してください。"
     },
     "queue_request_invalid": "既存の会話で /steer または /queue の後に内容を入力してください。",
     "queue_no_active_run": "現在の応答は終了しています。内容を新しいメッセージとして送信してください。",
@@ -182,7 +186,8 @@
       "request_invalid": "プロバイダー設定が無効です。"
     },
     "search_provider": {
-      "type_conflict": "このWeb検索プロバイダーはすでに設定されています。"
+      "type_conflict": "このWeb検索プロバイダーはすでに設定されています。",
+      "invalid_provider": "このWeb検索プロバイダーはサポートされていません。"
     },
     "connector": {
       "request_invalid": "コネクターのリクエストが無効です。",
@@ -228,6 +233,8 @@
       "action_unsupported": "この依存関係ではこの操作を利用できません。",
       "platform_unsupported": "この Workspace のプラットフォームでは利用できません。",
       "busy": "この依存関係で別の操作が進行中です。しばらくしてからもう一度お試しください。",
+      "required": "{dependents} がまだこの依存関係を必要としています。先にそちらを削除してください。",
+      "prerequisites_changed": "確認後に、この依存関係が必要とする前提依存関係が変更されました。操作をもう一度確認してください。",
       "workspace_not_running": "Workspace が起動していません。先に起動してください。",
       "workspace_missing": "Workspace がまだ作成されていません。先に作成してください。",
       "rollback_unavailable": "ロールバックできる以前のバージョンがありません。",
@@ -257,7 +264,9 @@
       "config_update_failed": "外部Agentに選択した設定を適用できませんでした。もう一度お試しください。"
     },
     "external_agent": {
-      "turn_replacement_unsupported": "外部 Agent のセッションでは再試行とメッセージの編集は利用できません。代わりに新しいメッセージを送信してください。"
+      "turn_replacement_unsupported": "外部 Agent のセッションでは再試行とメッセージの編集は利用できません。代わりに新しいメッセージを送信してください。",
+      "account_unbound": "この IM アカウントはまだ Memoh アカウントと連携されていないため、この Bot のワークスペースを利用できません。あなたが所有者の場合は、Memoh の Web 画面で「プロフィール → 連携済みアカウント」からリンクコードを取得し、ここで {link} <コード> を送信してください。",
+      "container_workspace_required": "この Agent ランタイムにはコンテナワークスペースが必要です。Bot をコンテナワークスペースに切り替えてから、もう一度お試しください。"
     },
     "agent_credential": {
       "not_found": "この Agent アカウントは利用できません。別のアカウントを選択してください。",
@@ -268,12 +277,16 @@
       "reauthorization_required": "この Agent アカウントを再接続してから使用してください。",
       "encryption_unavailable": "この Server では Agent アカウントの保存が設定されていません。",
       "runtime_busy": "現在の応答が完了してから Agent アカウントを切り替えてください。",
-      "materialization_failed": "Agent アカウントを準備できませんでした。もう一度お試しください。"
+      "materialization_failed": "Agent アカウントを準備できませんでした。もう一度お試しください。",
+      "usage_auth_expired": "アカウントのサインインが期限切れです。次の会話のあとに自動で更新されます。それでも利用上限を表示できない場合は、アカウントを再接続してください。",
+      "usage_unavailable": "利用上限を取得できませんでした。しばらくしてからもう一度お試しください。"
     },
     "session": {
-      "model_preference_conflict": "モデルの選択が別の場所で更新されました。再読み込みするか、メッセージを送信して現在の選択を適用してください。"
+      "model_preference_conflict": "モデルの選択が別の場所で更新されました。再読み込みするか、メッセージを送信して現在の選択を適用してください。",
+      "not_found": "会話が見つかりません。"
     },
     "session_runtime": {
+      "interrupted": "サーバーの終了により実行が中断されました。再起動後、保存済みの進捗から再開できます。",
       "session_busy": "このセッションはまだ前のメッセージを処理しています。しばらくしてからもう一度お試しください。",
       "invocation_conflict": "このメッセージは別の内容で既に送信されています。セッションを再読み込みして保存済みの内容を確認してください。",
       "history_inconsistent": "会話を保存できませんでした。再読み込みして、もう一度お試しください。",
@@ -297,7 +310,8 @@
     "external_runtime": {
       "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。",
-      "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。"
+      "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。",
+      "usage_limited": "外部 Agent の利用上限に達しました。しばらくしてからもう一度お試しください。"
     },
     "app": {
       "not_found": "このアプリのインストールは見つかりませんでした。",
@@ -329,7 +343,93 @@
       "forbidden": "この会話へのアクセス権がありません。",
       "request_invalid": "リクエストが無効です。更新して再試行してください。",
       "cancelled": "操作は中止されました。"
-    }
+    },
+    "schedule": {
+      "execution_timeout": "定期実行が制限時間に達しました。進捗を確認するか、制限時間を延長してください。"
+    },
+    "video": {
+      "job_outcome_unknown": "動画ジョブの状態を確認できませんでした。再生成する前に保存済みのジョブを確認してください。"
+    },
+    "internal": "サーバーでエラーが発生しました。もう一度お試しください。",
+    "canceled": "リクエストはキャンセルされました。",
+    "http": {
+      "bad_request": "リクエストが無効です。",
+      "unauthorized": "続行するにはサインインしてください。",
+      "forbidden": "この操作を実行する権限がありません。",
+      "not_found": "要求されたリソースが見つかりません。",
+      "method_not_allowed": "このリクエストメソッドはここでは使用できません。",
+      "conflict": "リクエストが現在の状態と競合しています。更新してからもう一度お試しください。",
+      "payload_too_large": "リクエストが大きすぎます。",
+      "unsupported_media_type": "このリクエストのコンテンツタイプはサポートされていません。",
+      "upgrade_required": "このエンドポイントには別のプロトコルが必要です。",
+      "too_many_requests": "リクエストが多すぎます。しばらく待ってからもう一度お試しください。",
+      "not_implemented": "この操作はサーバーでサポートされていません。",
+      "bad_gateway": "上流サービスから無効な応答が返されました。もう一度お試しください。",
+      "service_unavailable": "サービスは一時的に利用できません。しばらくしてからもう一度お試しください。",
+      "gateway_timeout": "上流サービスが時間内に応答しませんでした。もう一度お試しください。"
+    },
+    "agent_dependency_missing": "{dep_id} はこの Workspace にインストールされていません。Bot の「依存関係」からインストールするか、実行中のインストールの完了を待ってから、メッセージを再送してください。",
+    "runtime_run_failed": "応答を完了できませんでした。もう一度お試しください。",
+    "runtime_prompt_failed": "Agent runtime がこの応答を完了できませんでした。もう一度お試しください。",
+    "runtime_owner_lease_expired": "この応答を処理していたサーバーが応答しなくなったため、応答を終了しました。もう一度お試しください。",
+    "runtime_live_backend_lost": "この応答の実行状態が失われたため、応答を終了しました。もう一度お試しください。",
+    "runtime_admission_orphaned": "この応答は開始されなかったため、クリーンアップされました。もう一度お試しください。",
+    "runtime_fence_activation_failed": "応答を開始できませんでした。しばらくしてからもう一度お試しください。",
+    "runtime_reservation_failed": "応答を開始できませんでした。しばらくしてからもう一度お試しください。",
+    "runtime_reservation_declined": "応答の開始前に別のサーバーがこの会話を引き継ぎました。もう一度お試しください。",
+    "history_reset": "会話履歴がリセットされたため、この応答はキャンセルされました。",
+    "bot_ready_update_failed": "Workspace の作成後に Bot を読み込めませんでした。ページを更新してください。",
+    "workspace_setup_timeout": "Workspace の作成はまだ進行中です。Bot の Workspace ページで確認してください。",
+    "workspace_setup_failed": "Workspace の作成中にエラーが発生しました。",
+    "workspace_display_disabled": "Workspace のデスクトップが有効になっていません。",
+    "workspace_dependency_operation_unknown": "操作の結果はまだ確認できていません。依存関係を更新して状態を確認してください。",
+    "workspace_create_request_invalid": "Workspace のリクエストが無効です。",
+    "workspace_create_failed": "Workspace を作成できませんでした。もう一度お試しください。",
+    "workspace_not_found": "この Bot には Workspace がありません。",
+    "workspace_load_failed": "Workspace 情報を読み込めませんでした。もう一度お試しください。",
+    "workspace_metrics_load_failed": "メトリクスを読み込めませんでした。もう一度お試しください。",
+    "workspace_resource_limits_invalid": "リソース制限が無効です。制限値は 0 以上にしてください。",
+    "workspace_resource_limits_required": "リソース制限を指定してください。",
+    "workspace_resource_limits_save_failed": "リソース制限を保存できませんでした。もう一度お試しください。",
+    "workspace_delete_failed": "Workspace を削除できませんでした。もう一度お試しください。",
+    "workspace_start_failed": "Workspace を起動できませんでした。もう一度お試しください。",
+    "workspace_stop_failed": "Workspace を停止できませんでした。もう一度お試しください。",
+    "workspace_snapshots_unsupported": "この Workspace のランタイムはスナップショットをサポートしていません。",
+    "workspace_snapshot_manager_unavailable": "このサーバーではスナップショットが設定されていません。",
+    "workspace_snapshot_request_invalid": "スナップショットのリクエストが無効です。",
+    "workspace_snapshot_create_failed": "スナップショットを作成できませんでした。もう一度お試しください。",
+    "workspace_snapshots_load_failed": "スナップショットを読み込めませんでした。もう一度お試しください。",
+    "workspace_snapshotter_mismatch": "スナップショッターが Workspace のランタイムと一致しません。",
+    "workspace_snapshot_chain_not_found": "Workspace のスナップショット履歴が見つかりません。",
+    "workspace_manager_unavailable": "Workspace マネージャーが設定されていません。",
+    "workspace_snapshot_rollback_request_invalid": "ロールバックのリクエストが無効です。",
+    "workspace_snapshot_version_invalid": "スナップショットのバージョンが無効です。",
+    "workspace_snapshot_rollback_failed": "Workspace をロールバックできませんでした。もう一度お試しください。",
+    "workspace_preserved_data_not_found": "保存された Workspace データが見つかりません。",
+    "workspace_restore_failed": "Workspace のデータを復元できませんでした。もう一度お試しください。",
+    "acp_agent_not_found": "選択された外部Agentは利用できません。",
+    "acp_agent_not_enabled": "選択された外部AgentはこのBotで無効になっています。",
+    "acp_agent_not_configured": "このBotの外部Agent設定が完了していません。",
+    "codex_oauth_incomplete": "このBotワークスペースではCodexのChatGPTサインインが完了していません。",
+    "codex_auth_token_missing": "このBotワークスペースのCodex認証が不足しているか不完全です。",
+    "acp_agent_auth_invalid": "外部Agentの認証が無効です。Agent設定を更新してからもう一度お試しください。",
+    "no_workspace_exec": "このBotのWorkspaceコマンドを実行する権限がありません。",
+    "acp_runtime_owner_missing": "この外部Agent Sessionには実行所有者がありません。新しいSessionを開始してください。",
+    "acp_discuss_unsupported": "この外部Agentはディスカッションモードでは実行できません。",
+    "group_chat_acp_unsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new codex または /new discuss codex を使用してください。",
+    "acp_project_mode_invalid": "外部Agentのプロジェクトモードが無効です。",
+    "acp_project_path_invalid": "外部Agentのプロジェクトパスは絶対パスである必要があります。",
+    "acp_display_args_invalid": "外部Agentの表示引数が無効です。",
+    "acp_runtime_start_failed": "外部Agent runtimeの起動に失敗しました。",
+    "acp_runtime_busy": "外部Agent runtimeはこのSessionの前のターンを処理中です。",
+    "acp_attachment_invalid": "添付ファイルは無効です。もう一度添付してください。",
+    "acp_attachment_unavailable": "外部Agentが添付ファイルにアクセスできません。もう一度添付してください。",
+    "runtime_agent_command_stale": "Agentはこのコマンドを提供しなくなりました。コマンドピッカーを開き直して再試行してください。",
+    "acp_image_input_unsupported": "この外部Agentは添付画像を読み取れません。",
+    "invalid_chat_runtime": "選択されたチャットruntimeが無効です。",
+    "queue_invocation_conflict": "このメッセージは別の内容ですでに送信されています。",
+    "queue_unsupported_session": "ディスカッションセッションではキュー操作を利用できません。",
+    "queue_follow_up_unsupported_channel": "このチャンネルではキュー投入を利用できません。返信は送信したメッセージに対してのみ届きます。/steer で現在の返信に追加するか、Web アプリからキューに追加してください。"
   },
   "auth": {
     "welcome": "おかえり",
@@ -379,11 +479,9 @@
     "runtimes": "コンピューター",
     "providers": "プロバイダー",
     "webSearch": "ウェブ検索",
-    "memory": "メモリ",
     "group": {
-      "capabilities": "モデルと機能",
       "team": "チーム",
-      "preferences": "環境設定"
+      "personal": "個人設定"
     },
     "network": "ネットワーク",
     "speech": "音声合成",
@@ -391,13 +489,13 @@
     "voice": "音声",
     "video": "動画",
     "settings": "設定",
-    "profile": "プロフィール",
+    "profile": "アカウント",
     "home": "ホーム",
     "mcp": "MCP",
     "usage": "使用状況",
     "people": "メンバー",
     "appearance": "外観",
-    "keyboard": "ショートカット",
+    "keyboard": "キーボードショートカット",
     "supermarket": "マーケットプレイス",
     "about": "Memoh について",
     "userMenu": "アカウントメニュー",
@@ -434,11 +532,11 @@
       "title": "このコンピューター",
       "allow": "Bot にこのコンピューターの使用を許可",
       "description": "オンにすると、このコンピューターに名前を付けて接続し、各 Bot に追加できるようになります。",
-      "enabledDescription": "{name} は Bot の設定、承認、チャット履歴に表示される名前です。追加した Bot だけが、ホームフォルダー内のファイルにアクセスし、現在のユーザーとしてコマンドを実行できます。",
+      "enabledDescription": "許可した Bot だけが、ホームフォルダーにアクセスし、あなたとしてコマンドを実行できます。",
+      "pausedDescription": "一時停止中です。Bot は今は使用できませんが、付与したアクセス権は保持されます。",
       "fallbackName": "Memoh Desktop",
       "dialogTitle": "このコンピューターを使用可能にする",
-      "dialogDescription": "どの端末から Memoh を使っても識別できる、固定の名前を付けてください。",
-      "nameHelp": "Bot の設定、承認、チャット履歴で識別しやすい名前を入力してください。",
+      "dialogDescription": "この名前は Bot の設定、承認、チャット履歴に表示されます。",
       "confirm": "使用可能にする",
       "loading": "このコンピューターを読み込んでいます...",
       "loadFailed": "このコンピューターの接続状態を読み込めませんでした",
@@ -451,7 +549,7 @@
         "connecting": "接続中",
         "connected": "利用可能",
         "disconnected": "再接続中",
-        "stopped": "利用不可",
+        "stopped": "一時停止中",
         "error": "確認が必要"
       }
     },
@@ -478,11 +576,12 @@
     "userProfile": "プロフィール",
     "connectedAccounts": {
       "title": "連携済みアカウント",
-      "subtitle": "IM アカウントを連携すると、チャットから直接 Bot を管理できます。",
+      "subtitle": "IM アカウントを連携すると、Bot があなたを所有者として認識し、チャットから直接管理できるようになります。",
       "connect": "リンクコードを取得",
       "empty": "連携済みアカウントはまだありません",
       "linkAnother": "別のアカウントをリンクする",
-      "codeInstruction": "任意の IM チャネルで、このコードを Bot に送信してください",
+      "codeInstruction": "この行をコピーして IM で Bot に送信してください。連携が完了するとここに反映されます。",
+      "linked": "アカウントを連携しました",
       "copy": "コピー",
       "copied": "コピーされました",
       "disconnect": "切断する",
@@ -627,12 +726,9 @@
         }
       }
     },
-    "langZh": "中文",
-    "langEn": "英語",
     "version": "バージョン",
     "versionTag": "v{version}",
-    "commitHash": "コミット",
-    "langJa": "日本語"
+    "commitHash": "コミット"
   },
   "people": {
     "title": "メンバー",
@@ -713,6 +809,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "workspaceLinkUnavailable": "ここではワークスペースのリンクを開けません。ワークスペースへのアクセス権がある Memoh の会話で開いてください。",
     "runtimeStatus": {
       "compacting": "コンテキストを圧縮中…",
       "api_retry": "{seconds} 秒後に再試行（{attempt}/{max_retries}）…"
@@ -1160,6 +1257,7 @@
     "modelOverride": "モデル",
     "modelDefault": "デフォルト",
     "reasoningEffort": "推論",
+    "reasoningOn": "オン",
     "reasoningOff": "オフ",
     "reasoningAdaptive": "アダプティブ",
     "reasoningMinimal": "最小限",
@@ -1218,6 +1316,7 @@
       "codexAuthTokenMissing": "このBotワークスペースのCodex認証が不足しているか不完全です。",
       "agentAuthInvalid": "外部Agentの認証が無効です。Agent設定を更新してからもう一度お試しください。",
       "noWorkspaceExec": "このBotのWorkspaceコマンドを実行する権限がありません。",
+      "accountUnbound": "この IM アカウントはまだ Memoh アカウントと連携されていないため、この Bot のワークスペースを利用できません。あなたが所有者の場合は、Memoh の Web 画面で「プロフィール → 連携済みアカウント」からリンクコードを取得し、ここで {link} <コード> を送信してください。",
       "runtimeOwnerMissing": "この外部Agent Sessionには実行所有者がありません。新しいSessionを開始してください。",
       "discussUnsupported": "この外部Agentはディスカッションモードでは実行できません。",
       "groupChatUnsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new codex または /new discuss codex を使用してください。",
@@ -1316,6 +1415,13 @@
     "compactNow": "今すぐコンパクトに",
     "compactSuccess": "コンテキストの圧縮が完了しました",
     "compactingContext": "コンテキストを圧縮中…",
+    "codexUsage": {
+      "warning": "{window}：{percent}% 使用済み・{time}にリセット",
+      "warningNoReset": "{window}：{percent}% 使用済み",
+      "exhausted": "{window}に達しました・{time}にリセット",
+      "exhaustedNoReset": "{window}に達しました",
+      "dismiss": "閉じる"
+    },
     "compactFailed": "コンテキストの圧縮に失敗しました",
     "sessionStreaming": "生成中",
     "slash": {
@@ -1557,6 +1663,7 @@
     "emptyTitle": "モデルはまだありません",
     "emptyDescription": "手動で追加するか、このプロバイダーから完全なリストをインポートします。",
     "managedEmptyDescription": "認証を完了してから、管理対象の Model カタログを更新してください。",
+    "draftEmptyDescription": "手動で追加するか、API キーを入力してこのプロバイダーから完全なリストをインポートします。",
     "clientType": "クライアントの種類",
     "clientTypePlaceholder": "クライアントの種類を選択してください",
     "typeRequired": "種類を選択してください",
@@ -1568,7 +1675,7 @@
     "description": "モデルの説明",
     "descriptionPlaceholder": "モデルの用途や特徴を簡潔に入力",
     "dimensions": "寸法",
-    "dimensionsPlaceholder": "例: 1536",
+    "dimensionsPlaceholder": "空欄にすると自動検出します",
     "dimensionsMin": "次元数は 0 より大きい値にしてください",
     "compatibilities": "互換性",
     "compatibility": {
@@ -1580,6 +1687,8 @@
     },
     "contextWindow": "コンテキストウィンドウ",
     "contextWindowPlaceholder": "例: 128000",
+    "reasoningEfforts": "対応する推論強度",
+    "reasoningEffortsPlaceholder": "推論強度を選択",
     "contextWindowMin": "コンテキストウィンドウは 0 より大きい値にしてください",
     "testModel": "モデルをテスト",
     "enable": "モデルを有効化",
@@ -1588,6 +1697,7 @@
     "testAuthError": "認証エラー",
     "testError": "エラー",
     "testFailed": "テストが失敗しました",
+    "testModelNotSupported": "プロバイダーがこのモデルを認識できません。モデル ID を確認してください。",
     "importModels": "モデルをインポート",
     "importSuccess": "{created}件のモデルをインポートしました。{skipped}件はスキップされました",
     "importFailed": "モデルのインポートに失敗しました",
@@ -1751,36 +1861,13 @@
     }
   },
   "memory": {
-    "title": "メモリプロバイダー",
-    "add": "メモリプロバイダーを追加",
-    "empty": "メモリプロバイダーがありません",
-    "provider": "プロバイダーの種類",
-    "providerRequired": "プロバイダーの種類を選択してください",
-    "nameRequired": "名前を入力してください",
-    "searchPlaceholder": "プロバイダーを検索...",
-    "emptyTitle": "メモリプロバイダーがありません",
-    "saveSuccess": "メモリプロバイダーを保存しました",
-    "deleteSuccess": "メモリプロバイダーを削除しました",
-    "deleteFailed": "メモリプロバイダーの削除に失敗しました",
-    "deleteConfirm": "このメモリプロバイダーを削除してもよろしいですか？これを使用する Bot はメモリアクセスを失います。",
-    "name": "名前",
-    "namePlaceholder": "プロバイダー名を入力してください",
-    "advanced": "詳細",
-    "advancedHint": "高度な設定向けのカスタムメモリバックエンド。",
+    "builtinTitle": "Built-in Memory",
+    "saveSuccess": "Memory設定を保存しました",
     "graphTitle": "メモリグラフ",
     "graphNodes": "記憶",
     "graphEdges": "リンク",
-    "semanticIndexDescription": "Postgres では Embedding Model と pgvector でグラフ想起のセマンティック起点を作れます。SQLite と Local はグラフのみです。",
     "semanticEmbeddingModel": "Embedding Model",
     "semanticEmbeddingModelPlaceholder": "Embedding Modelを選択",
-    "modeNames": {
-      "graph": "グラフ"
-    },
-    "providerNames": {
-      "builtin": "内蔵",
-      "mem0": "Mem0",
-      "openviking": "オープンバイキング"
-    },
     "graphEmpty": "記憶がまだありません — 追加するとグラフが表示されます。"
   },
   "network": {
@@ -2173,6 +2260,9 @@
     },
     "title": "Bot",
     "searchPlaceholder": "Botを検索…",
+    "notFound": "Botが見つかりません",
+    "notFoundDescription": "このBotは削除されたか、リンクが正しくない可能性があります。",
+    "loadFailed": "このBotを読み込めませんでした",
     "createBot": "新しいBot",
     "createBotWaitHint": "初めて作成する場合は、基本イメージを取得するため、少し時間がかかる場合があります。",
     "createBotSuccess": "Botが正常に作成されました。",
@@ -2188,8 +2278,6 @@
       "model": "Model",
       "modelDesc": "チャット Modelを選択します (オプション)",
       "agent": "エージェント",
-      "memory": "Memory",
-      "memoryDesc": "MemoryProvider (オプション)",
       "settings": "設定",
       "settingsDesc": "タイムゾーンなど"
     },
@@ -2489,6 +2577,18 @@
       "codexDeviceHint": "認証ページを開き、このワンタイムコードを入力してください。表示された OpenAI の認証ページ以外には入力しないでください。Memoh が認証を自動で完了します。",
       "codexLoginSuccess": "Codex を ChatGPT アカウントに接続しました",
       "codexLoginFailed": "Codex アカウントを認証できませんでした。もう一度お試しください。",
+      "usage": {
+        "window": {
+          "weekly": "週間上限",
+          "days": "{count} 日間の上限",
+          "hours": "{count} 時間の上限",
+          "minutes": "{count} 分間の上限",
+          "unknown": "利用上限"
+        },
+        "resets": "{time}にリセット",
+        "exhausted": "上限に達しました・{time}にリセット",
+        "exhaustedNoReset": "上限に達しました"
+      },
       "modelsLoadFailed": "Agent のモデルを読み込めませんでした。Agent の設定を確認して、もう一度お試しください。",
       "openSettings": "Agent の設定を開く",
       "dependencyChecking": "依存関係を確認中…",
@@ -2551,6 +2651,7 @@
         "updateTitle": "{name} を更新",
         "updateDescription": "現在は {from} です。新しいバージョンを先にインストールし、成功した場合のみ切り替えます。失敗しても現在のバージョンには影響せず、後からロールバックできます。",
         "installDescription": "Workspace に {name} をダウンロードしてインストールします。",
+        "prerequisites": "不足している前提依存関係を先にインストールします：{names}。",
         "reinstallDescription": "Workspace に {name} を再ダウンロードしてインストールします。",
         "dependency": "依存関係",
         "installPath": "インストール先",
@@ -2648,8 +2749,12 @@
         "directoryTarget": "セッションは {path} で作業します（存在しない場合は作成されます）",
         "browseFailed": "フォルダを読み込めませんでした",
         "browseRetry": "再試行",
+        "browseEmpty": "フォルダはありません",
+        "browseForbidden": "このコンピューターではこのフォルダを読み取れません",
+        "browseUnreachable": "このコンピューターに接続できません。接続を確認して再試行してください",
         "path": "ディレクトリパス",
-        "remotePathHelp": "そのコンピューター上の絶対パス。すでに存在している必要があります。",
+        "remotePathHelp": "下のフォルダを選ぶか、絶対パスを入力してください。すでに存在している必要があります。",
+        "remoteOffline": "{name} は接続されていません。接続するとフォルダを選択できます。",
         "remotePathPlaceholder": "/Users/you/code/project"
       }
     },
@@ -2987,11 +3092,9 @@
       "searchProviderPlaceholder": "ウェブ検索を選択",
       "fetchProvider": "ウェブフェッチ",
       "fetchProviderPlaceholder": "Web フェッチを選択します",
-      "memoryProvider": "MemoryProvider",
-      "memoryProviderPlaceholder": "MemoryProviderの選択 (空の場合は無効)",
-      "memoryModePreview": "選択された組み込みモード: {mode}",
+      "memory": "Memory",
+      "memoryDescription": "Built-in Memoryで、会話をまたいで事実や好みを記憶します。",
       "memoryMarkdownFiles": "マークダウンファイル",
-      "memorySourceEntries": "ソースエントリ",
       "memoryGraphEdges": "グラフリンク",
       "memoryIndexedEntries": "インデックス付きエントリ",
       "ttsModel": "TTSModel",
@@ -3338,7 +3441,13 @@
         "expired": "QRコードの有効期限が切れました",
         "refresh": "リフレッシュQRコード",
         "success": "WeChat が正常に接続されました。",
-        "retry": "もう一度やり直してください"
+        "retry": "もう一度やり直してください",
+        "verifyCodePrompt": "続行するには、スマートフォンの WeChat に表示された数字を入力してください",
+        "verifyCodeWrong": "数字が一致しません。もう一度入力してください",
+        "verifyCodePlaceholder": "スマートフォンに表示された数字",
+        "verifyCodeSubmit": "確認",
+        "verifyCodeBlocked": "入力の誤りが多すぎます。QR コードを更新して、しばらくしてから再試行してください",
+        "alreadyBound": "この WeChat アカウントはすでにこのボットに接続されています"
       },
       "types": {
         "feishu": "フェイシュ",
@@ -3393,7 +3502,11 @@
       "ingestSuccess": "{n} 件のメモリをファイルから取り込みました",
       "ingestFailed": "ファイルからのメモリ取り込みに失敗しました",
       "advanced": {
-        "entryTitle": "インデックスと同期",
+        "entryTitle": "詳細",
+        "memoryModel": "記憶Model",
+        "memoryModelDescription": "記憶の抽出と整理に使うModelです。",
+        "memoryModelPlaceholder": "チャットModelに従う (デフォルト)",
+        "embeddingModelDescription": "グラフ検索に意味的な起点を与えます。このチームのすべてのBotで共有されます。",
         "syncAction": "手動同期",
         "syncSuccess": "同期が完了しました: {fsCount} ソース エントリ、{restoredCount} が復元され、{storageCount} がインデックス付けされました。",
         "syncFailed": "手動同期に失敗しました",
@@ -3500,7 +3613,10 @@
         "pattern": "スケジュール",
         "maxCalls": "実行制限",
         "enabled": "タスクを有効にする",
-        "invalidPattern": "無効なパターン"
+        "invalidPattern": "無効なパターン",
+        "maxRunMinutes": "1 回の実行制限（分）",
+        "maxRunMinutesHelp": "5 分から 24 時間まで設定できます。",
+        "invalidMaxRunMinutes": "5 から 1440 までの整数を入力してください。"
       },
       "mode": {
         "minutes": "N分ごと",
@@ -3605,6 +3721,7 @@
     "discuss": "ディスカッション",
     "acpAgent": "Agent",
     "schedule": "スケジュール",
+    "memory": "記憶",
     "inputTokens": "入力トークン",
     "outputTokens": "出力トークン",
     "dateFrom": "から",
@@ -3617,7 +3734,7 @@
     "colBot": "Bot",
     "colModel": "モデル",
     "colProvider": "モデルプロバイダー",
-    "colHarness": "Harness",
+    "colHarness": "実行元",
     "unknown": "不明",
     "colInputTokens": "入力",
     "colOutputTokens": "出力"
@@ -3651,8 +3768,6 @@
     "information": "情報",
     "category": "カテゴリ",
     "registry": "Registry",
-    "allRegistries": "すべて",
-    "registryFilter": "Registry で絞り込む",
     "app": "App",
     "previousPage": "前のページ",
     "nextPage": "次のページ",
@@ -3678,6 +3793,7 @@
     "revision": "リビジョン",
     "installPreview": "インストールすると",
     "installPreviewDependency": "未インストールならワークスペースにインストールします",
+    "installPreviewPrerequisite": "{by} に必要です。未インストールなら先にインストールします",
     "installPreviewConnector": "インストール中に認証",
     "installPreviewConnectorOptional": "後で認証できます（任意）",
     "viewAll": "すべて表示",
@@ -3904,7 +4020,8 @@
       "reason": {
         "shared": "他のアプリが使用中",
         "image": "ワークスペースイメージに同梱",
-        "absent": "未インストール"
+        "absent": "未インストール",
+        "required": "インストール済みの他のツールが必要としています"
       }
     },
     "progress": {
@@ -4086,6 +4203,7 @@
       },
       "empty": "記録はありません。",
       "unknown": "未取得",
+      "resets": "{time}にリセット",
       "details": "JSON を表示"
     }
   },

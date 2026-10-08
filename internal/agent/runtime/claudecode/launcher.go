@@ -4,13 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
-	"strconv"
 	"strings"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // dependencyID is the workspace dependency catalog id that provisions the
@@ -32,9 +29,9 @@ func (d *Driver) SetLauncherResolver(resolver external.LauncherResolver) {
 }
 
 // resolveLauncher picks the CLI executable for botID. A missing dependency
-// becomes the stable agent_dependency_missing feedback, which
-// callers must return unwrapped so it reaches the user; any other resolver
-// failure is a runtime-unavailable error like a failed bridge lookup.
+// becomes external.DependencyMissingError, which callers must not wrap in
+// an external.Failure so the application can translate it; any other
+// resolver failure is a runtime-unavailable error like a failed bridge lookup.
 func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.Launcher, error) {
 	if d.launchers == nil {
 		return external.Launcher{Path: defaultLauncherPath, Source: external.LauncherSourceToolkit}, nil
@@ -43,37 +40,25 @@ func (d *Driver) resolveLauncher(ctx context.Context, botID string) (external.La
 	if err != nil {
 		var missing *external.DependencyMissingError
 		if errors.As(err, &missing) {
-			return external.Launcher{}, dependencyMissingFeedback(missing)
+			return external.Launcher{}, dependencyMissing(missing)
 		}
-		return external.Launcher{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable,
-			fmt.Errorf("resolve claude launcher: %w", err), map[string]string{"runtime": RuntimeType})
+		return external.Launcher{}, external.Unavailable(fmt.Errorf("resolve claude launcher: %w", err))
 	}
 	if strings.TrimSpace(launcher.Path) == "" {
-		return external.Launcher{}, apperror.Wrap(apperror.CodeExternalRuntimeUnavailable,
-			errors.New("resolve claude launcher: resolver returned an empty path"), map[string]string{"runtime": RuntimeType})
+		return external.Launcher{}, external.Unavailable(errs.New("resolve claude launcher: resolver returned an empty path"))
 	}
 	return launcher, nil
 }
 
-// dependencyMissingFeedback blocks a turn until the dependency is available.
-func dependencyMissingFeedback(missing *external.DependencyMissingError) *agentfeedback.Error {
-	message := "Claude Code is not installed in this workspace. Ask a bot administrator to install it from the bot's dependencies, then send the message again."
-	operationInProgress := missing.OperationInProgress || strings.TrimSpace(missing.TaskID) != ""
-	if operationInProgress {
-		message = "Claude Code is not installed in this workspace yet; a dependency operation is already in progress. Send the message again when it finishes."
+// dependencyMissing blocks a turn until the dependency is available. It
+// names this driver's dependency when the resolver did not, and counts a
+// started installation task as an operation in progress.
+func dependencyMissing(missing *external.DependencyMissingError) *external.DependencyMissingError {
+	return &external.DependencyMissingError{
+		DependencyID:        firstNonEmpty(missing.DependencyID, dependencyID),
+		TaskID:              strings.TrimSpace(missing.TaskID),
+		OperationInProgress: missing.OperationInProgress || strings.TrimSpace(missing.TaskID) != "",
 	}
-	return agentfeedback.New(
-		agentfeedback.CodeAgentDependencyMissing,
-		"dependency_missing",
-		http.StatusConflict,
-		"chat.externalAgent.dependencyMissing",
-		message,
-		map[string]string{
-			"dep_id":                firstNonEmpty(missing.DependencyID, dependencyID),
-			"install_task_id":       strings.TrimSpace(missing.TaskID),
-			"operation_in_progress": strconv.FormatBool(operationInProgress),
-		},
-	)
 }
 
 // versionObserver returns the handshake callback that feeds the CLI's

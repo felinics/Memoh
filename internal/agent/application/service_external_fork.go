@@ -55,9 +55,9 @@ func (s *Service) PrepareExternalFork(ctx context.Context, botID, sessionID, tur
 	if err != nil {
 		return nil, err
 	}
-	delta, err := forker.ForkThread(ctx, botID, sess.BotAgentID, sessionID, runtimeSessionMeta(sess), lastTurnID)
+	delta, err := forker.ForkThread(ctx, botID, sess.BotAgentID, runtimeSessionMeta(sess), lastTurnID)
 	if err != nil {
-		return nil, err
+		return nil, ExternalRuntimeError(err)
 	}
 	override := make(map[string]any, len(sess.RuntimeMetadata)+len(delta))
 	for key, value := range sess.RuntimeMetadata {

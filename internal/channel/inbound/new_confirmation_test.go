@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	agentfeedback "github.com/felinics/memoh/internal/agent/decision/feedback"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/identities"
 	"github.com/felinics/memoh/internal/channel/route"
@@ -43,7 +43,7 @@ func (testACPProfiles) ResolveACPProfile(agentID string) turn.ACPAgentProfile {
 	}
 }
 
-func (testACPProfiles) ResolveACPSetupPreflight(agentID string, metadata map[string]any) turn.ACPSetupPreflight {
+func (testACPProfiles) ResolveACPSetupPreflight(_ context.Context, _, _, agentID string, metadata map[string]any) (turn.ACPSetupPreflight, error) {
 	acp, _ := metadata["acp"].(map[string]any)
 	agents, _ := acp["agents"].(map[string]any)
 	config, _ := agents[strings.ToLower(strings.TrimSpace(agentID))].(map[string]any)
@@ -52,13 +52,13 @@ func (testACPProfiles) ResolveACPSetupPreflight(agentID string, metadata map[str
 	mode, modeSet := config["setup_mode"].(string)
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if !modeSet || mode == "" || mode == "self" {
-		return result
+		return result, nil
 	}
 	managed, _ := config["managed"].(map[string]any)
 	if value, _ := managed["api_key"].(string); strings.TrimSpace(value) == "" {
 		result.MissingManagedField = &turn.ACPManagedField{ID: "api_key", Label: "API key"}
 	}
-	return result
+	return result, nil
 }
 
 func resolveNewSessionTypeForTest(t *testing.T, text string, msg channel.InboundMessage) (string, error) {
@@ -252,7 +252,7 @@ func TestHandleInboundNewCommandIgnoresCurrentBotMentionArguments(t *testing.T) 
 			processor := NewChannelInboundProcessor(slog.Default(), nil, chatSvc, chatSvc, gateway, channelIdentitySvc, &fakePolicyService{}, "", 0)
 			processor.SetACLService(&fakeChatACL{allowed: true})
 			processor.SetSessionEnsurer(ensurer)
-			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
+			processor.SetCommandHandler(command.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil))
 			sender := &fakeReplySender{}
 
 			msg := channel.InboundMessage{
@@ -288,9 +288,8 @@ func TestResolveNewSessionSpec_GroupChatACPUnsupported(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveNewSessionSpec error = nil, want group chat ACP unsupported")
 	}
-	var feedback *agentfeedback.Error
-	if !errors.As(err, &feedback) || feedback.Code != agentfeedback.CodeGroupChatUnsupported {
-		t.Fatalf("feedback = %#v, want code %s", feedback, agentfeedback.CodeGroupChatUnsupported)
+	if got := apperror.CodeOf(err); got != apperror.CodeGroupChatACPUnsupported {
+		t.Fatalf("code = %q, want %s", got, apperror.CodeGroupChatACPUnsupported)
 	}
 }
 
@@ -566,7 +565,7 @@ func TestHandleNewSessionCommandPreflightsACPSetup(t *testing.T) {
 	}
 }
 
-func TestSendACPFeedbackErrorUsesI18nKey(t *testing.T) {
+func TestSendExternalAgentErrorRendersChannelCopyForCode(t *testing.T) {
 	p := &ChannelInboundProcessor{}
 	sender := &fakeReplySender{}
 	msg := channel.InboundMessage{
@@ -575,23 +574,64 @@ func TestSendACPFeedbackErrorUsesI18nKey(t *testing.T) {
 		ReplyTarget: "target-1",
 	}
 
-	err := p.sendExternalAgentFeedbackError(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, agentfeedback.New(
-		agentfeedback.CodeNoWorkspaceExec,
-		"missing_workspace_exec",
-		403,
-		"chat.externalAgent.noWorkspaceExec",
-		"raw backend message",
-		nil,
-	))
+	err := p.sendExternalAgentError(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"},
+		apperror.Wrap(apperror.CodeNoWorkspaceExec, errors.New("raw backend message"), nil))
 	if err != nil {
-		t.Fatalf("sendExternalAgentFeedbackError() error = %v", err)
+		t.Fatalf("sendExternalAgentError() error = %v", err)
 	}
 	if len(sender.sent) != 1 {
 		t.Fatalf("sent replies = %d, want 1", len(sender.sent))
 	}
 	got := sender.sent[0].Message.PlainText()
-	if got == "raw backend message" || !strings.Contains(got, "workspace commands") {
-		t.Fatalf("feedback text = %q, want localized ACP feedback", got)
+	if strings.Contains(got, "raw backend message") || !strings.Contains(got, "workspace commands") {
+		t.Fatalf("text = %q, want the channel copy for no_workspace_exec", got)
+	}
+}
+
+func TestSendExternalAgentErrorTranslatesThreadErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code apperror.Code
+	}{
+		{sessionpkg.ErrACPAgentIDRequired, apperror.CodeACPAgentNotConfigured},
+		{sessionpkg.ErrACPAgentNotConfigured, apperror.CodeACPAgentNotConfigured},
+		{sessionpkg.ErrACPUnknownAgent, apperror.CodeACPAgentNotFound},
+		{sessionpkg.ErrACPAgentNotEnabled, apperror.CodeACPAgentNotEnabled},
+		{sessionpkg.ErrACPRuntimeOwnerMissing, apperror.CodeACPRuntimeOwnerMissing},
+	} {
+		if got := apperror.CodeOf(externalAgentError(tc.err)); got != tc.code {
+			t.Errorf("externalAgentError(%v) code = %q, want %s", tc.err, got, tc.code)
+		}
+	}
+	if got := externalAgentError(apperror.New(apperror.CodeAgentProviderRateLimited, nil)); got != nil {
+		t.Errorf("externalAgentError(provider error) = %v, want nil", got)
+	}
+	if got := externalAgentError(errors.New("synthetic failure")); got != nil {
+		t.Errorf("externalAgentError(plain error) = %v, want nil", got)
+	}
+}
+
+func TestRequireWorkspaceExecUnboundIdentityPointsToLink(t *testing.T) {
+	// An owner whose IM identity isn't linked yet fails this gate on every
+	// message; the reply must tell them how to link rather than just deny.
+	p := &ChannelInboundProcessor{permissionChecker: &fakeBotPermissionChecker{}}
+	sender := &fakeReplySender{}
+	msg := channel.InboundMessage{
+		Channel:     channel.ChannelTypeTelegram,
+		Message:     channel.Message{ID: "msg-1"},
+		ReplyTarget: "target-1",
+	}
+
+	err := p.requireWorkspaceExecForExternalAgent(context.Background(), InboundIdentity{BotID: "bot-1"})
+	if err := p.sendExternalAgentError(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, err); err != nil {
+		t.Fatalf("sendExternalAgentError() error = %v", err)
+	}
+	if len(sender.sent) != 1 {
+		t.Fatalf("sent replies = %d, want 1", len(sender.sent))
+	}
+	got := sender.sent[0].Message.PlainText()
+	if !strings.Contains(got, "/link") || !strings.Contains(got, "Connected Accounts") {
+		t.Fatalf("feedback text = %q, want link guidance", got)
 	}
 }
 

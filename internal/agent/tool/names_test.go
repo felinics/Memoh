@@ -11,15 +11,15 @@ import (
 	"strings"
 	"testing"
 
-	sdk "github.com/felinics/twilight/sdk"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 )
 
 const (
-	sdkImportPath            = "github.com/felinics/twilight/sdk"
+	sdkImportPath            = "github.com/felinics/memoh/internal/agent/toolexec"
 	mcpImportPath            = "github.com/felinics/memoh/internal/mcp"
 	memoryAdaptersImportPath = "github.com/felinics/memoh/internal/memory/adapters"
 
-	protocolTypeSDKTool           = "sdk.Tool"
+	protocolTypeSDKTool           = "toolexec.Tool"
 	protocolTypeMCPToolDescriptor = "mcp.ToolDescriptor"
 	protocolTypeShadow            = "<shadow>"
 )
@@ -97,7 +97,7 @@ func TestBuiltInToolNamesAreRegisteredAndUnique(t *testing.T) {
 func TestNewAvailableToolsRecognizesOnlyBuiltIns(t *testing.T) {
 	t.Parallel()
 
-	available := NewAvailableTools([]sdk.Tool{
+	available := NewAvailableTools([]toolexec.Tool{
 		{Name: " " + ToolSend().String() + " "},
 		{Name: "unknown_dynamic_tool"},
 		{Name: ""},
@@ -144,22 +144,31 @@ func TestMemoryAdapterMCPToolNamesUseConstant(t *testing.T) {
 func TestProtocolNameGuardsRejectRawStrings(t *testing.T) {
 	t.Parallel()
 
-	expr, err := parser.ParseExpr(`sdk.NewTool[map[string]any]("raw_tool", "desc", fn)`)
+	expr, err := parser.ParseExpr(`toolexec.Define[readArgs]("raw_tool", "desc", fn)`)
 	if err != nil {
-		t.Fatalf("parse sdk.NewTool raw expression: %v", err)
+		t.Fatalf("parse toolexec.Define raw expression: %v", err)
 	}
 	call := expr.(*ast.CallExpr)
 	if err := checkSDKNewToolNameValue(call, map[string]struct{}{"ToolRead": {}}, nil); err == nil {
-		t.Fatal("sdk.NewTool with a raw string name must be rejected")
+		t.Fatal("toolexec.Define with a raw string name must be rejected")
 	}
 
-	expr, err = parser.ParseExpr(`sdk.NewTool[map[string]any](ToolRead().String(), "desc", fn)`)
+	expr, err = parser.ParseExpr(`toolexec.Define[readArgs]("raw_tool", "desc", fn)`)
 	if err != nil {
-		t.Fatalf("parse sdk.NewTool central value expression: %v", err)
+		t.Fatalf("parse toolexec.Define raw expression: %v", err)
+	}
+	call = expr.(*ast.CallExpr)
+	if err := checkSDKNewToolNameValue(call, map[string]struct{}{"ToolRead": {}}, nil); err == nil {
+		t.Fatal("toolexec.Define with a raw string name must be rejected")
+	}
+
+	expr, err = parser.ParseExpr(`toolexec.Define[readArgs](ToolRead().String(), "desc", fn)`)
+	if err != nil {
+		t.Fatalf("parse toolexec.Define central value expression: %v", err)
 	}
 	call = expr.(*ast.CallExpr)
 	if err := checkSDKNewToolNameValue(call, map[string]struct{}{"ToolRead": {}}, nil); err != nil {
-		t.Fatalf("sdk.NewTool with ToolName.String() should pass: %v", err)
+		t.Fatalf("toolexec.Define with ToolName.String() should pass: %v", err)
 	}
 
 	expr, err = parser.ParseExpr(`[]mcp.ToolDescriptor{{Name: "search_memory"}}`)
@@ -172,12 +181,12 @@ func TestProtocolNameGuardsRejectRawStrings(t *testing.T) {
 		t.Fatal("mcp.ToolDescriptor with a raw string name must be rejected")
 	}
 
-	expr, err = parser.ParseExpr(`sdk.Tool{"raw_tool"}`)
+	expr, err = parser.ParseExpr(`toolexec.Tool{"raw_tool"}`)
 	if err != nil {
-		t.Fatalf("parse unkeyed sdk.Tool expression: %v", err)
+		t.Fatalf("parse unkeyed toolexec.Tool expression: %v", err)
 	}
 	if err := sdkToolLiteralNameError(expr.(*ast.CompositeLit), map[string]struct{}{"ToolRead": {}}, nil, nil); err == nil {
-		t.Fatal("unkeyed sdk.Tool literal must be rejected")
+		t.Fatal("unkeyed toolexec.Tool literal must be rejected")
 	}
 
 	expr, err = parser.ParseExpr(`mcp.ToolDescriptor{"search_memory"}`)
@@ -247,7 +256,7 @@ func f() {
 	typedAssignSrc := []byte(`package tools
 
 import (
-	"github.com/felinics/twilight/sdk"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/mcp"
 )
 
@@ -256,11 +265,11 @@ func late(nameVar string, h lateHolder) {
 }
 
 type lateHolder struct {
-	Tool sdk.Tool
+	Tool toolexec.Tool
 }
 
 type holder struct {
-	Tool sdk.Tool
+	Tool toolexec.Tool
 	Name string
 }
 
@@ -268,7 +277,7 @@ type plainHolder struct {
 	Name string
 }
 
-func f(nameVar string, t sdk.Tool, descriptors []mcp.ToolDescriptor, h holder) {
+func f(nameVar string, t toolexec.Tool, descriptors []mcp.ToolDescriptor, h holder) {
 	t.Name = nameVar
 	for _, descriptor := range descriptors {
 		descriptor.Name = nameVar
@@ -277,16 +286,16 @@ func f(nameVar string, t sdk.Tool, descriptors []mcp.ToolDescriptor, h holder) {
 	h.Name = "not a tool"
 }
 
-func indexed(nameVar string, tools []sdk.Tool, descriptors []mcp.ToolDescriptor) {
+func indexed(nameVar string, tools []toolexec.Tool, descriptors []mcp.ToolDescriptor) {
 	tools[0].Name = nameVar
 	descriptors[0].Name = nameVar
-	madeTools := make([]sdk.Tool, 1)
+	madeTools := make([]toolexec.Tool, 1)
 	madeTools[0].Name = nameVar
 	copiedTool := tools[0]
 	copiedTool.Name = nameVar
 }
 
-func scoped(tool sdk.Tool) {
+func scoped(tool toolexec.Tool) {
 	tool.Name = nameVar
 	{
 		tool := plainHolder{}
@@ -313,7 +322,7 @@ func unrelatedLocal() {
 	}
 	typedIndex := collectProtocolTypeIndex(
 		typedParsed,
-		importAliases(typedParsed, sdkImportPath, "sdk"),
+		importAliases(typedParsed, sdkImportPath, "toolexec"),
 		importAliases(typedParsed, mcpImportPath, "mcp"),
 	)
 	var sdkRejected, mcpRejected int
@@ -335,7 +344,7 @@ func unrelatedLocal() {
 			case protocolTypeSDKTool:
 				sdkRejected++
 				if err := checkSDKToolNameValue(assign.Rhs[i], map[string]struct{}{"ToolRead": {}}, nil, nil); err == nil {
-					t.Fatal("typed sdk.Tool.Name assignment with a non-central variable must be rejected")
+					t.Fatal("typed toolexec.Tool.Name assignment with a non-central variable must be rejected")
 				}
 			case protocolTypeMCPToolDescriptor:
 				mcpRejected++
@@ -369,9 +378,9 @@ func unrelatedLocal() {
 
 func f() {
 	for _, desc := range descriptors {
-		_ = sdk.Tool{Name: desc.Name}
+		_ = toolexec.Tool{Name: desc.Name}
 	}
-	_ = sdk.Tool{Name: desc.Name}
+	_ = toolexec.Tool{Name: desc.Name}
 }
 `)
 	dynamicParsed, err := parser.ParseFile(token.NewFileSet(), "federation.go", dynamicSrc, 0)
@@ -415,20 +424,20 @@ func TestProtocolNameGuardsRecognizeImportAliases(t *testing.T) {
 	src := []byte(`package tools
 
 import (
-	twilight "github.com/felinics/twilight/sdk"
+	twilight "github.com/felinics/memoh/internal/agent/toolexec"
 	mcpgw "github.com/felinics/memoh/internal/mcp"
 	memoryadapters "github.com/felinics/memoh/internal/memory/adapters"
 )
 
 var _ = []twilight.Tool{{Name: "raw_tool"}}
-var _ = twilight.NewTool[map[string]any]("raw_tool", "desc", nil)
+var _ = twilight.Define[readArgs]("raw_tool", "desc", nil)
 var _ = []mcpgw.ToolDescriptor{{Name: "search_memory"}, {Name: memoryadapters.ToolSearchMemory}}
 `)
 	parsed, err := parser.ParseFile(token.NewFileSet(), "alias.go", src, 0)
 	if err != nil {
 		t.Fatalf("parse alias file: %v", err)
 	}
-	sdkAliases := importAliases(parsed, sdkImportPath, "sdk")
+	sdkAliases := importAliases(parsed, sdkImportPath, "toolexec")
 	mcpAliases := importAliases(parsed, mcpImportPath, "mcp")
 	memoryAdapterAliases := importAliases(parsed, memoryAdaptersImportPath, "adapters")
 	if _, ok := sdkAliases["sdk"]; ok {
@@ -448,7 +457,7 @@ var _ = []mcpgw.ToolDescriptor{{Name: "search_memory"}, {Name: memoryadapters.To
 				sawSDKToolAlias = true
 				child := lit.Elts[0].(*ast.CompositeLit)
 				if err := firstSDKNameValueError(child, map[string]struct{}{"ToolRead": {}}); err == nil {
-					t.Fatal("sdk.Tool alias with raw string name must be rejected")
+					t.Fatal("toolexec.Tool alias with raw string name must be rejected")
 				}
 			}
 			if isMCPToolDescriptorSlice(lit.Type, mcpAliases) {
@@ -467,13 +476,13 @@ var _ = []mcpgw.ToolDescriptor{{Name: "search_memory"}, {Name: memoryadapters.To
 		if call, ok := n.(*ast.CallExpr); ok && isSDKNewToolCall(call, sdkAliases) {
 			sawSDKNewToolAlias = true
 			if err := checkSDKNewToolNameValue(call, map[string]struct{}{"ToolRead": {}}, nil); err == nil {
-				t.Fatal("sdk.NewTool alias with raw string name must be rejected")
+				t.Fatal("toolexec.Define alias with raw string name must be rejected")
 			}
 		}
 		return true
 	})
 	if !sawSDKToolAlias || !sawSDKNewToolAlias || !sawMCPDescriptorAlias || !sawMemoryAdapterAlias {
-		t.Fatalf("alias guard missed declarations: sdk.Tool=%v sdk.NewTool=%v mcp.ToolDescriptor=%v memoryAdapter=%v", sawSDKToolAlias, sawSDKNewToolAlias, sawMCPDescriptorAlias, sawMemoryAdapterAlias)
+		t.Fatalf("alias guard missed declarations: toolexec.Tool=%v toolexec.Define=%v mcp.ToolDescriptor=%v memoryAdapter=%v", sawSDKToolAlias, sawSDKNewToolAlias, sawMCPDescriptorAlias, sawMemoryAdapterAlias)
 	}
 }
 
@@ -802,7 +811,7 @@ func checkGoFileForSDKToolNames(t *testing.T, file string, src []byte, toolValue
 	if err != nil {
 		t.Fatalf("parse %s: %v", file, err)
 	}
-	sdkAliases := importAliases(parsed, sdkImportPath, "sdk")
+	sdkAliases := importAliases(parsed, sdkImportPath, "toolexec")
 	dynamicDescriptorNames := allowedDynamicSDKDescriptorNames(file, parsed)
 	shadowedTools := collectShadowedToolValues(parsed, toolValues)
 	protocolTypes := collectProtocolTypeIndex(parsed, sdkAliases, nil)
@@ -822,7 +831,7 @@ func checkGoFileForSDKToolNames(t *testing.T, file string, src []byte, toolValue
 		}
 		if call, ok := n.(*ast.CallExpr); ok && isSDKNewToolCall(call, sdkAliases) {
 			if err := checkSDKNewToolNameValue(call, toolValues, shadowedTools); err != nil {
-				t.Fatalf("%s:%d registers sdk.NewTool with invalid name: %v", file, fset.Position(call.Pos()).Line, err)
+				t.Fatalf("%s:%d registers a toolexec tool with invalid name: %v", file, fset.Position(call.Pos()).Line, err)
 			}
 		}
 		if assign, ok := n.(*ast.AssignStmt); ok {
@@ -1300,7 +1309,7 @@ func checkSDKToolName(t *testing.T, fset *token.FileSet, file string, lit *ast.C
 	t.Helper()
 
 	if err := sdkToolLiteralNameError(lit, toolValues, dynamicDescriptorNames, shadowedTools); err != nil {
-		t.Fatalf("%s:%d registers sdk.Tool with invalid Name: %v", file, fset.Position(lit.Pos()).Line, err)
+		t.Fatalf("%s:%d registers toolexec.Tool with invalid Name: %v", file, fset.Position(lit.Pos()).Line, err)
 	}
 }
 
@@ -1309,7 +1318,7 @@ func sdkToolLiteralNameError(lit *ast.CompositeLit, toolValues map[string]struct
 	for _, elt := range lit.Elts {
 		kv, ok := elt.(*ast.KeyValueExpr)
 		if !ok {
-			return &toolNameError{"sdk.Tool literals must use keyed fields and declare Name with a central ToolName value or dynamic descriptor name"}
+			return &toolNameError{"toolexec.Tool literals must use keyed fields and declare Name with a central ToolName value or dynamic descriptor name"}
 		}
 		key, ok := kv.Key.(*ast.Ident)
 		if !ok || key.Name != "Name" {
@@ -1321,7 +1330,7 @@ func sdkToolLiteralNameError(lit *ast.CompositeLit, toolValues map[string]struct
 		}
 	}
 	if !sawName {
-		return &toolNameError{"sdk.Tool literal must declare Name with a central ToolName value or dynamic descriptor name"}
+		return &toolNameError{"toolexec.Tool literal must declare Name with a central ToolName value or dynamic descriptor name"}
 	}
 	return nil
 }
@@ -1540,7 +1549,7 @@ func isSDKNewToolFun(expr ast.Expr, sdkAliases map[string]struct{}) bool {
 }
 
 func selectorIsSDKNewTool(sel *ast.SelectorExpr, sdkAliases map[string]struct{}) bool {
-	if sel.Sel.Name != "NewTool" {
+	if sel.Sel.Name != "Define" {
 		return false
 	}
 	pkg, ok := sel.X.(*ast.Ident)
@@ -1553,7 +1562,7 @@ func selectorIsSDKNewTool(sel *ast.SelectorExpr, sdkAliases map[string]struct{})
 
 func checkSDKNewToolNameValue(call *ast.CallExpr, toolValues map[string]struct{}, shadowedTools toolShadowSet) error {
 	if len(call.Args) == 0 {
-		return &toolNameError{"sdk.NewTool missing name argument"}
+		return &toolNameError{"toolexec.Define missing name argument"}
 	}
 	return checkSDKToolNameValue(call.Args[0], toolValues, nil, shadowedTools)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // interruptSettleTimeout bounds how long an interrupted turn may take to
@@ -177,25 +177,6 @@ func (t *turnState) currentTurnID() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.turnID
-}
-
-// capturableTurn returns the settled turn when its rollout has a provable end:
-// codex closes a completed turn with task_complete and an interrupted one with
-// turn_aborted. A failed turn is left out because codex does not reliably write
-// a terminal record for it, and waiting for one would stall every failure for
-// the whole staging budget.
-func (t *turnState) capturableTurn() (protocol.Turn, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.turn == nil || t.turn.ID != t.turnID {
-		return protocol.Turn{}, false
-	}
-	switch t.turn.Status {
-	case protocol.TurnStatusCompleted, protocol.TurnStatusInterrupted:
-		return *t.turn, true
-	default:
-		return protocol.Turn{}, false
-	}
 }
 
 // acceptsTurn reports whether a notification carrying turnID belongs to this
@@ -666,7 +647,7 @@ func (t *turnState) emitApprovalRequest(req approval.Request) bool {
 }
 
 // result assembles the durable outcome after the turn settled.
-func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
+func (t *turnState) result() (external.PromptResult, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -689,17 +670,11 @@ func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
 		usage := *t.usage
 		out.Usage = &usage
 	}
-	if newThreadID != "" || t.threadTotals != nil {
+	if t.threadTotals != nil {
 		out.RuntimeMetadata = map[string]any{}
-		if newThreadID != "" {
-			out.RuntimeMetadata[metadataThreadIDKey] = newThreadID
-			out.RuntimeMetadata[metadataCheckpointRequiredKey] = true
-		}
 		// Context-occupancy data for the session UI: the thread's cumulative
 		// token count against its model context window.
-		if t.threadTotals != nil {
-			out.RuntimeMetadata["codex_thread_total_tokens"] = t.threadTotals.TotalTokens
-		}
+		out.RuntimeMetadata["codex_thread_total_tokens"] = t.threadTotals.TotalTokens
 		if t.contextWindow != nil {
 			out.RuntimeMetadata["codex_context_window"] = *t.contextWindow
 		}
@@ -728,7 +703,11 @@ func (t *turnState) result(newThreadID string) (external.PromptResult, error) {
 		if turnErr != nil && strings.TrimSpace(turnErr.Message) != "" {
 			message = turnErr.Message
 		}
-		return out, errors.New(message)
+		err := errs.NewDependency(message)
+		if turnErr != nil && turnErr.CodexErrorInfo != nil && turnErr.CodexErrorInfo.Unit == protocol.CodexErrorInfoUnitUsageLimitExceeded {
+			return out, external.Fail(external.FailureUsageLimited, err)
+		}
+		return out, err
 	}
 }
 

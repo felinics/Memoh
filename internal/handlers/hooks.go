@@ -12,6 +12,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -81,9 +82,9 @@ func (h *HooksHandler) Register(e *echo.Echo) {
 // @Tags hooks
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} HooksEventsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/hooks/events [get].
 func (h *HooksHandler) Events(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -116,9 +117,9 @@ func (h *HooksHandler) Events(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body HookTestRequest true "Hook test payload"
 // @Success 200 {object} HookTestResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} apperror.Problem
+// @Failure 403 {object} apperror.Problem
+// @Failure 500 {object} apperror.Problem
 // @Router /bots/{bot_id}/hooks/test [post].
 func (h *HooksHandler) Test(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -215,10 +216,12 @@ func (r hookTestToolRunner) RunHookTool(ctx context.Context, toolName string, in
 	part, err := r.agent.ExecuteTool(ctx, r.cfg, sdk.ToolCall{
 		ToolName:   strings.TrimSpace(toolName),
 		ToolCallID: "hook-test:" + strings.TrimSpace(toolName),
-		Input:      input,
+		Input:      toolexec.ArgumentsFromValue(input),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return part.Result, nil
+	// The hook service reads decision/reason/append_* off the tool's own value;
+	// hand it the decoded output, not the SDK's {text|json} envelope.
+	return toolexec.OutputValue(part.Result), nil
 }

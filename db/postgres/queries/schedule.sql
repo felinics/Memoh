@@ -1,7 +1,7 @@
 -- name: CreateSchedule :one
 INSERT INTO schedule (
   name, description, pattern, max_calls, enabled, command, bot_id,
-  run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id
+  run_target, target_session_id, runtime_type, bot_agent_id, acp_agent_id, model_id, acp_model_id, reasoning_effort, workdir_id, max_run_seconds
 )
 VALUES (
   $1, $2, $3, $4, $5, $6, $7,
@@ -13,7 +13,8 @@ VALUES (
   sqlc.narg(model_id)::uuid,
   sqlc.narg(acp_model_id)::text,
   sqlc.narg(reasoning_effort)::text,
-  sqlc.narg(workdir_id)::uuid
+  sqlc.narg(workdir_id)::uuid,
+ COALESCE(NULLIF(sqlc.arg(max_run_seconds)::integer, 0), 3600)
 )
 RETURNING *;
 
@@ -51,6 +52,7 @@ SET name = $2,
     acp_model_id = sqlc.narg(acp_model_id)::text,
     reasoning_effort = sqlc.narg(reasoning_effort)::text,
     workdir_id = sqlc.narg(workdir_id)::uuid,
+    max_run_seconds = COALESCE(NULLIF(sqlc.arg(max_run_seconds)::integer, 0), 3600),
     updated_at = now()
 WHERE team_id = public.memoh_current_team_id() AND id = $1
 RETURNING *;

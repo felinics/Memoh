@@ -19,6 +19,7 @@ import {
   normalizeBackgroundTask,
   reconcileBackgroundTasksInMessages,
 } from './background-tasks'
+import { inheritErrorDetails } from './runtime-transcript-merge'
 import type {
   BackgroundTask,
   ChatMessage,
@@ -206,6 +207,16 @@ export function createTranscriptHistory(deps: {
     }
   }
 
+  // History stores a failure's code alone; a settled twin keeps the args and
+  // copy the live error frame left on the turn it replaces.
+  function inheritLiveErrorDetails(incoming: ChatMessage[]) {
+    const byId = new Map(deps.messages.map(turn => [turn.id, turn]))
+    for (const twin of incoming) {
+      const prior = byId.get(twin.id)
+      if (twin.role === 'assistant' && prior?.role === 'assistant') inheritErrorDetails(twin, prior)
+    }
+  }
+
   // An on-screen turn survives a settled replacement only while it is the
   // moving boundary: a local optimistic turn the server has not named yet, or
   // backed by a run the runtime still reports as active. A streaming flag
@@ -254,6 +265,7 @@ export function createTranscriptHistory(deps: {
   ) {
     const next = normalizeTurns(items, targetSessionId)
     adoptRenderIdentity(next)
+    inheritLiveErrorDetails(next)
     if (options?.preserveLive === false) {
       deps.messages.splice(0, deps.messages.length, ...next)
       return
@@ -270,6 +282,7 @@ export function createTranscriptHistory(deps: {
   function mergeMessages(items: UITurn[], targetSessionId?: string) {
     const incoming = normalizeTurns(items, targetSessionId)
     adoptRenderIdentity(incoming)
+    inheritLiveErrorDetails(incoming)
     const merged = new Map<string, ChatMessage>()
     for (const item of deps.messages) merged.set(item.id, item)
     for (const item of incoming) merged.set(item.id, item)

@@ -1347,16 +1347,17 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     })
   }
 
-  function openFile(filePath: string) {
-    if (!hasCurrentPermission('workspace_read')) return
+  function openFile(filePath: string): boolean {
+    if (!hasCurrentPermission('workspace_read') || !api.value) return false
     const path = (filePath ?? '').trim()
-    if (!path) return
+    if (!path) return false
     openEphemeral({
       id: `file:${path}`,
       component: 'file',
       title: fileBaseName(path),
       params: { filePath: path },
     })
+    return true
   }
 
   // Open a file as a PINNED tab in the active editor group. This is the

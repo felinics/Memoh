@@ -7,9 +7,17 @@ import (
 	"net/url"
 
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/felinics/memoh/internal/logger"
 )
+
+// NewRequestID returns a fresh request id from the generator echo's RequestID
+// middleware uses, so the id of a unit of work that did not arrive over HTTP,
+// such as an IM message, has the same form as the id of one that did.
+func NewRequestID() string {
+	return middleware.DefaultRequestIDConfig.Generator()
+}
 
 // RequestID returns the request id assigned by the RequestID middleware
 // (response header), falling back to a client-provided header. Empty when

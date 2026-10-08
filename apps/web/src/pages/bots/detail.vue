@@ -45,7 +45,10 @@
                 <span class="min-w-0 truncate">{{ backLabel }}</span>
               </NavItem>
 
-              <SettingsSection class="mt-3">
+              <SettingsSection
+                v-if="!botUnavailable"
+                class="mt-3"
+              >
                 <div class="flex items-center gap-3 p-3">
                   <!-- Avatar -->
                   <div class="group/avatar relative size-12 shrink-0 rounded-full overflow-hidden bg-muted">
@@ -144,7 +147,10 @@
               </SettingsSection>
 
               <!-- Search Input -->
-              <div class="mt-3 relative">
+              <div
+                v-if="!botUnavailable"
+                class="mt-3 relative"
+              >
                 <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
                 <Input
                   v-model="searchQuery"
@@ -172,7 +178,10 @@
           <template #sidebar-content>
             <!-- Same NavItem rows as the settings sidebar; search narrows the
                groups in place instead of swapping to a separate result list. -->
-            <div class="px-2 pb-2">
+            <div
+              v-if="!botUnavailable"
+              class="px-2 pb-2"
+            >
               <template v-if="displayGroups.length">
                 <div
                   v-for="(group, idx) in displayGroups"
@@ -221,13 +230,25 @@
           <template #sidebar-footer />
 
           <template #detail>
+            <!-- A bot that doesn't exist has no tabs to show, so the whole pane
+                 becomes the message. -->
+            <PanePlaceholder
+              v-if="botMissing"
+              class="absolute inset-0"
+              :title="$t('bots.notFound')"
+            >
+              {{ $t('bots.notFoundDescription') }}
+            </PanePlaceholder>
             <!-- scrollbar-gutter: stable reserves the scrollbar track on every tab,
                  scrolling or not. Without it a long tab (e.g. General) shows a
                  scrollbar that narrows the pane, so PageShell's mx-auto column
                  re-centers and the title + card edges shift vs a short tab (e.g.
                  Platforms). Reserving the gutter keeps the content width — and thus
                  every tab's alignment — identical. -->
-            <div class="absolute inset-0 overflow-y-auto bg-background [scrollbar-gutter:stable]">
+            <div
+              v-else
+              class="absolute inset-0 overflow-y-auto bg-background [scrollbar-gutter:stable]"
+            >
               <!-- Top drag strip over the detail pane only (mac desktop), so the
                    window stays draggable beside the sidebar. No fill/border — it
                    shares --background with the content, so the sidebar's vertical
@@ -241,7 +262,21 @@
                    phone keeps a 16px margin; the 'tab' PageShell variant inside
                    adds no horizontal padding of its own. -->
               <div class="px-4 md:px-6 pt-4 pb-4">
-                <KeepAlive>
+                <SettingsSection v-if="botLoadFailed">
+                  <SettingsRow
+                    :label="$t('bots.loadFailed')"
+                    :description="resolveErrorMessage(botError, $t('common.loadFailed'))"
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      @click="refetchBot()"
+                    >
+                      {{ $t('common.retry') }}
+                    </Button>
+                  </SettingsRow>
+                </SettingsSection>
+                <KeepAlive v-else>
                   <component
                     :is="activeComponent?.component"
                     v-bind="activeComponent?.params"
@@ -264,8 +299,8 @@
 
 <script setup lang="ts">
 import {
-  Avatar, AvatarImage, AvatarFallback, Input,
-  SidebarMenu, SidebarMenuItem, SettingsSection,
+  Avatar, AvatarImage, AvatarFallback, Button, Input, PanePlaceholder,
+  SidebarMenu, SidebarMenuItem, SettingsRow, SettingsSection,
 } from '@felinic/ui'
 import {
   SquarePen, LoaderCircle, Check, Search, X, LayoutDashboard, MessageSquare,
@@ -277,9 +312,9 @@ import { computed, ref, watch, onMounted, toValue, nextTick, type Ref } from 'vu
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { BadgeCount, NavItem, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useMutation, useQueryCache } from '@pinia/colada'
+import { useMutation, useQueryCache } from '@pinia/colada'
 import {
-  getBotsById, putBotsById,
+  putBotsById,
   getBotsByIdChecks,
   getBotsByBotIdContainer,
   getBotsByBotIdContainerSnapshots,
@@ -290,6 +325,7 @@ import type {
   HandlersListSnapshotsResponse,
 } from '@memohai/sdk'
 import { useCapabilitiesStore } from '@/store/capabilities'
+import { useBotQuery } from '@/composables/api/useBot'
 
 import BotAdvanced from './components/bot-advanced.vue'
 import BotSettings from './components/bot-settings.vue'
@@ -358,14 +394,13 @@ const routeIdentifier = computed(() => {
   return typeof id === 'string' ? id : ''
 })
 
-const { data: bot } = useQuery({
-  key: () => ['bot', routeIdentifier.value],
-  query: async () => {
-    const { data } = await getBotsById({ path: { id: routeIdentifier.value }, throwOnError: true })
-    return data
-  },
-  enabled: () => !!routeIdentifier.value,
-})
+const { data: bot, error: botError, refetch: refetchBot } = useBotQuery(routeIdentifier)
+
+const botMissing = computed(() => bot.value === null)
+// Only a first load that failed replaces the page; a failed refetch keeps the
+// bot already on screen.
+const botLoadFailed = computed(() => !!botError.value && bot.value === undefined)
+const botUnavailable = computed(() => botMissing.value || botLoadFailed.value)
 
 const botId = computed(() => bot.value?.id ?? '')
 

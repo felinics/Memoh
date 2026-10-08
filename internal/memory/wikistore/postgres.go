@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -55,7 +56,7 @@ func (s *PostgresStore) GetNode(ctx context.Context, botID, nodeID string) (migr
 	}
 	row, err := s.q.GetMemoryNode(ctx, dbsqlc.GetMemoryNodeParams{BotID: pgUUID(botID), ID: nodeID})
 	if err != nil {
-		if isPgNoRows(err) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return migrate.NodeSpec{}, ErrNodeNotFound
 		}
 		return migrate.NodeSpec{}, fmt.Errorf("wikistore(postgres): get node: %w", err)
@@ -283,14 +284,4 @@ func pgTimeValue(t pgtype.Timestamptz) time.Time {
 		return time.Time{}
 	}
 	return t.Time.UTC()
-}
-
-// isPgNoRows reports whether err is a pgx "no rows" error.
-func isPgNoRows(err error) bool {
-	if err == nil {
-		return false
-	}
-	// pgx returns pgx.ErrNoRows; avoid importing pgx directly here by string
-	// match on the sentinel error message.
-	return err.Error() == "no rows in result set"
 }

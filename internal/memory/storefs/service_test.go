@@ -3,6 +3,7 @@ package storefs
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestFormatAndParseMemoryDayMD_Roundtrip(t *testing.T) {
@@ -384,6 +385,56 @@ func TestFormatMemoryOverviewUsesProvidedPaths(t *testing.T) {
 	}, map[string]string{"bot-1:mem_1": "memory/20260706.md"})
 	if !strings.Contains(md, "[Legacy Topic](memory/20260706.md)") {
 		t.Fatalf("overview should preserve actual path, got:\n%s", md)
+	}
+}
+
+// Multi-byte text must be cut on rune boundaries: a split code point makes
+// MEMORY.md invalid UTF-8, which the workspace bridge then refuses to return.
+func TestFormatMemoryOverviewTruncatesByRune(t *testing.T) {
+	t.Parallel()
+
+	body := strings.Repeat("用户喜欢龙井茶", 60) // 420 runes, 1260 bytes
+	md := formatMemoryOverviewMD([]MemoryItem{
+		{
+			ID:        "bot-1:mem_1",
+			Memory:    body,
+			CreatedAt: "2026-07-06T10:00:00Z",
+			Metadata:  map[string]any{"layer": "preference", "subject": "Alice"},
+		},
+	})
+	if !utf8.ValidString(md) {
+		t.Fatalf("overview must be valid UTF-8, got:\n%q", md)
+	}
+	want := ") " + string([]rune(body)[:400]) + "...\n"
+	if !strings.Contains(md, want) {
+		t.Fatalf("overview should keep the first 400 runes, got:\n%s", md)
+	}
+}
+
+func TestConceptTitleTruncatesByRune(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		memory string
+		want   string
+	}{
+		"ascii": {memory: strings.Repeat("a", 100), want: strings.Repeat("a", 80) + "..."},
+		"cjk":   {memory: strings.Repeat("中文标题", 25), want: strings.Repeat("中文标题", 20) + "..."},
+		"emoji": {memory: strings.Repeat("🍵", 100), want: strings.Repeat("🍵", 80) + "..."},
+		"short": {memory: "中文标题", want: "中文标题"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := conceptTitle(MemoryItem{ID: "bot-1:mem_1", Memory: tc.memory})
+			if !utf8.ValidString(got) {
+				t.Fatalf("title must be valid UTF-8, got %q", got)
+			}
+			if got != tc.want {
+				t.Fatalf("conceptTitle() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

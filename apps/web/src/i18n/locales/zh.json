@@ -157,10 +157,14 @@
     "agent": {
       "response_timeout": "模型未能及时响应，请重试。",
       "response_interrupted": "模型响应意外中断，请重试。",
-      "provider_overloaded": "模型服务当前过载，请稍后重试。",
+      "provider_overloaded": "模型服务暂时不可用或过载，请稍后重试。",
       "provider_rate_limited": "已达到模型服务的速率上限，请稍后再发送。",
       "provider_quota_exhausted": "模型服务账户的余额或配额已用尽。",
-      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。"
+      "provider_auth_failed": "模型服务拒绝了当前凭据，请检查该服务商的 API Key。",
+      "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。",
+      "provider_request_rejected": "模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。",
+      "provider_unreachable": "无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。",
+      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。"
     },
     "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
     "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",
@@ -185,7 +189,8 @@
       "request_invalid": "提供方配置无效。"
     },
     "search_provider": {
-      "type_conflict": "该搜索提供方已完成配置。"
+      "type_conflict": "该搜索提供方已完成配置。",
+      "invalid_provider": "不支持该搜索提供方。"
     },
     "connector": {
       "request_invalid": "连接器请求无效。",
@@ -231,6 +236,8 @@
       "action_unsupported": "该依赖不支持此操作。",
       "platform_unsupported": "当前工作区平台不支持该依赖。",
       "busy": "该依赖正在进行其他操作，请稍后再试。",
+      "required": "{dependents} 仍依赖它，请先移除这些依赖。",
+      "prerequisites_changed": "确认后，它所需的前置依赖发生了变化，请重新确认此操作。",
       "workspace_not_running": "工作区未运行，请先启动。",
       "workspace_missing": "尚未创建工作区，请先创建。",
       "rollback_unavailable": "没有可回滚的旧版本。",
@@ -260,7 +267,9 @@
       "config_update_failed": "外部 Agent 无法应用所选设置，请重试。"
     },
     "external_agent": {
-      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。"
+      "turn_replacement_unsupported": "外部 Agent 会话不支持重试或编辑，请改为发送一条新消息。",
+      "account_unbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
+      "container_workspace_required": "该 Agent 运行时需要容器工作区。请先把 Bot 切换到容器工作区，再重试。"
     },
     "agent_credential": {
       "not_found": "这个 Agent 账号已不可用，请选择其他账号。",
@@ -271,12 +280,16 @@
       "reauthorization_required": "请先重新连接这个 Agent 账号。",
       "encryption_unavailable": "此服务器尚未配置 Agent 账号存储。",
       "runtime_busy": "请等待当前回复结束后再切换 Agent 账号。",
-      "materialization_failed": "Agent 账号准备失败，请重试。"
+      "materialization_failed": "Agent 账号准备失败，请重试。",
+      "usage_auth_expired": "账户登录已过期，下次对话后会自动续期；如果仍无法查看额度，请重新连接账户。",
+      "usage_unavailable": "暂时无法获取额度，请稍后再试。"
     },
     "session": {
-      "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。"
+      "model_preference_conflict": "模型选择已在其他位置更新，请刷新，或发送消息以使用当前选择。",
+      "not_found": "会话不存在。"
     },
     "session_runtime": {
+      "interrupted": "服务关闭时中断了本次运行，重启后可从已保存的进度继续。",
       "session_busy": "这个会话还在处理上一条消息，请稍后再试。",
       "invocation_conflict": "这条消息已用不同内容提交过，请刷新会话查看已保存的内容。",
       "history_inconsistent": "会话记录保存出错，请刷新后重试。",
@@ -300,7 +313,8 @@
     "external_runtime": {
       "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
-      "session_resume_failed": "会话无法恢复，请重试或新开会话。"
+      "session_resume_failed": "会话无法恢复，请重试或新开会话。",
+      "usage_limited": "外部 Agent 的额度已用完，请稍后再试。"
     },
     "app": {
       "not_found": "未找到该应用安装记录。",
@@ -332,7 +346,93 @@
       "forbidden": "你没有访问此会话的权限。",
       "request_invalid": "请求无效，请刷新后重试。",
       "cancelled": "操作已中止。"
-    }
+    },
+    "schedule": {
+      "execution_timeout": "定时任务已达到执行时限，请检查执行进度或延长时限。"
+    },
+    "video": {
+      "job_outcome_unknown": "无法确认视频任务状态，请先检查已保存的任务，再决定是否重新生成。"
+    },
+    "internal": "服务器出错了，请重试。",
+    "canceled": "请求已取消。",
+    "http": {
+      "bad_request": "请求无效。",
+      "unauthorized": "请先登录。",
+      "forbidden": "你没有执行此操作的权限。",
+      "not_found": "请求的资源不存在。",
+      "method_not_allowed": "此处不允许使用该请求方法。",
+      "conflict": "请求与当前状态冲突，请刷新后重试。",
+      "payload_too_large": "请求内容过大。",
+      "unsupported_media_type": "不支持该请求内容类型。",
+      "upgrade_required": "该接口需要使用其他协议。",
+      "too_many_requests": "请求过于频繁，请稍后再试。",
+      "not_implemented": "服务器不支持此操作。",
+      "bad_gateway": "上游服务返回了无效响应，请重试。",
+      "service_unavailable": "服务暂时不可用，请稍后重试。",
+      "gateway_timeout": "上游服务响应超时，请重试。"
+    },
+    "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
+    "runtime_run_failed": "回复未能完成，请重试。",
+    "runtime_prompt_failed": "Agent 运行时未能完成这次回复，请重试。",
+    "runtime_owner_lease_expired": "处理这次回复的服务器已无响应，回复已结束，请重试。",
+    "runtime_live_backend_lost": "这次回复的运行状态已丢失，回复已结束，请重试。",
+    "runtime_admission_orphaned": "这次回复未能开始，已被清理，请重试。",
+    "runtime_fence_activation_failed": "回复未能开始，请稍后重试。",
+    "runtime_reservation_failed": "回复未能开始，请稍后重试。",
+    "runtime_reservation_declined": "回复开始前，另一台服务器接管了这个会话，请重试。",
+    "history_reset": "会话历史已重置，这次回复已取消。",
+    "bot_ready_update_failed": "工作区已创建，但未能加载 Bot，请刷新页面。",
+    "workspace_setup_timeout": "工作区仍在创建中，请到 Bot 的工作区页面查看。",
+    "workspace_setup_failed": "创建工作区时出错。",
+    "workspace_display_disabled": "工作区桌面未启用。",
+    "workspace_dependency_operation_unknown": "操作结果尚未确认，请刷新依赖列表查看状态。",
+    "workspace_create_request_invalid": "工作区请求无效。",
+    "workspace_create_failed": "创建工作区失败，请重试。",
+    "workspace_not_found": "该 Bot 还没有工作区。",
+    "workspace_load_failed": "加载工作区信息失败，请重试。",
+    "workspace_metrics_load_failed": "加载资源状态失败，请重试。",
+    "workspace_resource_limits_invalid": "资源限制无效，限制值不能为负数。",
+    "workspace_resource_limits_required": "请填写资源限制。",
+    "workspace_resource_limits_save_failed": "保存资源限制失败，请重试。",
+    "workspace_delete_failed": "删除工作区失败，请重试。",
+    "workspace_start_failed": "启动工作区失败，请重试。",
+    "workspace_stop_failed": "停止工作区失败，请重试。",
+    "workspace_snapshots_unsupported": "当前工作区运行后端不支持快照。",
+    "workspace_snapshot_manager_unavailable": "服务器未配置快照功能。",
+    "workspace_snapshot_request_invalid": "快照请求无效。",
+    "workspace_snapshot_create_failed": "创建快照失败，请重试。",
+    "workspace_snapshots_load_failed": "加载快照失败，请重试。",
+    "workspace_snapshotter_mismatch": "快照器与工作区运行后端不匹配。",
+    "workspace_snapshot_chain_not_found": "找不到工作区的快照历史。",
+    "workspace_manager_unavailable": "服务器未配置工作区管理。",
+    "workspace_snapshot_rollback_request_invalid": "回滚请求无效。",
+    "workspace_snapshot_version_invalid": "快照版本无效。",
+    "workspace_snapshot_rollback_failed": "回滚工作区失败，请重试。",
+    "workspace_preserved_data_not_found": "没有找到保留的工作区数据。",
+    "workspace_restore_failed": "恢复工作区数据失败，请重试。",
+    "acp_agent_not_found": "选中的外部 Agent 不可用。",
+    "acp_agent_not_enabled": "该 Bot 已停用选中的外部 Agent。",
+    "acp_agent_not_configured": "该 Bot 的外部 Agent 配置尚未完成。",
+    "codex_oauth_incomplete": "该 Bot 工作区尚未完成 Codex ChatGPT 登录。",
+    "codex_auth_token_missing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
+    "acp_agent_auth_invalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
+    "no_workspace_exec": "你没有执行该 Bot 工作区命令的权限。",
+    "acp_runtime_owner_missing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
+    "acp_discuss_unsupported": "这个外部 Agent 无法在讨论模式中运行。",
+    "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
+    "acp_project_mode_invalid": "外部 Agent 的项目模式无效。",
+    "acp_project_path_invalid": "外部 Agent 的项目路径必须是绝对路径。",
+    "acp_display_args_invalid": "外部 Agent 的显示参数无效。",
+    "acp_runtime_start_failed": "外部 Agent 运行时启动失败。",
+    "acp_runtime_busy": "外部 Agent 正在处理该会话的上一轮请求。",
+    "acp_attachment_invalid": "附件无效，请重新添加。",
+    "acp_attachment_unavailable": "无法让外部 Agent 访问该附件，请重新添加。",
+    "runtime_agent_command_stale": "Agent 已不再提供该命令。请重新打开命令面板后重试。",
+    "acp_image_input_unsupported": "这个外部 Agent 无法读取所附图片。",
+    "invalid_chat_runtime": "选择的对话运行时无效。",
+    "queue_invocation_conflict": "这条消息已用不同内容提交过。",
+    "queue_unsupported_session": "讨论会话暂不支持队列操作。",
+    "queue_follow_up_unsupported_channel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。"
   },
   "auth": {
     "welcome": "欢迎回来",
@@ -380,26 +480,24 @@
     "chat": "对话",
     "bots": "Bot",
     "runtimes": "电脑",
-    "providers": "模型服务商",
+    "providers": "服务商",
     "settings": "设置",
     "webSearch": "搜索引擎",
-    "memory": "记忆管理",
     "group": {
-      "capabilities": "模型与能力",
       "team": "团队",
-      "preferences": "偏好"
+      "personal": "个人"
     },
     "network": "网络配置",
     "speech": "语音合成",
     "transcription": "语音转写",
     "voice": "语音",
     "video": "视频",
-    "profile": "个人资料",
+    "profile": "账户",
     "home": "首页",
     "mcp": "MCP",
     "usage": "用量统计",
     "people": "成员",
-    "appearance": "外观定制",
+    "appearance": "外观",
     "keyboard": "快捷键",
     "supermarket": "应用市场",
     "about": "关于",
@@ -437,11 +535,11 @@
       "title": "这台电脑",
       "allow": "允许 Bot 使用这台电脑",
       "description": "打开后需要给这台电脑命名并建立连接，然后才能将它添加给各个 Bot。",
-      "enabledDescription": "{name} 是这台电脑在 Bot 设置、审批和聊天记录中显示的名称。只有添加了它的 Bot 才能访问你主目录下的文件，并以当前用户身份执行命令。",
+      "enabledDescription": "只有你允许的 Bot 才能访问你的主目录，并以你的身份执行命令。",
+      "pausedDescription": "已暂停。Bot 暂时无法使用这台电脑，已授予的访问权会保留。",
       "fallbackName": "Memoh Desktop",
       "dialogTitle": "允许使用这台电脑",
-      "dialogDescription": "给这台电脑起一个固定名称，以后在任何设备上使用 Memoh 时都会显示这个名称。",
-      "nameHelp": "请填写一个在 Bot 设置、审批和聊天记录中都容易辨认的名称。",
+      "dialogDescription": "这个名称会显示在 Bot 设置、审批和聊天记录中。",
       "confirm": "允许使用",
       "loading": "正在读取这台电脑...",
       "loadFailed": "无法读取这台电脑的连接状态",
@@ -454,7 +552,7 @@
         "connecting": "连接中",
         "connected": "可用",
         "disconnected": "正在重连",
-        "stopped": "不可用",
+        "stopped": "已暂停",
         "error": "需要处理"
       }
     },
@@ -481,11 +579,12 @@
     "userProfile": "个人资料",
     "connectedAccounts": {
       "title": "关联账号",
-      "subtitle": "关联你的 IM 账号，即可在聊天里直接管理 Bot。",
+      "subtitle": "关联后，Bot 才能在 IM 里认出你是所有者，你就能在聊天里直接管理它。",
       "connect": "获取关联码",
       "empty": "暂无关联账号",
       "linkAnother": "关联另一个账号",
-      "codeInstruction": "在任意 IM 渠道把它发给你的 Bot",
+      "codeInstruction": "复制这行，在 IM 里发给你的 Bot；关联成功后这里会自动更新。",
+      "linked": "账号已关联",
       "copy": "复制",
       "copied": "已复制",
       "disconnect": "断开",
@@ -626,12 +725,9 @@
         }
       }
     },
-    "langZh": "简体中文",
-    "langEn": "English",
     "version": "当前版本",
     "versionTag": "v{version}",
     "commitHash": "提交记录",
-    "langJa": "日本語",
     "changeEmail": "修改邮箱",
     "emailRequired": "请填写邮箱",
     "emailUpdated": "邮箱已更新",
@@ -716,6 +812,7 @@
     "license": "AGPLv3 · © 2026 MemohAI"
   },
   "chat": {
+    "workspaceLinkUnavailable": "此处无法打开工作区链接，请在有工作区访问权限的 Memoh 对话中打开。",
     "runtimeStatus": {
       "compacting": "正在压缩上下文…",
       "api_retry": "{seconds} 秒后重试（{attempt}/{max_retries}）…"
@@ -1191,6 +1288,7 @@
     "modelOverride": "模型",
     "modelDefault": "默认",
     "reasoningEffort": "推理",
+    "reasoningOn": "开启",
     "reasoningOff": "关闭",
     "reasoningAdaptive": "自适应",
     "reasoningMinimal": "极简",
@@ -1252,6 +1350,7 @@
       "codexAuthTokenMissing": "该 Bot 工作区的 Codex 认证缺失或不完整。",
       "agentAuthInvalid": "外部 Agent 认证无效。请更新 Agent 配置后重试。",
       "noWorkspaceExec": "你没有执行该 Bot 工作区命令的权限。",
+      "accountUnbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
       "runtimeOwnerMissing": "这个外部 Agent 会话没有运行时所有者。请重新开始一个会话。",
       "discussUnsupported": "这个外部 Agent 无法在讨论模式中运行。",
       "groupChatUnsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
@@ -1350,6 +1449,13 @@
     "compactNow": "立即压缩",
     "compactSuccess": "上下文压缩完成",
     "compactingContext": "正在压缩上下文…",
+    "codexUsage": {
+      "warning": "{window}已用 {percent}%，{time}重置",
+      "warningNoReset": "{window}已用 {percent}%",
+      "exhausted": "{window}已用完，{time}重置",
+      "exhaustedNoReset": "{window}已用完",
+      "dismiss": "关闭提示"
+    },
     "compactFailed": "上下文压缩失败",
     "sessionStreaming": "生成中",
     "slash": {
@@ -1588,6 +1694,7 @@
     "emptyTitle": "暂无模型",
     "emptyDescription": "手动添加，或从该服务商导入完整列表。",
     "managedEmptyDescription": "请先完成授权，再刷新托管模型目录。",
+    "draftEmptyDescription": "手动添加，或填写 API 密钥后从该服务商导入完整列表。",
     "clientType": "客户端类型",
     "clientTypePlaceholder": "选择客户端类型",
     "typeRequired": "请选择类型",
@@ -1599,7 +1706,7 @@
     "description": "模型说明",
     "descriptionPlaceholder": "简要说明模型的用途或特点",
     "dimensions": "向量维度",
-    "dimensionsPlaceholder": "例如 1536",
+    "dimensionsPlaceholder": "留空将自动检测",
     "dimensionsMin": "向量维度需大于 0",
     "compatibilities": "兼容性",
     "compatibility": {
@@ -1611,6 +1718,8 @@
     },
     "contextWindow": "上下文窗口",
     "contextWindowPlaceholder": "例如 128000",
+    "reasoningEfforts": "支持的推理强度",
+    "reasoningEffortsPlaceholder": "选择推理强度",
     "contextWindowMin": "上下文窗口需大于 0",
     "testModel": "测试模型",
     "enable": "启用模型",
@@ -1619,6 +1728,7 @@
     "testAuthError": "认证失败",
     "testError": "异常",
     "testFailed": "测试失败",
+    "testModelNotSupported": "服务商无法识别该模型，请检查模型 ID。",
     "importModels": "导入模型",
     "importSuccess": "成功导入 {created} 个模型，跳过 {skipped} 个",
     "importFailed": "导入模型失败",
@@ -1782,36 +1892,13 @@
     }
   },
   "memory": {
-    "title": "记忆提供方",
-    "add": "添加记忆提供方",
-    "empty": "暂无记忆提供方",
-    "provider": "提供方类型",
-    "providerRequired": "请选择提供方类型",
-    "nameRequired": "请填写名称",
-    "searchPlaceholder": "搜索提供方...",
-    "emptyTitle": "暂无记忆提供方",
-    "saveSuccess": "记忆提供方已保存",
-    "deleteSuccess": "记忆提供方已删除",
-    "deleteFailed": "删除记忆提供方失败",
-    "deleteConfirm": "确定要删除该记忆提供方吗？使用它的 Bot 将失去记忆访问。",
-    "name": "名称",
-    "namePlaceholder": "输入提供方名称",
-    "advanced": "高级",
-    "advancedHint": "面向进阶场景的自定义记忆后端。",
+    "builtinTitle": "内置记忆",
+    "saveSuccess": "记忆设置已保存",
     "graphTitle": "记忆图谱",
     "graphNodes": "记忆",
     "graphEdges": "关联",
-    "semanticIndexDescription": "Postgres 部署可用 Embedding 模型和 pgvector 为图谱召回提供语义起点。SQLite 和 Local 保持纯图谱。",
     "semanticEmbeddingModel": "Embedding 模型",
     "semanticEmbeddingModelPlaceholder": "选择 Embedding 模型",
-    "modeNames": {
-      "graph": "图谱"
-    },
-    "providerNames": {
-      "builtin": "内置",
-      "mem0": "Mem0",
-      "openviking": "OpenViking"
-    },
     "graphEmpty": "还没有记忆——添加一些以查看图谱。"
   },
   "network": {
@@ -2174,6 +2261,9 @@
     },
     "title": "Bots",
     "searchPlaceholder": "搜索 Bot…",
+    "notFound": "找不到这个 Bot",
+    "notFoundDescription": "它可能已被删除，或链接有误。",
+    "loadFailed": "无法加载这个 Bot",
     "createBot": "新建 Bot",
     "createBotWaitHint": "首次创建可能需要拉取基础镜像，请耐心等待。",
     "createBotSuccess": "Bot 创建成功。",
@@ -2189,8 +2279,6 @@
       "model": "模型",
       "modelDesc": "选择聊天模型（可选）",
       "agent": "Agent",
-      "memory": "记忆",
-      "memoryDesc": "记忆提供者（可选）",
       "settings": "设置",
       "settingsDesc": "时区等"
     },
@@ -2491,6 +2579,18 @@
       "codexDeviceHint": "打开验证页面并输入这个一次性代码。只在页面显示的 OpenAI 验证地址输入此代码。Memoh 会自动完成授权。",
       "codexLoginSuccess": "Codex 已连接 ChatGPT 账号",
       "codexLoginFailed": "Codex 账号授权失败，请重试",
+      "usage": {
+        "window": {
+          "weekly": "每周额度",
+          "days": "{count} 天额度",
+          "hours": "{count} 小时额度",
+          "minutes": "{count} 分钟额度",
+          "unknown": "额度"
+        },
+        "resets": "{time}重置",
+        "exhausted": "已用完，{time}重置",
+        "exhaustedNoReset": "已用完"
+      },
       "modelsLoadFailed": "无法加载 Agent 模型。请检查 Agent 配置后重试。",
       "openSettings": "打开 Agent 设置",
       "dependencyChecking": "正在检查依赖…",
@@ -2553,6 +2653,7 @@
         "updateTitle": "更新 {name}",
         "updateDescription": "当前 {from}。新版本安装完成后才切换；失败不影响当前版本，成功后可回滚。",
         "installDescription": "将在工作区中下载并安装 {name}。",
+        "prerequisites": "将先安装缺失的前置依赖：{names}。",
         "reinstallDescription": "在工作区中重新下载并安装 {name}。",
         "dependency": "依赖",
         "installPath": "安装位置",
@@ -2650,8 +2751,12 @@
         "directoryTarget": "会话将在 {path} 中工作；目录不存在时会自动创建",
         "browseFailed": "无法加载文件夹",
         "browseRetry": "重试",
+        "browseEmpty": "没有子文件夹",
+        "browseForbidden": "这台电脑不允许读取该文件夹",
+        "browseUnreachable": "无法连接这台电脑，请确认已连接后重试",
         "path": "目录路径",
-        "remotePathHelp": "该电脑上的绝对路径，目录必须已经存在。",
+        "remotePathHelp": "在下方选择文件夹，或输入绝对路径。目录必须已经存在。",
+        "remoteOffline": "{name}未连接。连接后才能在这台电脑上选择文件夹。",
         "remotePathPlaceholder": "/Users/you/code/project"
       }
     },
@@ -2980,11 +3085,9 @@
       "searchProviderPlaceholder": "选择搜索提供方",
       "fetchProvider": "网页抓取提供方",
       "fetchProviderPlaceholder": "选择网页抓取提供方",
-      "memoryProvider": "记忆提供方",
-      "memoryProviderPlaceholder": "选择记忆提供方（为空则禁用）",
-      "memoryModePreview": "当前内置模式：{mode}",
+      "memory": "记忆",
+      "memoryDescription": "使用内置记忆，跨对话记住事实和偏好。",
       "memoryMarkdownFiles": "Markdown 文件数",
-      "memorySourceEntries": "源条目数",
       "memoryGraphEdges": "图谱关联数",
       "memoryIndexedEntries": "索引条目数",
       "ttsModel": "语音合成模型",
@@ -3339,7 +3442,13 @@
         "expired": "二维码已过期",
         "refresh": "刷新二维码",
         "success": "微信连接成功！",
-        "retry": "重试"
+        "retry": "重试",
+        "verifyCodePrompt": "输入手机微信上显示的数字以继续连接",
+        "verifyCodeWrong": "数字不匹配，请重新输入",
+        "verifyCodePlaceholder": "手机上显示的数字",
+        "verifyCodeSubmit": "确认",
+        "verifyCodeBlocked": "多次输入错误，请刷新二维码稍后再试",
+        "alreadyBound": "该微信已连接到此 Bot"
       },
       "types": {
         "feishu": "飞书",
@@ -3394,7 +3503,11 @@
       "ingestSuccess": "已从文件导入 {n} 条记忆",
       "ingestFailed": "从文件导入记忆失败",
       "advanced": {
-        "entryTitle": "索引与同步",
+        "entryTitle": "高级",
+        "memoryModel": "记忆模型",
+        "memoryModelDescription": "用于提取和整理记忆的模型。",
+        "memoryModelPlaceholder": "跟随对话模型（默认）",
+        "embeddingModelDescription": "为图谱召回提供语义起点。本团队所有 Bot 共用此设置。",
         "syncAction": "手动同步",
         "syncSuccess": "同步完成：源条目 {fsCount} 条，修复 {restoredCount} 条，索引现有 {storageCount} 条。",
         "syncFailed": "手动同步失败",
@@ -3506,7 +3619,10 @@
         "pattern": "调度规则",
         "maxCalls": "运行次数限制",
         "enabled": "启用任务",
-        "invalidPattern": "表达式无效"
+        "invalidPattern": "表达式无效",
+        "maxRunMinutes": "单次执行时限（分钟）",
+        "maxRunMinutesHelp": "每次可运行 5 分钟至 24 小时。",
+        "invalidMaxRunMinutes": "请输入 5 至 1440 的整数。"
       },
       "mode": {
         "minutes": "每 N 分钟",
@@ -3611,6 +3727,7 @@
     "discuss": "讨论",
     "acpAgent": "Agent",
     "schedule": "定时任务",
+    "memory": "记忆",
     "inputTokens": "输入 Tokens",
     "outputTokens": "输出 Tokens",
     "dateFrom": "开始日期",
@@ -3623,7 +3740,7 @@
     "colBot": "Bot",
     "colModel": "模型",
     "colProvider": "模型供应商",
-    "colHarness": "Harness",
+    "colHarness": "来源",
     "unknown": "未知",
     "colInputTokens": "输入",
     "colOutputTokens": "输出"
@@ -3657,8 +3774,6 @@
     "information": "信息",
     "category": "分类",
     "registry": "Registry",
-    "allRegistries": "全部",
-    "registryFilter": "按 Registry 筛选",
     "app": "应用",
     "previousPage": "上一页",
     "nextPage": "下一页",
@@ -3684,6 +3799,7 @@
     "revision": "版本修订",
     "installPreview": "安装将会",
     "installPreviewDependency": "缺失时安装到工作区",
+    "installPreviewPrerequisite": "{by} 需要，缺失时先安装",
     "installPreviewConnector": "安装时授权",
     "installPreviewConnectorOptional": "可稍后授权（可选）",
     "viewAll": "查看全部",
@@ -3910,7 +4026,8 @@
       "reason": {
         "shared": "被其他应用使用",
         "image": "随工作区镜像自带",
-        "absent": "未安装"
+        "absent": "未安装",
+        "required": "其他已安装的工具仍需要它"
       }
     },
     "progress": {
@@ -4092,6 +4209,7 @@
       },
       "empty": "暂无记录。",
       "unknown": "暂无数据",
+      "resets": "{time}重置",
       "details": "查看 JSON"
     }
   },

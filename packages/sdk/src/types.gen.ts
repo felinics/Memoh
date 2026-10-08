@@ -256,6 +256,18 @@ export type AdaptersMemoryCompactCapability = {
     semantic?: boolean;
 };
 
+export type AdaptersMemoryConfig = {
+    /**
+     * EmbeddingModelID optionally maintains the pgvector semantic seed index
+     * for graph recall. Empty means graph-only recall.
+     */
+    embedding_model_id?: string;
+};
+
+export type AdaptersMemoryConfigUpdateRequest = {
+    embedding_model_id?: string;
+};
+
 export type AdaptersMemoryItem = {
     agent_id?: string;
     bot_id?: string;
@@ -296,70 +308,6 @@ export type AdaptersMemoryStatusResponse = {
 export type AdaptersMessage = {
     content?: string;
     role?: string;
-};
-
-export type AdaptersProviderCollectionStatus = {
-    exists?: boolean;
-    health?: AdaptersHealthStatus;
-    name?: string;
-    points?: number;
-};
-
-export type AdaptersProviderConfigSchema = {
-    fields?: {
-        [key: string]: AdaptersProviderFieldSchema;
-    };
-};
-
-export type AdaptersProviderCreateRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
-    provider?: AdaptersProviderType;
-};
-
-export type AdaptersProviderFieldSchema = {
-    description?: string;
-    example?: unknown;
-    required?: boolean;
-    secret?: boolean;
-    title?: string;
-    type?: string;
-};
-
-export type AdaptersProviderGetResponse = {
-    config?: {
-        [key: string]: unknown;
-    };
-    created_at?: string;
-    id?: string;
-    is_default?: boolean;
-    name?: string;
-    provider?: string;
-    updated_at?: string;
-};
-
-export type AdaptersProviderMeta = {
-    config_schema?: AdaptersProviderConfigSchema;
-    display_name?: string;
-    provider?: string;
-};
-
-export type AdaptersProviderStatusResponse = {
-    collections?: Array<AdaptersProviderCollectionStatus>;
-    embedding_model_id?: string;
-    memory_mode?: string;
-    provider_type?: string;
-};
-
-export type AdaptersProviderType = 'builtin' | 'mem0' | 'openviking';
-
-export type AdaptersProviderUpdateRequest = {
-    config?: {
-        [key: string]: unknown;
-    };
-    name?: string;
 };
 
 export type AdaptersRebuildResult = {
@@ -425,8 +373,10 @@ export type ApperrorProblem = {
     };
     code: string;
     detail: string;
+    fault: string;
     request_id?: string;
     status: number;
+    trace_id?: string;
     type: string;
 };
 
@@ -1621,6 +1571,20 @@ export type ExternalagentCodexDeviceLoginPollResponse = {
     status: 'pending' | 'success' | 'error' | 'unknown';
 };
 
+export type ExternalagentCodexUsageResponse = {
+    limit_reached: boolean;
+    windows: Array<ExternalagentCodexUsageWindow>;
+};
+
+export type ExternalagentCodexUsageWindow = {
+    resets_at?: string;
+    used_percent: number;
+    /**
+     * WindowMinutes is 0 when the backend does not report the window length.
+     */
+    window_minutes: number;
+};
+
 export type FetchprovidersCreateRequest = {
     config?: {
         [key: string]: unknown;
@@ -1804,7 +1768,7 @@ export type HandlersAppRemovalPreviewConnector = {
 export type HandlersAppRemovalPreviewDependency = {
     action?: 'remove' | 'keep';
     id?: string;
-    reason?: 'shared' | 'image' | 'absent';
+    reason?: 'shared' | 'image' | 'absent' | 'required';
 };
 
 export type HandlersAppRemovalPreviewResponse = {
@@ -1888,11 +1852,6 @@ export type HandlersChannelMeta = {
     user_config_schema?: ChannelConfigSchema;
 };
 
-export type HandlersCommandActionError = {
-    code?: string;
-    message?: string;
-};
-
 export type HandlersCommandActionListItem = {
     description?: string;
     i18n_key?: string;
@@ -1913,9 +1872,13 @@ export type HandlersCommandActionResult = {
 
 export type HandlersCommandEventResponse = {
     action_id?: string;
+    /**
+     * Code and Message describe a command_error; the client renders the code.
+     */
+    code?: string;
     composer_scope?: string;
-    error?: HandlersCommandActionError;
     invocation_id?: string;
+    message?: string;
     result?: HandlersCommandActionResult;
     session_id?: string;
     terminal?: boolean;
@@ -2100,17 +2063,6 @@ export type HandlersDailyTokenUsage = {
     reasoning_tokens?: number;
 };
 
-export type HandlersErrorResponse = {
-    args?: {
-        [key: string]: string;
-    };
-    code?: string;
-    http_status?: number;
-    i18n_key?: string;
-    message?: string;
-    reason?: string;
-};
-
 export type HandlersFsArchiveRequest = {
     paths?: Array<string>;
 };
@@ -2146,6 +2098,10 @@ export type HandlersFsListResponse = {
 
 export type HandlersFsMkdirRequest = {
     path?: string;
+    /**
+     * WorkspaceTargetID overrides the Bot's Primary target for this request.
+     */
+    workspace_target_id?: string;
 };
 
 export type HandlersFsReadResponse = {
@@ -2373,6 +2329,13 @@ export type HandlersSessionInfoResponse = {
     context_usage?: HandlersContextUsage;
     message_count?: number;
     skills?: Array<string>;
+};
+
+export type HandlersSiteIconResponse = {
+    dark?: string;
+    dark_mask?: string;
+    light?: string;
+    light_mask?: string;
 };
 
 export type HandlersSkillItem = {
@@ -2644,6 +2607,11 @@ export type HandlersTokenUsageResponse = {
     by_model?: Array<HandlersModelTokenUsage>;
     chat?: Array<HandlersDailyTokenUsage>;
     discuss?: Array<HandlersDailyTokenUsage>;
+    /**
+     * Memory is usage of the memory LLM (extract / decide / compact), which
+     * runs outside any session.
+     */
+    memory?: Array<HandlersDailyTokenUsage>;
     schedule?: Array<HandlersDailyTokenUsage>;
 };
 
@@ -2698,6 +2666,10 @@ export type HandlersWorkspaceDependencyCatalogItem = {
     icon_url?: string;
     id?: string;
     name?: string;
+    /**
+     * Requires lists the dependency IDs installed first when missing.
+     */
+    requires?: Array<string>;
     translations?: {
         [key: string]: HandlersWorkspaceDependencyTranslation;
     };
@@ -2710,6 +2682,17 @@ export type HandlersWorkspaceDependencyCatalogResponse = {
 
 export type HandlersWorkspaceDependencyInstallRequest = {
     definition_revision?: string;
+    /**
+     * PrerequisiteRevisions are the definition revisions the confirmation
+     * showed for the dependency's prerequisites, keyed by dependency id. When
+     * present, a missing prerequisite installs only from its confirmed
+     * revision; one without an entry refuses the operation with
+     * workspace_dependency.prerequisites_changed. Omitted, prerequisites
+     * resolve when the operation starts, like an omitted definition_revision.
+     */
+    prerequisite_revisions?: {
+        [key: string]: string;
+    };
     /**
      * SessionID optionally routes operation progress to its originating conversation.
      */
@@ -2782,6 +2765,10 @@ export type HandlersWorkspaceDependencyItem = {
      */
     provides?: Array<string>;
     registry_id?: string;
+    /**
+     * Requires lists the dependency IDs installed first when missing.
+     */
+    requires?: Array<string>;
     retired?: boolean;
     /**
      * Source is image for dependencies shipped with the workspace image and
@@ -2897,6 +2884,11 @@ export type HandlersWorkspaceDependencyTranslation = {
 
 export type HandlersAcpRuntimeCreateRequest = {
     acp_agent_id?: string;
+    /**
+     * BotAgentID names the Agent instance whose setup launches the runtime;
+     * only a session bound to the same instance can later adopt it.
+     */
+    bot_agent_id?: string;
     project_path?: string;
 };
 
@@ -3133,6 +3125,25 @@ export type HandlersOauthDiscoverRequest = {
 export type HandlersOauthExchangeRequest = {
     code?: string;
     state?: string;
+};
+
+export type HandlersSessionInvocationResponse = {
+    /**
+     * Found is false when the session has no run for this invocation, which
+     * is an ordinary answer (never admitted, or not yet) rather than an error.
+     */
+    found?: boolean;
+    invocation_id?: string;
+    run_id?: string;
+    session_id?: string;
+    /**
+     * State is the durable run state as the ledger records it, e.g.
+     * accepted, running, waiting_decision, finishing, completed, aborted,
+     * failed or lost.
+     */
+    state?: string;
+    turn_id?: string;
+    turn_position?: number;
 };
 
 export type HandlersSessionQueueResponse = {
@@ -3423,8 +3434,12 @@ export type ModelsModelConfig = {
 export type ModelsModelType = 'chat' | 'embedding' | 'speech' | 'transcription' | 'video';
 
 export type ModelsTestResponse = {
+    /**
+     * Code is the error catalog code for why the test did not pass. It is
+     * empty on success and when no catalog code describes the failure.
+     */
+    code?: string;
     latency_ms?: number;
-    message?: string;
     reachable?: boolean;
     status?: ModelsTestStatus;
 };
@@ -3531,8 +3546,12 @@ export type ProvidersOAuthStatus = {
 };
 
 export type ProvidersTestResponse = {
+    /**
+     * Code is the error catalog code for why the test did not pass. It is
+     * empty on success and when no catalog code describes the failure.
+     */
+    code?: string;
     latency_ms?: number;
-    message?: string;
     reachable?: boolean;
     status?: ProvidersTestStatus;
 };
@@ -3638,6 +3657,10 @@ export type ScheduleCreateRequest = {
     enabled?: boolean;
     max_calls?: ScheduleNullableInt;
     /**
+     * MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.
+     */
+    max_run_seconds?: number;
+    /**
      * ModelID is a native model UUID override (models.id).
      */
     model_id?: string;
@@ -3683,6 +3706,10 @@ export type ScheduleExecutionConfig = {
      * the built-in Native runtime (or the legacy ACP fields below).
      */
     bot_agent_id?: string;
+    /**
+     * MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.
+     */
+    max_run_seconds?: number;
     /**
      * ModelID is a native model UUID override (models.id).
      */
@@ -3762,6 +3789,10 @@ export type ScheduleSchedule = {
     enabled?: boolean;
     id?: string;
     max_calls?: number;
+    /**
+     * MaxRunSeconds is the execution budget (300-86400 seconds); zero uses one hour.
+     */
+    max_run_seconds?: number;
     /**
      * ModelID is a native model UUID override (models.id).
      */
@@ -3925,7 +3956,16 @@ export type SettingsSettings = {
     display_enabled?: boolean;
     fetch_provider_id?: string;
     image_model_id?: string;
-    memory_provider_id?: string;
+    /**
+     * MemoryEnabled reports whether the bot uses Built-in Memory. It is derived
+     * from MemoryProviderID, which stays internal to the server.
+     */
+    memory_enabled?: boolean;
+    /**
+     * MemoryLLMModelID is the LLM behind memory extract / decide / compact.
+     * Empty falls back to the chat model.
+     */
+    memory_llm_model_id?: string;
     overlay_config?: {
         [key: string]: unknown;
     };
@@ -3993,7 +4033,11 @@ export type SettingsUpsertRequest = {
     display_enabled?: boolean;
     fetch_provider_id?: string;
     image_model_id?: string;
-    memory_provider_id?: string;
+    /**
+     * MemoryEnabled turns Built-in Memory on or off; nil keeps the current state.
+     */
+    memory_enabled?: boolean;
+    memory_llm_model_id?: string;
     overlay_config?: {
         [key: string]: unknown;
     };
@@ -4204,6 +4248,17 @@ export type WorkdirCreateRequest = {
     name: string;
     path: string;
     workspace_target_id?: string;
+};
+
+export type WorkdirDirectoriesResponse = {
+    directories?: Array<WorkdirDirectory>;
+    path?: string;
+    workspace_target_id?: string;
+};
+
+export type WorkdirDirectory = {
+    name?: string;
+    path?: string;
 };
 
 export type WorkdirGitBranchResponse = {
@@ -4513,15 +4568,15 @@ export type PostAuthLoginErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Unauthorized
      */
-    401: HandlersErrorResponse;
+    401: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostAuthLoginError = PostAuthLoginErrors[keyof PostAuthLoginErrors];
@@ -4546,11 +4601,11 @@ export type PostAuthRefreshErrors = {
     /**
      * Unauthorized
      */
-    401: HandlersErrorResponse;
+    401: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostAuthRefreshError = PostAuthRefreshErrors[keyof PostAuthRefreshErrors];
@@ -4580,15 +4635,15 @@ export type GetBotsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsError = GetBotsErrors[keyof GetBotsErrors];
@@ -4607,6 +4662,12 @@ export type PostBotsData = {
      * Bot payload
      */
     body: BotsCreateBotRequest;
+    headers?: {
+        /**
+         * Client-generated key for one logical create. A resend with the same key is answered with the bot the first attempt created instead of a second one.
+         */
+        'Idempotency-Key'?: string;
+    };
     path?: never;
     query?: never;
     url: '/bots';
@@ -4616,11 +4677,11 @@ export type PostBotsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Conflict
      */
@@ -4628,7 +4689,7 @@ export type PostBotsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsError = PostBotsErrors[keyof PostBotsErrors];
@@ -4674,15 +4735,15 @@ export type PostBotsBackupImportErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsBackupImportError = PostBotsBackupImportErrors[keyof PostBotsBackupImportErrors];
@@ -4728,11 +4789,11 @@ export type PostBotsBackupImportPreviewErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsBackupImportPreviewError = PostBotsBackupImportPreviewErrors[keyof PostBotsBackupImportPreviewErrors];
@@ -4766,11 +4827,11 @@ export type GetBotsNameAvailabilityErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsNameAvailabilityError = GetBotsNameAvailabilityErrors[keyof GetBotsNameAvailabilityErrors];
@@ -4804,11 +4865,11 @@ export type GetBotsUserAccessCandidatesErrors = {
     /**
      * Unauthorized
      */
-    401: HandlersErrorResponse;
+    401: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsUserAccessCandidatesError = GetBotsUserAccessCandidatesErrors[keyof GetBotsUserAccessCandidatesErrors];
@@ -4847,15 +4908,15 @@ export type GetBotsByBotIdAclChannelIdentitiesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdAclChannelIdentitiesError = GetBotsByBotIdAclChannelIdentitiesErrors[keyof GetBotsByBotIdAclChannelIdentitiesErrors];
@@ -4889,15 +4950,15 @@ export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsEr
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsError = GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsErrors[keyof GetBotsByBotIdAclChannelIdentitiesByChannelIdentityIdConversationsErrors];
@@ -4931,15 +4992,15 @@ export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdAclChannelTypesByChannelTypeConversationsError = GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors[keyof GetBotsByBotIdAclChannelTypesByChannelTypeConversationsErrors];
@@ -4969,15 +5030,15 @@ export type GetBotsByBotIdAclDefaultEffectErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdAclDefaultEffectError = GetBotsByBotIdAclDefaultEffectErrors[keyof GetBotsByBotIdAclDefaultEffectErrors];
@@ -5010,15 +5071,15 @@ export type PutBotsByBotIdAclDefaultEffectErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByBotIdAclDefaultEffectError = PutBotsByBotIdAclDefaultEffectErrors[keyof PutBotsByBotIdAclDefaultEffectErrors];
@@ -5046,15 +5107,15 @@ export type GetBotsByBotIdAclRulesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdAclRulesError = GetBotsByBotIdAclRulesErrors[keyof GetBotsByBotIdAclRulesErrors];
@@ -5087,15 +5148,15 @@ export type PostBotsByBotIdAclRulesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdAclRulesError = PostBotsByBotIdAclRulesErrors[keyof PostBotsByBotIdAclRulesErrors];
@@ -5129,15 +5190,15 @@ export type DeleteBotsByBotIdAclRulesByRuleIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdAclRulesByRuleIdError = DeleteBotsByBotIdAclRulesByRuleIdErrors[keyof DeleteBotsByBotIdAclRulesByRuleIdErrors];
@@ -5172,15 +5233,15 @@ export type PutBotsByBotIdAclRulesByRuleIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByBotIdAclRulesByRuleIdError = PutBotsByBotIdAclRulesByRuleIdErrors[keyof PutBotsByBotIdAclRulesByRuleIdErrors];
@@ -5532,7 +5593,7 @@ export type GetBotsByBotIdAgentsErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
 };
 
 export type GetBotsByBotIdAgentsError = GetBotsByBotIdAgentsErrors[keyof GetBotsByBotIdAgentsErrors];
@@ -5569,7 +5630,7 @@ export type PostBotsByBotIdAgentsErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Conflict
      */
@@ -5607,7 +5668,7 @@ export type DeleteBotsByBotIdAgentsByIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -5647,7 +5708,7 @@ export type GetBotsByBotIdAgentsByIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -5692,7 +5753,7 @@ export type PatchBotsByBotIdAgentsByIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -5734,11 +5795,11 @@ export type PostBotsByBotIdAgentsByIdCodexLoginDeviceAuthorizeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -5779,11 +5840,11 @@ export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
 };
 
 export type PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelError = PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDeviceCancelErrors];
@@ -5818,11 +5879,11 @@ export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
 };
 
 export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollError = PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors[keyof PostBotsByBotIdAgentsByIdCodexLoginDevicePollErrors];
@@ -5835,6 +5896,56 @@ export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses = {
 };
 
 export type PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponse = PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses[keyof PostBotsByBotIdAgentsByIdCodexLoginDevicePollResponses];
+
+export type GetBotsByBotIdAgentsByIdCodexUsageData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Bot Agent ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/agents/{id}/codex/usage';
+};
+
+export type GetBotsByBotIdAgentsByIdCodexUsageErrors = {
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Unprocessable Entity
+     */
+    422: ApperrorProblem;
+    /**
+     * Bad Gateway
+     */
+    502: ApperrorProblem;
+};
+
+export type GetBotsByBotIdAgentsByIdCodexUsageError = GetBotsByBotIdAgentsByIdCodexUsageErrors[keyof GetBotsByBotIdAgentsByIdCodexUsageErrors];
+
+export type GetBotsByBotIdAgentsByIdCodexUsageResponses = {
+    /**
+     * OK
+     */
+    200: ExternalagentCodexUsageResponse;
+};
+
+export type GetBotsByBotIdAgentsByIdCodexUsageResponse = GetBotsByBotIdAgentsByIdCodexUsageResponses[keyof GetBotsByBotIdAgentsByIdCodexUsageResponses];
 
 export type DeleteBotsByBotIdAgentsByIdCredentialData = {
     body?: never;
@@ -6037,7 +6148,7 @@ export type GetBotsByBotIdAgentsByIdModelsErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6122,15 +6233,15 @@ export type GetBotsByBotIdAppsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
@@ -6175,7 +6286,7 @@ export type PostBotsByBotIdAppsErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6213,7 +6324,7 @@ export type PostBotsByBotIdAppsCheckUpdatesErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
@@ -6258,7 +6369,7 @@ export type PostBotsByBotIdAppsUpdateErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6305,7 +6416,7 @@ export type DeleteBotsByBotIdAppsByInstallationIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6343,7 +6454,7 @@ export type GetBotsByBotIdAppsByInstallationIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6396,7 +6507,7 @@ export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeApiKeyEr
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6453,7 +6564,7 @@ export type PostBotsByBotIdAppsByInstallationIdConnectorsByConnectorTypeOauthErr
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6499,7 +6610,7 @@ export type GetBotsByBotIdAppsByInstallationIdRemovalPreviewErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6541,7 +6652,7 @@ export type PostBotsByBotIdAppsByInstallationIdResumeErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6578,15 +6689,15 @@ export type PostBotsByBotIdBackupExportErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdBackupExportError = PostBotsByBotIdBackupExportErrors[keyof PostBotsByBotIdBackupExportErrors];
@@ -6614,11 +6725,11 @@ export type GetBotsByBotIdBackupSummaryErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdBackupSummaryError = GetBotsByBotIdBackupSummaryErrors[keyof GetBotsByBotIdBackupSummaryErrors];
@@ -6648,15 +6759,15 @@ export type GetBotsByBotIdChannelManagersErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdChannelManagersError = GetBotsByBotIdChannelManagersErrors[keyof GetBotsByBotIdChannelManagersErrors];
@@ -6689,15 +6800,15 @@ export type PostBotsByBotIdChannelManagersErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdChannelManagersError = PostBotsByBotIdChannelManagersErrors[keyof PostBotsByBotIdChannelManagersErrors];
@@ -6729,15 +6840,15 @@ export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdChannelManagersByChannelIdentityIdError = DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors[keyof DeleteBotsByBotIdChannelManagersByChannelIdentityIdErrors];
@@ -6765,11 +6876,11 @@ export type DeleteBotsByBotIdCompactionLogsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdCompactionLogsError = DeleteBotsByBotIdCompactionLogsErrors[keyof DeleteBotsByBotIdCompactionLogsErrors];
@@ -6806,11 +6917,11 @@ export type GetBotsByBotIdCompactionLogsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdCompactionLogsError = GetBotsByBotIdCompactionLogsErrors[keyof GetBotsByBotIdCompactionLogsErrors];
@@ -6840,7 +6951,7 @@ export type GetBotsByBotIdConnectorsErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6894,7 +7005,7 @@ export type DeleteBotsByBotIdConnectorsByConnectionIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -6950,7 +7061,7 @@ export type GetBotsByBotIdConnectorsByConnectionIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -7007,7 +7118,7 @@ export type PatchBotsByBotIdConnectorsByConnectionIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -7059,7 +7170,7 @@ export type PostBotsByBotIdConnectorsByConnectionIdReauthErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -7114,11 +7225,11 @@ export type DeleteBotsByBotIdContainerErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdContainerError = DeleteBotsByBotIdContainerErrors[keyof DeleteBotsByBotIdContainerErrors];
@@ -7146,11 +7257,11 @@ export type GetBotsByBotIdContainerErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerError = GetBotsByBotIdContainerErrors[keyof GetBotsByBotIdContainerErrors];
@@ -7183,11 +7294,11 @@ export type PostBotsByBotIdContainerErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerError = PostBotsByBotIdContainerErrors[keyof PostBotsByBotIdContainerErrors];
@@ -7220,19 +7331,19 @@ export type PostBotsByBotIdContainerBrowserSessionsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Unauthorized
      */
-    401: HandlersErrorResponse;
+    401: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerBrowserSessionsError = PostBotsByBotIdContainerBrowserSessionsErrors[keyof PostBotsByBotIdContainerBrowserSessionsErrors];
@@ -7266,11 +7377,11 @@ export type DeleteBotsByBotIdContainerBrowserSessionsBySessionIdErrors = {
     /**
      * Unauthorized
      */
-    401: HandlersErrorResponse;
+    401: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdContainerBrowserSessionsBySessionIdError = DeleteBotsByBotIdContainerBrowserSessionsBySessionIdErrors[keyof DeleteBotsByBotIdContainerBrowserSessionsBySessionIdErrors];
@@ -7302,15 +7413,15 @@ export type PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveErrors = 
     /**
      * Unauthorized
      */
-    401: HandlersErrorResponse;
+    401: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveError = PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveErrors[keyof PostBotsByBotIdContainerBrowserSessionsBySessionIdKeepaliveErrors];
@@ -7340,11 +7451,11 @@ export type PostBotsByBotIdContainerDataRestoreErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerDataRestoreError = PostBotsByBotIdContainerDataRestoreErrors[keyof PostBotsByBotIdContainerDataRestoreErrors];
@@ -7376,7 +7487,7 @@ export type GetBotsByBotIdContainerDisplayErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerDisplayError = GetBotsByBotIdContainerDisplayErrors[keyof GetBotsByBotIdContainerDisplayErrors];
@@ -7406,7 +7517,7 @@ export type PostBotsByBotIdContainerDisplayPrepareErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerDisplayPrepareError = PostBotsByBotIdContainerDisplayPrepareErrors[keyof PostBotsByBotIdContainerDisplayPrepareErrors];
@@ -7436,7 +7547,7 @@ export type GetBotsByBotIdContainerDisplaySessionsErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerDisplaySessionsError = GetBotsByBotIdContainerDisplaySessionsErrors[keyof GetBotsByBotIdContainerDisplaySessionsErrors];
@@ -7470,7 +7581,7 @@ export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdContainerDisplaySessionsBySessionIdError = DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors[keyof DeleteBotsByBotIdContainerDisplaySessionsBySessionIdErrors];
@@ -7501,11 +7612,11 @@ export type PostBotsByBotIdContainerDisplayWebrtcOfferErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerDisplayWebrtcOfferError = PostBotsByBotIdContainerDisplayWebrtcOfferErrors[keyof PostBotsByBotIdContainerDisplayWebrtcOfferErrors];
@@ -7540,19 +7651,19 @@ export type GetBotsByBotIdContainerFsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7589,19 +7700,19 @@ export type PostBotsByBotIdContainerFsArchiveErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7636,19 +7747,19 @@ export type PostBotsByBotIdContainerFsDeleteErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7687,15 +7798,15 @@ export type GetBotsByBotIdContainerFsDownloadErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7730,23 +7841,23 @@ export type PostBotsByBotIdContainerFsExtractErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7785,15 +7896,15 @@ export type GetBotsByBotIdContainerFsListErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7830,15 +7941,19 @@ export type PostBotsByBotIdContainerFsMkdirErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7877,15 +7992,15 @@ export type GetBotsByBotIdContainerFsReadErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7922,19 +8037,19 @@ export type PostBotsByBotIdContainerFsRenameErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -7977,15 +8092,15 @@ export type PostBotsByBotIdContainerFsUploadErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -8022,15 +8137,15 @@ export type PostBotsByBotIdContainerFsWriteErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -8064,7 +8179,7 @@ export type GetBotsByBotIdContainerMetricsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerMetricsError = GetBotsByBotIdContainerMetricsErrors[keyof GetBotsByBotIdContainerMetricsErrors];
@@ -8097,11 +8212,11 @@ export type PutBotsByBotIdContainerMetricsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByBotIdContainerMetricsError = PutBotsByBotIdContainerMetricsErrors[keyof PutBotsByBotIdContainerMetricsErrors];
@@ -8134,11 +8249,11 @@ export type DeleteBotsByBotIdContainerSkillsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
@@ -8146,7 +8261,7 @@ export type DeleteBotsByBotIdContainerSkillsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -8185,19 +8300,19 @@ export type GetBotsByBotIdContainerSkillsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerSkillsError = GetBotsByBotIdContainerSkillsErrors[keyof GetBotsByBotIdContainerSkillsErrors];
@@ -8230,11 +8345,11 @@ export type PostBotsByBotIdContainerSkillsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
@@ -8279,11 +8394,11 @@ export type PostBotsByBotIdContainerSkillsActionsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
@@ -8291,7 +8406,7 @@ export type PostBotsByBotIdContainerSkillsActionsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -8330,7 +8445,7 @@ export type GetBotsByBotIdContainerSnapshotsErrors = {
     /**
      * Snapshots currently not supported on this backend
      */
-    501: HandlersErrorResponse;
+    501: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerSnapshotsError = GetBotsByBotIdContainerSnapshotsErrors[keyof GetBotsByBotIdContainerSnapshotsErrors];
@@ -8363,15 +8478,15 @@ export type PostBotsByBotIdContainerSnapshotsErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Snapshots currently not supported on this backend
      */
-    501: HandlersErrorResponse;
+    501: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerSnapshotsError = PostBotsByBotIdContainerSnapshotsErrors[keyof PostBotsByBotIdContainerSnapshotsErrors];
@@ -8404,11 +8519,11 @@ export type PostBotsByBotIdContainerSnapshotsRollbackErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerSnapshotsRollbackError = PostBotsByBotIdContainerSnapshotsRollbackErrors[keyof PostBotsByBotIdContainerSnapshotsRollbackErrors];
@@ -8440,11 +8555,11 @@ export type PostBotsByBotIdContainerStartErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerStartError = PostBotsByBotIdContainerStartErrors[keyof PostBotsByBotIdContainerStartErrors];
@@ -8476,11 +8591,11 @@ export type PostBotsByBotIdContainerStopErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdContainerStopError = PostBotsByBotIdContainerStopErrors[keyof PostBotsByBotIdContainerStopErrors];
@@ -8512,7 +8627,7 @@ export type GetBotsByBotIdContainerTerminalErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerTerminalError = GetBotsByBotIdContainerTerminalErrors[keyof GetBotsByBotIdContainerTerminalErrors];
@@ -8555,11 +8670,11 @@ export type GetBotsByBotIdContainerTerminalWsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdContainerTerminalWsError = GetBotsByBotIdContainerTerminalWsErrors[keyof GetBotsByBotIdContainerTerminalWsErrors];
@@ -8585,15 +8700,15 @@ export type GetBotsByBotIdDependenciesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
@@ -8631,15 +8746,15 @@ export type PostBotsByBotIdDependenciesCheckUpdatesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
@@ -8684,11 +8799,11 @@ export type PostBotsByBotIdDependenciesPreflightErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
@@ -8737,7 +8852,7 @@ export type PostBotsByBotIdDependenciesByDepIdInstallErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -8790,7 +8905,7 @@ export type PostBotsByBotIdDependenciesByDepIdReinstallErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -8840,7 +8955,7 @@ export type PostBotsByBotIdDependenciesByDepIdRollbackErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -8907,7 +9022,7 @@ export type GetBotsByBotIdDependenciesByDepIdScriptErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -8960,7 +9075,7 @@ export type PostBotsByBotIdDependenciesByDepIdUpdateErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
@@ -9002,15 +9117,15 @@ export type GetBotsByBotIdHooksEventsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdHooksEventsError = GetBotsByBotIdHooksEventsErrors[keyof GetBotsByBotIdHooksEventsErrors];
@@ -9043,15 +9158,15 @@ export type PostBotsByBotIdHooksTestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdHooksTestError = PostBotsByBotIdHooksTestErrors[keyof PostBotsByBotIdHooksTestErrors];
@@ -9076,19 +9191,19 @@ export type GetBotsByBotIdMcpErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMcpError = GetBotsByBotIdMcpErrors[keyof GetBotsByBotIdMcpErrors];
@@ -9116,19 +9231,19 @@ export type PostBotsByBotIdMcpErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMcpError = PostBotsByBotIdMcpErrors[keyof PostBotsByBotIdMcpErrors];
@@ -9156,15 +9271,15 @@ export type PostBotsByBotIdMcpOpsBatchDeleteErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMcpOpsBatchDeleteError = PostBotsByBotIdMcpOpsBatchDeleteErrors[keyof PostBotsByBotIdMcpOpsBatchDeleteErrors];
@@ -9187,15 +9302,15 @@ export type GetBotsByBotIdMcpOpsExportErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMcpOpsExportError = GetBotsByBotIdMcpOpsExportErrors[keyof GetBotsByBotIdMcpOpsExportErrors];
@@ -9223,15 +9338,15 @@ export type PutBotsByBotIdMcpOpsImportErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByBotIdMcpOpsImportError = PutBotsByBotIdMcpOpsImportErrors[keyof PutBotsByBotIdMcpOpsImportErrors];
@@ -9264,15 +9379,15 @@ export type PostBotsByBotIdMcpStdioErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMcpStdioError = PostBotsByBotIdMcpStdioErrors[keyof PostBotsByBotIdMcpStdioErrors];
@@ -9311,15 +9426,15 @@ export type PostBotsByBotIdMcpStdioByConnectionIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMcpStdioByConnectionIdError = PostBotsByBotIdMcpStdioByConnectionIdErrors[keyof PostBotsByBotIdMcpStdioByConnectionIdErrors];
@@ -9351,19 +9466,19 @@ export type DeleteBotsByBotIdMcpByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdMcpByIdError = DeleteBotsByBotIdMcpByIdErrors[keyof DeleteBotsByBotIdMcpByIdErrors];
@@ -9391,19 +9506,19 @@ export type GetBotsByBotIdMcpByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMcpByIdError = GetBotsByBotIdMcpByIdErrors[keyof GetBotsByBotIdMcpByIdErrors];
@@ -9436,19 +9551,19 @@ export type PutBotsByBotIdMcpByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByBotIdMcpByIdError = PutBotsByBotIdMcpByIdErrors[keyof PutBotsByBotIdMcpByIdErrors];
@@ -9481,11 +9596,11 @@ export type PostBotsByBotIdMcpByIdOauthAuthorizeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMcpByIdOauthAuthorizeError = PostBotsByBotIdMcpByIdOauthAuthorizeErrors[keyof PostBotsByBotIdMcpByIdOauthAuthorizeErrors];
@@ -9518,11 +9633,11 @@ export type PostBotsByBotIdMcpByIdOauthDiscoverErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMcpByIdOauthDiscoverError = PostBotsByBotIdMcpByIdOauthDiscoverErrors[keyof PostBotsByBotIdMcpByIdOauthDiscoverErrors];
@@ -9550,7 +9665,7 @@ export type PostBotsByBotIdMcpByIdOauthExchangeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMcpByIdOauthExchangeError = PostBotsByBotIdMcpByIdOauthExchangeErrors[keyof PostBotsByBotIdMcpByIdOauthExchangeErrors];
@@ -9582,11 +9697,11 @@ export type GetBotsByBotIdMcpByIdOauthStatusErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMcpByIdOauthStatusError = GetBotsByBotIdMcpByIdOauthStatusErrors[keyof GetBotsByBotIdMcpByIdOauthStatusErrors];
@@ -9616,7 +9731,7 @@ export type DeleteBotsByBotIdMcpByIdOauthTokenErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdMcpByIdOauthTokenError = DeleteBotsByBotIdMcpByIdOauthTokenErrors[keyof DeleteBotsByBotIdMcpByIdOauthTokenErrors];
@@ -9644,19 +9759,19 @@ export type PostBotsByBotIdMcpByIdProbeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMcpByIdProbeError = PostBotsByBotIdMcpByIdProbeErrors[keyof PostBotsByBotIdMcpByIdProbeErrors];
@@ -9689,19 +9804,19 @@ export type DeleteBotsByBotIdMemoryErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdMemoryError = DeleteBotsByBotIdMemoryErrors[keyof DeleteBotsByBotIdMemoryErrors];
@@ -9736,19 +9851,19 @@ export type GetBotsByBotIdMemoryErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMemoryError = GetBotsByBotIdMemoryErrors[keyof GetBotsByBotIdMemoryErrors];
@@ -9781,19 +9896,19 @@ export type PostBotsByBotIdMemoryErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMemoryError = PostBotsByBotIdMemoryErrors[keyof PostBotsByBotIdMemoryErrors];
@@ -9826,23 +9941,23 @@ export type PostBotsByBotIdMemoryCompactErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Not Implemented
      */
-    501: HandlersErrorResponse;
+    501: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMemoryCompactError = PostBotsByBotIdMemoryCompactErrors[keyof PostBotsByBotIdMemoryCompactErrors];
@@ -9872,15 +9987,15 @@ export type GetBotsByBotIdMemoryGraphErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMemoryGraphError = GetBotsByBotIdMemoryGraphErrors[keyof GetBotsByBotIdMemoryGraphErrors];
@@ -9910,23 +10025,23 @@ export type PostBotsByBotIdMemoryIngestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMemoryIngestError = PostBotsByBotIdMemoryIngestErrors[keyof PostBotsByBotIdMemoryIngestErrors];
@@ -9956,23 +10071,23 @@ export type PostBotsByBotIdMemoryRebuildErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMemoryRebuildError = PostBotsByBotIdMemoryRebuildErrors[keyof PostBotsByBotIdMemoryRebuildErrors];
@@ -10005,23 +10120,23 @@ export type PostBotsByBotIdMemorySearchErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type PostBotsByBotIdMemorySearchError = PostBotsByBotIdMemorySearchErrors[keyof PostBotsByBotIdMemorySearchErrors];
@@ -10051,23 +10166,23 @@ export type GetBotsByBotIdMemoryStatusErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMemoryStatusError = GetBotsByBotIdMemoryStatusErrors[keyof GetBotsByBotIdMemoryStatusErrors];
@@ -10097,19 +10212,19 @@ export type GetBotsByBotIdMemoryUsageErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMemoryUsageError = GetBotsByBotIdMemoryUsageErrors[keyof GetBotsByBotIdMemoryUsageErrors];
@@ -10143,19 +10258,19 @@ export type DeleteBotsByBotIdMemoryByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdMemoryByIdError = DeleteBotsByBotIdMemoryByIdErrors[keyof DeleteBotsByBotIdMemoryByIdErrors];
@@ -10192,19 +10307,19 @@ export type PutBotsByBotIdMemoryByMemoryIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
-    503: HandlersErrorResponse;
+    503: ApperrorProblem;
 };
 
 export type PutBotsByBotIdMemoryByMemoryIdError = PutBotsByBotIdMemoryByMemoryIdErrors[keyof PutBotsByBotIdMemoryByMemoryIdErrors];
@@ -10234,15 +10349,15 @@ export type DeleteBotsByBotIdMessagesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdMessagesError = DeleteBotsByBotIdMessagesErrors[keyof DeleteBotsByBotIdMessagesErrors];
@@ -10287,19 +10402,19 @@ export type GetBotsByBotIdMessagesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMessagesError = GetBotsByBotIdMessagesErrors[keyof GetBotsByBotIdMessagesErrors];
@@ -10346,19 +10461,19 @@ export type GetBotsByBotIdMessagesLocateErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdMessagesLocateError = GetBotsByBotIdMessagesLocateErrors[keyof GetBotsByBotIdMessagesLocateErrors];
@@ -10391,15 +10506,15 @@ export type PostBotsByBotIdQuickActionsExecuteErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdQuickActionsExecuteError = PostBotsByBotIdQuickActionsExecuteErrors[keyof PostBotsByBotIdQuickActionsExecuteErrors];
@@ -10429,11 +10544,11 @@ export type GetBotsByBotIdScheduleErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdScheduleError = GetBotsByBotIdScheduleErrors[keyof GetBotsByBotIdScheduleErrors];
@@ -10466,11 +10581,11 @@ export type PostBotsByBotIdScheduleErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdScheduleError = PostBotsByBotIdScheduleErrors[keyof PostBotsByBotIdScheduleErrors];
@@ -10500,11 +10615,11 @@ export type DeleteBotsByBotIdScheduleLogsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdScheduleLogsError = DeleteBotsByBotIdScheduleLogsErrors[keyof DeleteBotsByBotIdScheduleLogsErrors];
@@ -10541,11 +10656,11 @@ export type GetBotsByBotIdScheduleLogsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdScheduleLogsError = GetBotsByBotIdScheduleLogsErrors[keyof GetBotsByBotIdScheduleLogsErrors];
@@ -10579,11 +10694,11 @@ export type DeleteBotsByBotIdScheduleByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdScheduleByIdError = DeleteBotsByBotIdScheduleByIdErrors[keyof DeleteBotsByBotIdScheduleByIdErrors];
@@ -10615,15 +10730,15 @@ export type GetBotsByBotIdScheduleByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdScheduleByIdError = GetBotsByBotIdScheduleByIdErrors[keyof GetBotsByBotIdScheduleByIdErrors];
@@ -10660,11 +10775,11 @@ export type PutBotsByBotIdScheduleByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByBotIdScheduleByIdError = PutBotsByBotIdScheduleByIdErrors[keyof PutBotsByBotIdScheduleByIdErrors];
@@ -10707,11 +10822,11 @@ export type GetBotsByBotIdScheduleByIdLogsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdScheduleByIdLogsError = GetBotsByBotIdScheduleByIdLogsErrors[keyof GetBotsByBotIdScheduleByIdLogsErrors];
@@ -10762,11 +10877,11 @@ export type GetBotsByBotIdSessionsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSessionsError = GetBotsByBotIdSessionsErrors[keyof GetBotsByBotIdSessionsErrors];
@@ -10799,11 +10914,11 @@ export type PostBotsByBotIdSessionsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
 };
 
 export type PostBotsByBotIdSessionsError = PostBotsByBotIdSessionsErrors[keyof PostBotsByBotIdSessionsErrors];
@@ -10833,15 +10948,15 @@ export type GetBotsByBotIdSessionsEventsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSessionsEventsError = GetBotsByBotIdSessionsEventsErrors[keyof GetBotsByBotIdSessionsEventsErrors];
@@ -10871,11 +10986,11 @@ export type GetBotsByBotIdSessionsModelPreferenceSeedErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSessionsModelPreferenceSeedError = GetBotsByBotIdSessionsModelPreferenceSeedErrors[keyof GetBotsByBotIdSessionsModelPreferenceSeedErrors];
@@ -10909,11 +11024,11 @@ export type DeleteBotsByBotIdSessionsBySessionIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdSessionsBySessionIdError = DeleteBotsByBotIdSessionsBySessionIdErrors[keyof DeleteBotsByBotIdSessionsBySessionIdErrors];
@@ -10945,15 +11060,15 @@ export type GetBotsByBotIdSessionsBySessionIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdError = GetBotsByBotIdSessionsBySessionIdErrors[keyof GetBotsByBotIdSessionsBySessionIdErrors];
@@ -10990,15 +11105,15 @@ export type PatchBotsByBotIdSessionsBySessionIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
@@ -11315,7 +11430,7 @@ export type PostBotsByBotIdSessionsBySessionIdCompactErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdCompactError = PostBotsByBotIdSessionsBySessionIdCompactErrors[keyof PostBotsByBotIdSessionsBySessionIdCompactErrors];
@@ -11670,19 +11785,19 @@ export type PostBotsByBotIdSessionsBySessionIdForkErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
 };
 
 export type PostBotsByBotIdSessionsBySessionIdForkError = PostBotsByBotIdSessionsBySessionIdForkErrors[keyof PostBotsByBotIdSessionsBySessionIdForkErrors];
@@ -11695,6 +11810,56 @@ export type PostBotsByBotIdSessionsBySessionIdForkResponses = {
 };
 
 export type PostBotsByBotIdSessionsBySessionIdForkResponse = PostBotsByBotIdSessionsBySessionIdForkResponses[keyof PostBotsByBotIdSessionsBySessionIdForkResponses];
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+        /**
+         * Session ID
+         */
+        session_id: string;
+        /**
+         * Client invocation ID
+         */
+        invocation_id: string;
+    };
+    query?: never;
+    url: '/bots/{bot_id}/sessions/{session_id}/invocations/{invocation_id}';
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Internal Server Error
+     */
+    500: ApperrorProblem;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdError = GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors[keyof GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdErrors];
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSessionInvocationResponse;
+};
+
+export type GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdResponse = GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdResponses[keyof GetBotsByBotIdSessionsBySessionIdInvocationsByInvocationIdResponses];
 
 export type GetBotsByBotIdSessionsBySessionIdQueueData = {
     body?: never;
@@ -11980,15 +12145,15 @@ export type GetBotsByBotIdSessionsBySessionIdStatusErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSessionsBySessionIdStatusError = GetBotsByBotIdSessionsBySessionIdStatusErrors[keyof GetBotsByBotIdSessionsBySessionIdStatusErrors];
@@ -12235,11 +12400,11 @@ export type DeleteBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdSettingsError = DeleteBotsByBotIdSettingsErrors[keyof DeleteBotsByBotIdSettingsErrors];
@@ -12267,11 +12432,11 @@ export type GetBotsByBotIdSettingsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSettingsError = GetBotsByBotIdSettingsErrors[keyof GetBotsByBotIdSettingsErrors];
@@ -12308,7 +12473,7 @@ export type PostBotsByBotIdSettingsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -12349,7 +12514,7 @@ export type PutBotsByBotIdSettingsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -12383,19 +12548,19 @@ export type GetBotsByBotIdSkillsCatalogErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdSkillsCatalogError = GetBotsByBotIdSkillsCatalogErrors[keyof GetBotsByBotIdSkillsCatalogErrors];
@@ -12431,7 +12596,7 @@ export type GetBotsByBotIdTokenUsageData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.
+         * Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls.
          */
         session_type?: string;
     };
@@ -12442,15 +12607,15 @@ export type GetBotsByBotIdTokenUsageErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdTokenUsageError = GetBotsByBotIdTokenUsageErrors[keyof GetBotsByBotIdTokenUsageErrors];
@@ -12486,7 +12651,7 @@ export type GetBotsByBotIdTokenUsageRecordsData = {
          */
         model_id?: string;
         /**
-         * Optional session type: chat, discuss, schedule, or acp_agent. acp_agent filters by runtime.
+         * Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls.
          */
         session_type?: string;
         /**
@@ -12505,15 +12670,15 @@ export type GetBotsByBotIdTokenUsageRecordsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdTokenUsageRecordsError = GetBotsByBotIdTokenUsageRecordsErrors[keyof GetBotsByBotIdTokenUsageRecordsErrors];
@@ -12658,15 +12823,15 @@ export type PostBotsByBotIdToolsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdToolsError = PostBotsByBotIdToolsErrors[keyof PostBotsByBotIdToolsErrors];
@@ -12701,11 +12866,11 @@ export type PostBotsByBotIdTtsSynthesizeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdTtsSynthesizeError = PostBotsByBotIdTtsSynthesizeErrors[keyof PostBotsByBotIdTtsSynthesizeErrors];
@@ -12735,15 +12900,15 @@ export type GetBotsByBotIdUserAccessErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdUserAccessError = GetBotsByBotIdUserAccessErrors[keyof GetBotsByBotIdUserAccessErrors];
@@ -12776,19 +12941,19 @@ export type PostBotsByBotIdUserAccessErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdUserAccessError = PostBotsByBotIdUserAccessErrors[keyof PostBotsByBotIdUserAccessErrors];
@@ -12827,15 +12992,15 @@ export type GetBotsByBotIdUserAccessCandidatesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdUserAccessCandidatesError = GetBotsByBotIdUserAccessCandidatesErrors[keyof GetBotsByBotIdUserAccessCandidatesErrors];
@@ -12869,19 +13034,19 @@ export type DeleteBotsByBotIdUserAccessByGrantIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdUserAccessByGrantIdError = DeleteBotsByBotIdUserAccessByGrantIdErrors[keyof DeleteBotsByBotIdUserAccessByGrantIdErrors];
@@ -12916,19 +13081,19 @@ export type PutBotsByBotIdUserAccessByGrantIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByBotIdUserAccessByGrantIdError = PutBotsByBotIdUserAccessByGrantIdErrors[keyof PutBotsByBotIdUserAccessByGrantIdErrors];
@@ -12961,15 +13126,15 @@ export type PostBotsByBotIdWebMessagesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostBotsByBotIdWebMessagesError = PostBotsByBotIdWebMessagesErrors[keyof PostBotsByBotIdWebMessagesErrors];
@@ -13001,15 +13166,15 @@ export type GetBotsByBotIdWebStreamErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdWebStreamError = GetBotsByBotIdWebStreamErrors[keyof GetBotsByBotIdWebStreamErrors];
@@ -13039,15 +13204,15 @@ export type GetBotsByBotIdWebWsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdWebWsError = GetBotsByBotIdWebWsErrors[keyof GetBotsByBotIdWebWsErrors];
@@ -13073,11 +13238,11 @@ export type GetBotsByBotIdWorkdirsErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdWorkdirsError = GetBotsByBotIdWorkdirsErrors[keyof GetBotsByBotIdWorkdirsErrors];
@@ -13110,19 +13275,19 @@ export type PostBotsByBotIdWorkdirsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
 };
 
 export type PostBotsByBotIdWorkdirsError = PostBotsByBotIdWorkdirsErrors[keyof PostBotsByBotIdWorkdirsErrors];
@@ -13135,6 +13300,61 @@ export type PostBotsByBotIdWorkdirsResponses = {
 };
 
 export type PostBotsByBotIdWorkdirsResponse = PostBotsByBotIdWorkdirsResponses[keyof PostBotsByBotIdWorkdirsResponses];
+
+export type GetBotsByBotIdWorkdirsDirectoriesData = {
+    body?: never;
+    path: {
+        /**
+         * Bot ID
+         */
+        bot_id: string;
+    };
+    query?: {
+        /**
+         * Workspace target ID; defaults to the native workspace
+         */
+        workspace_target_id?: string;
+        /**
+         * Absolute directory path on that target
+         */
+        path?: string;
+    };
+    url: '/bots/{bot_id}/workdirs/directories';
+};
+
+export type GetBotsByBotIdWorkdirsDirectoriesErrors = {
+    /**
+     * Bad Request
+     */
+    400: ApperrorProblem;
+    /**
+     * Forbidden
+     */
+    403: ApperrorProblem;
+    /**
+     * Not Found
+     */
+    404: ApperrorProblem;
+    /**
+     * Conflict
+     */
+    409: ApperrorProblem;
+    /**
+     * Service Unavailable
+     */
+    503: ApperrorProblem;
+};
+
+export type GetBotsByBotIdWorkdirsDirectoriesError = GetBotsByBotIdWorkdirsDirectoriesErrors[keyof GetBotsByBotIdWorkdirsDirectoriesErrors];
+
+export type GetBotsByBotIdWorkdirsDirectoriesResponses = {
+    /**
+     * OK
+     */
+    200: WorkdirDirectoriesResponse;
+};
+
+export type GetBotsByBotIdWorkdirsDirectoriesResponse = GetBotsByBotIdWorkdirsDirectoriesResponses[keyof GetBotsByBotIdWorkdirsDirectoriesResponses];
 
 export type DeleteBotsByBotIdWorkdirsByWorkdirIdData = {
     body?: never;
@@ -13156,11 +13376,11 @@ export type DeleteBotsByBotIdWorkdirsByWorkdirIdErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdWorkdirsByWorkdirIdError = DeleteBotsByBotIdWorkdirsByWorkdirIdErrors[keyof DeleteBotsByBotIdWorkdirsByWorkdirIdErrors];
@@ -13195,15 +13415,15 @@ export type PatchBotsByBotIdWorkdirsByWorkdirIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PatchBotsByBotIdWorkdirsByWorkdirIdError = PatchBotsByBotIdWorkdirsByWorkdirIdErrors[keyof PatchBotsByBotIdWorkdirsByWorkdirIdErrors];
@@ -13324,11 +13544,11 @@ export type GetBotsByBotIdWorkspaceTargetsErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByBotIdWorkspaceTargetsError = GetBotsByBotIdWorkspaceTargetsErrors[keyof GetBotsByBotIdWorkspaceTargetsErrors];
@@ -13361,15 +13581,15 @@ export type PutBotsByBotIdWorkspaceTargetsPrimaryErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PutBotsByBotIdWorkspaceTargetsPrimaryError = PutBotsByBotIdWorkspaceTargetsPrimaryErrors[keyof PutBotsByBotIdWorkspaceTargetsPrimaryErrors];
@@ -13401,15 +13621,15 @@ export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdError = PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors[keyof PutBotsByBotIdWorkspaceTargetsRemotesByRuntimeIdErrors];
@@ -13443,15 +13663,15 @@ export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type DeleteBotsByBotIdWorkspaceTargetsByTargetIdError = DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors[keyof DeleteBotsByBotIdWorkspaceTargetsByTargetIdErrors];
@@ -13486,15 +13706,15 @@ export type PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalError = PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors[keyof PutBotsByBotIdWorkspaceTargetsByTargetIdToolApprovalErrors];
@@ -13522,19 +13742,19 @@ export type DeleteBotsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteBotsByIdError = DeleteBotsByIdErrors[keyof DeleteBotsByIdErrors];
@@ -13566,19 +13786,19 @@ export type GetBotsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByIdError = GetBotsByIdErrors[keyof GetBotsByIdErrors];
@@ -13611,15 +13831,15 @@ export type PutBotsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
@@ -13627,7 +13847,7 @@ export type PutBotsByIdErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByIdError = PutBotsByIdErrors[keyof PutBotsByIdErrors];
@@ -13661,15 +13881,15 @@ export type DeleteBotsByIdChannelByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -13705,19 +13925,19 @@ export type GetBotsByIdChannelByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByIdChannelByPlatformError = GetBotsByIdChannelByPlatformErrors[keyof GetBotsByIdChannelByPlatformErrors];
@@ -13754,19 +13974,19 @@ export type PutBotsByIdChannelByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Bad Gateway
      */
@@ -13811,19 +14031,19 @@ export type PostBotsByIdChannelByPlatformSendErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -13866,19 +14086,19 @@ export type PostBotsByIdChannelByPlatformSendChatErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Unauthorized
      */
-    401: HandlersErrorResponse;
+    401: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -13921,19 +14141,19 @@ export type PatchBotsByIdChannelByPlatformStatusErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
     /**
      * Bad Gateway
      */
@@ -13978,19 +14198,19 @@ export type PostBotsByIdChannelByPlatformWebhookEndpointErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
     /**
      * Service Unavailable
      */
@@ -14024,19 +14244,19 @@ export type GetBotsByIdChecksErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetBotsByIdChecksError = GetBotsByIdChecksErrors[keyof GetBotsByIdChecksErrors];
@@ -14069,19 +14289,19 @@ export type PutBotsByIdOwnerErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutBotsByIdOwnerError = PutBotsByIdOwnerErrors[keyof PutBotsByIdOwnerErrors];
@@ -14106,7 +14326,7 @@ export type GetChannelsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetChannelsError = GetChannelsErrors[keyof GetChannelsErrors];
@@ -14136,11 +14356,11 @@ export type GetChannelsByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetChannelsByPlatformError = GetChannelsByPlatformErrors[keyof GetChannelsByPlatformErrors];
@@ -14165,7 +14385,7 @@ export type GetConnectorsCatalogErrors = {
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Bad Gateway
      */
@@ -14203,7 +14423,7 @@ export type GetFetchProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetFetchProvidersError = GetFetchProvidersErrors[keyof GetFetchProvidersErrors];
@@ -14231,11 +14451,11 @@ export type PostFetchProvidersErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostFetchProvidersError = PostFetchProvidersErrors[keyof PostFetchProvidersErrors];
@@ -14281,11 +14501,11 @@ export type DeleteFetchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteFetchProvidersByIdError = DeleteFetchProvidersByIdErrors[keyof DeleteFetchProvidersByIdErrors];
@@ -14313,11 +14533,11 @@ export type GetFetchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetFetchProvidersByIdError = GetFetchProvidersByIdErrors[keyof GetFetchProvidersByIdErrors];
@@ -14350,11 +14570,11 @@ export type PutFetchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutFetchProvidersByIdError = PutFetchProvidersByIdErrors[keyof PutFetchProvidersByIdErrors];
@@ -14368,219 +14588,62 @@ export type PutFetchProvidersByIdResponses = {
 
 export type PutFetchProvidersByIdResponse = PutFetchProvidersByIdResponses[keyof PutFetchProvidersByIdResponses];
 
-export type GetMemoryProvidersData = {
+export type GetMemoryConfigData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/memory-providers';
+    url: '/memory/config';
 };
 
-export type GetMemoryProvidersErrors = {
+export type GetMemoryConfigErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
-export type GetMemoryProvidersError = GetMemoryProvidersErrors[keyof GetMemoryProvidersErrors];
+export type GetMemoryConfigError = GetMemoryConfigErrors[keyof GetMemoryConfigErrors];
 
-export type GetMemoryProvidersResponses = {
+export type GetMemoryConfigResponses = {
     /**
      * OK
      */
-    200: Array<AdaptersProviderGetResponse>;
+    200: AdaptersMemoryConfig;
 };
 
-export type GetMemoryProvidersResponse = GetMemoryProvidersResponses[keyof GetMemoryProvidersResponses];
+export type GetMemoryConfigResponse = GetMemoryConfigResponses[keyof GetMemoryConfigResponses];
 
-export type PostMemoryProvidersData = {
+export type PutMemoryConfigData = {
     /**
-     * Memory provider configuration
+     * Built-in Memory configuration
      */
-    body: AdaptersProviderCreateRequest;
+    body: AdaptersMemoryConfigUpdateRequest;
     path?: never;
     query?: never;
-    url: '/memory-providers';
+    url: '/memory/config';
 };
 
-export type PostMemoryProvidersErrors = {
+export type PutMemoryConfigErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
-export type PostMemoryProvidersError = PostMemoryProvidersErrors[keyof PostMemoryProvidersErrors];
+export type PutMemoryConfigError = PutMemoryConfigErrors[keyof PutMemoryConfigErrors];
 
-export type PostMemoryProvidersResponses = {
-    /**
-     * Created
-     */
-    201: AdaptersProviderGetResponse;
-};
-
-export type PostMemoryProvidersResponse = PostMemoryProvidersResponses[keyof PostMemoryProvidersResponses];
-
-export type GetMemoryProvidersMetaData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/memory-providers/meta';
-};
-
-export type GetMemoryProvidersMetaResponses = {
+export type PutMemoryConfigResponses = {
     /**
      * OK
      */
-    200: Array<AdaptersProviderMeta>;
+    200: AdaptersMemoryConfig;
 };
 
-export type GetMemoryProvidersMetaResponse = GetMemoryProvidersMetaResponses[keyof GetMemoryProvidersMetaResponses];
-
-export type DeleteMemoryProvidersByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/memory-providers/{id}';
-};
-
-export type DeleteMemoryProvidersByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type DeleteMemoryProvidersByIdError = DeleteMemoryProvidersByIdErrors[keyof DeleteMemoryProvidersByIdErrors];
-
-export type DeleteMemoryProvidersByIdResponses = {
-    /**
-     * No Content
-     */
-    204: unknown;
-};
-
-export type GetMemoryProvidersByIdData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/memory-providers/{id}';
-};
-
-export type GetMemoryProvidersByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-};
-
-export type GetMemoryProvidersByIdError = GetMemoryProvidersByIdErrors[keyof GetMemoryProvidersByIdErrors];
-
-export type GetMemoryProvidersByIdResponses = {
-    /**
-     * OK
-     */
-    200: AdaptersProviderGetResponse;
-};
-
-export type GetMemoryProvidersByIdResponse = GetMemoryProvidersByIdResponses[keyof GetMemoryProvidersByIdResponses];
-
-export type PutMemoryProvidersByIdData = {
-    /**
-     * Updated configuration
-     */
-    body: AdaptersProviderUpdateRequest;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/memory-providers/{id}';
-};
-
-export type PutMemoryProvidersByIdErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type PutMemoryProvidersByIdError = PutMemoryProvidersByIdErrors[keyof PutMemoryProvidersByIdErrors];
-
-export type PutMemoryProvidersByIdResponses = {
-    /**
-     * OK
-     */
-    200: AdaptersProviderGetResponse;
-};
-
-export type PutMemoryProvidersByIdResponse = PutMemoryProvidersByIdResponses[keyof PutMemoryProvidersByIdResponses];
-
-export type GetMemoryProvidersByIdStatusData = {
-    body?: never;
-    path: {
-        /**
-         * Provider ID
-         */
-        id: string;
-    };
-    query?: never;
-    url: '/memory-providers/{id}/status';
-};
-
-export type GetMemoryProvidersByIdStatusErrors = {
-    /**
-     * Bad Request
-     */
-    400: HandlersErrorResponse;
-    /**
-     * Not Found
-     */
-    404: HandlersErrorResponse;
-    /**
-     * Internal Server Error
-     */
-    500: HandlersErrorResponse;
-};
-
-export type GetMemoryProvidersByIdStatusError = GetMemoryProvidersByIdStatusErrors[keyof GetMemoryProvidersByIdStatusErrors];
-
-export type GetMemoryProvidersByIdStatusResponses = {
-    /**
-     * OK
-     */
-    200: AdaptersProviderStatusResponse;
-};
-
-export type GetMemoryProvidersByIdStatusResponse = GetMemoryProvidersByIdStatusResponses[keyof GetMemoryProvidersByIdStatusResponses];
+export type PutMemoryConfigResponse = PutMemoryConfigResponses[keyof PutMemoryConfigResponses];
 
 export type GetModelsData = {
     body?: never;
@@ -14602,11 +14665,11 @@ export type GetModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetModelsError = GetModelsErrors[keyof GetModelsErrors];
@@ -14634,11 +14697,11 @@ export type PostModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostModelsError = PostModelsErrors[keyof PostModelsErrors];
@@ -14668,11 +14731,11 @@ export type GetModelsCountErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetModelsCountError = GetModelsCountErrors[keyof GetModelsCountErrors];
@@ -14702,15 +14765,15 @@ export type DeleteModelsModelByModelIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteModelsModelByModelIdError = DeleteModelsModelByModelIdErrors[keyof DeleteModelsModelByModelIdErrors];
@@ -14738,15 +14801,15 @@ export type GetModelsModelByModelIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetModelsModelByModelIdError = GetModelsModelByModelIdErrors[keyof GetModelsModelByModelIdErrors];
@@ -14779,15 +14842,15 @@ export type PutModelsModelByModelIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutModelsModelByModelIdError = PutModelsModelByModelIdErrors[keyof PutModelsModelByModelIdErrors];
@@ -14817,15 +14880,15 @@ export type DeleteModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteModelsByIdError = DeleteModelsByIdErrors[keyof DeleteModelsByIdErrors];
@@ -14853,15 +14916,15 @@ export type GetModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetModelsByIdError = GetModelsByIdErrors[keyof GetModelsByIdErrors];
@@ -14894,15 +14957,15 @@ export type PutModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutModelsByIdError = PutModelsByIdErrors[keyof PutModelsByIdErrors];
@@ -14932,15 +14995,15 @@ export type PostModelsByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostModelsByIdTestError = PostModelsByIdTestErrors[keyof PostModelsByIdTestErrors];
@@ -15091,7 +15154,7 @@ export type GetProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetProvidersError = GetProvidersErrors[keyof GetProvidersErrors];
@@ -15119,11 +15182,11 @@ export type PostProvidersErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostProvidersError = PostProvidersErrors[keyof PostProvidersErrors];
@@ -15148,7 +15211,7 @@ export type GetProvidersCountErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetProvidersCountError = GetProvidersCountErrors[keyof GetProvidersCountErrors];
@@ -15218,15 +15281,15 @@ export type GetProvidersNameByNameErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetProvidersNameByNameError = GetProvidersNameByNameErrors[keyof GetProvidersNameByNameErrors];
@@ -15260,7 +15323,7 @@ export type GetProvidersOauthCallbackErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
 };
 
 export type GetProvidersOauthCallbackError = GetProvidersOauthCallbackErrors[keyof GetProvidersOauthCallbackErrors];
@@ -15290,15 +15353,15 @@ export type DeleteProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteProvidersByIdError = DeleteProvidersByIdErrors[keyof DeleteProvidersByIdErrors];
@@ -15326,15 +15389,15 @@ export type GetProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetProvidersByIdError = GetProvidersByIdErrors[keyof GetProvidersByIdErrors];
@@ -15367,15 +15430,15 @@ export type PutProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutProvidersByIdError = PutProvidersByIdErrors[keyof PutProvidersByIdErrors];
@@ -15408,15 +15471,15 @@ export type PostProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostProvidersByIdImportModelsError = PostProvidersByIdImportModelsErrors[keyof PostProvidersByIdImportModelsErrors];
@@ -15451,15 +15514,15 @@ export type GetProvidersByIdModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetProvidersByIdModelsError = GetProvidersByIdModelsErrors[keyof GetProvidersByIdModelsErrors];
@@ -15489,11 +15552,11 @@ export type GetProvidersByIdOauthAuthorizeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetProvidersByIdOauthAuthorizeError = GetProvidersByIdOauthAuthorizeErrors[keyof GetProvidersByIdOauthAuthorizeErrors];
@@ -15523,11 +15586,11 @@ export type PostProvidersByIdOauthPollErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type PostProvidersByIdOauthPollError = PostProvidersByIdOauthPollErrors[keyof PostProvidersByIdOauthPollErrors];
@@ -15557,11 +15620,11 @@ export type GetProvidersByIdOauthStatusErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetProvidersByIdOauthStatusError = GetProvidersByIdOauthStatusErrors[keyof GetProvidersByIdOauthStatusErrors];
@@ -15591,11 +15654,11 @@ export type DeleteProvidersByIdOauthTokenErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type DeleteProvidersByIdOauthTokenError = DeleteProvidersByIdOauthTokenErrors[keyof DeleteProvidersByIdOauthTokenErrors];
@@ -15623,15 +15686,15 @@ export type PostProvidersByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostProvidersByIdTestError = PostProvidersByIdTestErrors[keyof PostProvidersByIdTestErrors];
@@ -15661,7 +15724,7 @@ export type GetSearchProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetSearchProvidersError = GetSearchProvidersErrors[keyof GetSearchProvidersErrors];
@@ -15689,11 +15752,11 @@ export type PostSearchProvidersErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostSearchProvidersError = PostSearchProvidersErrors[keyof PostSearchProvidersErrors];
@@ -15739,11 +15802,11 @@ export type DeleteSearchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteSearchProvidersByIdError = DeleteSearchProvidersByIdErrors[keyof DeleteSearchProvidersByIdErrors];
@@ -15771,11 +15834,11 @@ export type GetSearchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetSearchProvidersByIdError = GetSearchProvidersByIdErrors[keyof GetSearchProvidersByIdErrors];
@@ -15808,11 +15871,11 @@ export type PutSearchProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutSearchProvidersByIdError = PutSearchProvidersByIdErrors[keyof PutSearchProvidersByIdErrors];
@@ -15826,6 +15889,27 @@ export type PutSearchProvidersByIdResponses = {
 
 export type PutSearchProvidersByIdResponse = PutSearchProvidersByIdResponses[keyof PutSearchProvidersByIdResponses];
 
+export type GetSiteIconData = {
+    body?: never;
+    path?: never;
+    query: {
+        /**
+         * Public page or site URL; only its origin is fetched
+         */
+        url: string;
+    };
+    url: '/site-icon';
+};
+
+export type GetSiteIconResponses = {
+    /**
+     * OK
+     */
+    200: HandlersSiteIconResponse;
+};
+
+export type GetSiteIconResponse = GetSiteIconResponses[keyof GetSiteIconResponses];
+
 export type GetSpeechModelsData = {
     body?: never;
     path?: never;
@@ -15837,7 +15921,7 @@ export type GetSpeechModelsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetSpeechModelsError = GetSpeechModelsErrors[keyof GetSpeechModelsErrors];
@@ -15867,7 +15951,7 @@ export type GetSpeechModelsByIdErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetSpeechModelsByIdError = GetSpeechModelsByIdErrors[keyof GetSpeechModelsByIdErrors];
@@ -15900,11 +15984,11 @@ export type PutSpeechModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutSpeechModelsByIdError = PutSpeechModelsByIdErrors[keyof PutSpeechModelsByIdErrors];
@@ -15934,7 +16018,7 @@ export type GetSpeechModelsByIdCapabilitiesErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetSpeechModelsByIdCapabilitiesError = GetSpeechModelsByIdCapabilitiesErrors[keyof GetSpeechModelsByIdCapabilitiesErrors];
@@ -15967,11 +16051,11 @@ export type PostSpeechModelsByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostSpeechModelsByIdTestError = PostSpeechModelsByIdTestErrors[keyof PostSpeechModelsByIdTestErrors];
@@ -15994,7 +16078,7 @@ export type GetSpeechProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetSpeechProvidersError = GetSpeechProvidersErrors[keyof GetSpeechProvidersErrors];
@@ -16040,11 +16124,11 @@ export type GetSpeechProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetSpeechProvidersByIdError = GetSpeechProvidersByIdErrors[keyof GetSpeechProvidersByIdErrors];
@@ -16074,15 +16158,15 @@ export type PostSpeechProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostSpeechProvidersByIdImportModelsError = PostSpeechProvidersByIdImportModelsErrors[keyof PostSpeechProvidersByIdImportModelsErrors];
@@ -16112,11 +16196,11 @@ export type GetSpeechProvidersByIdModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetSpeechProvidersByIdModelsError = GetSpeechProvidersByIdModelsErrors[keyof GetSpeechProvidersByIdModelsErrors];
@@ -16174,11 +16258,11 @@ export type GetSupermarketAppsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketAppsError = GetSupermarketAppsErrors[keyof GetSupermarketAppsErrors];
@@ -16208,15 +16292,15 @@ export type GetSupermarketArtifactsIconByDigestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketArtifactsIconByDigestError = GetSupermarketArtifactsIconByDigestErrors[keyof GetSupermarketArtifactsIconByDigestErrors];
@@ -16244,15 +16328,15 @@ export type GetSupermarketCategoriesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketCategoriesError = GetSupermarketCategoriesErrors[keyof GetSupermarketCategoriesErrors];
@@ -16277,7 +16361,7 @@ export type GetSupermarketRegistriesErrors = {
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketRegistriesError = GetSupermarketRegistriesErrors[keyof GetSupermarketRegistriesErrors];
@@ -16332,15 +16416,15 @@ export type GetSupermarketRegistriesByRegistryIdAppsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketRegistriesByRegistryIdAppsError = GetSupermarketRegistriesByRegistryIdAppsErrors[keyof GetSupermarketRegistriesByRegistryIdAppsErrors];
@@ -16374,15 +16458,15 @@ export type GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketRegistriesByRegistryIdAppsByAppIdError = GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdErrors];
@@ -16420,15 +16504,15 @@ export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErr
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionError = GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdReleasesByRevisionErrors];
@@ -16466,15 +16550,15 @@ export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdError = GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors[keyof GetSupermarketRegistriesByRegistryIdAppsByAppIdSkillsBySkillIdErrors];
@@ -16532,11 +16616,11 @@ export type GetSupermarketSkillsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Bad Gateway
      */
-    502: HandlersErrorResponse;
+    502: ApperrorProblem;
 };
 
 export type GetSupermarketSkillsError = GetSupermarketSkillsErrors[keyof GetSupermarketSkillsErrors];
@@ -16561,7 +16645,7 @@ export type GetTranscriptionModelsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetTranscriptionModelsError = GetTranscriptionModelsErrors[keyof GetTranscriptionModelsErrors];
@@ -16591,7 +16675,7 @@ export type GetTranscriptionModelsByIdErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetTranscriptionModelsByIdError = GetTranscriptionModelsByIdErrors[keyof GetTranscriptionModelsByIdErrors];
@@ -16624,11 +16708,11 @@ export type PutTranscriptionModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutTranscriptionModelsByIdError = PutTranscriptionModelsByIdErrors[keyof PutTranscriptionModelsByIdErrors];
@@ -16658,7 +16742,7 @@ export type GetTranscriptionModelsByIdCapabilitiesErrors = {
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetTranscriptionModelsByIdCapabilitiesError = GetTranscriptionModelsByIdCapabilitiesErrors[keyof GetTranscriptionModelsByIdCapabilitiesErrors];
@@ -16697,11 +16781,11 @@ export type PostTranscriptionModelsByIdTestErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostTranscriptionModelsByIdTestError = PostTranscriptionModelsByIdTestErrors[keyof PostTranscriptionModelsByIdTestErrors];
@@ -16726,7 +16810,7 @@ export type GetTranscriptionProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetTranscriptionProvidersError = GetTranscriptionProvidersErrors[keyof GetTranscriptionProvidersErrors];
@@ -16772,11 +16856,11 @@ export type GetTranscriptionProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetTranscriptionProvidersByIdError = GetTranscriptionProvidersByIdErrors[keyof GetTranscriptionProvidersByIdErrors];
@@ -16806,15 +16890,15 @@ export type PostTranscriptionProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostTranscriptionProvidersByIdImportModelsError = PostTranscriptionProvidersByIdImportModelsErrors[keyof PostTranscriptionProvidersByIdImportModelsErrors];
@@ -16844,11 +16928,11 @@ export type GetTranscriptionProvidersByIdModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetTranscriptionProvidersByIdModelsError = GetTranscriptionProvidersByIdModelsErrors[keyof GetTranscriptionProvidersByIdModelsErrors];
@@ -16873,15 +16957,15 @@ export type GetUsersErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetUsersError = GetUsersErrors[keyof GetUsersErrors];
@@ -16909,15 +16993,15 @@ export type PostUsersErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostUsersError = PostUsersErrors[keyof PostUsersErrors];
@@ -16942,15 +17026,15 @@ export type GetUsersMeErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Unauthorized
      */
-    401: HandlersErrorResponse;
+    401: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetUsersMeError = GetUsersMeErrors[keyof GetUsersMeErrors];
@@ -17007,7 +17091,7 @@ export type GetUsersMeChannelIdentitiesErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetUsersMeChannelIdentitiesError = GetUsersMeChannelIdentitiesErrors[keyof GetUsersMeChannelIdentitiesErrors];
@@ -17037,11 +17121,11 @@ export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteUsersMeChannelIdentitiesByChannelIdentityIdError = DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors[keyof DeleteUsersMeChannelIdentitiesByChannelIdentityIdErrors];
@@ -17067,11 +17151,11 @@ export type PostUsersMeChannelLinksErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostUsersMeChannelLinksError = PostUsersMeChannelLinksErrors[keyof PostUsersMeChannelLinksErrors];
@@ -17101,15 +17185,15 @@ export type GetUsersMeChannelsByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetUsersMeChannelsByPlatformError = GetUsersMeChannelsByPlatformErrors[keyof GetUsersMeChannelsByPlatformErrors];
@@ -17142,11 +17226,11 @@ export type PutUsersMeChannelsByPlatformErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutUsersMeChannelsByPlatformError = PutUsersMeChannelsByPlatformErrors[keyof PutUsersMeChannelsByPlatformErrors];
@@ -17171,11 +17255,11 @@ export type GetUsersMeComputerAccessErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetUsersMeComputerAccessError = GetUsersMeComputerAccessErrors[keyof GetUsersMeComputerAccessErrors];
@@ -17203,11 +17287,11 @@ export type PutUsersMePasswordErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutUsersMePasswordError = PutUsersMePasswordErrors[keyof PutUsersMePasswordErrors];
@@ -17230,7 +17314,7 @@ export type GetUsersMeRuntimesErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetUsersMeRuntimesError = GetUsersMeRuntimesErrors[keyof GetUsersMeRuntimesErrors];
@@ -17258,15 +17342,15 @@ export type PostUsersMeRuntimesErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostUsersMeRuntimesError = PostUsersMeRuntimesErrors[keyof PostUsersMeRuntimesErrors];
@@ -17296,15 +17380,15 @@ export type DeleteUsersMeRuntimesByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteUsersMeRuntimesByIdError = DeleteUsersMeRuntimesByIdErrors[keyof DeleteUsersMeRuntimesByIdErrors];
@@ -17332,23 +17416,23 @@ export type DeleteUsersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type DeleteUsersByIdError = DeleteUsersByIdErrors[keyof DeleteUsersByIdErrors];
@@ -17376,19 +17460,19 @@ export type GetUsersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetUsersByIdError = GetUsersByIdErrors[keyof GetUsersByIdErrors];
@@ -17421,23 +17505,23 @@ export type PutUsersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Forbidden
      */
-    403: HandlersErrorResponse;
+    403: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Conflict
      */
-    409: HandlersErrorResponse;
+    409: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutUsersByIdError = PutUsersByIdErrors[keyof PutUsersByIdErrors];
@@ -17462,7 +17546,7 @@ export type GetVideoModelsErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetVideoModelsError = GetVideoModelsErrors[keyof GetVideoModelsErrors];
@@ -17492,11 +17576,11 @@ export type GetVideoModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetVideoModelsByIdError = GetVideoModelsByIdErrors[keyof GetVideoModelsByIdErrors];
@@ -17529,15 +17613,15 @@ export type PutVideoModelsByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PutVideoModelsByIdError = PutVideoModelsByIdErrors[keyof PutVideoModelsByIdErrors];
@@ -17562,7 +17646,7 @@ export type GetVideoProvidersErrors = {
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetVideoProvidersError = GetVideoProvidersErrors[keyof GetVideoProvidersErrors];
@@ -17608,11 +17692,11 @@ export type GetVideoProvidersByIdErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Not Found
      */
-    404: HandlersErrorResponse;
+    404: ApperrorProblem;
 };
 
 export type GetVideoProvidersByIdError = GetVideoProvidersByIdErrors[keyof GetVideoProvidersByIdErrors];
@@ -17642,11 +17726,11 @@ export type PostVideoProvidersByIdImportModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type PostVideoProvidersByIdImportModelsError = PostVideoProvidersByIdImportModelsErrors[keyof PostVideoProvidersByIdImportModelsErrors];
@@ -17676,11 +17760,11 @@ export type GetVideoProvidersByIdModelsErrors = {
     /**
      * Bad Request
      */
-    400: HandlersErrorResponse;
+    400: ApperrorProblem;
     /**
      * Internal Server Error
      */
-    500: HandlersErrorResponse;
+    500: ApperrorProblem;
 };
 
 export type GetVideoProvidersByIdModelsError = GetVideoProvidersByIdModelsErrors[keyof GetVideoProvidersByIdModelsErrors];

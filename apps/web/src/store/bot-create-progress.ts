@@ -16,10 +16,12 @@ import {
   pushBotCreateTerminalLine,
   type BotCreateTerminalLine,
 } from '@/composables/api/botCreateTerminal'
-import { apiErrorStatus, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
+import { markOnboardingCompleted } from '@/composables/useOnboarding'
+import { apiErrorStatus, parseMemohError, renderI18nMessage, resolveApiErrorMessage } from '@/utils/api-error'
 import { botAgentRuntimeForProvider, directBotAgentMetadata } from '@/utils/bot-agent'
 import { externalAgentDisplayName } from '@/utils/external-agent'
 import { writeCreatedBotSession, type CreatedBotSession, type CreatedBotSessionRuntime } from '@/pages/bots/created-bot-session'
+import { randomUUID } from '@/utils/uuid'
 import { installCreatedAgent } from './install-created-agent'
 
 // The Bot row exists from the first `bot_created` event on, so every failure
@@ -39,7 +41,7 @@ export type BotCreateDisplay = {
 
 export type BotCreateSettings = {
   chat_model_id?: string
-  memory_provider_id?: string
+  memory_enabled?: boolean
   reasoning_effort?: string
 }
 
@@ -81,20 +83,18 @@ const NOTHING_APPLIED: BotCreateStartResult = { settingsApplied: false, agentApp
 export const BOT_STATUS_POLL_INTERVAL_MS = 2000
 export const BOT_STATUS_POLL_BUDGET_MS = 15 * 60 * 1000
 
-const WORKSPACE_FAILURE_FALLBACK = { i18n_key: 'bots.create.failedSubtitle' }
-const WORKSPACE_STILL_PROVISIONING = { i18n_key: 'bots.create.stillProvisioning' }
 const BOT_STATUS_FAILED = 'failed'
 const BOT_STATUS_CREATING = 'creating'
 const CONTAINER_INIT_CHECK = 'container.init'
 
 function hasSettings(settings?: BotCreateSettings): boolean {
-  return !!(settings && (settings.chat_model_id || settings.memory_provider_id || settings.reasoning_effort))
+  return !!(settings && (settings.chat_model_id || settings.memory_enabled !== undefined || settings.reasoning_effort))
 }
 
 function settingsBody(settings: BotCreateSettings) {
   return {
     ...(settings.chat_model_id ? { chat_model_id: settings.chat_model_id } : {}),
-    ...(settings.memory_provider_id ? { memory_provider_id: settings.memory_provider_id } : {}),
+    ...(settings.memory_enabled !== undefined ? { memory_enabled: settings.memory_enabled } : {}),
     ...(settings.reasoning_effort ? { reasoning_effort: settings.reasoning_effort } : {}),
   }
 }
@@ -165,7 +165,7 @@ async function workspaceFailureDetail(botId: string): Promise<string> {
   } catch {
     // The check list is a nicety; the failure itself is already known.
   }
-  return resolveApiErrorMessage(WORKSPACE_FAILURE_FALLBACK, 'Workspace setup failed')
+  return renderI18nMessage('bots.create.failedSubtitle') || 'Workspace setup failed'
 }
 
 // Owns the bot-create SSE stream and derived state so it survives navigation
@@ -186,6 +186,9 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
 
   let lastPayload: BotsCreateBotRequest | null = null
   let lastOptions: StartBotCreateOptions = {}
+  // retry() resends the same Idempotency-Key, so a lost response is answered
+  // with the Bot already made; each start() from the form mints a new key.
+  let lastRequestKey = ''
   let grantsApplied = false
 
   const percent = computed(() => botCreateProgressPercent(progress.value))
@@ -348,7 +351,16 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       grantsApplied = true
       await applyGrants(botId, lastOptions.grants, message => { setupError.value = message })
     }
-    return await applySetup(recovering)
+    const result = await applySetup(recovering)
+    // The setup that onboarding asked for lives only in this tab. Once it has
+    // all been applied, a user who leaves before the final step must not be
+    // sent back through the wizard on the next sign-in. A Bot left mid-setup
+    // stays incomplete on purpose: Step4 adopts it and the final step then
+    // reports what is still missing.
+    if (lastOptions.onboarding && status.value === 'ready' && !setupError.value) {
+      void markOnboardingCompleted().catch(() => {})
+    }
+    return result
   }
 
   // Relays a workspace provisioning stream (create or container retry) into
@@ -390,7 +402,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         return NOTHING_APPLIED
       }
       if (current.status === BOT_STATUS_CREATING) {
-        failWorkspace(resolveApiErrorMessage(WORKSPACE_STILL_PROVISIONING, 'Workspace setup is still in progress'), 'workspace_setup_timeout')
+        failWorkspace(renderI18nMessage('bots.create.stillProvisioning') || 'Workspace setup is still in progress', 'workspace_setup_timeout')
         return NOTHING_APPLIED
       }
       lines.value = finalizeBotCreateTerminalLines(lines.value)
@@ -434,11 +446,13 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   async function start(
     payload: BotsCreateBotRequest,
     options: StartBotCreateOptions = {},
+    requestKey: string = randomUUID(),
   ): Promise<BotCreateStartResult> {
     if (status.value === 'creating') return NOTHING_APPLIED
     lastPayload = payload
     hasPayload.value = true
     lastOptions = options
+    lastRequestKey = requestKey
     grantsApplied = false
     writeCreatedBotSession(null, options.onboarding)
     beginStep()
@@ -450,7 +464,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
     display.value = options.display ?? { display_name: payload.display_name ?? payload.name ?? '', avatar_url: payload.avatar_url }
     lines.value = pushBotCreateTerminalLine([], { kind: 'command', status: 'info', message: display.value.display_name })
     try {
-      const { stream } = await postBotsStream({ body: payload, throwOnError: true })
+      const { stream } = await postBotsStream({ body: payload, headers: { 'Idempotency-Key': requestKey }, throwOnError: true })
       const result = await followWorkspaceStream(stream)
       bot.value = result.bot ?? null
       if (!bot.value) {
@@ -485,7 +499,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       beginStep()
       return await applySetup(true)
     }
-    if (lastPayload) return await start(lastPayload, lastOptions)
+    if (lastPayload) return await start(lastPayload, lastOptions, lastRequestKey)
   }
 
   function restore(saved: CreatedBotSession, onboarding = false) {

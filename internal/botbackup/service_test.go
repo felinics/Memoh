@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -16,8 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/bots"
+	ctr "github.com/felinics/memoh/internal/container"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 func TestReadZipEntriesRejectsZipSlip(t *testing.T) {
@@ -425,22 +428,57 @@ func readTarGzFile(raw []byte, name string) ([]byte, error) {
 	}
 }
 
-func TestIsWorkspaceRestoreRetryable(t *testing.T) {
-	retryable := []string{
-		"get workspace runtime: not found",
-		"No such container: workspace-123",
-		"workspace is not reachable: connection refused",
-	}
-	for _, msg := range retryable {
-		if !isWorkspaceRestoreRetryable(errString(msg)) {
-			t.Fatalf("expected retryable error: %s", msg)
-		}
-	}
-	if isWorkspaceRestoreRetryable(io.ErrUnexpectedEOF) {
-		t.Fatal("unexpected retryable generic error")
-	}
-}
-
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// notReadyWorkspace fails every import with err and cancels the import's
+// context, so a restore that waits to retry returns the cancellation.
+type notReadyWorkspace struct {
+	failingWorkspace
+	err    error
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (w *notReadyWorkspace) ImportData(context.Context, string, io.Reader) error {
+	w.calls++
+	w.cancel()
+	return w.err
+}
+
+func TestRestoreWorkspaceDataRetriesWhileWorkspaceIsNotReady(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		err   error
+		retry bool
+	}{
+		{name: "container not created", err: fmt.Errorf("get workspace runtime: %w", ctr.ErrNotFound), retry: true},
+		{name: "bridge not answering", err: fmt.Errorf("write /data/a: %w", bridge.ErrUnavailable), retry: true},
+		{name: "archive failure", err: errString("tar next: unexpected EOF")},
+		{name: "text that names a missing container", err: errString("No such container: workspace-1")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ws := &notReadyWorkspace{err: tc.err, cancel: cancel}
+			svc := &Service{workspace: ws}
+
+			err := svc.restoreWorkspaceData(ctx, "bot-1", nil, true)
+			if ws.calls != 1 {
+				t.Fatalf("ImportData calls = %d, want 1", ws.calls)
+			}
+			if tc.retry && !errors.Is(err, context.Canceled) {
+				t.Fatalf("restoreWorkspaceData() error = %v, want it to wait for a retry until canceled", err)
+			}
+			if !tc.retry && !errors.Is(err, tc.err) {
+				t.Fatalf("restoreWorkspaceData() error = %v, want %v without a retry", err, tc.err)
+			}
+		})
+	}
+}

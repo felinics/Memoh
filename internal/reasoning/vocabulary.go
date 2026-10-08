@@ -33,6 +33,9 @@ const (
 // "off".
 const EffortDisable = "disable"
 
+// EffortEnabled selects thinking on models with a switch but no intensity tiers.
+const EffortEnabled = "enabled"
+
 // EffortNone is OpenAI's wire spelling of "no reasoning" (gpt-5.1 introduced it
 // and dropped minimal; gpt-5.0 has minimal and no none). It is never declared by a
 // model nor stored in settings — provider adaptors translate EffortDisable into
@@ -66,6 +69,7 @@ var orderedEfforts = []string{
 // absent because it is a provider wire value, not something a model declares.
 var declarableEfforts = map[string]struct{}{
 	EffortDisable: {},
+	EffortEnabled: {},
 	EffortMinimal: {},
 	EffortLow:     {},
 	EffortMedium:  {},
@@ -166,6 +170,8 @@ const (
 	// DialectTier sends a named tier: OpenAI reasoning.effort, Anthropic
 	// output_config.effort, Gemini 3.x thinkingLevel.
 	DialectTier = "tier"
+	// DialectToggle sends only thinking.type, without an effort or token budget.
+	DialectToggle = "toggle"
 	// DialectBudget sends a token budget: Anthropic <=4.5 budget_tokens, Gemini
 	// 2.5 thinkingBudget.
 	DialectBudget = "budget"
@@ -173,6 +179,7 @@ const (
 
 var validDialects = map[string]struct{}{
 	DialectTier:   {},
+	DialectToggle: {},
 	DialectBudget: {},
 }
 

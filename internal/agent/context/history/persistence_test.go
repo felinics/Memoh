@@ -7,6 +7,7 @@ import (
 
 	sdk "github.com/felinics/twilight/sdk"
 
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/agent/turn"
 )
 
@@ -101,7 +102,7 @@ func TestStoredModelMessageToSDKMessageRestoresLegacyToolResultFields(t *testing
 		Content: []sdk.MessagePart{sdk.ToolResultPart{
 			ToolCallID: "legacy-call-id",
 			ToolName:   "legacy-tool",
-			Result:     map[string]any{"status": "ok"},
+			Result:     toolexec.OutputFromValue(map[string]any{"status": "ok"}),
 		}},
 	}
 	assertPersistenceJSON(t, got, want)
@@ -126,7 +127,7 @@ func TestStoredModelMessageToSDKMessageRestoresLegacyToolCalls(t *testing.T) {
 		Content: []sdk.MessagePart{sdk.ToolCallPart{
 			ToolCallID: "legacy-call",
 			ToolName:   "lookup",
-			Input:      map[string]any{"query": "memoh"},
+			Input:      toolexec.ArgumentsFromValue(map[string]any{"query": "memoh"}),
 		}},
 	}
 	assertPersistenceJSON(t, got, want)
@@ -159,7 +160,7 @@ func TestStoredModelMessageToSDKMessageKeepsModernToolResult(t *testing.T) {
 	if len(got.Content) != 1 {
 		t.Fatalf("content parts = %d, want 1: %#v", len(got.Content), got.Content)
 	}
-	assertPersistenceJSON(t, got.Content[0], sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: "ok"})
+	assertPersistenceJSON(t, got.Content[0], sdk.ToolResultPart{ToolCallID: "call-1", ToolName: "lookup", Result: toolexec.OutputFromValue("ok")})
 }
 
 func TestDecodeStoredModelMessageSupportsPreviousSDKEnvelope(t *testing.T) {
@@ -170,11 +171,19 @@ func TestDecodeStoredModelMessageSupportsPreviousSDKEnvelope(t *testing.T) {
 		Content: []sdk.MessagePart{sdk.ToolCallPart{
 			ToolCallID: "call-old-sdk",
 			ToolName:   "lookup",
-			Input:      map[string]any{"query": "memoh"},
+			Input:      toolexec.ArgumentsFromValue(map[string]any{"query": "memoh"}),
 		}},
-		Usage: &sdk.Usage{InputTokens: 7, OutputTokens: 3},
 	}
-	raw := mustPersistenceJSON(t, previous)
+	// Rows written before the usage column carried the SDK envelope with its
+	// usage embedded; the arguments object sits directly under input.
+	raw := mustPersistenceJSON(t, map[string]any{
+		"role": "assistant",
+		"content": []map[string]any{{
+			"type": "tool-call", "toolCallId": "call-old-sdk", "toolName": "lookup",
+			"input": map[string]any{"query": "memoh"},
+		}},
+		"usage": map[string]any{"inputTokens": 7, "outputTokens": 3},
+	})
 
 	stored := DecodeStoredModelMessage(nil, "row-old-sdk", "assistant", raw)
 	if stored.Usage != nil {

@@ -8,6 +8,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/chat/timeline"
 )
 
@@ -35,7 +36,7 @@ func TestDiscussCollectorProviderIntentRepairsDanglingToolCalls(t *testing.T) {
 	if !ok ||
 		result.ToolCallID != "call-1" ||
 		result.ToolName != "lookup" ||
-		result.Result != contextfrag.ToolClosureRepairText ||
+		toolexec.OutputValue(result.Result) != contextfrag.ToolClosureRepairText ||
 		!result.IsError {
 		t.Fatalf("synthetic closure result = %#v, want interrupted call-1 lookup result", msg.Content[0])
 	}

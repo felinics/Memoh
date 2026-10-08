@@ -137,7 +137,6 @@
         >
           <Select v-model="testEvent">
             <SelectTrigger
-              size="sm"
               class="w-56"
             >
               <SelectValue :placeholder="$t('bots.hooks.selectEvent')" />

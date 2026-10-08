@@ -12,7 +12,7 @@ import (
 func TestRemainingStepBudgetUsesConservativeProviderEstimator(t *testing.T) {
 	t.Parallel()
 
-	params := &sdk.GenerateParams{
+	params := &sdk.Request{
 		System:   strings.Repeat("s", 101),
 		Messages: []sdk.Message{sdk.UserMessage(strings.Repeat("m", 103))},
 	}
@@ -34,7 +34,7 @@ func TestStepEnvelopeEstimatesPriceFrozenPrefixImagesFlat(t *testing.T) {
 		sdk.TextPart{Text: "what is in this photo?"},
 		sdk.ImagePart{Image: "data:image/jpeg;base64," + strings.Repeat("A", 400_000), MediaType: "image/jpeg"},
 	}}
-	params := &sdk.GenerateParams{
+	params := &sdk.Request{
 		System:   "system",
 		Messages: []sdk.Message{photo, sdk.AssistantMessage("looking")},
 	}

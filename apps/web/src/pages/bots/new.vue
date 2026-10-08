@@ -132,7 +132,7 @@
       </SettingsSection>
 
       <!-- One card for what the bot runs on: the agent kind and its model, the
-           memory backend, and the clock it schedules against. Three cards for
+           memory switch, and the clock it schedules against. Three cards for
            three single-row concerns was three titles saying less than the rows
            under them. -->
       <SettingsSection :title="$t('bots.steps.settings')">
@@ -175,17 +175,10 @@
         </SettingsRow>
 
         <SettingsRow
-          :label="$t('bots.settings.memoryProvider')"
-          :description="$t('bots.steps.memoryDesc')"
-          stack="sm"
+          :label="$t('bots.settings.memory')"
+          :description="$t('bots.settings.memoryDescription')"
         >
-          <div class="w-full sm:w-56">
-            <MemoryProviderSelect
-              v-model="form.memory_provider_id"
-              :providers="memoryProviders"
-              :placeholder="$t('common.none')"
-            />
-          </div>
+          <Switch v-model="form.memory_enabled" />
         </SettingsRow>
 
         <SettingsRow stack="sm">
@@ -320,6 +313,7 @@ import {
   SelectValue,
   SettingsRow,
   SettingsSection,
+  Switch,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -333,7 +327,7 @@ import { useDebounceFn } from '@vueuse/core'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery } from '@pinia/colada'
-import { getModels, getProviders, getMemoryProviders, getBotsNameAvailability } from '@memohai/sdk'
+import { getModels, getProviders, getBotsNameAvailability } from '@memohai/sdk'
 import type { BotsCreateBotRequest } from '@memohai/sdk'
 import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { aclPresetOptions, defaultAclPreset } from '@/constants/acl-presets'
@@ -350,7 +344,6 @@ import AgentTypePill from './components/agent-type-pill.vue'
 import AgentAuthorization from './components/agent-authorization.vue'
 import { readAgentAuthorizationDraft } from '@/composables/useAgentAuthorization'
 import { MEMOH_AGENT_VALUE } from './components/agent-type'
-import MemoryProviderSelect from './components/memory-provider-select.vue'
 import BotUserAccess from './components/bot-user-access.vue'
 import AvatarEditDialog from './components/avatar-edit-dialog.vue'
 import BotImportPanel from './components/bot-import-panel.vue'
@@ -375,7 +368,7 @@ const form = reactive({
   // Matches the bots.reasoning_effort column default, so creating a bot without
   // touching this control produces the same state as not sending it at all.
   reasoning_effort: 'medium',
-  memory_provider_id: '',
+  memory_enabled: true,
   timezone: emptyTimezoneValue,
 })
 
@@ -483,25 +476,8 @@ const { data: providerData } = useQuery({
   },
 })
 
-const { data: memoryProviderData } = useQuery({
-  key: ['memory-providers'],
-  query: async () => {
-    const { data } = await getMemoryProviders({ throwOnError: true })
-    return data
-  },
-})
-
 const models = computed(() => modelData.value ?? [])
 const providers = computed(() => providerData.value ?? [])
-const memoryProviders = computed(() => memoryProviderData.value ?? [])
-
-watch(memoryProviders, (list) => {
-  if (form.memory_provider_id) return
-  const builtin = list.find(p => p.provider === 'builtin')
-  if (builtin?.id) {
-    form.memory_provider_id = builtin.id
-  }
-}, { immediate: true })
 
 const authorizationKey = 'memoh:new-bot:agent-authorization'
 const agentType = ref(readAgentAuthorizationDraft(authorizationKey)?.runtime ?? MEMOH_AGENT_VALUE)
@@ -571,7 +547,7 @@ function createStartOptions() {
       })),
     settings: {
       chat_model_id: form.chat_model_id || undefined,
-      memory_provider_id: form.memory_provider_id || undefined,
+      memory_enabled: form.memory_enabled,
       // Only meaningful alongside a model; without one there are no tiers to pick
       // from and the stored value would be a guess.
       reasoning_effort: form.chat_model_id ? form.reasoning_effort || undefined : undefined,

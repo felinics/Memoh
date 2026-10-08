@@ -4,11 +4,9 @@ package channelqueue
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/felinics/memoh/internal/agent/application"
-	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/channel/inbound"
 )
 
@@ -49,29 +47,24 @@ func (a *Adapter) enqueue(input inbound.QueueCommandInput, admit func(applicatio
 	}))
 }
 
+// admissionCodes renders queue admission refusals in the channel command
+// vocabulary, which crosses the split-runtime RPC and is not the HTTP one.
+var admissionCodes = map[application.QueueAdmissionFailure]string{
+	application.QueueAdmissionSteerUnsupported:   inbound.QueueCommandCodeUnsupported,
+	application.QueueAdmissionNoActiveRun:        inbound.QueueCommandCodeNoActiveRun,
+	application.QueueAdmissionInvocationConflict: inbound.QueueCommandCodeConflict,
+	application.QueueAdmissionOverloaded:         inbound.QueueCommandCodeOverloaded,
+	application.QueueAdmissionCapacityExceeded:   inbound.QueueCommandCodeCapacity,
+	application.QueueAdmissionInvalidReference:   inbound.QueueCommandCodeInvalid,
+	application.QueueAdmissionUnavailable:        inbound.QueueCommandCodeUnavailable,
+}
+
 func mapAdmissionError(err error) error {
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, sessionruntime.ErrQueueSteerUnsupported):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeUnsupported)
-	case errors.Is(err, sessionruntime.ErrQueueNoActiveRun):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeNoActiveRun)
-	case errors.Is(err, sessionruntime.ErrQueueInvocationConflict):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeConflict)
-	case errors.Is(err, sessionruntime.ErrQueueAdmissionOverloaded):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeOverloaded)
-	case errors.Is(err, sessionruntime.ErrQueueCapacityExceeded):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeCapacity)
-	case errors.Is(err, sessionruntime.ErrQueueInvalidReference):
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeInvalid)
-	case errors.Is(err, application.ErrQueueInputIncomplete):
-		// The channel boundary did not record a team for this item. That is a
-		// server wiring fault, so the sender sees the generic unavailable code.
-		return inbound.NewQueueCommandError(inbound.QueueCommandCodeUnavailable)
-	default:
+	code, ok := admissionCodes[application.QueueAdmissionFailureOf(err)]
+	if !ok {
 		return err
 	}
+	return inbound.NewQueueCommandError(code)
 }
 
 var _ inbound.QueueCommandHandler = (*Adapter)(nil)
