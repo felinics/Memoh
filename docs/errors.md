@@ -116,7 +116,7 @@ type `application/problem+json`:
   "detail": "The workspace is not reachable.",
   "args": {},
   "fault": "server",
-  "request_id": "aeOSIBuu…",
+  "request_id": "3f2b9c1e-…",
   "trace_id": "4bf92f35…"
 }
 ```

@@ -53,8 +53,8 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	e.TLSServer.BaseContext = baseContext
 	e.HideBanner = true
 	e.HTTPErrorHandler = NewHTTPErrorHandler(log)
-	e.Use(middleware.RequestID())
-	// Directly after RequestID: everything below, and every handler, logs with
+	e.Use(httpx.AssignRequestID())
+	// Directly after AssignRequestID: everything below, and every handler, logs with
 	// a context that carries the id.
 	e.Use(httpx.RequestIDContext)
 	// After RequestIDContext so the span can carry the id the client is given,

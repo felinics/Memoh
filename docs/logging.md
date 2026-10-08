@@ -7,7 +7,7 @@ decisions a linter cannot make.
 ## The shape of a record
 
 ```json
-{"time":"2026-09-18T18:54:53.830Z","level":"INFO","msg":"request","method":"GET","uri":"/api/bots","status":200,"latency":"12ms","request_id":"aeOSIBuu…","trace_id":"4bf92f35…"}
+{"time":"2026-09-18T18:54:53.830Z","level":"INFO","msg":"request","method":"GET","uri":"/api/bots","status":200,"latency":"12ms","request_id":"3f2b9c1e-…","trace_id":"4bf92f35…"}
 ```
 
 `time`, `level`, `msg` and `source` belong to slog and must never be used as

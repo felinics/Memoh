@@ -369,7 +369,7 @@ func newWebhookTunnelEcho(log *slog.Logger) *echo.Echo {
 	// access log uses the same URI sanitizer: the media paths this listener
 	// serves carry an authorising token in the query string.
 	e.HTTPErrorHandler = server.NewHTTPErrorHandler(log)
-	e.Use(middleware.RequestID())
+	e.Use(httpx.AssignRequestID())
 	e.Use(httpx.RequestIDContext)
 	e.Use(telemetry.EchoServer)
 	e.Use(server.AccessLog(log))
