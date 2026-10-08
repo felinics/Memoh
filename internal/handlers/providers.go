@@ -16,6 +16,8 @@ import (
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
@@ -94,7 +96,7 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 
 	// Validate required fields
 	if req.Name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+		return apperror.FieldRequired("name")
 	}
 
 	resp, err := h.service.Create(c.Request().Context(), req)
@@ -102,7 +104,7 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 		if translated := providerError(err); apperror.CodeOf(translated) != "" {
 			return translated
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "create provider")
 	}
 
 	return c.JSON(http.StatusCreated, resp)
@@ -120,7 +122,7 @@ func (h *ProvidersHandler) Create(c echo.Context) error {
 func (h *ProvidersHandler) List(c echo.Context) error {
 	resp, err := h.service.List(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list providers")
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -139,9 +141,9 @@ func (h *ProvidersHandler) List(c echo.Context) error {
 // @Failure 500 {object} server.Problem
 // @Router /providers/{id} [get].
 func (h *ProvidersHandler) Get(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	resp, err := h.service.Get(c.Request().Context(), id)
@@ -167,15 +169,12 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 	if h.modelsService == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "models service not configured")
 	}
-	id := c.Param("id")
-	if strings.TrimSpace(id) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	modelType := strings.TrimSpace(c.QueryParam("type"))
-	var (
-		resp []models.GetResponse
-		err  error
-	)
+	var resp []models.GetResponse
 	if modelType == "" {
 		resp, err = h.modelsService.ListByProviderID(c.Request().Context(), id)
 	} else {
@@ -207,9 +206,9 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 // @Failure 500 {object} server.Problem
 // @Router /providers/name/{name} [get].
 func (h *ProvidersHandler) GetByName(c echo.Context) error {
-	name := c.Param("name")
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	name, err := httpx.RequiredParam(c, "name")
+	if err != nil {
+		return err
 	}
 
 	resp, err := h.service.GetByName(c.Request().Context(), name)
@@ -234,9 +233,9 @@ func (h *ProvidersHandler) GetByName(c echo.Context) error {
 // @Failure 500 {object} server.Problem
 // @Router /providers/{id} [put].
 func (h *ProvidersHandler) Update(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	var req providers.UpdateRequest
@@ -249,7 +248,7 @@ func (h *ProvidersHandler) Update(c echo.Context) error {
 		if translated := providerError(err); apperror.CodeOf(translated) != "" {
 			return translated
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update provider")
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -268,13 +267,13 @@ func (h *ProvidersHandler) Update(c echo.Context) error {
 // @Failure 500 {object} server.Problem
 // @Router /providers/{id} [delete].
 func (h *ProvidersHandler) Delete(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete provider")
 	}
 
 	return c.NoContent(http.StatusNoContent)
@@ -292,7 +291,7 @@ func (h *ProvidersHandler) Delete(c echo.Context) error {
 func (h *ProvidersHandler) Count(c echo.Context) error {
 	count, err := h.service.Count(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "count providers")
 	}
 
 	return c.JSON(http.StatusOK, providers.CountResponse{Count: count})
@@ -311,9 +310,9 @@ func (h *ProvidersHandler) Count(c echo.Context) error {
 // @Failure 500 {object} server.Problem
 // @Router /providers/{id}/test [post].
 func (h *ProvidersHandler) Test(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	ctx := c.Request().Context()
@@ -324,12 +323,12 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
 		if errors.Is(err, db.ErrInvalidUUID) {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid provider id").WithInternal(err)
+			return apperror.FieldInvalid("id", err)
 		}
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to test provider").WithInternal(err)
+		return errs.Wrap(err, "test provider")
 	}
 	if resp.Cause != nil {
 		// The response carries only the code; this event is where the cause
@@ -359,9 +358,9 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 // @Failure 500 {object} server.Problem
 // @Router /providers/{id}/import-models [post].
 func (h *ProvidersHandler) ImportModels(c echo.Context) error {
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	var req providers.ImportModelsRequest
 	if err := c.Bind(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -379,12 +378,12 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	provider, err := h.service.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, db.ErrInvalidUUID) {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid provider id").WithInternal(err)
+			return apperror.FieldInvalid("id", err)
 		}
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get provider").WithInternal(err)
+		return errs.Wrap(err, "get provider")
 	}
 	if !models.IsLLMClientType(models.ClientType(provider.ClientType)) {
 		return echo.NewHTTPError(http.StatusBadRequest, "import models is not supported for speech providers")
@@ -393,7 +392,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
 	if err != nil {
 		if errors.Is(err, db.ErrInvalidUUID) {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid provider id").WithInternal(err)
+			return apperror.FieldInvalid("id", err)
 		}
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
@@ -401,7 +400,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		if translated := probeError(err, false); apperror.CodeOf(translated) != "" {
 			return translated
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to fetch provider models").WithInternal(err)
+		return errs.Wrap(err, "fetch provider models")
 	}
 
 	resp := providers.ImportModelsResponse{

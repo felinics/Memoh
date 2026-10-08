@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
@@ -91,11 +92,12 @@ func TestProviderAndModelHandlersRejectInvalidInputWith400(t *testing.T) {
 		id     string
 		target string
 		call   func(echo.Context) error
+		field  string
 	}{
-		{"provider test id", "not-a-uuid", "/", providersHandler.Test},
-		{"provider models id", "not-a-uuid", "/", providersHandler.ListModelsByProvider},
-		{"provider models type", uuid.NewString(), "/?type=bogus", providersHandler.ListModelsByProvider},
-		{"model test id", "not-a-uuid", "/", modelsHandler.Test},
+		{"provider test id", "not-a-uuid", "/", providersHandler.Test, "id"},
+		{"provider models id", "not-a-uuid", "/", providersHandler.ListModelsByProvider, ""},
+		{"provider models type", uuid.NewString(), "/?type=bogus", providersHandler.ListModelsByProvider, ""},
+		{"model test id", "not-a-uuid", "/", modelsHandler.Test, "id"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,8 +105,15 @@ func TestProviderAndModelHandlersRejectInvalidInputWith400(t *testing.T) {
 			c := e.NewContext(httptest.NewRequest(http.MethodGet, tc.target, nil), httptest.NewRecorder())
 			c.SetParamNames("id")
 			c.SetParamValues(tc.id)
+			err := tc.call(c)
+			if tc.field != "" {
+				if apperror.CodeOf(err) != apperror.CodeRequestFieldInvalid || apperror.ArgsOf(err)["field"] != tc.field {
+					t.Fatalf("error = %v, want %s for field %q", err, apperror.CodeRequestFieldInvalid, tc.field)
+				}
+				return
+			}
 			var httpErr *echo.HTTPError
-			if err := tc.call(c); !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
+			if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
 				t.Fatalf("status = %v, want 400", err)
 			}
 		})
