@@ -68,7 +68,7 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 	}
 	var req schedule.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.Create(c.Request().Context(), botID, req)
 	if err != nil {
@@ -168,7 +168,7 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 	}
 	var req schedule.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {

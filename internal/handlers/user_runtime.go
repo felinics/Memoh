@@ -54,7 +54,7 @@ func (h *UserRuntimeHandler) Create(c echo.Context) error {
 	}
 	var req userruntime.CreateRuntimeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.CreateRuntime(c.Request().Context(), userID, req)
 	if err != nil {

@@ -137,7 +137,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 
 	var req SkillsUpsertRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if len(req.Skills) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "skills is required")
@@ -264,7 +264,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 
 	var req SkillsDeleteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if len(req.SourcePaths) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "source_paths is required")
@@ -380,7 +380,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 
 	var req SkillsActionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	if err := h.applySkillAction(c.Request().Context(), botID, req); err != nil {

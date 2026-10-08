@@ -539,7 +539,7 @@ func (h *ContainerdHandler) FSArchive(c echo.Context) error {
 	}
 	var req FSArchiveRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	paths, err := dedupeArchivePaths(req.Paths)
 	if err != nil {
@@ -665,7 +665,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 	}
 	var req FSWriteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
@@ -785,7 +785,7 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 	}
 	var req FSMkdirRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
@@ -836,7 +836,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 	}
 	var req FSDeleteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
@@ -884,7 +884,7 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	}
 	var req FSRenameRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.OldPath) == "" || strings.TrimSpace(req.NewPath) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "oldPath and newPath are required")
@@ -933,7 +933,7 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 	}
 	var req FSExtractRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "path is required")

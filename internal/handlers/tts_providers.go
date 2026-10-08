@@ -365,7 +365,7 @@ func (h *AudioHandler) UpdateModel(c echo.Context) error {
 	}
 	var req audiopkg.UpdateSpeechModelRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.UpdateSpeechModel(c.Request().Context(), id, req)
 	if err != nil {
@@ -412,7 +412,7 @@ func (h *AudioHandler) UpdateTranscriptionModel(c echo.Context) error {
 	}
 	var req audiopkg.UpdateSpeechModelRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.UpdateTranscriptionModel(c.Request().Context(), id, req)
 	if err != nil {
@@ -480,7 +480,7 @@ func (h *AudioHandler) TestModel(c echo.Context) error {
 	}
 	var req audiopkg.TestSynthesizeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {

@@ -95,7 +95,7 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 	var req settings.UpsertRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.UpsertBot(c.Request().Context(), botID, req)
 	if err != nil {

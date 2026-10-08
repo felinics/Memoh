@@ -212,6 +212,11 @@ const (
 	CodeHTTPServiceUnavailable   Code = "http.service_unavailable"
 	CodeHTTPGatewayTimeout       Code = "http.gateway_timeout"
 
+	// Request field codes: a request that lacks a field or carries an invalid
+	// value in one, named in the field arg as the request names it.
+	CodeRequestFieldRequired Code = "request.field_required"
+	CodeRequestFieldInvalid  Code = "request.field_invalid"
+
 	CodeSessionNotFound Code = "session.not_found"
 
 	// External Agent codes. They keep the values the removed agent feedback
@@ -1024,6 +1029,8 @@ var catalog = map[Code]Definition{
 	CodeHTTPBadGateway:           {HTTPStatus: http.StatusBadGateway, Detail: "An upstream service returned an invalid response. Please try again."},
 	CodeHTTPServiceUnavailable:   {HTTPStatus: http.StatusServiceUnavailable, Detail: "The service is temporarily unavailable. Please try again shortly."},
 	CodeHTTPGatewayTimeout:       {HTTPStatus: http.StatusGatewayTimeout, Detail: "An upstream service did not respond in time. Please try again."},
+	CodeRequestFieldRequired:     {HTTPStatus: http.StatusBadRequest, Detail: "A required field is missing.", AllowedArgs: []string{"field"}},
+	CodeRequestFieldInvalid:      {HTTPStatus: http.StatusBadRequest, Detail: "A field has an invalid value.", AllowedArgs: []string{"field"}},
 	CodeSessionNotFound:          {HTTPStatus: http.StatusNotFound, Detail: "The conversation was not found."},
 	CodeACPAgentNotFound:         {HTTPStatus: http.StatusBadRequest, Detail: "The selected external agent is unavailable."},
 	CodeACPAgentNotEnabled:       {HTTPStatus: http.StatusForbidden, Detail: "The selected external agent is disabled for this bot."},
@@ -1106,6 +1113,20 @@ type Error struct {
 // New creates a public application error without an infrastructure cause.
 func New(code Code, args map[string]string) *Error {
 	return &Error{code: code, args: sanitizeArgs(code, args)}
+}
+
+// FieldRequired is the answer to a request that lacks field. field is the
+// name the request uses for it: the JSON key, query parameter or path
+// parameter, as written there, with dots for a nested key.
+func FieldRequired(field string) *Error {
+	return New(CodeRequestFieldRequired, map[string]string{"field": field})
+}
+
+// FieldInvalid is the answer to a request whose field holds a value this
+// process cannot accept; cause says why and stays private. field is named as
+// for FieldRequired.
+func FieldInvalid(field string, cause error) *Error {
+	return Wrap(CodeRequestFieldInvalid, cause, map[string]string{"field": field})
 }
 
 // Wrap retains a private cause for boundary logging. Only catalog-allowed args

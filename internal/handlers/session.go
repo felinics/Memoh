@@ -231,7 +231,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	}
 	var req createSessionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	sessionType := strings.TrimSpace(req.Type)
 	if sessionType == "" {
@@ -417,7 +417,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 
 	var req forkSessionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	turnID := strings.TrimSpace(req.TurnID)
 	legacyMessageID := strings.TrimSpace(req.MessageID)
@@ -839,7 +839,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 
 	var req updateSessionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	// Mirror the create-path guard in session.ResolveDescriptor: the legacy

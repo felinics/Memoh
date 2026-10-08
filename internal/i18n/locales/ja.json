@@ -783,6 +783,10 @@
       "service_unavailable": "サービスは一時的に利用できません。しばらくしてからもう一度お試しください。",
       "gateway_timeout": "上流サービスが時間内に応答しませんでした。もう一度お試しください。"
     },
+    "request": {
+      "field_required": "{field} は必須です。",
+      "field_invalid": "{field} の値が無効です。"
+    },
     "agent_dependency_missing": "{dep_id} はこの Workspace にインストールされていません。Bot の「依存関係」からインストールするか、実行中のインストールの完了を待ってから、メッセージを再送してください。",
     "runtime_run_failed": "応答を完了できませんでした。もう一度お試しください。",
     "runtime_prompt_failed": "Agent runtime がこの応答を完了できませんでした。もう一度お試しください。",

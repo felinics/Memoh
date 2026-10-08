@@ -73,7 +73,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	var req LoginRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	if req.Username == "" || strings.TrimSpace(req.Password) == "" {

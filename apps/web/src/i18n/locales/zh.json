@@ -379,6 +379,10 @@
       "service_unavailable": "服务暂时不可用，请稍后重试。",
       "gateway_timeout": "上游服务响应超时，请重试。"
     },
+    "request": {
+      "field_required": "缺少 {field}。",
+      "field_invalid": "{field} 的值无效。"
+    },
     "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
     "runtime_run_failed": "回复未能完成，请重试。",
     "runtime_prompt_failed": "Agent 运行时未能完成这次回复，请重试。",

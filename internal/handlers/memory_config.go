@@ -59,7 +59,7 @@ func (h *MemoryConfigHandler) Get(c echo.Context) error {
 func (h *MemoryConfigHandler) Update(c echo.Context) error {
 	var req memprovider.MemoryConfigUpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	cfg, err := h.service.UpdateConfig(c.Request().Context(), req)
 	if err != nil {

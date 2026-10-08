@@ -359,6 +359,7 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 // routes other than /health.
 func newWebhookTunnelEcho(log *slog.Logger) *echo.Echo {
 	e := echo.New()
+	e.Binder = &httpx.Binder{}
 	e.HideBanner = true
 	e.HidePort = true
 	// This listener faces the public internet: it receives third-party channel

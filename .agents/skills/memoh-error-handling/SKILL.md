@@ -26,6 +26,11 @@ metadata:
    没有专用 code 的 4xx 为 `http.bad_request`，5xx 为 `internal`。它的 message 不下发，
    handler 有 cause 时用 `WithInternal(err)` 附上，进结果记录
    （`internal/server/error_handler_test.go` 的 `TestBoundaryAnswersEveryErrorWithAProblem` 锁定此行为）。
+   所以 handler 不要用 `echo.NewHTTPError(4xx, "...")` 告诉用户哪里错了，用户看不到：
+   缺字段用 `apperror.FieldRequired("字段名")` 或 `httpx.RequiredParam/RequiredQuery`，
+   字段值不合法用 `apperror.FieldInvalid("字段名", err)`。字段名照请求里的写法写成字面量
+   （JSON 键、query 或路径参数名，大小写不改，嵌套用点）。修正需要的不止字段名时，
+   在该领域建自己的 code。绑定类型错误由 `httpx.Binder` 自动给出字段，`c.Bind` 的错误直接返回。
 
 ## 后端：新增一个错误的标准步骤
 

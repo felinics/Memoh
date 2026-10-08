@@ -63,7 +63,7 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 
 	var req synthesizeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {

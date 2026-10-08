@@ -156,6 +156,30 @@ own code is `http.bad_request` and a server status without one is
 The message of an `*echo.HTTPError` is not sent. A handler that has a cause
 for one attaches it with `WithInternal(err)`, so the result record carries it.
 
+### Request fields
+
+A request that lacks a field, or holds a value this process cannot accept in
+one, is answered with the field it names:
+
+| Code | Built with | Args |
+| --- | --- | --- |
+| `request.field_required` | `apperror.FieldRequired(field)`, or `httpx.RequiredParam` / `httpx.RequiredQuery`, which read and trim the parameter | `field` |
+| `request.field_invalid` | `apperror.FieldInvalid(field, cause)`; the cause stays private | `field` |
+
+`field` is the name the request uses: the JSON key, query parameter or path
+parameter as written there, without changing its case, with dots for a nested
+key. It is written as a string literal where the field is read; a guard test
+in `internal/apperror` fails on any other argument. A response names one
+field: a handler returns at the first problem.
+
+Both HTTP servers bind with `httpx.Binder`, so a JSON value of the wrong type
+is answered as `request.field_invalid` for its key. Malformed JSON has no
+field and stays `http.bad_request`.
+
+A field problem whose fix needs more than the field's name, such as a rule
+between two fields or an action the user has to take first, has a code of its
+own in the domain that checks it.
+
 `fault` is who the process attributes the failure to, not something derived
 from the status:
 

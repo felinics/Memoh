@@ -174,7 +174,7 @@ func (h *MemoryHandler) ChatAdd(c echo.Context) error {
 
 	var payload memoryAddPayload
 	if err := c.Bind(&payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	namespace, err := normalizeSharedMemoryNamespace(payload.Namespace)
@@ -237,7 +237,7 @@ func (h *MemoryHandler) ChatSearch(c echo.Context) error {
 
 	var payload memorySearchPayload
 	if err := c.Bind(&payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	scopes, err := h.resolveEnabledScopes(botID)
@@ -833,7 +833,7 @@ func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 	}
 	var payload memoryUpdatePayload
 	if err := c.Bind(&payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(payload.Memory) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "memory is required")
@@ -878,7 +878,7 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	}
 	var payload memoryCompactPayload
 	if err := c.Bind(&payload); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if payload.Ratio <= 0 || payload.Ratio > 1 {
 		return echo.NewHTTPError(http.StatusBadRequest, "ratio is required and must be in range (0, 1]")

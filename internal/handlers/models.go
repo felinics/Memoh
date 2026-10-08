@@ -108,7 +108,7 @@ func (h *ModelsHandler) Register(e *echo.Echo) {
 func (h *ModelsHandler) Create(c echo.Context) error {
 	var req models.AddRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.Create(c.Request().Context(), req)
@@ -236,7 +236,7 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 
 	var req models.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.UpdateByID(c.Request().Context(), id, req)
@@ -276,7 +276,7 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 
 	var req models.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.UpdateByModelID(c.Request().Context(), modelID, req)

@@ -236,7 +236,7 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	}
 	var req QuickActionExecuteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	actionID := strings.TrimSpace(req.ActionID)
 	sessionID := strings.TrimSpace(req.SessionID)
@@ -825,7 +825,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	var req LocalChannelMessageRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")

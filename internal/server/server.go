@@ -47,6 +47,7 @@ func newServer(log *slog.Logger, addr string, jwtSecret string,
 	}
 
 	e := echo.New()
+	e.Binder = &httpx.Binder{}
 	requestCtx, stopRequests := context.WithCancel(context.Background())
 	baseContext := func(net.Listener) context.Context { return requestCtx }
 	e.Server.BaseContext = baseContext

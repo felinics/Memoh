@@ -1,6 +1,7 @@
 // Package httpx holds tiny echo-boundary helpers shared by both HTTP shells
-// and by handlers. Keep it dependency-light — echo, plus internal/logger,
-// which imports no package from this repository and so cannot close a cycle.
+// and by handlers. Keep it dependency-light — echo, plus internal/logger and
+// internal/apperror, which import no package from this repository and so
+// cannot close a cycle.
 package httpx
 
 import (

@@ -85,7 +85,7 @@ func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 	}
 	var req channelaccess.SetManagerRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	channelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
@@ -142,7 +142,7 @@ func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 	}
 	var req channelaccess.IssueLinkCodeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	code, err := h.service.IssueLinkCode(c.Request().Context(), userID, strings.TrimSpace(req.ChannelType))
 	if err != nil {

@@ -186,7 +186,7 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 
 	var req browserSessionCreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid browser session payload")
+		return err
 	}
 	if err := validateBrowserPort(req.Port); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())

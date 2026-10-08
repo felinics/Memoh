@@ -190,7 +190,7 @@ func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 	}
 	var req accounts.UpdatePasswordRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if err := h.service.UpdatePassword(c.Request().Context(), channelIdentityID, req.CurrentPassword, req.NewPassword); err != nil {
 		if errors.Is(err, accounts.ErrInvalidPassword) {
@@ -309,7 +309,7 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	}
 	var req accounts.UpdateAccountRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.UpdateAdmin(c.Request().Context(), targetID, req)
 	if err != nil {
@@ -345,7 +345,7 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 	}
 	var req accounts.CreateAccountRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	//nolint:staticcheck // Keep backward-compatible behavior: CreateHuman creates backing user when owner id is empty.
 	resp, err := h.service.CreateHuman(c.Request().Context(), "", req)
@@ -423,7 +423,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	}
 	var req bots.CreateBotRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	ownerID := channelIdentityID
 	ownerFromToken := true
@@ -780,7 +780,7 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	}
 	var req bots.UpdateBotRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	shouldResetRuntimes := false
 	if req.Metadata != nil {
@@ -920,7 +920,7 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 	}
 	var req bots.TransferBotRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.botService.TransferOwner(c.Request().Context(), botID, req.OwnerUserID)
 	if err != nil {
@@ -1057,7 +1057,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	}
 	var req channel.UpsertConfigRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Credentials == nil {
 		req.Credentials = map[string]any{}
@@ -1114,7 +1114,7 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 	}
 	var req channel.UpdateChannelStatusRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
@@ -1170,7 +1170,7 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 	}
 	var req channel.SetWebhookEndpointRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel runtime not configured")
@@ -1267,7 +1267,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	}
 	var req channel.SendRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
@@ -1324,7 +1324,7 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 
 	var req channel.SendRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")

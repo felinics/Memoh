@@ -135,7 +135,7 @@ func (h *HooksHandler) Test(c echo.Context) error {
 	}
 	var input HookTestRequest
 	if err := c.Bind(&input); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	eventName := strings.TrimSpace(input.Event)
 	if eventName == "" {

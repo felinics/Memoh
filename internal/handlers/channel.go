@@ -79,7 +79,7 @@ func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	}
 	var req channel.UpsertChannelIdentityConfigRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Config == nil {
 		req.Config = map[string]any{}

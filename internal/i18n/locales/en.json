@@ -783,6 +783,10 @@
       "service_unavailable": "The service is temporarily unavailable. Please try again shortly.",
       "gateway_timeout": "An upstream service did not respond in time. Please try again."
     },
+    "request": {
+      "field_required": "{field} is required.",
+      "field_invalid": "{field} is invalid."
+    },
     "agent_dependency_missing": "{dep_id} is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.",
     "runtime_run_failed": "The response could not be completed. Please try again.",
     "runtime_prompt_failed": "The agent runtime could not complete this response. Please try again.",

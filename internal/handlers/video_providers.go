@@ -211,7 +211,7 @@ func (h *VideoHandler) UpdateModel(c echo.Context) error {
 	}
 	var req videopkg.UpdateModelRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		return err
 	}
 	resp, err := h.service.UpdateModel(c.Request().Context(), id, req)
 	if err != nil {

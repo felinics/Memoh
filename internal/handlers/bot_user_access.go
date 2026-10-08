@@ -100,7 +100,7 @@ func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 	}
 	var req bots.CreateUserGrantRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.botService.CreateUserGrant(c.Request().Context(), botID, actorID, req)
 	if err != nil {
@@ -133,7 +133,7 @@ func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 	}
 	var req bots.UpdateUserGrantRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.botService.UpdateUserGrant(c.Request().Context(), botID, grantID, req)
 	if err != nil {

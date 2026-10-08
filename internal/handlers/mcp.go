@@ -104,7 +104,7 @@ func (h *MCPHandler) Create(c echo.Context) error {
 	}
 	var req mcp.UpsertRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.Create(c.Request().Context(), botID, req)
 	if err != nil {
@@ -180,7 +180,7 @@ func (h *MCPHandler) Update(c echo.Context) error {
 	}
 	var req mcp.UpsertRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.Update(c.Request().Context(), botID, id, req)
 	if err != nil {
@@ -345,7 +345,7 @@ func (h *MCPHandler) Import(c echo.Context) error {
 	}
 	var req mcp.ImportRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	items, err := h.service.Import(c.Request().Context(), botID, req)
 	if err != nil {
@@ -383,7 +383,7 @@ func (h *MCPHandler) BatchDelete(c echo.Context) error {
 	}
 	var req BatchDeleteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if len(req.IDs) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "ids are required")

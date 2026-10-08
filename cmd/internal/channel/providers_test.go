@@ -10,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel/inbound"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/logger"
 	"github.com/felinics/memoh/internal/server"
 )
@@ -63,5 +64,14 @@ func TestWebhookTunnelAnswersAnUnknownRouteWithAProblemAndOneRecord(t *testing.T
 	}
 	if requests != 1 {
 		t.Fatalf("request records = %d, want 1: %s", requests, logs.String())
+	}
+}
+
+// The channel listener binds requests the way the main server does, so a
+// webhook body of the wrong shape names its field on either listener.
+func TestWebhookTunnelBindsWithTheSharedBinder(t *testing.T) {
+	e := newWebhookTunnelEcho(logger.New(&bytes.Buffer{}, "debug", "json"))
+	if _, ok := e.Binder.(*httpx.Binder); !ok {
+		t.Fatalf("binder = %T, want *httpx.Binder", e.Binder)
 	}
 }

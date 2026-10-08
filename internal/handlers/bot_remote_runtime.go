@@ -162,7 +162,7 @@ func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 	}
 	var req workspace.SetPrimaryWorkspaceTargetRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.TargetID) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "target_id is required")
@@ -193,7 +193,7 @@ func (h *BotRemoteRuntimeHandler) UpdateToolApproval(c echo.Context) error {
 	}
 	var req workspace.UpdateWorkspaceTargetToolApprovalRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	targetID := strings.TrimSpace(c.Param("target_id"))
 	config, err := h.resolveToolApprovalUpdate(c.Request().Context(), botID, targetID, req)

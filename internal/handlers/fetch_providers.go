@@ -57,7 +57,7 @@ func (h *FetchProvidersHandler) ListMeta(c echo.Context) error {
 func (h *FetchProvidersHandler) Create(c echo.Context) error {
 	var req fetchproviders.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
@@ -132,7 +132,7 @@ func (h *FetchProvidersHandler) Update(c echo.Context) error {
 	}
 	var req fetchproviders.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {

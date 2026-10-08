@@ -87,7 +87,7 @@ func (h *WorkdirHandler) Create(c echo.Context) error {
 	}
 	var req workdir.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	created, err := h.service.Create(c.Request().Context(), botID, identityID, req)
 	if err != nil {
@@ -193,7 +193,7 @@ func (h *WorkdirHandler) Rename(c echo.Context) error {
 	}
 	var req workdir.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	renamed, err := h.service.Rename(c.Request().Context(), botID, workdirID, req.Name)
 	if err != nil {

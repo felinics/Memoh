@@ -41,6 +41,15 @@ func (h boundaryTestHandler) Register(e *echo.Echo) {
 	e.HEAD("/probe", func(echo.Context) error { return h.err })
 	e.GET("/panic", func(echo.Context) error { panic("synthetic panic value") })
 	e.GET("/written", func(c echo.Context) error { return c.NoContent(http.StatusInternalServerError) })
+	e.POST("/bind", func(c echo.Context) error {
+		var body struct {
+			Count  int `json:"count"`
+			Config struct {
+				Retries int `json:"retries"`
+			} `json:"config"`
+		}
+		return c.Bind(&body)
+	})
 	e.POST("/channels/:platform/webhook/:id", func(c echo.Context) error {
 		_, err := io.ReadAll(c.Request().Body)
 		return err
@@ -303,5 +312,35 @@ func TestBoundaryWritesNoErrorFieldsForASuccess(t *testing.T) {
 		if _, found := record[key]; found {
 			t.Errorf("successful request record has %s: %v", key, record)
 		}
+	}
+}
+
+// A JSON value of the wrong type is answered with the field it was found in,
+// named by its key; malformed JSON has no field and stays a bad request.
+func TestBoundaryAnswersABindingTypeErrorWithItsField(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body  string
+		code  apperror.Code
+		field string
+	}{
+		"top-level key":  {`{"count":"three"}`, apperror.CodeRequestFieldInvalid, "count"},
+		"nested key":     {`{"config":{"retries":"many"}}`, apperror.CodeRequestFieldInvalid, "config.retries"},
+		"malformed JSON": {`{"count":`, apperror.CodeHTTPBadRequest, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/bind", strings.NewReader(tc.body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			res := serveBoundary(t, nil, req)
+			if res.rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body %s", res.rec.Code, res.rec.Body.String())
+			}
+			problem := res.problem(t)
+			if problem.Code != string(tc.code) || problem.Args["field"] != tc.field {
+				t.Fatalf("problem = %+v, want code %s field %q", problem, tc.code, tc.field)
+			}
+			if problem.Fault != apperror.FaultClient {
+				t.Fatalf("fault = %q, want client", problem.Fault)
+			}
+		})
 	}
 }

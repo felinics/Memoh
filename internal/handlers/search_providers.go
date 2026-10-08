@@ -57,7 +57,7 @@ func (h *SearchProvidersHandler) ListMeta(c echo.Context) error {
 func (h *SearchProvidersHandler) Create(c echo.Context) error {
 	var req searchproviders.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
@@ -135,7 +135,7 @@ func (h *SearchProvidersHandler) Update(c echo.Context) error {
 	}
 	var req searchproviders.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {

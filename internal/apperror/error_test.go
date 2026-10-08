@@ -3,6 +3,7 @@ package apperror
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -294,5 +295,21 @@ func TestParseFault(t *testing.T) {
 		if got, ok := ParseFault(s); ok || got != "" {
 			t.Errorf("ParseFault(%q) = %q, %v; want rejected", s, got, ok)
 		}
+	}
+}
+
+// A field error carries only the field to the client; the cause stays private.
+func TestFieldErrorsCarryOnlyTheField(t *testing.T) {
+	cause := errors.New("strconv.Atoi: parsing \"three\": invalid syntax")
+	invalid := FieldInvalid("count", cause)
+	if CodeOf(invalid) != CodeRequestFieldInvalid || !maps.Equal(ArgsOf(invalid), map[string]string{"field": "count"}) {
+		t.Fatalf("FieldInvalid = %s %v", CodeOf(invalid), ArgsOf(invalid))
+	}
+	if !errors.Is(CauseOf(invalid), cause) {
+		t.Fatalf("cause = %v, want the private cause", CauseOf(invalid))
+	}
+	required := FieldRequired("session_id")
+	if CodeOf(required) != CodeRequestFieldRequired || !maps.Equal(ArgsOf(required), map[string]string{"field": "session_id"}) {
+		t.Fatalf("FieldRequired = %s %v", CodeOf(required), ArgsOf(required))
 	}
 }

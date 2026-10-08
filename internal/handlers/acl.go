@@ -84,7 +84,7 @@ func (h *ACLHandler) CreateRule(c echo.Context) error {
 	}
 	var req acl.CreateRuleRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.service.CreateRule(c.Request().Context(), botID, actorID, req)
 	if err != nil {
@@ -115,7 +115,7 @@ func (h *ACLHandler) UpdateRule(c echo.Context) error {
 	}
 	var req acl.UpdateRuleRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.service.UpdateRule(c.Request().Context(), ruleID, req)
 	if err != nil {
@@ -189,7 +189,7 @@ func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
 	}
 	var req acl.DefaultEffectResponse
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if err := h.service.SetDefaultEffect(c.Request().Context(), botID, req.DefaultEffect); err != nil {
 		if errors.Is(err, acl.ErrInvalidEffect) {

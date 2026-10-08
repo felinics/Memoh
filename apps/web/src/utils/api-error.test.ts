@@ -201,6 +201,21 @@ describe('resolveApiErrorMessage', () => {
   })
 
   it.each([
+    ['en', 'request.field_required', 'session_id is required.'],
+    ['zh', 'request.field_required', '缺少 session_id。'],
+    ['ja', 'request.field_required', 'session_id は必須です。'],
+    ['en', 'request.field_invalid', 'session_id is invalid.'],
+    ['zh', 'request.field_invalid', 'session_id 的值无效。'],
+    ['ja', 'request.field_invalid', 'session_id の値が無効です。'],
+  ])('names the field of a %s %s error', (language, code, expected) => {
+    locale = language
+
+    const error = { code, args: { field: 'session_id' }, detail: 'A field problem.', request_id: 'req-1', status: 400 }
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
+  })
+
+  it.each([
     ['en', 'skill.builtin_read_only', 'Built-in Skills are managed by Memoh and cannot be edited or deleted.'],
     ['zh', 'skill.builtin_read_only', 'Memoh 自带 Skill 由系统管理，无法编辑或删除。'],
     ['ja', 'skill.builtin_read_only', 'Memoh 組み込みの Skill はシステムによって管理されているため、編集または削除できません。'],

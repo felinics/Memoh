@@ -430,7 +430,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	}
 	var req MCPStdioRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Command) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "command is required")
@@ -534,7 +534,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 
 	var req mcptools.JSONRPCRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.JSONRPC != "" && req.JSONRPC != "2.0" {
 		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, -32600, "invalid jsonrpc version"))

@@ -95,7 +95,7 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	var req botbackup.ExportRequest
 	if c.Request().Body != nil {
 		if err := c.Bind(&req); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return err
 		}
 	}
 

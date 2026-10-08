@@ -145,7 +145,7 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 
 	var req displayWebRTCOfferRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid display offer payload")
+		return err
 	}
 
 	answer, err := h.displayService.Answer(c.Request().Context(), botID, displaypkg.OfferRequest{

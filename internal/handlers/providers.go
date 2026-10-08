@@ -89,7 +89,7 @@ func (h *ProvidersHandler) CreateFromTemplate(c echo.Context) error {
 func (h *ProvidersHandler) Create(c echo.Context) error {
 	var req providers.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	// Validate required fields
@@ -241,7 +241,7 @@ func (h *ProvidersHandler) Update(c echo.Context) error {
 
 	var req providers.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.Update(c.Request().Context(), id, req)
@@ -365,7 +365,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 	}
 	var req providers.ImportModelsRequest
 	if err := c.Bind(&req); err != nil && !errors.Is(err, io.EOF) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if err := models.ValidateCompatibilities(req.DefaultCompatibilities); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())

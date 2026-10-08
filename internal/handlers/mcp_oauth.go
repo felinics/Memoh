@@ -162,7 +162,7 @@ type oauthExchangeRequest struct {
 func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 	var req oauthExchangeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		return err
 	}
 
 	code := strings.TrimSpace(req.Code)
