@@ -11,6 +11,8 @@ import (
 	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channelaccess"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	identitypkg "github.com/felinics/memoh/internal/identity"
 )
 
@@ -62,7 +64,7 @@ func (h *ChannelAccessHandler) ListManagers(c echo.Context) error {
 	}
 	items, err := h.service.ListManagers(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list managers")
 	}
 	return c.JSON(http.StatusOK, channelaccess.ListManagersResponse{Items: items})
 }
@@ -95,7 +97,7 @@ func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 		if errors.Is(err, channelaccess.ErrInvalidInput) || errors.Is(err, acl.ErrInvalidRuleSubject) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "set manager")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -121,7 +123,7 @@ func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.service.ClearManagerOverride(c.Request().Context(), botID, channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "clear manager override")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -149,7 +151,7 @@ func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 		if errors.Is(err, channelaccess.ErrInvalidInput) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "issue link code")
 	}
 	return c.JSON(http.StatusCreated, code)
 }
@@ -168,7 +170,7 @@ func (h *ChannelAccessHandler) ListBindings(c echo.Context) error {
 	}
 	items, err := h.service.ListUserBindings(c.Request().Context(), userID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list user bindings")
 	}
 	return c.JSON(http.StatusOK, channelaccess.ListBindingsResponse{Items: items})
 }
@@ -192,7 +194,7 @@ func (h *ChannelAccessHandler) Unbind(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if err := h.service.Unbind(c.Request().Context(), userID, channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "unbind")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -202,9 +204,9 @@ func (h *ChannelAccessHandler) requireManageAccess(c echo.Context) (string, stri
 	if err != nil {
 		return "", "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err

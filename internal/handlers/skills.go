@@ -12,6 +12,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -112,7 +113,7 @@ func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 	}
 	catalog, err := h.buildSafeSkillCatalog(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "build skill catalog")
 	}
 	return c.JSON(http.StatusOK, SafeSkillsResponse{Skills: catalog})
 }
@@ -140,7 +141,7 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		return err
 	}
 	if len(req.Skills) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "skills is required")
+		return apperror.FieldRequired("skills")
 	}
 	sourcePath := strings.TrimSpace(req.SourcePath)
 	if sourcePath != "" && len(req.Skills) != 1 {
@@ -267,7 +268,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		return err
 	}
 	if len(req.SourcePaths) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "source_paths is required")
+		return apperror.FieldRequired("source_paths")
 	}
 
 	if err := h.deleteSkills(c.Request().Context(), botID, req.SourcePaths); err != nil {
@@ -403,7 +404,7 @@ func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, 
 	}
 	roots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "discover skill roots")
 	}
 
 	if err := skillset.ApplyAction(ctx, client, roots, skillset.ActionRequest{

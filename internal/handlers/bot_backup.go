@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/botbackup"
 	"github.com/felinics/memoh/internal/botbackup/secure"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -113,10 +114,10 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	}()
 
 	if err := h.service.Export(c.Request().Context(), botID, botbackup.ExportOptions{Sections: req.Sections}, tmp); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "export failed: "+err.Error())
+		return errs.Wrap(err, "export bot backup")
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "rewind backup file")
 	}
 
 	filename := fmt.Sprintf("bot-%s-backup-%s.memoh.zip", safeFilename(bot.DisplayName, bot.ID), time.Now().UTC().Format("20060102T150405Z"))
@@ -219,7 +220,7 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 func readUploadedBackup(c echo.Context) ([]byte, error) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "file is required")
+		return nil, apperror.FieldRequired("file")
 	}
 	src, err := file.Open()
 	if err != nil {

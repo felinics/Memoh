@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/errs"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 )
 
@@ -40,7 +41,7 @@ func (h *MemoryConfigHandler) Register(e *echo.Echo) {
 func (h *MemoryConfigHandler) Get(c echo.Context) error {
 	cfg, err := h.service.GetConfig(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get config")
 	}
 	return c.JSON(http.StatusOK, cfg)
 }
@@ -63,7 +64,7 @@ func (h *MemoryConfigHandler) Update(c echo.Context) error {
 	}
 	cfg, err := h.service.UpdateConfig(c.Request().Context(), req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update config")
 	}
 	return c.JSON(http.StatusOK, cfg)
 }

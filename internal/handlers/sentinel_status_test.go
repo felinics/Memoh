@@ -58,10 +58,7 @@ func TestGetChannelIdentityConfigStatusFollowsSentinel(t *testing.T) {
 			c := testAuthContext(e, httptest.NewRequest(http.MethodGet, "/", nil), rec, uuid.NewString())
 			c.SetParamNames("platform")
 			c.SetParamValues(string(sentinelTestChannelType))
-			var httpErr *echo.HTTPError
-			if err := h.GetChannelIdentityConfig(c); !errors.As(err, &httpErr) || httpErr.Code != tc.want {
-				t.Fatalf("status = %v, want %d", err, tc.want)
-			}
+			assertSentinelStatus(t, h.GetChannelIdentityConfig(c), tc.err, tc.want)
 		})
 	}
 }
@@ -76,10 +73,25 @@ func TestFetchProviderHTTPErrorStatus(t *testing.T) {
 		{errors.New("invalid provider row"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
-		var httpErr *echo.HTTPError
-		if err := fetchProviderHTTPError(tc.err); !errors.As(err, &httpErr) || httpErr.Code != tc.want {
-			t.Errorf("fetchProviderHTTPError(%v) = %v, want %d", tc.err, err, tc.want)
+		assertSentinelStatus(t, fetchProviderHTTPError(tc.err), tc.err, tc.want)
+	}
+}
+
+// assertSentinelStatus checks a 4xx answer as an echo.HTTPError. A 500 is the
+// cause wrapped without a status of its own, which the HTTP boundary answers
+// as an internal error.
+func assertSentinelStatus(t *testing.T, got, cause error, want int) {
+	t.Helper()
+	var httpErr *echo.HTTPError
+	isHTTP := errors.As(got, &httpErr)
+	if want == http.StatusInternalServerError {
+		if isHTTP || !errors.Is(got, cause) {
+			t.Fatalf("error = %v, want %v wrapped without a status", got, cause)
 		}
+		return
+	}
+	if !isHTTP || httpErr.Code != want {
+		t.Fatalf("status = %v, want %d", got, want)
 	}
 }
 
