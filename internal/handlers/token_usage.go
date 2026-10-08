@@ -106,9 +106,9 @@ type TokenUsageRecordsResponse struct {
 // @Param model_id query string false "Optional model UUID to filter by"
 // @Param session_type query string false "Optional session type: chat, discuss, schedule, acp_agent, or memory. acp_agent filters by runtime; memory selects memory LLM calls."
 // @Success 200 {object} TokenUsageResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/token-usage [get].
 func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)
@@ -352,9 +352,9 @@ const (
 // @Param limit query int false "Page size (default 20, max 100)"
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} TokenUsageRecordsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/token-usage/records [get].
 func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)

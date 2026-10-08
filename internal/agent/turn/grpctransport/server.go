@@ -236,8 +236,10 @@ func (s *Server) AdvancePlainTextUserInput(ctx context.Context, req *turnpb.Json
 	return &turnpb.JsonResponse{Json: data}, nil
 }
 
-// mapError maps a turn error to the status the client receives. A status that
-// does not carry the cause hands it to the RPC result line first.
+// mapError maps a turn error to the status the client receives: a registered
+// turn reason, a cancellation or deadline the turn ended with, or the status
+// rpc.AnswerStatus gives the translated error. A status that does not carry
+// the cause hands it to the RPC result line first.
 func (*Server) mapError(ctx context.Context, operation string, err error) error {
 	if entry, ok := turnReasons.Lookup(err); ok {
 		return entry.Status("")
@@ -250,11 +252,10 @@ func (*Server) mapError(ctx context.Context, operation string, err error) error 
 		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, err))
 		return status.Error(codes.DeadlineExceeded, "turn deadline exceeded")
 	default:
-		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, err))
-		if encoded := rpc.AppErrorStatus(threadError(err)); encoded != nil {
-			return encoded
-		}
-		return status.Error(codes.Internal, "internal turn operation failed")
+		// The result line attributes the error the status is rendered from.
+		translated := threadError(err)
+		rpc.RecordError(ctx, fmt.Errorf("%s: %w", operation, translated))
+		return rpc.AnswerStatus(ctx, translated)
 	}
 }
 

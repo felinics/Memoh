@@ -3,15 +3,12 @@ package inbound
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"strings"
 
 	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/agent/turn"
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/route"
-	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/slash"
 )
@@ -154,29 +151,12 @@ func (p *ChannelInboundProcessor) sendRuntimeControlText(ctx context.Context, se
 	return sender.Send(ctx, channel.OutboundMessage{Target: strings.TrimSpace(msg.ReplyTarget), Message: out})
 }
 
+// sendRuntimeControlError answers a runtime control that failed. The service
+// translates its failures with application.RuntimeControlError, whose default
+// is runtime_control.failed, so the reply is the copy for the error's code;
+// an error that reaches here without one gets the generic copy.
 func (p *ChannelInboundProcessor) sendRuntimeControlError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
-	if externalAgentError(err) != nil {
-		return p.sendExternalAgentError(ctx, sender, msg, identity, err)
-	}
-	code := apperror.CodeOf(err)
-	if code == "" {
-		code = apperror.CodeRuntimeControlFailed
-		// The reply carries only the generic copy and the message is answered,
-		// so this is where the cause is recorded.
-		if p.logger != nil {
-			result := errlog.Event(ctx, "channel.runtime_control", err, errlog.Options{})
-			p.logger.LogAttrs(ctx, result.Level, "runtime control failed", append([]slog.Attr{
-				slog.String("bot_id", identity.BotID), slog.String("channel", msg.Channel.String()),
-			}, result.Attrs()...)...)
-		}
-	}
-	loc := p.localizer(ctx, identity.BotID)
-	key := "errors." + string(code)
-	text := loc.T(key)
-	if text == key {
-		text = loc.T("errors.runtime_control.failed")
-	}
-	return p.sendRuntimeControlText(ctx, sender, msg, text)
+	return p.replyFailure(ctx, sender, msg, identity, err, "")
 }
 
 // Native copy wins. Only host-declared keys are looked up in the channel catalog.

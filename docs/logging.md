@@ -73,7 +73,7 @@ Added by the handler, never by the call site:
 
 | Key | Source |
 | --- | --- |
-| `request_id` | The id echo's `RequestID` middleware assigns, put into the context by `httpx.RequestIDContext`. The same id the client receives, in the response header and in `apperror.Problem`. |
+| `request_id` | The id echo's `RequestID` middleware assigns, put into the context by `httpx.RequestIDContext`. The same id the client receives, in the response header and in `server.Problem`. |
 | | Work that does not arrive over HTTP gets its own id from `httpx.NewRequestID`: each inbound IM message and each discuss trigger. The internal RPC carries the caller's id in `x-request-id` metadata, so the callee's records report it too. |
 | `trace_id`, `span_id` | The span context, when tracing is configured — see [observability.md](observability.md). |
 
@@ -89,7 +89,7 @@ to `group.request_id` and breaks queries written against the top level.
 | Level | Meaning |
 | --- | --- |
 | `ERROR` | This process failed at something it was asked to do. |
-| `WARN` | Something is wrong but the operation continued, or a caller was refused. |
+| `WARN` | Something is wrong but the operation continued. |
 | `INFO` | A thing happened that an operator would want in the record. |
 | `DEBUG` | Detail useful while working on this code. |
 

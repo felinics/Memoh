@@ -47,7 +47,7 @@ func (s *Service) startDiscussTurn(runCtx context.Context, cmd turn.StartTurnCom
 	if !s.discussRuntimeConfigured() {
 		return nil, errors.New("turn: discuss runtime not configured")
 	}
-	h := newDiscussHandle(runCtx, cmd, cancel, admission.RunID, s.turnRunFinisher(runCtx, admission))
+	h := newDiscussHandle(runCtx, cmd, cancel, admission.RunID, s.turnRunFinisher(runCtx, admission, string(cmd.Mode)))
 	h.publishAgentEvent = s.turnAgentEventPublisher(admission.Handle)
 	go s.pumpDiscuss(runCtx, cmd, h)
 	return h, nil

@@ -132,6 +132,17 @@ func safeChannelError(err error) error {
 	return entry.Status(err.Error())
 }
 
+// deliveryError encodes the failure of a send or a reaction. A channel
+// sentinel travels as its reason. Any other failure carries the platform
+// adapter's own text ("telegram: chat not found"), which callers surface to
+// users and the agent uses to self-correct.
+func deliveryError(err error) error {
+	if _, ok := reasons.Lookup(err); ok {
+		return safeChannelError(err)
+	}
+	return runtimeRpc.Public(err)
+}
+
 func Handlers(channelRuntime channel.Runtime, tunnel *webhooktunnel.Manager) map[string]runtimeRpc.Handler {
 	decode := func(raw json.RawMessage, dst any) error { return json.Unmarshal(raw, dst) }
 	return map[string]runtimeRpc.Handler{
@@ -171,18 +182,14 @@ func Handlers(channelRuntime channel.Runtime, tunnel *webhooktunnel.Manager) map
 			if err := decode(raw, &in); err != nil {
 				return nil, err
 			}
-			// Public: send failures carry the platform adapter's own text
-			// ("telegram: chat not found"), which callers surface to users
-			// and the agent uses to self-correct — sanitizing it regresses
-			// the pre-split behavior.
-			return nil, runtimeRpc.Public(channelRuntime.Send(ctx, in.BotID, in.ChannelType, in.Send))
+			return nil, deliveryError(channelRuntime.Send(ctx, in.BotID, in.ChannelType, in.Send))
 		},
 		MethodReact: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var in channelInput
 			if err := decode(raw, &in); err != nil {
 				return nil, err
 			}
-			return nil, runtimeRpc.Public(channelRuntime.React(ctx, in.BotID, in.ChannelType, in.React))
+			return nil, deliveryError(channelRuntime.React(ctx, in.BotID, in.ChannelType, in.React))
 		},
 		MethodStatuses: func(_ context.Context, raw json.RawMessage) (any, error) {
 			var botID string

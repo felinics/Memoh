@@ -57,7 +57,7 @@ func (h *VideoHandler) ListMeta(c echo.Context) error {
 // @Tags video-providers
 // @Produce json
 // @Success 200 {array} videopkg.ProviderResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /video-providers [get].
 func (h *VideoHandler) ListProviders(c echo.Context) error {
 	items, err := h.service.ListProviders(c.Request().Context())
@@ -73,8 +73,8 @@ func (h *VideoHandler) ListProviders(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} videopkg.ProviderResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /video-providers/{id} [get].
 func (h *VideoHandler) GetProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -94,8 +94,8 @@ func (h *VideoHandler) GetProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {array} videopkg.ModelResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /video-providers/{id}/models [get].
 func (h *VideoHandler) ListModelsByProvider(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -116,8 +116,8 @@ func (h *VideoHandler) ListModelsByProvider(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} videopkg.ImportModelsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /video-providers/{id}/import-models [post].
 func (h *VideoHandler) ImportModels(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -161,7 +161,7 @@ func (h *VideoHandler) ImportModels(c echo.Context) error {
 // @Tags video-models
 // @Produce json
 // @Success 200 {array} videopkg.ModelResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /video-models [get].
 func (h *VideoHandler) ListModels(c echo.Context) error {
 	items, err := h.service.ListModels(c.Request().Context())
@@ -177,8 +177,8 @@ func (h *VideoHandler) ListModels(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model ID (UUID)"
 // @Success 200 {object} videopkg.ModelResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /video-models/{id} [get].
 func (h *VideoHandler) GetModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
@@ -200,9 +200,9 @@ func (h *VideoHandler) GetModel(c echo.Context) error {
 // @Param id path string true "Model ID (UUID)"
 // @Param request body videopkg.UpdateModelRequest true "Model update payload"
 // @Success 200 {object} videopkg.ModelResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /video-models/{id} [put].
 func (h *VideoHandler) UpdateModel(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))

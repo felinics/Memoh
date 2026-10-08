@@ -69,8 +69,8 @@ func (h *CompactionHandler) Register(e *echo.Echo) {
 // @Param limit query int false "Limit" default(50)
 // @Param offset query int false "Offset" default(0)
 // @Success 200 {object} compaction.ListLogsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/compaction/logs [get].
 func (h *CompactionHandler) ListLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -99,8 +99,8 @@ func (h *CompactionHandler) ListLogs(c echo.Context) error {
 // @Tags compaction
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/compaction/logs [delete].
 func (h *CompactionHandler) DeleteLogs(c echo.Context) error {
 	userID, err := h.requireUserID(c)
@@ -134,8 +134,8 @@ type TriggerCompactResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} TriggerCompactResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/compact [post].
 func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 	userID, err := h.requireUserID(c)

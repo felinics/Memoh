@@ -78,14 +78,28 @@ The packages that return package errors are listed in the `depguard` rule
 `internal/apperror`. A package is added to the rule when its errors move to
 package errors.
 
-The transport renders a public error in its own envelope:
+Every entry point answers with the public error `errs.Answer(ctx, err)`
+chooses, where `ctx` is the unit's own context. It applies these rules in
+order:
+
+1. The caller has ended and the chain holds a cancellation: `canceled`, fault
+   `canceled`.
+2. The outermost apperror on the chain whose code is in the catalog, with the
+   fault its attribution gives. It is skipped when it came from a remote that
+   refused a request this process sent and was not marked `errs.Forwarded`:
+   that refusal says nothing about this process's caller.
+3. The generic code for the fault: `http.bad_request` for a `client` fault,
+   `internal` for a `server` or `dependency` fault.
+
+A native gRPC status takes part in the attribution but is never the answer.
+The transport renders the answer in its own envelope:
 
 | Entry point | Rendered by |
 | --- | --- |
 | HTTP request | `internal/server/error_handler.go`, as described below |
-| SSE or WebSocket event after the stream is open | The handler that sends the event: code, args and fault, no error text |
-| IM channel reply | The renderer in `internal/channel/inbound`, which looks up the code's copy |
-| Cross-process RPC | The RPC server packages, as a gRPC status whose `google.rpc.ErrorInfo` reason is the code and whose metadata holds the args and the server's `fault` |
+| SSE or WebSocket event after the stream is open | The handler that sends the event, from `server.NewStreamError`: code, args, catalog detail and fault, no error text. It returns the error it rendered, which the request's result record attributes. |
+| IM channel reply | `channel.ErrorEvent` or `channel.ReplyText`, which look up the code's copy. A flow's own failure copy replaces the generic codes, and a canceled caller gets no reply. |
+| Cross-process RPC | `rpc.AnswerStatus`, a gRPC status whose `google.rpc.ErrorInfo` reason is the code and whose metadata holds the args and the server's `fault`; a canceled caller gets `Canceled` |
 
 Errors produced by the transport itself (an unknown route, a method that is
 not allowed, a body over the limit, an unparsable WebSocket frame) are
@@ -96,9 +110,8 @@ an event, a frame or a reply. It goes to the result record. Nor is it stored:
 an agent run records its failure in `session_runs.error_code` and in the
 `error_code` of history metadata, and the live run view carries the code
 alone. An error without a public error is answered with the generic code for
-its fault: `internal` on the WebSocket and in IM, or `http.bad_request` in IM
-for a client fault. A stream error without a code is `runtime_run_failed`,
-the code its run records.
+its fault on every entry point. A stream error without a code is
+`runtime_run_failed`, the code its run records.
 
 A warning attached to a result, such as an item a backup import skipped, says
 only what was skipped. Its cause is recorded as an event.
@@ -115,7 +128,7 @@ type `application/problem+json`:
   "status": 503,
   "detail": "The workspace is not reachable.",
   "args": {},
-  "fault": "server",
+  "fault": "dependency",
   "request_id": "3f2b9c1e-…",
   "trace_id": "4bf92f35…"
 }
@@ -125,14 +138,19 @@ type `application/problem+json`:
 the request is traced. A `HEAD` request gets the status and headers without a
 body.
 
-The code is chosen from the chain of the returned error:
+The code is the one `errs.Answer` chooses. An `*echo.HTTPError` is the
+transport's own error and becomes the `http.*` code for its status, with the
+returned error as its cause, before the choice: a client status without its
+own code is `http.bad_request` and a server status without one is
+`internal`. The rules then give:
 
 | The chain holds | Code |
 | --- | --- |
 | A cancellation by the caller | `canceled`, 499 |
-| An `*echo.HTTPError` | The `http.*` code for its status. A client status without one is `http.bad_request`; a server status without one is `internal`. |
+| An `*echo.HTTPError` | The `http.*` code for its status |
 | A public error from a remote that refused this process's request | `internal`, 500 |
 | Any other public error | The outermost one |
+| No public error, `client` fault | `http.bad_request`, 400 |
 | No public error | `internal`, 500 |
 
 The message of an `*echo.HTTPError` is not sent. A handler that has a cause
@@ -148,16 +166,22 @@ from the status:
 | `dependency` | A service this process called failed. |
 | `canceled` | The caller canceled the request. |
 
-A client that has no copy for a code uses the fault: the copy for the status
-for `client`, a retry prompt for `server` and `dependency`, and nothing for
-`canceled`.
+A client that has no copy for a code chooses by the status: nothing for 499,
+a retry prompt for 429 and for a 5xx status, and the copy for the status, or
+`http.bad_request`, for any other 4xx status. The error event of an SSE or
+WebSocket stream has no status. One whose code the client has no copy for
+shows the generic failure copy `errors.internal`, and nothing when its fault
+is `canceled`. `fault` is only used for attribution and log levels.
 
 ## Attribution of a code
 
 A public error with a catalog code is attributed by its entry. When the entry
 declares a `Fault`, that is the fault. Otherwise a 4xx status is a `client`
-fault, and a 5xx status is a `server` fault unless the cause in the chain is
-marked with `errs.WrapDependency`. The HTTP Problem, the result record of
+fault, and a 5xx status is a `server` fault unless its cause is marked with
+`errs.WrapDependency` or was received from another service. A received cause
+is a `dependency` fault, except when that service reported a `client` fault:
+then this process sent a request it refused, and the fault is `server`. An
+error with no public error is attributed by its cause the same way. The HTTP Problem, the result record of
 every boundary and the RPC envelope all take the fault from this one rule.
 
 A model provider is outside Memoh, whoever holds the credential. Every code
@@ -172,9 +196,10 @@ context window (`external_runtime.context_window_exceeded`) and a request the
 model service's policy refused (`external_runtime.request_blocked`). A code
 that some producers raise for this process's own failures, such as
 `external_runtime.unavailable`, declares nothing and is attributed by its
-chain. `workspace.unreachable` is one: the workspace bridge client marks
-an unreachable workspace runtime with `errs.WrapDependency`, and a failure to
-look up the target in this process stays `server`. A guard test in
+chain. `workspace.unreachable` is one: the workspace bridge client decodes an
+unreachable workspace runtime with `rpc.Decode`, so its cause is received and
+the fault is `dependency`; a failure to look up the target in this process
+stays `server`. A guard test in
 `internal/apperror` lists every declaration and fails when a code under
 `agent.provider_` or `agent.response_` declares none.
 
@@ -186,9 +211,12 @@ look up the target in this process stays `server`. A guard test in
 
 ## Attribution across an RPC
 
-An RPC server writes the fault it attributes the error to under the `fault`
-key of the `ErrorInfo` metadata. The client records the error as `remote`
-with that value as `remote_fault`, and attributes it on its side:
+An internal RPC server writes the fault it attributes the error to under the
+`fault` key of the `ErrorInfo` metadata of every status it returns. A catalog
+envelope carries the fault of its error, a reason an RPC package registers
+the fault its status code gives, and any other status the fault the server's
+result record attributes. The client records the error as `remote` with that
+value as `remote_fault`, and attributes it on its side:
 
 | `remote_fault` | Fault in the client |
 | --- | --- |
@@ -199,14 +227,30 @@ with that value as `remote_fault`, and attributes it on its side:
 A client that predates the key ignores it: the key is not a catalog argument
 and is not restored as one.
 
+Every internal RPC client decodes what it receives with `rpc.Decode`. The
+result is marked remote and keeps the received status on its chain. A status
+is restored by its `ErrorInfo` reason (a sentinel the RPC package registers,
+or a catalog code) and then by its status code alone; the status message is
+never read. `Canceled` and `DeadlineExceeded` are not restored as
+`context.Canceled` or `context.DeadlineExceeded`: a server, a closing
+connection and the caller all end a call with them, and only the caller's
+own context tells them apart. A caller that needs to know whether it ended a
+call reads its context. The clients that relay an end user's request, the
+turn client and the server runtime client of the channel process, mark a
+restored catalog error with `errs.Forwarded`, so the user gets the same
+answer in split and all-in-one deployments.
+
 ## Result records
 
 A unit of work ends with exactly one result record. For an HTTP request that
 is the access record, `msg` = `request`, written by `server.AccessLog` in both
 HTTP shells. For a failed request it also carries the error fields of the
-error the response was rendered from. A panic in a handler is recovered into
-an error with the stack of the panic, answered as `internal` and recorded the
-same way.
+error the response was rendered from. A handler that wrote its own response
+body, such as an SSE error frame, returns the error the body was rendered
+from; the access record attributes it by the same rule without answering it
+again. A write that failed because the client went away is not a failure and
+is not returned. A panic in a handler is recovered into an error with the
+stack of the panic, answered as `internal` and recorded the same way.
 
 The boundary logs; the code below it returns. A handler or helper that logs
 an error and then returns it produces a second record of the same failure and
@@ -243,10 +287,39 @@ The level comes from the attribution, not from the status:
 | `server` fault, or a panic | `ERROR` |
 | `dependency` fault | `ERROR`, or `WARN` when the remote reported its own failure and logged it there |
 | A background unit that will be retried after a dependency failure | `WARN` |
+| A `server` or `dependency` failure marked `errs.Recorded` | `WARN` |
 | An event | `WARN` |
 
 A background unit has no caller to blame, so a client fault there counts as
-this process's fault.
+this process's fault. An agent run is a background unit when its mode has no
+user in the loop: schedule, discuss and subagent. An IM message is not: it has
+a sender, so a client fault stays the sender's.
+
+`errs.Recorded` marks a failure that a nested unit in this process has already
+written its own result record for. A run with a durable record writes its
+`agent run` record, and the unit that consumed the run (the inbound message,
+the RPC, the schedule firing, the discuss turn) gets the failure marked. That
+unit still records it, at no more than `WARN`, so one failure has one `ERROR`.
+
+## Background units
+
+`internal/job` is the boundary of a background unit: work that has an object
+(a session, a workspace, a schedule firing, a task) and an end, but no caller
+waiting for its outcome. `job.Go` runs the unit on a new goroutine and
+`job.Run` on the caller's. The unit's context is detached from the
+cancellation of whatever started it, and it runs under its own root span
+linked to the span that started it. The unit recovers its own panic and writes
+exactly one result record, `msg` = `job`, on success as well as on failure,
+attributed as a background unit. Work no request started, such as a timer or a
+cron firing, sets `OwnRequestID` and gets a new request id and no link.
+
+The work inside the unit returns its failure. `job.WillRetry` marks a failure
+the owner retries automatically: the record carries `will_retry` and a
+`dependency` failure is `WARN`. Only an attempt inside the retry budget is
+marked; the attempt that exhausts it is the outcome. `job.Annotate` adds facts
+the unit learns while it runs, such as a skip reason or an exit code, to the
+record. Periodic passes and ticks, reconnect loops and single attempts inside
+a unit are not units, and their failures are events.
 
 ## Error fields
 

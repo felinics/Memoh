@@ -28,6 +28,7 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/errs"
@@ -521,7 +522,7 @@ func TestCharacterizeTurnRunFinisherCodes_CurrentBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatalf("admit: %v", err)
 			}
-			service.turnRunFinisher(context.Background(), admission)(RunOutcome{Status: tc.status, Cause: tc.cause})
+			service.turnRunFinisher(context.Background(), admission, sessionmode.Chat)(RunOutcome{Status: tc.status, Cause: tc.cause})
 			run, err := runs.Get(context.Background(), admission.RunID)
 			if err != nil {
 				t.Fatalf("load run: %v", err)

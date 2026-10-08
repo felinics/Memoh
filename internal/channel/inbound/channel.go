@@ -33,6 +33,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/runtimekind"
@@ -752,10 +753,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			spec, shouldCreate, specErr := p.defaultSessionSpecForInbound(ctx, identity, msg)
 			if specErr != nil {
-				if p.logger != nil {
-					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
-				}
-				return p.sendExternalAgentError(ctx, sender, msg, identity, specErr)
+				return p.replyFailure(ctx, sender, msg, identity, specErr, friendlyOps(p.localizer(ctx, identity.BotID), "ops.verb.startSession"))
 			}
 			defaultSpec = spec
 			defaultSpecShouldCreate = shouldCreate
@@ -805,10 +803,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			var specErr error
 			spec, shouldCreate, specErr = p.defaultSessionSpecForInbound(ctx, identity, msg)
 			if specErr != nil {
-				if p.logger != nil {
-					p.logger.WarnContext(ctx, "resolve default session spec failed", slog.Any("error", specErr))
-				}
-				return p.sendExternalAgentError(ctx, sender, msg, identity, specErr)
+				return p.replyFailure(ctx, sender, msg, identity, specErr, friendlyOps(p.localizer(ctx, identity.BotID), "ops.verb.startSession"))
 			}
 		}
 		if shouldCreate {
@@ -817,10 +812,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			sess, createErr := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 			if createErr != nil {
-				if p.logger != nil {
-					p.logger.WarnContext(ctx, "auto-create session failed", slog.Any("error", createErr))
-				}
-				return p.sendExternalAgentError(ctx, sender, msg, identity, createErr)
+				return p.replyFailure(ctx, sender, msg, identity, createErr, friendlyOps(p.localizer(ctx, identity.BotID), "ops.verb.startSession"))
 			}
 			sessionID = sess.ID
 			sessionType = sess.Type
@@ -844,7 +836,7 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 		if err != nil {
 			p.persistPassiveMessage(ctx, identity, msg, text, attachments, resolved.RouteID, sessionID, "")
 			if shouldTrigger || isDirectedAtBot(msg) {
-				return p.sendExternalAgentError(ctx, sender, msg, identity, err)
+				return p.replyFailure(ctx, sender, msg, identity, err, "")
 			}
 			return nil
 		}
@@ -1191,11 +1183,18 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 			}
 			return nil
 		}
-		_ = stream.Push(ctx, channel.ErrorEvent(p.localizer(ctx, identity.BotID), startErr))
+		// The stream's context is the turn's caller: /new and /stop end it,
+		// and a turn they ended gets no reply.
+		if event, ok := channel.ErrorEvent(streamCtx, p.localizer(ctx, identity.BotID), threadError(startErr)); ok {
+			_ = stream.Push(ctx, event)
+		}
 		if statusNotifier != nil {
 			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, startErr); notifyErr != nil {
 				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 			}
+		}
+		if stoppedByCommand(ctx, streamCtx) {
+			return nil
 		}
 		return startErr
 	}
@@ -1300,30 +1299,19 @@ func (p *ChannelInboundProcessor) HandleInbound(ctx context.Context, cfg channel
 	}
 	failureReply, hasFailureReply := failures.reply(loc, streamErr)
 	if streamErr != nil {
-		if public := externalAgentError(streamErr); public != nil {
-			if !hasFailureReply {
-				failureReply = channel.StreamEvent{
-					Type:      channel.StreamEventError,
-					Error:     externalAgentErrorText(public, loc),
-					ErrorCode: string(apperror.CodeOf(public)),
-				}
-			}
-			_ = stream.Push(ctx, failureReply)
-			if statusNotifier != nil {
-				if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
-					p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
-				}
-			}
-			return streamErr
-		}
 		if !hasFailureReply {
-			failureReply = channel.ErrorEvent(loc, streamErr)
+			failureReply, hasFailureReply = channel.ErrorEvent(streamCtx, loc, threadError(streamErr))
 		}
-		_ = stream.Push(ctx, failureReply)
+		if hasFailureReply {
+			_ = stream.Push(ctx, failureReply)
+		}
 		if statusNotifier != nil {
 			if notifyErr := p.notifyProcessingFailed(ctx, statusNotifier, cfg, msg, statusInfo, statusHandle, streamErr); notifyErr != nil {
 				p.logProcessingStatusError("processing_failed", msg, identity, notifyErr)
 			}
+		}
+		if stoppedByCommand(ctx, streamCtx) {
+			return nil
 		}
 		return streamErr
 	}
@@ -2415,19 +2403,9 @@ func mapStreamChunkToChannelEvents(chunk json.RawMessage, t *i18n.Localizer) ([]
 			},
 		}, finalMessages, nil
 	case "error":
-		code := apperror.Code(strings.TrimSpace(envelope.Code))
-		if text, ok := channel.ErrorCodeText(t, code, nil); ok {
-			return []channel.StreamEvent{
-				{
-					Type:      channel.StreamEventError,
-					Error:     text,
-					ErrorCode: string(code),
-				},
-			}, finalMessages, nil
-		}
 		// Without a catalogued code the event is a failed run; its own text is
 		// never shown.
-		return []channel.StreamEvent{channel.RunFailureEvent(t, apperror.CodeRuntimeRunFailed, nil)}, finalMessages, nil
+		return []channel.StreamEvent{channel.CodeEvent(t, apperror.Code(envelope.Code), nil)}, finalMessages, nil
 	default:
 		return nil, finalMessages, nil
 	}
@@ -3985,7 +3963,7 @@ func (p *ChannelInboundProcessor) streamContinuationCommand(ctx context.Context,
 		if p.logger != nil {
 			p.logger.WarnContext(ctx, "accepted decision delivery interrupted", slog.Any("error", continuationErr))
 		}
-		if err := stream.Push(ctx, channel.RunFailureEvent(loc, apperror.CodeAgentResponseInterrupted, nil)); err != nil {
+		if err := stream.Push(ctx, channel.CodeEvent(loc, apperror.CodeAgentResponseInterrupted, nil)); err != nil {
 			return err
 		}
 		return closeStream()
@@ -4291,37 +4269,25 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	caps := p.channelCaps(msg.Channel)
 
 	parsed := invocation.Parsed
+	startFailed := friendlyOps(loc, "ops.verb.startSession")
 	spec, err := resolveNewSessionSpecParsed(parsed, msg, p.acpProfiles)
 	if err != nil {
-		if public := externalAgentError(err); public != nil {
-			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-		}
-		return sender.Send(ctx, channel.OutboundMessage{
-			Target:  target,
-			Message: plainTextMessage(loc.T("newSession.usage"), caps),
-		})
+		// An operand /new cannot use is answered and is not a failure: the
+		// reply is the copy for its code, or the usage.
+		return p.sendFailureReply(ctx, sender, msg, identity, err, loc.T("newSession.usage"))
 	}
 	spec, err = p.applyDefaultChatRuntimeToNewSessionSpec(ctx, identity, msg, spec)
 	if err != nil {
-		if public := externalAgentError(err); public != nil {
-			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-		}
-		return err
+		return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent {
 		if err := p.validateACPNewSessionSpec(ctx, identity, spec); err != nil {
-			if public := externalAgentError(err); public != nil {
-				return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-			}
-			return err
+			return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
 		}
 	}
 	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
 		if err := p.requireWorkspaceExecForExternalAgent(ctx, identity); err != nil {
-			if public := externalAgentError(err); public != nil {
-				return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-			}
-			return err
+			return p.replyFailure(ctx, sender, msg, identity, err, startFailed)
 		}
 	}
 
@@ -4362,13 +4328,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		Metadata:               routeMetadata,
 	})
 	if err != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "resolve route for /new command failed", slog.Any("error", err))
-		}
-		return sender.Send(ctx, channel.OutboundMessage{
-			Target:  target,
-			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
-		})
+		return p.replyFailure(ctx, sender, msg, identity, errs.Wrap(err, "resolve route for /new command"), startFailed)
 	}
 
 	if spec.Runtime == sessionpkg.RuntimeACPAgent || sessionpkg.IsDirectRuntimeType(spec.Runtime) {
@@ -4381,16 +4341,7 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 	}
 	sess, err := p.sessionEnsurer.CreateNewSession(ctx, identity.BotID, resolved.RouteID, msg.Channel.String(), spec)
 	if err != nil {
-		if p.logger != nil {
-			p.logger.WarnContext(ctx, "create new session via /new command failed", slog.Any("error", err))
-		}
-		if public := externalAgentError(err); public != nil {
-			return p.sendExternalAgentError(ctx, sender, msg, identity, public)
-		}
-		return sender.Send(ctx, channel.OutboundMessage{
-			Target:  target,
-			Message: plainTextMessage(friendlyOps(loc, "ops.verb.startSession"), caps),
-		})
+		return p.replyFailure(ctx, sender, msg, identity, errs.Wrap(err, "create new session via /new command"), startFailed)
 	}
 	p.cancelActiveStreamForRoute(identity.BotID, resolved.RouteID, "new session created")
 
@@ -4431,6 +4382,14 @@ func (p *ChannelInboundProcessor) handleNewSessionCommand(
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
+}
+
+// stoppedByCommand reports that /new or /stop ended a turn: its stream's
+// context, the turn's caller, has ended while the message's own context is
+// live. The message was handled, so its record is not a failure; a turn ended
+// because the message's own context ended is still returned as canceled.
+func stoppedByCommand(ctx, streamCtx context.Context) bool {
+	return errs.CallerEnded(streamCtx) && !errs.CallerEnded(ctx)
 }
 
 func (p *ChannelInboundProcessor) cancelActiveStreamForRoute(botID, routeID, reason string) bool {
@@ -4780,38 +4739,39 @@ func externalAgentExecDenied(reason string) error {
 	return apperror.Wrap(apperror.CodeNoWorkspaceExec, cause, nil)
 }
 
-// sendExternalAgentError replies with the External Agent error err carries,
-// rendered from the channel copy for its code. Any other error is returned
-// unchanged.
-func (p *ChannelInboundProcessor) sendExternalAgentError(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error) error {
-	public := externalAgentError(err)
-	if public == nil {
-		return err
+// replyFailure answers a flow that failed with err by sendFailureReply and
+// returns err for the message's result record, with the failure to send the
+// reply when there is one.
+func (p *ChannelInboundProcessor) replyFailure(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error, fallback string) error {
+	if sendErr := p.sendFailureReply(ctx, sender, msg, identity, err, fallback); sendErr != nil {
+		return errors.Join(err, sendErr)
 	}
+	return err
+}
+
+// sendFailureReply replies to err with the copy for its public error, or with
+// fallback, the flow's own failure copy, when err has no specific one. Nothing
+// is sent when the caller has canceled. It returns the failure to send.
+func (p *ChannelInboundProcessor) sendFailureReply(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error, fallback string) error {
+	text := channel.ReplyText(ctx, p.localizer(ctx, identity.BotID), threadError(err), fallback)
 	target := strings.TrimSpace(msg.ReplyTarget)
-	if target == "" {
-		return err
+	if text == "" || target == "" {
+		return nil
 	}
-	loc := p.localizer(ctx, identity.BotID)
-	out := applyMessageFormat(channel.Message{Text: externalAgentErrorText(public, loc)}, p.channelCaps(msg.Channel))
+	out := applyMessageFormat(channel.Message{Text: text}, p.channelCaps(msg.Channel))
 	if mid := strings.TrimSpace(msg.Message.ID); mid != "" {
 		out.Reply = &channel.ReplyRef{MessageID: mid}
 	}
 	return sender.Send(ctx, channel.OutboundMessage{Target: target, Message: out})
 }
 
-// externalAgentError returns err as an External Agent error, translating the
-// thread errors a session create or lookup ends with, or nil when err is not
-// one.
-func externalAgentError(err error) error {
-	if code := apperror.CodeOf(err); code != "" {
-		if apperror.IsExternalAgentCode(code) {
-			return err
-		}
-		return nil
-	}
+// threadError translates the thread errors a session create or lookup ends
+// with to their public errors. Any other error is returned unchanged.
+func threadError(err error) error {
 	var code apperror.Code
 	switch {
+	case apperror.CodeOf(err) != "":
+		return err
 	case errors.Is(err, sessionpkg.ErrACPAgentIDRequired),
 		errors.Is(err, sessionpkg.ErrACPAgentNotConfigured):
 		code = apperror.CodeACPAgentNotConfigured
@@ -4822,7 +4782,7 @@ func externalAgentError(err error) error {
 	case errors.Is(err, sessionpkg.ErrACPRuntimeOwnerMissing):
 		code = apperror.CodeACPRuntimeOwnerMissing
 	default:
-		return nil
+		return err
 	}
 	return apperror.Wrap(code, err, nil)
 }

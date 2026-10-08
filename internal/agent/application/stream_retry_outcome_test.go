@@ -121,6 +121,7 @@ func eventTypes(t *testing.T, payloads []json.RawMessage) []string {
 type turnRun struct {
 	types     []string
 	errCodes  []string
+	errs      []error
 	proposals [][2]string
 	ledger    [3]string
 }
@@ -165,6 +166,7 @@ func runNativeTurnWith(t *testing.T, fixture directLifecycleFixture, runs *propo
 		}
 		for err := range handle.Errs() {
 			out.errCodes = append(out.errCodes, string(apperror.CodeOf(err)))
+			out.errs = append(out.errs, err)
 		}
 	}()
 	select {

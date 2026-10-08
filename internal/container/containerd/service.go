@@ -27,6 +27,7 @@ import (
 	cdi "tags.cncf.io/container-device-interface/pkg/cdi"
 
 	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 var ErrTaskStopTimeout = errors.New("timeout waiting for task to stop")
@@ -927,8 +928,10 @@ func mapContainerdErr(err error) error {
 	if errdefs.IsAlreadyExists(err) {
 		return errors.Join(ErrAlreadyExists, err)
 	}
+	// containerd is a dependency of this process: when it cannot be reached
+	// or refuses the call for now, the failure is its own.
 	if errdefs.IsUnavailable(err) {
-		return errors.Join(ErrUnavailable, ErrRuntime, err)
+		return errs.WrapDependency(errors.Join(ErrUnavailable, ErrRuntime, err), "containerd unavailable")
 	}
 	return errors.Join(ErrRuntime, err)
 }

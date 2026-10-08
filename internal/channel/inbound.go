@@ -108,11 +108,9 @@ func (m *Manager) runInboundUnit(ctx context.Context, trigger telemetry.Trigger,
 	if err != nil {
 		span.RecordError(err)
 	}
-	// The unit is async on both paths. The IM platform that delivered the
-	// message is not waiting for its outcome and never receives this error
-	// as a response; an adapter goroutine waiting on a direct call only
-	// acts on it locally. A client fault is therefore this process's fault.
-	result := errlog.Finish(ctx, "channel.inbound", err, errlog.Options{Async: true})
+	// The unit is not async: the message has a sender, so a client fault
+	// stays the sender's.
+	result := errlog.Finish(ctx, "channel.inbound", err, errlog.Options{})
 	if m.logger != nil {
 		attrs := append([]slog.Attr{
 			slog.String("channel", msg.Channel.String()),

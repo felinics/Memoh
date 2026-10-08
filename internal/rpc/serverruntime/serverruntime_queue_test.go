@@ -63,10 +63,10 @@ func TestQueueRPCHandlerPublishesOnlyStableQueueCode(t *testing.T) {
 }
 
 func TestQueueCommandCodeAcceptsOnlyStableRPCVocabulary(t *testing.T) {
-	if got := queueCommandCode(queueStatus(inbound.QueueCommandCodeConflict)); got != inbound.QueueCommandCodeConflict {
+	if got := queueCommandCode(queueStatus(context.Background(), inbound.QueueCommandCodeConflict)); got != inbound.QueueCommandCodeConflict {
 		t.Fatalf("stable code = %q", got)
 	}
-	if got := queueCommandCode(intrpc.AppErrorStatus(apperror.New(apperror.CodeBotNameTaken, nil))); got != "" {
+	if got := queueCommandCode(intrpc.AnswerStatus(context.Background(), apperror.New(apperror.CodeBotNameTaken, nil))); got != "" {
 		t.Fatalf("catalog code outside the queue vocabulary became queue code %q", got)
 	}
 	if got := queueCommandCode(assertionError("database diagnostic")); got != "" {

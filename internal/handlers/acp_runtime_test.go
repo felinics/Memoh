@@ -25,6 +25,7 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/server"
 )
 
 type acpRuntimeQueries struct {
@@ -322,7 +323,7 @@ func TestACPRuntimeHandlerEnsureRejectsMissingRuntimeOwner(t *testing.T) {
 	ctx.SetParamValues(botID, sessionID)
 
 	err := handler.EnsureRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusConflict || problem.Code != string(apperror.CodeACPRuntimeConflict) {
 		t.Fatalf("EnsureRuntime() error = %v, want %d %s", err, http.StatusConflict, apperror.CodeACPRuntimeConflict)
 	}
@@ -695,7 +696,7 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsDisabledAgent(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusForbidden || problem.Code != string(apperror.CodeACPAgentNotEnabled) {
 		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusForbidden, apperror.CodeACPAgentNotEnabled)
 	}
@@ -737,7 +738,7 @@ func TestACPRuntimeHandlerCreateRuntimeRejectsUnconfiguredAgent(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusBadRequest || problem.Code != string(apperror.CodeACPAgentNotConfigured) {
 		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusBadRequest, apperror.CodeACPAgentNotConfigured)
 	}
@@ -773,7 +774,7 @@ func TestACPRuntimeHandlerCreateRuntimeMapsCapToTooManyRequests(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusTooManyRequests || problem.Code != string(apperror.CodeACPRuntimeLimitReached) {
 		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusTooManyRequests, apperror.CodeACPRuntimeLimitReached)
 	}
@@ -806,7 +807,7 @@ func TestACPRuntimeHandlerCreateRuntimeRedactsStartFailure(t *testing.T) {
 	ctx.SetParamValues(botID)
 
 	err := handler.CreateRuntime(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusInternalServerError || problem.Code != string(apperror.CodeACPOperationFailed) {
 		t.Fatalf("CreateRuntime() error = %v, want %d %s", err, http.StatusInternalServerError, apperror.CodeACPOperationFailed)
 	}
@@ -986,7 +987,7 @@ func TestRuntimePoolConfigFailureUsesApplicationError(t *testing.T) {
 func TestRuntimePoolMissingCommandNamesTheCommand(t *testing.T) {
 	cause := fmt.Errorf("start devin acp: %w", &acpclient.CommandNotFoundError{Command: "devin"})
 	err := runtimePoolError(cause)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusConflict || problem.Code != string(apperror.CodeACPCommandNotFound) {
 		t.Fatalf("runtimePoolError() = %v, want %d %s", err, http.StatusConflict, apperror.CodeACPCommandNotFound)
 	}

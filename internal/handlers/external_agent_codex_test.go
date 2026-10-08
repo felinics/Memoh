@@ -17,6 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/server"
 )
 
 type codexLoginFailure struct {
@@ -66,7 +67,7 @@ func TestCodexDeviceAuthorizeAnswersRuntimeFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := newCodexDeviceTestHandler(codexLoginFailure{err: fmt.Errorf("start login: %w", tc.err)})
 			ctx := codexDeviceRequest(t, "authorize", "")
-			problem, ok := apperror.ProblemFrom(handler.AuthorizeDevice(ctx), "")
+			problem, ok := server.ProblemFrom(handler.AuthorizeDevice(ctx), "")
 			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
 				t.Fatalf("AuthorizeDevice() problem = %+v, want %d %s", problem, tc.status, tc.code)
 			}
@@ -105,7 +106,7 @@ func TestCodexDevicePollAnswersCompletionFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := newCodexDeviceTestHandler(codexDeviceCompletion{err: fmt.Errorf("complete login: %w", tc.err)})
 			ctx := codexDeviceRequest(t, "poll", `{"login_id":"login-1"}`)
-			problem, ok := apperror.ProblemFrom(handler.PollDevice(ctx), "")
+			problem, ok := server.ProblemFrom(handler.PollDevice(ctx), "")
 			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
 				t.Fatalf("PollDevice() problem = %+v, want %d %s", problem, tc.status, tc.code)
 			}
@@ -156,7 +157,7 @@ func TestCodexUsageAnswersFailuresWithTheirCodes(t *testing.T) {
 			ctx, _ := botAgentsRequest(t, http.MethodGet, "/bots/"+botAgentsTestBotID+"/agents/"+botAgentsTestCodexID+"/codex/usage", "")
 			ctx.SetParamNames("bot_id", "id")
 			ctx.SetParamValues(botAgentsTestBotID, botAgentsTestCodexID)
-			problem, ok := apperror.ProblemFrom(handler.Usage(ctx), "")
+			problem, ok := server.ProblemFrom(handler.Usage(ctx), "")
 			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
 				t.Fatalf("Usage() problem = %+v, want %d %s", problem, tc.status, tc.code)
 			}

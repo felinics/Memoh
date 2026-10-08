@@ -25,6 +25,7 @@ import (
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
 	"github.com/felinics/memoh/internal/policy"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/workspace"
 )
 
@@ -110,32 +111,18 @@ type createContainerRestoringEvent struct {
 	Type string `json:"type"`
 }
 
-type createContainerErrorEvent struct {
-	Type      string            `json:"type"`
-	Code      string            `json:"code"`
-	Args      map[string]string `json:"args"`
-	Detail    string            `json:"detail,omitempty"`
-	Message   string            `json:"message"`
-	RequestID string            `json:"request_id,omitempty"`
-}
-
 // sendWorkspaceStreamFailure ends a workspace stream with the error event for
 // the catalog code code and returns the error the handler returns. The event
 // carries the code's detail and none of the text of cause; the request's
 // result record carries cause. The response is already committed, so the
-// access log records the returned error without answering it again.
-func sendWorkspaceStreamFailure(send func(payload any) bool, code apperror.Code, cause error, requestID string) error {
-	recorded := apperror.Wrap(code, cause, nil)
-	public, _ := apperror.PublicFrom(recorded, requestID)
-	_ = send(createContainerErrorEvent{
-		Type:      "error",
-		Code:      string(public.Code),
-		Args:      public.Args,
-		Detail:    public.Detail,
-		Message:   public.Detail,
-		RequestID: public.RequestID,
-	})
-	return recorded
+// access log records the returned error without answering it again. The
+// handler chose code, so the event names it whatever has become of ctx, such
+// as a stream budget that ran out; the result record still reads the
+// request's own context.
+func sendWorkspaceStreamFailure(ctx context.Context, send func(payload any) bool, code apperror.Code, cause error, requestID string) error {
+	frame, rendered := server.NewStreamError(context.WithoutCancel(ctx), apperror.Wrap(code, cause, nil), requestID)
+	_ = send(frame)
+	return rendered
 }
 
 type GetContainerResponse struct {
@@ -375,8 +362,8 @@ func (h *ContainerdHandler) Register(e *echo.Echo) {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateContainerRequest true "Create workspace payload"
 // @Success 200 {object} CreateContainerResponse "SSE stream of workspace creation events"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container [post].
 func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -429,7 +416,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	intent, err := h.workspaces.EnsurePresent(intentCtx, botID, imageOverride)
 	cancelIntent()
 	if err != nil {
-		return sendWorkspaceStreamFailure(send, apperror.CodeWorkspaceCreateFailed, err, httpx.RequestID(c))
+		return sendWorkspaceStreamFailure(ctx, send, apperror.CodeWorkspaceCreateFailed, err, httpx.RequestID(c))
 	}
 
 	streamCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceStreamBudget)
@@ -450,7 +437,7 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 	if req.RestoreData && h.manager.HasPreservedData(botID) {
 		send(createContainerRestoringEvent{Type: "restoring"})
 		if err := h.manager.RestorePreservedData(streamCtx, botID); err != nil {
-			return sendWorkspaceStreamFailure(send, apperror.CodeWorkspaceRestoreFailed, err, httpx.RequestID(c))
+			return sendWorkspaceStreamFailure(streamCtx, send, apperror.CodeWorkspaceRestoreFailed, err, httpx.RequestID(c))
 		}
 		dataRestored = true
 	}
@@ -471,8 +458,8 @@ func (h *ContainerdHandler) CreateContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} GetContainerResponse
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container [get].
 func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -508,7 +495,7 @@ func (h *ContainerdHandler) GetContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} GetContainerMetricsResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/metrics [get].
 func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -529,8 +516,8 @@ func (h *ContainerdHandler) GetContainerMetrics(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body UpdateContainerMetricsRequest true "Metrics settings payload"
 // @Success 200 {object} GetContainerMetricsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/metrics [put].
 func (h *ContainerdHandler) UpdateContainerMetrics(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionManage)
@@ -608,8 +595,8 @@ func (h *ContainerdHandler) buildContainerMetricsResponse(
 // @Param bot_id path string true "Bot ID"
 // @Param preserve_data query bool false "Export /data before deletion"
 // @Success 204
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container [delete].
 func (h *ContainerdHandler) DeleteContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -659,8 +646,8 @@ const workspaceDeleteWait = 2 * time.Minute
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/start [post].
 func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -682,8 +669,8 @@ func (h *ContainerdHandler) StartContainer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/stop [post].
 func (h *ContainerdHandler) StopContainer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -719,9 +706,9 @@ func (h *ContainerdHandler) observeWorkspace(ctx context.Context, botID string) 
 // @Param bot_id path string true "Bot ID"
 // @Param payload body CreateSnapshotRequest true "Create snapshot payload"
 // @Success 200 {object} CreateSnapshotResponse
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 501 {object} apperror.Problem "Snapshots currently not supported on this backend"
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 501 {object} server.Problem "Snapshots currently not supported on this backend"
 // @Router /bots/{bot_id}/container/snapshots [post].
 func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 	if h.containerBackend == "apple" {
@@ -762,7 +749,7 @@ func (h *ContainerdHandler) CreateSnapshot(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param snapshotter query string false "Snapshotter name"
 // @Success 200 {object} ListSnapshotsResponse
-// @Failure 501 {object} apperror.Problem "Snapshots currently not supported on this backend"
+// @Failure 501 {object} server.Problem "Snapshots currently not supported on this backend"
 // @Router /bots/{bot_id}/container/snapshots [get].
 func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 	if h.containerBackend == "apple" {
@@ -807,8 +794,8 @@ func (h *ContainerdHandler) ListSnapshots(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body RollbackRequest true "Rollback payload"
 // @Success 200 {object} object
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/snapshots/rollback [post].
 func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -838,8 +825,8 @@ func (h *ContainerdHandler) RollbackSnapshot(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} object
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/data/restore [post].
 func (h *ContainerdHandler) RestorePreservedData(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)

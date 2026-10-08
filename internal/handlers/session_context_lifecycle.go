@@ -78,11 +78,11 @@ type ContextLifecycleAggregates struct {
 // @Param session_id path string true "Session ID"
 // @Param limit query int false "Maximum number of turns to return (default 50, max 200)"
 // @Success 200 {object} ContextLifecycleResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/context-lifecycle [get].
 func (h *SessionInfoHandler) GetSessionContextLifecycle(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)

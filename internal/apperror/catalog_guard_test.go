@@ -87,8 +87,9 @@ func sortedCatalogCodes() []Code {
 }
 
 // Every declared Code has a catalog entry and every catalog entry is a
-// declared Code. PublicFrom refuses codes outside the catalog, so an
-// undeclared code would surface as an opaque 500 at the transport boundary.
+// declared Code. errs.Answer does not answer with a code outside the catalog,
+// so an undeclared code would surface as an opaque 500 at the transport
+// boundary.
 func TestCatalogCoversEveryDeclaredCode(t *testing.T) {
 	t.Parallel()
 	declared := declaredCodes(t)
@@ -301,13 +302,36 @@ var declaredFaults = map[Code]Fault{
 // fault its 4xx status would give.
 var providerCodePrefixes = []string{"agent.provider_", "agent.response_"}
 
+// declarable reports whether a catalog entry may declare f. Canceled is
+// attributed at a boundary from the caller's context, never by a code.
+func declarable(f Fault) bool {
+	switch f {
+	case "", FaultClient, FaultServer, FaultDependency:
+		return true
+	default:
+		return false
+	}
+}
+
+func TestDeclarableFaults(t *testing.T) {
+	t.Parallel()
+	for _, f := range []Fault{"", FaultClient, FaultServer, FaultDependency} {
+		if !declarable(f) {
+			t.Errorf("fault %q should be declarable", f)
+		}
+	}
+	for _, f := range []Fault{FaultCanceled, "unknown"} {
+		if declarable(f) {
+			t.Errorf("fault %q must not be declarable", f)
+		}
+	}
+}
+
 func TestCatalogDeclaredFaults(t *testing.T) {
 	t.Parallel()
 	for code, definition := range catalog {
-		switch definition.Fault {
-		case "", FaultClient, FaultServer, FaultDependency:
-		default:
-			t.Errorf("catalog entry %q declares unknown fault %q", code, definition.Fault)
+		if !declarable(definition.Fault) {
+			t.Errorf("catalog entry %q declares fault %q, which a catalog entry cannot declare", code, definition.Fault)
 		}
 		if want, listed := declaredFaults[code]; definition.Fault != want {
 			if listed {

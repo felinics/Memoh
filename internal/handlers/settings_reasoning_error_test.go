@@ -7,6 +7,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/reasoning"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/settings"
 )
 
@@ -24,7 +25,7 @@ func TestSettingsReasoningHTTPError(t *testing.T) {
 	if got := apperror.CodeOf(mapped); got != apperror.CodeSettingsReasoningEffortInvalid {
 		t.Fatalf("invalid effort code = %q, want %q", got, apperror.CodeSettingsReasoningEffortInvalid)
 	}
-	problem, ok := apperror.ProblemFrom(mapped, "request-reasoning")
+	problem, ok := server.ProblemFrom(mapped, "request-reasoning")
 	if !ok {
 		t.Fatal("invalid effort did not map to Problem Details")
 	}
@@ -37,7 +38,7 @@ func TestSettingsReasoningHTTPError(t *testing.T) {
 	if got := apperror.CodeOf(unavailable); got != apperror.CodeSettingsReasoningUnavailable {
 		t.Fatalf("unavailable code = %q, want %q", got, apperror.CodeSettingsReasoningUnavailable)
 	}
-	problem, ok = apperror.ProblemFrom(unavailable, "request-reasoning")
+	problem, ok = server.ProblemFrom(unavailable, "request-reasoning")
 	if !ok || problem.Status != 503 {
 		t.Fatalf("unavailable problem = %#v, ok = %t", problem, ok)
 	}

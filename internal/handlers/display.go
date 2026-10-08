@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -16,7 +15,9 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	displaypkg "github.com/felinics/memoh/internal/display"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -69,7 +70,7 @@ type displayRuntimeProbe struct {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} displayInfoResponse
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/container/display [get].
 func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -130,8 +131,8 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body displayWebRTCOfferRequest true "WebRTC offer payload"
 // @Success 200 {object} displayWebRTCOfferResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/display/webrtc/offer [post].
 func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -180,7 +181,7 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} displaySessionListResponse
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/container/display/sessions [get].
 func (h *ContainerdHandler) ListDisplaySessions(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -201,7 +202,7 @@ func (h *ContainerdHandler) ListDisplaySessions(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Display session ID"
 // @Success 204
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/container/display/sessions/{session_id} [delete].
 func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -224,33 +225,20 @@ const (
 	displayApplyStyleScriptPath  = "/opt/memoh/scripts/display-apply-style.sh"
 )
 
+// displayPrepareStreamEvent is a progress or complete event of display
+// preparation, as the prepare script reports it.
 type displayPrepareStreamEvent struct {
-	Type      string            `json:"type"`
-	Step      string            `json:"step,omitempty"`
-	Code      string            `json:"code,omitempty"`
-	Args      map[string]string `json:"args,omitempty"`
-	Detail    string            `json:"detail,omitempty"`
-	Message   string            `json:"message,omitempty"`
-	RequestID string            `json:"request_id,omitempty"`
-	Percent   int               `json:"percent,omitempty"`
+	Type    string `json:"type"`
+	Step    string `json:"step,omitempty"`
+	Message string `json:"message,omitempty"`
+	Percent int    `json:"percent,omitempty"`
 }
 
-func newDisplayPrepareAppError(step string, err error, requestID string) displayPrepareStreamEvent {
-	public, ok := apperror.PublicFrom(err, requestID)
-	if !ok {
-		return displayPrepareStreamEvent{
-			Type: "error", Step: step, Message: "Display preparation failed.",
-		}
-	}
-	return displayPrepareStreamEvent{
-		Type:      "error",
-		Step:      step,
-		Code:      string(public.Code),
-		Args:      public.Args,
-		Detail:    public.Detail,
-		Message:   public.Detail,
-		RequestID: public.RequestID,
-	}
+// displayPrepareErrorEvent is the error event of display preparation: the
+// stream error event with the step that failed.
+type displayPrepareErrorEvent struct {
+	server.StreamError
+	Step string `json:"step,omitempty"`
 }
 
 // PrepareDisplay godoc
@@ -260,7 +248,7 @@ func newDisplayPrepareAppError(step string, err error, requestID string) display
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream of display preparation events"
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/container/display/prepare [post].
 func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -276,48 +264,31 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 	setSSEHeaders(c)
 	c.Response().WriteHeader(http.StatusOK)
 	writer := c.Response().Writer
-	send := func(payload displayPrepareStreamEvent) {
+	send := func(payload any) {
 		_ = writeSSEJSON(writer, flusher, payload)
 	}
-	sendError := func(step, code, message string) {
-		send(displayPrepareStreamEvent{
-			Type:      "error",
-			Step:      step,
-			Code:      code,
-			Args:      map[string]string{},
-			Message:   message,
-			RequestID: httpx.RequestID(c),
-		})
-	}
-	streamRequestID := httpx.RequestID(c)
-	sendAppError := func(step string, code apperror.Code, cause error) {
-		if cause != nil {
-			h.logger.ErrorContext(c.Request().Context(), "display preparation failed",
-				slog.String("code", string(code)),
-				slog.String("request_id", streamRequestID),
-				slog.Any("error", cause),
-			)
-		}
-		send(newDisplayPrepareAppError(step, apperror.Wrap(code, cause, nil), streamRequestID))
+	ctx := c.Request().Context()
+	// fail sends the error event for err and returns the error it was
+	// rendered from, which the request's result record attributes.
+	fail := func(step string, err error) error {
+		frame, rendered := server.NewStreamError(ctx, err, httpx.RequestID(c))
+		send(displayPrepareErrorEvent{StreamError: frame, Step: step})
+		return rendered
 	}
 
-	ctx := c.Request().Context()
 	if h.manager == nil {
-		sendError("checking", "workspace_manager_unavailable", "manager not configured")
-		return nil
+		return fail("checking", apperror.New(apperror.CodeWorkspaceManagerUnavailable, nil))
 	}
 	if !h.manager.BotDisplayEnabled(ctx, botID) {
-		sendError("checking", "workspace_display_disabled", "workspace display is not enabled")
-		return nil
+		return fail("checking", apperror.New(apperror.CodeWorkspaceDisplayDisabled, nil))
 	}
 
 	client, err := h.manager.NativeMCPClient(ctx, botID)
 	if err != nil || client == nil {
 		if err == nil {
-			err = errors.New("workspace bridge client is unavailable")
+			err = errs.New("workspace bridge client is unavailable")
 		}
-		sendAppError("checking", apperror.CodeWorkspaceUnreachable, err)
-		return nil
+		return fail("checking", apperror.Wrap(apperror.CodeWorkspaceUnreachable, err, nil))
 	}
 
 	send(displayPrepareStreamEvent{
@@ -329,8 +300,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 
 	stream, err := client.ExecStream(ctx, displayPrepareCommand(), "/", 1200)
 	if err != nil {
-		sendAppError("checking", apperror.CodeWorkspaceUnreachable, err)
-		return nil
+		return fail("checking", apperror.Wrap(apperror.CodeWorkspaceUnreachable, err, nil))
 	}
 	defer func() { _ = stream.Close() }()
 
@@ -347,8 +317,7 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 		if recvErr != nil {
 			// The bridge was reachable and preparation already started, so a
 			// broken stream is a prepare failure, not "workspace unreachable".
-			sendAppError(lastStep, apperror.CodeWorkspaceDisplayPrepareFailed, recvErr)
-			return nil
+			return fail(lastStep, apperror.Wrap(apperror.CodeWorkspaceDisplayPrepareFailed, recvErr, nil))
 		}
 		switch msg.GetStream() {
 		case pb.ExecOutput_STDOUT:
@@ -397,12 +366,11 @@ func (h *ContainerdHandler) PrepareDisplay(c echo.Context) error {
 		// `workspace.display_prepare_failed` code — identical to the mid-stream
 		// recvErr path above — instead of the legacy underscore string that the
 		// frontend's parseMemohError/isApiErrorCode branches can't match.
-		// sendAppError logs the private cause (exit code + stderr) with the
-		// request id, and apperror.PublicFrom renders only the catalog Detail,
-		// so the diagnostic never leaks into the user-facing response.
-		cause := fmt.Errorf("display preparation exited with status %d: %s", exitCode, diagnostic)
-		sendAppError(lastStep, apperror.CodeWorkspaceDisplayPrepareFailed, cause)
-		return nil
+		// The event renders only the catalog detail and the private cause
+		// (exit code + stderr) goes to the request's result record, so the
+		// diagnostic never leaks into the user-facing response.
+		cause := errs.New("display preparation exited", slog.Int("exit_code", int(exitCode)), slog.String("stderr", diagnostic))
+		return fail(lastStep, apperror.Wrap(apperror.CodeWorkspaceDisplayPrepareFailed, cause, nil))
 	}
 	if !completed {
 		send(displayPrepareStreamEvent{

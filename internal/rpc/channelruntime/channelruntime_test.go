@@ -2,6 +2,7 @@ package channelruntime
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -61,5 +62,22 @@ func TestSafeChannelErrorLeavesUnknownCauseForRuntimeSanitization(t *testing.T) 
 	cause := errors.New("private database detail")
 	if got := safeChannelError(cause); !errors.Is(got, cause) {
 		t.Fatalf("error = %v", got)
+	}
+}
+
+// A send or reaction that fails with a channel sentinel crosses as its
+// reason; any other failure keeps the adapter's text.
+func TestDeliveryErrorKeepsChannelSentinels(t *testing.T) {
+	sent := fmt.Errorf("resolve config: %w", channel.ErrChannelConfigNotFound)
+	restored := restoreChannelError(overWire(t, deliveryError(sent)))
+	if !errors.Is(restored, channel.ErrChannelConfigNotFound) {
+		t.Fatalf("got %v, want the channel sentinel", restored)
+	}
+	adapter := errors.New("telegram: chat not found")
+	if public := deliveryError(adapter); !errors.Is(public, adapter) || public.Error() != adapter.Error() {
+		t.Fatalf("got %v, want the adapter error marked public", public)
+	}
+	if deliveryError(nil) != nil {
+		t.Fatal("deliveryError(nil) is not nil")
 	}
 }

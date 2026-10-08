@@ -54,9 +54,9 @@ func (h *BotAgentsHandler) Register(e *echo.Echo) {
 // @Param model_id query string false "Model whose effective defaults should be displayed"
 // @Param project_path query string false "Workspace project path for runtime model settings"
 // @Success 200 {object} external.ModelCatalog
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/models [get].
 func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 	botID, err := h.authorize(c, bots.PermissionWorkspaceExec)
@@ -93,9 +93,9 @@ func (h *BotAgentsHandler) ListModels(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body botagents.CreateRequest true "Agent payload"
 // @Success 201 {object} botagents.BotAgent
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/agents [post].
 func (h *BotAgentsHandler) Create(c echo.Context) error {
 	bot, err := h.authorizeBot(c, bots.PermissionManage)
@@ -120,7 +120,7 @@ func (h *BotAgentsHandler) Create(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} botagents.ListResponse
-// @Failure 403 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/agents [get].
 func (h *BotAgentsHandler) List(c echo.Context) error {
 	bot, err := h.authorizeBot(c, bots.PermissionChat)
@@ -145,8 +145,8 @@ func (h *BotAgentsHandler) List(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Agent ID"
 // @Success 200 {object} botagents.BotAgent
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id} [get].
 func (h *BotAgentsHandler) Get(c echo.Context) error {
 	bot, err := h.authorizeBot(c, bots.PermissionChat)
@@ -170,10 +170,10 @@ func (h *BotAgentsHandler) Get(c echo.Context) error {
 // @Param id path string true "Agent ID"
 // @Param payload body botagents.UpdateRequest true "Agent changes"
 // @Success 200 {object} botagents.BotAgent
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id} [patch].
 func (h *BotAgentsHandler) Update(c echo.Context) error {
 	bot, err := h.authorizeBot(c, bots.PermissionManage)
@@ -201,9 +201,9 @@ func (h *BotAgentsHandler) Update(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Agent ID"
 // @Success 204 "No Content"
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id} [delete].
 func (h *BotAgentsHandler) Delete(c echo.Context) error {
 	botID, err := h.authorize(c, bots.PermissionManage)
@@ -302,9 +302,9 @@ func dependencyFor(requirements map[string]external.DependencyRequirement, runti
 // @Param bot_id path string true "Bot ID"
 // @Param id path string true "Agent ID"
 // @Success 200 {object} external.Controls
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/agents/{id}/runtime-controls [get].
 func (h *BotAgentsHandler) RuntimeControls(c echo.Context) error {
 	botID, err := h.authorize(c, bots.PermissionWorkspaceExec)

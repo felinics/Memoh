@@ -292,9 +292,9 @@ func validateReorderRefs(item, before string) error {
 // @Param session_id path string true "Session ID"
 // @Param body body enqueueQueueRequest true "Steer payload"
 // @Success 202 {object} steerQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue [post].
 func (h *SessionQueueHandler) EnqueueSteer(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -319,9 +319,9 @@ func (h *SessionQueueHandler) EnqueueSteer(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body enqueueQueueRequest true "Follow-up payload"
 // @Success 202 {object} followUpQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue [post].
 func (h *SessionQueueHandler) EnqueueFollowUp(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -345,7 +345,7 @@ func (h *SessionQueueHandler) EnqueueFollowUp(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} steerQueueResponse
-// @Failure 403 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue [get].
 func (h *SessionQueueHandler) ListSteer(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -365,7 +365,7 @@ func (h *SessionQueueHandler) ListSteer(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} followUpQueueResponse
-// @Failure 403 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue [get].
 func (h *SessionQueueHandler) ListFollowUp(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -385,7 +385,7 @@ func (h *SessionQueueHandler) ListFollowUp(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} sessionQueueResponse
-// @Failure 403 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/queue [get].
 func (h *SessionQueueHandler) ListSessionQueue(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -410,9 +410,9 @@ func (h *SessionQueueHandler) ListSessionQueue(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body steerQueueReorderRequest true "Typed steer queue references"
 // @Success 200 {object} steerQueueResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue/reorder [put].
 func (h *SessionQueueHandler) ReorderSteer(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -437,9 +437,9 @@ func (h *SessionQueueHandler) ReorderSteer(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param body body followUpQueueReorderRequest true "Typed follow-up queue references"
 // @Success 200 {object} followUpQueueResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/reorder [put].
 func (h *SessionQueueHandler) ReorderFollowUp(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -465,9 +465,9 @@ func (h *SessionQueueHandler) ReorderFollowUp(c echo.Context) error {
 // @Param item_id path string true "Queue item ID"
 // @Param body body updateQueueRequest true "Updated steer payload"
 // @Success 200 {object} steerQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue/{item_id} [patch].
 func (h *SessionQueueHandler) UpdateSteer(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -496,9 +496,9 @@ func (h *SessionQueueHandler) UpdateSteer(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param item_id path string true "Queue item ID"
 // @Success 204
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/steer-queue/{item_id} [delete].
 func (h *SessionQueueHandler) CancelSteer(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -523,9 +523,9 @@ func (h *SessionQueueHandler) CancelSteer(c echo.Context) error {
 // @Param item_id path string true "Queue item ID"
 // @Param body body updateQueueRequest true "Updated follow-up payload"
 // @Success 200 {object} followUpQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id} [patch].
 func (h *SessionQueueHandler) UpdateFollowUp(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -554,9 +554,9 @@ func (h *SessionQueueHandler) UpdateFollowUp(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param item_id path string true "Queue item ID"
 // @Success 204
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id} [delete].
 func (h *SessionQueueHandler) CancelFollowUp(c echo.Context) error {
 	scope, err := h.authorize(c)
@@ -580,9 +580,9 @@ func (h *SessionQueueHandler) CancelFollowUp(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param item_id path string true "Follow-up queue item ID"
 // @Success 202 {object} steerQueueItemResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/follow-up-queue/{item_id}/steer [post].
 func (h *SessionQueueHandler) PromoteFollowUpToSteer(c echo.Context) error {
 	scope, err := h.authorize(c)
