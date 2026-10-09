@@ -650,6 +650,72 @@ func TestCompactionRefusedRowsLeaveLaterClaimsOfTheirRun(t *testing.T) {
 	assertClaimsContiguous(t, q)
 }
 
+func TestCompactionProvedRowsLeaveLaterClaimsOfTheirRun(t *testing.T) {
+	t.Parallel()
+
+	// One step of a long turn always gets a summary no shorter than its
+	// claim. Rows proved ineffective rejoin later claims only next to as many
+	// new ones, so that step drops out after a bounded number of failures
+	// instead of sinking every later claim of the run.
+	q := newSessionStore()
+	q.append(prose(t, "user", "TASK", 120, 50))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), verbose: "VERBOSE"}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 1500)
+	cfg.HardPressure = true
+	failed := 0
+	var steps []sqlc.ListUncompactedMessagesBySessionRow
+	for s := 0; s < 80; s++ {
+		clock = clock.Add(2 * time.Minute)
+		step := execExchange(t, s)
+		if s == 6 {
+			step[1] = mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"exec-6","toolName":"exec","output":{"type":"text","value":"VERBOSE output"}}]`, 10)
+		}
+		steps = append(steps, step...)
+		q.append(step...)
+		if s%4 == 3 {
+			for pass := 0; pass < 3; pass++ {
+				res, err := svc.RunCompactionSync(context.Background(), cfg)
+				if errors.Is(err, ErrIneffectiveSummary) {
+					failed++
+					continue
+				}
+				if err != nil || res.Status != StatusOK {
+					break
+				}
+			}
+		}
+	}
+	compacted := 0
+	for _, row := range steps[len(steps)/2 : len(steps)*3/4] {
+		if q.logStatuses[q.claims[row.ID]] == "ok" {
+			compacted++
+		}
+	}
+	if failed > 3 || compacted != len(steps)/4 {
+		t.Fatalf("failures=%d, compacted %d of %d rows in the third quarter of the turn", failed, compacted, len(steps)/4)
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestManualCompactionReportsAnUnusableSummary(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "SPAN", 300, 100), prose(t, "assistant", "SPANA", 300, 100), prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "SPAN"}
+	cfg := machineryConfig(stub, 50)
+	cfg.Manual = true
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err != nil || res.Status != StatusNoop || res.Reason != ReasonSummaryUnusable {
+		t.Fatalf("result = %+v, %v; want a noop that says the model returned no usable summary", res, err)
+	}
+	if q.completed.FailureReason != failureReasonUnusableSummary {
+		t.Fatalf("failure_reason = %q, want the attempt recorded as unusable", q.completed.FailureReason)
+	}
+}
+
 func TestManualCompactionReportsASummaryThatDoesNotShrinkAsBlocked(t *testing.T) {
 	t.Parallel()
 

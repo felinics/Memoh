@@ -519,6 +519,50 @@ func TestCompactionGrownWindowCountsItsStatsOnce(t *testing.T) {
 	}
 }
 
+func TestCompactionLongTurnLeavesNoStepsAloneBehindItsBarriers(t *testing.T) {
+	t.Parallel()
+
+	// One long turn with a reasoning-only row every few steps, compacted while
+	// it runs behind a short row that waits for the turn to end. Each time
+	// the kept tail moves past such a row, the steps in front of it must not
+	// be left behind below the floor.
+	q := newSessionStore(prose(t, "user", "ok", 4, 5))
+	stub := &stubModel{summary: summaryOfTokens(t, 100)}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 400)
+	cfg.HardPressure = true
+	q.append(prose(t, "user", "TASK", 120, 50))
+	var steps []sqlc.ListUncompactedMessagesBySessionRow
+	for s := 0; s < 60; s++ {
+		if s%5 == 4 {
+			q.append(reasoningOnlyRow(t))
+		}
+		id := fmt.Sprintf("step-%d", s)
+		step := []sqlc.ListUncompactedMessagesBySessionRow{
+			mkRow(t, "assistant", `[{"type":"tool-call","toolCallId":"`+id+`","toolName":"exec","input":{"command":"check"}}]`, 20),
+			mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"`+id+`","toolName":"exec","output":{"type":"text","value":`+jsonStr(strings.Repeat("ok; ", 80))+`}}]`, 10),
+		}
+		steps = append(steps, step...)
+		q.append(step...)
+		for pass := 0; pass < 2; pass++ {
+			if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+				break
+			}
+		}
+	}
+	// The first steps are the task's joint, held while the turn runs.
+	raw := 0
+	for _, row := range steps[8 : len(steps)-20] {
+		if q.logStatuses[q.claims[row.ID]] != "ok" {
+			raw++
+		}
+	}
+	if raw > 0 {
+		t.Fatalf("%d step rows older than the kept tail stayed raw between summaries and reasoning rows", raw)
+	}
+	assertClaimsContiguous(t, q)
+}
+
 func TestCompactionTasksOfRunningTurnsCompactAfterTheirTurn(t *testing.T) {
 	t.Parallel()
 

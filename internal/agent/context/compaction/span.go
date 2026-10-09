@@ -269,8 +269,9 @@ func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCan
 // closeRun extends the claimable prefix items[:n] — what the recent tail
 // leaves — over the rest of its run when a barrier or a gap closes that rest
 // below floor: left raw, it would stay alone between this claim and the
-// barrier for good once the tail moves past it. A rest that reaches a row held
-// with the current task, or the end of the window, may still grow and stays.
+// barrier for good once the tail moves past it. A rest that reaches the end
+// of the window may still grow and stays; rows held with the current task are
+// never claimed either way.
 func closeRun(items []CompactionCandidate, n, floor int) int {
 	if n == 0 || n >= len(items) || items[n].GapBefore {
 		return n
@@ -282,11 +283,8 @@ func closeRun(items []CompactionCandidate, n, floor int) int {
 			return n + group[0]
 		}
 		c, kind := groupCost(rest, group)
-		switch {
-		case kind != groupMarkable:
+		if kind != groupMarkable {
 			return n + group[0]
-		case rest[group[0]].HasPolicy(CompactPolicyPreserveRecent):
-			return n
 		}
 		if cost += c; cost >= floor {
 			return n
