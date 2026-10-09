@@ -159,7 +159,9 @@
                 v-if="selected.dropped > 0"
                 class="text-foreground"
               >
-                {{ t('chat.lifecycle.leftOut', { n: selected.dropped, tokens: formatTokenCount(selected.droppedTokens) }) }}
+                {{ selected.droppedTokens != null
+                  ? t('chat.lifecycle.leftOut', { n: selected.dropped, tokens: formatTokenCount(selected.droppedTokens) })
+                  : t('chat.lifecycle.leftOutCount', { n: selected.dropped }) }}
               </p>
               <p
                 v-for="reason in selected.reasons"
@@ -214,7 +216,8 @@ interface TurnView {
   tokensLabel: string
   groups: ContextGroup[]
   dropped: number
-  droppedTokens: number
+  // Null for snapshots recorded before per-reason token totals existed.
+  droppedTokens: number | null
   trimmed: number
   reasons: Array<{ id: string, label: string, count: number }>
 }
@@ -256,11 +259,15 @@ function toTurnView(turn: HandlersContextLifecycleTurn, index: number): TurnView
       : t('chat.infoContextTokensEstimateNoWindow', { used }),
     groups: groupContextCategories(composition?.categories),
     dropped: selection?.dropped ?? 0,
-    droppedTokens: Object.values(selection?.drop_reason_tokens ?? {}).reduce((sum, n) => sum + n, 0),
+    droppedTokens: selection?.drop_reason_tokens
+      ? Object.values(selection.drop_reason_tokens).reduce((sum, n) => sum + n, 0)
+      : null,
     trimmed: selection?.trimmed ?? 0,
     reasons: Object.entries(selection?.drop_reasons ?? {})
       .filter(([, count]) => count > 0)
-      .map(([id, count]) => ({ id, count, label: REASON_KEY[id] ? t(REASON_KEY[id]!) : id })),
+      // `unknown` (a drop recorded without a reason) and reasons this build
+      // does not know yet share one localized label instead of a raw id.
+      .map(([id, count]) => ({ id, count, label: t(REASON_KEY[id] ?? 'chat.lifecycle.reasonOther') })),
   }
 }
 
