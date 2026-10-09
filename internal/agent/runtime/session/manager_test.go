@@ -216,6 +216,31 @@ func TestRuntimeCommandResultPollingIgnoresALookupTheDeadlineCut(t *testing.T) {
 	}
 }
 
+// deadlineTimeoutCommandResultLoadBackend answers lookups without a result,
+// except the one its context's deadline is about to cut: that one fails when
+// the deadline passes, the way a socket deadline set from the context can,
+// before the context itself reports it.
+type deadlineTimeoutCommandResultLoadBackend struct{ DistributedBackend }
+
+func (deadlineTimeoutCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) > 40*time.Millisecond {
+		return Command{}, false, nil
+	}
+	time.Sleep(time.Until(deadline))
+	return Command{}, false, errors.New("i/o timeout")
+}
+
+func TestRuntimeCommandResultPollingIgnoresATimeoutAtTheWaitDeadline(t *testing.T) {
+	for range 20 {
+		manager := NewManager(deadlineTimeoutCommandResultLoadBackend{}, Options{CommandAckTTL: 2 * time.Second})
+		err := manager.waitCommandResult(context.Background(), Command{ID: "command-cut"}, make(chan error), 200*time.Millisecond)
+		if !errors.Is(err, ErrCommandNotAcknowledged) {
+			t.Fatalf("wait error = %v (fault %q), want ErrCommandNotAcknowledged", err, errs.FaultOf(err))
+		}
+	}
+}
+
 // An owner that never answers leaves lookups that return without a result.
 func TestRuntimeCommandResultPollingReportsAnUnansweredCommand(t *testing.T) {
 	backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}

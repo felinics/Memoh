@@ -1097,6 +1097,7 @@ func (m *Manager) commandResultTTL() time.Duration {
 func (m *Manager) waitCommandResult(ctx context.Context, request Command, pending <-chan error, timeout time.Duration, retryOwnerIDs ...string) error {
 	waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
 	defer cancelWait()
+	waitDeadline, _ := waitCtx.Deadline()
 	retryOwnerID := ""
 	if len(retryOwnerIDs) > 0 {
 		retryOwnerID = strings.TrimSpace(retryOwnerIDs[0])
@@ -1151,7 +1152,9 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 			if loadErr == nil && ok {
 				return commandResultErrorFor(request, result)
 			}
-			if waitCtx.Err() == nil {
+			// The wait's deadline cut a lookup that returns at or after it,
+			// whether or not the context has reported it yet.
+			if waitCtx.Err() == nil && time.Now().Before(waitDeadline) {
 				unreadable = loadErr
 			}
 		case <-retry:
