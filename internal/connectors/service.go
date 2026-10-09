@@ -365,7 +365,7 @@ func (s *Service) createBindingOrRollback(
 			s.logger.WarnContext(ctx,
 				"failed to roll back Connect-It connection after binding failed",
 				slog.String("connection_id", connectionID),
-				slog.Any("error", rollbackErr),
+				slog.Any("error", upstreamError(rollbackErr)),
 			)
 		}
 	}
@@ -484,9 +484,17 @@ func upstreamError(err error) error {
 	if err == nil {
 		return nil
 	}
+	var apiErr *connectsdk.APIError
+	if errors.As(err, &apiErr) {
+		code := "upstream_error"
+		switch apiErr.Code {
+		case "oauth_client_not_configured", "validation_failed", "unauthorized", "forbidden", "not_found", "conflict", "internal":
+			code = apiErr.Code
+		}
+		err = &connectsdk.APIError{StatusCode: apiErr.StatusCode, Code: code}
+	}
 	err = fmt.Errorf("%w: %w", ErrUpstreamUnavailable, err)
 	// A 4xx answer refuses what this process sent, such as its own API token.
-	var apiErr *connectsdk.APIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode < http.StatusInternalServerError {
 		return errs.WrapWithDepth(1, err, "call connect-it")
 	}

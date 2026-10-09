@@ -31,7 +31,8 @@ const (
 	oauthTestUserID         = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	oauthTestInstallationID = "installation-56"
 	oauthTestAPIToken       = "cit_test-only-token-56"
-	oauthClientMissing      = `{"error":"oauth_client_not_configured","message":"PRIVATE the connector's OAuth client is not configured"}`
+	oauthTestClientSecret   = "test-only-client-secret-56"
+	oauthClientMissing      = `{"error":"oauth_client_not_configured","message":"PRIVATE the connector's OAuth client is not configured; client_secret=` + oauthTestClientSecret + `"}`
 	legacyClientMissing     = `{"error":"validation_failed","message":"PRIVATE oauthsvc: config is missing client_id or client_secret"}`
 	unknownAuthMethod       = `{"error":"validation_failed","message":"PRIVATE oauthsvc: unknown auth method: nope"}`
 )
@@ -172,6 +173,11 @@ func (c oauthChain) post(t *testing.T, path, body string) (*httptest.ResponseRec
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c.echo.ServeHTTP(rec, req)
+	for _, leaked := range []string{oauthTestAPIToken, oauthTestClientSecret, "PRIVATE"} {
+		if strings.Contains(c.logs.String(), leaked) {
+			t.Fatalf("%q reached the logs: %s", leaked, c.logs.String())
+		}
+	}
 	var record map[string]any
 	for _, line := range strings.Split(strings.TrimSpace(c.logs.String()), "\n") {
 		var entry map[string]any
@@ -209,14 +215,10 @@ func assertConnectorProblem(t *testing.T, rec *httptest.ResponseRecorder, record
 		record["status"] != float64(definition.HTTPStatus) {
 		t.Fatalf("request record = %v, want %s %s %s", record, level, code, fault)
 	}
-	logged, _ := json.Marshal(record)
-	for _, leaked := range []string{oauthTestAPIToken, "PRIVATE"} {
+	for _, leaked := range []string{oauthTestAPIToken, oauthTestClientSecret, "PRIVATE"} {
 		if strings.Contains(rec.Body.String(), leaked) {
 			t.Fatalf("%q reached the response: %s", leaked, rec.Body.String())
 		}
-	}
-	if strings.Contains(string(logged), oauthTestAPIToken) {
-		t.Fatalf("the Connect-It API token reached the log: %s", logged)
 	}
 }
 
@@ -229,8 +231,8 @@ func TestAppConnectorOAuthReportsMissingOAuthClientApp(t *testing.T) {
 	if chain.upstream.authorization[0] != "Bearer "+oauthTestAPIToken {
 		t.Fatalf("Connect-It was not called with the deployment token: %q", chain.upstream.authorization)
 	}
-	if text, _ := record["error"].(string); !strings.Contains(text, "oauth_client_not_configured") {
-		t.Fatalf("the record lost the upstream code: %v", record["error"])
+	if text, _ := record["error"].(string); !strings.Contains(text, "oauth_client_not_configured") || !strings.Contains(text, "HTTP 422") {
+		t.Fatalf("the record lost the upstream code or status: %v", record["error"])
 	}
 	if _, located := record["error_source"].(map[string]any); !located {
 		t.Fatalf("the record has no error source: %v", record)
@@ -266,6 +268,7 @@ func TestAppConnectorOAuthKeepsOtherConnectItAnswers(t *testing.T) {
 		{"Connect-It failure", http.StatusInternalServerError, `{"error":"internal","message":"PRIVATE internal error"}`, apperror.CodeConnectorUpstreamUnavailable, "dependency", "ERROR"},
 		{"Memoh's API token rejected", http.StatusUnauthorized, `{"error":"unauthorized","message":"PRIVATE invalid API token"}`, apperror.CodeConnectorUpstreamUnavailable, "server", "ERROR"},
 		{"Memoh's API token forbidden", http.StatusForbidden, `{"error":"forbidden","message":"PRIVATE forbidden"}`, apperror.CodeConnectorUpstreamUnavailable, "server", "ERROR"},
+		{"unrecognized upstream code", http.StatusBadGateway, `{"error":"PRIVATE test-only-client-secret-56","message":"PRIVATE failure"}`, apperror.CodeConnectorUpstreamUnavailable, "dependency", "ERROR"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			chain := newOAuthChain(t)

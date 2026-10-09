@@ -1,14 +1,23 @@
 package connectors
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	connectsdk "github.com/felinics/connect-it/sdk/go"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/felinics/memoh/internal/config"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func TestNormalizeAlias(t *testing.T) {
@@ -58,13 +67,75 @@ func TestUpstreamErrorPreservesClassification(t *testing.T) {
 		Code:       "conflict",
 		Message:    "private upstream detail",
 	}
-	err := upstreamError(apiErr)
+	err := upstreamError(fmt.Errorf("PRIVATE wrapper: %w", apiErr))
 	if !errors.Is(err, ErrUpstreamUnavailable) {
 		t.Fatalf("upstream error does not match ErrUpstreamUnavailable: %v", err)
 	}
 	var gotAPIError *connectsdk.APIError
-	if !errors.As(err, &gotAPIError) || gotAPIError != apiErr {
-		t.Fatalf("upstream error did not retain APIError: %v", err)
+	if !errors.As(err, &gotAPIError) || gotAPIError.Code != apiErr.Code || gotAPIError.StatusCode != apiErr.StatusCode {
+		t.Fatalf("upstream error did not retain APIError classification: %v", err)
+	}
+	if gotAPIError == apiErr || gotAPIError.Message != "" || apiErr.Message != "private upstream detail" {
+		t.Fatalf("upstream error must retain only a sanitized copy: %v", gotAPIError)
+	}
+	for _, leaked := range []string{"PRIVATE", apiErr.Message} {
+		if strings.Contains(errs.Text(err), leaked) || strings.Contains(err.Error(), leaked) {
+			t.Fatalf("upstream diagnostic leaked: %v", err)
+		}
+	}
+}
+
+func TestUpstreamErrorDiscardsUnrecognizedCode(t *testing.T) {
+	t.Parallel()
+	const private = "PRIVATE test-only-client-secret-56"
+	err := upstreamError(&connectsdk.APIError{StatusCode: http.StatusBadGateway, Code: private, Message: private})
+	var apiErr *connectsdk.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadGateway || apiErr.Code != "upstream_error" {
+		t.Fatalf("unexpected sanitized classification: %v", err)
+	}
+	if strings.Contains(errs.Text(err), private) || strings.Contains(err.Error(), private) {
+		t.Fatalf("upstream diagnostic leaked: %v", err)
+	}
+}
+
+type failedBindingQueries struct {
+	dbstore.Queries
+	err error
+}
+
+func (q failedBindingQueries) ListConnectorsByBotID(context.Context, pgtype.UUID) ([]dbsqlc.Connector, error) {
+	return nil, q.err
+}
+
+func TestBindingRollbackDiscardsUpstreamDiagnostics(t *testing.T) {
+	t.Parallel()
+	const private = "PRIVATE test-only-client-secret-56"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v1/connections/conn-56" {
+			t.Errorf("unexpected rollback request: %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(private))
+	}))
+	defer upstream.Close()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	storageErr := errors.New("binding store unavailable")
+	svc, err := NewService(logger, config.Config{ConnectIt: config.ConnectItConfig{
+		BaseURL: upstream.URL, APIToken: "test-only-token",
+	}}, failedBindingQueries{err: storageErr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.createBindingOrRollback(context.Background(), "00000000-0000-0000-0000-000000000056", "conn-56", "github")
+	if !errors.Is(err, storageErr) {
+		t.Fatalf("lost binding failure: %v", err)
+	}
+	if strings.Contains(logs.String(), private) {
+		t.Fatalf("rollback leaked upstream diagnostics: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "HTTP 502") || !strings.Contains(logs.String(), "conn-56") {
+		t.Fatalf("rollback lost safe diagnostics: %s", logs.String())
 	}
 }
 
