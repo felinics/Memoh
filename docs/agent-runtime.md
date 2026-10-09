@@ -153,6 +153,13 @@ with the failure as its `Cause`; after the last retry that is the last attempt's
 failure, wrapped. A subagent attempt is run again only when its watchdog ended
 it.
 
+The runtime projection keeps the wait visible to subscribers. A `retry` event
+sets `retry` on the current run (`attempt`, `max_attempt`, `delay_ms`, `reason`
+and `retry_at`, the server time of the next attempt) and sends it in the run
+patch. The next visible event, a terminal event or a terminal status clears it;
+a patch removes it with `clear_retry: true`, and a patch carrying neither field
+leaves it unchanged. Snapshots carry the field, so a reconnecting client sees it.
+
 Single model calls outside a run use the same rule: the context compaction
 summary, the memory calls and the session title. Image generation is retried
 only after a `rate_limited` answer, since a failed call may still have produced
