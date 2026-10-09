@@ -16,8 +16,8 @@ import (
 
 // errCompactNoModel is a sentinel returned by buildCompactConfig when neither
 // a compaction model nor a chat model is configured. The Handler catches it
-// via errors.Is and surfaces a localized user message; other (internal) errors
-// flow through friendlyCommandError's looksLikeInternalError path.
+// via errors.Is and surfaces a localized user message; any other error gets the
+// generic copy from failureReply.
 var (
 	errCompactNoModel = errors.New("compact: no compaction or chat model configured")
 	// errCompactModelUnavailable covers every other resolution failure (model

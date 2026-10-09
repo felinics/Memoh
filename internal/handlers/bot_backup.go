@@ -46,8 +46,8 @@ func (h *BotBackupHandler) Register(e *echo.Echo) {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} botbackup.SummaryResult
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/backup/summary [get].
 func (h *BotBackupHandler) Summary(c echo.Context) error {
 	if h.service == nil {
@@ -76,9 +76,9 @@ func (h *BotBackupHandler) Summary(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body botbackup.ExportRequest true "Export options"
 // @Success 200 {file} file
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/backup/export [post].
 func (h *BotBackupHandler) Export(c echo.Context) error {
 	if h.service == nil {
@@ -96,7 +96,7 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	var req botbackup.ExportRequest
 	if c.Request().Body != nil {
 		if err := c.Bind(&req); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return err
 		}
 	}
 
@@ -149,8 +149,8 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 // @Param sections formData string false "JSON object mapping section to strategy (skip|merge|replace), e.g. {\"settings\":\"replace\"}; omit to import all"
 // @Param passphrase formData string false "Passphrase to decrypt an encrypted backup"
 // @Success 200 {object} botbackup.PreviewResult
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/backup/import/preview [post].
 func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 	if h.service == nil {
@@ -181,9 +181,9 @@ func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 // @Param sections formData string false "JSON object mapping section to strategy (skip|merge|replace), e.g. {\"settings\":\"replace\"}; omit to import all"
 // @Param passphrase formData string false "Passphrase to decrypt an encrypted backup"
 // @Success 200 {object} botbackup.ImportResult
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/backup/import [post].
 func (h *BotBackupHandler) Import(c echo.Context) error {
 	if h.service == nil {

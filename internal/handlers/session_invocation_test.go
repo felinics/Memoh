@@ -21,6 +21,7 @@ import (
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/testutil/sessionledger"
 )
 
@@ -312,7 +313,7 @@ func TestGetSessionInvocationLedgerFailureIsServerError(t *testing.T) {
 	handler := newInvocationTestHandler(newInvocationTestQueries(invocationTestSession(invocationTestSessionA, invocationTestOwnerID)), lookup)
 
 	_, err := callGetSessionInvocation(handler, invocationTestSessionA, invocationTestInvocation, invocationTestOwnerID)
-	problem, ok := apperror.ProblemFrom(err, "invocation-request")
+	problem, ok := server.ProblemFrom(err, "invocation-request")
 	if !ok || problem.Status != http.StatusInternalServerError || problem.Code != string(apperror.CodeInternal) {
 		t.Fatalf("GetSessionInvocation() error = %v, want internal Problem with HTTP 500", err)
 	}

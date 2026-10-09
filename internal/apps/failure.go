@@ -76,8 +76,8 @@ func publicCause(err error) string {
 	if errors.As(err, &nested) {
 		return nested.Public()
 	}
-	if public, ok := apperror.PublicFrom(RegistryError(err), ""); ok {
-		return public.Detail
+	if definition, ok := apperror.Lookup(apperror.CodeOf(RegistryError(err))); ok {
+		return definition.Detail
 	}
 	for _, sentinel := range publicSentinels {
 		if errors.Is(err, sentinel) {

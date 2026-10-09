@@ -103,8 +103,10 @@ func provideSessionHandler(log *slog.Logger, sessionService *sessionpkg.Service,
 	return handler
 }
 
-func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service) *handlers.ACPRuntimeHandler {
-	return handlers.NewACPRuntimeHandler(pool, sessionService, botService, accountService)
+func provideACPRuntimeHandler(pool *acpagent.SessionPool, sessionService *sessionpkg.Service, botService *bots.Service, accountService *accounts.Service, botAgentsService *botagents.Service) *handlers.ACPRuntimeHandler {
+	handler := handlers.NewACPRuntimeHandler(pool, sessionService, botService, accountService)
+	handler.SetBotAgents(botAgentsService)
+	return handler
 }
 
 func provideBotAgentsHandler(log *slog.Logger, service *botagents.Service, botService *bots.Service, accountService *accounts.Service, runtimes external.Drivers) *handlers.BotAgentsHandler {

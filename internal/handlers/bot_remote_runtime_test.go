@@ -34,7 +34,7 @@ func TestWorkspaceTargetHTTPError(t *testing.T) {
 				if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceUnreachable {
 					t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceUnreachable)
 				}
-				if got := errs.FaultOf(err); got != errs.FaultDependency {
+				if got := errs.FaultOf(err); got != apperror.FaultDependency {
 					t.Fatalf("fault = %q, want dependency", got)
 				}
 				return

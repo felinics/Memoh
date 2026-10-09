@@ -77,6 +77,7 @@ external_runtime.auth_required	409
 external_runtime.session_resume_failed	502
 external_runtime.unavailable	503
 history.delete_failed	500
+hook.user_message_failed	400
 native_history_lost	503
 profile.request_invalid	400
 profile.title_model_invalid	400
@@ -246,3 +247,11 @@ agent.provider_permission_denied	502
 agent.provider_request_rejected	502
 agent.provider_unreachable	502
 external_runtime.usage_limited	429
+agent.chat_model_not_configured	409
+external_runtime.context_window_exceeded	422
+external_runtime.overloaded	503
+external_runtime.rate_limited	429
+external_runtime.request_blocked	422
+external_runtime.upstream_unreachable	502
+request.field_invalid	400
+request.field_required	400

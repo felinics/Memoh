@@ -37,7 +37,7 @@ type terminalControlMessage struct {
 // @Tags containerd
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} terminalInfoResponse
-// @Failure 404 {object} apperror.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/container/terminal [get].
 func (h *ContainerdHandler) GetTerminalInfo(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceExec)
@@ -69,8 +69,8 @@ func (h *ContainerdHandler) GetTerminalInfo(c echo.Context) error {
 // @Param rows query int false "Initial terminal rows" default(24)
 // @Param token query string false "Auth token"
 // @Success 101 "WebSocket upgrade"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/container/terminal/ws [get].
 func (h *ContainerdHandler) HandleTerminalWS(c echo.Context) error {
 	botID, err := h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceExec)

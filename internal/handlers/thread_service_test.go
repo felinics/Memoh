@@ -8,6 +8,6 @@ import (
 
 func newThreadServiceForTest(queries dbstore.Queries) *thread.Service {
 	service := thread.NewService(nil, queries, nil)
-	service.SetACPSetupValidator(acpprofileadapter.NewCatalog())
+	service.SetACPSetupValidator(acpprofileadapter.NewCatalog(nil))
 	return service
 }

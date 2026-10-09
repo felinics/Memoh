@@ -112,6 +112,7 @@ Current Desktop IPC includes:
 - `desktop:api-base-url`
 - `desktop:runtime-state`
 - `desktop:configure-runtime`
+- `desktop:set-runtime-paused`
 - `desktop:updates:get-info`
 - `desktop:updates:get-state`
 - `desktop:updates:check`
@@ -122,11 +123,13 @@ Current Desktop IPC includes:
 - `desktop:open-external-url`
 - `desktop:broadcast-invalidate`
 - `window:close-self`
+- `window:ignore-menu-shortcuts`
 
 Remote Runtime IPC is intentionally narrower than the SDK: the renderer may
-only read status or pass `{ runtimeId, name, key } | null`. `name` is the
-user-chosen Runtime display name; server URL, workspace base, OS device name,
-localhost policy, filesystem paths, and commands are owned by Main.
+only read status, pass `{ runtimeId, name, key } | null`, or pause and resume
+with a boolean. `name` is the user-chosen Runtime display name; server URL,
+workspace base, OS device name, localhost policy, filesystem paths, and
+commands are owned by Main.
 Do not add IPC for local database auth, project-folder picking, server lifecycle,
 arbitrary filesystem/command access, or CLI installation.
 

@@ -78,8 +78,8 @@
             size="lg"
             class="max-h-52 min-h-20 resize-none rounded-none border-0 bg-transparent p-0 text-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
             :aria-label="t('chat.actions.edit')"
-            @keydown.enter.meta.prevent="submitEdit"
-            @keydown.enter.ctrl.prevent="submitEdit"
+            @keydown.enter.meta.exact.prevent="submitEdit"
+            @keydown.enter.ctrl.exact.prevent="submitEdit"
             @keydown.escape.stop.prevent="cancelEdit"
           />
           <div class="mt-2 flex justify-end gap-1.5">

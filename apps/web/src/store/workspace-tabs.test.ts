@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
 import { useWorkspaceTabsStore } from './workspace-tabs'
+import { appKeyboardCommands, createKeyboardCommandRegistry } from '@/lib/keyboard-commands'
+import { registerWorkbenchCommands } from '@/pages/home/commands/workbench-commands'
+import { canDispatchKeyboardCommand } from '@/lib/keyboard-context'
+import { handleBrowserKeyboardShortcut } from '@/lib/browser-keyboard-shortcuts'
+import { selectWebBindings } from '@/lib/keyboard-bindings'
+import { useKeyboardShortcutsStore } from '@/store/keyboard-shortcuts'
 
 vi.hoisted(() => {
   class MemoryStorage implements Storage {
@@ -227,6 +233,10 @@ vi.mock('@/store/chat-list', () => ({
       {
         id: 'bot-without-layout',
         current_user_permissions: ['manage', 'workspace_exec', 'workspace_read'],
+      },
+      {
+        id: 'bot-chat-only',
+        current_user_permissions: ['chat'],
       },
     ],
     isSessionStreaming: vi.fn(() => false),
@@ -740,6 +750,161 @@ describe('workspace layout store', () => {
     store.updateBrowserAddress('browser:1', 'localhost:3000/app')
     expect(panel?.params.address).toBe('localhost:3000/app')
     expect(panel?.title).toBe('localhost:3000/app')
+  })
+
+  it('cycles tabs within the focused group, wraps, and leaves other splits unchanged', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openFilePinned('/a.txt')
+    store.openFilePinned('/b.txt')
+    const first = dock.getPanel('file:/a.txt')!
+    const second = dock.getPanel('file:/b.txt')!
+    store.openFileToSide('/right.txt')
+    const right = dock.getPanel('file:/right.txt')!
+    first.api.setActive()
+    expect(store.focusAdjacentTab(1)).toBe(true)
+    expect(store.activeId).toBe(second.id)
+    expect(store.focusAdjacentTab(-1)).toBe(true)
+    expect(store.activeId).toBe(first.id)
+    const groupIds = first.group!.panels.map(panel => panel.id)
+    store.focusAdjacentTab(-1)
+    expect(store.activeId).toBe(groupIds.at(-1))
+    store.focusAdjacentTab(1)
+    expect(store.activeId).toBe(groupIds[0])
+    expect(right.group!.activePanel?.id).toBe(right.id)
+  })
+
+  it('does not navigate without a workspace', () => {
+    expect(useWorkspaceTabsStore().focusAdjacentTab(1)).toBe(false)
+  })
+
+  it('keeps unavailable file navigation and execution commands behind existing permissions', () => {
+    useChatSelectionStore().setBot('bot-chat-only')
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.selectSidebarView('schedule')
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    registry.dispatch(appKeyboardCommands.showFiles)
+    expect(store.sidebarView).toBe('schedule')
+    registry.dispatch(appKeyboardCommands.newTerminal)
+    registry.dispatch(appKeyboardCommands.newBrowser)
+    expect(dock.panels.filter(panel => panel.component === 'terminal' || panel.component === 'browser')).toHaveLength(0)
+    unregister()
+  })
+
+  it('routes workbench commands through the existing sidebar, session, split and creation operations', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    const views = [
+      [appKeyboardCommands.showSessions, 'sessions'], [appKeyboardCommands.showFiles, 'files'],
+      [appKeyboardCommands.showSchedule, 'schedule'], [appKeyboardCommands.showSupermarket, 'supermarket'],
+    ] as const
+    for (const [command, view] of views) {
+      registry.dispatch(command)
+      expect(store.sidebarView).toBe(view)
+      expect(store.workbenchOpen).toBe(true)
+    }
+    registry.dispatch(appKeyboardCommands.newTerminal)
+    expect(dock.getPanel('terminal:1')?.component).toBe('terminal')
+    registry.dispatch(appKeyboardCommands.newBrowser)
+    expect(dock.getPanel('browser:1')?.component).toBe('browser')
+    registry.dispatch(appKeyboardCommands.newChatSession)
+    expect(dock.activePanel?.component).toBe('chat')
+    expect(dock.activePanel?.params.sessionId).toBeNull()
+    const groupCount = dock.groups.length
+    registry.dispatch(appKeyboardCommands.splitWorkspaceRight)
+    expect(dock.groups).toHaveLength(groupCount + 1)
+    registry.dispatch(appKeyboardCommands.splitWorkspaceBelow)
+    expect(dock.groups).toHaveLength(groupCount + 2)
+    unregister()
+    expect(registry.dispatch(appKeyboardCommands.newTerminal)).toBe(false)
+  })
+
+  it('retains focus intent for the selected chat until its composer mounts', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openTerminal()
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    registry.dispatch(appKeyboardCommands.focusChatInput)
+    await nextTick()
+    expect(store.pendingChatInputFocus?.panelId).toBe(store.activeId)
+    expect(dock.getPanel(store.pendingChatInputFocus!.panelId)?.component).toBe('chat')
+    store.openTerminal()
+    expect(store.pendingChatInputFocus).toBeNull()
+    unregister()
+  })
+
+  it('focuses the chat the user is in rather than the first chat of another group', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    store.openDraftChat()
+    const first = store.activeId
+    store.openFileToSide('/right.txt')
+    registry.dispatch(appKeyboardCommands.newChatSession)
+    const second = store.activeId
+    expect(dock.getPanel(second!)?.component).toBe('chat')
+    expect(second).not.toBe(first)
+
+    registry.dispatch(appKeyboardCommands.focusChatInput)
+    await nextTick()
+    expect(store.activeId).toBe(second)
+    expect(store.pendingChatInputFocus?.panelId).toBe(second)
+    unregister()
+  })
+
+  it('opens a chat to focus when the dock is empty', async () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    const registry = createKeyboardCommandRegistry()
+    const unregister = registerWorkbenchCommands(registry, store)
+    expect(dock.panels).toHaveLength(0)
+
+    registry.dispatch(appKeyboardCommands.focusChatInput)
+    await nextTick()
+    expect(dock.getPanel(store.activeId!)?.component).toBe('chat')
+    expect(store.pendingChatInputFocus?.panelId).toBe(store.activeId)
+    unregister()
+  })
+
+  it('creates once from a shortcut, suppresses repeat, blocks settings and accepts a live rebind', () => {
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    let path = '/'
+    const registry = createKeyboardCommandRegistry(command => canDispatchKeyboardCommand(command, { name: path === '/' ? 'home' : 'keyboard', path }, {
+      querySelectorAll: () => [],
+    } as unknown as Document))
+    const unregister = registerWorkbenchCommands(registry, store)
+    const shortcuts = useKeyboardShortcutsStore()
+    const press = (key: string, modifiers: { ctrlKey?: boolean, shiftKey?: boolean }, repeat = false) => handleBrowserKeyboardShortcut(
+      { key, ctrlKey: false, metaKey: false, altKey: true, shiftKey: false, ...modifiers, repeat, preventDefault: vi.fn() },
+      registry, selectWebBindings(shortcuts.effectiveBindings), 'linux',
+    )
+    expect(press('X', { shiftKey: true })).toBe(true)
+    press('X', { shiftKey: true }, true)
+    expect(dock.getPanel('terminal:1')).toBeTruthy()
+    expect(dock.getPanel('terminal:2')).toBeUndefined()
+    path = '/settings/keyboard'
+    press('X', { shiftKey: true })
+    expect(dock.getPanel('terminal:2')).toBeUndefined()
+    path = '/'
+    expect(shortcuts.setBinding(appKeyboardCommands.newTerminal, 'Mod+Alt+z').kind).toBe('none')
+    expect(press('X', { shiftKey: true })).toBe(false)
+    expect(press('z', { ctrlKey: true })).toBe(true)
+    expect(dock.getPanel('terminal:2')).toBeTruthy()
+    unregister()
   })
 
   it('opens a browser tab at an address and focuses the existing one on the same URL', () => {
@@ -2363,6 +2528,25 @@ describe('workspace layout store', () => {
       // panels, they are not the desktop arrangement.
       const written = JSON.parse(localStorage.getItem('workspace-layout')!)
       expect(written['bot-1'].layout).toEqual(storedLayout)
+    })
+
+    it('opens mobile navigation for sidebar shortcuts it can show and ignores Supermarket', async () => {
+      mobileBreakpoint.setMobile(true)
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      await flushDraftChatFallback()
+      const registry = createKeyboardCommandRegistry()
+      const unregister = registerWorkbenchCommands(registry, store)
+
+      registry.dispatch(appKeyboardCommands.showSchedule)
+      expect(store.sidebarView).toBe('schedule')
+      expect(store.mobileNavOpen).toBe(true)
+      store.closeMobileNav()
+      registry.dispatch(appKeyboardCommands.showSupermarket)
+      expect(store.sidebarView).toBe('schedule')
+      expect(store.mobileNavOpen).toBe(false)
+      unregister()
     })
 
     it('keeps programmatic opens inside the single group instead of splitting', async () => {

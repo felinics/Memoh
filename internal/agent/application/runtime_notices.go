@@ -28,8 +28,8 @@ func publicRuntimeNotice(ev event.StreamEvent) event.StreamEvent {
 	}
 	ev.Code = string(code)
 	if ev.Delta == "" {
-		if public, ok := apperror.PublicFrom(apperror.New(code, nil), ""); ok {
-			ev.Delta = public.Detail
+		if definition, ok := apperror.Lookup(code); ok {
+			ev.Delta = definition.Detail
 		}
 	}
 	ev.NoticeKind = ""

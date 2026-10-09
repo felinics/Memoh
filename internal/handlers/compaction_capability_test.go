@@ -22,6 +22,7 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/models"
 	"github.com/felinics/memoh/internal/providers"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/settings"
 )
 
@@ -231,7 +232,7 @@ func TestTriggerCompactRejectsProviderWithoutOutputLimitBeforeService(t *testing
 	if got := apperror.CodeOf(err); got != apperror.CodeCompactionModelUnavailable {
 		t.Fatalf("TriggerCompact() code = %q, want %q (err=%v)", got, apperror.CodeCompactionModelUnavailable, err)
 	}
-	problem, ok := apperror.ProblemFrom(err, "req-test")
+	problem, ok := server.ProblemFrom(err, "req-test")
 	if !ok || problem.Status != http.StatusBadRequest {
 		t.Fatalf("TriggerCompact() problem = %+v ok=%t, want a 400 problem shape", problem, ok)
 	}
@@ -277,7 +278,7 @@ func TestCompactionRunFailureShapes(t *testing.T) {
 	if got := apperror.CodeOf(err); got != apperror.CodeCompactionModelUnavailable {
 		t.Fatalf("window-too-small code = %q, want %q", got, apperror.CodeCompactionModelUnavailable)
 	}
-	problem, ok := apperror.ProblemFrom(err, "req")
+	problem, ok := server.ProblemFrom(err, "req")
 	if !ok || problem.Status != http.StatusBadRequest {
 		t.Fatalf("window-too-small problem = %+v ok=%t, want a 400 problem shape", problem, ok)
 	}

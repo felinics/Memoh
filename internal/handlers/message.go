@@ -178,10 +178,10 @@ func writeSSEJSON(writer io.Writer, flusher http.Flusher, payload any) error {
 // @Param before query string false "Before"
 // @Param before_message_id query string false "Message ID cursor before which to page" format(uuid)
 // @Success 200 {object} UIMessageListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/messages [get].
 func (h *MessageHandler) ListMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -293,10 +293,10 @@ func (h *MessageHandler) listLatestUIPageBySession(ctx context.Context, sessionI
 // @Param before query int false "Messages before target" default(30) minimum(0) maximum(100)
 // @Param after query int false "Messages after target" default(30) minimum(0) maximum(100)
 // @Success 200 {object} UILocateMessageResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/messages/locate [get].
 func (h *MessageHandler) LocateMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -684,9 +684,9 @@ func uiTurnHeadExtensionLimit(currentRows int, limit int32) int {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/messages [delete].
 func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)

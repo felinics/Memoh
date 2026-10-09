@@ -17,7 +17,7 @@
     :aria-expanded="expanded"
     :class="[rowClass, compact ? compactClass : rowHeightClass, hoverFill ? hoverFillClass : '']"
     @click="emit('toggle')"
-    @keydown.enter="onRowKeydown"
+    @keydown.enter.exact="onRowKeydown"
     @keydown.space="onRowKeydown"
   >
     <slot name="leading" />

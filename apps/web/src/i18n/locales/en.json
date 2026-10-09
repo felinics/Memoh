@@ -164,7 +164,8 @@
       "provider_permission_denied": "The model provider denied access to this model or resource. Check that the provider account can use this model.",
       "provider_request_rejected": "The model provider rejected the request. Check the model settings, or try another model.",
       "provider_unreachable": "Memoh could not reach the model provider. Check the provider address and that the service is running.",
-      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying."
+      "tool_timeout": "The tool stopped reporting progress. Review its saved result before retrying.",
+      "chat_model_not_configured": "No chat model is selected. Set a default chat model in Bot settings → General, then try again."
     },
     "queue_request_invalid": "Enter text after /steer or /queue in an existing conversation.",
     "queue_no_active_run": "The current response has ended. Send this as a new message.",
@@ -303,6 +304,9 @@
     "history": {
       "delete_failed": "The conversation history could not be deleted. Please try again."
     },
+    "hook": {
+      "user_message_failed": "The message could not be accepted by the message hook. Check the Hook configuration and try again."
+    },
     "context_lifecycle": {
       "request_invalid": "The context lifecycle request is invalid.",
       "authentication_required": "Sign in to view context lifecycle diagnostics.",
@@ -311,10 +315,15 @@
       "load_failed": "Context lifecycle diagnostics could not be loaded. Please try again."
     },
     "external_runtime": {
-      "auth_required": "Codex is not connected yet. Open Agent settings to connect ChatGPT or configure an API key.",
+      "auth_required": "Codex is not connected, or its sign-in has expired. Open Agent settings to connect ChatGPT or configure an API key.",
       "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",
       "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
-      "usage_limited": "The external Agent's usage limit has been reached. Please try again later."
+      "usage_limited": "The external Agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing.",
+      "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
+      "context_window_exceeded": "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
+      "overloaded": "The external Agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
+      "upstream_unreachable": "The external Agent could not reach its model service, or the connection dropped. Check the network and the Agent's service address, then try again.",
+      "request_blocked": "The model service's safety policy blocked this request. Change the request and send it again."
     },
     "app": {
       "not_found": "This App installation was not found.",
@@ -370,6 +379,10 @@
       "bad_gateway": "An upstream service returned an invalid response. Please try again.",
       "service_unavailable": "The service is temporarily unavailable. Please try again shortly.",
       "gateway_timeout": "An upstream service did not respond in time. Please try again."
+    },
+    "request": {
+      "field_required": "{field} is required.",
+      "field_invalid": "{field} is invalid."
     },
     "agent_dependency_missing": "{dep_id} is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.",
     "runtime_run_failed": "The response could not be completed. Please try again.",
@@ -680,25 +693,80 @@
     },
     "keyboard": {
       "title": "Keyboard Shortcuts",
-      "intro": "Click Edit on a row, then press the new key combination. Cmd/Ctrl + W, Q, T, N stay reserved for the browser and OS.",
+      "intro": "Click Edit on a row, then press the new key combination. Cmd/Ctrl + W, Q, T, N stay reserved for the browser and OS. Workspace defaults use ⌘⌥ on macOS, matched by the key positions of a US keyboard, and Alt+Shift on Windows and Linux. If Alt+Shift switches your keyboard layout, assign other keys here.",
       "resetAll": "Reset all",
       "scopes": {
+        "workspace": "Workspace",
         "global": "Global",
         "mediaLightbox": "Media Lightbox"
       },
       "row": {
-        "reset": "Reset to default"
+        "reset": "Reset to default",
+        "ignored": "Saved shortcut {combo} isn't available here, so the default is used.",
+        "shadowed": "{combo} is assigned to {command}, so this shortcut is off. Choose another combination."
       },
       "dialog": {
         "title": "Edit shortcut",
         "prompt": "Press a key combination…",
         "resetDefault": "Reset to default",
-        "reservedError": "This combination is reserved by the browser or OS.",
-        "noModifierError": "Global shortcuts need a Cmd/Ctrl or Alt modifier so they don't fire while typing.",
-        "sameScopeError": "Already used by {command}.",
+        "reservedError": "This combination is reserved by the browser, the OS or the app menu.",
+        "editingError": "This combination is used for text editing (copy, paste, undo…).",
+        "menuPauseFailed": "Couldn't pause the app menu shortcuts. They may still trigger while you record.",
+        "menuRestoreFailed": "Couldn't turn the app menu shortcuts back on. Reload the window if they stop responding.",
+        "noModifierError": "This shortcut needs a Cmd/Ctrl or Alt modifier so it doesn't fire while typing.",
+        "typingError": "On macOS, Option with a letter or symbol types a character. Add Command.",
+        "sameScopeError": "This combination is already used by {command}.",
         "crossScopeWarn": "Also used by {command} (only active in a different context)."
       },
       "commands": {
+        "newChatSession": {
+          "label": "New session",
+          "description": "Open or focus a new chat in the current group."
+        },
+        "focusChatInput": {
+          "label": "Focus chat input",
+          "description": "Activate chat and focus its message input."
+        },
+        "showSessions": {
+          "label": "Show Chat",
+          "description": "Open the Chat sidebar with your sessions."
+        },
+        "showFiles": {
+          "label": "Show Files",
+          "description": "Open the Files sidebar."
+        },
+        "showSchedule": {
+          "label": "Show Schedule",
+          "description": "Open the Schedule sidebar."
+        },
+        "showSupermarket": {
+          "label": "Show Supermarket",
+          "description": "Open the Supermarket sidebar."
+        },
+        "nextWorkspaceTab": {
+          "label": "Next tab",
+          "description": "Focus the next tab in the current group."
+        },
+        "previousWorkspaceTab": {
+          "label": "Previous tab",
+          "description": "Focus the previous tab in the current group."
+        },
+        "splitWorkspaceRight": {
+          "label": "Split right",
+          "description": "Split the current panel to the right."
+        },
+        "splitWorkspaceBelow": {
+          "label": "Split below",
+          "description": "Split the current panel below."
+        },
+        "newTerminal": {
+          "label": "New terminal",
+          "description": "Open a terminal in the current group."
+        },
+        "newBrowser": {
+          "label": "New browser",
+          "description": "Open a workspace browser in the current group."
+        },
         "closeCurrentWorkspaceTab": {
           "label": "Close current workspace tab",
           "description": "Close the active tab in the workspace pane (falls back to the OS close behavior)."
@@ -843,7 +911,6 @@
     "showLess": "Show less",
     "actions": {
       "copy": "Copy",
-      "copied": "Copied",
       "edit": "Edit",
       "share": "Share",
       "retry": "Try again",
@@ -3074,8 +3141,8 @@
         "interaction": "Interaction",
         "multimedia": "Multimedia"
       },
-      "chatModel": "Chat Model",
-      "chatModelDescription": "Used by the Memoh Agent.",
+      "chatModel": "Default chat model",
+      "chatModelDescription": "Used by Memoh Agent in new channel conversations, such as Telegram. Choosing a model in a web conversation does not change this default.",
       "chatModelPlaceholder": "Select model",
       "defaultAgent": "Default Agent",
       "defaultAgentDescription": "Used for new local chats. Existing conversations keep their current Agent.",
@@ -3466,7 +3533,9 @@
         "web": "Web",
         "cli": "CLI",
         "local": "Local"
-      }
+      },
+      "modelRequiredTitle": "Choose a default chat model",
+      "modelRequiredDescription": "Channel connections can be enabled without a model. Set a default model so the bot can reply in new conversations."
     },
     "memory": {
       "title": "Memories",

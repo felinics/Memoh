@@ -109,8 +109,8 @@ func queueCommandCode(err error) string {
 
 // queueStatus is the error envelope of a queue code. Every queue code is a
 // catalog code, so the envelope is that of the catalog error.
-func queueStatus(code string) error {
-	return intrpc.AppErrorStatus(apperror.New(apperror.Code(code), nil))
+func queueStatus(ctx context.Context, code string) error {
+	return intrpc.AnswerStatus(ctx, apperror.New(apperror.Code(code), nil))
 }
 
 func (c *Client) ResolveTextRequestedSkills(ctx context.Context, botID string, names []string) ([]skills.ResolvedSkill, error) {
@@ -161,8 +161,12 @@ func (c *Client) Transcribe(ctx context.Context, modelID string, data []byte, fi
 	return out, nil
 }
 
+// call runs one method on the server. Every method serves an end user's
+// message or command in a channel, so a restored catalog error is forwarded:
+// the user gets the same answer as when the channel runs in the server
+// process.
 func (c *Client) call(ctx context.Context, method string, input, output any) error {
-	return c.rpc.Call(ctx, method, input, output)
+	return intrpc.Forward(c.rpc.Call(ctx, method, input, output))
 }
 
 type transcriptionResult struct {
@@ -276,7 +280,7 @@ func queueHandlerFunc(decode func(json.RawMessage, any) error, handler func(cont
 		}
 		err := handler(ctx, input)
 		if code := inbound.QueueCommandErrorCode(err); code != "" {
-			return nil, queueStatus(code)
+			return nil, queueStatus(ctx, code)
 		}
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // QRHandler handles WeChat QR code login for the management UI.
@@ -61,8 +62,7 @@ func (h *QRHandler) Start(c echo.Context) error {
 	ctx := c.Request().Context()
 	qr, err := h.client.FetchQRCode(ctx, defaultBaseURL, h.localTokens(ctx, strings.TrimSpace(c.Param("id"))))
 	if err != nil {
-		h.logger.ErrorContext(ctx, "weixin qr start failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to fetch QR code: "+err.Error())
+		return errs.WrapDependency(err, "fetch weixin qr code")
 	}
 
 	return c.JSON(http.StatusOK, QRStartResponse{
@@ -138,7 +138,7 @@ func (h *QRHandler) Poll(c echo.Context) error {
 
 	var req QRPollRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	qrCode := strings.TrimSpace(req.QRCode)
 	if qrCode == "" {
@@ -155,8 +155,7 @@ func (h *QRHandler) Poll(c echo.Context) error {
 
 	status, err := h.client.PollQRStatus(ctx, apiBaseURL, qrCode, strings.TrimSpace(req.VerifyCode))
 	if err != nil {
-		h.logger.ErrorContext(ctx, "weixin qr poll failed", slog.Any("error", err))
-		return echo.NewHTTPError(http.StatusInternalServerError, "Poll failed: "+err.Error())
+		return errs.WrapDependency(err, "poll weixin qr status")
 	}
 
 	resp := QRPollResponse{Status: status.Status, PollHost: pollHost}
@@ -176,11 +175,11 @@ func (h *QRHandler) Poll(c echo.Context) error {
 	case "binded_redirect":
 		resp.Status = "already_bound"
 		if err := h.ensureEnabled(ctx, botID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "WeChat is already connected but enabling the channel failed: "+err.Error())
+			return errs.Wrap(err, "enable bound weixin channel", slog.String("bot_id", botID))
 		}
 	case "confirmed":
 		if err := h.saveCredentials(ctx, botID, status); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Login succeeded but failed to save credentials: "+err.Error())
+			return errs.Wrap(err, "save weixin credentials", slog.String("bot_id", botID))
 		}
 	}
 	resp.Message = statusMessage(resp.Status)
@@ -204,10 +203,6 @@ func (h *QRHandler) saveCredentials(ctx context.Context, botID string, status *Q
 		Disabled:    boolPtr(false),
 	})
 	if err != nil {
-		h.logger.ErrorContext(ctx, "weixin qr save credentials failed",
-			slog.String("bot_id", botID),
-			slog.Any("error", err),
-		)
 		return err
 	}
 	h.logger.InfoContext(ctx, "weixin qr login saved",
@@ -238,11 +233,8 @@ func (h *QRHandler) ensureEnabled(ctx context.Context, botID string) error {
 	if !cfg.Disabled {
 		return nil
 	}
-	if _, err := h.lifecycle.SetBotChannelStatus(ctx, botID, Type, false); err != nil {
-		h.logger.ErrorContext(ctx, "weixin qr enable bound channel failed", slog.String("bot_id", botID), slog.Any("error", err))
-		return err
-	}
-	return nil
+	_, err = h.lifecycle.SetBotChannelStatus(ctx, botID, Type, false)
+	return err
 }
 
 // isILinkHost accepts a bare hostname under qq.com. iLink redirect hosts come

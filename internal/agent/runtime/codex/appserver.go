@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/codex/protocol"
 	"github.com/felinics/memoh/internal/agent/runtime/external"
 	"github.com/felinics/memoh/internal/agent/runtime/toolmount"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/version"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -113,6 +115,10 @@ func startAppServerSession(ctx context.Context, botID, botAgentID string, client
 	}, &initResp)
 	if err != nil {
 		_ = srv.conn.Close()
+		if errors.Is(err, ErrConnClosed) {
+			// The closed connection's error already carries the exit and stderr.
+			return nil, fmt.Errorf("codex initialize failed: %w", err)
+		}
 		return nil, fmt.Errorf("codex initialize failed: %w (stderr: %s)", err, proc.StderrTail())
 	}
 	if err := srv.conn.Notify(protocol.MethodInitialized, nil); err != nil {
@@ -360,7 +366,8 @@ func (s *appServer) handleGlobalNotification(method string, decoded any) {
 			outcome.Error = *completed.Error
 		}
 		s.mu.Lock()
-		if _, tracked := s.logins[*completed.LoginID]; tracked {
+		_, tracked := s.logins[*completed.LoginID]
+		if tracked {
 			s.logins[*completed.LoginID] = outcome
 		}
 		if completed.Success {
@@ -368,6 +375,15 @@ func (s *appServer) handleGlobalNotification(method string, decoded any) {
 			s.authReady = true
 		}
 		s.mu.Unlock()
+		// A login the user cancelled is no longer tracked and is not a failure.
+		if tracked && !completed.Success {
+			// The poll response carries only the state, so this record is the
+			// one place the reason Codex gave survives.
+			s.logger.Warn("codex device login failed",
+				slog.String("bot_id", s.botID),
+				slog.String("login_id", *completed.LoginID),
+				slog.String("error", errs.RedactURLs(outcome.Error)))
+		}
 	}
 }
 

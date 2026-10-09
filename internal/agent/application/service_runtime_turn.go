@@ -21,6 +21,7 @@ import (
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/schedule"
 )
 
@@ -223,7 +224,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 			s.cleanupReplacementMessages(context.WithoutCancel(ctx), []messagepkg.Message{*leadingUser})
 		}
 	}
-	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -396,6 +397,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		CanRequestUserInput: s.canDeliverUserInputWS(eventCh),
 		Sink:                external.EventSinkFunc(emit),
 	})
+	err = runtimeTurnError(runtimeType, err)
 	configurationFailure := isRuntimeConfigurationError(err)
 	err = ExternalAgentError(err)
 	notices.apply(&result)
@@ -406,7 +408,7 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		// stable cause here; unlike a user stop or client disconnect, an idle
 		// timeout is a failed turn and must carry agent.response_timeout through
 		// history, lifecycle, and the live stream.
-		err = context.Cause(idleCtx)
+		err = runtimeTurnError(runtimeType, context.Cause(idleCtx))
 		configurationFailure = false
 		outcome.setCause(err)
 	}
@@ -672,16 +674,18 @@ func (s *Service) triggerScheduleRuntime(ctx context.Context, botID string, payl
 			reasoningTiming.observe(ev)
 		}),
 	})
+	promptErr = runtimeTurnError(runtimeType, promptErr)
 	configurationFailure := isRuntimeConfigurationError(promptErr)
 	promptErr = ExternalAgentError(promptErr)
 	notices.apply(&result)
 	if idleCancel.DidFire() {
-		promptErr = context.Cause(idleCtx)
+		promptErr = runtimeTurnError(runtimeType, context.Cause(idleCtx))
 		configurationFailure = false
 	} else if errors.Is(context.Cause(ctx), schedule.ErrExecutionTimeout) {
-		promptErr = agentAbortCause(ctx)
+		promptErr = runtimeTurnError(runtimeType, agentAbortCause(ctx))
 		configurationFailure = false
 	}
+	promptErr = scheduledRuntimeFailure(promptErr)
 	lifecycleCause = promptErr
 	// Same contract as the chat path: the round must not commit past a lost
 	// runtime session anchor, or later fires resume the pre-round context.
@@ -984,9 +988,28 @@ func (s *Service) persistRuntimeRound(
 		s.publishRuntimeSteerHistory(ctx, req, result.SteerInputIDs, persisted)
 	}
 	if err == nil && promptErr == nil && (req.UserMessagePersisted || req.ReusePersistedUserMessage) && !req.SkipMemoryExtraction {
-		go s.storeMemory(context.WithoutCancel(ctx), req, persisted)
+		s.storeMemory(context.WithoutCancel(ctx), req, persisted)
 	}
 	return err
+}
+
+// runtimeTurnError marks err as the failure of a turn runtimeType ran. Every
+// External Agent failure carries its runtime under the same key, so one query
+// over the result records finds them whichever agent failed and whatever code
+// the failure took.
+func runtimeTurnError(runtimeType string, err error) error {
+	return errs.WrapWithDepth(1, err, "external agent turn", slog.String("runtime", runtimeType))
+}
+
+// scheduledRuntimeFailure returns a scheduled turn's failure under the code
+// its run ends with. The schedule log stores the text of the error a fire
+// returns and the API serves it; a public error's text is its code, and the
+// agent's own words stay behind it for the result record.
+func scheduledRuntimeFailure(err error) error {
+	if err == nil || err.Error() == string(apperror.CodeOf(err)) {
+		return err
+	}
+	return apperror.Wrap(classifyRuntimeFailure(err), err, apperror.ArgsOf(err))
 }
 
 // runtimeTurnRan reports evidence that the runtime accepted the turn. "Nothing
@@ -1003,8 +1026,10 @@ func runtimeTurnRan(result external.PromptResult) bool {
 func runtimeFailureEvent(cause error) native.StreamEvent {
 	code := string(classifyRuntimeFailure(cause))
 	event := native.StreamEvent{Type: native.EventError, Code: code, Error: code}
-	if public, ok := apperror.PublicFrom(ExternalAgentError(cause), ""); ok && len(public.Args) > 0 {
-		event.Args = public.Args
+	if public := ExternalAgentError(cause); hasCatalogCode(public) {
+		if args := apperror.ArgsOf(public); len(args) > 0 {
+			event.Args = args
+		}
 	}
 	return event
 }

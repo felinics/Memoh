@@ -91,9 +91,9 @@ type CacheStats struct {
 // @Param session_id path string true "Session ID"
 // @Param model_id query string false "Optional model UUID override for context window"
 // @Success 200 {object} SessionInfoResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/status [get].
 func (h *SessionInfoHandler) GetSessionInfo(c echo.Context) error {
 	userID, err := RequireChannelIdentityID(c)

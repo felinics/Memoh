@@ -38,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { inject, onScopeDispose, ref, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
@@ -48,7 +48,8 @@ import MobileTopBar from './components/mobile-top-bar.vue'
 import MobileNavSheet from './components/mobile-nav-sheet.vue'
 import { ONBOARDING_KEYS } from '@/pages/onboarding/constants'
 import { safeSessionGet, safeSessionRemove } from '@/utils/safe-storage'
-import { useKeyboardCommand } from '@/composables/useKeyboardCommand'
+import { KEYBOARD_REGISTRY, useKeyboardCommand } from '@/composables/useKeyboardCommand'
+import { registerWorkbenchCommands } from '@/pages/home/commands/workbench-commands'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
 import { useI18n } from 'vue-i18n'
@@ -98,6 +99,8 @@ onMounted(() => {
 // the desktop settings sidebar's pinned-open intent AND prevent the web
 // browser from falling through to its native Mod+B (bookmarks bar).
 const workspaceTabs = useWorkspaceTabsStore()
+const keyboardRegistry = inject(KEYBOARD_REGISTRY, null)
+if (keyboardRegistry) onScopeDispose(registerWorkbenchCommands(keyboardRegistry, workspaceTabs))
 const { isMobile } = storeToRefs(workspaceTabs)
 const route = useRoute()
 useKeyboardCommand(appKeyboardCommands.toggleSidebar, () => {

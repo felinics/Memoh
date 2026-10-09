@@ -63,11 +63,11 @@ func (h *ToolApprovalHandler) Register(e *echo.Echo) {
 // @Param approval_id path string true "Approval ID"
 // @Param payload body ToolApprovalDecisionRequest false "Approval payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/tool-approvals/{approval_id}/approve [post].
 func (h *ToolApprovalHandler) Approve(c echo.Context) error {
 	return h.respond(c, "approve")
@@ -80,11 +80,11 @@ func (h *ToolApprovalHandler) Approve(c echo.Context) error {
 // @Param approval_id path string true "Approval ID"
 // @Param payload body ToolApprovalDecisionRequest false "Rejection payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/tool-approvals/{approval_id}/reject [post].
 func (h *ToolApprovalHandler) Reject(c echo.Context) error {
 	return h.respond(c, "reject")

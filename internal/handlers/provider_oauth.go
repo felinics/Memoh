@@ -34,8 +34,8 @@ func (h *ProviderOAuthHandler) Register(e *echo.Echo) {
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.OAuthAuthorizeResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /providers/{id}/oauth/authorize [get].
 func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
 	providerID := strings.TrimSpace(c.Param("id"))
@@ -58,8 +58,8 @@ func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.OAuthStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /providers/{id}/oauth/poll [post].
 func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
 	providerID := strings.TrimSpace(c.Param("id"))
@@ -82,8 +82,8 @@ func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
 // @Success 200 {object} providers.OAuthStatus
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /providers/{id}/oauth/status [get].
 func (h *ProviderOAuthHandler) Status(c echo.Context) error {
 	providerID := strings.TrimSpace(c.Param("id"))
@@ -106,8 +106,8 @@ func (h *ProviderOAuthHandler) Status(c echo.Context) error {
 // @Tags providers-oauth
 // @Param id path string true "Provider ID (UUID)"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /providers/{id}/oauth/token [delete].
 func (h *ProviderOAuthHandler) Revoke(c echo.Context) error {
 	providerID := strings.TrimSpace(c.Param("id"))
@@ -130,7 +130,7 @@ func (h *ProviderOAuthHandler) Revoke(c echo.Context) error {
 // @Param code query string true "Authorization code"
 // @Param state query string true "State parameter"
 // @Success 200 {string} string "HTML success page"
-// @Failure 400 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
 // @Router /providers/oauth/callback [get].
 func (h *ProviderOAuthHandler) Callback(c echo.Context) error {
 	code := strings.TrimSpace(c.QueryParam("code"))

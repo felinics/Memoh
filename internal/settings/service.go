@@ -422,7 +422,7 @@ func (s *Service) UpsertBot(ctx context.Context, botID string, req UpsertRequest
 		}
 	}
 	current = normalizeChatRuntimeFields(current)
-	if err := validateChatRuntimeSettings(botRow.Metadata, current); err != nil {
+	if err := validateChatRuntimeSettings(botRow.Metadata, current, s.acpSetupResolver(ctx, botID)); err != nil {
 		return Settings{}, err
 	}
 	toolApprovalConfig, err := json.Marshal(current.ToolApprovalConfig)
@@ -945,7 +945,24 @@ func normalizeChatRuntimeFields(current Settings) Settings {
 	return current
 }
 
-func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
+// acpSetupResolver returns the setup a provider-addressed ACP default runs
+// with.
+type acpSetupResolver func(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error)
+
+func legacyACPSetup(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error) {
+	return acpprofile.ParseAgentSetup(botMetadata, agentID), nil
+}
+
+func (s *Service) acpSetupResolver(ctx context.Context, botID string) acpSetupResolver {
+	if s.botAgents == nil {
+		return legacyACPSetup
+	}
+	return func(agentID string, botMetadata map[string]any) (acpprofile.AgentSetup, error) {
+		return s.botAgents.ResolveACPSetup(ctx, botID, "", agentID, botMetadata)
+	}
+}
+
+func validateChatRuntimeSettings(botMetadata []byte, current Settings, resolveSetup acpSetupResolver) error {
 	current = normalizeChatRuntimeFields(current)
 	if strings.TrimSpace(current.DefaultBotAgentID) != "" {
 		// The BotAgent path validates availability and shared provider config
@@ -969,8 +986,10 @@ func validateChatRuntimeSettings(botMetadata []byte, current Settings) error {
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrACPUnknownAgent, agentID)
 	}
-	metadata := normalizeJSONObject(botMetadata)
-	setup := acpprofile.ParseAgentSetup(metadata, agentID)
+	setup, err := resolveSetup(agentID, normalizeJSONObject(botMetadata))
+	if err != nil {
+		return err
+	}
 	if !setup.Enabled {
 		return fmt.Errorf("%w: %q", ErrACPAgentNotEnabled, agentID)
 	}

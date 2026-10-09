@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -27,33 +28,32 @@ func TestErrorReplyTextPrefix(t *testing.T) {
 	}
 }
 
-func TestErrorCodeText(t *testing.T) {
-	zh, ok := ErrorCodeText(i18n.New("zh"), apperror.CodeRuntimeRunFailed, nil)
-	if !ok || zh != "回复未能完成，请重试。" {
-		t.Fatalf("zh copy = %q, %v", zh, ok)
+func TestErrorText(t *testing.T) {
+	if zh := ErrorText(i18n.New("zh"), apperror.New(apperror.CodeRuntimeRunFailed, nil)); zh != "回复未能完成，请重试。" {
+		t.Fatalf("zh copy = %q", zh)
 	}
-	withArgs, ok := ErrorCodeText(i18n.New("en"), apperror.CodeAgentDependencyMissing, map[string]string{"dep_id": "codex"})
-	if !ok || withArgs[:5] != "codex" {
-		t.Fatalf("args copy = %q, %v", withArgs, ok)
+	if withArgs := ErrorText(i18n.New("en"), apperror.New(apperror.CodeAgentDependencyMissing, map[string]string{"dep_id": "codex"})); !strings.HasPrefix(withArgs, "codex") {
+		t.Fatalf("args copy = %q", withArgs)
 	}
-	detail, ok := ErrorCodeText(nil, apperror.CodeAgentProviderOverloaded, nil)
-	if !ok || detail != "The model provider is unavailable or overloaded right now. Please try again in a moment." {
-		t.Fatalf("catalog detail = %q, %v", detail, ok)
-	}
-	if text, ok := ErrorCodeText(i18n.New("en"), "not.in_catalog", nil); ok {
-		t.Fatalf("unknown code copy = %q", text)
+	if detail := ErrorText(nil, apperror.New(apperror.CodeAgentProviderOverloaded, nil)); detail != "The model provider is unavailable or overloaded right now. Please try again in a moment." {
+		t.Fatalf("catalog detail = %q", detail)
 	}
 }
 
-// A code without copy falls back to runtime_run_failed, never the code itself.
-func TestRunFailureEventFallsBackToRunFailed(t *testing.T) {
-	event := RunFailureEvent(i18n.New("en"), "not.in_catalog", nil)
+// A code outside the catalog falls back to runtime_run_failed, never the code
+// itself.
+func TestCodeEventFallsBackToRunFailed(t *testing.T) {
+	event := CodeEvent(i18n.New("en"), "not.in_catalog", nil)
 	if event.Type != StreamEventError || event.ErrorCode != "runtime_run_failed" || event.Error != "The response could not be completed. Please try again." {
 		t.Fatalf("event = %+v", event)
 	}
-	event = RunFailureEvent(i18n.New("en"), "", nil)
+	event = CodeEvent(i18n.New("en"), "", nil)
 	if event.ErrorCode != "runtime_run_failed" {
 		t.Fatalf("empty code event = %+v", event)
+	}
+	event = CodeEvent(i18n.New("en"), apperror.CodeAgentDependencyMissing, map[string]string{"dep_id": "codex"})
+	if event.ErrorCode != string(apperror.CodeAgentDependencyMissing) || !strings.HasPrefix(event.Error, "codex") {
+		t.Fatalf("catalog code event = %+v", event)
 	}
 }
 
@@ -113,8 +113,8 @@ func TestErrorEvent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event := ErrorEvent(i18n.New(tt.locale), tt.err)
-			if event.Type != StreamEventError || event.ErrorCode != tt.wantCode {
+			event, ok := ErrorEvent(context.Background(), i18n.New(tt.locale), tt.err)
+			if !ok || event.Type != StreamEventError || event.ErrorCode != tt.wantCode {
 				t.Fatalf("event = %+v, want code %q", event, tt.wantCode)
 			}
 			matched := event.Error == tt.wantText
@@ -125,5 +125,34 @@ func TestErrorEvent(t *testing.T) {
 				t.Fatalf("text = %q, want %q", event.Error, tt.wantText)
 			}
 		})
+	}
+}
+
+func TestErrorEventIsNotSentToACanceledCaller(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if event, ok := ErrorEvent(ctx, i18n.New("en"), fmt.Errorf("stream: %w", context.Canceled)); ok {
+		t.Fatalf("canceled caller got %+v", event)
+	}
+	if text := ReplyText(ctx, i18n.New("en"), fmt.Errorf("stream: %w", context.Canceled), "fallback"); text != "" {
+		t.Fatalf("canceled caller got reply %q", text)
+	}
+}
+
+func TestReplyText(t *testing.T) {
+	const fallback = "flow fallback"
+	ctx := context.Background()
+	en := i18n.New("en")
+	if got := ReplyText(ctx, en, apperror.New(apperror.CodeACPAgentNotEnabled, nil), fallback); got == fallback || got == "" {
+		t.Fatalf("specific code reply = %q, want its copy", got)
+	}
+	if got := ReplyText(ctx, en, errors.New("synthetic dial refused"), fallback); got != fallback {
+		t.Fatalf("generic reply = %q, want the fallback", got)
+	}
+	if got := ReplyText(ctx, en, status.Error(codes.InvalidArgument, "SECRET"), fallback); got != fallback {
+		t.Fatalf("generic client reply = %q, want the fallback", got)
+	}
+	if got := ReplyText(ctx, en, errors.New("synthetic dial refused"), ""); got != "Something went wrong on the server. Please try again." {
+		t.Fatalf("generic reply without fallback = %q", got)
 	}
 }

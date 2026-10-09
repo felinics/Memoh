@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
@@ -219,7 +220,7 @@ func TestRPCClientReadsTheServerFault(t *testing.T) {
 		t.Fatalf("code = %q", got)
 	}
 	result := errlog.Finish(ctx, "runtime.call", restored, errlog.Options{})
-	if result.Level != slog.LevelWarn || result.Report.Fault != errs.FaultDependency || result.Report.RemoteFault != "dependency" {
+	if result.Level != slog.LevelWarn || result.Report.Fault != apperror.FaultDependency || result.Report.RemoteFault != "dependency" {
 		t.Fatalf("client result = level %v report %+v; want WARN dependency with remote_fault dependency", result.Level, result.Report)
 	}
 }
@@ -357,5 +358,61 @@ func TestRPCCarriesTheCallerRequestID(t *testing.T) {
 	}
 	if record := waitRecord(t, logs); record["request_id"] != nil {
 		t.Fatalf("call without a request id reports %v", record["request_id"])
+	}
+}
+
+// wireFault is the fault the server wrote on a received status.
+func wireFault(t *testing.T, err error) string {
+	t.Helper()
+	for _, detail := range status.Convert(err).Details() {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok {
+			return info.GetMetadata()[rpc.MetadataFault]
+		}
+	}
+	return ""
+}
+
+// Every status the server returns carries the fault its result line
+// attributes, so the client can attribute the failure from it.
+func TestRPCServerWritesTheFaultOnEveryStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler rpcruntime.Handler
+		want    apperror.Fault
+	}{
+		{"status built by the handler", func(context.Context, json.RawMessage) (any, error) {
+			return nil, status.Error(codes.InvalidArgument, "invalid payload")
+		}, apperror.FaultClient},
+		{"internal error", func(context.Context, json.RawMessage) (any, error) {
+			return nil, errors.New("database connection lost")
+		}, apperror.FaultServer},
+		{"dependency failure behind an internal status", func(context.Context, json.RawMessage) (any, error) {
+			return nil, errs.WrapDependency(errors.New("connection refused"), "call workspace")
+		}, apperror.FaultDependency},
+		{"catalog envelope keeps its fault", func(context.Context, json.RawMessage) (any, error) {
+			return nil, apperror.New(apperror.CodeBotNameTaken, nil)
+		}, apperror.FaultClient},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, _ := startResultServer(t, tt.handler)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if got := wireFault(t, callProbe(ctx, conn)); got != string(tt.want) {
+				t.Fatalf("wire fault = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	addr, _ := serveResult(t, func(context.Context, json.RawMessage) (any, error) { return nil, nil })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := rpcruntime.NewClient(dialResult(t, addr, "wrong-shared-value")).Call(ctx, "probe", nil, nil)
+	if got := wireFault(t, rpc.Received(err)); got != string(apperror.FaultClient) {
+		t.Fatalf("auth refusal wire fault = %q, want client", got)
+	}
+	// The server refused this process's secret: a misconfiguration here.
+	if !errors.Is(err, rpcruntime.ErrUnauthenticated) || errs.FaultOf(err) != apperror.FaultServer {
+		t.Fatalf("auth refusal = %v, fault %s; want ErrUnauthenticated, server", err, errs.FaultOf(err))
 	}
 }

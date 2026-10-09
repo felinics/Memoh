@@ -52,8 +52,8 @@ type synthesizeResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param request body synthesizeRequest true "Text to synthesize"
 // @Success 200 {object} synthesizeResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/tts/synthesize [post].
 func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 	botID := strings.TrimSpace(c.Param("bot_id"))
@@ -63,7 +63,7 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 
 	var req synthesizeRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {

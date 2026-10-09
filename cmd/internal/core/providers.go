@@ -448,7 +448,9 @@ func provideMemoryProviderRegistry(log *slog.Logger, llm memprovider.LLM, provid
 
 func provideSessionService(log *slog.Logger, queries dbstore.Queries, hub *event.Hub) *sessionpkg.Service {
 	service := sessionpkg.NewService(log, queries, hub)
-	service.SetACPSetupValidator(acpprofileadapter.NewCatalog())
+	// Foundation-level: the Server's Agent service is not in every graph that
+	// builds sessions, and setup resolution only reads Agent rows.
+	service.SetACPSetupValidator(acpprofileadapter.NewCatalog(botagents.NewService(log, queries)))
 	return service
 }
 
@@ -657,8 +659,9 @@ func provideACPRunner(log *slog.Logger, manager *workspace.Manager) *acpclient.R
 	return acpclient.NewRunner(log, manager)
 }
 
-func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager) *acpagent.SessionPool {
+func provideACPSessionPool(lc fx.Lifecycle, log *slog.Logger, runner *acpclient.Runner, botService *bots.Service, sessionService *sessionpkg.Service, queries dbstore.Queries, toolGateway *mcp.ToolGatewayService, toolContexts *mcp.ToolSessionContextStore, toolApproval *toolapproval.Service, userInput *userinput.Service, containerdHandler *handlers.ContainerdHandler, sessionRuntime *sessionruntime.Manager, botAgents *botagents.Service) *acpagent.SessionPool {
 	pool := acpagent.NewSessionPool(log, runner, botService, agentsessionadapter.NewSource(sessionService))
+	pool.SetAgentSetupResolver(botAgents)
 	pool.SetSessionRuntime(sessionRuntime)
 	pool.SetRuntimeStateStore(agentsessionadapter.NewRuntimeStateStore(queries))
 	pool.SetToolGateway(toolGateway)

@@ -26,6 +26,7 @@ import (
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
 	audiopkg "github.com/felinics/memoh/internal/audio"
+	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/adapters/dingtalk"
@@ -209,6 +210,7 @@ func provideChannelRouter(
 	cmdHandler inbound.CommandHandler,
 	queueHandler inbound.QueueCommandHandler,
 	skillResolver inbound.RequestedSkillResolver,
+	queries dbstore.Queries,
 ) *inbound.ChannelInboundProcessor {
 	adapter, ok := registry.Get(qq.Type)
 	if !ok {
@@ -238,7 +240,10 @@ func provideChannelRouter(
 	processor.SetIMDisplayOptions(&settingsIMDisplayOptions{settings: settingsService})
 	processor.SetDefaultChatRuntime(&settingsDefaultChatRuntime{settings: settingsService})
 	processor.SetACPAgentSetupReader(&botACPAgentSetupReader{bots: botService})
-	processor.SetACPProfileResolver(acpprofileadapter.NewCatalog())
+	// The standalone Channel process has no Server-owned Agent service; setup
+	// resolution only reads Agent rows, so a local instance over the shared
+	// queries is enough.
+	processor.SetACPProfileResolver(acpprofileadapter.NewCatalog(botagents.NewService(log, queries)))
 	processor.SetBotPermissionChecker(&botPermissionCheckerAdapter{bots: botService, accounts: accountService})
 	processor.SetCommandHandler(cmdHandler)
 	processor.SetQueueCommandHandler(queueHandler)
@@ -354,6 +359,7 @@ func startWebhookTunnelListener(lc fx.Lifecycle, log *slog.Logger, cfg config.Co
 // routes other than /health.
 func newWebhookTunnelEcho(log *slog.Logger) *echo.Echo {
 	e := echo.New()
+	e.Binder = &httpx.Binder{}
 	e.HideBanner = true
 	e.HidePort = true
 	// This listener faces the public internet: it receives third-party channel
@@ -364,7 +370,7 @@ func newWebhookTunnelEcho(log *slog.Logger) *echo.Echo {
 	// access log uses the same URI sanitizer: the media paths this listener
 	// serves carry an authorising token in the query string.
 	e.HTTPErrorHandler = server.NewHTTPErrorHandler(log)
-	e.Use(middleware.RequestID())
+	e.Use(httpx.AssignRequestID())
 	e.Use(httpx.RequestIDContext)
 	e.Use(telemetry.EchoServer)
 	e.Use(server.AccessLog(log))

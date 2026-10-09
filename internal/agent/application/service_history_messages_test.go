@@ -22,6 +22,22 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
+func TestDropPreflightFailureTurns(t *testing.T) {
+	user := sdkMessagesToModelMessages([]sdk.Message{sdk.UserMessage("rejected")})[0]
+	assistant := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("")})[0]
+	kept := sdkMessagesToModelMessages([]sdk.Message{sdk.UserMessage("accepted")})[0]
+	records := []historyfrag.HistoryRecord{
+		{ModelMessage: user, Metadata: map[string]any{messagepkg.HistoryFailureOriginMetadataKey: messagepkg.HistoryFailureOriginUserMessageHook}},
+		{ModelMessage: assistant, Metadata: map[string]any{messagepkg.HistoryFailureOriginMetadataKey: messagepkg.HistoryFailureOriginUserMessageHook}},
+		{ModelMessage: kept},
+	}
+
+	got := dropPreflightFailureTurns(records)
+	if len(got) != 1 || got[0].ModelMessage.TextContent() != "accepted" {
+		t.Fatalf("preflight failure records = %#v, want only accepted input", got)
+	}
+}
+
 func TestDropEmptyHistoryFailures(t *testing.T) {
 	empty := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("")})[0]
 	kept := sdkMessagesToModelMessages([]sdk.Message{sdk.AssistantMessage("hello")})[0]

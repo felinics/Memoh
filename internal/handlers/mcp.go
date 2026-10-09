@@ -13,6 +13,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/mcp"
 )
 
@@ -54,10 +55,10 @@ func (h *MCPHandler) Register(e *echo.Echo) {
 // @Description List MCP connections for a bot
 // @Tags mcp
 // @Success 200 {object} mcp.ListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp [get].
 func (h *MCPHandler) List(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -84,10 +85,10 @@ func (h *MCPHandler) List(c echo.Context) error {
 // @Tags mcp
 // @Param payload body mcp.UpsertRequest true "MCP payload"
 // @Success 201 {object} mcp.Connection
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp [post].
 func (h *MCPHandler) Create(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -103,7 +104,7 @@ func (h *MCPHandler) Create(c echo.Context) error {
 	}
 	var req mcp.UpsertRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.Create(c.Request().Context(), botID, req)
 	if err != nil {
@@ -118,10 +119,10 @@ func (h *MCPHandler) Create(c echo.Context) error {
 // @Tags mcp
 // @Param id path string true "MCP ID"
 // @Success 200 {object} mcp.Connection
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp/{id} [get].
 func (h *MCPHandler) Get(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -156,10 +157,10 @@ func (h *MCPHandler) Get(c echo.Context) error {
 // @Param id path string true "MCP ID"
 // @Param payload body mcp.UpsertRequest true "MCP payload"
 // @Success 200 {object} mcp.Connection
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp/{id} [put].
 func (h *MCPHandler) Update(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -179,7 +180,7 @@ func (h *MCPHandler) Update(c echo.Context) error {
 	}
 	var req mcp.UpsertRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.Update(c.Request().Context(), botID, id, req)
 	if err != nil {
@@ -197,10 +198,10 @@ func (h *MCPHandler) Update(c echo.Context) error {
 // @Tags mcp
 // @Param id path string true "MCP ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp/{id} [delete].
 func (h *MCPHandler) Delete(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -224,6 +225,20 @@ func (h *MCPHandler) Delete(c echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+// mcpProbeFailedMessage is the message a failed probe answers and stores. The
+// agent tool stores the same text for its own probes.
+const mcpProbeFailedMessage = "Connection probe failed."
+
+// probeFailureResponse answers a failed probe without the cause's text.
+func probeFailureResponse(err error) ProbeResponse {
+	return ProbeResponse{
+		Status:       "error",
+		Tools:        []mcp.ToolDescriptor{},
+		Error:        mcpProbeFailedMessage,
+		AuthRequired: errors.Is(err, errMCPUnauthorized),
+	}
+}
+
 // ProbeResponse is the response for a probe operation.
 type ProbeResponse struct {
 	Status       string               `json:"status"`
@@ -238,10 +253,10 @@ type ProbeResponse struct {
 // @Tags mcp
 // @Param id path string true "MCP connection ID"
 // @Success 200 {object} ProbeResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp/{id}/probe [post].
 func (h *MCPHandler) Probe(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -287,12 +302,14 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 
 	resp := ProbeResponse{}
 	if probeErr != nil {
-		resp.Status = "error"
-		resp.Error = probeErr.Error()
-		resp.Tools = []mcp.ToolDescriptor{}
-		authRequired := strings.Contains(probeErr.Error(), "401") || strings.Contains(strings.ToLower(probeErr.Error()), "unauthorized")
-		resp.AuthRequired = authRequired
-		_ = h.service.UpdateProbeResult(ctx, botID, id, "error", []mcp.ToolDescriptor{}, probeErr.Error())
+		// The response and the stored status carry a fixed message; this
+		// event is where the cause is kept.
+		result := errlog.Event(ctx, "mcp.probe", probeErr, errlog.Options{})
+		h.logger.LogAttrs(ctx, result.Level, "mcp probe failed", append([]slog.Attr{
+			slog.String("bot_id", botID), slog.String("connection_id", id), slog.String("type", conn.Type),
+		}, result.Attrs()...)...)
+		resp = probeFailureResponse(probeErr)
+		_ = h.service.UpdateProbeResult(ctx, botID, id, "error", []mcp.ToolDescriptor{}, mcpProbeFailedMessage)
 	} else {
 		resp.Status = "connected"
 		if tools == nil {
@@ -310,9 +327,9 @@ func (h *MCPHandler) Probe(c echo.Context) error {
 // @Tags mcp
 // @Param payload body mcp.ImportRequest true "mcpServers dict"
 // @Success 200 {object} mcp.ListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp-ops/import [put].
 func (h *MCPHandler) Import(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -328,7 +345,7 @@ func (h *MCPHandler) Import(c echo.Context) error {
 	}
 	var req mcp.ImportRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	items, err := h.service.Import(c.Request().Context(), botID, req)
 	if err != nil {
@@ -348,9 +365,9 @@ type BatchDeleteRequest struct {
 // @Tags mcp
 // @Param payload body BatchDeleteRequest true "IDs to delete"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp-ops/batch-delete [post].
 func (h *MCPHandler) BatchDelete(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
@@ -366,7 +383,7 @@ func (h *MCPHandler) BatchDelete(c echo.Context) error {
 	}
 	var req BatchDeleteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if len(req.IDs) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "ids are required")
@@ -382,9 +399,9 @@ func (h *MCPHandler) BatchDelete(c echo.Context) error {
 // @Description Export all MCP connections for a bot in standard mcpServers format.
 // @Tags mcp
 // @Success 200 {object} mcp.ExportResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp-ops/export [get].
 func (h *MCPHandler) Export(c echo.Context) error {
 	userID, err := h.requireChannelIdentityID(c)
