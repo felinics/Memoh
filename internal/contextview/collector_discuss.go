@@ -25,6 +25,9 @@ type DiscussContextConfig struct {
 	// InlineImages are freshly surfaced attachments delivered as native vision
 	// input on the latest user message.
 	InlineImages []sdk.ImagePart
+	// SourceImages are freshly surfaced attachments keyed by the external
+	// message they arrived with; each rides on that message.
+	SourceImages map[string][]sdk.ImagePart
 }
 
 type DiscussContextCollector struct{}
@@ -51,7 +54,11 @@ func (*DiscussContextCollector) Collect(_ context.Context, req CollectRequest) (
 		currentUserIndex = latestComposedUserMessageIndex(cfg.ComposedMessages)
 	}
 	for i, message := range cfg.ComposedMessages {
-		frags = append(frags, discussComposedMessageFrag(message, i, i == currentUserIndex, req.Scope))
+		frag := discussComposedMessageFrag(message, i, i == currentUserIndex, req.Scope)
+		if message.Source != nil && message.Source.Kind == "external" {
+			frag = appendDiscussImages(frag, cfg.SourceImages[message.Source.ID])
+		}
+		frags = append(frags, frag)
 	}
 	if req.Intent == contextfrag.IntentRunConfigPreProvider {
 		frags = contextfrag.RepairToolClosureFrags(frags, req.Scope, discussContextCollectorName)
@@ -121,26 +128,31 @@ func discussComposedMessageFrag(message timeline.ContextMessage, index int, curr
 // injectDiscussImages mirrors the legacy inject-into-last-user-message
 // behavior at fragment granularity.
 func injectDiscussImages(frags []contextfrag.ContextFrag, images []sdk.ImagePart) []contextfrag.ContextFrag {
-	extra := make([]sdk.MessagePart, 0, len(images))
-	for _, img := range images {
-		if strings.TrimSpace(img.Image) != "" {
-			extra = append(extra, img)
-		}
-	}
-	if len(extra) == 0 {
-		return frags
-	}
 	for i := len(frags) - 1; i >= 0; i-- {
-		msg := contextfrag.FragMessage(frags[i])
-		if msg == nil || frags[i].Kind != contextfrag.KindCurrentUserMessage {
-			continue
+		if frags[i].Kind == contextfrag.KindCurrentUserMessage && contextfrag.FragMessage(frags[i]) != nil {
+			frags[i] = appendDiscussImages(frags[i], images)
+			return frags
 		}
-		enriched := *msg
-		enriched.Content = append(append([]sdk.MessagePart(nil), msg.Content...), extra...)
-		frags[i] = contextfrag.RebuildFragMessage(frags[i], enriched)
-		return frags
 	}
 	return frags
+}
+
+func appendDiscussImages(frag contextfrag.ContextFrag, images []sdk.ImagePart) contextfrag.ContextFrag {
+	msg := contextfrag.FragMessage(frag)
+	if msg == nil {
+		return frag
+	}
+	enriched := *msg
+	enriched.Content = append([]sdk.MessagePart(nil), msg.Content...)
+	for _, img := range images {
+		if strings.TrimSpace(img.Image) != "" {
+			enriched.Content = append(enriched.Content, img)
+		}
+	}
+	if len(enriched.Content) == len(msg.Content) {
+		return frag
+	}
+	return contextfrag.RebuildFragMessage(frag, enriched)
 }
 
 func discussContextConfig(config any) (DiscussContextConfig, error) {

@@ -48,14 +48,6 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			CompactionArtifactID: message.CompactionArtifactID,
 		})
 	}
-	imageRefs := make([]turn.DiscussImageRef, 0)
-	for _, ref := range extractNewImageRefs(timeline.ActiveRenderedContext(rc, artifacts), after) {
-		imageRefs = append(imageRefs, turn.DiscussImageRef{
-			ContentHash: ref.ContentHash,
-			Mime:        ref.Mime,
-		})
-	}
-
 	return discussTurnPlan{
 		command: turn.StartTurnCommand{
 			SchemaVersion:           1,
@@ -75,7 +67,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			DiscussMessages:         msgs,
 			DiscussCurrentSources:   currentSources,
 			DiscussOmittedSources:   admission.OmittedSources,
-			DiscussImageRefs:        imageRefs,
+			DiscussImageRefs:        extractNewImageRefs(timeline.ActiveRenderedContext(rc, artifacts), after),
 			DiscussAddressed:        addressed,
 			DiscussContextTokens:    admission.EstimatedTokens,
 			DiscussContextOverflow:  admission.ProtectedOverflow,
@@ -88,12 +80,14 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 }
 
 // extractNewImageRefs collects image references from external RC segments
-// that arrived after the last consumed cursor.
-func extractNewImageRefs(rc timeline.RenderedContext, after timeline.DiscussCursorPosition) []timeline.ImageAttachmentRef {
-	var refs []timeline.ImageAttachmentRef
+// that arrived after the last consumed cursor, each naming its message.
+func extractNewImageRefs(rc timeline.RenderedContext, after timeline.DiscussCursorPosition) []turn.DiscussImageRef {
+	refs := make([]turn.DiscussImageRef, 0)
 	for _, segment := range rc {
 		if !after.Covers(segment) && !segment.IsMyself && !segment.IsSelfSent {
-			refs = append(refs, segment.ImageRefs...)
+			for _, ref := range segment.ImageRefs {
+				refs = append(refs, turn.DiscussImageRef{ContentHash: ref.ContentHash, Mime: ref.Mime, MessageID: segment.MessageID})
+			}
 		}
 	}
 	return refs

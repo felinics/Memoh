@@ -10,8 +10,11 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
+
+	sdk "github.com/felinics/twilight/sdk"
 
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/models"
@@ -81,6 +84,10 @@ func imageInputService(t *testing.T, assets map[string][]byte) *Service {
 	}
 }
 
+func inlineImageParts(ctx context.Context, s *Service, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart {
+	return slices.Concat(s.InlineImageAttachments(ctx, botID, refs)...)
+}
+
 // The reported failure: an unusable attachment sitting in pending discussion
 // context made every later turn fail image parsing. It must be skipped without
 // taking the other images of the turn down with it.
@@ -91,7 +98,7 @@ func TestInlineImageAttachmentsRendersAnimationsAndSkipsUnparsableBytes(t *testi
 		"photo":            rasterPNG(t),
 	})
 
-	parts := s.InlineImageAttachments(context.Background(), "bot-1", []timeline.ImageAttachmentRef{
+	parts := inlineImageParts(context.Background(), s, "bot-1", []timeline.ImageAttachmentRef{
 		// WebM has no renderer here, so it stays out of the vision lane.
 		{ContentHash: "video-sticker", Mime: "video/webm"},
 		// TGS is rendered into frames, whatever the stored label claims.
@@ -117,7 +124,7 @@ func TestInlineImageAttachmentsRendersAnimationsAndSkipsUnparsableBytes(t *testi
 // enough to get them into a vision request.
 func TestInlineImageAttachmentsIgnoresMislabeledStickerBytes(t *testing.T) {
 	s := imageInputService(t, map[string][]byte{"legacy": webmSticker()})
-	parts := s.InlineImageAttachments(context.Background(), "bot-1", []timeline.ImageAttachmentRef{
+	parts := inlineImageParts(context.Background(), s, "bot-1", []timeline.ImageAttachmentRef{
 		{ContentHash: "legacy", Mime: "image/png"},
 	})
 	if len(parts) != 0 {
@@ -140,7 +147,7 @@ func TestInlineImageAttachmentsLoadsEachAssetOnce(t *testing.T) {
 		{ContentHash: "photo", Mime: "image/png"},
 		{ContentHash: "photo", Mime: "image/png"},
 	}
-	if parts := s.InlineImageAttachments(context.Background(), "bot-1", refs); len(parts) != 1 {
+	if parts := inlineImageParts(context.Background(), s, "bot-1", refs); len(parts) != 1 {
 		t.Fatalf("InlineImageAttachments() = %d parts, want the repeated reference collapsed", len(parts))
 	}
 	if opens != 1 {
@@ -260,7 +267,7 @@ func TestStoredImageSurvivesShortReads(t *testing.T) {
 			},
 		},
 	}
-	parts := s.InlineImageAttachments(context.Background(), "bot-1", []timeline.ImageAttachmentRef{
+	parts := inlineImageParts(context.Background(), s, "bot-1", []timeline.ImageAttachmentRef{
 		{ContentHash: "photo", Mime: "image/png"},
 	})
 	if len(parts) != 1 || parts[0].MediaType != "image/png" {
@@ -275,7 +282,7 @@ func TestStoredImageSurvivesShortReads(t *testing.T) {
 func TestStoredImageShorterThanSniffWindow(t *testing.T) {
 	jpegBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0xFF, 0xD9}
 	s := imageInputService(t, map[string][]byte{"tiny": jpegBytes})
-	parts := s.InlineImageAttachments(context.Background(), "bot-1", []timeline.ImageAttachmentRef{
+	parts := inlineImageParts(context.Background(), s, "bot-1", []timeline.ImageAttachmentRef{
 		{ContentHash: "tiny", Mime: "image/jpeg"},
 	})
 	if len(parts) != 1 || parts[0].Image != dataURL("image/jpeg", jpegBytes) {
@@ -301,7 +308,7 @@ func TestGatewayInlineDataURLKeepsRealImage(t *testing.T) {
 func TestStoredImageMimeIsCorrectedFromBytes(t *testing.T) {
 	jpegBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0xFF, 0xD9}
 	s := imageInputService(t, map[string][]byte{"mislabeled": jpegBytes})
-	parts := s.InlineImageAttachments(context.Background(), "bot-1", []timeline.ImageAttachmentRef{
+	parts := inlineImageParts(context.Background(), s, "bot-1", []timeline.ImageAttachmentRef{
 		{ContentHash: "mislabeled", Mime: "image/png"},
 	})
 	if len(parts) != 1 || parts[0].MediaType != "image/jpeg" {

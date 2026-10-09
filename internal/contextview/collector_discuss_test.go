@@ -153,6 +153,40 @@ func TestDiscussCollectorProtectsOnlyTheNewestUnconsumedInput(t *testing.T) {
 	}
 }
 
+// Images ride on the message they arrived with, so older input of the batch
+// stays history a budget may trim or compaction may cover, with its images.
+func TestDiscussCollectorAttachesImagesToTheirOwnMessages(t *testing.T) {
+	older := sdk.ImagePart{Image: "data:image/png;base64,b2xkZXI="}
+	newest := sdk.ImagePart{Image: "data:image/png;base64,bmV3ZXN0"}
+	omitted := sdk.ImagePart{Image: "data:image/png;base64,b21pdHRlZA=="}
+	frags := collectDiscussContext(t, DiscussContextConfig{
+		ComposedMessages: []timeline.ContextMessage{
+			{Role: "user", Content: "older", Source: &turn.ContextMessageSource{Kind: "external", ID: "older-id", Current: true}},
+			{Role: "assistant", Content: "reply", Source: &turn.ContextMessageSource{Kind: "history", ID: "older-id"}},
+			{Role: "user", Content: "newest", Source: &turn.ContextMessageSource{Kind: "external", ID: "newest-id", Current: true}},
+		},
+		SourceImages: map[string][]sdk.ImagePart{"older-id": {older}, "newest-id": {newest}, "omitted-id": {omitted}},
+	})
+	images := func(frag contextfrag.ContextFrag) []string {
+		var out []string
+		for _, part := range contextfrag.FragMessage(frag).Content {
+			if image, ok := part.(sdk.ImagePart); ok {
+				out = append(out, image.Image)
+			}
+		}
+		return out
+	}
+	if got := images(frags[0]); len(got) != 1 || got[0] != older.Image || frags[0].Kind != contextfrag.KindConversationEvent {
+		t.Fatalf("older input = %s with images %v, want history carrying its own image", frags[0].Kind, got)
+	}
+	if got := images(frags[1]); len(got) != 0 {
+		t.Fatalf("a history reply sharing the source ID took images %v", got)
+	}
+	if got := images(frags[2]); len(got) != 1 || got[0] != newest.Image || frags[2].Kind != contextfrag.KindCurrentUserMessage {
+		t.Fatalf("current input = %s with images %v, want only its own image", frags[2].Kind, got)
+	}
+}
+
 // A composed discuss message with RawContent carries the stored content shape;
 // the collector types it through the codec instead of decoding SDK JSON.
 func TestDiscussContextMessageToSDKTypesStoredShape(t *testing.T) {

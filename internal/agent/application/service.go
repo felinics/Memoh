@@ -372,17 +372,19 @@ func (s *Service) Pipeline() *timeline.Pipeline {
 
 // InlineImageAttachments resolves image content hashes to sdk.ImagePart values
 // using the configured asset loader. Intended for the discuss driver to inline
-// images from new RC segments before calling the LLM.
-func (s *Service) InlineImageAttachments(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart {
+// images from new RC segments before calling the LLM. The result holds what
+// each reference contributes, in order, under one turn-wide vision budget; a
+// duplicate or unusable reference contributes nothing.
+func (s *Service) InlineImageAttachments(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) [][]sdk.ImagePart {
 	if s == nil || s.assetLoader == nil || len(refs) == 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, attachmentPreparationTimeout)
 	defer cancel()
-	var parts []sdk.ImagePart
+	parts := make([][]sdk.ImagePart, len(refs))
 	var budget visionBudget
 	seen := make(map[string]bool, len(refs))
-	for _, ref := range refs {
+	for i, ref := range refs {
 		contentHash := strings.TrimSpace(ref.ContentHash)
 		if contentHash == "" || seen[contentHash] {
 			continue
@@ -396,7 +398,7 @@ func (s *Service) InlineImageAttachments(ctx context.Context, botID string, refs
 			s.logImageInputRejected(err, botID, contentHash)
 			continue
 		}
-		parts = append(parts, budget.take(framed)...)
+		parts[i] = budget.take(framed)
 	}
 	return parts
 }

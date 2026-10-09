@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,8 +56,10 @@ type backlogFixture struct {
 	t           *testing.T
 	ctx         context.Context
 	pool        *pgxpool.Pool
+	service     *application.Service
 	botID       string
 	sessionID   string
+	chatModel   string
 	rc          timeline.RenderedContext
 	base        time.Time
 	messages    messagepkg.Service
@@ -60,6 +67,7 @@ type backlogFixture struct {
 	cfg         discuss.DiscussSessionConfig
 	cursor      *notifyingRecoveryCursor
 	broadcaster *recordingFailureBroadcaster
+	images      *backlogImageLoader
 	summaries   atomic.Int32
 	modelCalls  atomic.Int32
 	lastRequest atomic.Value
@@ -103,6 +111,7 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 	}))
 	t.Cleanup(server.Close)
 	chatModel, compactModel, providerID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	f.chatModel = chatModel
 	providerConfig, _ := json.Marshal(map[string]string{"base_url": server.URL, "api_key": "test-key"})
 	if _, err := f.pool.Exec(ctx, `INSERT INTO providers(id,name,client_type,config) VALUES($1,$2,'openai-completions',$3)`, providerID, providerID, providerConfig); err != nil {
 		t.Fatal(err)
@@ -129,6 +138,7 @@ func newBacklogFixture(t *testing.T) *backlogFixture {
 	service.SetSessionRuntime(manager)
 	service.SetCompactionService(compaction.NewService(logger, queries))
 	service.SetContextAbsoluteMaxTokens(16000)
+	f.service = service
 	f.cursor = &notifyingRecoveryCursor{EventStore: timeline.NewEventStore(logger, queries), advanced: make(chan timeline.DiscussCursorPosition, 4)}
 	f.broadcaster = &recordingFailureBroadcaster{failures: make(chan string, 16)}
 	f.driver = discuss.NewDiscussDriver(discuss.DiscussDriverDeps{Turn: service, CursorStore: f.cursor, MessageService: f.messages, Artifacts: compaction.NewTimelineArtifactSource(queries), Broadcaster: f.broadcaster, AdmissionMaxTokens: 16000, Logger: logger})
@@ -315,4 +325,175 @@ func TestPostgresDiscussOversizedInputFailsOnceThenNextMessageIsAnswered(t *test
 			t.Logf("size=%d compacted=%v summaries=%d", size, compacted, f.summaries.Load())
 		})
 	}
+}
+
+// backlogImageLoader serves each content hash as a PNG of its own width, so
+// the provider request tells which stored image every image part is.
+type backlogImageLoader struct {
+	mu     sync.Mutex
+	hashes map[string]string
+}
+
+func (l *backlogImageLoader) OpenForGateway(_ context.Context, _, contentHash string) (io.ReadCloser, string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewGray(image.Rect(0, 0, len(l.hashes)+1, 1))); err != nil {
+		return nil, "", err
+	}
+	l.hashes[encoded.String()] = contentHash
+	return io.NopCloser(bytes.NewReader(encoded.Bytes())), "image/png", nil
+}
+
+func (*backlogImageLoader) AccessPathForGateway(context.Context, string, string) (string, error) {
+	return "", io.EOF
+}
+
+func (l *backlogImageLoader) hash(data []byte) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.hashes[string(data)]
+}
+
+// enableVision lets the chat model take images from a loader that tells the
+// stored images apart.
+func (f *backlogFixture) enableVision() {
+	f.t.Helper()
+	if _, err := f.pool.Exec(f.ctx, `UPDATE models SET config = config || '{"compatibilities":["vision"]}'::jsonb WHERE id=$1`, f.chatModel); err != nil {
+		f.t.Fatal(err)
+	}
+	f.images = &backlogImageLoader{hashes: map[string]string{}}
+	f.service.SetGatewayAssetLoader(f.images)
+}
+
+func (f *backlogFixture) appendImageMessage(id, text string, hashes ...string) {
+	f.t.Helper()
+	f.appendMessage(id, text)
+	for _, hash := range hashes {
+		f.rc[len(f.rc)-1].ImageRefs = append(f.rc[len(f.rc)-1].ImageRefs, timeline.ImageAttachmentRef{ContentHash: hash, Mime: "image/png"})
+	}
+}
+
+// requestImages maps each provider message carrying images to the image
+// content hashes it carries, keyed by the message's text.
+func (f *backlogFixture) requestImages(request string) map[string][]string {
+	t := f.t
+	t.Helper()
+	var body struct {
+		Messages []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(request), &body); err != nil {
+		t.Fatal(err)
+	}
+	images := map[string][]string{}
+	for _, message := range body.Messages {
+		var parts []struct {
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			ImageURL struct {
+				URL string `json:"url"`
+			} `json:"image_url"`
+		}
+		if json.Unmarshal(message.Content, &parts) != nil {
+			continue
+		}
+		var text strings.Builder
+		var hashes []string
+		for _, part := range parts {
+			switch part.Type {
+			case "text":
+				text.WriteString(part.Text)
+			case "image_url":
+				_, encoded, _ := strings.Cut(part.ImageURL.URL, ";base64,")
+				decoded, err := base64.StdEncoding.DecodeString(encoded)
+				if err != nil {
+					t.Fatalf("image part %q: %v", part.ImageURL.URL, err)
+				}
+				hashes = append(hashes, f.images.hash(decoded))
+			}
+		}
+		if len(hashes) > 0 {
+			images[text.String()] = hashes
+		}
+	}
+	return images
+}
+
+// assertImagesOnOwnMessages fails unless every image the request carries sits
+// on the message it arrived with.
+func (f *backlogFixture) assertImagesOnOwnMessages(request string, owners map[string]string) int {
+	t := f.t
+	t.Helper()
+	total := 0
+	for text, hashes := range f.requestImages(request) {
+		for _, hash := range hashes {
+			total++
+			if owner, ok := owners[hash]; !ok || !strings.Contains(text, owner) {
+				t.Fatalf("image %s arrived with %q but rides on a message %q", hash, owner, text)
+			}
+		}
+	}
+	return total
+}
+
+func (f *backlogFixture) assertPresentOrOmitted(request, prefix string, count int) {
+	f.t.Helper()
+	omitted := f.omittedInput()
+	for i := range count {
+		id := fmt.Sprintf("%s%d", prefix, i)
+		if !omitted[id] && !strings.Contains(request, id+" ") {
+			f.t.Fatalf("%s vanished from the provider context without a record; omitted=%v", id, omitted)
+		}
+	}
+}
+
+// Images of an unconsumed backlog belong to their own messages: the older
+// ones are history recovery may compact, not protected input riding on the
+// newest message. A backlog whose images exceed the window is answered, and
+// the next message is answered too.
+func TestPostgresDiscussImageBacklogKeepsImagesOnTheirMessages(t *testing.T) {
+	f := newBacklogFixture(t)
+	f.enableVision()
+	owners := map[string]string{}
+	for i := range 6 {
+		id, hash := fmt.Sprintf("image-%d", i), fmt.Sprintf("image-hash-%d", i)
+		owners[hash] = id + " "
+		f.appendImageMessage(id, id+" look at this", hash)
+	}
+	request := f.answer("image backlog", "image-5 ")
+	if f.assertImagesOnOwnMessages(request, owners) == 0 || len(f.requestImages(request)["image-5 look at this"]) != 1 {
+		t.Fatalf("the newest input lost its image: %v", f.requestImages(request))
+	}
+	f.assertPresentOrOmitted(request, "image-", 6)
+	f.appendMessage("next-round", "next-round small message")
+	request = f.answer("next round", "next-round small message")
+	f.assertImagesOnOwnMessages(request, owners)
+	t.Logf("summary_calls=%d provider_calls=%d", f.summaries.Load(), f.modelCalls.Load())
+}
+
+// A newest message whose own images cannot fit fails once without consuming
+// the batch; the next message demotes it to history and is answered without
+// the demoted images riding on it.
+func TestPostgresDiscussOversizedImageInputFailsOnceThenNextMessageIsAnswered(t *testing.T) {
+	f := newBacklogFixture(t)
+	f.enableVision()
+	owners := map[string]string{}
+	hashes := make([]string, 6)
+	for i := range hashes {
+		hashes[i] = fmt.Sprintf("album-hash-%d", i)
+		owners[hashes[i]] = "album "
+	}
+	f.appendImageMessage("album", "album of six", hashes...)
+	if code := f.trigger(); code != "context.budget_unsatisfied" || f.modelCalls.Load() != 0 {
+		t.Fatalf("oversized image input: code=%q provider_calls=%d, want one bounded failure", code, f.modelCalls.Load())
+	}
+	f.appendMessage("next-round", "next-round small message")
+	request := f.answer("next round", "next-round small message")
+	f.assertImagesOnOwnMessages(request, owners)
+	if !strings.Contains(request, "album of six") && !f.omittedInput()["album"] {
+		t.Fatal("the demoted album left the provider context without a record")
+	}
+	t.Logf("summary_calls=%d provider_calls=%d", f.summaries.Load(), f.modelCalls.Load())
 }

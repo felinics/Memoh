@@ -28,7 +28,7 @@ type turnRuntimeHooks struct {
 	streamChat       func(context.Context, ChatRequest) (<-chan StreamChunk, <-chan error)
 	streamAgent      func(context.Context, native.RunConfig) <-chan native.StreamEvent
 	resolveRunConfig func(context.Context, string, string, string, string, string, string, string) (ResolveRunConfigResult, error)
-	inlineImages     func(context.Context, string, []timeline.ImageAttachmentRef) []sdk.ImagePart
+	inlineImages     func(context.Context, string, []timeline.ImageAttachmentRef) [][]sdk.ImagePart
 	storeRound       func(context.Context, string, string, string, string, string, []sdk.Message, string, *contextfrag.LifecycleHolder) error
 }
 
@@ -245,17 +245,15 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 
 	// Inline image attachments from new RC segments so the model receives
 	// them as native vision input (ImagePart) on the first encounter.
-	var imageParts []sdk.ImagePart
+	var currentImages []sdk.ImagePart
+	var sourceImages map[string][]sdk.ImagePart
 	if runConfig.SupportsImageInput && len(cmd.DiscussImageRefs) > 0 {
-		refs := make([]timeline.ImageAttachmentRef, len(cmd.DiscussImageRefs))
-		for i, r := range cmd.DiscussImageRefs {
-			refs[i] = timeline.ImageAttachmentRef{ContentHash: r.ContentHash, Mime: r.Mime}
-		}
-		imageParts = s.inlineDiscussImages(ctx, cmd.BotID, refs)
+		currentImages, sourceImages = s.discussImageParts(ctx, cmd, admitted)
 	}
-	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, imageParts)
+	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, currentImages, sourceImages)
 	for _, frag := range runConfig.ContextSourceFrags {
-		if frag.Kind == contextfrag.KindCurrentUserMessage && frag.Provenance.Collector == "discuss_context" {
+		if frag.Provenance.Collector == "discuss_context" &&
+			(frag.Kind == contextfrag.KindCurrentUserMessage || len(sourceImages[frag.Provenance.SourceID]) > 0) {
 			if message := contextfrag.FragMessage(frag); message != nil {
 				runConfig.Messages[frag.Provenance.Index] = *message
 			}
@@ -446,11 +444,47 @@ func (s *Service) persistDiscussTerminalSnapshot(
 	})
 }
 
+// discussImageParts inlines the batch's new images, each on the admitted
+// message it arrived with; a ref naming no message rides on the current input.
+// A message admission left out takes its images with it, so older input of
+// the batch carries its own images as history instead of growing the
+// protected current input.
+func (s *Service) discussImageParts(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage) ([]sdk.ImagePart, map[string][]sdk.ImagePart) {
+	admittedIDs := make(map[string]bool, len(admitted))
+	for _, message := range admitted {
+		if message.Source != nil && message.Source.Kind == "external" {
+			admittedIDs[message.Source.ID] = true
+		}
+	}
+	var refs []timeline.ImageAttachmentRef
+	var owners []string
+	for _, ref := range cmd.DiscussImageRefs {
+		if ref.MessageID == "" || admittedIDs[ref.MessageID] {
+			refs = append(refs, timeline.ImageAttachmentRef{ContentHash: ref.ContentHash, Mime: ref.Mime})
+			owners = append(owners, ref.MessageID)
+		}
+	}
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	var current []sdk.ImagePart
+	bySource := make(map[string][]sdk.ImagePart)
+	for i, parts := range s.inlineDiscussImages(ctx, cmd.BotID, refs) {
+		if owners[i] == "" {
+			current = append(current, parts...)
+		} else {
+			bySource[owners[i]] = append(bySource[owners[i]], parts...)
+		}
+	}
+	return current, bySource
+}
+
 func (s *Service) collectDiscussSourceFrags(
 	ctx context.Context,
 	runConfig native.RunConfig,
 	messages []turn.DiscussMessage,
 	inlineImages []sdk.ImagePart,
+	sourceImages map[string][]sdk.ImagePart,
 ) []contextfrag.ContextFrag {
 	var systemFrags []contextfrag.ContextFrag
 	var memoryFrags []contextfrag.ContextFrag
@@ -472,6 +506,7 @@ func (s *Service) collectDiscussSourceFrags(
 		contextview.DiscussContextInput{
 			ComposedMessages: discussMessagesToTimeline(messages),
 			InlineImages:     inlineImages,
+			SourceImages:     sourceImages,
 			SystemFrags:      systemFrags,
 		},
 	)
@@ -645,7 +680,7 @@ func (s *Service) resolveDiscussRunConfig(
 	)
 }
 
-func (s *Service) inlineDiscussImages(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) []sdk.ImagePart {
+func (s *Service) inlineDiscussImages(ctx context.Context, botID string, refs []timeline.ImageAttachmentRef) [][]sdk.ImagePart {
 	if s.turnHooks != nil && s.turnHooks.inlineImages != nil {
 		return s.turnHooks.inlineImages(ctx, botID, refs)
 	}

@@ -151,9 +151,12 @@ type DiscussMessage struct {
 }
 
 // DiscussImageRef references an image attachment to inline as vision input.
+// MessageID names the external message it arrived with; a ref without one
+// rides on the current input.
 type DiscussImageRef struct {
 	ContentHash string `json:"content_hash"`
 	Mime        string `json:"mime,omitempty"`
+	MessageID   string `json:"message_id,omitempty"`
 }
 
 // Synthetic discuss event kinds emitted by the runtime before (or instead
