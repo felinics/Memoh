@@ -735,6 +735,16 @@
       "busy": "该应用的另一个操作正在进行中。",
       "operation_failed": "应用操作失败。"
     },
+    "mcp": {
+      "endpoint_invalid": "请填写命令（本地服务器）或 URL（远程服务器），二选一，不能同时填写或都不填。",
+      "name_taken": "已存在同名的 MCP 连接。",
+      "oauth_discovery_failed": "无法从该 MCP 服务器发现 OAuth 配置。请确认 URL 正确且服务器支持 OAuth。",
+      "oauth_not_discovered": "请先对该连接执行 OAuth 发现。",
+      "oauth_client_id_required": "该服务器无法自动注册客户端。请填写你在该服务器上注册的 OAuth 应用的 Client ID。"
+    },
+    "oauth": {
+      "state_invalid": "本次授权已过期或已失效，请重新发起授权。"
+    },
     "agent_authorization": {
       "expired": "授权已过期，请重新连接账号。",
       "not_ready": "请先完成账号连接，再创建 Bot。",

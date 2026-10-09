@@ -220,6 +220,15 @@ const (
 
 	CodeSessionNotFound Code = "session.not_found"
 
+	// MCP connection codes, and the OAuth state code that MCP shares with
+	// provider sign-in.
+	CodeMCPEndpointInvalid       Code = "mcp.endpoint_invalid"
+	CodeMCPNameTaken             Code = "mcp.name_taken"
+	CodeMCPOAuthDiscoveryFailed  Code = "mcp.oauth_discovery_failed"
+	CodeMCPOAuthNotDiscovered    Code = "mcp.oauth_not_discovered"
+	CodeMCPOAuthClientIDRequired Code = "mcp.oauth_client_id_required"
+	CodeOAuthStateInvalid        Code = "oauth.state_invalid"
+
 	// External Agent codes. They keep the values the removed agent feedback
 	// protocol published and history rows still store.
 	CodeACPAgentNotFound            Code = "acp_agent_not_found"
@@ -1033,6 +1042,33 @@ var catalog = map[Code]Definition{
 	CodeRequestFieldRequired:     {HTTPStatus: http.StatusBadRequest, Detail: "A required field is missing.", AllowedArgs: []string{"field"}},
 	CodeRequestFieldInvalid:      {HTTPStatus: http.StatusBadRequest, Detail: "A field has an invalid value.", AllowedArgs: []string{"field"}},
 	CodeSessionNotFound:          {HTTPStatus: http.StatusNotFound, Detail: "The conversation was not found."},
+	CodeMCPEndpointInvalid: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "Specify either a command or a URL for the MCP server, not both and not neither.",
+		AllowedArgs: []string{"server"},
+	},
+	CodeMCPNameTaken: {
+		HTTPStatus:  http.StatusConflict,
+		Detail:      "An MCP connection with this name already exists.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeMCPOAuthDiscoveryFailed: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "OAuth discovery against the MCP server failed.",
+		Fault:      FaultDependency,
+	},
+	CodeMCPOAuthNotDiscovered: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "OAuth has not been discovered for this connection.",
+	},
+	CodeMCPOAuthClientIDRequired: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The authorization server cannot register a client automatically; a client_id is required.",
+	},
+	CodeOAuthStateInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The authorization is unknown or has expired.",
+	},
 	CodeACPAgentNotFound:         {HTTPStatus: http.StatusBadRequest, Detail: "The selected external agent is unavailable."},
 	CodeACPAgentNotEnabled:       {HTTPStatus: http.StatusForbidden, Detail: "The selected external agent is disabled for this bot."},
 	CodeACPAgentNotConfigured:    {HTTPStatus: http.StatusBadRequest, Detail: "External agent setup is incomplete for this bot."},

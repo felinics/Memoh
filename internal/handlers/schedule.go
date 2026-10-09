@@ -5,13 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/schedule"
 	"github.com/felinics/memoh/internal/workdir"
 )
@@ -59,9 +59,9 @@ func (h *ScheduleHandler) Create(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -91,9 +91,9 @@ func (h *ScheduleHandler) List(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -121,13 +121,13 @@ func (h *ScheduleHandler) Get(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
@@ -158,13 +158,13 @@ func (h *ScheduleHandler) Update(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	var req schedule.UpdateRequest
 	if err := c.Bind(&req); err != nil {
@@ -202,13 +202,13 @@ func (h *ScheduleHandler) Delete(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	id := c.Param("id")
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	item, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
@@ -242,9 +242,9 @@ func (h *ScheduleHandler) ListLogs(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -275,16 +275,16 @@ func (h *ScheduleHandler) ListLogsBySchedule(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
-	scheduleID := strings.TrimSpace(c.Param("id"))
-	if scheduleID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "schedule id is required")
+	scheduleID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 
 	limit, offset := parseOffsetLimit(c)
@@ -309,9 +309,9 @@ func (h *ScheduleHandler) DeleteLogs(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -341,10 +341,13 @@ func scheduleServiceError(err error) error {
 	}
 	var invalid schedule.InvalidRequestError
 	if errors.As(err, &invalid) {
-		return echo.NewHTTPError(http.StatusBadRequest, invalid.Error())
+		if invalid.Required() {
+			return apperror.FieldRequired(invalid.Field())
+		}
+		return apperror.FieldInvalid(invalid.Field(), err)
 	}
 	if errors.Is(err, workdir.ErrWorkdirNotFound) || errors.Is(err, workdir.ErrWorkdirArchived) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("workdir_id", err)
 	}
 	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 }

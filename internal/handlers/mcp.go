@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
@@ -111,7 +112,7 @@ func (h *MCPHandler) Create(c echo.Context) error {
 	}
 	resp, err := h.service.Create(c.Request().Context(), botID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return mcpUpsertError(err, "create mcp connection")
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -190,7 +191,10 @@ func (h *MCPHandler) Update(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, db.ErrInvalidUUID) {
+			return apperror.FieldInvalid("id", err)
+		}
+		return mcpUpsertError(err, "update mcp connection")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -352,7 +356,7 @@ func (h *MCPHandler) Import(c echo.Context) error {
 	}
 	items, err := h.service.Import(c.Request().Context(), botID, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return mcpUpsertError(err, "import mcp servers")
 	}
 	return c.JSON(http.StatusOK, mcp.ListResponse{Items: items})
 }
@@ -431,4 +435,25 @@ func (*MCPHandler) requireChannelIdentityID(c echo.Context) (string, error) {
 
 func (h *MCPHandler) authorizeBotAccess(ctx context.Context, channelIdentityID, botID string) (bots.Bot, error) {
 	return AuthorizeBotAccess(ctx, h.botService, h.accountService, channelIdentityID, botID)
+}
+
+// mcpUpsertError answers a failed create, update or import: the request
+// mistakes the service names are the caller's to fix, anything else is this
+// process's failure.
+func mcpUpsertError(err error, op string) error {
+	switch {
+	case errors.Is(err, mcp.ErrNameRequired):
+		return apperror.Wrap(apperror.CodeRequestFieldRequired, err, map[string]string{"field": "name"})
+	case errors.Is(err, mcp.ErrNameTaken):
+		return apperror.Wrap(apperror.CodeMCPNameTaken, err, map[string]string{"field": "name"})
+	case errors.Is(err, mcp.ErrEndpointInvalid):
+		args := map[string]string{}
+		var serverErr *mcp.ServerError
+		if errors.As(err, &serverErr) {
+			args["server"] = serverErr.Name
+		}
+		return apperror.Wrap(apperror.CodeMCPEndpointInvalid, err, args)
+	default:
+		return errs.Wrap(err, op)
+	}
 }
