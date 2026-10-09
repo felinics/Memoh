@@ -398,6 +398,7 @@ func ConvertMessagesToUITurns(messages []messagepkg.Message) []UITurn {
 					Type:    UIMessageError,
 					Code:    errorCode,
 					Content: persistedHistoryErrorDetail(raw.Metadata),
+					Args:    persistedHistoryErrorArgs(raw.Metadata),
 				})
 			}
 
@@ -535,6 +536,25 @@ func persistedHistoryErrorCode(meta map[string]any) string {
 	}
 	code, _ := meta[messagepkg.HistoryErrorCodeMetadataKey].(string)
 	return strings.TrimSpace(code)
+}
+
+// persistedHistoryErrorArgs are the string args stored beside a failure's
+// code. A row written before args were stored has none.
+func persistedHistoryErrorArgs(meta map[string]any) map[string]string {
+	stored, _ := meta[messagepkg.HistoryErrorArgsMetadataKey].(map[string]any)
+	if len(stored) == 0 {
+		return nil
+	}
+	args := make(map[string]string, len(stored))
+	for key, value := range stored {
+		if text, ok := value.(string); ok {
+			args[key] = text
+		}
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	return args
 }
 
 func persistedHistoryErrorDetail(meta map[string]any) string {

@@ -2227,7 +2227,7 @@ async function controlGoal(action: 'pause' | 'clear' | 'resume') {
         onBeforeTurnAppend: releaseRequest,
       })
       pairSend.finish(result.messageSent === true || result.stage === 'stream')
-      if (!result.ok && scope === runtimeModeScope.value) composerError.value = result.error || t('chat.sendFailed')
+      if (!result.ok && scope === runtimeModeScope.value) composerError.value = result.error ?? t('chat.sendFailed')
     } else if (action !== 'resume') {
       await runtimeControls.controlGoal(action)
     }
@@ -3720,7 +3720,7 @@ watch([
   requestedSkills.value = skillSlashEnabled.value
     ? (failure.restoreRequestedSkills ?? []).map(skill => ({ ...skill }))
     : []
-  composerError.value = failure.error || t('chat.sendFailed')
+  composerError.value = failure.error ?? t('chat.sendFailed')
   chatStore.clearStartupSendFailure(failure.id)
 }, { immediate: true })
 
