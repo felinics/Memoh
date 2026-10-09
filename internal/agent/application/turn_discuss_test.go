@@ -374,6 +374,29 @@ func TestDiscussRepeatedImageRidesOnTheNewestInput(t *testing.T) {
 	}
 }
 
+// An old Channel names no message for its images; one that is not delivered
+// is recorded under the current input it would have ridden on.
+func TestDiscussRecordsWithheldLegacyImageUnderTheCurrentInput(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{RunConfig: native.RunConfig{SupportsImageInput: true}, ModelID: "model-1"}}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	a.turnHooks.inlineImages = imageInputService(t, map[string][]byte{"clip": webmSticker()}).InlineImageAttachments
+	cmd := discussCommand()
+	cmd.DiscussMessages = []turn.DiscussMessage{{Role: "user", Content: "look", Source: &turn.ContextMessageSource{Kind: "external", ID: "current", Current: true}}}
+	cmd.DiscussImageRefs = []turn.DiscussImageRef{{ContentHash: "clip", Mime: "video/webm"}}
+
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	if records := agent.lastConfig.ContextMutations.Records(); len(records) != 1 ||
+		records[0].Kind != contextfrag.MutationCurrentInputImagesOmitted || records[0].Detail != "sources=current" {
+		t.Fatalf("mutations = %+v, want the undelivered legacy image recorded under the current input", records)
+	}
+}
+
 func TestDiscussUsesAdmittedRunIDInNativeConfig(t *testing.T) {
 	agent := &fakeAgentStreamer{}
 	resolver := &fakeDiscussService{
