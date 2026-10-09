@@ -1,4 +1,4 @@
-import { nextTick, reactive, ref } from 'vue'
+import { nextTick, reactive, ref, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatSelectionStore } from './chat-selection'
@@ -127,7 +127,13 @@ const chatStoreMock = vi.hoisted(() => ({
   sessionId: null as string | null,
   hasExplicitSessionSelection: false,
   loadingChats: false,
-  sessions: [] as Array<{ id: string, title?: string }>,
+  sessionsState: undefined as unknown as Ref<Array<{ id: string, title?: string }>>,
+  get sessions(): Array<{ id: string, title?: string }> {
+    return this.sessionsState.value
+  },
+  set sessions(sessions: Array<{ id: string, title?: string }>) {
+    this.sessionsState.value = sessions
+  },
   knownSessions: [] as Array<{ id: string, title?: string, type?: string }>,
   createNewSession: vi.fn(async () => {}),
   deletedSession: undefined as unknown as ReturnType<typeof ref<{ id: string, botId: string, seq: number, composerScope?: string } | null>>,
@@ -201,7 +207,9 @@ vi.mock('@/store/chat-list', () => ({
     get hasExplicitSessionSelection() {
       return chatStoreMock.hasExplicitSessionSelection
     },
-    sessions: chatStoreMock.sessions,
+    get sessions() {
+      return chatStoreMock.sessions
+    },
     knownSessions: chatStoreMock.knownSessions,
     get loadingChats() {
       return chatStoreMock.loadingChats
@@ -673,7 +681,7 @@ describe('workspace layout store', () => {
     chatStoreMock.forkedSessionRequested = ref(null)
     chatStoreMock.userSentInSession = ref(null)
     chatStoreMock.guiToolUseRequested = ref(null)
-    chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
+    chatStoreMock.sessionsState = ref([])
     chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
     chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
       chatStoreMock.knownSessions.find(session => session.id === sessionId)
@@ -1575,6 +1583,51 @@ describe('workspace layout store', () => {
     expect(chatPanels).toHaveLength(1)
     expect(chatPanels[0]!.id).toBe(firstId)
     expect(chatPanels[0]!.params.sessionId).toBe('s2')
+  })
+
+  describe.each(['browser', 'terminal', 'file'] as const)('background activity with an active %s panel', (surface) => {
+    async function openSessionAndSurface() {
+      chatStoreMock.sessions = [{ id: 's1', title: 'Session 1' }]
+      const store = useWorkspaceTabsStore()
+      const dock = createFakeDock()
+      store.registerApi(dock as never)
+      store.openSessionChatPinned({ sessionId: 's1', title: 'Session 1' })
+      await nextTick()
+      if (surface === 'browser') store.openBrowserAt('localhost:5173/')
+      else if (surface === 'terminal') store.openTerminal()
+      else store.openFilePinned('/data/dashboard.ts')
+      await nextTick()
+      chatStoreMock.selectSession.mockClear()
+      return { store, dock, surfacePanel: dock.activePanel! }
+    }
+
+    it('preserves the active panel when the session list is replaced without changing its length', async () => {
+      const { dock, surfacePanel } = await openSessionAndSurface()
+
+      chatStoreMock.sessions = chatStoreMock.sessions.map(session => ({ ...session, title: 'Updated session' }))
+      chatStoreMock.knownSessions.push({ id: 's1', title: 'Updated session' })
+      await nextTick()
+
+      expect(dock.activePanel?.id).toBe(surfacePanel.id)
+      expect(chatStoreMock.selectSession).not.toHaveBeenCalled()
+      expect(dock.panels.find(panel => panel.params.sessionId === 's1')?.title).toBe('Updated session')
+      expect(useChatSelectionStore().sessionId).toBe('s1')
+    })
+
+    it('preserves the active panel when background activity adds a session', async () => {
+      const { store, dock, surfacePanel } = await openSessionAndSurface()
+
+      chatStoreMock.sessions = [...chatStoreMock.sessions, { id: 'background-session', title: 'Background session' }]
+      await nextTick()
+
+      expect(dock.activePanel?.id).toBe(surfacePanel.id)
+      expect(chatStoreMock.selectSession).not.toHaveBeenCalled()
+      expect(useChatSelectionStore().sessionId).toBe('s1')
+
+      // Explicit navigation still activates the conversation after a passive refresh.
+      store.openSessionChat({ sessionId: 's1' })
+      expect(dock.activePanel?.params.sessionId).toBe('s1')
+    })
   })
 
   it('reuses an ephemeral chat tab even when its session is off the current page', () => {
