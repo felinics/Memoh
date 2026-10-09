@@ -650,7 +650,7 @@ func TestSessionPoolCloseBotAgentRuntimesDoesNotWaitForActivePrompt(t *testing.T
 
 	done := make(chan error, 1)
 	go func() {
-		done <- pool.CloseBotAgentRuntimes("bot-1", acpprofile.AgentACPID)
+		done <- pool.CloseBotAgentRuntimes("bot-1", "")
 	}()
 
 	select {

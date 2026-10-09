@@ -631,23 +631,23 @@ func TestValidateChatRuntimeSettings(t *testing.T) {
 		ChatACPProjectPath: DefaultACPProjectPath,
 		ChatACPProjectMode: DefaultACPProjectMode,
 	}
-	if err := validateChatRuntimeSettings(metadata, valid); err != nil {
+	if err := validateChatRuntimeSettings(metadata, valid, legacyACPSetup); err != nil {
 		t.Fatalf("validateChatRuntimeSettings(valid) error = %v", err)
 	}
 
 	noModel := valid
 	noModel.ChatModelID = ""
-	if err := validateChatRuntimeSettings(metadata, noModel); err != nil {
+	if err := validateChatRuntimeSettings(metadata, noModel, legacyACPSetup); err != nil {
 		t.Fatalf("validateChatRuntimeSettings without chat model error = %v, want nil", err)
 	}
 
 	disabled := valid
-	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":false}}}}`), disabled); !errors.Is(err, ErrACPAgentNotEnabled) {
+	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":false}}}}`), disabled, legacyACPSetup); !errors.Is(err, ErrACPAgentNotEnabled) {
 		t.Fatalf("validateChatRuntimeSettings disabled agent error = %v, want ErrACPAgentNotEnabled", err)
 	}
 
 	missingKey := valid
-	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":true,"setup_mode":"api_key","managed":{}}}}}`), missingKey); !errors.Is(err, ErrACPAgentNotConfigured) {
+	if err := validateChatRuntimeSettings([]byte(`{"acp":{"agents":{"acp":{"enabled":true,"setup_mode":"api_key","managed":{}}}}}`), missingKey, legacyACPSetup); !errors.Is(err, ErrACPAgentNotConfigured) {
 		t.Fatalf("validateChatRuntimeSettings missing api key error = %v, want ErrACPAgentNotConfigured", err)
 	}
 }

@@ -533,7 +533,8 @@
       "steer_unsupported": "現在の実行にはメッセージを追加できません。終了してから新しいメッセージを送信してください。"
     },
     "bot": {
-      "name_taken": "この名前はすでに使用されています。"
+      "name_taken": "この名前はすでに使用されています。",
+      "name_invalid": "名前は小文字、数字、ハイフンの 2〜63 文字で、先頭は英字または数字にしてください。一部の名前は予約されています。"
     },
     "bot_agent": {
       "not_found": "この Agent は存在しません。",
@@ -545,7 +546,10 @@
     },
     "channel": {
       "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。",
-      "verification_failed": "プラットフォーム設定を検証できませんでした。認証情報を確認して、もう一度お試しください。"
+      "verification_failed": "プラットフォーム設定を検証できませんでした。認証情報を確認して、もう一度お試しください。",
+      "enable_failed": "チャンネルを有効にできませんでした。認証情報を確認して再試行してください。",
+      "webhook_endpoint_invalid": "ポート、認証情報、クエリ、フラグメントを含まない公開 HTTPS URL を指定してください。パスはこのチャンネルに表示される webhook パスにしてください。",
+      "binding_required": "受信者はまだこのチャンネルを連携していません。"
     },
     "compaction": {
       "model_unavailable": "圧縮Modelを利用できません。有効でコンテキストウィンドウが宣言されたチャットModelを選択してください。"
@@ -568,7 +572,8 @@
       "provider_permission_denied": "モデルプロバイダーがこのモデルまたはリソースへのアクセスを拒否しました。プロバイダーのアカウントがこのモデルを利用できるか確認してください。",
       "provider_request_rejected": "モデルプロバイダーがリクエストを拒否しました。モデル設定を確認するか、別のモデルをお試しください。",
       "provider_unreachable": "Memoh からモデルプロバイダーに接続できませんでした。プロバイダーのアドレスとサービスが稼働中か確認してください。",
-      "tool_timeout": "ツールの進捗が途絶えました。保存済みの結果を確認してから再試行してください。"
+      "tool_timeout": "ツールの進捗が途絶えました。保存済みの結果を確認してから再試行してください。",
+      "chat_model_not_configured": "チャットモデルが選択されていません。Bot 設定 →「一般的な」でデフォルトのチャットモデルを設定してから、もう一度お試しください。"
     },
     "queue_request_invalid": "既存の会話で /steer または /queue の後に内容を入力してください。",
     "queue_no_active_run": "現在の応答は終了しています。内容を新しいメッセージとして送信してください。",
@@ -622,7 +627,9 @@
     "skill": {
       "builtin_read_only": "Memoh 組み込みの Skill はシステムによって管理されているため、編集または削除できません。",
       "name_taken": "同じ名前の Skill がすでに存在します。別の名前を使用してください。",
-      "save_failed": "Skill を保存できませんでした。もう一度お試しください。"
+      "save_failed": "Skill を保存できませんでした。もう一度お試しください。",
+      "registry_read_only": "この Skill は Registry App に属します。App を更新またはアンインストールしてください。",
+      "name_invalid": "Skill の YAML frontmatter に有効な名前が必要です。"
     },
     "registry": {
       "unavailable": "Supermarket に接続できません。しばらくしてからもう一度お試しください。",
@@ -633,7 +640,8 @@
     "workspace": {
       "unreachable": "Workspace に接続できません。しばらくしてからもう一度お試しください。",
       "template_bootstrap_failed": "Workspace ファイルを初期化できませんでした。Workspace を再構築してからもう一度お試しください。",
-      "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。"
+      "display_prepare_failed": "ディスプレイの準備に失敗しました。しばらくしてからもう一度お試しください。",
+      "archive_invalid": "アーカイブを展開できません。有効な .zip、.tar.gz、.tgz ファイルを使用してください。"
     },
     "workspace_dependency": {
       "not_found": "この依存関係は存在しません。",
@@ -708,6 +716,9 @@
     "history": {
       "delete_failed": "会話履歴を削除できませんでした。もう一度お試しください。"
     },
+    "hook": {
+      "user_message_failed": "メッセージ Hook で受け付けられませんでした。Hook の設定を確認して、もう一度お試しください。"
+    },
     "context_lifecycle": {
       "request_invalid": "コンテキストライフサイクルのリクエストが無効です。内容を確認してもう一度お試しください。",
       "authentication_required": "コンテキストライフサイクルの診断情報を表示するにはサインインしてください。",
@@ -716,16 +727,31 @@
       "load_failed": "コンテキストライフサイクルの診断情報を読み込めませんでした。しばらくしてからもう一度お試しください。"
     },
     "external_runtime": {
-      "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
+      "auth_required": "Codex のアカウントが未接続か、ログインの有効期限が切れています。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。",
       "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。",
-      "usage_limited": "外部 Agent の利用上限に達しました。しばらくしてからもう一度お試しください。"
+      "usage_limited": "外部 Agent のアカウントの利用枠を使い切りました。上限がリセットされてからもう一度お試しいただくか、アカウントのプランと請求情報をご確認ください。",
+      "rate_limited": "外部 Agent がモデルサービスのレート制限に達しました。しばらく待ってからもう一度送信してください。",
+      "context_window_exceeded": "この会話はモデルのコンテキストウィンドウを超えました。コンテキストを圧縮するか、新しい会話を開始してください。",
+      "overloaded": "外部 Agent のモデルサービスが一時的に利用できないか、過負荷になっています。しばらくしてからもう一度お試しいただくか、別のモデルに切り替えてください。",
+      "upstream_unreachable": "外部 Agent がモデルサービスに接続できないか、接続が途中で切断されました。ネットワークと Agent のサービスアドレスを確認して、もう一度お試しください。",
+      "request_blocked": "このリクエストはモデルサービスの安全ポリシーによりブロックされました。内容を変更してもう一度送信してください。"
     },
     "app": {
       "not_found": "このアプリのインストールは見つかりませんでした。",
       "request_invalid": "アプリのリクエストが無効です。",
       "busy": "このアプリの別の操作が進行中です。",
       "operation_failed": "アプリの操作に失敗しました。"
+    },
+    "mcp": {
+      "endpoint_invalid": "コマンド（ローカルサーバー）または URL（リモートサーバー）のどちらか一方を入力してください。",
+      "name_taken": "同じ名前の MCP 接続がすでに存在します。",
+      "oauth_discovery_failed": "この MCP サーバーから OAuth 設定を検出できませんでした。URL が正しいこと、サーバーが OAuth に対応していることを確認してください。",
+      "oauth_not_discovered": "先にこの接続の OAuth 検出を実行してください。",
+      "oauth_client_id_required": "このサーバーではクライアントの自動登録を利用できません。登録済み OAuth アプリのクライアント ID を入力してください。"
+    },
+    "oauth": {
+      "state_invalid": "この認可は期限切れか無効になっています。もう一度認可を開始してください。"
     },
     "agent_authorization": {
       "expired": "認証の有効期限が切れました。アカウントを再接続してください。",
@@ -734,11 +760,15 @@
       "failed": "アカウント認証に失敗しました。もう一度お試しください。",
       "code_invalid": "認証コードが無効か期限切れです。Claude の完全なコードをコピーするか、再接続してください。"
     },
+    "chat": {
+      "message_empty": "メッセージを入力するか、ファイルを添付してください。"
+    },
     "workdir": {
       "git_busy": "Agent がこの作業ディレクトリを使用中です。実行が終わってからブランチを切り替えてください。",
       "git_branch_unavailable": "このローカルブランチは利用できません。更新して既存のブランチを選択してください。",
       "git_switch_failed": "Git ブランチを切り替えられませんでした。未コミットの変更や、別の Worktree で使用中のブランチでないか確認してください。",
-      "git_unavailable": "Git 作業ディレクトリを読み取れません。ワークスペースを確認して再試行してください。"
+      "git_unavailable": "Git 作業ディレクトリを読み取れません。ワークスペースを確認して再試行してください。",
+      "remote_unsupported_for_agent": "外部エージェントのセッションではリモートコンピューターを使えません。ネイティブワークスペースの作業ディレクトリを選んでください。"
     },
     "runtime_control": {
       "goal_requires_default_mode": "目標を作成・再開するには、先にプランモードを終了してください。",
@@ -775,6 +805,10 @@
       "bad_gateway": "上流サービスから無効な応答が返されました。もう一度お試しください。",
       "service_unavailable": "サービスは一時的に利用できません。しばらくしてからもう一度お試しください。",
       "gateway_timeout": "上流サービスが時間内に応答しませんでした。もう一度お試しください。"
+    },
+    "request": {
+      "field_required": "{field} は必須です。",
+      "field_invalid": "{field} の値が無効です。"
     },
     "agent_dependency_missing": "{dep_id} はこの Workspace にインストールされていません。Bot の「依存関係」からインストールするか、実行中のインストールの完了を待ってから、メッセージを再送してください。",
     "runtime_run_failed": "応答を完了できませんでした。もう一度お試しください。",
@@ -837,7 +871,23 @@
     "invalid_chat_runtime": "選択されたチャットruntimeが無効です。",
     "queue_invocation_conflict": "このメッセージは別の内容ですでに送信されています。",
     "queue_unsupported_session": "ディスカッションセッションではキュー操作を利用できません。",
-    "queue_follow_up_unsupported_channel": "このチャンネルではキュー投入を利用できません。返信は送信したメッセージに対してのみ届きます。/steer で現在の返信に追加するか、Web アプリからキューに追加してください。"
+    "queue_follow_up_unsupported_channel": "このチャンネルではキュー投入を利用できません。返信は送信したメッセージに対してのみ届きます。/steer で現在の返信に追加するか、Web アプリからキューに追加してください。",
+    "network": {
+      "provider_not_configured": "先にこの Bot のネットワークプロバイダーを選択してください。"
+    },
+    "user": {
+      "cannot_remove_self": "自分自身は削除できません。他の管理者に依頼してください。"
+    },
+    "tts": {
+      "text_too_long": "テキストが長すぎます。上限は{max}文字です。",
+      "model_not_configured": "この Bot には音声合成モデルが設定されていません。Bot 設定で選択してください。"
+    },
+    "bot_backup": {
+      "bundle_invalid": "バックアップファイルが破損しているか、非対応のバージョンです。"
+    },
+    "fetch_provider": {
+      "native_managed": "組み込みの取得プロバイダーは Memoh が管理しており、この方法では変更できません。"
+    }
   },
   "runtime": {
     "claudeCode": {

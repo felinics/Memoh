@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/workdir"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -75,10 +76,10 @@ func (h *WorkdirHandler) Register(e *echo.Echo) {
 // @Param bot_id path string true "Bot ID"
 // @Param request body workdir.CreateRequest true "Workdir"
 // @Success 201 {object} workdir.Workdir
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
 // @Router /bots/{bot_id}/workdirs [post].
 func (h *WorkdirHandler) Create(c echo.Context) error {
 	botID, identityID, err := h.requirePermission(c, bots.PermissionManage)
@@ -87,7 +88,7 @@ func (h *WorkdirHandler) Create(c echo.Context) error {
 	}
 	var req workdir.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	created, err := h.service.Create(c.Request().Context(), botID, identityID, req)
 	if err != nil {
@@ -105,11 +106,11 @@ func (h *WorkdirHandler) Create(c echo.Context) error {
 // @Param workspace_target_id query string false "Workspace target ID; defaults to the native workspace"
 // @Param path query string false "Absolute directory path on that target"
 // @Success 200 {object} workdir.DirectoriesResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/workdirs/directories [get].
 func (h *WorkdirHandler) Directories(c echo.Context) error {
 	// Browsing serves workdir creation only, so it carries the same permission:
@@ -152,8 +153,8 @@ func workdirDirectoriesHTTPError(err error) error {
 // @Param bot_id path string true "Bot ID"
 // @Param include_archived query bool false "Include archived workdirs"
 // @Success 200 {object} workdir.WorkdirsResponse
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/workdirs [get].
 func (h *WorkdirHandler) List(c echo.Context) error {
 	botID, _, err := h.requirePermission(c, bots.PermissionWorkspaceRead)
@@ -178,22 +179,22 @@ func (h *WorkdirHandler) List(c echo.Context) error {
 // @Param workdir_id path string true "Workdir ID"
 // @Param request body workdir.UpdateRequest true "New name"
 // @Success 200 {object} workdir.Workdir
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workdirs/{workdir_id} [patch].
 func (h *WorkdirHandler) Rename(c echo.Context) error {
 	botID, _, err := h.requirePermission(c, bots.PermissionManage)
 	if err != nil {
 		return err
 	}
-	workdirID := strings.TrimSpace(c.Param("workdir_id"))
-	if workdirID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "workdir_id is required")
+	workdirID, err := httpx.RequiredParam(c, "workdir_id")
+	if err != nil {
+		return err
 	}
 	var req workdir.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	renamed, err := h.service.Rename(c.Request().Context(), botID, workdirID, req.Name)
 	if err != nil {
@@ -209,17 +210,17 @@ func (h *WorkdirHandler) Rename(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param workdir_id path string true "Workdir ID"
 // @Success 204 "No Content"
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /bots/{bot_id}/workdirs/{workdir_id} [delete].
 func (h *WorkdirHandler) Archive(c echo.Context) error {
 	botID, _, err := h.requirePermission(c, bots.PermissionManage)
 	if err != nil {
 		return err
 	}
-	workdirID := strings.TrimSpace(c.Param("workdir_id"))
-	if workdirID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "workdir_id is required")
+	workdirID, err := httpx.RequiredParam(c, "workdir_id")
+	if err != nil {
+		return err
 	}
 	if err := h.service.Archive(c.Request().Context(), botID, workdirID); err != nil {
 		return workdirHTTPError(err)
@@ -235,9 +236,9 @@ func (h *WorkdirHandler) requirePermission(c echo.Context, permission string) (s
 	if err != nil {
 		return "", "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", "", err
 	}
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.bots, h.accounts, identityID, botID, permission)
 	if err != nil {
@@ -248,12 +249,14 @@ func (h *WorkdirHandler) requirePermission(c echo.Context, permission string) (s
 
 func workdirHTTPError(err error) error {
 	switch {
-	case errors.Is(err, workdir.ErrNameRequired),
-		errors.Is(err, workdir.ErrPathRequired),
-		errors.Is(err, workdir.ErrInvalidPath),
+	case errors.Is(err, workdir.ErrNameRequired):
+		return apperror.FieldRequired("name")
+	case errors.Is(err, workdir.ErrPathRequired):
+		return apperror.FieldRequired("path")
+	case errors.Is(err, workdir.ErrInvalidPath),
 		errors.Is(err, workdir.ErrPathNotFound),
 		errors.Is(err, workdir.ErrPathNotDirectory):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("path", err)
 	case errors.Is(err, workdir.ErrWorkdirNotFound),
 		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):
@@ -279,9 +282,9 @@ func workdirHTTPError(err error) error {
 // @Param bot_id path string true "Bot ID"
 // @Param workdir_id path string true "Workdir ID"
 // @Success 200 {object} workdir.GitBranchResponse
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/workdirs/{workdir_id}/git-branch [get].
 func (h *WorkdirHandler) GitBranch(c echo.Context) error {
 	botID, _, err := h.requirePermission(c, bots.PermissionWorkspaceRead)
@@ -304,10 +307,10 @@ func (h *WorkdirHandler) GitBranch(c echo.Context) error {
 // @Param workdir_id path string true "Workdir ID"
 // @Param request body workdir.SwitchGitBranchRequest true "Local branch"
 // @Success 200 {object} workdir.GitBranchResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/workdirs/{workdir_id}/git-branch [post].
 func (h *WorkdirHandler) SwitchGitBranch(c echo.Context) error {
 	botID, _, err := h.requirePermission(c, bots.PermissionWorkspaceExec)

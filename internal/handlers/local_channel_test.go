@@ -36,6 +36,7 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/server"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
 	"github.com/felinics/memoh/internal/storage"
@@ -188,7 +189,7 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 		{
 			name: "uncoded stream error",
 			send: func(w *wsWriter) {
-				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Error: "provider said " + secret})
+				sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Error: "provider said " + secret})
 			},
 			wantCode:    "runtime_run_failed",
 			wantMessage: runFailedDetail,
@@ -196,7 +197,7 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 		{
 			name: "uncatalogued stream code",
 			send: func(w *wsWriter) {
-				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Error: "provider said " + secret})
+				sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Error: "provider said " + secret})
 			},
 			wantCode:    "not.in_catalog",
 			wantMessage: runFailedDetail,
@@ -204,14 +205,16 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 		{
 			name: "catalogued stream code",
 			send: func(w *wsWriter) {
-				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: " agent.provider_overloaded ", Error: "provider said " + secret})
+				sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Code: " agent.provider_overloaded ", Error: "provider said " + secret})
 			},
 			wantCode:    "agent.provider_overloaded",
 			wantMessage: "The model provider is unavailable or overloaded right now. Please try again in a moment.",
 		},
 		{
-			name:        "blank stream error",
-			send:        func(w *wsWriter) { sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Error: "  "}) },
+			name: "blank stream error",
+			send: func(w *wsWriter) {
+				sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Error: "  "})
+			},
 			wantCode:    "runtime_run_failed",
 			wantMessage: runFailedDetail,
 		},
@@ -230,7 +233,7 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 func TestSendWSAgentErrorCarriesCatalogArgs(t *testing.T) {
 	ref := wsTurn("invocation-1", "session-1").withRun("run-1")
 	event := decodeWSTestEvent(t, func(w *wsWriter) {
-		sendWSAgentError(w, ref, native.StreamEvent{
+		sendWSAgentError(context.Background(), w, ref, native.StreamEvent{
 			Type: native.EventError, Code: string(apperror.CodeAgentDependencyMissing),
 			Args: map[string]string{"dep_id": "python", "secret": "token"},
 		})
@@ -240,24 +243,19 @@ func TestSendWSAgentErrorCarriesCatalogArgs(t *testing.T) {
 		t.Fatalf("event = %#v, want dep_id as its only arg", event)
 	}
 	uncatalogued := decodeWSTestEvent(t, func(w *wsWriter) {
-		sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Args: map[string]string{"dep_id": "python"}})
+		sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Args: map[string]string{"dep_id": "python"}})
 	})
 	if _, ok := uncatalogued["args"]; ok {
 		t.Fatalf("uncatalogued event = %#v, want no args", uncatalogued)
 	}
 }
 
-func TestNewWSAppErrorEventUsesPublicCatalogOnly(t *testing.T) {
+func TestWSErrorEventUsesPublicCatalogOnly(t *testing.T) {
 	t.Parallel()
 
-	event, ok := newWSAppErrorEvent(
-		wsTurnRef{RunID: "run-1", SessionID: "session-1"},
-		apperror.Wrap(apperror.CodeACPConfigUpdateFailed, errors.New("SECRET transport path"), nil),
-	)
-	if !ok {
-		t.Fatal("newWSAppErrorEvent() did not recognize application error")
-	}
-	if event.Code != string(apperror.CodeACPConfigUpdateFailed) || event.Message != "The external agent could not apply the selected settings. Please retry." {
+	frame, _ := server.NewStreamError(context.Background(), apperror.Wrap(apperror.CodeACPConfigUpdateFailed, errors.New("SECRET transport path"), nil), "")
+	event := wsErrorEvent(wsTurnRef{RunID: "run-1", SessionID: "session-1"}, frame)
+	if event.Code != string(apperror.CodeACPConfigUpdateFailed) || event.Message != "The external agent could not apply the selected settings. Please retry." || event.Fault != apperror.FaultDependency {
 		t.Fatalf("event = %#v", event)
 	}
 	data, err := json.Marshal(event)
@@ -1211,18 +1209,21 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 		message    map[string]any
 		wantCode   string
 		wantDetail string
+		wantField  string
 	}{
 		{
 			name:       "message with a legacy stream id and no invocation",
 			message:    map[string]any{"type": "message", "stream_id": "legacy-stream", "session_id": sessionID, "text": "hello"},
-			wantCode:   "http.bad_request",
-			wantDetail: "The request is invalid.",
+			wantCode:   "request.field_required",
+			wantDetail: "A required field is missing.",
+			wantField:  "invocation_id",
 		},
 		{
 			name:       "abort naming a stream instead of a run",
 			message:    map[string]any{"type": "abort", "stream_id": "legacy-stream", "session_id": sessionID},
-			wantCode:   "http.bad_request",
-			wantDetail: "The request is invalid.",
+			wantCode:   "request.field_required",
+			wantDetail: "A required field is missing.",
+			wantField:  "run_id",
 		},
 	} {
 		if err := client.WriteJSON(tc.message); err != nil {
@@ -1234,6 +1235,9 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 		}
 		if event["type"] != "error" || event["code"] != tc.wantCode || event["message"] != tc.wantDetail {
 			t.Fatalf("%s: event = %#v, want code %q detail %q", tc.name, event, tc.wantCode, tc.wantDetail)
+		}
+		if args, _ := event["args"].(map[string]any); args["field"] != tc.wantField {
+			t.Fatalf("%s: event = %#v, want field %q", tc.name, event, tc.wantField)
 		}
 		data, _ := json.Marshal(event)
 		literal := map[string]string{
@@ -1259,8 +1263,8 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 	if err := client.ReadJSON(&unknownEvent); err != nil {
 		t.Fatalf("unknown message: read ws event: %v", err)
 	}
-	if unknownEvent["type"] != "error" || unknownEvent["code"] != "http.bad_request" || unknownEvent["message"] != "The request is invalid." {
-		t.Fatalf("unknown event = %#v, want http.bad_request with catalog detail", unknownEvent)
+	if unknownEvent["type"] != "error" || unknownEvent["code"] != "request.field_invalid" || unknownEvent["message"] != "A field has an invalid value." {
+		t.Fatalf("unknown event = %#v, want request.field_invalid", unknownEvent)
 	}
 	encoded, _ := json.Marshal(unknownEvent)
 	if strings.Contains(string(encoded), "unknown message type: client_invented_type") {
@@ -1269,8 +1273,7 @@ func TestLocalChannelWSRejectsClientSuppliedStreamID(t *testing.T) {
 	waitFor(t, "unknown-message ws request record", func() bool {
 		logsText := logs.String()
 		return strings.Contains(logsText, `"operation":"ws.unknown_message"`) &&
-			!strings.Contains(logsText, `"operation":"ws.client_invented_type"`) &&
-			strings.Contains(logsText, `unknown message type: client_invented_type`)
+			!strings.Contains(logsText, `"operation":"ws.client_invented_type"`)
 	})
 }
 
@@ -1905,9 +1908,9 @@ func TestWebQueueCommandErrorsUsePublicCatalog(t *testing.T) {
 			event := decodeWSTestEvent(t, func(w *wsWriter) {
 				h.executeWSQueueCommand(context.Background(), w, wsClientMessage{SessionID: tc.session, InvocationID: "invocation"}, "user", "bot", action, tc.text)
 			})
-			public, _ := apperror.PublicFrom(apperror.New(tc.code, nil), "")
+			definition, _ := apperror.Lookup(tc.code)
 			_, nested := event["error"]
-			if event["type"] != "command_error" || event["terminal"] != true || event["code"] != string(tc.code) || event["message"] != public.Detail || nested {
+			if event["type"] != "command_error" || event["terminal"] != true || event["code"] != string(tc.code) || event["message"] != definition.Detail || event["fault"] == nil || nested {
 				t.Fatalf("unexpected queue error envelope: %#v", event)
 			}
 		}

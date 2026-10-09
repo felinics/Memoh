@@ -196,13 +196,13 @@ func assertConnectorProblem(t *testing.T, rec *httptest.ResponseRecorder, record
 	if !ok {
 		t.Fatalf("%s is not in the catalog", code)
 	}
-	var problem apperror.Problem
+	var problem server.Problem
 	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("response is not a Problem: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec.Code != definition.HTTPStatus || rec.Header().Get(echo.HeaderContentType) != "application/problem+json" ||
 		problem.Code != string(code) || problem.Status != definition.HTTPStatus || problem.Detail != definition.Detail ||
-		problem.Fault != fault || len(problem.Args) != 0 {
+		string(problem.Fault) != fault || len(problem.Args) != 0 {
 		t.Fatalf("response = %d %s, want %s %d fault %s", rec.Code, rec.Body.String(), code, definition.HTTPStatus, fault)
 	}
 	if record["level"] != level || record["reason"] != string(code) || record["fault"] != fault ||

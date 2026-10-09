@@ -12,6 +12,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/connectors"
+	"github.com/felinics/memoh/internal/server"
 )
 
 func TestConnectorHTTPErrorUsesStablePublicContract(t *testing.T) {
@@ -113,7 +114,7 @@ func TestConnectorHTTPErrorUsesStablePublicContract(t *testing.T) {
 				t.Fatalf("CauseOf() = %v, causeKept = %v", got, tt.causeKept)
 			}
 
-			problem, ok := apperror.ProblemFrom(err, "req-connectors")
+			problem, ok := server.ProblemFrom(err, "req-connectors")
 			if !ok {
 				t.Fatal("ProblemFrom() did not recognize connector error")
 			}

@@ -8,6 +8,8 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/searchproviders"
 )
 
@@ -51,26 +53,26 @@ func (h *SearchProvidersHandler) ListMeta(c echo.Context) error {
 // @Produce json
 // @Param request body searchproviders.CreateRequest true "Search provider configuration"
 // @Success 201 {object} searchproviders.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /search-providers [post].
 func (h *SearchProvidersHandler) Create(c echo.Context) error {
 	var req searchproviders.CreateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+		return apperror.FieldRequired("name")
 	}
 	if strings.TrimSpace(string(req.Provider)) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "provider is required")
+		return apperror.FieldRequired("provider")
 	}
 	resp, err := h.service.Create(c.Request().Context(), req)
 	if err != nil {
 		if translated := searchProviderError(err); apperror.CodeOf(translated) != "" {
 			return translated
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "create search provider")
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -83,12 +85,12 @@ func (h *SearchProvidersHandler) Create(c echo.Context) error {
 // @Produce json
 // @Param provider query string false "Provider filter (brave)"
 // @Success 200 {array} searchproviders.GetResponse
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /search-providers [get].
 func (h *SearchProvidersHandler) List(c echo.Context) error {
 	items, err := h.service.List(c.Request().Context(), c.QueryParam("provider"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list search providers")
 	}
 	return c.JSON(http.StatusOK, items)
 }
@@ -101,13 +103,13 @@ func (h *SearchProvidersHandler) List(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 200 {object} searchproviders.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /search-providers/{id} [get].
 func (h *SearchProvidersHandler) Get(c echo.Context) error {
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	resp, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
@@ -125,24 +127,24 @@ func (h *SearchProvidersHandler) Get(c echo.Context) error {
 // @Param id path string true "Provider ID"
 // @Param request body searchproviders.UpdateRequest true "Updated configuration"
 // @Success 200 {object} searchproviders.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /search-providers/{id} [put].
 func (h *SearchProvidersHandler) Update(c echo.Context) error {
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	var req searchproviders.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.Update(c.Request().Context(), id, req)
 	if err != nil {
 		if translated := searchProviderError(err); apperror.CodeOf(translated) != "" {
 			return translated
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update search provider")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -155,16 +157,16 @@ func (h *SearchProvidersHandler) Update(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Provider ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /search-providers/{id} [delete].
 func (h *SearchProvidersHandler) Delete(c echo.Context) error {
-	id := strings.TrimSpace(c.Param("id"))
-	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	id, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete search provider")
 	}
 	return c.NoContent(http.StatusNoContent)
 }

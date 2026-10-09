@@ -59,7 +59,7 @@ func (h *RuntimeConnectHandler) Connect(c echo.Context) error {
 	}
 	info, err := userruntime.ParseHandshakeMetadata(c.Request().Header.Get(userruntime.RuntimeMetadataHeader))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(err)
 	}
 	if !offersSubprotocol(c.Request(), runtimeProtocolGRPC) {
 		c.Response().Header().Set("Sec-WebSocket-Protocol", runtimeProtocolGRPC)

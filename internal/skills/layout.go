@@ -2,10 +2,9 @@ package skills
 
 import (
 	"errors"
+	"fmt"
 	"path"
 	"strings"
-
-	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -22,11 +21,11 @@ func SkillDirForIDs(namespaceID, appID, skillID string) (string, error) {
 	appID = strings.TrimSpace(appID)
 	skillID = strings.TrimSpace(skillID)
 	if !validSkillPathIDs(namespaceID, appID, skillID) {
-		return "", bridge.ErrBadRequest
+		return "", ErrInvalidSkillRequest
 	}
 	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID, appID, skillID))
 	if !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
-		return "", bridge.ErrBadRequest
+		return "", ErrInvalidSkillRequest
 	}
 	return dirPath, nil
 }
@@ -36,11 +35,11 @@ func AppDirForIDs(namespaceID, appID string) (string, error) {
 	namespaceID = strings.TrimSpace(namespaceID)
 	appID = strings.TrimSpace(appID)
 	if !validAppIDs(namespaceID, appID) {
-		return "", bridge.ErrBadRequest
+		return "", ErrInvalidSkillRequest
 	}
 	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID, appID))
 	if !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
-		return "", bridge.ErrBadRequest
+		return "", ErrInvalidSkillRequest
 	}
 	return dirPath, nil
 }
@@ -65,11 +64,11 @@ func RegistrySkillDirIDs(skillDir string) (registryID, appID, skillID string, ok
 func skillNamespaceDirForID(namespaceID string) (string, error) {
 	namespaceID = strings.TrimSpace(namespaceID)
 	if namespaceID != UserSkillNamespace && !IsValidRegistryID(namespaceID) {
-		return "", bridge.ErrBadRequest
+		return "", ErrInvalidSkillRequest
 	}
 	dirPath := path.Clean(path.Join(ManagedDirPath, namespaceID))
 	if dirPath == ManagedDirPath || !strings.HasPrefix(dirPath, ManagedDirPath+"/") {
-		return "", bridge.ErrBadRequest
+		return "", ErrInvalidSkillRequest
 	}
 	return dirPath, nil
 }
@@ -91,11 +90,11 @@ type UpsertPlan struct {
 func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
 	parsed := ParseFile(raw, "")
 	if !IsValidName(parsed.Name) {
-		return UpsertPlan{}, bridge.ErrBadRequest
+		return UpsertPlan{}, ErrInvalidSkillName
 	}
 	userDir, err := userSkillDirForName(parsed.Name)
 	if err != nil {
-		return UpsertPlan{}, err
+		return UpsertPlan{}, fmt.Errorf("%w: %w", ErrInvalidSkillName, err)
 	}
 	userWrite := path.Join(userDir, "SKILL.md")
 
@@ -105,7 +104,7 @@ func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
 	}
 	sourcePath = path.Clean(sourcePath)
 	if path.Base(sourcePath) != "SKILL.md" || !path.IsAbs(sourcePath) {
-		return UpsertPlan{}, bridge.ErrBadRequest
+		return UpsertPlan{}, ErrInvalidSkillRequest
 	}
 	if oldName, ok := UserSkillName(sourcePath); ok {
 		plan := UpsertPlan{WritePath: userWrite}
@@ -132,7 +131,7 @@ func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
 func DeletableSkillDirForSourcePath(sourcePath string) (string, error) {
 	sourcePath = path.Clean(strings.TrimSpace(sourcePath))
 	if !path.IsAbs(sourcePath) || path.Base(sourcePath) != "SKILL.md" {
-		return "", bridge.ErrBadRequest
+		return "", ErrInvalidSkillRequest
 	}
 	if _, ok := UserSkillName(sourcePath); ok {
 		return path.Dir(sourcePath), nil
@@ -143,7 +142,7 @@ func DeletableSkillDirForSourcePath(sourcePath string) (string, error) {
 	if _, _, _, ok := RegistrySkillIDs(sourcePath); ok {
 		return "", ErrRegistrySkillReadOnly
 	}
-	return "", bridge.ErrBadRequest
+	return "", ErrInvalidSkillRequest
 }
 
 // PrunableSkillNamespaceDirs returns empty app and namespace directories
@@ -231,4 +230,12 @@ func validSkillPathIDs(namespaceID, appID, skillID string) bool {
 var (
 	ErrBuiltinSkillReadOnly  = errors.New("built-in skills are read-only")
 	ErrRegistrySkillReadOnly = errors.New("registry skills are read-only")
+	// ErrInvalidSkillRequest reports a Skill name, path, identity or action
+	// that the Skill layout does not accept.
+	ErrInvalidSkillRequest = errors.New("invalid skill request")
+	// ErrInvalidSkillName reports that the Skill content has no usable name.
+	ErrInvalidSkillName = errors.New("invalid skill name")
+	// ErrSkillNotFound reports that the Skill an action names is not among
+	// the discovered Skills.
+	ErrSkillNotFound = errors.New("skill not found")
 )

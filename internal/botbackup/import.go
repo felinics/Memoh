@@ -78,7 +78,12 @@ func decodeBundle(raw []byte, passphrase string) (plaintext []byte, encrypted bo
 	}
 	var out bytes.Buffer
 	if err := secure.Decrypt(&out, bytes.NewReader(raw), passphrase); err != nil {
-		return nil, true, err
+		if errors.Is(err, secure.ErrAuth) {
+			return nil, true, err
+		}
+		// The source is the in-memory upload, so any other failure is a
+		// damaged or foreign stream.
+		return nil, true, invalidBundle(err)
 	}
 	return out.Bytes(), true, nil
 }
@@ -446,9 +451,6 @@ func readTarGzNames(raw []byte, limit int) ([]string, int) {
 func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, opts ImportOptions, passphrase string) (ImportResult, error) {
 	plain, _, decErr := decodeBundle(raw, passphrase)
 	if decErr != nil {
-		if errors.Is(decErr, secure.ErrPassphraseRequired) {
-			return ImportResult{}, errors.New("this backup is encrypted; a passphrase is required")
-		}
 		return ImportResult{}, fmt.Errorf("decrypt backup: %w", decErr)
 	}
 	entries, manifest, err := loadManifest(plain)
@@ -456,7 +458,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 		return ImportResult{}, err
 	}
 	if manifest.SchemaVersion != BackupSchemaVersion {
-		return ImportResult{}, fmt.Errorf("unsupported backup schema version: %d", manifest.SchemaVersion)
+		return ImportResult{}, invalidBundle(fmt.Errorf("unsupported backup schema version: %d", manifest.SchemaVersion))
 	}
 	state := &importState{
 		entries:    entries,
@@ -482,7 +484,7 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 	}
 	cfg, err := decodeBackupSettings(settingsRaw)
 	if err != nil {
-		return ImportResult{}, fmt.Errorf("read bot/settings.json: %w", err)
+		return ImportResult{}, invalidBundle(fmt.Errorf("read bot/settings.json: %w", err))
 	}
 	cfg = resolveLegacyMemoryProvider(state, cfg)
 	// Dependencies (providers/models/...) are global, idempotent resources; they
@@ -801,7 +803,7 @@ func (s *Service) restoreBot(ctx context.Context, actorUserID string, profile bo
 	if mode == ImportModeOverwrite {
 		target := strings.TrimSpace(opts.TargetBotID)
 		if target == "" {
-			return "", false, errors.New("target_bot_id is required for overwrite import")
+			return "", false, ErrTargetBotRequired
 		}
 		// Only overwrite the target's identity (name/avatar/timezone) when the
 		// profile section is explicitly selected; otherwise keep it intact.
@@ -1989,15 +1991,15 @@ func (s *Service) ensureFetchProvider(ctx context.Context, item fetchpkg.GetResp
 func loadManifest(raw []byte) (map[string]backupZipEntry, Manifest, error) {
 	entries, err := readZipEntries(raw)
 	if err != nil {
-		return nil, Manifest{}, err
+		return nil, Manifest{}, invalidBundle(err)
 	}
 	manifestEntry, ok := entries[ManifestPath]
 	if !ok {
-		return nil, Manifest{}, errors.New("manifest.json not found")
+		return nil, Manifest{}, invalidBundle(errors.New("manifest.json not found"))
 	}
 	var manifest Manifest
 	if err := unmarshalJSON(manifestEntry.data, &manifest); err != nil {
-		return nil, Manifest{}, err
+		return nil, Manifest{}, invalidBundle(fmt.Errorf("read %s: %w", ManifestPath, err))
 	}
 	return entries, manifest, nil
 }
@@ -2013,7 +2015,7 @@ func readEntry[T any](state *importState, path string) (T, error) {
 	}
 	var out T
 	if err := unmarshalJSON(raw, &out); err != nil {
-		return zero, fmt.Errorf("read %s: %w", path, err)
+		return zero, invalidBundle(fmt.Errorf("read %s: %w", path, err))
 	}
 	return out, nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
@@ -169,10 +169,7 @@ func TestListSessionsRejectsUnknownType(t *testing.T) {
 	handler := newListSessionHandler(t, queries)
 
 	_, err := callListSessions(handler, botID, "types=chat,bogus")
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("ListSessions() error = %v, want HTTP 400", err)
-	}
+	requireFieldError(t, err, apperror.CodeRequestFieldInvalid, "types")
 	if queries.pagedCallCount != 0 {
 		t.Fatalf("query should not run when types validation fails")
 	}
@@ -324,10 +321,7 @@ func TestListSessionsRejectsMalformedCursor(t *testing.T) {
 	handler := newListSessionHandler(t, queries)
 
 	_, err := callListSessions(handler, botID, "cursor=not%20base64%21")
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("ListSessions() error = %v, want HTTP 400", err)
-	}
+	requireFieldError(t, err, apperror.CodeRequestFieldInvalid, "cursor")
 }
 
 // TestListSessionsRejectsCursorWithBadUUID guards against a cursor whose
@@ -341,10 +335,7 @@ func TestListSessionsRejectsCursorWithBadUUID(t *testing.T) {
 
 	cursor := base64.RawURLEncoding.EncodeToString([]byte("2026-06-19T00:00:00Z|not-a-uuid"))
 	_, err := callListSessions(handler, botID, "cursor="+url.QueryEscape(cursor))
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("ListSessions() error = %v, want HTTP 400", err)
-	}
+	requireFieldError(t, err, apperror.CodeRequestFieldInvalid, "cursor")
 }
 
 // TestListSessionsCursorNotTruncatedByPermissionFilter pins down that

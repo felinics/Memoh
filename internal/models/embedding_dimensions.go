@@ -12,10 +12,6 @@ import (
 	"github.com/felinics/memoh/internal/db"
 )
 
-// ErrValidation marks model writes rejected because of the submitted payload,
-// so handlers can answer 400 instead of treating user input as a server fault.
-var ErrValidation = errors.New("validation failed")
-
 // embeddingDimensionsProbeTimeout bounds the extra embedding call a save may
 // trigger. It is shorter than the model test probe because the user is waiting
 // on a form submit, and a slow provider still leaves the manual field as a way
@@ -61,14 +57,15 @@ func (s *Service) fillEmbeddingDimensions(ctx context.Context, model *Model) err
 	}
 	provider, err := s.queries.GetProviderByID(ctx, providerID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: provider not found: %w", ErrValidation, err)
+		return fieldInvalid("provider_id", err)
 	}
 	if err != nil {
 		return fmt.Errorf("get provider: %w", err)
 	}
 	creds, err := s.resolveModelCredentials(ctx, provider)
 	if err != nil {
-		return fmt.Errorf("%w: could not detect embedding dimensions automatically, enter them manually: %w", ErrValidation, err)
+		// The caller can still enter the dimensions manually.
+		return &FieldError{Field: "config.dimensions", Required: true, Err: err}
 	}
 
 	probeCtx, cancel := context.WithTimeout(ctx, embeddingDimensionsProbeTimeout)
@@ -76,7 +73,8 @@ func (s *Service) fillEmbeddingDimensions(ctx context.Context, model *Model) err
 	baseURL := strings.TrimRight(providerConfigString(provider.Config, "base_url"), "/")
 	dim, err := InferEmbeddingDimensions(probeCtx, provider.ClientType, baseURL, creds.APIKey, model.ModelID, embeddingDimensionsProbeTimeout, nil)
 	if err != nil {
-		return fmt.Errorf("%w: could not detect embedding dimensions automatically, enter them manually: %w", ErrValidation, err)
+		// The caller can still enter the dimensions manually.
+		return &FieldError{Field: "config.dimensions", Required: true, Err: err}
 	}
 	model.Config.Dimensions = &dim
 	return nil

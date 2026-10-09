@@ -46,7 +46,7 @@ func (p *discussEventProjector) BroadcastFailure(botID string, code apperror.Cod
 	broadcaster := p.broadcaster
 	p.mu.RUnlock()
 	if broadcaster != nil {
-		broadcaster.PublishEvent(botID, channel.RunFailureEvent(i18n.New(""), code, args))
+		broadcaster.PublishEvent(botID, channel.CodeEvent(i18n.New(""), code, args))
 	}
 }
 
@@ -120,11 +120,7 @@ func agentEventToChannelEvent(event agentevent.StreamEvent) (channel.StreamEvent
 	case agentevent.Error:
 		// A catalogued code gets the channel copy. Without one the event is a
 		// failed run, shown with that copy; its own text is never shown.
-		code := apperror.Code(strings.TrimSpace(event.Code))
-		if text, ok := channel.ErrorCodeText(i18n.New(""), code, nil); ok {
-			return channel.StreamEvent{Type: channel.StreamEventError, Error: text, ErrorCode: string(code)}, true
-		}
-		return channel.RunFailureEvent(i18n.New(""), apperror.CodeRuntimeRunFailed, nil), true
+		return channel.CodeEvent(i18n.New(""), apperror.Code(event.Code), nil), true
 	default:
 		return channel.StreamEvent{}, false
 	}

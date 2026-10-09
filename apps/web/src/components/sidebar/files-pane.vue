@@ -184,7 +184,7 @@
           v-model="newFileName"
           :placeholder="t('bots.files.fileNamePlaceholder')"
           :disabled="newFileLoading"
-          @keydown.enter.prevent="handleNewFile"
+          @keydown.enter.exact.prevent="handleNewFile"
         />
         <DialogFooter>
           <Button
@@ -214,7 +214,7 @@
           v-model="mkdirName"
           :placeholder="t('bots.files.folderNamePlaceholder')"
           :disabled="mkdirLoading"
-          @keydown.enter.prevent="handleMkdir"
+          @keydown.enter.exact.prevent="handleMkdir"
         />
         <DialogFooter>
           <Button
@@ -244,7 +244,7 @@
           v-model="renameNewName"
           :placeholder="t('bots.files.newNamePlaceholder')"
           :disabled="renameLoading"
-          @keydown.enter.prevent="handleRename"
+          @keydown.enter.exact.prevent="handleRename"
         />
         <DialogFooter>
           <Button

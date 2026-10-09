@@ -10,9 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 )
@@ -47,16 +44,16 @@ func startErrorOverTransport(t *testing.T, startErr error) error {
 	return err
 }
 
-// A plain error reaches the channel as codes.Internal with a fixed text. A
-// catalog apperror crosses with its code; in both cases the raw cause text
-// stays on the server.
+// A plain error reaches the channel as the generic internal code, the answer
+// errs.Answer gives it. A catalog apperror crosses with its code; in both
+// cases the raw cause text stays on the server.
 func TestTransportEncodesPlainAndCatalogErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		err      error
 		wantCode apperror.Code
 	}{
-		{"plain", errors.New("SECRET provider exploded"), ""},
+		{"plain", errors.New("SECRET provider exploded"), apperror.CodeInternal},
 		{"coded", apperror.Wrap(apperror.CodeAgentProviderOverloaded, errors.New("SECRET 503"), nil), apperror.CodeAgentProviderOverloaded},
 	} {
 		for path, deliver := range map[string]func(*testing.T, error) error{
@@ -70,13 +67,6 @@ func TestTransportEncodesPlainAndCatalogErrors(t *testing.T) {
 				}
 				if code := apperror.CodeOf(got); code != tc.wantCode {
 					t.Fatalf("apperror code over transport = %q, want %q", code, tc.wantCode)
-				}
-				if tc.wantCode != "" {
-					return
-				}
-				st, ok := status.FromError(got)
-				if !ok || st.Code() != codes.Internal || st.Message() != "internal turn operation failed" {
-					t.Fatalf("error = %v, want Internal \"internal turn operation failed\"", got)
 				}
 			})
 		}

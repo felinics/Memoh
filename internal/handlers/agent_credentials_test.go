@@ -5,10 +5,10 @@ import (
 	"testing"
 
 	"github.com/felinics/memoh/internal/agent/runtime/external"
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/server"
 )
 
 // Disconnecting a credential purges it from the runtime first, and answers a
@@ -28,7 +28,7 @@ func TestAgentCredentialHandlerDeleteAnswersPurgeFailures(t *testing.T) {
 			ctx, _ := botAgentsRequest(t, http.MethodDelete, "/bots/"+botAgentsTestBotID+"/agents/"+botAgentsTestCodexID+"/credential", "")
 			ctx.SetParamNames("bot_id", "id")
 			ctx.SetParamValues(botAgentsTestBotID, botAgentsTestCodexID)
-			problem, ok := apperror.ProblemFrom(handler.Delete(ctx), "")
+			problem, ok := server.ProblemFrom(handler.Delete(ctx), "")
 			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
 				t.Fatalf("Delete() problem = %+v, want %d %s", problem, tc.status, tc.code)
 			}

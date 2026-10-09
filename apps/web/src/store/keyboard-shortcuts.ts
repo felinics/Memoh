@@ -2,9 +2,14 @@ import { computed } from 'vue'
 import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
 import {
+  detectPlatform,
   keyboardBindings,
+  resolveKeyboardBinding,
+  RESERVED_APP_MENU_COMBOS,
   RESERVED_BROWSER_COMBOS,
+  TEXT_EDITING_COMBOS,
   type KeyboardBinding,
+  type KeyboardScope,
 } from '@/lib/keyboard-bindings'
 import {
   comboFromBinding,
@@ -15,55 +20,119 @@ import {
 } from '@/lib/keyboard-combo'
 import type { AppKeyboardCommand } from '@/lib/keyboard-commands'
 
-export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'invalid' | 'no-modifier'
+export type ConflictKind = 'none' | 'same-scope' | 'cross-scope' | 'reserved' | 'editing' | 'invalid' | 'no-modifier' | 'typing'
 
 export interface ConflictResult {
   kind: ConflictKind
   collidesWith?: AppKeyboardCommand
 }
 
+
 function isReservedCombo(combo: ParsedKeyCombo): boolean {
   return combo.mod && !combo.alt && !combo.shift && RESERVED_BROWSER_COMBOS.has(combo.key.toLowerCase())
 }
 
-function applyOverride(binding: KeyboardBinding, override: string | undefined): KeyboardBinding {
-  if (!override) return binding
-  const parsed = parseKeyCombo(override)
-  if (!parsed) return binding
-  return {
-    ...binding,
-    key: parsed.key,
-    mod: parsed.mod || undefined,
-    alt: parsed.alt || undefined,
-    shift: parsed.shift || undefined,
-    mac: undefined,
-    win: undefined,
-    linux: undefined,
-    // A user override is never on a reserved combo (set/setBinding blocks it),
-    // so we can claim browser intercept; without this the default's passthrough
-    // would silently leak through and the dispatcher would not preventDefault.
-    browser: isReservedCombo(parsed) ? binding.browser : 'intercept',
-  }
+function canRunTogether(a: KeyboardScope, b: KeyboardScope): boolean {
+  return a === b || (a !== 'mediaLightbox' && b !== 'mediaLightbox')
+}
+
+interface AppliedBinding {
+  binding: KeyboardBinding
+  overridden: boolean
+  ignored?: ConflictResult
+  shadowedBy?: AppKeyboardCommand
 }
 
 export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () => {
+  const platform = detectPlatform()
+  const appMenuCombos = RESERVED_APP_MENU_COMBOS[platform].map(combo => parseKeyCombo(combo)!)
+  const textEditingCombos = TEXT_EDITING_COMBOS[platform].map(combo => parseKeyCombo(combo)!)
   const overrides = useStorage<Record<string, string>>('keyboard-shortcuts-overrides', {}, undefined, {
     mergeDefaults: true,
   })
 
-  const effectiveBindings = computed<KeyboardBinding[]>(() => {
-    const merged = keyboardBindings.map(binding => applyOverride(binding, overrides.value[binding.command]))
-    // Non-global (scoped) bindings come first so the dispatcher's first-handled-
-    // wins iterator gives them a chance to claim their keys before any global
-    // binding that happens to share a combo. A scoped command's handler is only
-    // registered while its owning component is mounted, so when the scope is
-    // inactive the matcher falls through to the global. Stable sort preserves
-    // intra-scope order from the source table.
-    return [...merged].sort((a, b) => {
-      if (a.scope === b.scope) return 0
-      return a.scope === 'global' ? 1 : -1
+  // Rules a combo must pass no matter how it was saved, so an override stored
+  // before a rule existed cannot take over copy, paste or a menu shortcut.
+  function unsafeCombo(scope: KeyboardScope, combo: ParsedKeyCombo): ConflictKind | null {
+    if (isReservedCombo(combo) || appMenuCombos.some(reserved => keyCombosEqual(reserved, combo))) return 'reserved'
+    if (textEditingCombos.some(editing => keyCombosEqual(editing, combo))) return 'editing'
+    // macOS Option without Command types a character (or starts a dead key).
+    if (platform === 'mac' && combo.alt && !combo.mod && (combo.key.length === 1 || combo.key === 'Dead')) return 'typing'
+    // The window-level listener also runs while text inputs have focus, so a
+    // bare key would fire on every keystroke. Lightbox bindings are only active
+    // while the overlay is open, so a bare arrow key is fine there.
+    if (scope !== 'mediaLightbox' && !combo.mod && !combo.alt) return 'no-modifier'
+    return null
+  }
+
+  function applyOverride(binding: KeyboardBinding, override: string | undefined): AppliedBinding {
+    if (!override) return { binding, overridden: false }
+    const parsed = parseKeyCombo(override)
+    if (!parsed) return { binding, overridden: false, ignored: { kind: 'invalid' } }
+    if (keyCombosEqual(parsed, comboFromBinding(binding))) return { binding, overridden: true }
+    const unsafe = unsafeCombo(binding.scope, parsed)
+    if (unsafe) return { binding, overridden: false, ignored: { kind: unsafe } }
+    return {
+      overridden: true,
+      binding: {
+        ...binding,
+        key: parsed.key,
+        mod: parsed.mod || undefined,
+        alt: parsed.alt || undefined,
+        shift: parsed.shift || undefined,
+        // The default's passthrough would let the new combo leak to the browser.
+        browser: 'intercept',
+      },
+    }
+  }
+
+  // A saved override keeps working when a later default takes its combo: the
+  // default is switched off instead. Two overrides on one combo keep the first.
+  const applied = computed(() => {
+    const defaults = keyboardBindings.map(binding => resolveKeyboardBinding(binding, platform))
+    const results = defaults.map(binding => applyOverride(binding, overrides.value[binding.command]))
+    const collides = (a: KeyboardBinding, b: KeyboardBinding) => a.command !== b.command
+      && canRunTogether(a.scope, b.scope)
+      && keyCombosEqual(comboFromBinding(a), comboFromBinding(b))
+    results.forEach((entry, index) => {
+      if (!entry.overridden) return
+      const earlier = results.slice(0, index).find(other => other.overridden && collides(entry.binding, other.binding))
+      if (earlier) results[index] = { binding: defaults[index]!, overridden: false, ignored: { kind: 'same-scope', collidesWith: earlier.binding.command } }
     })
+    for (const entry of results) {
+      if (!entry.overridden) entry.shadowedBy = results.find(other => other.overridden && collides(entry.binding, other.binding))?.binding.command
+    }
+    return results
   })
+
+  // Lightbox bindings come first so a combo shared with the workspace resolves
+  // to the open lightbox; selectActiveKeyboardBindings drops them while no
+  // lightbox is open. Saved overrides precede defaults, then narrower scopes.
+  const ordered = computed(() => [...applied.value].sort((a, b) => {
+    const rank = (entry: AppliedBinding) => [
+      entry.binding.scope === 'mediaLightbox' ? 0 : 1,
+      entry.overridden ? 0 : 1,
+      entry.binding.scope === 'global' ? 1 : 0,
+    ]
+    const [x, y] = [rank(a), rank(b)]
+    return x[0]! - y[0]! || x[1]! - y[1]! || x[2]! - y[2]!
+  }))
+
+  /** Every command with the chord shown in settings, including defaults that are switched off. */
+  const allBindings = computed(() => applied.value.map(({ binding }) => binding))
+
+  /** The bindings the dispatcher acts on. */
+  const effectiveBindings = computed(() => ordered.value.filter(({ shadowedBy }) => !shadowedBy).map(({ binding }) => binding))
+
+  /** Saved overrides that cannot apply; their commands keep the default. */
+  const ignoredOverrides = computed(() => Object.fromEntries(applied.value
+    .filter(({ ignored }) => ignored)
+    .map(({ binding, ignored }) => [binding.command, ignored!])) as Partial<Record<AppKeyboardCommand, ConflictResult>>)
+
+  /** Defaults switched off because a saved override took their combo, mapped to that override's command. */
+  const shadowedDefaults = computed(() => Object.fromEntries(applied.value
+    .filter(({ shadowedBy }) => shadowedBy)
+    .map(({ binding, shadowedBy }) => [binding.command, shadowedBy!])) as Partial<Record<AppKeyboardCommand, AppKeyboardCommand>>)
 
   function getEffectiveCombo(command: AppKeyboardCommand): ParsedKeyCombo | null {
     const binding = effectiveBindings.value.find(b => b.command === command)
@@ -75,17 +144,10 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
   }
 
   function detectConflict(command: AppKeyboardCommand, combo: ParsedKeyCombo): ConflictResult {
-    if (isReservedCombo(combo)) return { kind: 'reserved' }
     const ownBinding = keyboardBindings.find(b => b.command === command)
     if (!ownBinding) return { kind: 'none' }
-    // Global shortcuts dispatch from a window-level listener that does not skip
-    // focused inputs, so a bare-key global binding would fire on every literal
-    // keystroke (e.g. binding 'b' would make typing 'b' open the sidebar).
-    // Scoped bindings only register their handler while the owning component is
-    // mounted, so a bare arrow key for the lightbox is fine.
-    if (ownBinding.scope === 'global' && !combo.mod && !combo.alt) {
-      return { kind: 'no-modifier' }
-    }
+    const unsafe = unsafeCombo(ownBinding.scope, combo)
+    if (unsafe) return { kind: unsafe }
     // Scan every matching binding before deciding: a same-scope collision must
     // block the save even when an earlier-iterated cross-scope binding shares
     // the combo. Otherwise the first cross-scope match would short-circuit and
@@ -94,7 +156,9 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     for (const binding of effectiveBindings.value) {
       if (binding.command === command) continue
       if (!keyCombosEqual(comboFromBinding(binding), combo)) continue
-      if (binding.scope === ownBinding.scope) return { kind: 'same-scope', collidesWith: binding.command }
+      if (binding.scope === ownBinding.scope || (binding.scope !== 'mediaLightbox' && ownBinding.scope !== 'mediaLightbox')) {
+        return { kind: 'same-scope', collidesWith: binding.command }
+      }
       crossScopeMatch = crossScopeMatch ?? binding.command
     }
     if (crossScopeMatch) return { kind: 'cross-scope', collidesWith: crossScopeMatch }
@@ -111,7 +175,7 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
     const parsed = parseKeyCombo(combo)
     if (!parsed) return { kind: 'invalid' }
     const conflict = detectConflict(command, parsed)
-    if (conflict.kind === 'same-scope' || conflict.kind === 'reserved' || conflict.kind === 'no-modifier') return conflict
+    if (conflict.kind !== 'none' && conflict.kind !== 'cross-scope') return conflict
     overrides.value = { ...overrides.value, [command]: formatKeyCombo(parsed) }
     return conflict
   }
@@ -129,7 +193,10 @@ export const useKeyboardShortcutsStore = defineStore('keyboard-shortcuts', () =>
 
   return {
     overrides,
+    allBindings,
     effectiveBindings,
+    ignoredOverrides,
+    shadowedDefaults,
     getEffectiveCombo,
     isOverridden,
     detectConflict,

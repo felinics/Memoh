@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { createRuntimeIntegration, wsFrameErrorCode, type RuntimeIntegrationDeps } from './runtime-integration'
+import { failureStage } from './send'
 import { createEmptyRuntimeProjection } from './runtime-projection'
 import type { RuntimeCurrentRunView } from '@/composables/api/useChat'
 
@@ -34,6 +35,14 @@ it('模式保存的所有帧均不刷新历史或改写上轮回复', () => {
   expect(refreshCurrentSession).not.toHaveBeenCalled()
   expect(resyncRuntimeTranscript).not.toHaveBeenCalled()
   expect(deps.bumpProjectionVersion).toHaveBeenCalledTimes(5)
+})
+
+it('does not treat a replacement error code as replacement output', () => {
+  const assistant = {
+    id: 'assistant', role: 'assistant' as const, messages: [], timestamp: '', streaming: false,
+  }
+  expect(failureStage(assistant, true, false)).toBe('startup')
+  expect(failureStage(assistant, true, true)).toBe('stream')
 })
 
 it('reads a WS failure code from the top level of the frame', () => {

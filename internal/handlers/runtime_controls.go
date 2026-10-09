@@ -48,9 +48,9 @@ func (h *SessionHandler) runtimeControlRequest(c echo.Context) (application.Runt
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} external.Controls
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/runtime-controls [get].
 func (h *SessionHandler) GetRuntimeControls(c echo.Context) error {
 	request, err := h.runtimeControlRequest(c)
@@ -71,10 +71,10 @@ func (h *SessionHandler) GetRuntimeControls(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param payload body RuntimeModeRequest true "Permission mode"
 // @Success 200 {object} external.ModeState
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/runtime-controls/mode [patch].
 func (h *SessionHandler) SetRuntimeMode(c echo.Context) error {
 	request, err := h.runtimeControlRequest(c)
@@ -101,10 +101,10 @@ func (h *SessionHandler) SetRuntimeMode(c echo.Context) error {
 // @Param session_id path string true "Session ID"
 // @Param payload body RuntimeCommandRequest true "Runtime command"
 // @Success 200 {object} RuntimeCommandResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/runtime-controls/commands [post].
 func (h *SessionHandler) ExecuteRuntimeCommand(c echo.Context) error {
 	request, err := h.runtimeControlRequest(c)
@@ -147,9 +147,9 @@ type RuntimeGoalRequest struct {
 // @Param session_id path string true "Session ID"
 // @Param payload body RuntimeGoalRequest true "Goal action"
 // @Success 204
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/runtime-controls/goal [post].
 func (h *SessionHandler) ControlRuntimeGoal(c echo.Context) error {
 	request, err := h.runtimeControlRequest(c)
@@ -181,9 +181,9 @@ type RuntimeGoalResponse struct {
 // @Param bot_id path string true "Bot ID"
 // @Param session_id path string true "Session ID"
 // @Success 200 {object} RuntimeGoalResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/{session_id}/runtime-controls/goal [get].
 func (h *SessionHandler) GetRuntimeGoal(c echo.Context) error {
 	request, err := h.runtimeControlRequest(c)

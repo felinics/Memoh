@@ -22,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/server"
 )
 
 const (
@@ -342,7 +343,7 @@ func TestBotAgentsHandlerListModelsAnswersMissingDependencyWithItsCode(t *testin
 	if got := apperror.CodeOf(err); got != apperror.CodeAgentDependencyMissing {
 		t.Fatalf("ListModels() code = %q, want %s: %v", got, apperror.CodeAgentDependencyMissing, err)
 	}
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Status != http.StatusConflict {
 		t.Fatalf("problem = %+v, want status %d", problem, http.StatusConflict)
 	}
@@ -364,7 +365,7 @@ func TestBotAgentsHandlerListModelsWrapsPlainRuntimeErrors(t *testing.T) {
 
 	ctx, _ := listModelsRequest(t)
 	err := handler.ListModels(ctx)
-	problem, ok := apperror.ProblemFrom(err, "")
+	problem, ok := server.ProblemFrom(err, "")
 	if !ok || problem.Code != string(apperror.CodeExternalRuntimeUnavailable) || problem.Status != http.StatusServiceUnavailable {
 		t.Fatalf("ListModels() error = %v, want %d %s", err, http.StatusServiceUnavailable, apperror.CodeExternalRuntimeUnavailable)
 	}
@@ -391,7 +392,7 @@ func TestBotAgentsHandlerListModelsAnswersRuntimeFailuresWithTheirCode(t *testin
 				err:         fmt.Errorf("model catalog: %w", tc.err),
 			})
 			ctx, _ := listModelsRequest(t)
-			problem, ok := apperror.ProblemFrom(handler.ListModels(ctx), "")
+			problem, ok := server.ProblemFrom(handler.ListModels(ctx), "")
 			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
 				t.Fatalf("ListModels() problem = %+v, want %d %s", problem, tc.status, tc.code)
 			}
@@ -443,7 +444,7 @@ func TestBotAgentsHandlerDeleteAnswersPurgeFailures(t *testing.T) {
 			ctx, _ := botAgentsRequest(t, http.MethodDelete, "/bots/"+botAgentsTestBotID+"/agents/"+botAgentsTestCodexID, "")
 			ctx.SetParamNames("bot_id", "id")
 			ctx.SetParamValues(botAgentsTestBotID, botAgentsTestCodexID)
-			problem, ok := apperror.ProblemFrom(handler.Delete(ctx), "")
+			problem, ok := server.ProblemFrom(handler.Delete(ctx), "")
 			if !ok || problem.Code != string(tc.code) || problem.Status != tc.status {
 				t.Fatalf("Delete() problem = %+v, want %d %s", problem, tc.status, tc.code)
 			}

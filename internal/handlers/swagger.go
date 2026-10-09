@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/swaggo/swag"
 
+	"github.com/felinics/memoh/internal/errs"
 	// Register the generated swagger document for swag.ReadDoc.
 	_ "github.com/felinics/memoh/spec"
 )
@@ -44,7 +45,7 @@ func (*SwaggerHandler) Spec(c echo.Context) error {
 		swaggerSpec = []byte(doc)
 	})
 	if swaggerErr != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, swaggerErr.Error())
+		return errs.Wrap(swaggerErr, "read swagger doc")
 	}
 	return c.Blob(http.StatusOK, "application/json", swaggerSpec)
 }

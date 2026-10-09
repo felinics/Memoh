@@ -19,7 +19,6 @@ func TestWorkspaceTargetHTTPError(t *testing.T) {
 		err  error
 		code int
 	}{
-		"invalid mode":          {workspace.ErrInvalidWorkspaceToolApprovalMode, http.StatusBadRequest},
 		"unusable runtime":      {workspace.ErrRemoteRuntimeNotUsable, http.StatusNotFound},
 		"missing target":        {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
 		"owner mismatch":        {workspace.ErrRemoteRuntimeOwnerMismatch, http.StatusConflict},
@@ -34,7 +33,7 @@ func TestWorkspaceTargetHTTPError(t *testing.T) {
 				if got := apperror.CodeOf(err); got != apperror.CodeWorkspaceUnreachable {
 					t.Fatalf("code = %q, want %q", got, apperror.CodeWorkspaceUnreachable)
 				}
-				if got := errs.FaultOf(err); got != errs.FaultDependency {
+				if got := errs.FaultOf(err); got != apperror.FaultDependency {
 					t.Fatalf("fault = %q, want dependency", got)
 				}
 				return

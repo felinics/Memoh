@@ -10,7 +10,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type AuthHandler struct {
@@ -56,9 +58,9 @@ func (h *AuthHandler) Register(e *echo.Echo) {
 // @Tags auth
 // @Param payload body LoginRequest true "Login request"
 // @Success 200 {object} LoginResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 401 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /auth/login [post].
 func (h *AuthHandler) Login(c echo.Context) error {
 	if h.accountService == nil {
@@ -73,11 +75,14 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	var req LoginRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" || strings.TrimSpace(req.Password) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "username and password are required")
+	if req.Username == "" {
+		return apperror.FieldRequired("username")
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		return apperror.FieldRequired("password")
 	}
 
 	account, err := h.accountService.Login(c.Request().Context(), req.Username, req.Password)
@@ -88,11 +93,11 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		if errors.Is(err, accounts.ErrInactiveAccount) {
 			return echo.NewHTTPError(http.StatusUnauthorized, "user is inactive")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "login")
 	}
 	token, expiresAt, err := auth.GenerateToken(account.ID, h.jwtSecret, h.expiresIn)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "generate token")
 	}
 
 	return c.JSON(http.StatusOK, LoginResponse{
@@ -119,8 +124,8 @@ type RefreshResponse struct {
 // @Tags auth
 // @Security BearerAuth
 // @Success 200 {object} RefreshResponse
-// @Failure 401 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /auth/refresh [post].
 func (h *AuthHandler) Refresh(c echo.Context) error {
 	if strings.TrimSpace(h.jwtSecret) == "" {

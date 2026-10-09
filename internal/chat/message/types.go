@@ -9,6 +9,8 @@ import (
 const (
 	AgentStepInterruptedMetadataKey     = "agent_step_interrupted"
 	HistoryErrorCodeMetadataKey         = "error_code"
+	HistoryFailureOriginMetadataKey     = "failure_origin"
+	HistoryFailureOriginUserMessageHook = "user_message_hook"
 	AgentStepInterruptedReasoningPrefix = "[Previous assistant response was interrupted during reasoning. Continue from this checkpoint:]\n"
 	// ToolCallDiffsMetadataKey carries UI-only edit/write diffs lifted out of
 	// assistant message content at persist time. Value shape:

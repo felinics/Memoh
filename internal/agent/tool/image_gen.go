@@ -22,6 +22,7 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 	"github.com/felinics/memoh/internal/providers"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -284,7 +285,13 @@ func (p *ImageGenProvider) unsavedImageResult(session SessionContext, toolCallID
 	}
 }
 
-func (*ImageGenProvider) generateImage(ctx context.Context, provider sqlc.Provider, apiKey, modelID, prompt, size string) (generatedImage, error) {
+// generateImage asks the image model for one image. A generated image may be
+// billed even when the call that produced it fails, so a call is made again
+// only after a rate-limit answer, which proves no image was made. The
+// DashScope task API is not retried at all: its create and poll requests fail
+// alike, and creating the task again after a failed poll would generate a
+// second image.
+func (p *ImageGenProvider) generateImage(ctx context.Context, provider sqlc.Provider, apiKey, modelID, prompt, size string) (generatedImage, error) {
 	baseURL := providers.ProviderConfigString(provider, "base_url")
 	httpClient := models.NewProviderHTTPClient(models.DefaultProviderRequestTimeout)
 
@@ -292,9 +299,9 @@ func (*ImageGenProvider) generateImage(ctx context.Context, provider sqlc.Provid
 	case shouldUseDashScopeImageGeneration(provider.ClientType, baseURL, modelID):
 		return generateDashScopeImage(ctx, httpClient, baseURL, apiKey, modelID, prompt, size)
 	case shouldUseOpenAIImagesGeneration(provider.ClientType, baseURL, modelID):
-		return generateOpenAIImagesImage(ctx, httpClient, baseURL, apiKey, modelID, prompt, size)
+		return generateOpenAIImagesImage(ctx, p.logger, httpClient, baseURL, apiKey, modelID, prompt, size)
 	default:
-		return generateChatImage(ctx, provider, apiKey, modelID, prompt, size)
+		return generateChatImage(ctx, p.logger, provider, apiKey, modelID, prompt, size)
 	}
 }
 
@@ -354,7 +361,7 @@ func generateDashScopeImage(ctx context.Context, httpClient *http.Client, baseUR
 	return imageResultToGeneratedImage(ctx, httpClient, result)
 }
 
-func generateOpenAIImagesImage(ctx context.Context, httpClient *http.Client, baseURL, apiKey, modelID, prompt, size string) (generatedImage, error) {
+func generateOpenAIImagesImage(ctx context.Context, logger *slog.Logger, httpClient *http.Client, baseURL, apiKey, modelID, prompt, size string) (generatedImage, error) {
 	opts := []openaiimages.Option{
 		openaiimages.WithAPIKey(apiKey),
 		openaiimages.WithHTTPClient(httpClient),
@@ -364,19 +371,22 @@ func generateOpenAIImagesImage(ctx context.Context, httpClient *http.Client, bas
 	}
 	provider := openaiimages.New(opts...)
 	imageModel := provider.GenerationModel(modelID)
-	result, err := sdk.GenerateImage(ctx,
-		sdk.WithImageGenerationModel(imageModel),
-		sdk.WithImagePrompt(prompt),
-		sdk.WithImageSize(size),
-		sdk.WithImageN(1),
-	)
+	result, err := modelretry.Do(ctx, logger, "tool.image_gen", modelretry.Config{}, modelretry.RateLimited,
+		func(ctx context.Context) (*sdk.ImageResult, error) {
+			return sdk.GenerateImage(ctx,
+				sdk.WithImageGenerationModel(imageModel),
+				sdk.WithImagePrompt(prompt),
+				sdk.WithImageSize(size),
+				sdk.WithImageN(1),
+			)
+		})
 	if err != nil {
 		return generatedImage{}, err
 	}
 	return imageResultToGeneratedImage(ctx, httpClient, result)
 }
 
-func generateChatImage(ctx context.Context, provider sqlc.Provider, apiKey, modelID, prompt, size string) (generatedImage, error) {
+func generateChatImage(ctx context.Context, logger *slog.Logger, provider sqlc.Provider, apiKey, modelID, prompt, size string) (generatedImage, error) {
 	if strings.TrimSpace(size) == "" {
 		size = "1024x1024"
 	}
@@ -396,10 +406,12 @@ func generateChatImage(ctx context.Context, provider sqlc.Provider, apiKey, mode
 		[]sdk.Message{sdk.UserMessage(userMsg)},
 		nil,
 	)
-	result, err := sdkModel.Generate(ctx, sdk.Request{
+	request := sdk.Request{
 		System:   system,
 		Messages: messages,
-	})
+	}
+	result, err := modelretry.Do(ctx, logger, "tool.image_gen", modelretry.Config{}, modelretry.RateLimited,
+		func(ctx context.Context) (sdk.ModelResult, error) { return sdkModel.Generate(ctx, request) })
 	if err != nil {
 		return generatedImage{}, err
 	}

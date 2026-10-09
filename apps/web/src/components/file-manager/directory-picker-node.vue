@@ -84,7 +84,7 @@ onMounted(() => {
     role="button"
     tabindex="0"
     @click="onRowClick"
-    @keydown.enter.prevent="onRowClick"
+    @keydown.enter.exact.prevent="onRowClick"
     @keydown.space.prevent="onRowClick"
   >
     <span

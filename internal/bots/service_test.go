@@ -515,7 +515,9 @@ func TestRunDeleteLifecycleWaitsForWorkspaceAbsent(t *testing.T) {
 	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
 	svc.SetWorkspaceIntents(intents)
 
-	svc.runDeleteLifecycle(context.Background(), botID, BotStatusReady)
+	if err := svc.runDeleteLifecycle(context.Background(), botID, BotStatusReady); err != nil {
+		t.Fatalf("delete lifecycle should succeed once the workspace is absent: %v", err)
+	}
 	if len(intents.absent) != 1 || intents.absent[0] != botID || intents.preserve[0] {
 		t.Fatalf("delete must request a non-preserving absent workspace, got %v/%v", intents.absent, intents.preserve)
 	}
@@ -549,7 +551,9 @@ func TestRunDeleteLifecycleRevertsToPreviousStatusWhenWorkspaceLingers(t *testin
 	svc := NewService(nil, postgresstore.NewQueries(sqlc.New(db)))
 	svc.SetWorkspaceIntents(intents)
 
-	svc.runDeleteLifecycle(context.Background(), botID, BotStatusFailed)
+	if err := svc.runDeleteLifecycle(context.Background(), botID, BotStatusFailed); err == nil || !strings.Contains(err.Error(), "did not complete") {
+		t.Fatalf("a lingering workspace must fail the delete unit, got %v", err)
+	}
 	if len(exec) != 1 || exec[0] != "status:"+BotStatusFailed {
 		t.Fatalf("a failed bot whose deletion lingers must revert to failed, not ready, and not be deleted; exec=%v", exec)
 	}

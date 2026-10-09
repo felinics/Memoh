@@ -8,7 +8,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 // BotUserGrantListResponse wraps the list of workspace user access grants for a bot.
@@ -65,9 +68,9 @@ func (h *BotUserAccessHandler) Register(e *echo.Echo) {
 // @Tags bots
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} BotUserGrantListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/user-access [get].
 func (h *BotUserAccessHandler) ListGrants(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
@@ -88,10 +91,10 @@ func (h *BotUserAccessHandler) ListGrants(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body bots.CreateUserGrantRequest true "Grant payload"
 // @Success 201 {object} bots.UserGrant
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/user-access [post].
 func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 	botID, actorID, err := h.requireManageAccess(c)
@@ -100,7 +103,7 @@ func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 	}
 	var req bots.CreateUserGrantRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.botService.CreateUserGrant(c.Request().Context(), botID, actorID, req)
 	if err != nil {
@@ -117,23 +120,23 @@ func (h *BotUserAccessHandler) CreateGrant(c echo.Context) error {
 // @Param grant_id path string true "Grant ID"
 // @Param payload body bots.UpdateUserGrantRequest true "Grant payload"
 // @Success 200 {object} bots.UserGrant
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/user-access/{grant_id} [put].
 func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
 	if err != nil {
 		return err
 	}
-	grantID := strings.TrimSpace(c.Param("grant_id"))
-	if grantID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "grant_id is required")
+	grantID, err := httpx.RequiredParam(c, "grant_id")
+	if err != nil {
+		return err
 	}
 	var req bots.UpdateUserGrantRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	item, err := h.botService.UpdateUserGrant(c.Request().Context(), botID, grantID, req)
 	if err != nil {
@@ -149,19 +152,19 @@ func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param grant_id path string true "Grant ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/user-access/{grant_id} [delete].
 func (h *BotUserAccessHandler) DeleteGrant(c echo.Context) error {
 	botID, _, err := h.requireManageAccess(c)
 	if err != nil {
 		return err
 	}
-	grantID := strings.TrimSpace(c.Param("grant_id"))
-	if grantID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "grant_id is required")
+	grantID, err := httpx.RequiredParam(c, "grant_id")
+	if err != nil {
+		return err
 	}
 	if err := h.botService.DeleteUserGrant(c.Request().Context(), botID, grantID); err != nil {
 		return h.mapGrantError(err)
@@ -177,9 +180,9 @@ func (h *BotUserAccessHandler) DeleteGrant(c echo.Context) error {
 // @Param q query string false "Search query"
 // @Param limit query int false "Max results"
 // @Success 200 {object} BotUserCandidateListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/user-access/candidates [get].
 func (h *BotUserAccessHandler) ListCandidates(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
@@ -195,8 +198,8 @@ func (h *BotUserAccessHandler) ListCandidates(c echo.Context) error {
 // @Param q query string false "Search query"
 // @Param limit query int false "Max results"
 // @Success 200 {object} BotUserCandidateListResponse
-// @Failure 401 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/user-access/candidates [get].
 func (h *BotUserAccessHandler) ListNewBotCandidates(c echo.Context) error {
 	if _, err := RequireChannelIdentityID(c); err != nil {
@@ -210,7 +213,7 @@ func (h *BotUserAccessHandler) ListNewBotCandidates(c echo.Context) error {
 func (h *BotUserAccessHandler) respondCandidates(c echo.Context) error {
 	accountsList, err := h.accountService.SearchAccounts(c.Request().Context(), strings.TrimSpace(c.QueryParam("q")), parseLimit(c.QueryParam("limit")))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "search accounts")
 	}
 	items := make([]BotUserCandidate, 0, len(accountsList))
 	for _, account := range accountsList {
@@ -232,9 +235,9 @@ func (h *BotUserAccessHandler) requireManageAccess(c echo.Context) (string, stri
 	if err != nil {
 		return "", "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err
@@ -247,17 +250,20 @@ func (*BotUserAccessHandler) mapGrantError(err error) error {
 	case errors.Is(err, bots.ErrGrantNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	case errors.Is(err, bots.ErrOwnerUserNotFound):
-		return echo.NewHTTPError(http.StatusBadRequest, "user not found")
-	case errors.Is(err, bots.ErrInvalidPermission),
-		errors.Is(err, bots.ErrInvalidGrantSubject),
-		errors.Is(err, bots.ErrGrantUserRequired),
-		errors.Is(err, bots.ErrGrantOwnerConflict):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("user_id", err)
+	case errors.Is(err, bots.ErrInvalidPermission):
+		return apperror.FieldInvalid("permissions", err)
+	case errors.Is(err, bots.ErrInvalidGrantSubject):
+		return apperror.FieldInvalid("subject_type", err)
+	case errors.Is(err, bots.ErrGrantUserRequired):
+		return apperror.FieldRequired("user_id")
+	case errors.Is(err, bots.ErrGrantOwnerConflict):
+		return apperror.FieldInvalid("user_id", err)
 	case errors.Is(err, bots.ErrGrantExists):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case errors.Is(err, bots.ErrBotNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "bot not found")
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "grant bot access")
 	}
 }

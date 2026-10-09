@@ -28,9 +28,11 @@ import (
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/models/modelretry"
 	"github.com/felinics/memoh/internal/testutil/sessionledger"
 )
 
@@ -73,7 +75,7 @@ func charModelCallFailure(t *testing.T, err error) error {
 		Messages:         []sdk.Message{sdk.UserMessage("hello")},
 		Identity:         native.SessionContext{BotID: "char-bot"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		Retry:            native.RetryConfig{MaxAttempts: 1, FastAttempts: 1},
+		Retry:            modelretry.Config{MaxAttempts: 1, FastAttempts: 1},
 	}) {
 		if event.Type == native.EventError {
 			cause = event.Cause
@@ -521,7 +523,7 @@ func TestCharacterizeTurnRunFinisherCodes_CurrentBehavior(t *testing.T) {
 			if err != nil {
 				t.Fatalf("admit: %v", err)
 			}
-			service.turnRunFinisher(context.Background(), admission)(RunOutcome{Status: tc.status, Cause: tc.cause})
+			service.turnRunFinisher(context.Background(), admission, sessionmode.Chat)(RunOutcome{Status: tc.status, Cause: tc.cause})
 			run, err := runs.Get(context.Background(), admission.RunID)
 			if err != nil {
 				t.Fatalf("load run: %v", err)

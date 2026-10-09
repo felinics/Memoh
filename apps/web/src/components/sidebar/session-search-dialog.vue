@@ -19,7 +19,7 @@
           v-model="query"
           class="h-11 min-w-0 flex-1 bg-transparent px-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           :placeholder="t('chat.searchSessions')"
-          @keydown.enter.prevent="selectFirst"
+          @keydown.enter.exact.prevent="selectFirst"
         >
         <DialogClose as-child>
           <Button

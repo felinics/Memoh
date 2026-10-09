@@ -75,10 +75,27 @@ export function keyCombosEqual(a: ParsedKeyCombo, b: ParsedKeyCombo): boolean {
 
 export interface KeyboardEventLike {
   key: string
+  code?: string
   ctrlKey: boolean
   metaKey: boolean
   altKey: boolean
   shiftKey: boolean
+}
+
+const CODE_KEYS: Record<string, string> = {
+  Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+  Semicolon: ';', Quote: '\'', Comma: ',', Period: '.', Slash: '/', Backquote: '`',
+}
+
+// The digit row types a different character with Shift on most layouts (and
+// AZERTY needs Shift for the digit itself), so it is read as its digit.
+// macOS applies Option to `key` even while Command is held (Option+1 is `¡`,
+// Option+N is a dead key), so Command+Option combos are read from the physical key.
+export function shortcutKeyFromEvent(event: KeyboardEventLike, isMac: boolean): string {
+  if (event.code && /^Digit\d$/.test(event.code)) return event.code.slice(5)
+  if (!isMac || !event.metaKey || !event.altKey || !event.code) return event.key
+  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3).toLowerCase()
+  return CODE_KEYS[event.code] ?? event.key
 }
 
 export function keyComboFromEvent(event: KeyboardEventLike, isMac: boolean): ParsedKeyCombo | null {
@@ -89,12 +106,21 @@ export function keyComboFromEvent(event: KeyboardEventLike, isMac: boolean): Par
   // match every literal 's' keypress in any input. Reject the capture so the
   // user picks a Cmd/Alt/Shift-based combo instead.
   if (isMac && event.ctrlKey) return null
+  if (isMac && event.altKey && !event.metaKey && (event.key.length === 1 || event.key === 'Dead')) return null
   return {
     mod: isMac ? event.metaKey : event.ctrlKey,
     alt: event.altKey,
     shift: event.shiftKey,
-    key: canonicalKey(event.key),
+    key: canonicalKey(shortcutKeyFromEvent(event, isMac)),
   }
+}
+
+/** Every combo the dispatcher matches for this event: the recorded one first, then the typed character when it differs. */
+export function keyCombosFromEvent(event: KeyboardEventLike, isMac: boolean): ParsedKeyCombo[] {
+  const combo = keyComboFromEvent(event, isMac)
+  if (!combo) return []
+  const typed = canonicalKey(event.key)
+  return typed === combo.key ? [combo] : [combo, { ...combo, key: typed }]
 }
 
 export function comboFromBinding(binding: { key: string; mod?: boolean; alt?: boolean; shift?: boolean }): ParsedKeyCombo {
