@@ -274,10 +274,11 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
 	outcome.watchIdle(idleCtx, idleCancel)
-	if !cmd.DiscussRecoveryExhausted {
-		runConfig.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
-			return s.recoverDiscussContextBudget(ctx, cmd, admitted, resolved.ModelID, cfg)
-		}
+	// A run compacts at most once; the last attempt a recompose budget
+	// allows only sheds images.
+	compacted := cmd.DiscussRecoveryExhausted
+	runConfig.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
+		return s.recoverDiscussContextBudget(ctx, cmd, admitted, resolved.ModelID, cfg, &compacted)
 	}
 	runConfig = pauseIdleDuringBudgetRecovery(runConfig, idleCancel)
 	eventCh := s.streamDiscussAgent(idleCtx, runConfig)
@@ -457,24 +458,33 @@ const discussContextCollector = "discuss_context"
 // A message admission left out takes its images with it, so older input of
 // the batch carries its own images as history instead of growing the
 // protected current input. The vision budget is spent newest first; the
-// messages whose images neither it nor a repeat delivers are reported.
+// messages whose images are not delivered are reported.
 func (s *Service) discussImageParts(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage) ([]sdk.ImagePart, map[string][]sdk.ImagePart, []string) {
 	admittedIDs := make(map[string]bool, len(admitted))
+	currentID := ""
 	for _, message := range admitted {
 		if message.Source != nil && message.Source.Kind == "external" {
 			admittedIDs[message.Source.ID] = true
+			if message.Source.Current {
+				currentID = message.Source.ID
+			}
 		}
 	}
 	var refs []timeline.ImageAttachmentRef
-	var owners []string
+	var owners, withheld []string
 	for _, ref := range cmd.DiscussImageRefs {
-		if ref.MessageID == "" || admittedIDs[ref.MessageID] {
+		switch {
+		case ref.MessageID == "" || admittedIDs[ref.MessageID]:
 			refs = append(refs, timeline.ImageAttachmentRef{ContentHash: ref.ContentHash, Mime: ref.Mime})
 			owners = append(owners, ref.MessageID)
+		case !slices.Contains(withheld, ref.MessageID):
+			// Admission left the message out or compaction summarized it; no
+			// summary carries an image.
+			withheld = append(withheld, ref.MessageID)
 		}
 	}
 	if len(refs) == 0 {
-		return nil, nil, nil
+		return nil, nil, withheld
 	}
 	slices.Reverse(refs)
 	inlined := s.inlineDiscussImages(ctx, cmd.BotID, refs)
@@ -491,8 +501,10 @@ func (s *Service) discussImageParts(ctx context.Context, cmd turn.StartTurnComma
 			bySource[owner] = append(bySource[owner], inlined[i]...)
 		}
 	}
-	var withheld []string
 	for i, owner := range owners {
+		if owner == "" {
+			owner = currentID
+		}
 		if hash := refs[len(refs)-1-i].ContentHash; owner != "" && !delivered[hash] && !slices.Contains(withheld, owner) {
 			withheld = append(withheld, owner)
 		}

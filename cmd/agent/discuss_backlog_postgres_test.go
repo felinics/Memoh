@@ -202,8 +202,12 @@ func (f *backlogFixture) appendBacklog(count, size int) {
 }
 
 func (f *backlogFixture) backlogRows() (raw, compacted int) {
+	return f.backlogRowsPrefixed("backlog-")
+}
+
+func (f *backlogFixture) backlogRowsPrefixed(prefix string) (raw, compacted int) {
 	f.t.Helper()
-	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE compact_id IS NULL), count(*) FILTER (WHERE compact_id IS NOT NULL) FROM bot_history_messages WHERE session_id=$1 AND source_message_id LIKE 'backlog-%'`, f.sessionID).Scan(&raw, &compacted); err != nil {
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FILTER (WHERE compact_id IS NULL), count(*) FILTER (WHERE compact_id IS NOT NULL) FROM bot_history_messages WHERE session_id=$1 AND source_message_id LIKE $2`, f.sessionID, prefix+"%").Scan(&raw, &compacted); err != nil {
 		f.t.Fatal(err)
 	}
 	return raw, compacted
@@ -512,4 +516,55 @@ func TestPostgresDiscussOversizedImageInputFailsOnceThenNextMessageIsAnswered(t 
 		t.Fatal("the demoted album shed images without a record")
 	}
 	t.Logf("summary_calls=%d provider_calls=%d", f.summaries.Load(), f.modelCalls.Load())
+}
+
+// Answered history goes before the images of unconsumed input: with or
+// without compaction, an older unconsumed message keeps its image when
+// trimming or summarizing what was already answered makes room.
+func TestPostgresDiscussImageBacklogYieldsAnsweredHistoryFirst(t *testing.T) {
+	for _, tc := range []struct {
+		compaction bool
+		rounds     int
+	}{{false, 10}, {true, 10}, {true, 4}, {false, 4}} {
+		t.Run(fmt.Sprintf("compaction=%v/rounds=%d", tc.compaction, tc.rounds), func(t *testing.T) {
+			f := newBacklogFixture(t)
+			f.enableVision()
+			if _, err := f.pool.Exec(f.ctx, `UPDATE bots SET compaction_enabled=$2 WHERE id=$1`, f.botID, tc.compaction); err != nil {
+				t.Fatal(err)
+			}
+			for i := range tc.rounds {
+				id := fmt.Sprintf("old-%d", i)
+				f.appendMessage(id, id+" "+strings.Repeat("h", 2400))
+				f.answer(id, id+" ")
+			}
+			f.appendImageMessage("img-old", "img-old look at this", "img-hash")
+			f.appendMessage("newest", "newest small message")
+			request := f.answer("batch", "newest small message")
+			if len(f.requestImages(request)["img-old look at this"]) != 1 || f.omittedImages()["img-old"] {
+				t.Fatalf("img-old's image was shed although answered history could make room; shed=%v", f.omittedImages())
+			}
+		})
+	}
+}
+
+// Older unconsumed input that compaction summarizes cannot carry its images
+// into the summary; each such image is still recorded, never silently lost.
+func TestPostgresDiscussCompactedImageInputIsRecorded(t *testing.T) {
+	f := newBacklogFixture(t)
+	f.enableVision()
+	for i := range 10 {
+		id := fmt.Sprintf("img-%d", i)
+		f.appendImageMessage(id, id+" look "+strings.Repeat("z", 2800), fmt.Sprintf("hash-%d", i))
+	}
+	request := f.answer("batch", "img-9 look")
+	images, shed := f.requestImages(request), f.omittedImages()
+	if _, compacted := f.backlogRowsPrefixed("img-"); compacted == 0 {
+		t.Fatal("the fixture must summarize part of the batch")
+	}
+	for i := range 10 {
+		id := fmt.Sprintf("img-%d", i)
+		if len(images[id+" look "+strings.Repeat("z", 2800)]) == 0 && !shed[id] {
+			t.Fatalf("%s: image neither delivered nor recorded; shed=%v", id, shed)
+		}
+	}
 }

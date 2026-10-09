@@ -227,7 +227,7 @@ func (l chatHistoryLayout) replaceSourceFrags(ctx context.Context, old, cfg nati
 	return out
 }
 
-func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage, modelID string, cfg native.RunConfig) (native.RunConfig, bool, error) {
+func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage, modelID string, cfg native.RunConfig, compacted *bool) (native.RunConfig, bool, error) {
 	plan := cfg.ContextManifest.BudgetPlan
 	if plan == nil || ctx.Err() != nil {
 		return cfg, false, nil
@@ -241,7 +241,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 		}
 	}
 	cfg, shed := shedOlderBatchImages(cfg, batch, plan.HistoryBudget)
-	if s.effectiveSyncCompactionMode() == syncCompactionModeOff {
+	if *compacted || s.effectiveSyncCompactionMode() == syncCompactionModeOff {
 		return cfg, shed, nil
 	}
 	type batchInput struct {
@@ -282,6 +282,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 		limit -= older[i].cost
 		historyBudget -= older[i].cost
 	}
+	*compacted = true
 	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: protected}, pressure, historyBudget, modelID)
 	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
 		return cfg, shed, nil
@@ -290,15 +291,32 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 }
 
 // shedOlderBatchImages strips the images of older input of the batch, oldest
-// first, until the history fits the budget. An image costs far more than its
-// message's text and no summary can carry it, so the text survives its
-// images; the newest input keeps its own. It reports whether any were shed.
+// first, until what must stay fits the budget. Answered history before the
+// batch is what selection trims first, so it does not count; an image costs
+// far more than its message's text and no summary can carry it, so the text
+// survives its images. The newest input keeps its own. It reports whether
+// any were shed.
 func shedOlderBatchImages(cfg native.RunConfig, batch map[string]turn.ContextMessageSource, historyBudget int) (native.RunConfig, bool) {
-	excess := -historyBudget
+	excess, total, trimmable, inBatch := -historyBudget, -historyBudget, false, false
 	for _, frag := range cfg.ContextSourceFrags {
-		if frag.Slot != contextfrag.SlotSystem && frag.Slot != contextfrag.SlotCurrentUser && frag.Kind != contextfrag.KindCurrentUserMessage {
-			excess += contextfrag.ResolveProviderBudgetFragTokens(frag)
+		if frag.Slot == contextfrag.SlotSystem || frag.Slot == contextfrag.SlotCurrentUser || frag.Kind == contextfrag.KindCurrentUserMessage {
+			continue
 		}
+		cost := contextfrag.ResolveProviderBudgetFragTokens(frag)
+		total += cost
+		_, member := batch[frag.Provenance.SourceID]
+		inBatch = inBatch || member && frag.Kind == contextfrag.KindConversationEvent
+		if inBatch || frag.Slot != contextfrag.SlotHistory || frag.Kind != contextfrag.KindConversationEvent {
+			excess += cost
+		} else {
+			trimmable = true
+		}
+	}
+	if total <= 0 {
+		return cfg, false
+	}
+	if trimmable {
+		excess += contextfrag.ResolveProviderBudgetFragTokens(contextview.TrimNoticeFrag(contextfrag.Scope{}))
 	}
 	var shed []string
 	frags, messages := slices.Clone(cfg.ContextSourceFrags), slices.Clone(cfg.Messages)

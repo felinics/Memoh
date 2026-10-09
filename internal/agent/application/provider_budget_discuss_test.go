@@ -18,6 +18,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/contextview"
 )
 
@@ -321,5 +322,75 @@ func TestDiscussProviderBudgetRecoveryFusesSummaryOnlyHistory(t *testing.T) {
 	}
 	if !recomposed || len(compactor.configs) != 1 || provider.callCount() != 0 || resolver.storeCalls != 0 {
 		t.Fatalf("summary-only recovery: recompose=%v compactions=%d provider=%d stored=%d", recomposed, len(compactor.configs), provider.callCount(), resolver.storeCalls)
+	}
+}
+
+func echoDiscussImages(_ context.Context, _ string, refs []timeline.ImageAttachmentRef) [][]sdk.ImagePart {
+	out := make([][]sdk.ImagePart, len(refs))
+	for i, ref := range refs {
+		out[i] = []sdk.ImagePart{{Image: "data:image/png;base64," + ref.ContentHash, MediaType: "image/png"}}
+	}
+	return out
+}
+
+// The last attempt a recompose budget allows compacts nothing, yet it still
+// sheds older images before letting the selector drop their text.
+func TestDiscussExhaustedRecoveryStillShedsOlderImages(t *testing.T) {
+	for _, exhausted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exhausted=%v", exhausted), func(t *testing.T) {
+			service, resolver, provider, compactor, cmd := discussBudgetRecoveryFixture(t)
+			configureDiscussLifecycle(service)
+			compactor.status = compaction.StatusNoop
+			resolver.resolveResult.RunConfig.SupportsImageInput = true
+			service.turnHooks.inlineImages = echoDiscussImages
+			cmd.DiscussMessages = []turn.DiscussMessage{
+				{Role: "user", Content: "older-a " + strings.Repeat("a", 200), Source: &turn.ContextMessageSource{Kind: "external", ID: "older-a", Current: true}},
+				{Role: "user", Content: "newest continue", Source: &turn.ContextMessageSource{Kind: "external", ID: "newest", Current: true}},
+			}
+			cmd.DiscussImageRefs = []turn.DiscussImageRef{{ContentHash: "aGFzaA==", Mime: "image/png", MessageID: "older-a"}}
+			cmd.DiscussRecoveryExhausted = exhausted
+			h, err := service.StartTurn(context.Background(), cmd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			drainDiscuss(t, h)
+			provider.mu.Lock()
+			params := provider.params
+			provider.mu.Unlock()
+			kept := false
+			for _, message := range params.Messages {
+				for _, part := range message.Content {
+					if text, ok := part.(sdk.TextPart); ok && strings.HasPrefix(text.Text, "older-a ") {
+						kept = true
+					}
+				}
+			}
+			if provider.callCount() != 1 || !kept || (exhausted && len(compactor.configs) != 0) {
+				t.Fatalf("provider_calls=%d older text kept=%v compactions=%d, want the text kept by shedding its image", provider.callCount(), kept, len(compactor.configs))
+			}
+		})
+	}
+}
+
+// Shedding is progress the applier retries on; it must not buy a failing
+// compaction a second attempt in the same run.
+func TestDiscussFailedCompactionRunsOnceAfterShedding(t *testing.T) {
+	service, resolver, _, compactor, cmd := discussBudgetRecoveryFixture(t)
+	configureDiscussLifecycle(service)
+	compactor.status = compaction.StatusNoop
+	resolver.resolveResult.RunConfig.SupportsImageInput = true
+	service.turnHooks.inlineImages = echoDiscussImages
+	last := len(cmd.DiscussMessages) - 1
+	cmd.DiscussMessages[last].Source = &turn.ContextMessageSource{Kind: "external", ID: "newest", Current: true}
+	older := turn.DiscussMessage{Role: "user", Content: "older-a", Source: &turn.ContextMessageSource{Kind: "external", ID: "older-a", Current: true}}
+	cmd.DiscussMessages = append(cmd.DiscussMessages[:last], older, cmd.DiscussMessages[last])
+	cmd.DiscussImageRefs = []turn.DiscussImageRef{{ContentHash: "aGFzaA==", Mime: "image/png", MessageID: "older-a"}}
+	h, err := service.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+	if len(compactor.configs) != 1 {
+		t.Fatalf("compactions=%d, want one attempt per run", len(compactor.configs))
 	}
 }

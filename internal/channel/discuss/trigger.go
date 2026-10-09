@@ -67,7 +67,7 @@ func (discussTriggerBuilder) Build(cfg DiscussSessionConfig, rc timeline.Rendere
 			DiscussMessages:         msgs,
 			DiscussCurrentSources:   currentSources,
 			DiscussOmittedSources:   admission.OmittedSources,
-			DiscussImageRefs:        extractNewImageRefs(timeline.ActiveRenderedContext(rc, artifacts), after),
+			DiscussImageRefs:        extractNewImageRefs(rc, after),
 			DiscussAddressed:        addressed,
 			DiscussContextTokens:    admission.EstimatedTokens,
 			DiscussContextOverflow:  admission.ProtectedOverflow,

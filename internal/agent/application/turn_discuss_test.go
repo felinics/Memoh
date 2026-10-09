@@ -291,6 +291,13 @@ func TestDiscussInlinesImagesOnTheirAdmittedMessages(t *testing.T) {
 	if len(images) != 2 || strings.Join(images["older"], ",") != "older-image" || strings.Join(images["newest"], ",") != "newest-image,unattributed-image" {
 		t.Fatalf("images by message = %v, want each on its own message and the unattributed one on the current input", images)
 	}
+	recorded := false
+	for _, record := range agent.lastConfig.ContextMutations.Records() {
+		recorded = recorded || record.Kind == contextfrag.MutationCurrentInputImagesOmitted && record.Detail == "sources=omitted"
+	}
+	if !recorded {
+		t.Fatalf("mutations = %+v, want the left-out message's image recorded", agent.lastConfig.ContextMutations.Records())
+	}
 }
 
 // The turn-wide vision budget goes to the newest input first: older images
