@@ -247,8 +247,10 @@ const renderedActionLabel = computed(() => title.value.action)
 
 // edit always renders its diff flush with the card edges; write joins it
 // only when the server attached a diff (older write records keep the padded
-// content block).
+// content block). A failed call shows the generic diagnostic detail instead
+// of a diff, so it keeps the padded card every other detail uses.
 const flushDiffCard = computed(() => {
+  if (resultFailed.value) return false
   if (props.block.toolName === 'edit') return true
   return props.block.toolName === 'write' && Boolean(props.block.diff)
 })
