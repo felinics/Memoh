@@ -1,25 +1,36 @@
 // Package httpx holds tiny echo-boundary helpers shared by both HTTP shells
-// and by handlers. Keep it dependency-light — echo, plus internal/logger,
-// which imports no package from this repository and so cannot close a cycle.
+// and by handlers. Keep it dependency-light — echo, plus internal/logger and
+// internal/apperror, which import no package from this repository and so
+// cannot close a cycle.
 package httpx
 
 import (
 	"net/url"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/felinics/memoh/internal/logger"
 )
 
-// NewRequestID returns a fresh request id from the generator echo's RequestID
-// middleware uses, so the id of a unit of work that did not arrive over HTTP,
-// such as an IM message, has the same form as the id of one that did.
+// NewRequestID returns a fresh request id. It is a UUID: lowercase, so an id
+// a user copies by hand keeps its case, and hyphenated, so it does not read as
+// a trace id. AssignRequestID uses it for HTTP requests, so the id of a unit
+// of work that did not arrive over HTTP, such as an IM message, has the same
+// form as the id of one that did. Readers treat an id as an opaque string: an
+// inbound X-Request-ID is adopted whatever its form.
 func NewRequestID() string {
-	return middleware.DefaultRequestIDConfig.Generator()
+	return uuid.NewString()
 }
 
-// RequestID returns the request id assigned by the RequestID middleware
+// AssignRequestID is echo's RequestID middleware with NewRequestID as its
+// generator: it adopts an inbound X-Request-ID and assigns one otherwise.
+func AssignRequestID() echo.MiddlewareFunc {
+	return middleware.RequestIDWithConfig(middleware.RequestIDConfig{Generator: NewRequestID})
+}
+
+// RequestID returns the request id assigned by AssignRequestID
 // (response header), falling back to a client-provided header. Empty when
 // neither exists — callers should treat it as optional metadata.
 func RequestID(c echo.Context) string {
@@ -41,7 +52,7 @@ func RequestID(c echo.Context) string {
 // serving the request can include it. An id a user quotes back therefore names
 // a request whose actual work cannot be found.
 //
-// Install it directly after middleware.RequestID, which is what assigns the id.
+// Install it directly after AssignRequestID, which is what assigns the id.
 func RequestIDContext(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if id := RequestID(c); id != "" {

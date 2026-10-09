@@ -208,7 +208,7 @@ func TestAutomaticCompactionPathsApplyTargetAndBoundAsyncDrain(t *testing.T) {
 		compactableTokensKnown: true,
 	}
 
-	service.maybeCompact(context.Background(), req, resolved, 150000)
+	runAutomaticCompaction(t, service, req, resolved, 150000)
 	if len(runner.configs) != 3 {
 		t.Fatalf("async compaction passes = %d, want 3", len(runner.configs))
 	}
@@ -291,7 +291,7 @@ func TestSyncBackstopTargetCapsAtSoftShare(t *testing.T) {
 				compactableTokensKnown: true,
 			}
 
-			service.maybeCompact(context.Background(), req, resolved, 4000)
+			runAutomaticCompaction(t, service, req, resolved, 4000)
 			if len(runner.configs) != maxAsyncCompactionPasses {
 				t.Fatalf("async compaction passes = %d, want %d", len(runner.configs), maxAsyncCompactionPasses)
 			}
@@ -328,4 +328,17 @@ func TestSetCompactionServicePreservesNil(t *testing.T) {
 
 func targetPercentPointer(value int) *int {
 	return &value
+}
+
+// runAutomaticCompaction runs what maybeCompact starts as a unit, on the
+// test's goroutine.
+func runAutomaticCompaction(t *testing.T, service *Service, req ChatRequest, rc resolvedContext, inputTokens int) {
+	t.Helper()
+	plan, ok := service.planCompaction(context.Background(), req, rc, inputTokens)
+	if !ok {
+		t.Fatal("planCompaction() = false, want a compaction to run")
+	}
+	if err := service.runCompaction(context.Background(), plan); err != nil {
+		t.Fatalf("runCompaction() error = %v", err)
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"
 )
 
@@ -43,7 +44,7 @@ func Finish(ctx context.Context, operation string, err error, opts Options) Resu
 	}
 	report := analyze(ctx, operation, err, opts)
 	span := trace.SpanFromContext(ctx)
-	if report.Fault == errs.FaultServer || report.Fault == errs.FaultDependency {
+	if report.Fault == apperror.FaultServer || report.Fault == apperror.FaultDependency {
 		span.SetStatus(codes.Error, report.Reason)
 	}
 	span.SetAttributes(attribute.String("error.type", report.Reason))
@@ -68,11 +69,11 @@ func Event(ctx context.Context, operation string, err error, opts Options) Resul
 
 func analyze(ctx context.Context, operation string, err error, opts Options) errs.Report {
 	report := errs.Analyze(ctx, err)
-	if opts.Async && report.Fault == errs.FaultClient {
-		report.Fault = errs.FaultServer
+	if opts.Async && report.Fault == apperror.FaultClient {
+		report.Fault = apperror.FaultServer
 		report.Unlocated = len(report.Stack) == 0
 	}
-	if report.Unlocated && (report.Fault == errs.FaultServer || report.Fault == errs.FaultDependency) {
+	if report.Unlocated && (report.Fault == apperror.FaultServer || report.Fault == apperror.FaultDependency) {
 		recordUnlocated(ctx, operation)
 	}
 	return report
@@ -82,20 +83,24 @@ func levelFor(report errs.Report, opts Options) slog.Level {
 	if report.Panic {
 		return slog.LevelError
 	}
-	if opts.WillRetry && report.Fault == errs.FaultDependency {
+	// A nested unit in this process already wrote the ERROR for this failure.
+	if report.Recorded && (report.Fault == apperror.FaultServer || report.Fault == apperror.FaultDependency) {
+		return slog.LevelWarn
+	}
+	if opts.WillRetry && report.Fault == apperror.FaultDependency {
 		return slog.LevelWarn
 	}
 	switch report.Fault {
-	case errs.FaultServer:
+	case apperror.FaultServer:
 		return slog.LevelError
-	case errs.FaultDependency:
+	case apperror.FaultDependency:
 		// The remote already logged its own failure at ERROR; the request_id
 		// on this record finds it.
-		if report.Remote && (report.RemoteFault == string(errs.FaultServer) || report.RemoteFault == string(errs.FaultDependency)) {
+		if report.Remote && (report.RemoteFault == apperror.FaultServer || report.RemoteFault == apperror.FaultDependency) {
 			return slog.LevelWarn
 		}
 		return slog.LevelError
-	case errs.FaultClient, errs.FaultCanceled:
+	case apperror.FaultClient, apperror.FaultCanceled:
 		return slog.LevelInfo
 	default:
 		return slog.LevelError

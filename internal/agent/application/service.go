@@ -36,6 +36,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	turnpkg "github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
@@ -838,7 +839,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 	req.Query = rc.query
 	req.RunID = rc.runConfig.RunID
 
-	go s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
+	s.maybeGenerateSessionTitle(context.WithoutCancel(ctx), req, req.RawQuery)
 
 	cfg := rc.runConfig
 	stepCommitter := s.newAgentStepCommitter(ctx, req, rc)
@@ -885,7 +886,7 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (ChatResponse, erro
 			return ChatResponse{}, err
 		}
 		if result.Usage != nil {
-			go s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
+			s.maybeCompact(context.WithoutCancel(ctx), req, rc, result.Usage.InputTokens)
 		}
 	}
 
@@ -941,6 +942,9 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 
 	chatModel, provider, err := s.selectChatModel(ctx, req, botSettings, p.SessionPrefModelID)
 	if err != nil {
+		if errors.Is(err, errChatModelNotConfigured) {
+			err = apperror.Wrap(apperror.CodeAgentChatModelNotConfigured, err, nil)
+		}
 		return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, err
 	}
 

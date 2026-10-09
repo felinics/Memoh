@@ -35,9 +35,9 @@ func (h *ChannelHandler) Register(e *echo.Echo) {
 // @Tags channel
 // @Param platform path string true "Channel platform"
 // @Success 200 {object} channel.ChannelIdentityBinding
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/me/channels/{platform} [get].
 func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -65,8 +65,8 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 // @Param platform path string true "Channel platform"
 // @Param payload body channel.UpsertChannelIdentityConfigRequest true "Channel user config payload"
 // @Success 200 {object} channel.ChannelIdentityBinding
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/me/channels/{platform} [put].
 func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -79,7 +79,7 @@ func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	}
 	var req channel.UpsertChannelIdentityConfigRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Config == nil {
 		req.Config = map[string]any{}
@@ -107,7 +107,7 @@ type ChannelMeta struct {
 // @Description List channel meta information including capabilities and schemas
 // @Tags channel
 // @Success 200 {array} ChannelMeta
-// @Failure 500 {object} apperror.Problem
+// @Failure 500 {object} server.Problem
 // @Router /channels [get].
 func (h *ChannelHandler) ListChannels(c echo.Context) error {
 	descs := h.registry.ListDescriptors()
@@ -136,8 +136,8 @@ func (h *ChannelHandler) ListChannels(c echo.Context) error {
 // @Tags channel
 // @Param platform path string true "Channel platform"
 // @Success 200 {object} ChannelMeta
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /channels/{platform} [get].
 func (h *ChannelHandler) GetChannel(c echo.Context) error {
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))

@@ -3,13 +3,17 @@ package workspace
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"strings"
+	"syscall"
 
 	"github.com/felinics/memoh/internal/botworkspace"
 	"github.com/felinics/memoh/internal/config"
 	ctr "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // The Manager is the botworkspace.Backend for every native container runtime.
@@ -59,7 +63,6 @@ func (m *Manager) provisionWorkspace(ctx context.Context, botID, imageOverride s
 	if image == "" {
 		resolved, err := m.resolveWorkspaceImage(ctx, botID)
 		if err != nil {
-			m.logger.ErrorContext(ctx, "provision: resolve image failed", slog.String("bot_id", botID), slog.Any("error", err))
 			return stepError(botworkspace.PhaseImagePrepare, err, true)
 		}
 		image = resolved
@@ -76,10 +79,10 @@ func (m *Manager) provisionWorkspace(ctx context.Context, botID, imageOverride s
 		},
 	})
 	if err != nil {
-		m.logger.ErrorContext(ctx, "provision: prepare image failed", slog.String("bot_id", botID), slog.String("image", image), slog.Any("error", err))
 		// A registry that says the image does not exist will keep saying so;
-		// only transport-level failures are worth retrying.
-		return stepError(botworkspace.PhaseImagePrepare, err, isTransient(err))
+		// only transport-level failures are worth retrying. The wrap adds the
+		// image to the record and leaves the persisted message as it is.
+		return stepError(botworkspace.PhaseImagePrepare, errs.Wrap(err, "", slog.String("image", image)), isTransient(err))
 	}
 	if strings.TrimSpace(result.ImageRef) != "" {
 		image = result.ImageRef
@@ -102,20 +105,18 @@ func (m *Manager) provisionWorkspace(ctx context.Context, botID, imageOverride s
 		emit(ContainerSetupEvent{Type: "restoring"})
 	}
 	if err := m.StartWithResolvedConfig(ctx, botID, image, gpu); err != nil {
-		m.logger.ErrorContext(ctx, "provision: start failed", slog.String("bot_id", botID), slog.Any("error", err))
 		return stepError(botworkspace.PhaseStart, err, true)
 	}
 	if err := m.WaitForWorkspaceReady(ctx, botID); err != nil {
-		m.logger.ErrorContext(ctx, "provision: bridge not ready", slog.String("bot_id", botID), slog.Any("error", err))
 		return stepError(botworkspace.PhaseBridge, err, true)
 	}
 	if err := m.InitializeNativeWorkspace(ctx, botID); err != nil {
-		m.logger.ErrorContext(ctx, "provision: workspace initialization failed", slog.String("bot_id", botID), slog.Any("error", err))
 		// A template that cannot be written will not fix itself.
 		return stepError(botworkspace.PhaseBootstrap, err, !errors.Is(err, ErrWorkspaceTemplateBootstrapFailed))
 	}
 	if err := m.RememberWorkspaceImage(ctx, botID, image); err != nil {
-		m.logger.WarnContext(ctx, "provision: remember workspace image failed", slog.String("bot_id", botID), slog.String("image", image), slog.Any("error", err))
+		record := errlog.Event(ctx, "workspace.provision", errs.Wrap(err, "remember workspace image", slog.String("image", image)), errlog.Options{})
+		m.logger.LogAttrs(ctx, record.Level, "provision: remember workspace image failed", append([]slog.Attr{slog.String("bot_id", botID)}, record.Attrs()...)...)
 	}
 
 	containerID := m.resolveContainerID(ctx, botID)
@@ -151,26 +152,28 @@ func stepError(phase string, err error, retryable bool) error {
 }
 
 // isTransient classifies runtime errors that a later attempt may not see
-// again: timeouts, network errors, and control-plane conflicts such as an
-// operation still in flight on the Cloud builtin backend.
+// again: timeouts, network errors, an unreachable runtime, and control-plane
+// conflicts such as an operation still in flight on the Cloud builtin backend.
 func isTransient(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, ctr.ErrConflict) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	for _, marker := range []string{"timeout", "timed out", "connection refused", "connection reset", "temporarily unavailable", "eof", "no such host", "tls handshake"} {
-		if strings.Contains(msg, marker) {
+	for _, target := range []error{
+		context.DeadlineExceeded,
+		context.Canceled,
+		ctr.ErrConflict,
+		ctr.ErrUnavailable,
+		io.EOF,
+		io.ErrUnexpectedEOF,
+		syscall.ECONNREFUSED,
+		syscall.ECONNRESET,
+	} {
+		if errors.Is(err, target) {
 			return true
 		}
 	}
-	return false
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 func toProgressEvent(ev ContainerSetupEvent) botworkspace.ProgressEvent {

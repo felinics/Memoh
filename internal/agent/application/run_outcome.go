@@ -30,13 +30,21 @@ func classifyRuntimeFailure(cause error) apperror.Code {
 	return apperror.CodeRuntimePromptFailed
 }
 
+// hasCatalogCode reports whether err carries an apperror whose code is in the
+// catalog.
+func hasCatalogCode(err error) bool {
+	_, ok := apperror.Lookup(apperror.CodeOf(err))
+	return ok
+}
+
 // publicFailureCode is the catalogued code a cause carries, or the code
 // ExternalAgentError gives it. It is empty when the cause has neither.
 func publicFailureCode(cause error) apperror.Code {
-	if public, ok := apperror.PublicFrom(ExternalAgentError(cause), ""); ok {
-		return public.Code
+	public := ExternalAgentError(cause)
+	if !hasCatalogCode(public) {
+		return ""
 	}
-	return ""
+	return apperror.CodeOf(public)
 }
 
 // outcomeRecorder holds what a stream loop has learned about how its run ended.

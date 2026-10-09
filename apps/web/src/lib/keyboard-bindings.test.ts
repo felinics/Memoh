@@ -1,64 +1,50 @@
 import { describe, expect, it } from 'vitest'
+import en from '@/i18n/locales/en.json'
+import ja from '@/i18n/locales/ja.json'
+import zh from '@/i18n/locales/zh.json'
 import { appKeyboardCommands } from './keyboard-commands'
 import {
   keyboardBindings,
   toElectronAccelerator,
   acceleratorForCommand,
   selectWebBindings,
-  selectDesktopKeydownBindings,
-  resolveBindingKey,
+  resolveKeyboardBinding,
   detectPlatform,
   RESERVED_BROWSER_COMBOS,
   type KeyboardBinding,
 } from './keyboard-bindings'
 
 describe('keyboard bindings table', () => {
-  it('declares the close-tab and save bindings as the single source of truth', () => {
-    const close = keyboardBindings.find(b => b.command === appKeyboardCommands.closeCurrentWorkspaceTab)
-    const save = keyboardBindings.find(b => b.command === appKeyboardCommands.saveActiveFile)
-
-    expect(close).toMatchObject({ key: 'w', mod: true, desktop: 'menu', browser: 'passthrough', scope: 'global' })
-    expect(save).toMatchObject({ key: 's', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
-  })
-
-  it('migrates the previously hardcoded sidebar toggle into the table', () => {
-    const toggle = keyboardBindings.find(b => b.command === appKeyboardCommands.toggleSidebar)
-    expect(toggle).toMatchObject({ key: 'b', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
-  })
-
-  it('declares Mod+K as the open-settings global shortcut', () => {
-    const open = keyboardBindings.find(b => b.command === appKeyboardCommands.openSettings)
-    expect(open).toMatchObject({ key: 'k', mod: true, desktop: 'keydown', browser: 'intercept', scope: 'global' })
-  })
-
-  it('migrates the lightbox keys with a scoped lifetime (not global)', () => {
-    const lightboxCommands = [
-      appKeyboardCommands.closeMediaLightbox,
-      appKeyboardCommands.mediaLightboxPrev,
-      appKeyboardCommands.mediaLightboxNext,
-    ]
-    for (const command of lightboxCommands) {
-      const binding = keyboardBindings.find(b => b.command === command)
-      expect(binding, command).toBeDefined()
-      expect(binding?.scope).toBe('mediaLightbox')
-      expect(binding?.mod).toBeUndefined()
+  it('gives every settings row its own translated label and description', () => {
+    const keys = keyboardBindings.map(b => b.i18nKey)
+    expect(new Set(keys).size).toBe(keys.length)
+    for (const [locale, messages] of Object.entries({ en, zh, ja })) {
+      for (const key of keys) {
+        const command = (messages.settings.keyboard.commands as Record<string, { label?: string, description?: string }>)[key]
+        expect(command?.label, `${locale} ${key}`).toBeTruthy()
+        expect(command?.description, `${locale} ${key}`).toBeTruthy()
+      }
     }
   })
 
-  it('every binding declares an i18nKey unique within the table', () => {
-    const keys = keyboardBindings.map(b => b.i18nKey)
-    expect(keys.every(Boolean)).toBe(true)
-    expect(new Set(keys).size).toBe(keys.length)
+  it('gives every app command exactly one discoverable binding', () => {
+    for (const command of Object.values(appKeyboardCommands)) {
+      expect(keyboardBindings.filter(binding => binding.command === command), command).toHaveLength(1)
+    }
   })
 })
 
 describe('toElectronAccelerator', () => {
   it('maps mod to CmdOrCtrl so one string aligns across platforms', () => {
-    expect(toElectronAccelerator({ command: appKeyboardCommands.closeCurrentWorkspaceTab, key: 'w', mod: true, desktop: 'menu', browser: 'passthrough' })).toBe('CmdOrCtrl+W')
+    expect(toElectronAccelerator({ key: 'w', mod: true })).toBe('CmdOrCtrl+W')
+  })
+
+  it('encodes a literal plus key for the native accelerator parser', () => {
+    expect(toElectronAccelerator({ key: '+', mod: true, shift: true })).toBe('CmdOrCtrl+Shift+Plus')
   })
 
   it('orders modifiers CmdOrCtrl, Alt, Shift and uppercases single-char keys', () => {
-    const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, desktop: 'keydown', browser: 'intercept', scope: 'global', i18nKey: 'saveActiveFile' }
+    const binding: KeyboardBinding = { command: appKeyboardCommands.saveActiveFile, key: 'k', mod: true, alt: true, shift: true, browser: 'intercept', scope: 'global', i18nKey: 'saveActiveFile' }
     expect(toElectronAccelerator(binding)).toBe('CmdOrCtrl+Alt+Shift+K')
   })
 
@@ -95,34 +81,42 @@ describe('selectWebBindings', () => {
   })
 })
 
-describe('selectDesktopKeydownBindings', () => {
-  it('keeps keydown bindings and drops menu ones (avoids double-firing with menu accelerators)', () => {
-    const commands = selectDesktopKeydownBindings(keyboardBindings).map(b => b.command)
-    expect(commands).toContain(appKeyboardCommands.saveActiveFile)
-    expect(commands).not.toContain(appKeyboardCommands.closeCurrentWorkspaceTab)
+describe('resolveKeyboardBinding', () => {
+  const base = { command: appKeyboardCommands.saveActiveFile, key: 's', mod: true }
+
+  it('keeps the base chord when no platform diverges', () => {
+    for (const platform of ['mac', 'win', 'linux'] as const) {
+      expect(resolveKeyboardBinding(base, platform)).toMatchObject({ key: 's', mod: true })
+    }
+  })
+
+  it('replaces the whole chord on a platform that declares its own', () => {
+    const binding = { ...base, key: 'n', mod: undefined, alt: true, shift: true, mac: { key: 'n', mod: true, alt: true } }
+    expect(resolveKeyboardBinding(binding, 'mac')).toMatchObject({ key: 'n', mod: true, alt: true, shift: undefined, mac: undefined })
+    expect(resolveKeyboardBinding(binding, 'win')).toMatchObject({ key: 'n', mod: undefined, alt: true, shift: true })
   })
 })
 
-describe('resolveBindingKey', () => {
-  const base = { command: appKeyboardCommands.saveActiveFile, key: 's' }
-
-  it('returns the base key when no per-platform override is declared', () => {
-    expect(resolveBindingKey(base, 'mac')).toBe('s')
-    expect(resolveBindingKey(base, 'win')).toBe('s')
-    expect(resolveBindingKey(base, 'linux')).toBe('s')
+describe('platform defaults', () => {
+  it.each(['win', 'linux'] as const)('never uses Ctrl+Alt on %s, which Windows reports for AltGr', (platform) => {
+    const altGr = keyboardBindings.map(binding => resolveKeyboardBinding(binding, platform)).filter(binding => binding.mod && binding.alt)
+    expect(altGr).toEqual([])
   })
 
-  it('returns the platform-specific override when declared', () => {
-    const binding = { key: 'w', mac: 'w', win: 'F4', linux: 'w' }
-    expect(resolveBindingKey(binding, 'mac')).toBe('w')
-    expect(resolveBindingKey(binding, 'win')).toBe('F4')
-    expect(resolveBindingKey(binding, 'linux')).toBe('w')
+  it.each(['win', 'linux'] as const)('leaves the file editor its own Alt+Shift keys on %s', (platform) => {
+    // Monaco 0.52 binds Shift+Alt+arrows (expand selection, copy line), A, F, I, period and F8.
+    const editorKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'a', 'f', 'i', '.', 'F8']
+    const taken = keyboardBindings.map(binding => resolveKeyboardBinding(binding, platform))
+      .filter(binding => binding.alt && binding.shift && !binding.mod && editorKeys.includes(binding.key))
+    expect(taken).toEqual([])
   })
 
-  it('falls back to the base key when only some platforms are overridden', () => {
-    const binding = { key: 'k', win: 'j' }
-    expect(resolveBindingKey(binding, 'mac')).toBe('k')
-    expect(resolveBindingKey(binding, 'win')).toBe('j')
+  it('keeps the workspace defaults on Command+Option on macOS', () => {
+    const workbench = keyboardBindings.filter(binding => binding.alt && binding.shift)
+    expect(workbench).toHaveLength(12)
+    for (const binding of workbench) {
+      expect(resolveKeyboardBinding(binding, 'mac'), binding.command).toMatchObject({ mod: true, alt: true, shift: undefined })
+    }
   })
 })
 
@@ -144,7 +138,7 @@ describe('detectPlatform', () => {
   })
 })
 
-describe('menu bindings do not use per-platform key overrides', () => {
+describe('menu bindings do not use per-platform chords', () => {
   // toElectronAccelerator emits CmdOrCtrl+<base key>; Electron maps the mod per
   // platform natively. A menu binding with divergent per-platform keys would not
   // be reflected in that single accelerator, so it is disallowed (flagged here
@@ -160,7 +154,7 @@ describe('menu bindings do not use per-platform key overrides', () => {
 describe('reserved browser combos invariant', () => {
   it('never marks an OS/browser-reserved combo as browser:intercept', () => {
     const offenders = keyboardBindings.filter(
-      b => b.mod === true && b.browser === 'intercept' && RESERVED_BROWSER_COMBOS.has(b.key.toLowerCase()),
+      b => b.mod === true && !b.alt && !b.shift && b.browser === 'intercept' && RESERVED_BROWSER_COMBOS.has(b.key.toLowerCase()),
     )
     expect(offenders).toEqual([])
   })

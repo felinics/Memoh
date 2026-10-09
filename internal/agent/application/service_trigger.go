@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/sessionmode"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/schedule"
 )
 
@@ -63,14 +65,21 @@ func (s *Service) TriggerSchedule(ctx context.Context, botID string, payload sch
 			},
 		}
 	}
-	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, botID, payload.SessionID, scheduleInvocationID(payload), submission, viewFn)
+	runCtx, admission, finish, err := s.admitTriggeredRun(ctx, sessionmode.Schedule, botID, payload.SessionID, scheduleInvocationID(payload), submission, viewFn)
+	if errors.Is(err, sessionruntime.ErrSessionBusy) {
+		// A fire that cannot take the thread's slot has no value once the next
+		// one is due, so it is dropped rather than retried here.
+		return schedule.TriggerResult{}, fmt.Errorf("%w: %w", schedule.ErrSessionBusy, err)
+	}
 	if err != nil {
-		// Including a busy answer: a fire that cannot take the thread's slot has
-		// no value once the next one is due, so it is reported and dropped rather
-		// than retried here.
 		return schedule.TriggerResult{}, err
 	}
-	defer func() { finish(RunOutcome{Cause: err}) }()
+	defer func() {
+		finish(RunOutcome{Cause: err})
+		// The run's own result record carries this failure at its level; the
+		// fire that returns it does not record it again.
+		err = errs.Recorded(err)
+	}()
 	ctx = runCtx
 
 	// Runtime sessions (ACP, codex, claude-code) must never silently degrade

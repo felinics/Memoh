@@ -213,7 +213,7 @@ func (*Adapter) Connect(_ context.Context, cfg channel.ChannelConfig, _ channel.
 	return channel.NewConnection(cfg, func(context.Context) error { return nil }), nil
 }
 
-func (*Adapter) httpError(status int, message string) error {
+func (*Adapter) httpError(status int, message string) *echo.HTTPError {
 	if strings.TrimSpace(message) == "" {
 		message = http.StatusText(status)
 	}

@@ -1298,6 +1298,7 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
+import { useComposerKeyboardFocus } from '../composables/useComposerKeyboardFocus'
 import { useComposerPair } from '../composables/useComposerPair'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
@@ -1311,7 +1312,7 @@ import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
 import { useAgentModelCatalog } from '@/composables/useAgentModelCatalog'
 import { useVirtualKeyboard } from '@/composables/useVirtualKeyboard'
-import { findMissingRequiredManagedField, readACPAgentConfig } from '@/utils/acp'
+import { isACPAgentConfigured } from '@/utils/acp'
 import { BOT_AGENT_RUNTIME_ACP, BOT_AGENT_RUNTIME_CLAUDE_CODE, BOT_AGENT_RUNTIME_CODEX, botAgentIcon, botAgentName, botAgentProvider, isDirectBotAgentConfigured, normalizeBotAgentRuntime } from '@/utils/bot-agent'
 import { UserFacingError, isApiErrorCode, parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 import { hasBotPermission } from '@/utils/bot-permissions'
@@ -1689,7 +1690,6 @@ interface ForkSourceMeta {
 }
 
 const acpProfiles = computed<AcpprofilePublicProfile[]>(() => acpProfileData.value?.items ?? [])
-const currentBotMetadata = computed(() => currentBot.value?.metadata as Record<string, unknown> | undefined)
 const botAgents = computed<BotagentsBotAgent[]>(() => botAgentData.value?.items ?? [])
 const enabledBotAgents = computed(() => botAgents.value.filter(agent => agent.enabled !== false && !!agent.id))
 
@@ -2809,8 +2809,7 @@ const defaultExternalAgentAvailability = computed<DefaultExternalAgentAvailabili
     }
     const profile = acpProfiles.value.find(item => normalizeAgentID(item.id) === agentId)
     if (!profile) return { input: null, messageKey: 'chat.defaultAgentUnavailable', loading: false }
-    const config = readACPAgentConfig(currentBotMetadata.value, agentId)
-    if (config.setupModeSet && findMissingRequiredManagedField(profile, config.managed, config.setupMode)) {
+    if (!isACPAgentConfigured(agent, profile)) {
       return { input: null, messageKey: 'chat.defaultAgentNotConfigured', loading: false }
     }
   }
@@ -3329,6 +3328,21 @@ const inactiveSlotVisible = computed(() => !sendButtonVisible.value)
 type VoiceInputState = 'idle' | 'recording' | 'transcribing'
 
 const voiceInputState = ref<VoiceInputState>('idle')
+
+useComposerKeyboardFocus({
+  textarea: textareaEl,
+  enabled: () => isActive.value && isVisible.value,
+  available: () => (router.currentRoute.value.name === 'home' || router.currentRoute.value.name === 'bot')
+    && !!currentBotId.value && !activeChatReadOnly.value
+    && voiceInputState.value === 'idle',
+  ready: () => !loadingMessages.value && !composerPlacementPending.value,
+  owner: () => `${paneTarget.value.botId}:${paneTarget.value.viewId}:${paneTarget.value.sessionId ?? ''}`,
+  request: () => workspaceTabs.pendingChatInputFocus?.panelId === props.tabId
+    && workspaceTabs.pendingChatInputFocus.botId === paneTarget.value.botId
+    && workspaceTabs.pendingChatInputFocus.sessionId === paneTarget.value.sessionId,
+  consumeRequest: () => { workspaceTabs.pendingChatInputFocus = null },
+})
+
 const voiceInputLabel = computed(() => {
   if (voiceInputState.value === 'recording') return t('chat.voiceInput.stop')
   if (voiceInputState.value === 'transcribing') return t('chat.voiceInput.transcribing')

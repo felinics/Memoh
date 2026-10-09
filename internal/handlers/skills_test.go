@@ -228,6 +228,27 @@ func TestSkillsActionsAPIAdoptDisableEnableAndDeleteManaged(t *testing.T) {
 	}
 }
 
+// A Skill action on a Skill that is not discovered answers 404, and an action
+// the Skill layout does not accept answers 400.
+func TestSkillsActionsAPITranslatesSkillErrors(t *testing.T) {
+	env := newSkillsTestEnv(t)
+	missing := path.Join("/data/.agents/skills", "missing", "SKILL.md")
+	for _, tc := range []struct {
+		name string
+		req  SkillsActionRequest
+		want int
+	}{
+		{"missing skill", SkillsActionRequest{Action: skillset.ActionDisable, TargetPath: missing}, http.StatusNotFound},
+		{"unknown action", SkillsActionRequest{Action: "rename", TargetPath: missing}, http.StatusBadRequest},
+	} {
+		_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills/actions", tc.req, env.handler.ApplySkillAction)
+		var httpErr *echo.HTTPError
+		if !errors.As(err, &httpErr) || httpErr.Code != tc.want {
+			t.Fatalf("%s: error = %v, want %d", tc.name, err, tc.want)
+		}
+	}
+}
+
 func TestDeleteSkillsAPIReportsMissingManagedSkill(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	env.writeSkillFile(t, path.Join("/data/.agents/skills", "alpha", "SKILL.md"), managedSkillRaw("alpha", "Compat Alpha"))

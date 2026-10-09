@@ -18,6 +18,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/errs"
+	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
 )
 
@@ -227,5 +228,81 @@ func TestPermissionQuickActionRecordsAnUnclassifiedCause(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), `"msg":"permission mode change failed"`) || !strings.Contains(logs.String(), "SECRET session store unreachable") {
 		t.Fatalf("records = %s, want the cause recorded", logs.String())
+	}
+}
+
+// A deprecated message_id that does not resolve is refused as not found. The
+// lookup error is the 404's internal error, so the request's one result record
+// carries it and the frame does not.
+func TestResolveWSTargetTurnIDFailureReachesTheResultRecord(t *testing.T) {
+	t.Parallel()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	handler := &LocalChannelHandler{logger: logger, agentService: &application.Service{}}
+
+	_, err := handler.resolveWSTargetTurnID(context.Background(), "session-1", "", "message-1")
+	if err == nil {
+		t.Fatal("resolveWSTargetTurnID succeeded, want not found")
+	}
+	frame := decodeWSTestEvent(t, func(writer *wsWriter) {
+		failWSRequest(context.Background(), logger, writer, "bot-1", wsTurn("invocation-1", "session-1"), "ws.retry_message", err)
+	})
+	if frame["code"] != "http.not_found" {
+		t.Fatalf("frame = %#v, want http.not_found", frame)
+	}
+	if encoded, _ := json.Marshal(frame); strings.Contains(string(encoded), "message service") {
+		t.Fatalf("frame carries the cause: %s", encoded)
+	}
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("records = %q, want one result record", lines)
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["msg"] != "ws request" || record["fault"] != "client" {
+		t.Fatalf("record = %v, want a client ws request record", record)
+	}
+	if got, _ := record["error"].(string); !strings.Contains(got, "message service not configured") {
+		t.Fatalf("record error = %#v, want the lookup cause", record["error"])
+	}
+}
+
+type failingSkillResolver struct{ testRuntimeSkillResolver }
+
+func (failingSkillResolver) ListSafeSkillCatalog(context.Context, string) ([]skillset.SafeCatalogItem, error) {
+	return nil, errors.New("SECRET skill store unreachable")
+}
+
+// A skill catalog failure without a slash code is answered with the generic
+// skill code. The slash error carries no text of the cause, and the cause is
+// recorded once as an event.
+func TestSkillListFailureRecordsTheCauseAndCarriesOnlyTheCode(t *testing.T) {
+	t.Parallel()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	handler := &LocalChannelHandler{logger: logger, skillResolver: failingSkillResolver{}}
+
+	result, slashErr := handler.executeWebQuickAction(context.Background(), "bot-1", "skill.list", true, webQuickActionContext{})
+	if result != nil || slashErr == nil {
+		t.Fatalf("executeWebQuickAction = %v, %v, want a slash error", result, slashErr)
+	}
+	if slashErr.Code != slash.CodeRequestedSkillNotRuntimeUsable || strings.Contains(slashErr.Error(), "SECRET") {
+		t.Fatalf("slash error = %#v, want the generic code without the cause", slashErr)
+	}
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("records = %q, want one event record", lines)
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record["msg"] != "skill catalog failed" || record["level"] != "WARN" || record["bot_id"] != "bot-1" {
+		t.Fatalf("record = %v, want a WARN skill catalog event", record)
+	}
+	if got, _ := record["error"].(string); !strings.Contains(got, "SECRET") {
+		t.Fatalf("record error = %#v, want the cause", record["error"])
 	}
 }

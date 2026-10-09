@@ -36,9 +36,9 @@ const sseHeartbeatInterval = 20 * time.Second
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/sessions/events [get].
 func (h *MessageHandler) StreamSessionsActivityEvents(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)

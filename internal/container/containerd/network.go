@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,8 @@ import (
 	"strings"
 
 	gocni "github.com/containerd/go-cni"
+	"github.com/containernetworking/cni/libcni"
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 )
 
 func (s *DefaultService) setupNetwork(ctx context.Context, req NetworkRequest) (string, error) {
@@ -145,34 +148,40 @@ func networkNamespacePath(pid uint32) string {
 	return filepath.Join("/proc", strconv.FormatUint(uint64(pid), 10), "ns", "net")
 }
 
-func isDuplicateAllocationError(err error) bool {
-	if err == nil {
-		return false
+// The CNI plugins report setup failures only as a *types.Error whose Msg is
+// free text, so the setup retry conditions below match that text. They read
+// only the plugin's message, never the text libcni and go-cni wrap around it.
+func cniPluginMessage(err error) (string, bool) {
+	var pluginErr *cnitypes.Error
+	if !errors.As(err, &pluginErr) {
+		return "", false
 	}
-	return strings.Contains(err.Error(), "duplicate allocation")
+	return pluginErr.Msg, true
+}
+
+// isDuplicateAllocationError returns true if host-local IPAM refused an
+// address it still records for this container.
+func isDuplicateAllocationError(err error) bool {
+	msg, ok := cniPluginMessage(err)
+	return ok && strings.Contains(msg, "duplicate allocation")
 }
 
 // isVethExistsError returns true if the CNI setup failed because veth devices
 // already exist (e.g. after container restart with stale network state).
 func isVethExistsError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "already exists")
+	msg, ok := cniPluginMessage(err)
+	return ok && strings.Contains(msg, "already exists")
 }
 
 // isBridgeMACError returns true if the CNI bridge plugin failed because the
 // stale cni0 bridge has a zeroed MAC address (common after container restart).
 func isBridgeMACError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "set bridge") && strings.Contains(msg, "mac")
+	msg, ok := cniPluginMessage(err)
+	return ok && strings.Contains(msg, "set bridge") && strings.Contains(msg, "mac")
 }
 
 // isCNICheckUnsupported returns true when the CNI configuration version
 // predates the CHECK command (requires spec >= 0.4.0).
 func isCNICheckUnsupported(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "does not support the CHECK command")
+	return errors.Is(err, libcni.ErrorCheckNotSupp)
 }

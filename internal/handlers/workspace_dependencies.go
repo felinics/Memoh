@@ -16,7 +16,9 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
+	"github.com/felinics/memoh/internal/server"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 	"github.com/felinics/memoh/internal/workspacedeps"
 	"github.com/felinics/memoh/internal/workspacedeps/catalog"
@@ -156,7 +158,7 @@ type WorkspaceDependencyCatalogResponse struct {
 // @Tags containerd
 // @Produce json
 // @Success 200 {object} WorkspaceDependencyCatalogResponse
-// @Failure 503 {object} apperror.Problem
+// @Failure 503 {object} server.Problem
 // @Router /workspace-dependencies [get].
 func (h *ContainerdHandler) ListWorkspaceDependencyCatalog(c echo.Context) error {
 	if h.workspaceDeps == nil {
@@ -282,6 +284,7 @@ type WorkspaceDependencyStreamEvent struct {
 	Args               map[string]string `json:"args,omitempty"`
 	Detail             string            `json:"detail,omitempty"`
 	Message            string            `json:"message,omitempty"`
+	Fault              apperror.Fault    `json:"fault,omitempty"`
 	RequestID          string            `json:"request_id,omitempty"`
 }
 
@@ -307,15 +310,6 @@ type workspaceDependencyDoneEvent struct {
 	Entrypoints        map[string]string `json:"entrypoints,omitempty"`
 }
 
-type workspaceDependencyErrorEvent struct {
-	Type      string            `json:"type"`
-	Code      string            `json:"code"`
-	Args      map[string]string `json:"args"`
-	Detail    string            `json:"detail,omitempty"`
-	Message   string            `json:"message"`
-	RequestID string            `json:"request_id,omitempty"`
-}
-
 // ListWorkspaceDependencies godoc
 // @Summary List workspace dependencies
 // @Description Every catalog dependency (image-provided runtimes, managed agent CLIs and tools) reconciled with its installation record and, when the workspace is running, with what is actually installed.
@@ -323,11 +317,11 @@ type workspaceDependencyErrorEvent struct {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} WorkspaceDependencyListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Param refresh query bool false "Refresh definitions and workspace discovery"
 // @Router /bots/{bot_id}/dependencies [get].
 func (h *ContainerdHandler) ListWorkspaceDependencies(c echo.Context) error {
@@ -355,11 +349,11 @@ func (h *ContainerdHandler) ListWorkspaceDependencies(c echo.Context) error {
 // @Produce json
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {object} WorkspaceDependencyListResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/dependencies/check-updates [post].
 func (h *ContainerdHandler) CheckWorkspaceDependencyUpdates(c echo.Context) error {
 	botID, svc, err := h.workspaceDependencyRequest(c)
@@ -383,11 +377,11 @@ func (h *ContainerdHandler) CheckWorkspaceDependencyUpdates(c echo.Context) erro
 // @Param bot_id path string true "Bot ID"
 // @Param payload body WorkspaceDependencyPreflightRequest true "Dependencies to check"
 // @Success 200 {object} WorkspaceDependencyPreflightResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/dependencies/preflight [post].
 func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error {
 	botID, svc, err := h.workspaceDependencyRequest(c)
@@ -437,11 +431,11 @@ func (h *ContainerdHandler) PreflightWorkspaceDependencies(c echo.Context) error
 // @Param dep_id path string true "Dependency ID"
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/dependencies/{dep_id}/install [post].
 func (h *ContainerdHandler) InstallWorkspaceDependency(c echo.Context) error {
 	return h.streamWorkspaceDependencyOperation(c, catalog.ActionInstall, workspaceDependencyService.Install)
@@ -457,11 +451,11 @@ func (h *ContainerdHandler) InstallWorkspaceDependency(c echo.Context) error {
 // @Param dep_id path string true "Dependency ID"
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to update to (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/dependencies/{dep_id}/update [post].
 func (h *ContainerdHandler) UpdateWorkspaceDependency(c echo.Context) error {
 	return h.streamWorkspaceDependencyOperation(c, catalog.ActionUpdate, workspaceDependencyService.Update)
@@ -477,11 +471,11 @@ func (h *ContainerdHandler) UpdateWorkspaceDependency(c echo.Context) error {
 // @Param dep_id path string true "Dependency ID"
 // @Param payload body WorkspaceDependencyInstallRequest false "Version to install (optional)"
 // @Success 200 {object} WorkspaceDependencyStreamEvent "SSE stream of operation events"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/dependencies/{dep_id}/reinstall [post].
 func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 	return h.streamWorkspaceDependencyOperation(c, catalog.ActionReinstall, workspaceDependencyService.Reinstall)
@@ -495,13 +489,13 @@ func (h *ContainerdHandler) ReinstallWorkspaceDependency(c echo.Context) error {
 // @Param bot_id path string true "Bot ID"
 // @Param dep_id path string true "Dependency ID"
 // @Success 200 {object} WorkspaceDependencyOperationResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/dependencies/{dep_id}/rollback [post].
 func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 	botID, svc, err := h.workspaceDependencyRequest(c)
@@ -536,11 +530,11 @@ func (h *ContainerdHandler) RollbackWorkspaceDependency(c echo.Context) error {
 // @Param dep_id path string true "Dependency ID"
 // @Param action query string false "Action" Enums(install, update, remove, reinstall, rollback) default(install)
 // @Success 200 {object} WorkspaceDependencyScriptResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 422 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 422 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Param definition_revision query string false "Keep a previously prepared definition revision"
 // @Router /bots/{bot_id}/dependencies/{dep_id}/script [get].
 func (h *ContainerdHandler) GetWorkspaceDependencyScript(c echo.Context) error {
@@ -654,24 +648,14 @@ func (h *ContainerdHandler) streamWorkspaceDependencyOperation(c echo.Context, a
 		result, err = run(svc, ctx, botID, depID, version, sink)
 	}
 	if err != nil {
-		requestID := httpx.RequestID(c)
-		attrs := []any{
-			slog.String("bot_id", botID),
-			slog.String("dependency_id", depID),
-			slog.String("action", string(action)),
-			slog.String("request_id", requestID),
-			slog.Any("error", err),
-		}
-		switch {
-		case errors.Is(err, workspacedeps.ErrBusy):
-			// Operations never queue: a second request for the
-			// same dependency is refused by design, not failed.
-			h.logger.InfoContext(c.Request().Context(), "workspace dependency operation refused: another operation is in progress", attrs...)
-		default:
-			h.logger.WarnContext(c.Request().Context(), "workspace dependency operation failed", attrs...)
-		}
-		stream.send(newWorkspaceDependencyErrorEvent(err, requestID))
-		return nil
+		// The error frame is the answer and the returned error is the
+		// request's result record. A busy dependency is a client fault:
+		// operations never queue, so a second request for the same dependency
+		// is refused by design, not failed.
+		frame, rendered := server.NewStreamError(c.Request().Context(), errs.Wrap(workspaceDependencyError(err), "workspace dependency operation",
+			slog.String("dependency_id", depID), slog.String("action", string(action))), httpx.RequestID(c))
+		stream.send(frame)
+		return rendered
 	}
 	stream.send(workspaceDependencyDoneEvent{Type: "done", Version: result.Version, Entrypoints: result.Entrypoints, DefinitionRevision: result.DefinitionRevision})
 	return nil
@@ -861,6 +845,8 @@ func workspaceDependencyError(err error) error {
 		return nil
 	case apperror.CodeOf(err) != "":
 		return err
+	case errors.Is(err, workspacedeps.ErrOperationUncertain):
+		return apperror.Wrap(apperror.CodeWorkspaceDependencyOperationUnknown, err, nil)
 	case errors.Is(err, workspacedeps.ErrInvalidVersion):
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyRequestInvalid, err, nil)
 	case errors.Is(err, workspacedeps.ErrCatalogUnavailable):
@@ -896,33 +882,6 @@ func workspaceDependencyError(err error) error {
 		return apperror.Wrap(apperror.CodeWorkspaceUnreachable, err, nil)
 	default:
 		return apperror.Wrap(apperror.CodeWorkspaceDependencyOperationFailed, err, nil)
-	}
-}
-
-// newWorkspaceDependencyErrorEvent projects only stable public Problem fields.
-func newWorkspaceDependencyErrorEvent(err error, requestID string) workspaceDependencyErrorEvent {
-	if errors.Is(err, workspacedeps.ErrOperationUncertain) {
-		return workspaceDependencyErrorEvent{Type: "error", Code: "workspace_dependency_operation_unknown", Args: map[string]string{}, Detail: "The operation result is not yet confirmed. Refresh dependencies to check its status.", Message: "The operation result is not yet confirmed.", RequestID: requestID}
-	}
-	mapped := workspaceDependencyError(err)
-	public, ok := apperror.PublicFrom(mapped, requestID)
-	if !ok {
-		return workspaceDependencyErrorEvent{
-			Type:      "error",
-			Code:      string(apperror.CodeWorkspaceDependencyOperationFailed),
-			Args:      map[string]string{},
-			Message:   "The dependency operation failed.",
-			RequestID: requestID,
-		}
-	}
-	message := public.Detail
-	return workspaceDependencyErrorEvent{
-		Type:      "error",
-		Code:      string(public.Code),
-		Args:      public.Args,
-		Detail:    public.Detail,
-		Message:   message,
-		RequestID: public.RequestID,
 	}
 }
 
@@ -969,8 +928,8 @@ var dependencyIconLimiter = rate.NewLimiter(50, 100)
 // @Produce image/svg+xml
 // @Param digest path string true "SHA-256 digest"
 // @Success 200 {file} binary
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
 // @Router /workspace-dependencies/icons/{digest} [get].
 func (h *ContainerdHandler) GetWorkspaceDependencyIcon(c echo.Context) error {
 	if !dependencyIconLimiter.Allow() {

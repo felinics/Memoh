@@ -186,9 +186,12 @@ type CommandEventResponse struct {
 	ActionID      string               `json:"action_id,omitempty"`
 	Terminal      bool                 `json:"terminal"`
 	Result        *CommandActionResult `json:"result,omitempty"`
-	// Code and Message describe a command_error; the client renders the code.
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
+	// Code, Args, Message and Fault describe a command_error, as the error
+	// event of a stream does; the client renders the code.
+	Code    string            `json:"code,omitempty"`
+	Args    map[string]string `json:"args,omitempty"`
+	Message string            `json:"message,omitempty"`
+	Fault   apperror.Fault    `json:"fault,omitempty"`
 }
 
 type CommandActionResult struct {
@@ -218,9 +221,9 @@ type CommandActionListItem struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body QuickActionExecuteRequest true "Quick action payload"
 // @Success 200 {object} CommandEventResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/quick-actions/execute [post].
 func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -233,7 +236,7 @@ func (h *LocalChannelHandler) ExecuteQuickAction(c echo.Context) error {
 	}
 	var req QuickActionExecuteRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	actionID := strings.TrimSpace(req.ActionID)
 	sessionID := strings.TrimSpace(req.SessionID)
@@ -354,8 +357,14 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 			code := slashErrorCode(err)
 			if code == "" {
 				code = slash.CodeRequestedSkillNotRuntimeUsable
+				// The generic code does not carry the cause, and the request is
+				// answered, so this is where the cause is recorded.
+				result := errlog.Event(ctx, "skill.list", err, errlog.Options{})
+				h.logger.LogAttrs(ctx, result.Level, "skill catalog failed", append([]slog.Attr{
+					slog.String("bot_id", botID),
+				}, result.Attrs()...)...)
 			}
-			slashErr := slash.Error{Code: code, Msg: err.Error()}
+			slashErr := slash.Error{Code: code}
 			return nil, &slashErr
 		}
 		items := make([]CommandActionListItem, 0, len(catalog))
@@ -628,6 +637,16 @@ func sendWSCommandError(writer *wsWriter, msg wsClientMessage, code string) {
 	writer.SendJSON(event)
 }
 
+// commandErrorEvent is the command_error event for a command that failed with
+// err: the public error the HTTP error handler would answer err with.
+func commandErrorEvent(ctx context.Context, msg wsClientMessage, actionID string, err error) CommandEventResponse {
+	frame, _ := server.NewStreamError(ctx, err, "")
+	event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID)
+	event.Type = "command_error"
+	event.Code, event.Args, event.Message, event.Fault = frame.Code, frame.Args, frame.Message, frame.Fault
+	return event
+}
+
 func sendWSCommandResult(writer *wsWriter, msg wsClientMessage, actionID string, result *CommandActionResult) {
 	event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID)
 	event.Type = "command_result"
@@ -669,17 +688,14 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 			_, err = h.agentService.EnqueueFollowUp(ctx, input)
 		}
 		err = queueAdmissionError(err)
+		if err != nil && apperror.CodeOf(err) == "" {
+			// A queue command that failed for any other reason was not admitted.
+			err = apperror.Wrap(apperror.CodeQueueAdmissionUnavailable, err, nil)
+		}
 	}
 	if err != nil {
-		public, ok := apperror.PublicFrom(err, "")
-		if !ok {
-			h.logger.ErrorContext(ctx, "web queue command failed", slog.Any("error", err))
-			public, _ = apperror.PublicFrom(apperror.New(apperror.CodeQueueAdmissionUnavailable, nil), "")
-		}
-		event := commandEvent(msg.InvocationID, msg.ComposerScope, msg.SessionID, actionID)
-		event.Type = "command_error"
-		event.Code, event.Message = string(public.Code), public.Detail
-		writer.SendJSON(event)
+		writer.SendJSON(commandErrorEvent(ctx, msg, actionID, err))
+		recordWSRequestFailure(ctx, h.logger, botID, wsTurn(msg.InvocationID, msg.SessionID), "ws.queue_command", err)
 		return
 	}
 	sendWSCommandResult(writer, msg, actionID, &CommandActionResult{Kind: "queue_accepted"})
@@ -692,9 +708,9 @@ func (h *LocalChannelHandler) executeWSQueueCommand(ctx context.Context, writer 
 // @Produce text/event-stream
 // @Param bot_id path string true "Bot ID"
 // @Success 200 {string} string "SSE stream"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/web/stream [get].
 func (h *LocalChannelHandler) StreamMessages(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -777,9 +793,9 @@ type LocalChannelMessageRequest struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body LocalChannelMessageRequest true "Message payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/web/messages [post].
 func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -809,7 +825,7 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	var req LocalChannelMessageRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
@@ -987,6 +1003,9 @@ type wsOutboundEvent struct {
 	Message   string `json:"message,omitempty"`
 	// Args are the public parameters of Code, for the client's copy of it.
 	Args map[string]string `json:"args,omitempty"`
+	// Fault is who an error frame's failure is attributed to, for a client
+	// that has no copy for Code.
+	Fault apperror.Fault `json:"fault,omitempty"`
 	// Control, ControlID and Applied describe the outcome of a control request.
 	// Applied is reported separately from Code because "the run was already over"
 	// is not a failure: the control was resolved, it simply changed nothing, and a
@@ -1231,8 +1250,9 @@ func (h *LocalChannelHandler) issueRuntimeOwnerBearerToken(runtimeOwnerAccountID
 // session" for a caller who cannot read the session at all, which is a
 // cross-session existence oracle even though no write follows it.
 //
-// The storage error is deliberately not returned: it names rows, and the
-// caller only needs to know that the id did not resolve. The cause is logged.
+// The storage error is not sent: it names rows, and the caller only needs to
+// know that the id did not resolve. It is the internal error of the 404, so the
+// request's result record reports it.
 // Both refusals are the client's: a missing id is a bad request and an id that
 // names no turn is not found.
 //
@@ -1248,11 +1268,7 @@ func (h *LocalChannelHandler) resolveWSTargetTurnID(ctx context.Context, session
 	}
 	resolved, err := h.agentService.ResolveTurnIDForMessage(ctx, sessionID, legacy)
 	if err != nil {
-		h.logger.WarnContext(ctx, "resolve deprecated message_id failed",
-			slog.String("session_id", sessionID),
-			slog.Any("error", err),
-		)
-		return "", echo.NewHTTPError(http.StatusNotFound, "message_id does not name a turn in this session")
+		return "", echo.NewHTTPError(http.StatusNotFound, "message_id does not name a turn in this session").WithInternal(err)
 	}
 	return resolved, nil
 }
@@ -1264,23 +1280,24 @@ func wsWorkspaceTargetError(err error) error {
 }
 
 // sendWSAgentError sends a stream error with its code and the code's catalog
-// detail. An error without a code is sent as runtime_run_failed, the code the
-// run records for it, and a code without a catalog entry carries the detail of
-// runtime_run_failed. The event's own text is never sent. A catalogued code
-// keeps the event's args that its catalog entry allows.
-func sendWSAgentError(writer *wsWriter, ref wsTurnRef, streamEvent native.StreamEvent) {
-	event := ref.event("error")
-	event.Code = strings.TrimSpace(streamEvent.Code)
-	if event.Code == "" {
-		event.Code = string(apperror.CodeRuntimeRunFailed)
+// detail and fault. An error without a code is sent as runtime_run_failed, the
+// code the run records for it, and a code without a catalog entry carries the
+// detail and fault of runtime_run_failed. The event's own text is never sent.
+// A catalogued code keeps the event's args that its catalog entry allows.
+func sendWSAgentError(ctx context.Context, writer *wsWriter, ref wsTurnRef, streamEvent native.StreamEvent) {
+	code := strings.TrimSpace(streamEvent.Code)
+	if code == "" {
+		code = string(apperror.CodeRuntimeRunFailed)
 	}
-	definition, ok := apperror.Lookup(apperror.Code(event.Code))
-	if !ok {
-		definition, _ = apperror.Lookup(apperror.CodeRuntimeRunFailed)
-	} else if public, _ := apperror.PublicFrom(apperror.New(apperror.Code(event.Code), streamEvent.Args), ""); len(public.Args) > 0 {
-		event.Args = public.Args
+	public := apperror.New(apperror.Code(code), streamEvent.Args)
+	if _, ok := apperror.Lookup(apperror.Code(code)); !ok {
+		public = apperror.New(apperror.CodeRuntimeRunFailed, nil)
 	}
-	event.Message = definition.Detail
+	// The run recorded the code, so the frame names it whatever has become of
+	// the stream's context.
+	frame, _ := server.NewStreamError(context.WithoutCancel(ctx), public, "")
+	event := wsErrorEvent(ref, frame)
+	event.Code = code
 	writer.SendJSON(event)
 }
 
@@ -1363,22 +1380,18 @@ func wsRunRejectionCode(err error) (apperror.Code, bool) {
 	}
 }
 
-func newWSAppErrorEvent(ref wsTurnRef, err error) (wsOutboundEvent, bool) {
-	public, ok := apperror.PublicFrom(err, "")
-	if !ok {
-		return wsOutboundEvent{}, false
-	}
+// wsErrorEvent is the error frame of frame for the turn ref names.
+func wsErrorEvent(ref wsTurnRef, frame server.StreamError) wsOutboundEvent {
 	event := ref.event("error")
-	event.Code = string(public.Code)
-	event.Args = public.Args
-	event.Message = public.Detail
-	return event, true
+	event.Code, event.Args, event.Message, event.Fault = frame.Code, frame.Args, frame.Message, frame.Fault
+	return event
 }
 
 // sendWSErrorFromError sends the error frame for a request that failed before
 // a run took it over, and returns the error the request's result record
-// attributes. The frame carries the code, args and catalog detail of the public
-// error the HTTP error handler would answer err with, never err's text.
+// attributes. The frame carries the code, args, catalog detail and fault of
+// the public error the HTTP error handler would answer err with, never err's
+// text.
 func sendWSErrorFromError(ctx context.Context, writer *wsWriter, ref wsTurnRef, err error) error {
 	// A refusal to run is not a stream failure: the turn never started, so the
 	// client is told which invocation was refused and why, by code.
@@ -1386,10 +1399,9 @@ func sendWSErrorFromError(ctx context.Context, writer *wsWriter, ref wsTurnRef, 
 		sendWSRunRejected(writer, ref.withRun(""), code)
 		return apperror.Wrap(code, err, nil)
 	}
-	public, recorded := server.PublicError(ctx, application.ExternalAgentError(err))
-	event, _ := newWSAppErrorEvent(ref, public)
-	writer.SendJSON(event)
-	return recorded
+	frame, rendered := server.NewStreamError(ctx, application.ExternalAgentError(err), "")
+	writer.SendJSON(wsErrorEvent(ref, frame))
+	return rendered
 }
 
 // failWSRequest answers a request that failed before a run took it over with
@@ -1424,10 +1436,11 @@ func recordWSRequestFailure(ctx context.Context, logger *slog.Logger, botID stri
 // after the run's failure was delivered, is answered as a request error.
 func sendWSRunFailure(ctx context.Context, writer *wsWriter, ref wsTurnRef, err error, outcome application.RunOutcome, runCode apperror.Code) {
 	if outcome.Cause == err { //nolint:errorlint // Identity: whether this error is the run's outcome.
-		if event, ok := newWSAppErrorEvent(ref, apperror.Wrap(runCode, err, nil)); ok {
-			writer.SendJSON(event)
-			return
-		}
+		// The run's record already names the failure, whatever has become of
+		// the stream since, so the frame is rendered without its caller.
+		frame, _ := server.NewStreamError(context.WithoutCancel(ctx), apperror.Wrap(runCode, err, nil), "")
+		writer.SendJSON(wsErrorEvent(ref, frame))
+		return
 	}
 	_ = sendWSErrorFromError(ctx, writer, ref, err)
 }
@@ -1490,7 +1503,7 @@ func (h *LocalChannelHandler) forwardWSStreamEvents(ctx, assetCtx context.Contex
 			// its own: it names the run as failed but not what to tell this
 			// caller, which is still waiting on the send it made.
 			if streamEvent.Type == native.EventError {
-				sendWSAgentError(writer, ref, streamEvent)
+				sendWSAgentError(ctx, writer, ref, streamEvent)
 			}
 		}
 	}
@@ -1862,9 +1875,9 @@ func (h *LocalChannelHandler) startWSStream(baseCtx, connCtx context.Context, wr
 // @Tags local-channel
 // @Param bot_id path string true "Bot ID"
 // @Success 101 {string} string "Switching Protocols"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/web/ws [get].
 func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -2166,16 +2179,8 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 						}
 						result, err := h.agentService.ExecuteRuntimeCommand(controlCtx, request)
 						if err != nil {
-							event := commandEvent(message.InvocationID, message.ComposerScope, message.SessionID, request.Command)
-							event.Type = "command_error"
 							mapped := runtimeControlError(err)
-							code := apperror.CodeOf(mapped)
-							if code == "" {
-								code = apperror.CodeRuntimeControlFailed
-								mapped = apperror.Wrap(code, err, nil)
-							}
-							event.Code = string(code)
-							writer.SendJSON(event)
+							writer.SendJSON(commandErrorEvent(controlCtx, message, request.Command, mapped))
 							recordWSRequestFailure(controlCtx, h.logger, botID, wsTurn(message.InvocationID, message.SessionID), "ws.runtime_command", mapped)
 							return
 						}

@@ -22,7 +22,7 @@ func discussContextPressure(cmd turn.StartTurnCommand) int {
 
 func (s *Service) scheduleDiscussCompaction(ctx context.Context, cmd turn.StartTurnCommand, modelID string) {
 	if pressure := discussContextPressure(cmd); pressure > 0 && s.compactionService != nil && s.settingsService != nil {
-		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, modelID, pressure)
+		s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, modelID, pressure)
 	}
 }
 

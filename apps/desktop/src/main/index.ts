@@ -20,6 +20,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import trayIconPng from '../../resources/tray-icon.png?asset'
 import { acceleratorForCommand, appKeyboardCommands, type AppKeyboardCommand } from '../shared/keyboard-commands'
+import { attachMenuShortcutOwnership } from './menu-shortcuts'
 import { dispatchFocusedWindowCommand } from './window-commands'
 import { dispatchRendererNavigate } from './window-navigation'
 import { macWindowChromeOptions } from './window-chrome'
@@ -69,6 +70,7 @@ type TraySettingsItem = {
 }
 
 let chatWindow: BrowserWindow | null = null
+let menuShortcuts: ReturnType<typeof attachMenuShortcutOwnership> | null = null
 let appTray: Tray | null = null
 let isQuitting = false
 let windowStatesCache: StoredWindowStates | null = null
@@ -522,6 +524,11 @@ function createChatWindow(): BrowserWindow {
     },
   })
   if (process.platform === 'win32') window.setMenuBarVisibility(false)
+  menuShortcuts = attachMenuShortcutOwnership(
+    window.webContents,
+    () => effectiveMenuAccelerator(appKeyboardCommands.closeCurrentWorkspaceTab),
+    process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux',
+  )
   attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
   // macOS hides the traffic lights in fullscreen — the renderer drops its
@@ -732,6 +739,10 @@ app.whenReady().then(async () => {
     assertTrustedRenderer(event)
     if (typeof paused !== 'boolean') throw new Error('paused must be a boolean')
     return requireRemoteRuntimeManager().setPaused(paused)
+  })
+  ipcMain.handle('window:ignore-menu-shortcuts', (event, ignore: unknown) => {
+    assertTrustedRenderer(event)
+    menuShortcuts?.setCapture(event.sender, ignore)
   })
   ipcMain.handle('desktop:set-menu-accelerators', async (event, rawPayload: unknown) => {
     assertTrustedRenderer(event)

@@ -58,6 +58,17 @@ func (d *Driver) OnRoundRolledBack(_ context.Context, _, threadID string) {
 	}
 }
 
+// ResetBotAgent implements external.BotAgentResetter: an instance's warm
+// processes were launched from its previous setup.
+func (d *Driver) ResetBotAgent(botID, botAgentID string) {
+	if strings.TrimSpace(botAgentID) == "" {
+		return
+	}
+	if closer, ok := d.pool.(interface{ CloseBotAgentRuntimes(string, string) error }); ok {
+		_ = closer.CloseBotAgentRuntimes(botID, botAgentID)
+	}
+}
+
 // Prompt implements external.Driver: one pooled ACP turn.
 func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (external.PromptResult, error) {
 	agentID := driverMetadataString(input.RuntimeMetadata, metadataAgentIDKey)
@@ -71,6 +82,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	sink := client.EventSinkFunc(input.Sink.EmitStreamEvent)
 	result, err := d.pool.Prompt(ctx, PromptInput{
 		BotID:                    input.BotID,
+		BotAgentID:               input.BotAgentID,
 		ChatID:                   input.ChatID,
 		SessionID:                input.ThreadID,
 		RunID:                    input.RunID,

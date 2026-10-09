@@ -568,7 +568,8 @@
       "provider_permission_denied": "模型服务商拒绝访问该模型或资源，请确认该账号有权使用此模型。",
       "provider_request_rejected": "模型服务商拒绝了这次请求，请检查模型设置，或换一个模型。",
       "provider_unreachable": "无法连接到模型服务商，请检查服务地址是否正确、服务是否在运行。",
-      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。"
+      "tool_timeout": "工具长时间没有进度，请先检查已保存的结果再重试。",
+      "chat_model_not_configured": "尚未选择对话模型。请在 Bot 设置 → 通用中设置默认对话模型，然后重试。"
     },
     "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
     "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",
@@ -707,6 +708,9 @@
     "history": {
       "delete_failed": "会话历史删除失败，请重试。"
     },
+    "hook": {
+      "user_message_failed": "消息未能通过消息 Hook，请检查 Hook 配置后重试。"
+    },
     "context_lifecycle": {
       "request_invalid": "上下文生命周期请求无效，请检查后重试。",
       "authentication_required": "请登录后查看上下文生命周期诊断信息。",
@@ -715,10 +719,15 @@
       "load_failed": "无法加载上下文生命周期诊断信息，请稍后重试。"
     },
     "external_runtime": {
-      "auth_required": "Codex 尚未连接账号。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
+      "auth_required": "Codex 账号未连接或登录已失效。请前往 Agent 设置连接 ChatGPT，或配置 API Key。",
       "unavailable": "外部 Agent 运行时暂不可用。请检查 Agent 配置和工作区后重试。",
       "session_resume_failed": "会话无法恢复，请重试或新开会话。",
-      "usage_limited": "外部 Agent 的额度已用完，请稍后再试。"
+      "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。",
+      "rate_limited": "外部 Agent 已达到模型服务的速率上限，请稍后再发送。",
+      "context_window_exceeded": "这个会话已超出模型的上下文长度上限。请压缩上下文，或新开一个会话。",
+      "overloaded": "外部 Agent 的模型服务暂时不可用或过载。请稍后重试，或换一个模型。",
+      "upstream_unreachable": "外部 Agent 无法连接到模型服务，或连接中途断开。请检查网络和 Agent 的服务地址后重试。",
+      "request_blocked": "这次请求被模型服务的安全策略拦截，请调整内容后再发送。"
     },
     "app": {
       "not_found": "未找到该应用安装记录。",
@@ -774,6 +783,10 @@
       "bad_gateway": "上游服务返回了无效响应，请重试。",
       "service_unavailable": "服务暂时不可用，请稍后重试。",
       "gateway_timeout": "上游服务响应超时，请重试。"
+    },
+    "request": {
+      "field_required": "缺少 {field}。",
+      "field_invalid": "{field} 的值无效。"
     },
     "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
     "runtime_run_failed": "回复未能完成，请重试。",

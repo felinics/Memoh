@@ -336,15 +336,17 @@ type Service struct {
 // ACPSetupValidation is the channel- and runtime-independent policy result
 // needed before a thread can persist an ACP runtime descriptor.
 type ACPSetupValidation struct {
-	Known                 bool
 	Enabled               bool
 	MissingManagedFieldID string
 }
 
 // ACPSetupValidator is implemented by an Agent adapter. Thread owns this port
-// so chat persistence never imports an Agent runtime implementation.
+// so chat persistence never imports an Agent runtime implementation. The
+// adapter resolves which Agent instance's setup applies: botAgentID when the
+// thread is bound to one, otherwise the instance the provider falls back to.
 type ACPSetupValidator interface {
-	ValidateACPSetup(agentID string, botMetadata map[string]any) ACPSetupValidation
+	KnownACPAgent(agentID string) bool
+	ValidateACPSetup(ctx context.Context, botID, botAgentID, agentID string, botMetadata map[string]any) (ACPSetupValidation, error)
 }
 
 // NewService creates a thread service. publisher may be nil — thread
@@ -449,7 +451,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Thread, error)
 		if err := validateACPMetadata(meta); err != nil {
 			return Thread{}, err
 		}
-		if err := s.validateACPCreatePolicy(ctx, pgBotID, meta, strings.TrimSpace(input.BotAgentID) == ""); err != nil {
+		if err := s.validateACPCreatePolicy(ctx, pgBotID, input.BotAgentID, meta); err != nil {
 			return Thread{}, err
 		}
 	} else if IsDirectRuntimeType(desc.RuntimeType) {
@@ -1021,7 +1023,7 @@ func (s *Service) updateDescriptorAndMetadata(ctx context.Context, queries Queri
 		if err := validateACPMetadata(metadata); err != nil {
 			return Thread{}, err
 		}
-		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, existing.BotID, metadata, !pgBotAgentID.Valid); err != nil {
+		if err := s.validateACPCreatePolicyWithQueries(ctx, queries, existing.BotID, pgBotAgentID.String(), metadata); err != nil {
 			return Thread{}, err
 		}
 	case IsDirectRuntimeType(desc.RuntimeType):
@@ -1888,28 +1890,31 @@ func nonNilMap(in map[string]any) map[string]any {
 	return out
 }
 
-func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, meta map[string]any, requireLegacyEnabledOption ...bool) error {
-	requireLegacyEnabled := true
-	if len(requireLegacyEnabledOption) > 0 {
-		requireLegacyEnabled = requireLegacyEnabledOption[0]
-	}
-	return s.validateACPCreatePolicyWithQueries(ctx, s.queries, botID, meta, requireLegacyEnabled)
+// validateACPCreatePolicy checks the setup the thread would launch with.
+// botAgentID is the bound Agent instance; a thread that names only the
+// provider additionally needs the legacy enabled flag.
+func (s *Service) validateACPCreatePolicy(ctx context.Context, botID pgtype.UUID, botAgentID string, meta map[string]any) error {
+	return s.validateACPCreatePolicyWithQueries(ctx, s.queries, botID, botAgentID, meta)
 }
 
-func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, meta map[string]any, requireLegacyEnabled bool) error {
+func (s *Service) validateACPCreatePolicyWithQueries(ctx context.Context, queries Queries, botID pgtype.UUID, botAgentID string, meta map[string]any) error {
 	agentID := metadataString(meta, "acp_agent_id")
+	botAgentID = strings.TrimSpace(botAgentID)
+	requireLegacyEnabled := botAgentID == ""
 	if s.acpSetupValidator == nil {
 		return fmt.Errorf("%w: ACP setup validator unavailable", ErrACPAgentNotConfigured)
 	}
-	if validation := s.acpSetupValidator.ValidateACPSetup(agentID, nil); !validation.Known {
+	if !s.acpSetupValidator.KnownACPAgent(agentID) {
 		return fmt.Errorf("%w: %s", ErrACPUnknownAgent, agentID)
 	}
 	bot, err := queries.GetBotByID(ctx, botID)
 	if err != nil {
 		return err
 	}
-	botMeta := parseJSONMap(bot.Metadata)
-	validation := s.acpSetupValidator.ValidateACPSetup(agentID, botMeta)
+	validation, err := s.acpSetupValidator.ValidateACPSetup(ctx, botID.String(), botAgentID, agentID, parseJSONMap(bot.Metadata))
+	if err != nil {
+		return err
+	}
 	if requireLegacyEnabled && !validation.Enabled {
 		return fmt.Errorf("%w: %s", ErrACPAgentNotEnabled, agentID)
 	}

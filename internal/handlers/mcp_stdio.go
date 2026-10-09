@@ -419,9 +419,9 @@ type mcpStdioSession struct {
 // @Param bot_id path string true "Bot ID"
 // @Param payload body MCPStdioRequest true "Stdio MCP payload"
 // @Success 200 {object} MCPStdioResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp-stdio [post].
 func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	botID, err := h.requireBotAccess(c)
@@ -430,7 +430,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	}
 	var req MCPStdioRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if strings.TrimSpace(req.Command) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "command is required")
@@ -483,9 +483,9 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 // @Param connection_id path string true "Connection ID"
 // @Param payload body object true "JSON-RPC request"
 // @Success 200 {object} object "JSON-RPC response: {jsonrpc,id,result|error}"
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/mcp-stdio/{connection_id} [post].
 // ensureStdioSession lazily starts the session process on the first proxied
 // message. An initialize starts it with a client built from the message's own
@@ -534,7 +534,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 
 	var req mcptools.JSONRPCRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.JSONRPC != "" && req.JSONRPC != "2.0" {
 		return c.JSON(http.StatusOK, mcptools.JSONRPCErrorResponse(req.ID, -32600, "invalid jsonrpc version"))

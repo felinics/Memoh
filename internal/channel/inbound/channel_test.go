@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/acl"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
 	"github.com/felinics/memoh/internal/agent/turn"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/channel/discuss"
@@ -30,6 +31,7 @@ import (
 	"github.com/felinics/memoh/internal/chat/timeline"
 	"github.com/felinics/memoh/internal/command"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/i18n"
 	"github.com/felinics/memoh/internal/media"
 	skillset "github.com/felinics/memoh/internal/skills"
@@ -1411,8 +1413,13 @@ func TestChannelInboundProcessorDefaultACPRequiresWorkspaceExec(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := processor.HandleInbound(context.Background(), cfg, msg, sender)
+	if err == nil {
+		t.Fatal("the failure is not returned for the result record")
+	}
+	// The inbound message record keeps the sender's refusal a client fault.
+	if record := errlog.Finish(context.Background(), "channel.inbound", err, errlog.Options{}); record.Level != slog.LevelInfo || record.Report.Fault != apperror.FaultClient {
+		t.Fatalf("inbound record level=%v fault=%q, want INFO client", record.Level, record.Report.Fault)
 	}
 	if ensurer.lastSpec.Runtime != "" {
 		t.Fatalf("session should not be created when workspace_exec is missing, got spec %#v", ensurer.lastSpec)
@@ -1456,8 +1463,8 @@ func TestChannelInboundProcessorActiveACPRequiresRuntimeOwner(t *testing.T) {
 		},
 	}
 
-	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+		t.Fatal("the failure is not returned for the result record")
 	}
 	if gateway.gotReq.Query != "" {
 		t.Fatalf("chat should not run without runtime owner, got query %q", gateway.gotReq.Query)
@@ -1508,8 +1515,8 @@ func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *te
 			},
 		}
 
-		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+			t.Fatal("the failure is not returned for the result record")
 		}
 		if gateway.gotReq.Query != "" {
 			t.Fatalf("chat should not run for non-owner actor, got query %q", gateway.gotReq.Query)
@@ -1557,8 +1564,8 @@ func TestChannelInboundProcessorActiveACPRequiresCurrentActorOwnerOrManage(t *te
 			},
 		}
 
-		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err := processor.HandleInbound(context.Background(), cfg, msg, sender); err == nil {
+			t.Fatal("the failure is not returned for the result record")
 		}
 		if gateway.gotReq.Query != "" {
 			t.Fatalf("chat should not run for manager on another user's runtime, got query %q", gateway.gotReq.Query)

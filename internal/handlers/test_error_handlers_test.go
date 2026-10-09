@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 
-	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/models"
@@ -38,14 +37,14 @@ func (q testHandlerQueries) GetProviderByID(context.Context, pgtype.UUID) (sqlc.
 	return q.provider, q.providerErr
 }
 
-func serveHandlerProblem(t *testing.T, register func(*echo.Echo), target string) (int, apperror.Problem, string) {
+func serveHandlerProblem(t *testing.T, register func(*echo.Echo), target string) (int, server.Problem, string) {
 	t.Helper()
 	e := echo.New()
 	e.HTTPErrorHandler = server.NewHTTPErrorHandler(slog.New(slog.DiscardHandler))
 	register(e)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, target, nil))
-	var problem apperror.Problem
+	var problem server.Problem
 	_ = json.Unmarshal(rec.Body.Bytes(), &problem)
 	return rec.Code, problem, rec.Body.String()
 }

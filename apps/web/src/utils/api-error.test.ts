@@ -93,8 +93,9 @@ describe('resolveApiErrorMessage', () => {
   it.each([
     [404, 'The requested resource was not found.'],
     [422, 'The request is invalid.'],
+    [429, 'Too many requests. Please wait a moment and try again.'],
     [502, 'Something went wrong on the server. Please try again.'],
-  ])('describes an error without a code or fault by its status %d', (status, expected) => {
+  ])('describes an error without a code by its status %d', (status, expected) => {
     const error = { status, message: 'raw gateway text' }
 
     expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
@@ -197,6 +198,21 @@ describe('resolveApiErrorMessage', () => {
       requestId: 'req-1',
       status: 409,
     })
+  })
+
+  it.each([
+    ['en', 'request.field_required', 'session_id is required.'],
+    ['zh', 'request.field_required', '缺少 session_id。'],
+    ['ja', 'request.field_required', 'session_id は必須です。'],
+    ['en', 'request.field_invalid', 'session_id is invalid.'],
+    ['zh', 'request.field_invalid', 'session_id 的值无效。'],
+    ['ja', 'request.field_invalid', 'session_id の値が無効です。'],
+  ])('names the field of a %s %s error', (language, code, expected) => {
+    locale = language
+
+    const error = { code, args: { field: 'session_id' }, detail: 'A field problem.', request_id: 'req-1', status: 400 }
+
+    expect(resolveApiErrorMessage(error, 'fallback')).toBe(expected)
   })
 
   it.each([
@@ -315,19 +331,33 @@ describe('resolveApiErrorMessage', () => {
   it.each([
     ['client', 409, 'The request conflicts with the current state. Refresh and try again.'],
     ['client', 422, 'The request is invalid.'],
-    ['server', 500, 'Something went wrong on the server. Please try again.'],
+    ['dependency', 429, 'Too many requests. Please wait a moment and try again.'],
+    ['client', 500, 'Something went wrong on the server. Please try again.'],
     ['dependency', 502, 'Something went wrong on the server. Please try again.'],
-  ])('describes an unrecognized code with a %s fault and status %d by its fault', (fault, status, expected) => {
+  ])('describes an unrecognized code with a %s fault and status %d by its status', (fault, status, expected) => {
     const problem = { code: 'future.new_condition', status, fault, args: {}, detail: 'raw server detail' }
 
     expect(resolveApiErrorMessage(problem, 'fallback')).toBe(expected)
     expect(resolveApiErrorMessage(problem, 'Save failed', { prefixFallback: true })).toBe(`Save failed: ${expected}`)
   })
 
-  it('shows nothing for an unrecognized code of a canceled request', () => {
-    const problem = { code: 'future.new_condition', status: 499, fault: 'canceled', args: {}, detail: 'raw server detail' }
-
+  it.each([
+    ['a canceled fault', { code: 'future.new_condition', status: 499, fault: 'canceled', args: {} }],
+    ['no fault', { code: 'future.new_condition', status: 499, args: {} }],
+  ])('shows nothing for an unrecognized code of a canceled request with %s', (_case, problem) => {
     expect(resolveApiErrorMessage(problem, 'fallback', { prefixFallback: true })).toBe('')
+  })
+
+  it.each([
+    ['client', { type: 'error', code: 'future.new_condition', fault: 'client', args: {}, message: 'raw server detail' }],
+    ['dependency', { type: 'error', code: 'future.new_condition', fault: 'dependency', args: {}, message: 'raw server detail' }],
+    ['no', { type: 'error', code: 'future.new_condition', args: {}, message: 'raw server detail' }],
+  ])('describes a stream error event with an unrecognized code and %s fault as a failure', (_case, event) => {
+    expect(resolveApiErrorMessage(event, 'raw server detail')).toBe('Something went wrong on the server. Please try again.')
+  })
+
+  it('shows nothing for a stream error event of a canceled run', () => {
+    expect(resolveApiErrorMessage({ type: 'error', code: 'future.new_condition', fault: 'canceled', args: {}, message: 'raw server detail' }, 'fallback')).toBe('')
   })
 
   it('prefers the copy of a recognized code over its fault', () => {
