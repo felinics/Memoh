@@ -39,7 +39,7 @@ func TestApplyProviderRunConfigFallbackCarriesBudgetPlanAndStepReselector(t *tes
 	if plan == nil {
 		t.Fatal("fallback manifest lost the budget plan")
 	}
-	limits := models.ResolveGenerationLimits(models.ClientTypeOpenAICompletions, nil, 100_000)
+	limits := models.ResolveGenerationLimits(models.ClientTypeOpenAICompletions, nil, 100_000, 0)
 	if plan.Window != 100_000 || plan.OutputReserve != limits.MaxOutputTokens || plan.OutputReserveResolution != limits.Resolution {
 		t.Fatalf("fallback plan = %+v, want window 100000 reserving %d (%s)", plan, limits.MaxOutputTokens, limits.Resolution)
 	}
@@ -66,7 +66,7 @@ func TestFallbackDispatchFailsClosedWhenLegacyPayloadExceedsAllowance(t *testing
 	}}
 	agent := agentpkg.New(agentpkg.Deps{ContextViewApplier: ProviderRunConfigApplier(nil)})
 	const window = 2_000
-	limits := models.ResolveGenerationLimits(models.ClientTypeOpenAICompletions, nil, window)
+	limits := models.ResolveGenerationLimits(models.ClientTypeOpenAICompletions, nil, window, 0)
 	cfg := buildErrorFragsFirstConfig([]sdk.Message{sdk.UserMessage(strings.Repeat("o", 5_100))}, window)
 	if cost := contextfrag.ProviderEnvelopeTokens(cfg.System, cfg.Messages, nil); cost <= window-limits.MaxOutputTokens || cost >= window {
 		t.Fatalf("legacy payload costs %d tokens, want strictly between allowance %d and window %d", cost, window-limits.MaxOutputTokens, window)

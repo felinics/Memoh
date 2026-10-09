@@ -115,6 +115,7 @@
     "native_history_lost": "Agent は以前の会話コンテキストを復元できず、最初から開始しました。上のメッセージは履歴としてのみ残っています。続行に必要な情報をもう一度伝えてください。",
     "tools_unavailable": "この会話では Memoh のツールを利用できません。新しい会話を開始して再試行してください。",
     "elicitation_declined": "ツールが要求した対話を表示できなかったため、その要求は拒否されました。",
+    "output_truncated": "応答がモデルの出力上限に達したため、途中で打ち切られました。続きを依頼するか、リクエストを小さく分けてください。",
     "capability": {
       "access_denied": "機能を管理するには、この Bot の管理権限が必要です。",
       "request_invalid": "機能管理のリクエストが無効です。操作とパラメーターを確認してください。",
@@ -1767,6 +1768,9 @@
     "reasoningEfforts": "対応する推論強度",
     "reasoningEffortsPlaceholder": "推論強度を選択",
     "contextWindowMin": "コンテキストウィンドウは 0 より大きい値にしてください",
+    "maxOutputTokens": "最大出力トークン",
+    "maxOutputTokensPlaceholder": "例: 8192",
+    "maxOutputTokensMin": "最大出力トークンは 0 より大きい値にしてください",
     "testModel": "モデルをテスト",
     "enable": "モデルを有効化",
     "toggleFailed": "モデルの更新に失敗しました",

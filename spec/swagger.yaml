@@ -5915,6 +5915,12 @@ definitions:
         type: string
       dimensions:
         type: integer
+      max_output_tokens:
+        description: |-
+          MaxOutputTokens is the most output tokens the model can produce in one
+          response; nil means unknown. When set, every turn requests an explicit
+          limit within it.
+        type: integer
       reasoning_default_on:
         description: |-
           ReasoningDefaultOn reports whether omitting the thinking field leaves the

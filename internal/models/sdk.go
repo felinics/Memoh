@@ -43,6 +43,9 @@ type SDKModelConfig struct {
 	// ContextWindow is the configured context window the turn budgets against;
 	// legacy Anthropic thinking budgets are fitted to it. Zero means unknown.
 	ContextWindow int
+	// MaxOutputTokens is the model's configured output cap; the legacy
+	// Anthropic thinking budget is fitted below it. Zero means unknown.
+	MaxOutputTokens int
 }
 
 // ReasoningConfig is the resolved extended-thinking decision for one call,
@@ -133,7 +136,7 @@ func NewSDKChatModel(cfg SDKModelConfig) *sdk.Model {
 			case rc.Active:
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{
 					Type:         "enabled",
-					BudgetTokens: AnthropicThinkingBudget(rc.Effort, cfg.ContextWindow),
+					BudgetTokens: AnthropicThinkingBudget(rc.Effort, cfg.ContextWindow, cfg.MaxOutputTokens),
 				}))
 			case rc.Disabled && anthropicNeedsExplicitOff(cfg.ReasoningOffSupport, cfg.ReasoningDefaultOn):
 				opts = append(opts, anthropicmessages.WithThinking(anthropicmessages.ThinkingConfig{

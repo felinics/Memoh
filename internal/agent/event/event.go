@@ -62,6 +62,9 @@ const (
 	// NoticeSteerFailed: an instruction sent during the turn was not
 	// delivered to the runtime.
 	NoticeSteerFailed NoticeKind = "steer_failed"
+	// NoticeOutputTruncated: the model stopped because it reached its output
+	// limit, so the reply is cut off.
+	NoticeOutputTruncated NoticeKind = "output_truncated"
 )
 
 // StreamEvent is emitted by an agent runtime during streaming. The JSON

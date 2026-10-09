@@ -194,3 +194,18 @@ func TestMergeDiscoveredConfigRefreshesTrustedReasoningMetadata(t *testing.T) {
 
 func boolPointer(value bool) *bool { return &value }
 func intPointer(value int) *int    { return &value }
+
+func TestMergeDiscoveredConfigRefreshesMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	existing := models.ModelConfig{MaxOutputTokens: intPointer(4096)}
+
+	got, changed := mergeDiscoveredConfig(existing, models.ModelConfig{MaxOutputTokens: intPointer(8192)})
+	if !changed || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 8192 {
+		t.Fatalf("max_output_tokens = %v changed = %v, want 8192 refreshed", got.MaxOutputTokens, changed)
+	}
+	got, changed = mergeDiscoveredConfig(existing, models.ModelConfig{})
+	if changed || got.MaxOutputTokens == nil || *got.MaxOutputTokens != 4096 {
+		t.Fatalf("an endpoint that reports nothing must keep the stored value: %v changed = %v", got.MaxOutputTokens, changed)
+	}
+}

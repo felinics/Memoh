@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -278,6 +279,9 @@ func (s *Service) Count(ctx context.Context) (int64, error) {
 
 const probeTimeout = models.DefaultProviderProbeTimeout
 
+// remoteModelsResponseLimit bounds the /models body read for extension fields.
+const remoteModelsResponseLimit = 8 << 20
+
 const (
 	registryMetadataKey = "registry"
 	metadataSourceKey   = "source"
@@ -435,6 +439,7 @@ func remoteModelsFromCatalog(items []sqlc.TemplateProviderTemplateModel) []Remot
 			ThinkingBudgetMin:   configNonNegativeIntPtr(cfg, "thinking_budget_min"),
 			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
 			ContextWindow:       configIntPtr(cfg, "context_window"),
+			MaxOutputTokens:     configIntPtr(cfg, "max_output_tokens"),
 			Dimensions:          configIntPtr(cfg, "dimensions"),
 			CapabilitiesKnown:   true,
 		})
@@ -464,6 +469,7 @@ func remoteModelsFromTemplate(def registry.ProviderDefinition) []RemoteModel {
 			ThinkingBudgetMin:   configNonNegativeIntPtr(cfg, "thinking_budget_min"),
 			ThinkingBudgetMax:   configIntPtr(cfg, "thinking_budget_max"),
 			ContextWindow:       configIntPtr(cfg, "context_window"),
+			MaxOutputTokens:     configIntPtr(cfg, "max_output_tokens"),
 			Dimensions:          configIntPtr(cfg, "dimensions"),
 			CapabilitiesKnown:   true,
 		})
@@ -504,6 +510,8 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 			templatesByID[model.ID] = model
 		}
 	}
+
+	liveMaxOutput := fetchMaxOutputTokens(ctx, clientType, baseURL, creds.APIKey)
 
 	remoteModels := make([]RemoteModel, 0, len(sdkModels))
 	for _, m := range sdkModels {
@@ -571,15 +579,62 @@ func (s *Service) fetchRemoteModelsViaSDK(ctx context.Context, provider sqlc.Pro
 			remote.ThinkingBudgetMin = template.ThinkingBudgetMin
 			remote.ThinkingBudgetMax = template.ThinkingBudgetMax
 			remote.ContextWindow = template.ContextWindow
+			remote.MaxOutputTokens = template.MaxOutputTokens
 			remote.CapabilitiesKnown = true
 		} else if clientType == models.ClientTypeOpenCodeGo {
 			remote.Compatibilities = []string{models.CompatToolCall, models.CompatReasoning}
 			remote.ThinkingMode = models.ThinkingModeAlways
 			remote.CapabilitiesKnown = true
 		}
+		// An explicit value from the endpoint is fresher than the template's.
+		if limit, ok := liveMaxOutput[m.ID]; ok {
+			remote.MaxOutputTokens = &limit
+		}
 		remoteModels = append(remoteModels, remote)
 	}
 	return remoteModels, nil
+}
+
+// fetchMaxOutputTokens reads the optional max_output_tokens field that an
+// OpenAI-compatible /models endpoint may attach to each entry; the SDK's model
+// list keeps only ids. It is best effort: any failure, or an entry without a
+// positive integer, leaves the model's limit unknown.
+func fetchMaxOutputTokens(ctx context.Context, clientType models.ClientType, baseURL, apiKey string) map[string]int {
+	if clientType != models.ClientTypeOpenAICompletions && clientType != models.ClientTypeOpenAIResponses {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/models", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	resp, err := models.NewProviderHTTPClient(probeTimeout).Do(req) //nolint:gosec // The URL is the provider's own configured base URL, like the SDK's list request.
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var body struct {
+		Data []struct {
+			ID              string `json:"id"`
+			MaxOutputTokens *int   `json:"max_output_tokens"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, remoteModelsResponseLimit)).Decode(&body); err != nil {
+		return nil
+	}
+	limits := make(map[string]int)
+	for _, item := range body.Data {
+		if item.MaxOutputTokens != nil && *item.MaxOutputTokens > 0 {
+			limits[item.ID] = *item.MaxOutputTokens
+		}
+	}
+	return limits
 }
 
 // toGetResponse converts a database provider to a response.

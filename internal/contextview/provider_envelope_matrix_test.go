@@ -69,7 +69,7 @@ func TestProviderEnvelopeAuthorityMatrix(t *testing.T) {
 			t.Run(client.name+"/"+path.name, func(t *testing.T) {
 				t.Parallel()
 
-				limits := models.ResolveGenerationLimits(client.clientType, client.reasoning, window)
+				limits := models.ResolveGenerationLimits(client.clientType, client.reasoning, window, 0)
 				// Inside the window, outside the allowance: only the output reserve
 				// can reject it, so an allowance that forgot the reserve would dispatch.
 				overAllowanceTokens := window - limits.MaxOutputTokens + 1_000

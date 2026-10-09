@@ -25525,6 +25525,10 @@ const docTemplate = `{
                 "dimensions": {
                     "type": "integer"
                 },
+                "max_output_tokens": {
+                    "description": "MaxOutputTokens is the most output tokens the model can produce in one\nresponse; nil means unknown. When set, every turn requests an explicit\nlimit within it.",
+                    "type": "integer"
+                },
                 "reasoning_default_on": {
                     "description": "ReasoningDefaultOn reports whether omitting the thinking field leaves the\nmodel thinking. Separate from off-ability: Claude 4.6 can be turned off *and*\ndefaults to off, while Opus 5 can be turned off but defaults to on, so\nomitting the field there keeps thinking running — billed, and invisible to a\nuser who believes they turned it off. nil means unknown.",
                     "type": "boolean"

@@ -8,6 +8,9 @@ import (
 	"strings"
 	"sync"
 
+	sdk "github.com/felinics/twilight/sdk"
+
+	"github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/step"
@@ -117,6 +120,34 @@ func (c *agentStepCommitter) bindContinuation(cfg *native.RunConfig) {
 	}
 }
 
+// withOutputTruncatedNotice records the truncation notice on the assistant row
+// of a final step the model cut off at its output limit, so history shows it
+// the way the live stream did.
+func withOutputTruncatedNotice(opts storeRoundOptions, record *step.Record, messages []ModelMessage) storeRoundOptions {
+	if record.Result.FinishReason != sdk.FinishReasonLength || len(record.Result.ToolCalls) > 0 {
+		return opts
+	}
+	idx := lastAssistantMessageIndex(messages)
+	if idx < 0 {
+		return opts
+	}
+	definition, ok := apperror.Lookup(apperror.CodeRuntimeOutputTruncated)
+	if !ok {
+		return opts
+	}
+	if opts.MessageMetadataByIndex == nil {
+		opts.MessageMetadataByIndex = make(map[int]map[string]any, 1)
+	}
+	if opts.MessageMetadataByIndex[idx] == nil {
+		opts.MessageMetadataByIndex[idx] = map[string]any{}
+	}
+	opts.MessageMetadataByIndex[idx][event.RuntimeNoticesMetadataKey] = []event.Notice{{
+		Code:    string(apperror.CodeRuntimeOutputTruncated),
+		Content: definition.Detail,
+	}}
+	return opts
+}
+
 type stepCommitMode uint8
 
 const (
@@ -200,6 +231,7 @@ func (c *agentStepCommitter) persist(ctx context.Context, stepIndex int, record 
 			}
 		}
 	}
+	opts = withOutputTruncatedNotice(opts, record, messages)
 	opts = opts.withContextLifecycleMetadata(c.service.logger, storeReq, messages)
 	var (
 		inputs []messagepkg.PersistInput

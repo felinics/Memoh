@@ -165,6 +165,7 @@ const (
 	CodeRuntimeNativeHistoryLost   Code = "native_history_lost"
 	CodeRuntimeToolsUnavailable    Code = "tools_unavailable"
 	CodeRuntimeElicitationDeclined Code = "elicitation_declined"
+	CodeRuntimeOutputTruncated     Code = "output_truncated"
 	CodeQueueCapacityExceeded      Code = "queue_capacity_exceeded"
 	CodeQueueSteerUnsupported      Code = "queue.steer_unsupported"
 
@@ -972,6 +973,10 @@ var catalog = map[Code]Definition{
 	CodeRuntimeElicitationDeclined: {
 		HTTPStatus: http.StatusUnprocessableEntity,
 		Detail:     "A tool requested an interaction that could not be shown. The request was declined.",
+	},
+	CodeRuntimeOutputTruncated: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "The reply reached the model's output limit and was cut off. Ask it to continue, or split the request into smaller parts.",
 	},
 	CodeQueueNoActiveRun: {
 		HTTPStatus: http.StatusConflict,

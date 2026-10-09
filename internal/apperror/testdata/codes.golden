@@ -261,3 +261,4 @@ mcp.oauth_discovery_failed	502
 mcp.oauth_not_discovered	409
 oauth.state_invalid	400
 mcp.name_taken	409
+output_truncated	422

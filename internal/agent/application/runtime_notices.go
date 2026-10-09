@@ -14,6 +14,7 @@ var runtimeNoticeCodes = map[event.NoticeKind]apperror.Code{
 	event.NoticeToolsUnavailable:    apperror.CodeRuntimeToolsUnavailable,
 	event.NoticeElicitationDeclined: apperror.CodeRuntimeElicitationDeclined,
 	event.NoticeSteerFailed:         apperror.CodeRuntimeControlSteerFailed,
+	event.NoticeOutputTruncated:     apperror.CodeRuntimeOutputTruncated,
 }
 
 // publicRuntimeNotice gives a runtime notice its public code before the event

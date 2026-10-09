@@ -14,6 +14,7 @@ import (
 	sdk "github.com/felinics/twilight/sdk"
 
 	contextfrag "github.com/felinics/memoh/internal/agent/context/fragment"
+	agentevent "github.com/felinics/memoh/internal/agent/event"
 	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
@@ -994,6 +995,13 @@ partLoop:
 	if err != nil {
 		e.localFailure(err)
 		return true, nil
+	}
+	if kind == stepFinal && result.FinishReason == sdk.FinishReasonLength {
+		// The reply is cut off at the model's output limit. The user is told
+		// through a notice, never through text added to the reply.
+		if !e.emit(StreamEvent{Type: EventRuntimeNotice, NoticeKind: agentevent.NoticeOutputTruncated}) {
+			e.aborted = true
+		}
 	}
 	dir, err := e.commitStep(attemptStep, &sr)
 	if err != nil {

@@ -973,6 +973,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ThinkingBudgetMin:     chatModel.Config.ThinkingBudgetMin,
 		ThinkingBudgetMax:     chatModel.Config.ThinkingBudgetMax,
 		ContextWindow:         contextBudgetFromChatModel(chatModel),
+		MaxOutputTokens:       chatModel.Config.MaxOutputTokensLimit(),
 	})
 
 	var agentSkills []native.SkillEntry
@@ -1007,6 +1008,7 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		SupportsImageInput:       supportsImageInputForModel(chatModel),
 		SupportsFileInput:        supportsFileInputForModel(chatModel),
 		SupportsToolCall:         chatModel.HasCompatibility(models.CompatToolCall),
+		ModelMaxOutputTokens:     chatModel.Config.MaxOutputTokensLimit(),
 		Identity: native.SessionContext{
 			BotID:             p.BotID,
 			ChatID:            chatID,

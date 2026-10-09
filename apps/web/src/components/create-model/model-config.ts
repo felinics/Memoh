@@ -10,6 +10,7 @@ interface BuildModelConfigInput {
   description?: string
   dimensions?: number
   contextWindow?: number
+  maxOutputTokens?: number
   compatibilities: string[]
   reasoningEfforts?: string[]
   existing?: ModelsModelConfig
@@ -27,6 +28,7 @@ export function buildModelConfig(input: BuildModelConfigInput): ModelsModelConfi
     config.dimensions = input.dimensions
     delete config.compatibilities
     delete config.context_window
+    delete config.max_output_tokens
     delete config.reasoning_efforts
     delete config.thinking_mode
     return config
@@ -36,6 +38,8 @@ export function buildModelConfig(input: BuildModelConfigInput): ModelsModelConfi
   config.compatibilities = input.compatibilities
   if (input.contextWindow) config.context_window = input.contextWindow
   else delete config.context_window
+  if (input.maxOutputTokens) config.max_output_tokens = input.maxOutputTokens
+  else delete config.max_output_tokens
   applyReasoning(config, input.compatibilities.includes('reasoning') ? input.reasoningEfforts : undefined)
   return config
 }

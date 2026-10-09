@@ -14,6 +14,7 @@ func (cfg RunConfig) GenerationLimits() models.GenerationLimits {
 		models.ClientType(models.ResolveClientType(cfg.Model)),
 		cfg.ReasoningConfig,
 		cfg.ContextBudgetMaxTokens,
+		cfg.ModelMaxOutputTokens,
 	)
 }
 

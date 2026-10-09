@@ -81,6 +81,7 @@ type SpawnRunConfig struct {
 	Skills                    map[string]SkillDetail
 	BackgroundManager         *background.Manager
 	ContextBudgetMaxTokens    int
+	ModelMaxOutputTokens      int
 	ContextToolExchangePolicy *contextfrag.ToolExchangePolicy
 	// TurnRequestMessageID is the persisted task user message this run's
 	// assistant and tool rows bind to, so incremental step persistence files
@@ -252,6 +253,7 @@ type resolvedSubagentModel struct {
 	SupportsFileInput      bool
 	SupportsToolCall       bool
 	ContextBudgetMaxTokens int
+	ModelMaxOutputTokens   int
 }
 
 type subagentModelCatalogItem struct {
@@ -989,6 +991,7 @@ func (p *SpawnProvider) runSubagentTask(ctx context.Context, req *agentRequest) 
 		Skills:                    req.parentSession.Skills,
 		BackgroundManager:         p.bgManager,
 		ContextBudgetMaxTokens:    contextBudgetMaxTokens,
+		ModelMaxOutputTokens:      req.runtime.ModelMaxOutputTokens,
 		ContextToolExchangePolicy: req.parentSession.ContextToolExchangePolicy,
 		TurnRequestMessageID:      req.requestMessageID,
 		Identity: SpawnIdentity{
@@ -1880,6 +1883,7 @@ func (p *SpawnProvider) resolveModel(
 		ThinkingBudgetMin:     modelInfo.Config.ThinkingBudgetMin,
 		ThinkingBudgetMax:     modelInfo.Config.ThinkingBudgetMax,
 		ContextWindow:         contextWindow,
+		MaxOutputTokens:       modelInfo.Config.MaxOutputTokensLimit(),
 	})
 	return resolvedSubagentModel{
 		Model:                  sdkModel,
@@ -1893,6 +1897,7 @@ func (p *SpawnProvider) resolveModel(
 		SupportsImageInput:     modelInfo.HasCompatibility(models.CompatVision),
 		SupportsToolCall:       modelInfo.HasCompatibility(models.CompatToolCall),
 		ContextBudgetMaxTokens: contextWindow,
+		ModelMaxOutputTokens:   modelInfo.Config.MaxOutputTokensLimit(),
 	}, nil
 }
 

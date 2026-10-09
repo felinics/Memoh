@@ -1370,3 +1370,57 @@ func TestTestUnreachableStaysHardError(t *testing.T) {
 		t.Fatalf("cause = %v, want a *url.Error in the chain", resp.Cause)
 	}
 }
+
+func TestFetchRemoteModelsViaSDKReadsMaxOutputTokens(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gateway.yaml"), []byte(`
+name: Gateway
+client_type: openai-completions
+base_url: https://example.invalid/v1
+
+models:
+  - model_id: templated
+    name: Templated
+    type: chat
+    config:
+      max_output_tokens: 4096
+`), 0o600); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "declared", "object": "model", "max_output_tokens": 64000},
+				{"id": "undeclared", "object": "model"},
+				{"id": "invalid", "object": "model", "max_output_tokens": 0},
+				{"id": "templated", "object": "model", "max_output_tokens": 8192},
+			},
+		})
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil, "", dir)
+	remoteModels, err := svc.fetchRemoteModelsViaSDK(context.Background(), sqlc.Provider{
+		ClientType: string(models.ClientTypeOpenAICompletions),
+		Config:     []byte(`{"base_url":"` + server.URL + `","api_key":"sk-test"}`),
+		Metadata:   []byte(`{"preset":{"source":"gateway.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("fetch remote models: %v", err)
+	}
+	got := map[string]*int{}
+	for _, m := range remoteModels {
+		got[m.ID] = m.MaxOutputTokens
+	}
+	if got["declared"] == nil || *got["declared"] != 64000 {
+		t.Fatalf("declared = %v, want 64000", got["declared"])
+	}
+	if got["undeclared"] != nil || got["invalid"] != nil {
+		t.Fatalf("undeclared = %v, invalid = %v, want unknown", got["undeclared"], got["invalid"])
+	}
+	if got["templated"] == nil || *got["templated"] != 8192 {
+		t.Fatalf("templated = %v, want the endpoint's 8192 over the template's 4096", got["templated"])
+	}
+}

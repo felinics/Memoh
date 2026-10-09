@@ -3392,6 +3392,12 @@ export type ModelsModelConfig = {
     description?: string;
     dimensions?: number;
     /**
+     * MaxOutputTokens is the most output tokens the model can produce in one
+     * response; nil means unknown. When set, every turn requests an explicit
+     * limit within it.
+     */
+    max_output_tokens?: number;
+    /**
      * ReasoningDefaultOn reports whether omitting the thinking field leaves the
      * model thinking. Separate from off-ability: Claude 4.6 can be turned off *and*
      * defaults to off, while Opus 5 can be turned off but defaults to on, so

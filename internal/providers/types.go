@@ -143,6 +143,7 @@ type RemoteModel struct {
 	ThinkingBudgetMin   *int   `json:"thinking_budget_min,omitempty"`
 	ThinkingBudgetMax   *int   `json:"thinking_budget_max,omitempty"`
 	ContextWindow       *int   `json:"context_window,omitempty"`
+	MaxOutputTokens     *int   `json:"max_output_tokens,omitempty"`
 	Dimensions          *int   `json:"dimensions,omitempty"`
 	CapabilitiesKnown   bool   `json:"-"`
 }
