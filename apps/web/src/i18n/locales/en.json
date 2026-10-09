@@ -185,8 +185,10 @@
     "agent_dependency_missing": "{dep_id} is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.",
     "app": {
       "busy": "Another operation on this App is in progress.",
+      "dependencies_unavailable": "Workspace dependencies are unavailable on this server, so the App cannot manage them.",
       "not_found": "This App installation was not found.",
       "operation_failed": "The App operation failed.",
+      "prerequisite_failed": "A dependency this one needs failed to install. Fix that dependency first, then retry.",
       "request_invalid": "The App request is invalid."
     },
     "bot": {
@@ -199,6 +201,7 @@
       "invalid_runtime": "This Agent runtime is not supported.",
       "name_taken": "An Agent with this name already exists for this Bot.",
       "not_found": "This Agent no longer exists.",
+      "provider_direct_runtime": "This provider runs as a direct runtime. Create the Agent with the {runtime} runtime instead.",
       "unavailable": "This Agent is unavailable for new conversations."
     },
     "bot_backup": {
@@ -369,7 +372,12 @@
     "runtime_reservation_failed": "The response could not be started. Please try again shortly.",
     "runtime_run_failed": "The response could not be completed. Please try again.",
     "schedule": {
-      "execution_timeout": "This scheduled run reached its execution limit. Review its progress or increase the limit."
+      "execution_timeout": "This scheduled run reached its execution limit. Review its progress or increase the limit.",
+      "model_conflict": "The model setting does not fit this schedule's runtime. Choose the model field that matches the runtime.",
+      "model_required": "This bot has no default model, so the schedule needs an explicit model. Choose a model or set a default one.",
+      "model_unusable": "This model cannot run a schedule. Choose an enabled chat model.",
+      "run_target_conflict": "The run target, runtime, Agent and session settings of this schedule cannot be combined. Adjust them and try again.",
+      "session_mode_unsupported": "Scheduled runs can only continue chat or schedule sessions. Choose another target session."
     },
     "search_provider": {
       "invalid_provider": "This web search provider is not supported.",
@@ -399,6 +407,7 @@
       "builtin_read_only": "Built-in Skills are managed by Memoh and cannot be edited or deleted.",
       "name_invalid": "The Skill needs a valid name in its YAML frontmatter.",
       "name_taken": "A Skill with this name already exists. Choose a different name.",
+      "not_found": "This Skill was not found. Refresh the list and try again.",
       "registry_read_only": "This Skill belongs to a Registry App. Update or uninstall the App instead.",
       "save_failed": "The Skill could not be saved. Please try again."
     },

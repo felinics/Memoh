@@ -45,7 +45,10 @@ type Event struct {
 	Data    string
 	Status  string
 	Version string
+	// Message is the reason a step was kept; Code is the catalog code of a
+	// failed step.
 	Message string
+	Code    string
 }
 
 // EventSink receives operation events.
@@ -68,7 +71,10 @@ type StepResult struct {
 	ID      string
 	Status  string
 	Version string
-	Error   string
+	// Error is the reason a step was kept. A failed step carries Code, the
+	// catalog code the user sees; the cause goes to the log.
+	Error string
+	Code  string
 }
 
 // OperationResult is the receipt of an App operation.

@@ -47,6 +47,14 @@ describe('App error presentation', () => {
     expect(actions).toEqual(['open'])
   })
 
+  it('renders errors.<code> in the detail panel and prefers it over recorded text', async () => {
+    const item = reactive<AppItem>({ app_id: 'bun', installation_id: 'bun-install', status: 'failed', last_error: diagnostic, last_error_code: 'app.operation_failed' })
+    await mount(AppDetailPanel, item)
+    root.querySelector<HTMLButtonElement>('button[aria-expanded]:not([aria-haspopup])')!.click()
+    await nextTick()
+    expect(root.querySelector('pre')?.textContent).toBe(en.errors.app.operation_failed)
+  })
+
   it('discloses the full diagnostic only on demand and resets when the app changes', async () => {
     const item = reactive<AppItem>({ app_id: 'bun', installation_id: 'bun-install', status: 'failed', last_error: diagnostic })
     await mount(AppDetailPanel, item)

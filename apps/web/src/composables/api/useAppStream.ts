@@ -22,7 +22,7 @@ export type AppStreamEvent =
   | { type: 'started'; kind?: AppStepKind; id?: string; version?: string }
   | { type: 'step'; kind: AppStepKind; id: string }
   | { type: 'log'; kind?: AppStepKind; id?: string; stream: 'stdout' | 'stderr'; data: string }
-  | { type: 'step_done'; kind: AppStepKind; id: string; status: string; version?: string; message?: string }
+  | { type: 'step_done'; kind: AppStepKind; id: string; status: string; version?: string; message?: string; code?: string }
   | { type: 'done'; kind?: AppStepKind; id?: string; status?: string; version?: string }
   | SSEErrorEvent
 
@@ -83,7 +83,7 @@ export function isAppStreamEvent(value: unknown): value is AppStreamEvent {
       return (event.stream === 'stdout' || event.stream === 'stderr') && optionalString(event.data)
     case 'step_done':
       return typeof event.kind === 'string' && typeof event.id === 'string' && typeof event.status === 'string'
-        && optionalString(event.version) && optionalString(event.message)
+        && optionalString(event.version) && optionalString(event.message) && optionalString(event.code)
     case 'error':
       return isSSEErrorEvent(event)
     default:

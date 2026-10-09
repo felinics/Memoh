@@ -28,6 +28,7 @@ const (
 	CodeBotAgentInvalidMetadata                  Code = "bot_agent.invalid_metadata"
 	CodeBotAgentDefaultInUse                     Code = "bot_agent.default_in_use"
 	CodeBotAgentUnavailable                      Code = "bot_agent.unavailable"
+	CodeBotAgentProviderDirectRuntime            Code = "bot_agent.provider_direct_runtime"
 	CodeChannelRuntimeUnavailable                Code = "channel.runtime_unavailable"
 	CodeChannelVerificationFailed                Code = "channel.verification_failed"
 	CodeAgentChatModelNotConfigured              Code = "agent.chat_model_not_configured"
@@ -75,6 +76,7 @@ const (
 	CodeSkillSaveFailed                          Code = "skill.save_failed"
 	CodeSkillRegistryReadOnly                    Code = "skill.registry_read_only"
 	CodeSkillNameInvalid                         Code = "skill.name_invalid"
+	CodeSkillNotFound                            Code = "skill.not_found"
 	CodeTTSTextTooLong                           Code = "tts.text_too_long"
 	CodeTTSModelNotConfigured                    Code = "tts.model_not_configured"
 	CodeWorkspaceArchiveInvalid                  Code = "workspace.archive_invalid"
@@ -84,6 +86,8 @@ const (
 	CodeAppRequestInvalid                        Code = "app.request_invalid"
 	CodeAppBusy                                  Code = "app.busy"
 	CodeAppOperationFailed                       Code = "app.operation_failed"
+	CodeAppDependenciesUnavailable               Code = "app.dependencies_unavailable"
+	CodeAppPrerequisiteFailed                    Code = "app.prerequisite_failed"
 	CodeRegistryUnavailable                      Code = "registry.unavailable"
 	CodeRegistryAppNotFound                      Code = "registry.app_not_found"
 	CodeRegistryAppInvalid                       Code = "registry.app_invalid"
@@ -160,6 +164,11 @@ const (
 	CodeAgentToolTimeout                         Code = "agent.tool_timeout"
 	CodeVideoJobOutcomeUnknown                   Code = "video.job_outcome_unknown"
 	CodeScheduleExecutionTimeout                 Code = "schedule.execution_timeout"
+	CodeScheduleRunTargetConflict                Code = "schedule.run_target_conflict"
+	CodeScheduleModelConflict                    Code = "schedule.model_conflict"
+	CodeScheduleModelUnusable                    Code = "schedule.model_unusable"
+	CodeScheduleModelRequired                    Code = "schedule.model_required"
+	CodeScheduleSessionModeUnsupported           Code = "schedule.session_mode_unsupported"
 	CodeAgentResponseInterrupted                 Code = "agent.response_interrupted"
 	CodeAgentProviderOverloaded                  Code = "agent.provider_overloaded"
 	CodeAgentProviderRateLimited                 Code = "agent.provider_rate_limited"
@@ -457,6 +466,11 @@ var catalog = map[Code]Definition{
 		Detail:      "This Agent is disabled or not configured.",
 		AllowedArgs: []string{"field"},
 	},
+	CodeBotAgentProviderDirectRuntime: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "This provider runs as a direct runtime. Create the Agent with the codex or claude-code runtime instead.",
+		AllowedArgs: []string{"runtime"},
+	},
 	CodeChannelRuntimeUnavailable: {
 		HTTPStatus: http.StatusServiceUnavailable,
 		Detail:     "The channel service could not be reached.",
@@ -654,6 +668,10 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusBadRequest,
 		Detail:     "The Skill needs a valid name in its YAML frontmatter.",
 	},
+	CodeSkillNotFound: {
+		HTTPStatus: http.StatusNotFound,
+		Detail:     "This Skill was not found. Refresh the list and try again.",
+	},
 	CodeTTSTextTooLong: {
 		HTTPStatus:  http.StatusBadRequest,
 		Detail:      "The text is too long to synthesize.",
@@ -690,6 +708,14 @@ var catalog = map[Code]Definition{
 	CodeAppOperationFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The App operation failed.",
+	},
+	CodeAppDependenciesUnavailable: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "Workspace dependencies are unavailable on this server, so the App cannot manage them.",
+	},
+	CodeAppPrerequisiteFailed: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "A dependency this one needs failed to install. Fix that dependency first, then retry.",
 	},
 	CodeRegistryUnavailable: {
 		HTTPStatus: http.StatusBadGateway,
@@ -974,7 +1000,31 @@ var catalog = map[Code]Definition{
 	CodeSessionInterrupted:       {HTTPStatus: http.StatusServiceUnavailable, Detail: "The server interrupted this run during shutdown. It can resume from saved progress after restart."},
 	CodeAgentToolTimeout:         {HTTPStatus: http.StatusGatewayTimeout, Detail: "The tool stopped reporting progress. Review its saved result before retrying."},
 	CodeScheduleExecutionTimeout: {HTTPStatus: http.StatusGatewayTimeout, Detail: "This scheduled run reached its execution limit. Review its progress or increase the limit."},
-	CodeVideoJobOutcomeUnknown:   {HTTPStatus: http.StatusBadGateway, Detail: "The video job status could not be confirmed. Check the saved job before creating another video."},
+	CodeScheduleRunTargetConflict: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The run target, runtime, Agent and session settings of this schedule cannot be combined. Adjust them and try again.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeScheduleModelConflict: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The model setting does not fit this schedule's runtime. Choose the model field that matches the runtime.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeScheduleModelUnusable: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "This model cannot run a schedule. Choose an enabled chat model.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeScheduleModelRequired: {
+		HTTPStatus:  http.StatusConflict,
+		Detail:      "This bot has no default model, so the schedule needs an explicit model. Choose a model or set a default one.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeScheduleSessionModeUnsupported: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Scheduled runs can only continue chat or schedule sessions. Choose another target session.",
+	},
+	CodeVideoJobOutcomeUnknown: {HTTPStatus: http.StatusBadGateway, Detail: "The video job status could not be confirmed. Check the saved job before creating another video."},
 	// Model provider codes. The provider is outside Memoh whoever holds the
 	// credential, so each is a dependency fault regardless of its status: a
 	// rejected key or an exhausted quota is the provider's answer, not a

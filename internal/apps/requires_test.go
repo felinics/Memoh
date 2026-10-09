@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/workspacedeps"
 )
 
@@ -67,8 +68,17 @@ func TestInstallSkipsDependentsOfAFailedPrerequisite(t *testing.T) {
 	if !strings.Contains(rec.types(), "step_done:dependency:pandoc=failed") {
 		t.Fatalf("events = %s", rec.types())
 	}
-	if !strings.Contains(result.Installation.LastError, "prerequisite micromamba failed") {
-		t.Fatalf("last error = %q", result.Installation.LastError)
+	if result.Installation.LastErrorCode != string(apperror.CodeAppOperationFailed) {
+		t.Fatalf("last error code = %q", result.Installation.LastErrorCode)
+	}
+	var blocked *StepResult
+	for i := range result.Steps {
+		if result.Steps[i].ID == "pandoc" {
+			blocked = &result.Steps[i]
+		}
+	}
+	if blocked == nil || blocked.Code != string(apperror.CodeAppPrerequisiteFailed) || blocked.Error != "" {
+		t.Fatalf("blocked step = %+v, want the prerequisite code and no text", blocked)
 	}
 
 	delete(h.deps.installErr, "micromamba")

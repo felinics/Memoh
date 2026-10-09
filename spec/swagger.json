@@ -20551,7 +20551,7 @@
                     "$ref": "#/definitions/conversation.UIToolApproval"
                 },
                 "args": {
-                    "description": "Args are the machine-readable parameters of a notice block: the string\nvalues of the runtime_notice event metadata (dep_id and install_task_id\nfor a workspace dependency notice, for instance). The client renders\nactions from them instead of parsing Content.",
+                    "description": "Args are the machine-readable parameters of a notice or error block: the\nstring values of the runtime_notice event metadata (dep_id and\ninstall_task_id for a workspace dependency notice, for instance), or the\ncatalog args stored with a failure's code. The client renders text and\nactions from them instead of parsing Content.",
                     "type": "object",
                     "additionalProperties": {
                         "type": "string"
@@ -21390,6 +21390,10 @@
                     "type": "string"
                 },
                 "last_error": {
+                    "description": "LastError is text recorded by earlier servers. A failure recorded now\ncarries LastErrorCode, which clients render as errors.\u003ccode\u003e.",
+                    "type": "string"
+                },
+                "last_error_code": {
                     "type": "string"
                 },
                 "license": {

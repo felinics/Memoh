@@ -451,3 +451,21 @@ func TestBotAgentsHandlerDeleteAnswersPurgeFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestBotAgentHTTPErrorKeepsTheCauseAndNamesTheDirectRuntime(t *testing.T) {
+	_, err := botagents.DescriptorFor(botagents.BotAgent{
+		Runtime:  "acp",
+		Metadata: map[string]any{"provider": "codex"},
+	})
+	got := botAgentHTTPError(fmt.Errorf("create: %w", err))
+	if apperror.CodeOf(got) != apperror.CodeBotAgentProviderDirectRuntime || apperror.ArgsOf(got)["runtime"] != "codex" {
+		t.Fatalf("answer = %s %v, want %s naming codex", apperror.CodeOf(got), apperror.ArgsOf(got), apperror.CodeBotAgentProviderDirectRuntime)
+	}
+	if !errors.Is(apperror.CauseOf(got), botagents.ErrProviderDirectRuntime) {
+		t.Fatalf("cause = %v, want ErrProviderDirectRuntime", apperror.CauseOf(got))
+	}
+	plain := botAgentHTTPError(botagents.ErrNameTaken)
+	if !errors.Is(apperror.CauseOf(plain), botagents.ErrNameTaken) {
+		t.Fatalf("cause of name_taken = %v, want the sentinel kept", apperror.CauseOf(plain))
+	}
+}

@@ -202,12 +202,12 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 func (s *Service) Get(ctx context.Context, id string) (Schedule, error) {
 	pgID, err := db.ParseUUID(id)
 	if err != nil {
-		return Schedule{}, err
+		return Schedule{}, invalidFieldf("id", "invalid schedule id: %v", err)
 	}
 	row, err := s.queries.GetScheduleByID(ctx, pgID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Schedule{}, errors.New("schedule not found")
+			return Schedule{}, ErrScheduleNotFound
 		}
 		return Schedule{}, err
 	}

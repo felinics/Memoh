@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -234,9 +235,8 @@ func TestSkillsActionsAPITranslatesSkillErrors(t *testing.T) {
 	env := newSkillsTestEnv(t)
 	missing := path.Join("/data/.agents/skills", "missing", "SKILL.md")
 	_, err := env.callJSON(t, http.MethodPost, "/bots/:bot_id/container/skills/actions", SkillsActionRequest{Action: skillset.ActionDisable, TargetPath: missing}, env.handler.ApplySkillAction)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("missing skill: error = %v, want 404", err)
+	if apperror.CodeOf(err) != apperror.CodeSkillNotFound {
+		t.Fatalf("missing skill: error = %v, want %s", err, apperror.CodeSkillNotFound)
 	}
 	for _, tc := range []struct {
 		name  string
@@ -1126,4 +1126,20 @@ func promptFromLoadedSkills(items []SkillItem) string {
 
 func managedSkillRaw(name, description string) string {
 	return "---\nname: " + name + "\ndescription: " + description + "\n---\n\n# " + description + "\n"
+}
+
+func TestSkillActionHTTPErrorMapsEveryPackageRefusal(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want apperror.Code
+	}{
+		{skillset.ErrSkillNotFound, apperror.CodeSkillNotFound},
+		{skillset.ErrRegistrySkillReadOnly, apperror.CodeSkillRegistryReadOnly},
+		{skillset.ErrBuiltinSkillReadOnly, apperror.CodeSkillBuiltinReadOnly},
+	} {
+		got := skillActionHTTPError(fmt.Errorf("apply: %w", tc.err))
+		if apperror.CodeOf(got) != tc.want || !errors.Is(apperror.CauseOf(got), tc.err) {
+			t.Errorf("skillActionHTTPError(%v) = %s, want %s keeping the cause", tc.err, apperror.CodeOf(got), tc.want)
+		}
+	}
 }

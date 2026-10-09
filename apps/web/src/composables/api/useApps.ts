@@ -156,6 +156,16 @@ export function appInProgress(item: Pick<AppItem, 'status'>): boolean {
   return item.status === 'installing' || item.status === 'updating' || item.status === 'removing'
 }
 
+/**
+ * The failure text of an installation: the catalog copy for its error code, or
+ * the text recorded by an earlier server when the row has no code.
+ */
+export function appLastError(item: Pick<AppItem, 'last_error' | 'last_error_code'>, translate: (key: string) => string): string {
+  const code = item.last_error_code?.trim()
+  if (code) return translate(`errors.${code}`)
+  return item.last_error?.trim() ?? ''
+}
+
 /** A newer release is known for this installation. */
 export function appUpdateAvailable(item: Pick<AppItem, 'available_revision' | 'revision'>): boolean {
   const available = item.available_revision?.trim() ?? ''

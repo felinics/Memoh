@@ -58,8 +58,10 @@ agent_credential.usage_auth_expired	409
 agent_credential.usage_unavailable	502
 agent_dependency_missing	409
 app.busy	409
+app.dependencies_unavailable	503
 app.not_found	404
 app.operation_failed	500
+app.prerequisite_failed	409
 app.request_invalid	400
 bot.name_invalid	400
 bot.name_taken	409
@@ -68,6 +70,7 @@ bot_agent.invalid_metadata	400
 bot_agent.invalid_runtime	400
 bot_agent.name_taken	409
 bot_agent.not_found	404
+bot_agent.provider_direct_runtime	400
 bot_agent.unavailable	409
 bot_backup.bundle_invalid	400
 bot_ready_update_failed	500
@@ -189,6 +192,11 @@ runtime_reservation_declined	409
 runtime_reservation_failed	503
 runtime_run_failed	500
 schedule.execution_timeout	504
+schedule.model_conflict	400
+schedule.model_required	409
+schedule.model_unusable	400
+schedule.run_target_conflict	400
+schedule.session_mode_unsupported	409
 search_provider.invalid_provider	400
 search_provider.type_conflict	409
 session.model_preference_conflict	409
@@ -208,6 +216,7 @@ settings.reasoning_options_unavailable	503
 skill.builtin_read_only	409
 skill.name_invalid	400
 skill.name_taken	409
+skill.not_found	404
 skill.registry_read_only	409
 skill.save_failed	500
 tool_approval.ambiguous	409

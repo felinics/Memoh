@@ -185,8 +185,10 @@
     "agent_dependency_missing": "{dep_id} 尚未安装在此工作区。请在 Bot 的「依赖」中安装，或等待正在进行的安装完成，然后重新发送消息。",
     "app": {
       "busy": "该应用的另一个操作正在进行中。",
+      "dependencies_unavailable": "此服务器未启用工作区依赖服务，应用无法管理依赖。请联系管理员。",
       "not_found": "未找到该应用安装记录。",
       "operation_failed": "应用操作失败。",
+      "prerequisite_failed": "所需的前置依赖安装失败。请先处理该依赖，再重试。",
       "request_invalid": "应用请求无效。"
     },
     "bot": {
@@ -199,6 +201,7 @@
       "invalid_runtime": "暂不支持这个 Agent 运行时。",
       "name_taken": "这个 Bot 中已存在同名 Agent。",
       "not_found": "这个 Agent 已不存在。",
+      "provider_direct_runtime": "该服务商以直连运行时方式运行，请改用 {runtime} 运行时创建 Agent。",
       "unavailable": "这个 Agent 已不能用于新对话。"
     },
     "bot_backup": {
@@ -369,7 +372,12 @@
     "runtime_reservation_failed": "回复未能开始，请稍后重试。",
     "runtime_run_failed": "回复未能完成，请重试。",
     "schedule": {
-      "execution_timeout": "定时任务已达到执行时限，请检查执行进度或延长时限。"
+      "execution_timeout": "定时任务已达到执行时限，请检查执行进度或延长时限。",
+      "model_conflict": "模型设置与该定时任务的运行时不匹配，请改用与运行时对应的模型字段。",
+      "model_required": "该机器人没有默认模型，定时任务需要明确指定模型。请选择模型，或先设置默认模型。",
+      "model_unusable": "该模型无法用于定时任务，请选择已启用的对话模型。",
+      "run_target_conflict": "该定时任务的运行目标、运行时、Agent 与会话设置互相冲突，请调整后重试。",
+      "session_mode_unsupported": "定时任务只能接续对话会话或定时任务会话，请选择其他目标会话。"
     },
     "search_provider": {
       "invalid_provider": "不支持该搜索提供方。",
@@ -399,6 +407,7 @@
       "builtin_read_only": "Memoh 自带 Skill 由系统管理，无法编辑或删除。",
       "name_invalid": "Skill 的 YAML frontmatter 中需要有效的名称。",
       "name_taken": "已存在同名 Skill，请换一个名称。",
+      "not_found": "未找到该技能，请刷新列表后重试。",
       "registry_read_only": "该 Skill 属于 Registry App，请通过更新或卸载 App 来修改。",
       "save_failed": "Skill 保存失败，请重试。"
     },

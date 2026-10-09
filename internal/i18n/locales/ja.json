@@ -588,8 +588,10 @@
     "agent_dependency_missing": "{dep_id} はこの Workspace にインストールされていません。Bot の「依存関係」からインストールするか、実行中のインストールの完了を待ってから、メッセージを再送してください。",
     "app": {
       "busy": "このアプリの別の操作が進行中です。",
+      "dependencies_unavailable": "このサーバーではワークスペース依存関係サービスが利用できないため、アプリは依存関係を管理できません。管理者に連絡してください。",
       "not_found": "このアプリのインストールは見つかりませんでした。",
       "operation_failed": "アプリの操作に失敗しました。",
+      "prerequisite_failed": "前提となる依存関係のインストールに失敗しました。先にその依存関係を解決してから再試行してください。",
       "request_invalid": "アプリのリクエストが無効です。"
     },
     "bot": {
@@ -602,6 +604,7 @@
       "invalid_runtime": "この Agent ランタイムには対応していません。",
       "name_taken": "この Bot には同じ名前の Agent が既にあります。",
       "not_found": "この Agent は存在しません。",
+      "provider_direct_runtime": "このプロバイダーは直接ランタイムで動作します。代わりに {runtime} ランタイムで Agent を作成してください。",
       "unavailable": "この Agent は新しい会話では利用できません。"
     },
     "bot_backup": {
@@ -772,7 +775,12 @@
     "runtime_reservation_failed": "応答を開始できませんでした。しばらくしてからもう一度お試しください。",
     "runtime_run_failed": "応答を完了できませんでした。もう一度お試しください。",
     "schedule": {
-      "execution_timeout": "定期実行が制限時間に達しました。進捗を確認するか、制限時間を延長してください。"
+      "execution_timeout": "定期実行が制限時間に達しました。進捗を確認するか、制限時間を延長してください。",
+      "model_conflict": "モデル設定がこの定期実行のランタイムと合っていません。ランタイムに対応するモデル項目を選択してください。",
+      "model_required": "このボットには既定のモデルがないため、定期実行にはモデルの指定が必要です。モデルを選択するか、既定のモデルを設定してください。",
+      "model_unusable": "このモデルは定期実行に使えません。有効なチャットモデルを選択してください。",
+      "run_target_conflict": "この定期実行の実行対象、ランタイム、Agent、セッションの設定は同時に指定できません。見直してからやり直してください。",
+      "session_mode_unsupported": "定期実行は、チャットまたは定期実行のセッションにのみ続けて実行できます。別の対象セッションを選択してください。"
     },
     "search_provider": {
       "invalid_provider": "このWeb検索プロバイダーはサポートされていません。",
@@ -802,6 +810,7 @@
       "builtin_read_only": "Memoh 組み込みの Skill はシステムによって管理されているため、編集または削除できません。",
       "name_invalid": "Skill の YAML frontmatter に有効な名前が必要です。",
       "name_taken": "同じ名前の Skill がすでに存在します。別の名前を使用してください。",
+      "not_found": "このスキルが見つかりません。一覧を更新してからやり直してください。",
       "registry_read_only": "この Skill は Registry App に属します。App を更新またはアンインストールしてください。",
       "save_failed": "Skill を保存できませんでした。もう一度お試しください。"
     },

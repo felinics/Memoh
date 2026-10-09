@@ -196,6 +196,7 @@ type BotAppInstallation struct {
 	AvailableVersion  string             `json:"available_version"`
 	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
 	LastError         string             `json:"last_error"`
+	LastErrorCode     string             `json:"last_error_code"`
 	Release           []byte             `json:"release"`
 	InstalledAt       pgtype.Timestamptz `json:"installed_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
