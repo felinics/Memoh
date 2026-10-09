@@ -72,7 +72,7 @@ func TestCompactionMovesPastIneffectiveSpanAcrossRestart(t *testing.T) {
 	cfg.Manual = true
 
 	_, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
-	if err == nil || !strings.Contains(err.Error(), errIneffectiveSummary.Error()) {
+	if err == nil || !strings.Contains(err.Error(), ErrIneffectiveSummary.Error()) {
 		t.Fatalf("first pass error = %v, want the first span rejected as ineffective", err)
 	}
 	if q.completed.FailureReason != failureReasonIneffectiveSummary {

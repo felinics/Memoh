@@ -77,7 +77,9 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		minSpanTokens = 0
 	}
 
-	read, reason, err := s.readCompactionSpan(ctx, sessionUUID, cfg, measure, minSpanTokens)
+	// Both entries budgets below are floored at half of maxCompactTokens, so a
+	// span claimable within that is claimable within the actual one.
+	read, reason, err := s.readCompactionSpan(ctx, sessionUUID, cfg, measure, minSpanTokens, maxCompactTokens/2)
 	if err != nil {
 		return Result{}, err
 	}
@@ -137,6 +139,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{Status: StatusNoop, Reason: ReasonNoBeneficialSpan}, nil
 	}
 	s.logger.InfoContext(ctx, "compaction: after trim",
+		slog.String("session_id", cfg.SessionID),
 		slog.Int("selected_entry_count", len(entries)),
 		slog.Int("claimed_row_count", len(compactedMessageIDs)),
 		slog.String("first_message_id", formatUUID(compactedMessageIDs[0])),
@@ -260,8 +263,14 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 	summaryTokens := estimateSummaryReplayTokens(summary)
 	if summaryTokens >= replacementTokens {
-		err = fmt.Errorf("%w: summary_tokens=%d raw_tokens=%d", errIneffectiveSummary, summaryTokens, replacementTokens)
-		s.failLog(persistCtx, logID, err)
+		err = fmt.Errorf("%w: summary_tokens=%d raw_tokens=%d", ErrIneffectiveSummary, summaryTokens, replacementTokens)
+		if fusing {
+			// A rollup failed with the summaries it absorbs; that says nothing
+			// about the new rows on their own.
+			_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil, "")
+		} else {
+			s.failLog(persistCtx, logID, err)
+		}
 		return Result{}, err
 	}
 
@@ -376,7 +385,7 @@ func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, m
 // them; any other failure leaves the rows eligible for a retry.
 func (s *Service) failLog(ctx context.Context, logID pgtype.UUID, cause error) {
 	reason := ""
-	if errors.Is(cause, errIneffectiveSummary) {
+	if errors.Is(cause, ErrIneffectiveSummary) {
 		reason = failureReasonIneffectiveSummary
 	}
 	_ = s.completeLog(ctx, logID, "error", "", cause.Error(), 0, nil, pgtype.UUID{}, nil, reason)

@@ -52,8 +52,25 @@ func TestCompactionLongHorizonGrowthStaysBoundedAndOrdered(t *testing.T) {
 	proved := map[pgtype.UUID]bool{}
 	var passes, failures, committed, recovered int
 	started := time.Now()
+	var task sqlc.ListUncompactedMessagesBySessionRow
+	var taskSteps []sqlc.ListUncompactedMessagesBySessionRow
 	for turn := 1; turn <= turns; turn++ {
-		longHorizonTurn(t, q, turn)
+		switch {
+		case turn == 31:
+			// One task worked on through turns 31-45 without a new user
+			// message: its steps must keep compacting behind the task.
+			task = prose(t, "user", "LONG-TASK", 120, 120)
+			q.append(task)
+			fallthrough
+		case turn > 31 && turn <= 45:
+			for n := 0; n < 3; n++ {
+				step := execExchange(t, turn*10+n)
+				taskSteps = append(taskSteps, step...)
+				q.append(step...)
+			}
+		default:
+			longHorizonTurn(t, q, turn)
+		}
 		for _, row := range q.history {
 			if _, ok := rowCost[row.ID]; !ok {
 				items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
@@ -85,7 +102,7 @@ func TestCompactionLongHorizonGrowthStaysBoundedAndOrdered(t *testing.T) {
 				}
 			}
 			if err != nil {
-				if !errors.Is(err, errIneffectiveSummary) {
+				if !errors.Is(err, ErrIneffectiveSummary) {
 					t.Fatalf("turn %d pass %d: %v", turn, pass, err)
 				}
 				failures++
@@ -103,6 +120,22 @@ func TestCompactionLongHorizonGrowthStaysBoundedAndOrdered(t *testing.T) {
 					recovered++
 					delete(proved, id)
 				}
+			}
+		}
+		if turn >= 31 && turn <= 45 && q.logStatuses[q.claims[task.ID]] == "ok" {
+			t.Fatalf("turn %d compacted the prompt of the task still being worked on", turn)
+		}
+		if turn == 45 {
+			compactedSteps := 0
+			for _, row := range taskSteps {
+				if q.logStatuses[q.claims[row.ID]] == "ok" {
+					compactedSteps++
+				}
+			}
+			// The newest steps within the target stay raw; the older ones
+			// must not.
+			if compactedSteps < len(taskSteps)/4 {
+				t.Fatalf("only %d of %d steps of the long task compacted while it ran", compactedSteps, len(taskSteps))
 			}
 		}
 	}

@@ -116,14 +116,27 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 		total += payloadBytes(c.row)
 	}
 	q.windows++
+	latestUser := -1
+	for i, c := range candidates {
+		if c.row.Role == "user" {
+			latestUser = i
+		}
+	}
 	var window []sqlc.ListUncompactedMessagesBySessionWithinBytesRow
 	var cumulative int64
-	for _, c := range candidates {
+	for i, c := range candidates {
 		cumulative += payloadBytes(c.row)
-		if cumulative > arg.MaxBytes {
+		oversized := i == 0 && cumulative > arg.MaxBytes
+		if cumulative > arg.MaxBytes && !oversized {
 			break
 		}
-		bounded := boundedRowsForTest([]sqlc.ListUncompactedMessagesBySessionRow{c.row})[0]
+		row := c.row
+		if oversized {
+			row.Content, row.Metadata, row.Usage, row.DisplayText = nil, nil, nil, pgtype.Text{}
+		}
+		bounded := boundedRowsForTest([]sqlc.ListUncompactedMessagesBySessionRow{row})[0]
+		bounded.Oversized = oversized
+		bounded.LatestUser = i == latestUser
 		bounded.CandidateCount = int64(len(candidates))
 		bounded.CandidateBytes = total
 		bounded.CumulativeBytes = cumulative
@@ -132,8 +145,11 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 		claim := q.claims[c.row.ID]
 		bounded.IneffectiveClaim = q.claimEpoch[claim] == q.epoch && q.logStatuses[claim] == "error" && q.reasons[claim] == arg.IneffectiveFailureReason
 		window = append(window, bounded)
+		if oversized {
+			break
+		}
 	}
-	if len(window) > 0 {
+	if len(window) > 0 && !window[0].Oversized {
 		q.readBytes += window[len(window)-1].CumulativeBytes
 	}
 	return window, nil

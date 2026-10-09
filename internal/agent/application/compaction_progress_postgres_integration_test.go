@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -140,14 +141,18 @@ func (f progressFixture) compact(id string) compactRecord {
 	return record
 }
 
-func (f progressFixture) run(svc *compaction.Service, model *countingSummarizer) (compaction.Result, error) {
-	return svc.RunCompactionSync(f.ctx, compaction.TriggerConfig{
+func (f progressFixture) config(model *countingSummarizer) compaction.TriggerConfig {
+	return compaction.TriggerConfig{
 		BotID: f.botID, SessionID: f.sessionID,
 		ModelID: "stub-model", ClientType: "openai-completions", APIKey: "test", BaseURL: "http://stub.invalid",
 		HTTPClient:   &http.Client{Transport: model},
 		TargetTokens: 50,
 		Manual:       true,
-	})
+	}
+}
+
+func (f progressFixture) run(svc *compaction.Service, model *countingSummarizer) (compaction.Result, error) {
+	return svc.RunCompactionSync(f.ctx, f.config(model))
 }
 
 // replay loads the session history the way a turn does and substitutes
@@ -312,8 +317,10 @@ func TestPostgresCompactionAdvancesPastHeldBackHistory(t *testing.T) {
 		t.Fatalf("NEXT-A attempt = %+v, want an error recorded as ineffective_summary", got)
 	}
 	model.summary = summaryTokens(254)
-	if res, err := f.run(svc, model); err != nil || res.Status != compaction.StatusOK {
-		t.Fatalf("same-process next pass = %+v, %v; want NEXT-B committed", res, err)
+	auto := f.config(model)
+	auto.Manual, auto.HardPressure = false, true
+	if res, err := svc.RunCompactionSync(ctx, auto); err != nil || res.Status != compaction.StatusOK {
+		t.Fatalf("same-process automatic next pass = %+v, %v; want NEXT-B committed without a cooldown", res, err)
 	}
 	_, claim = f.claims()
 	if claim[nextB[0].ID] == "" || claim[nextB[0].ID] != claim[nextB[1].ID] || claim[nextA[0].ID] != failed {
@@ -452,5 +459,68 @@ func TestPostgresCompactionScanStopsAtFreshClaim(t *testing.T) {
 	_, claim := f.claims()
 	if claim[claimed[0].ID] == formatPGUUID(attempt.ID) || claim[claimed[0].ID] != claim[claimed[1].ID] {
 		t.Fatal("lapsed rows were not reclaimed by the new summary")
+	}
+}
+
+func TestPostgresCompactionPassesOversizedRowAndRetriesProvedRowsWithNewOnes(t *testing.T) {
+	ctx := context.Background()
+	pool := openTurnAdmissionPostgres(t, ctx)
+	botID, sessionID := createTurnAdmissionFixture(t, ctx, pool)
+	queries := dbsqlc.New(pool)
+	f := progressFixture{t: t, ctx: ctx, pool: pool, queries: queries, messages: messagepkg.NewService(nil, postgresstore.NewQueries(queries)), botID: botID, sessionID: sessionID}
+	store := postgresstore.NewQueries(queries)
+
+	huge := f.text("assistant", strings.Repeat("H", 600_000))
+	old := []messagepkg.Message{f.text("user", strings.Repeat("OLD question. ", 50)), f.text("assistant", strings.Repeat("OLD answer. ", 50))}
+	f.text("user", "current question")
+
+	window, err := queries.ListUncompactedMessagesBySessionWithinBytes(ctx, dbsqlc.ListUncompactedMessagesBySessionWithinBytesParams{
+		SessionID: f.uuid(sessionID), MaxBytes: 512 << 10, IneffectiveFailureReason: "ineffective_summary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window) != 1 || formatPGUUID(window[0].ID) != huge.ID || !window[0].Oversized || len(window[0].Content) != 0 {
+		t.Fatalf("leading oversized row came back as %d rows, oversized=%v, %d content bytes; want it alone without payload", len(window), len(window) > 0 && window[0].Oversized, len(window[0].Content))
+	}
+	all, err := queries.ListUncompactedMessagesBySessionWithinBytes(ctx, dbsqlc.ListUncompactedMessagesBySessionWithinBytesParams{
+		SessionID: f.uuid(sessionID), MaxBytes: 1 << 20, IneffectiveFailureReason: "ineffective_summary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range all {
+		if row.LatestUser != (row.Role == "user" && formatPGUUID(row.ID) != old[0].ID) {
+			t.Fatalf("latest_user(%s, %s) = %v", formatPGUUID(row.ID), row.Role, row.LatestUser)
+		}
+	}
+
+	// The span behind the oversized row fails as ineffective.
+	model := &countingSummarizer{summary: summaryTokens(600)}
+	if _, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model); !errors.Is(err, compaction.ErrIneffectiveSummary) {
+		t.Fatalf("first pass = %v, want the span past the oversized row tried and rejected", err)
+	}
+	_, claim := f.claims()
+	failed := claim[old[0].ID]
+	if failed == "" || claim[huge.ID] != "" {
+		t.Fatal("the span past the oversized row was not the one tried")
+	}
+
+	// The turn continues right after the failed rows: they are resent with
+	// the new ones and the claim moves off the failed attempt.
+	current := f.text("assistant", strings.Repeat("NEW answer continues the work. ", 80))
+	f.text("user", "next question")
+	model.summary = summaryTokens(254)
+	res, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model)
+	if err != nil || res.Status != compaction.StatusOK {
+		t.Fatalf("second pass = %+v, %v", res, err)
+	}
+	_, claim = f.claims()
+	committed := claim[old[0].ID]
+	if committed == failed || committed != claim[old[1].ID] || claim[current.ID] == "" {
+		t.Fatalf("claims after retry: old=%q/%q new=%q (failed %q); want the failed rows and the new ones in one summary", committed, claim[old[1].ID], claim[current.ID], failed)
+	}
+	if got := f.compact(committed); got.status != "ok" {
+		t.Fatalf("retry summary = %+v", got)
 	}
 }

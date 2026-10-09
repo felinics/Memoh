@@ -108,9 +108,11 @@ type spanChoice struct {
 }
 
 // chooseSpan picks the oldest span worth one summarizer call: at least
-// minTokens of rows not already proved ineffective. Proved rows ride along
-// with new ones but never count toward the floor. Other spans stay raw in
-// place. Barriers and gaps bound every span, and the read query
+// minTokens of rows not already proved ineffective, which trimSpan can still
+// claim within budget. Proved rows ride along with new ones but never count
+// toward the floor. Other spans stay raw in place, and so does a row marked
+// PreserveRecent, which also stops the settled prefix: it is protected only
+// while it is the current task. Barriers and gaps bound every span, and the read query
 // marks the row after a claim with a gap, so rows left behind never join a
 // later claim across it.
 //
@@ -120,22 +122,26 @@ type spanChoice struct {
 // start, so the next window reads it whole — unless it starts the window,
 // where re-reading could not advance and the window is passed instead. A
 // window passed over this way is settled too: every pass cuts it the same.
-func chooseSpan(items []CompactionCandidate, minTokens int, truncated bool) spanChoice {
+func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bool) spanChoice {
 	groups := toolExchangeGroups(items)
 	costs := make([]int, len(groups))
 	fresh := make([]bool, len(groups))
+	recent := len(groups)
 	var stats spanStats
 	for g, group := range groups {
 		cost, kind := groupCost(items, group)
-		switch kind {
-		case groupMarkable:
+		switch {
+		case kind == groupMarkable && items[group[0]].HasPolicy(CompactPolicyPreserveRecent):
+			// The current task: held back for now, not for good.
+			recent = min(recent, g)
+		case kind == groupMarkable:
 			costs[g] = cost
 			fresh[g] = !provedIneffective(items, group)
-		case groupMustKeep:
+		case kind == groupMustKeep:
 			stats.MustKeepGroups++
-		case groupOrphanResult:
+		case kind == groupOrphanResult:
 			stats.OrphanResultGroups++
-		case groupUnrendered:
+		case kind == groupUnrendered:
 			stats.UnrenderedGroups++
 		}
 		if g > 0 && items[group[0]].GapBefore {
@@ -169,7 +175,7 @@ func chooseSpan(items []CompactionCandidate, minTokens int, truncated bool) span
 				freshCost += costs[g]
 			}
 		}
-		if freshCost > 0 && freshCost >= minTokens {
+		if trimSpan(items[groups[first][0]:groups[g-1][len(groups[g-1])-1]+1], budget, minTokens) != nil {
 			stats.SpanTokens = cost
 			choice.start = groups[first][0]
 			choice.end = groups[g-1][len(groups[g-1])-1] + 1
@@ -193,6 +199,9 @@ func chooseSpan(items []CompactionCandidate, minTokens int, truncated bool) span
 		} else {
 			stats.IneffectiveSpans++
 		}
+	}
+	if recent < len(groups) {
+		choice.settled = min(choice.settled, groups[recent][0])
 	}
 	choice.stats = stats
 	return choice

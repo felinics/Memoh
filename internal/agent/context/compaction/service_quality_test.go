@@ -85,8 +85,8 @@ func TestRunCompactionRejectsIneffectiveSummary(t *testing.T) {
 	stub := &stubModel{summary: strings.Repeat("a summary longer than everything it replaces ", 200)}
 
 	_, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 200))
-	if !errors.Is(err, errIneffectiveSummary) {
-		t.Fatalf("RunCompactionSync error = %v, want errIneffectiveSummary: a summary must shrink what it replaces", err)
+	if !errors.Is(err, ErrIneffectiveSummary) {
+		t.Fatalf("RunCompactionSync error = %v, want ErrIneffectiveSummary: a summary must shrink what it replaces", err)
 	}
 	if q.completed.Status != "error" {
 		t.Fatalf("attempt status = %q, want error", q.completed.Status)

@@ -30,9 +30,10 @@ var (
 	// other than a natural stop (length cap, content filter): the text is
 	// unusable because it may cut mid-thought.
 	errIncompleteSummary = errors.New("compaction: model returned an incomplete summary")
-	// errIneffectiveSummary marks a summary that would replay at least as many
-	// tokens as the raw entries it replaces.
-	errIneffectiveSummary = errors.New("compaction: summary does not reduce replay tokens")
+	// ErrIneffectiveSummary marks a summary that would replay at least as many
+	// tokens as the raw entries it replaces. Those rows are recorded as such,
+	// so the next pass selects past them; callers may run it right away.
+	ErrIneffectiveSummary = errors.New("compaction: summary does not reduce replay tokens")
 	// ErrSummaryWindowTooSmall marks a summarizer whose declared window cannot
 	// hold the fixed prompt plus the output reserve; running it would overflow
 	// on every attempt, so it fails closed before claiming any source rows.
@@ -335,6 +336,9 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		case !preHookRan:
 			// A pre-hook error or deny is bot policy, not a model failure;
 			// it must not arm the cooldown (panics above still do).
+		case errors.Is(compactErr, ErrIneffectiveSummary):
+			// The rows are recorded as not shrinking, so the next pass selects
+			// past them; a cooldown would only hold back the history behind.
 		case ctx.Err() != nil:
 			// The caller's request was canceled or hit its deadline — not a
 			// model failure. Arming the five-minute cooldown here would

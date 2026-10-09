@@ -9,10 +9,14 @@ import (
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 )
 
-// maxCompactionScanBytes bounds how much candidate payload one pass reads
-// while looking for a span past rows that stay raw. Every window is still
-// bounded by compactionReadMaxBytes.
-const maxCompactionScanBytes = 32 << 20
+// maxCompactionScanBytes and maxCompactionScanWindows bound how much one
+// pass reads while looking for a span past rows that stay raw. Every window is
+// still bounded by compactionReadMaxBytes, and the next pass continues from
+// the recorded scan position.
+const (
+	maxCompactionScanBytes   = 32 << 20
+	maxCompactionScanWindows = 64
+)
 
 // spanRead is the outcome of reading candidates until a span is chosen: the
 // window holding it and the span itself, plus what the scan cost.
@@ -22,15 +26,16 @@ type spanRead struct {
 	stats        spanStats
 	windows      int
 	loadedRows   int
+	oversized    int
 	scannedBytes int64
 }
 
 // readCompactionSpan reads candidate windows oldest-first until one holds a
 // span worth claiming. A window that only holds rows staying raw — protected,
-// unrenderable, already proved ineffective, or too small — moves the cursor
-// past them, so a span beyond the first window is still reached. A non-empty
-// reason reports why nothing can be claimed now.
-func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUID, cfg TriggerConfig, measure sqlc.MeasureUncompactedMessagesBySessionRow, minSpanTokens int) (spanRead, string, error) {
+// unrenderable, already proved ineffective, too small, or too large to read —
+// moves the cursor past them, so a span beyond the first window is still
+// reached. A non-empty reason reports why nothing can be claimed now.
+func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUID, cfg TriggerConfig, measure sqlc.MeasureUncompactedMessagesBySessionRow, minSpanTokens, minBudget int) (spanRead, string, error) {
 	readMaxBytes := compactionReadMaxBytes(cfg)
 	var read spanRead
 	var after pgtype.UUID
@@ -38,10 +43,13 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 	// unclaimable. Recording it lets later passes start after it instead of
 	// rescanning, so history behind a prefix larger than the scan budget is
 	// still reached. It never passes a fresh claim, whose rows come back as
-	// candidates if the claim lapses.
+	// candidates if the claim lapses, nor the current task.
 	var settledThrough pgtype.UUID
 	var scanEpoch int64
 	settling := true
+	settle := func(row sqlc.ListUncompactedMessagesBySessionRow) {
+		settledThrough, scanEpoch = row.ID, row.CompactionEpoch
+	}
 	defer func() {
 		if !settledThrough.Valid {
 			return
@@ -56,6 +64,9 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 		}
 	}()
 	for {
+		if read.windows >= maxCompactionScanWindows || read.scannedBytes >= maxCompactionScanBytes {
+			return read, ReasonReadBudgetExceeded, nil
+		}
 		window, err := s.queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
 			SessionID:                sessionUUID,
 			MaxBytes:                 readMaxBytes,
@@ -66,25 +77,45 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			return spanRead{}, "", err
 		}
 		if len(window) == 0 {
-			s.logger.WarnContext(ctx, "compaction: no candidate fits the database read budget",
+			if read.windows > 0 || measure.CandidateCount > 0 {
+				return read, ReasonNoBeneficialSpan, nil
+			}
+			return read, ReasonNothingToCompact, nil
+		}
+		read.windows++
+		truncated := window[0].CandidateCount > int64(len(window))
+		if window[0].Oversized {
+			// Larger than a whole window: it stays raw, and the cursor moves
+			// past it so the history behind it is still reached.
+			read.oversized++
+			s.logger.WarnContext(ctx, "compaction: candidate larger than the read window stays raw",
 				slog.String("session_id", cfg.SessionID),
-				slog.Int("window", read.windows),
-				slog.Int64("candidate_count", measure.CandidateCount),
-				slog.Int64("candidate_bytes", measure.CandidateBytes),
-				slog.Int64("largest_candidate_bytes", measure.LargestCandidateBytes),
+				slog.String("message_id", formatUUID(window[0].ID)),
 				slog.Int64("read_max_bytes", readMaxBytes))
-			return read, ReasonReadBudgetExceeded, nil
+			row := uncompactedRowsFromBounded(window)[0]
+			if window[0].PendingBefore || window[0].LatestUser {
+				settling = false
+			} else if settling {
+				settle(row)
+			}
+			if !truncated {
+				return read, ReasonReadBudgetExceeded, nil
+			}
+			after = row.ID
+			continue
 		}
 		// Use the count captured by the same SQL statement as the payload rows
 		// for the selection decision. The metadata-only measure is
-		// observability and oversized-head handling; concurrent claims may
-		// legitimately change eligibility between the two statements.
-		truncated := window[0].CandidateCount > int64(len(window))
+		// observability; concurrent claims may legitimately change eligibility
+		// between the two statements.
 		loadedBytes := window[len(window)-1].CumulativeBytes
-		read.windows++
 		read.loadedRows += len(window)
 		read.scannedBytes += loadedBytes
-		s.logger.InfoContext(ctx, "compaction: bounded candidate read",
+		level := slog.LevelInfo
+		if read.windows > 1 {
+			level = slog.LevelDebug
+		}
+		s.logger.Log(ctx, level, "compaction: bounded candidate read",
 			slog.String("session_id", cfg.SessionID),
 			slog.Int("window", read.windows),
 			slog.Int("loaded_messages", len(window)),
@@ -104,31 +135,26 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 		var toCompact []CompactionCandidate
 		switch {
 		case truncated:
-			// Rows are an oldest-first window with more history behind it.
-			// Compact within the window; splitByTarget could noop forever
-			// because the unseen newest tail is precisely what should be kept.
-			toCompact = items
-		case cfg.TargetTokens > 0:
-			// Keep the newest messages that fit TargetTokens and compact
-			// everything older.
-			toCompact = splitByTarget(items, cfg.TargetTokens)
-		default:
-			toCompact = splitByRatio(items, cfg.TotalInputTokens, cfg.Ratio)
-		}
-		if len(toCompact) == 0 {
-			// Rows passed over — in an earlier window or behind the recorded
-			// scan position — are history that cannot shrink, not nothing.
-			if read.windows > 1 || measure.CandidateCount > window[0].CandidateCount {
-				return read, ReasonNoBeneficialSpan, nil
+			// An oldest-first window with more history behind it: the recent
+			// tail lies beyond it, so only the current task is held back.
+			// splitByTarget could noop forever because the unseen newest tail
+			// is precisely what should be kept.
+			for i := range items {
+				items[i].Policies = withoutPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+				if window[i].LatestUser {
+					items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+				}
 			}
-			return read, ReasonNothingToCompact, nil
+			toCompact = items
+		default:
+			toCompact = splitRecent(items, cfg)
 		}
 
-		choice := chooseSpan(toCompact, minSpanTokens, truncated)
+		choice := chooseSpan(toCompact, minSpanTokens, minBudget, truncated)
 		read.stats.add(choice.stats)
 		if settling {
 			settled := 0
-			if toCompact[0].ID == items[0].ID {
+			if len(toCompact) > 0 && toCompact[0].ID == items[0].ID {
 				settled = choice.settled
 			}
 			for i := 0; i < settled; i++ {
@@ -137,7 +163,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 				}
 			}
 			if settled > 0 {
-				settledThrough, scanEpoch = rows[settled-1].ID, rows[settled-1].CompactionEpoch
+				settle(rows[settled-1])
 			}
 			settling = settling && settled == choice.resume
 		}
@@ -147,13 +173,55 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			return read, "", nil
 		}
 		if !truncated {
+			// Nothing older than the current turn can be claimed: the turn's
+			// own older steps may still be, behind its task message.
+			if turn := currentTurnItems(items); len(turn) > 0 {
+				steps := splitRecent(turn, cfg)
+				if choice := chooseSpan(steps, minSpanTokens, minBudget, false); choice.end > choice.start {
+					read.rows = rows
+					read.span = steps[choice.start:choice.end]
+					return read, "", nil
+				}
+			}
+			// Rows passed over — in an earlier window or behind the recorded
+			// scan position — are history that cannot shrink, not nothing.
+			switch {
+			case read.oversized > 0:
+				return read, ReasonReadBudgetExceeded, nil
+			case len(toCompact) == 0 && read.windows == 1 && measure.CandidateCount <= window[0].CandidateCount:
+				return read, ReasonNothingToCompact, nil
+			}
 			return read, ReasonNoBeneficialSpan, nil
-		}
-		if read.scannedBytes >= maxCompactionScanBytes {
-			return read, ReasonReadBudgetExceeded, nil
 		}
 		after = rows[choice.resume-1].ID
 	}
+}
+
+// splitRecent keeps the newest candidates that fit the trigger's target (or
+// ratio) and returns the older ones a claim may come from.
+func splitRecent(items []CompactionCandidate, cfg TriggerConfig) []CompactionCandidate {
+	if cfg.TargetTokens > 0 {
+		return splitByTarget(items, cfg.TargetTokens)
+	}
+	return splitByRatio(items, cfg.TotalInputTokens, cfg.Ratio)
+}
+
+// currentTurnItems returns the current turn — its task message and every
+// step after it — with selection policies derived as if the turn were all
+// that is left, so its task message and latest step stay raw while its older
+// steps become claimable. Nil when the turn already starts the window.
+func currentTurnItems(items []CompactionCandidate) []CompactionCandidate {
+	latest := latestUserIndex(items)
+	if latest <= 0 {
+		return nil
+	}
+	turn := make([]CompactionCandidate, len(items)-latest)
+	for i, item := range items[latest:] {
+		item.Policies = withoutPolicy(item.Policies, CompactPolicyPreserveRecent)
+		turn[i] = item
+	}
+	markSelectionPolicies(turn)
+	return turn
 }
 
 func (r spanRead) attrs(cfg TriggerConfig, reason string) []slog.Attr {
@@ -170,5 +238,6 @@ func (r spanRead) attrs(cfg TriggerConfig, reason string) []slog.Attr {
 		slog.Int("gaps", r.stats.Gaps),
 		slog.Int("small_spans", r.stats.SmallSpans),
 		slog.Int("ineffective_spans", r.stats.IneffectiveSpans),
+		slog.Int("oversized_rows", r.oversized),
 	}
 }

@@ -154,6 +154,16 @@ func candidatePolicies(record historyfrag.HistoryRecord) []CompactPolicy {
 	return policies
 }
 
+func withoutPolicy(policies []CompactPolicy, policy CompactPolicy) []CompactPolicy {
+	out := policies[:0:0]
+	for _, p := range policies {
+		if p != policy {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func appendPolicy(policies []CompactPolicy, policy CompactPolicy) []CompactPolicy {
 	for _, p := range policies {
 		if p == policy {
@@ -363,9 +373,8 @@ func isToolResultItem(item CompactionCandidate) bool {
 // buildEntriesAndIDs renders the summarizer entries and the ids to mark
 // compacted from one contiguous sequence of markable tool-exchange groups (see
 // toolExchangeGroups and classifyGroup): the first group that is complete,
-// not must-keep, not an orphaned result and not already proved ineffective,
-// plus every following markable group up to the first one that is not, or
-// that sits behind a gap. The marked ids therefore stay a contiguous history
+// not must-keep and not an orphaned result, plus every following markable
+// group up to the first one that is not, or that sits behind a gap. The marked ids therefore stay a contiguous history
 // range under one compact_id — were a later group marked across a skipped
 // raw row, the read path (replaceCompactedHistoryRecords) would emit the
 // summary at the first marked row and fold the later rows in front of the

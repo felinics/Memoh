@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -173,6 +174,10 @@ func (s *Service) drainCompactionBacklog(ctx context.Context, cfg compaction.Tri
 			return err
 		}
 		res, err := s.runCompactionPass(ctx, cfg)
+		if errors.Is(err, compaction.ErrIneffectiveSummary) {
+			// The next pass selects past the rows that did not shrink.
+			continue
+		}
 		if err != nil {
 			return err
 		}

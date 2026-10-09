@@ -5320,12 +5320,28 @@ func (q *Queries) ListUncompactedMessagesBySession(ctx context.Context, sessionI
 }
 
 const listUncompactedMessagesBySessionWithinBytes = `-- name: ListUncompactedMessagesBySessionWithinBytes :many
-WITH session_rows AS MATERIALIZED (
+WITH scan_anchor AS MATERIALIZED (
+  SELECT anchor.turn_position, anchor.turn_message_seq, anchor.created_at, anchor.id
+  FROM bot_visible_history_messages anchor
+  WHERE anchor.team_id = public.memoh_current_team_id()
+    AND anchor.session_id = $2
+    AND anchor.id = COALESCE(
+      $3::uuid,
+      (
+        SELECT scan_session.compaction_scan_after
+        FROM bot_sessions scan_session
+        WHERE scan_session.team_id = public.memoh_current_team_id()
+          AND scan_session.id = $2
+          AND scan_session.compaction_scan_epoch = scan_session.compaction_epoch
+      )
+    )
+), session_rows AS MATERIALIZED (
   SELECT
     m.id,
     m.turn_position,
     m.turn_message_seq,
     m.created_at,
+    m.role,
     held.status AS held_by
   FROM bot_visible_history_messages m
   JOIN bot_sessions candidate_session
@@ -5347,26 +5363,19 @@ WITH session_rows AS MATERIALIZED (
   WHERE m.team_id = public.memoh_current_team_id()
     AND m.session_id = $2
     AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
+    AND (
+      NOT EXISTS (SELECT 1 FROM scan_anchor)
+      OR (m.turn_position, m.turn_message_seq, m.created_at, m.id) >= (
+        SELECT scan_anchor.turn_position, scan_anchor.turn_message_seq, scan_anchor.created_at, scan_anchor.id FROM scan_anchor
+      )
+    )
 ), ordered_rows AS MATERIALIZED (
   SELECT
-    session_rows.id, session_rows.turn_position, session_rows.turn_message_seq, session_rows.created_at, session_rows.held_by,
+    session_rows.id, session_rows.turn_position, session_rows.turn_message_seq, session_rows.created_at, session_rows.role, session_rows.held_by,
     COALESCE(LAG(held_by IS NOT NULL) OVER replay_order, false)::boolean AS gap_before,
     COALESCE(LAG(held_by = 'pending') OVER replay_order, false)::boolean AS pending_before
   FROM session_rows
   WINDOW replay_order AS (ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC)
-), anchor AS MATERIALIZED (
-  SELECT session_rows.turn_position, session_rows.turn_message_seq, session_rows.created_at, session_rows.id
-  FROM session_rows
-  WHERE session_rows.id = COALESCE(
-    $3::uuid,
-    (
-      SELECT scan_session.compaction_scan_after
-      FROM bot_sessions scan_session
-      WHERE scan_session.team_id = public.memoh_current_team_id()
-        AND scan_session.id = $2
-        AND scan_session.compaction_scan_epoch = scan_session.compaction_epoch
-    )
-  )
 ), candidate_rows AS MATERIALIZED (
   SELECT
     ordered.id,
@@ -5375,6 +5384,14 @@ WITH session_rows AS MATERIALIZED (
     ordered.created_at,
     ordered.gap_before,
     ordered.pending_before,
+    ordered.id = (
+      SELECT latest.id
+      FROM ordered_rows latest
+      WHERE latest.held_by IS NULL
+        AND latest.role = 'user'
+      ORDER BY latest.turn_position DESC, latest.turn_message_seq DESC, latest.created_at DESC, latest.id DESC
+      LIMIT 1
+    ) AS latest_user,
     (
       octet_length(m.content::text)
       + octet_length(m.metadata::text)
@@ -5386,15 +5403,10 @@ WITH session_rows AS MATERIALIZED (
     ON m.id = ordered.id
    AND m.team_id = public.memoh_current_team_id()
   WHERE ordered.held_by IS NULL
-    AND (
-      NOT EXISTS (SELECT 1 FROM anchor)
-      OR (ordered.turn_position, ordered.turn_message_seq, ordered.created_at, ordered.id) > (
-        SELECT anchor.turn_position, anchor.turn_message_seq, anchor.created_at, anchor.id FROM anchor
-      )
-    )
+    AND NOT EXISTS (SELECT 1 FROM scan_anchor WHERE scan_anchor.id = ordered.id)
 ), ranked_candidates AS MATERIALIZED (
   SELECT
-    candidate_rows.id, candidate_rows.turn_position, candidate_rows.turn_message_seq, candidate_rows.created_at, candidate_rows.gap_before, candidate_rows.pending_before, candidate_rows.payload_bytes,
+    candidate_rows.id, candidate_rows.turn_position, candidate_rows.turn_message_seq, candidate_rows.created_at, candidate_rows.gap_before, candidate_rows.pending_before, candidate_rows.latest_user, candidate_rows.payload_bytes,
     COUNT(*) OVER ()::BIGINT AS candidate_count,
     COALESCE(SUM(payload_bytes) OVER (), 0)::BIGINT AS candidate_bytes,
     SUM(payload_bytes) OVER (
@@ -5402,9 +5414,10 @@ WITH session_rows AS MATERIALIZED (
     )::BIGINT AS cumulative_bytes
   FROM candidate_rows
 ), admitted_candidates AS MATERIALIZED (
-  SELECT id, turn_position, turn_message_seq, created_at, gap_before, pending_before, payload_bytes, candidate_count, candidate_bytes, cumulative_bytes
+  SELECT ranked_candidates.id, ranked_candidates.turn_position, ranked_candidates.turn_message_seq, ranked_candidates.created_at, ranked_candidates.gap_before, ranked_candidates.pending_before, ranked_candidates.latest_user, ranked_candidates.payload_bytes, ranked_candidates.candidate_count, ranked_candidates.candidate_bytes, ranked_candidates.cumulative_bytes, payload_bytes > $4::BIGINT AS oversized
   FROM ranked_candidates
   WHERE cumulative_bytes <= $4::BIGINT
+     OR cumulative_bytes = payload_bytes
 )
 SELECT
   m.id,
@@ -5415,11 +5428,11 @@ SELECT
   m.source_message_id AS external_message_id,
   m.source_reply_to_message_id,
   m.role,
-  m.content,
-  m.metadata,
-  m.usage,
+  payload.content,
+  payload.metadata,
+  payload.usage,
   m.event_id,
-  m.display_text,
+  payload.display_text,
   m.compact_id,
   m.created_at,
   ci.display_name AS sender_display_name,
@@ -5438,9 +5451,15 @@ SELECT
   admitted.cumulative_bytes,
   admitted.gap_before::boolean AS gap_before,
   admitted.pending_before::boolean AS pending_before,
+  admitted.latest_user::boolean AS latest_user,
+  admitted.oversized::boolean AS oversized,
   (claim.id IS NOT NULL)::boolean AS ineffective_claim
 FROM bot_visible_history_messages m
 JOIN admitted_candidates admitted ON admitted.id = m.id
+LEFT JOIN bot_history_messages payload
+  ON payload.id = m.id
+ AND payload.team_id = public.memoh_current_team_id()
+ AND NOT admitted.oversized
 LEFT JOIN channel_identities ci
   ON ci.id = m.sender_channel_identity_id
  AND ci.team_id = public.memoh_current_team_id()
@@ -5497,16 +5516,19 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 	CumulativeBytes         int64              `json:"cumulative_bytes"`
 	GapBefore               bool               `json:"gap_before"`
 	PendingBefore           bool               `json:"pending_before"`
+	LatestUser              bool               `json:"latest_user"`
+	Oversized               bool               `json:"oversized"`
 	IneffectiveClaim        bool               `json:"ineffective_claim"`
 }
 
 // Compaction candidates are admitted oldest-first within a hard serialized
 // payload budget, starting after a candidate cursor: the given one, or else
 // the session's recorded scan position when it belongs to the current epoch.
-// The cumulative filter is evaluated before the payload join, so an oversized
-// leading row returns no payload instead of crossing the process-memory
-// boundary. CandidateCount counts the candidates after the cursor and reports
-// whether this window was truncated.
+// Only rows from the cursor on are read. The cumulative filter is evaluated
+// before the payload join, so a leading row larger than the budget comes back
+// alone and Oversized, without its payload, instead of crossing the
+// process-memory boundary. CandidateCount counts the candidates after the
+// cursor and reports whether this window was truncated.
 //
 // GapBefore marks a candidate whose preceding replayed row is not a
 // candidate (the source of an active summary or of a fresh claim): one
@@ -5514,7 +5536,8 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 // in front of that summary. PendingBefore narrows that to a fresh claim,
 // whose rows return as candidates if the claim lapses. IneffectiveClaim
 // marks a row whose claim in this epoch failed because the summary was not
-// shorter than the rows.
+// shorter than the rows. LatestUser marks the session's newest user message
+// among the candidates: the task the current turn is working on.
 func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Context, arg ListUncompactedMessagesBySessionWithinBytesParams) ([]ListUncompactedMessagesBySessionWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listUncompactedMessagesBySessionWithinBytes,
 		arg.IneffectiveFailureReason,
@@ -5557,6 +5580,8 @@ func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Contex
 			&i.CumulativeBytes,
 			&i.GapBefore,
 			&i.PendingBefore,
+			&i.LatestUser,
+			&i.Oversized,
 			&i.IneffectiveClaim,
 		); err != nil {
 			return nil, err
