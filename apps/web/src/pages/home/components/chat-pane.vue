@@ -905,19 +905,14 @@
                           class="grid size-[18px] max-md:size-5 shrink-0 place-items-center"
                           aria-hidden="true"
                         >
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2.5"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
+                          <!-- The arrow, which bends into the busy ring while a
+                               first send waits for the server or a stop waits
+                               for the run to end. -->
+                          <SendMorphIcon
+                            :busy="sendButtonBusy"
                             class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                            :class="streaming || sendButtonBusy ? 'opacity-0' : 'opacity-100'"
-                          >
-                            <path d="M12 19 V5.75" />
-                            <path d="M6.5 10.5 L12 5 L17.5 10.5" />
-                          </svg>
+                            :class="streaming && !sendButtonBusy ? 'opacity-0' : 'opacity-100'"
+                          />
                           <svg
                             viewBox="0 0 24 24"
                             fill="currentColor"
@@ -932,12 +927,6 @@
                               rx="3"
                             />
                           </svg>
-                          <!-- A first send the server has not confirmed yet,
-                               or a stop waiting for the server to end the run. -->
-                          <Spinner
-                            v-if="sendButtonBusy"
-                            class="col-start-1 row-start-1 size-4 max-md:size-4.5"
-                          />
                         </span>
                       </Button>
                     </div>
@@ -1310,6 +1299,7 @@ import { enqueueSteerQueue, enqueueFollowUpQueue, fetchSafeSkillCatalog, fetchSe
 import { parseSessionQueueCommand, SessionQueueSubmissionGate } from './session-queue-submission'
 import { localizeRuntimeControls, localizeRuntimeCommandResult } from '@/utils/runtime-control-presentation'
 import { commandResultPresentation, isCommandResultItemVisible, resolveCommandResultSelection } from './slash-command-result'
+import SendMorphIcon from './send-morph-icon.vue'
 import { captureChatPaneSendContext, clearComposerPairDraft, composerRestoreForSendResult, composerHasNoModel as hasNoComposerModel, matchesChatPaneSendContext, pinnedSubagentModelId as resolvePinnedSubagentModelId, shouldRefreshACPComposerConfig, welcomeSendConsumedDraft } from './chat-pane-send'
 import { onAuthSessionCleared } from '@/lib/auth-session'
 import { useACPRuntime } from '@/composables/useACPRuntime'
