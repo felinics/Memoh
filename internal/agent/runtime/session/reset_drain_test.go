@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"sync/atomic"
@@ -57,14 +58,22 @@ func TestBeginHistoryResetOrphanFinalizeFailure(t *testing.T) {
 }
 
 // failingClockBackend is the memory backend with a clock that can be made to
-// fail, the way a Redis outage fails it.
+// fail, the way a Redis outage fails it: from now on, or once after failAfter
+// more reads while failAfter is not negative.
 type failingClockBackend struct {
 	*MemoryBackend
-	fail atomic.Bool
+	fail      atomic.Bool
+	failAfter atomic.Int64
+}
+
+func newFailingClockBackend() *failingClockBackend {
+	b := &failingClockBackend{MemoryBackend: NewMemoryBackend()}
+	b.failAfter.Store(-1)
+	return b
 }
 
 func (b *failingClockBackend) Now(ctx context.Context) (time.Time, error) {
-	if b.fail.Load() {
+	if b.fail.Load() || b.failAfter.Load() >= 0 && b.failAfter.Add(-1) < 0 {
 		return time.Time{}, errors.New("runtime backend unreachable")
 	}
 	return b.MemoryBackend.Now(ctx)
@@ -74,7 +83,7 @@ func (b *failingClockBackend) Now(ctx context.Context) (time.Time, error) {
 // reset is left to hold the next one up.
 func TestBeginHistoryResetClockFailureLeavesTheRun(t *testing.T) {
 	t.Parallel()
-	backend := &failingClockBackend{MemoryBackend: NewMemoryBackend()}
+	backend := newFailingClockBackend()
 	runs := newFakeResetLedger()
 	manager := NewManager(backend, Options{
 		OwnerID: "owner-reset-drain", StateTTL: time.Minute, OwnerLeaseTTL: time.Second,
@@ -106,24 +115,83 @@ func TestBeginHistoryResetClockFailureLeavesTheRun(t *testing.T) {
 	release()
 }
 
-// The lease can be taken over while the drain waits for a run to stop; the
-// reset is then the busy conversation, whatever the drain was doing when it
-// noticed. The lease is renewed every ten seconds at the shortest.
-func TestBeginHistoryResetLeaseLostDuringDrainIsBusy(t *testing.T) {
+// The lease can be taken over while the reset waits for a run to stop or
+// clears the projections; the reset is then the busy conversation, whatever it
+// was doing when it noticed. The lease is renewed every ten seconds at the
+// shortest.
+func TestBeginHistoryResetLeaseLostIsBusy(t *testing.T) {
 	t.Parallel()
-	runs := newFakeResetLedger()
 	orphan := ledger.Run{RunID: "run-1", BotID: "bot-1", SessionID: "session-1", State: ledger.StateRunning, FencingToken: 3}
-	for range 5000 {
-		runs.activeRunsByBot = append(runs.activeRunsByBot, []ledger.Run{orphan})
-	}
-	runs.renewResults = []fakeRenewResult{{ok: false}}
-	manager, _ := newResetTestManager(t, runs)
+	for name, setup := range map[string]func(*fakeResetLedger){
+		"while draining": func(runs *fakeResetLedger) {
+			for range 5000 {
+				runs.activeRunsByBot = append(runs.activeRunsByBot, []ledger.Run{orphan})
+			}
+		},
+		"while clearing projections": func(runs *fakeResetLedger) { runs.botSessionsWait = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runs := newFakeResetLedger()
+			setup(runs)
+			runs.renewResults = []fakeRenewResult{{ok: false}}
+			manager, _ := newResetTestManager(t, runs)
 
-	_, _, err := manager.BeginBotHistoryReset(context.Background(), "bot-1")
-	if !errors.Is(err, ErrHistoryResetLeaseLost) {
-		t.Fatalf("reset that lost its lease during the drain = %v, want ErrHistoryResetLeaseLost", err)
+			_, _, err := manager.BeginBotHistoryReset(context.Background(), "bot-1")
+			if !errors.Is(err, ErrHistoryResetLeaseLost) {
+				t.Fatalf("reset that lost its lease = %v, want ErrHistoryResetLeaseLost", err)
+			}
+			assertHistoryResetDrainFailure(t, err, true, runs)
+		})
 	}
-	assertHistoryResetDrainFailure(t, err, true, runs)
+}
+
+// A command result crosses the runtime backend as its code; a failure of a
+// dependency stays one on the way, whatever its code.
+func TestCommandResultKeepsDependencyFault(t *testing.T) {
+	t.Parallel()
+	request := Command{Type: CommandHistoryReset, ID: "cmd-1"}
+	for name, cause := range map[string]error{
+		"timeout": errs.WrapDependency(context.DeadlineExceeded, "load runtime command result"),
+		"failure": errs.WrapDependency(errors.New("redis: connection refused"), "load runtime command result"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, err := json.Marshal(newCommandResult(request, cause))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result Command
+			if err := json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+			got := commandResultErrorFor(request, result)
+			if errs.FaultOf(got) != apperror.FaultDependency || IsHistoryResetBusy(got) {
+				t.Fatalf("decoded %v (fault %q, busy %v), want a dependency failure", got, errs.FaultOf(got), IsHistoryResetBusy(got))
+			}
+		})
+	}
+	if got := commandResultErrorFor(request, newCommandResult(request, context.DeadlineExceeded)); !IsHistoryResetBusy(got) {
+		t.Fatalf("a command that ran out of time = %v, want the busy conversation", got)
+	}
+}
+
+// The owner of a run is this process and the reset's command fails reading
+// its own result from the runtime backend.
+func TestBeginHistoryResetLocalCommandBackendFailure(t *testing.T) {
+	t.Parallel()
+	backend := newFailingClockBackend()
+	runs := newFakeResetLedger()
+	manager := NewManager(backend, Options{
+		OwnerID: "owner-reset-command", StateTTL: time.Minute, OwnerLeaseTTL: time.Second,
+		Ledger: runs, Fence: &fakeFence{},
+	})
+	t.Cleanup(func() { _ = manager.Close() })
+	admitResetRaceRun(t, manager)
+
+	backend.failAfter.Store(1)
+	_, _, err := manager.BeginSessionHistoryReset(context.Background(), testBotID, testSessionID)
+	backend.failAfter.Store(-1)
+	assertHistoryResetDrainFailure(t, err, false, runs)
 }
 
 // failingRunRefBackend is the Redis backend unable to read a run's route.
@@ -160,4 +228,38 @@ func TestRedisBeginHistoryResetRunRouteFailure(t *testing.T) {
 
 	_, _, err = manager.BeginBotHistoryReset(context.Background(), "bot-1")
 	assertHistoryResetDrainFailure(t, err, false, runs)
+}
+
+// failingCommandResultBackend is the Redis backend unable to read command
+// results.
+type failingCommandResultBackend struct{ *RedisBackend }
+
+func (failingCommandResultBackend) LoadCommandResult(context.Context, string) (Command, bool, error) {
+	return Command{}, false, errors.New("redis: connection refused")
+}
+
+// A command whose result cannot be read was not left unanswered by a busy
+// owner: the wait reports the runtime backend's failure.
+func TestRedisCommandResultWaitReportsUnreadableResults(t *testing.T) {
+	url := os.Getenv("MEMOH_TEST_REDIS_URL")
+	if url == "" {
+		url = os.Getenv("MEMOH_TEST_VALKEY_URL")
+	}
+	if url == "" {
+		if os.Getenv("MEMOH_TEST_DISTRIBUTED_REQUIRED") == "1" {
+			t.Fatal("MEMOH_TEST_REDIS_URL or MEMOH_TEST_VALKEY_URL required")
+		}
+		t.Skip("set MEMOH_TEST_REDIS_URL or MEMOH_TEST_VALKEY_URL")
+	}
+	backend, err := NewRedisBackend(context.Background(), RedisOptions{URL: url, KeyPrefix: uniqueRuntimeBackendPrefix("reset-result"), StateTTL: time.Minute})
+	if err != nil {
+		t.Fatalf("redis backend: %v", err)
+	}
+	manager := NewManager(failingCommandResultBackend{backend}, Options{OwnerID: "owner-reset-result", StateTTL: time.Minute, OwnerLeaseTTL: time.Second})
+	t.Cleanup(func() { _ = manager.Close() })
+
+	err = manager.waitCommandResult(context.Background(), Command{Type: CommandHistoryReset, ID: "cmd-1"}, make(chan error), 200*time.Millisecond)
+	if errs.FaultOf(err) != apperror.FaultDependency || IsHistoryResetBusy(err) {
+		t.Fatalf("wait with unreadable results = %v (fault %q), want a dependency failure", err, errs.FaultOf(err))
+	}
 }

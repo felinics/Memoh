@@ -187,6 +187,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 		err = m.invalidateHistoryResetSnapshots(resetCtx, keys, true)
 	}
 	if err != nil {
+		err = runtimefence.NormalizeResetError(resetCtx, err)
 		release()
 		return nil, nil, err
 	}
@@ -422,7 +423,13 @@ func (m *Manager) dispatchRemoteHistoryReset(ctx context.Context, ownerID string
 	if timeout <= 0 {
 		return ErrCommandExpired
 	}
-	return m.waitCommandResult(ctx, cmd, waiter.result, timeout, ownerID)
+	err := m.waitCommandResult(ctx, cmd, waiter.result, timeout, ownerID)
+	if err == nil || errors.Is(err, ErrCommandTargetNotActive) || IsHistoryResetBusy(err) {
+		return err
+	}
+	// The run's owner is another process: its failure reaches this one as a
+	// dependency's.
+	return errs.WrapDependency(err, "reset run on its owner")
 }
 
 func (m *Manager) applyHistoryResetCommand(ctx context.Context, cmd Command, ctrl *runControl) error {

@@ -413,6 +413,9 @@ type Command struct {
 
 	// ErrorArgs are the catalog args of a failure whose ErrorCode is a catalog code.
 	ErrorArgs map[string]string `json:"error_args,omitempty"`
+	// ErrorFault is "dependency" for a failure of a service the executor
+	// called, which its code alone does not tell.
+	ErrorFault string `json:"error_fault,omitempty"`
 
 	// StreamOutput is fixed at admission and travels to the owner with the command.
 	// It must not depend on subscriber liveness: disconnecting cannot change a run.

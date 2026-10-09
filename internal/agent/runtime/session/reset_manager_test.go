@@ -33,6 +33,8 @@ type fakeResetLedger struct {
 	orphanErr       error
 	botSessionIDs   []string
 	botSessionsErr  error
+	// botSessionsWait makes SessionIDsByBot wait until the reset ends.
+	botSessionsWait bool
 }
 
 type fakeRenewResult struct {
@@ -99,7 +101,11 @@ func (f *fakeResetLedger) ActiveRunsByBot(context.Context, string) ([]ledger.Run
 	return runs, nil
 }
 
-func (f *fakeResetLedger) SessionIDsByBot(context.Context, string) ([]string, error) {
+func (f *fakeResetLedger) SessionIDsByBot(ctx context.Context, _ string) ([]string, error) {
+	if f.botSessionsWait {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	f.resetMu.Lock()
 	defer f.resetMu.Unlock()
 	return append([]string(nil), f.botSessionIDs...), f.botSessionsErr

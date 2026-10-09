@@ -16,6 +16,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func (m *Manager) RunRef(ctx context.Context, botID, sessionID, runID string) (RunRef, bool, error) {
@@ -935,7 +936,7 @@ func (m *Manager) executeRoutedCommand(ctx context.Context, cmd Command) Command
 			return newCommandResult(cmd, ctx.Err())
 		}
 		if result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID); err != nil {
-			return newCommandResult(cmd, err)
+			return newCommandResult(cmd, errs.WrapDependency(err, "load runtime command result"))
 		} else if ok {
 			if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
 				return newCommandResult(cmd, ErrCommandPayloadConflict)
@@ -947,7 +948,7 @@ func (m *Manager) executeRoutedCommand(ctx context.Context, cmd Command) Command
 	defer m.finishCommandExecution(cmd.ID, executionDone)
 
 	if result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID); err != nil {
-		return newCommandResult(cmd, err)
+		return newCommandResult(cmd, errs.WrapDependency(err, "load runtime command result"))
 	} else if ok {
 		if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
 			return newCommandResult(cmd, ErrCommandPayloadConflict)
@@ -973,6 +974,9 @@ func newCommandResult(request Command, err error) Command {
 		return result
 	}
 	result.Error = err.Error()
+	if errs.FaultOf(err) == apperror.FaultDependency {
+		result.ErrorFault = string(apperror.FaultDependency)
+	}
 	switch {
 	case errors.Is(err, ErrCommandTargetNotActive):
 		result.ErrorCode = "target_not_active"
@@ -1116,6 +1120,9 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 		retry = retryTicker.C
 		defer retryTicker.Stop()
 	}
+	// The last poll that could not read the result: an owner that never
+	// answers is not the same as a backend that cannot tell.
+	var unreadable error
 	for {
 		select {
 		case err := <-pending:
@@ -1124,11 +1131,17 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if unreadable != nil {
+				return errs.WrapDependency(unreadable, "load runtime command result")
+			}
 			return ErrCommandNotAcknowledged
 		case <-poll.C:
 			result, ok, loadErr := m.loadCommandResult(waitCtx, request.ID)
 			if loadErr == nil && ok {
 				return commandResultErrorFor(request, result)
+			}
+			if waitCtx.Err() == nil {
+				unreadable = loadErr
 			}
 		case <-retry:
 			if err := m.distributed.PublishCommand(waitCtx, retryOwnerID, request); err != nil && waitCtx.Err() == nil {
@@ -1214,6 +1227,14 @@ func commandResultError(result Command) error {
 	if strings.TrimSpace(result.Error) == "" {
 		return nil
 	}
+	err := decodeCommandResultError(result)
+	if result.ErrorFault == string(apperror.FaultDependency) {
+		return errs.WrapDependency(err, "runtime command")
+	}
+	return err
+}
+
+func decodeCommandResultError(result Command) error {
 	switch result.ErrorCode {
 	case "target_not_active":
 		return fmt.Errorf("%w: %s", ErrCommandTargetNotActive, result.Error)
