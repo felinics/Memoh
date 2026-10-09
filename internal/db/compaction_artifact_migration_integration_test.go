@@ -68,6 +68,7 @@ CREATE TABLE session_runs (
   session_id UUID NOT NULL,
   state TEXT NOT NULL,
   error_code TEXT,
+  fencing_token BIGINT NOT NULL DEFAULT 0,
   input_json JSONB NOT NULL
 );
 

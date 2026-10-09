@@ -492,25 +492,30 @@ func TestPostgresHistoryResetDrainBackendFailure(t *testing.T) {
 	}
 }
 
-// A run that never got a fencing token cannot be ordered against a clear, so
-// the ledger fallback may still report it afterwards; that takes a process
-// dying between admission and claim, and the reaper marking the admission
-// lost. What it reports is the run's state and failure code only: never the
-// cleared input, nor the reply of the run before it.
-func TestPostgresHistoryResetOrphanedAdmissionExposesNoContent(t *testing.T) {
+// A run that never got a fencing token cannot be ordered against a clear by
+// its token; that takes a process dying between admission and claim, and the
+// reaper marking the admission lost. The clear retires such a run with the
+// history it belonged to, while an admission made after the clear is still
+// reported.
+func TestPostgresHistoryResetRetiresOrphanedAdmission(t *testing.T) {
 	h := newWSStepHistoryHarness(t, wsStepHistorySuccess)
 	h.run(t, nil)
 	ctx := context.Background()
 	runs := ledger.NewPostgres(dbsqlc.New(h.pool), h.pool)
-	const input = "orphaned admission input that was cleared"
-	orphan, _, err := runs.Admit(ctx, ledger.AdmitParams{
-		RunID: uuid.NewString(), BotID: h.botID, SessionID: h.sessionID,
-		InvocationID: uuid.NewString(), TurnID: uuid.NewString(),
-		Input: []byte(`{"kind":"message","text":"` + input + `"}`), InputFingerprint: "orphaned-admission",
-	})
-	if err != nil {
-		t.Fatalf("admit: %v", err)
+	admit := func(input string) ledger.Run {
+		t.Helper()
+		run, _, err := runs.Admit(ctx, ledger.AdmitParams{
+			RunID: uuid.NewString(), BotID: h.botID, SessionID: h.sessionID,
+			InvocationID: uuid.NewString(), TurnID: uuid.NewString(),
+			Input: []byte(`{"kind":"message","text":"` + input + `"}`), InputFingerprint: input,
+		})
+		if err != nil {
+			t.Fatalf("admit: %v", err)
+		}
+		return run
 	}
+	const input = "orphaned admission input that was cleared"
+	orphan := admit(input)
 	// The reaper's repair of an admission whose process died before claiming it.
 	if _, applied, err := runs.Finalize(ctx, ledger.FinalizeParams{
 		RunID: orphan.RunID, State: ledger.StateLost, ErrorCode: "runtime_admission_orphaned",
@@ -522,6 +527,9 @@ func TestPostgresHistoryResetOrphanedAdmissionExposesNoContent(t *testing.T) {
 
 	for name, manager := range map[string]*sessionruntime.Manager{"live": h.manager, "restarted": h.restarted(t)} {
 		snapshot := mustSnapshot(t, manager, h.botID, h.sessionID)
+		if run := snapshot.CurrentRunView; run != nil {
+			t.Errorf("%s snapshot after the clear reports %s, want no run", name, describeRun(run))
+		}
 		raw, err := json.Marshal(snapshot)
 		if err != nil {
 			t.Fatal(err)
@@ -531,9 +539,11 @@ func TestPostgresHistoryResetOrphanedAdmissionExposesNoContent(t *testing.T) {
 				t.Errorf("%s snapshot after the clear carries cleared content %q: %s", name, cleared, raw)
 			}
 		}
-		if run := snapshot.CurrentRunView; run != nil && (run.RunID != orphan.RunID || len(run.Messages) > 0 || len(run.UserTurns) > 0) {
-			t.Errorf("%s snapshot after the clear reports %+v, want at most the orphaned admission's state", name, run)
-		}
+	}
+
+	pending := admit("admission after the clear")
+	if got := mustSnapshot(t, h.restarted(t), h.botID, h.sessionID).CurrentRunView; got == nil || got.RunID != pending.RunID {
+		t.Fatalf("ledger fallback after a new admission = %s, want %s", describeRun(got), pending.RunID)
 	}
 }
 
