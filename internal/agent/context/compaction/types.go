@@ -18,8 +18,8 @@ const (
 	// ReasonNoBeneficialSpan: candidates exist, but each is protected,
 	// unrenderable, already proved ineffective, or too small to shrink.
 	ReasonNoBeneficialSpan = "no_beneficial_span"
-	// ReasonReadBudgetExceeded: a single row or tool exchange is larger than
-	// one read window, or the scan budget ran out before a span qualified.
+	// ReasonReadBudgetExceeded: a single row is larger than one read window,
+	// or the scan budget ran out before a span qualified.
 	ReasonReadBudgetExceeded = "read_budget_exceeded"
 )
 

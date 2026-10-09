@@ -123,7 +123,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		slog.Int("prior_context_tokens", priorTokens),
 		slog.Int("absorbed_context_tokens", absorbTokens),
 	)
-	toCompact = trimCompactMessages(toCompact, entriesBudget)
+	toCompact = trimSpan(toCompact, entriesBudget, minSpanTokens)
 	// The progress guarantee may keep one oversized markable group past the
 	// entries budget; the prior context is reference-only, so shrink it (down
 	// to nothing) before letting the combined prompt exceed MaxCompactTokens.

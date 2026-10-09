@@ -108,9 +108,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 		if !truncated {
 			return read, ReasonNoBeneficialSpan, nil
 		}
-		if choice.resume == 0 || read.scannedBytes >= maxCompactionScanBytes {
-			// One tool exchange fills the whole window, or the scan budget is
-			// spent before any span qualified.
+		if read.scannedBytes >= maxCompactionScanBytes {
 			return read, ReasonReadBudgetExceeded, nil
 		}
 		after = rows[choice.resume-1].ID
@@ -127,9 +125,9 @@ func (r spanRead) attrs(cfg TriggerConfig, reason string) []slog.Attr {
 		slog.Int("must_keep_groups", r.stats.MustKeepGroups),
 		slog.Int("orphan_result_groups", r.stats.OrphanResultGroups),
 		slog.Int("unrendered_groups", r.stats.UnrenderedGroups),
-		slog.Int("ineffective_groups", r.stats.IneffectiveGroups),
 		slog.Int("open_groups", r.stats.OpenGroups),
 		slog.Int("gaps", r.stats.Gaps),
 		slog.Int("small_spans", r.stats.SmallSpans),
+		slog.Int("ineffective_spans", r.stats.IneffectiveSpans),
 	}
 }
