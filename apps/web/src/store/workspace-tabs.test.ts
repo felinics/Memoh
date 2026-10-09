@@ -1793,6 +1793,65 @@ describe('workspace layout store', () => {
     expect(dock.panels.some(panel => panel.params.sessionId === 's2')).toBe(false)
   })
 
+  it('drops the selection when its tab closes while a non-chat tab has focus', () => {
+    const selection = useChatSelectionStore()
+    chatStoreMock.sessions.push(
+      { id: 's1', title: 'Closed session' },
+      { id: 's2', title: 'Other session' },
+    )
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's2', title: 'Other session' })
+    store.pinPanel(dock.activePanel!.id)
+    store.openSessionChat({ sessionId: 's1', title: 'Closed session' })
+    const closing = dock.activePanel!
+    store.pinPanel(closing.id)
+    expect(selection.sessionId).toBe('s1')
+    store.openFile('/data/a.md')
+    expect(dock.activePanel?.component).toBe('file')
+    expect(selection.sessionId).toBe('s1')
+
+    closing.api.close()
+
+    expect(dock.activePanel?.component).toBe('file')
+    expect(dock.panels.some(panel => panel.params.sessionId === 's2')).toBe(true)
+    expect(selection.sessionId).toBeNull()
+  })
+
+  it('never selects a deleted session while its split copies close', async () => {
+    const selection = useChatSelectionStore()
+    selection.setSession('s1')
+    chatStoreMock.sessions.push({ id: 's1', title: 'Deleted session' })
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+
+    store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
+    const original = dock.panels.find(panel => panel.component === 'chat' && panel.params.sessionId === 's1')!
+    store.pinPanel(original.id)
+    store.splitGroup(original.group!.id, 'right')
+    const copy = dock.panels.find(panel => panel.component === 'chat' && panel.id !== original.id)!
+    expect(copy.params.sessionId).toBe('s1')
+    store.pinPanel(copy.id)
+    store.openFile('/data/a.md')
+    original.api.setActive()
+    chatStoreMock.selectSession.mockClear()
+
+    chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length)
+    emitDeletedSession('s1')
+    chatStoreMock.sessionId = null
+    selection.setSession(null)
+    await nextTick()
+    await nextTick()
+
+    expect(dock.panels.some(panel => panel.params.sessionId === 's1')).toBe(false)
+    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1', expect.anything())
+    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s1')
+    expect(selection.sessionId).toBeNull()
+  })
+
   it('keeps open chat tabs when a paginated session list refresh drops their id', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s1')

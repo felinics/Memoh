@@ -134,12 +134,13 @@ async function maybeStartExternalAgentSession() {
         projectMode: ACP_NO_PROJECT_MODE,
         projectPath: createACPNoProjectPath(),
       })
-      // Creation is async: if the user moved to another tab meanwhile, open the
-      // session's tab in the background instead of pulling them back.
-      workspaceTabs.openSessionChat({
-        sessionId: session.id,
-        activate: workspaceTabs.activeId === startedOnPanel,
-      })
+      // Creation is async. If the user moved to another tab meanwhile, leave the
+      // dock alone: opening a tab now would replace the group's preview tab,
+      // which may be the one they are reading. A draft that was focused when
+      // creation started already shows the session, and Recents lists it.
+      if (workspaceTabs.activeId === startedOnPanel) {
+        workspaceTabs.openSessionChat({ sessionId: session.id })
+      }
     }
   } catch {
     // Bot may not have the agent enabled; user can still pick it from the composer.

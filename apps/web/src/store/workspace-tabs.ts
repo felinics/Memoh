@@ -546,6 +546,26 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         ) {
           chatStore.selectDraft({ explicitSelection: false })
         }
+        // With a non-chat tab focused, the selection is the last chat the user
+        // looked at. Once that chat's last tab closes it is no longer on screen,
+        // so Recents must stop highlighting it. A chat tab taking focus instead
+        // updates the selection through its own activation.
+        else if (!suppressPersist && panelComponentOf(panel.id) === 'chat') {
+          const sid = (chatStore.sessionId ?? '').trim()
+          const active = dock.activePanel
+          if (
+            sid
+            && panelSessionId(panel) === sid
+            && !chatPanelForSession(sid)
+            && (!active || panelComponentOf(active.id) !== 'chat')
+          ) {
+            chatStore.resetToEmptyComposer({
+              clearPendingExternalAgent: false,
+              explicitSelection: false,
+              draftIntent: false,
+            })
+          }
+        }
         ensureDraftChatPanel()
       }),
       // Let the entire desktop header accept panel and group drops.
@@ -991,6 +1011,11 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     // That is not a user click, and must not promote a stale restored chat tab into
     // an explicit chat-selection entry before chat initialization/default External Agent wins.
     if (suppressPersist) return
+    // A deleted session's tabs are closing. When one of them was split into
+    // several tabs, dockview may hand focus to another copy on its way out;
+    // selecting it would revive the deleted session's runtime and selection.
+    const deletedSid = panelSessionId(panel)
+    if (deletedSid && isDeletedSessionForCurrentBot(deletedSid)) return
     // Switch the panel-scoped chat state before the global selection changes. ACP
     // draft staging uses this transition to persist the old view before loading
     // the newly focused panel.
