@@ -10,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"
 )
 
@@ -175,7 +176,7 @@ func TestBeginBotHistoryResetFailsClosedWithoutSessionList(t *testing.T) {
 	if err == nil {
 		t.Fatal("bot history reset began without its session list")
 	}
-	if fault := errs.FaultOf(err); fault != errs.FaultDependency {
+	if fault := errs.FaultOf(err); fault != apperror.FaultDependency {
 		t.Fatalf("session list failure fault = %q, want dependency", fault)
 	}
 	if released := runs.releasedLeases(); len(released) != 1 || released[0].Scope != ledger.ResetScopeBot {
@@ -215,7 +216,7 @@ func TestBeginHistoryResetSnapshotWriteFailureIsDependencyFault(t *testing.T) {
 	if err == nil {
 		t.Fatal("history reset began although its snapshot could not be cleared")
 	}
-	if fault := errs.FaultOf(err); fault != errs.FaultDependency {
+	if fault := errs.FaultOf(err); fault != apperror.FaultDependency {
 		t.Fatalf("snapshot write failure fault = %q, want dependency", fault)
 	}
 	if released := runs.releasedLeases(); len(released) != 1 {

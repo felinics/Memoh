@@ -208,7 +208,7 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 		if errors.Is(err, runtimefence.ErrResetLeaseLost) {
 			return apperror.Wrap(apperror.CodeSessionResetConflict, err, nil)
 		}
-		if errors.Is(err, botbackup.ErrHistoryResetUnavailable) && errs.FaultOf(err) == errs.FaultDependency {
+		if errors.Is(err, botbackup.ErrHistoryResetUnavailable) && errs.FaultOf(err) == apperror.FaultDependency {
 			return apperror.Wrap(apperror.CodeInternal, err, nil)
 		}
 		if errors.Is(err, runtimefence.ErrTransactionsUnsupported) ||

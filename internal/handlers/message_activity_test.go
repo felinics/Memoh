@@ -253,10 +253,10 @@ func TestDeleteMessagesClassifiesHistoryResetFailures(t *testing.T) {
 		name  string
 		err   error
 		code  apperror.Code
-		fault errs.Fault
+		fault apperror.Fault
 	}{
-		{"lease busy", sessionruntime.ErrHistoryResetLeaseLost, apperror.CodeSessionResetConflict, errs.FaultClient},
-		{"backend failed", errs.WrapDependency(errors.New("runtime backend write failed"), "clear runtime snapshots"), apperror.CodeInternal, errs.FaultDependency},
+		{"lease busy", sessionruntime.ErrHistoryResetLeaseLost, apperror.CodeSessionResetConflict, apperror.FaultClient},
+		{"backend failed", errs.WrapDependency(errors.New("runtime backend write failed"), "clear runtime snapshots"), apperror.CodeInternal, apperror.FaultDependency},
 	} {
 		for _, sessionID := range []string{activityTestSessionID, ""} {
 			t.Run(tc.name+"/"+sessionID, func(t *testing.T) {

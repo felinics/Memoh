@@ -757,7 +757,7 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 // runtime backend or database the reset could not use is a dependency's
 // failure (docs/errors.md).
 func historyResetError(err error) error {
-	if errs.FaultOf(err) == errs.FaultDependency {
+	if errs.FaultOf(err) == apperror.FaultDependency {
 		return apperror.Wrap(apperror.CodeInternal, err, nil)
 	}
 	return apperror.Wrap(apperror.CodeSessionResetConflict, err, nil)
