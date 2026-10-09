@@ -142,7 +142,7 @@ func TestDiscussProviderBudgetRecoveryRecomposesBeforeProviderDispatch(t *testin
 		published = append(published, event.Type)
 		return nil
 	}
-	if pressure := discussCompactableTokens(cmd.DiscussMessages); pressure >= hardCompactionThreshold(16000) {
+	if pressure := discussContextPressure(cmd); pressure >= hardCompactionThreshold(16000) {
 		t.Fatalf("fixture pressure %d must stay below the old window-share backstop", pressure)
 	}
 	handle, err := service.StartTurn(context.Background(), cmd)

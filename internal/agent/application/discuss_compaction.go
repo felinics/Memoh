@@ -120,16 +120,3 @@ func (s *Service) maybeCompactDiscuss(ctx context.Context, botID, threadID, mode
 		contextTokenBudget:     budget,
 	}, compactable)
 }
-
-// discussCompactableTokens estimates the raw history share of a discuss
-// context, excluding artifact summaries, in the shared estimator's unit.
-func discussCompactableTokens(messages []turn.DiscussMessage) int {
-	total := 0
-	for _, message := range messages {
-		if message.CompactionArtifactID != "" {
-			continue
-		}
-		total += discussMessageTokens(message)
-	}
-	return total
-}
