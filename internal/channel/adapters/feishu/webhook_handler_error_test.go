@@ -15,20 +15,23 @@ import (
 	"github.com/felinics/memoh/internal/channel"
 )
 
-// requireHTTPErrorWithCause checks that err answers status with a message
-// that does not carry the cause, and that the cause is kept for the result
-// record.
-func requireHTTPErrorWithCause(t *testing.T, err error, status int, message string) {
+// requireHTTPErrorWithCause checks that err answers status, that the answer
+// does not carry the cause, and that the cause, naming what failed, is kept
+// for the result record.
+func requireHTTPErrorWithCause(t *testing.T, err error, status int, cause string) {
 	t.Helper()
 	var he *echo.HTTPError
 	if !errors.As(err, &he) {
 		t.Fatalf("error = %T, want *echo.HTTPError", err)
 	}
-	if he.Code != status || he.Message != message {
-		t.Fatalf("HTTPError = %d %v, want %d %q", he.Code, he.Message, status, message)
+	if he.Code != status {
+		t.Fatalf("HTTPError = %d, want %d", he.Code, status)
 	}
-	if he.Internal == nil {
-		t.Fatal("HTTPError carries no cause for the result record")
+	if he.Internal == nil || !strings.Contains(he.Internal.Error(), cause) {
+		t.Fatalf("HTTPError internal = %v, want a cause naming %q", he.Internal, cause)
+	}
+	if message, _ := he.Message.(string); message != http.StatusText(status) && strings.Contains(he.Internal.Error(), message) {
+		t.Fatalf("HTTPError message %q carries the cause", message)
 	}
 }
 
@@ -99,7 +102,7 @@ func TestHandleWebhook_ForgedSignatureIsUnauthorizedWithCause(t *testing.T) {
 
 	err := NewFeishuAdapter(nil).HandleWebhook(context.Background(), encryptedWebhookConfig(), manager.HandleInbound, req, rec)
 
-	requireHTTPErrorWithCause(t, err, http.StatusUnauthorized, "invalid feishu webhook signature")
+	requireHTTPErrorWithCause(t, err, http.StatusUnauthorized, "signature verification failed")
 	if len(manager.calls) != 0 || rec.Body.Len() != 0 {
 		t.Fatalf("forged callback dispatched %d messages and wrote %q", len(manager.calls), rec.Body.String())
 	}

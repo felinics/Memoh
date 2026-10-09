@@ -485,7 +485,7 @@ function formatJSON(value: unknown): string {
 }
 
 function isNotFoundError(error: unknown): boolean {
-  const maybe = error as { status?: number, response?: { status?: number }, message?: string }
-  return maybe?.status === 404 || maybe?.response?.status === 404 || String(maybe?.message ?? '').toLowerCase().includes('not found')
+  const maybe = error as { status?: number, response?: { status?: number } }
+  return maybe?.status === 404 || maybe?.response?.status === 404
 }
 </script>

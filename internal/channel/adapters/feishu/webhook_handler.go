@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,15 +39,15 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg channel.ChannelCo
 
 	feishuCfg, err := parseConfig(cfg.Credentials)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid feishu channel config").WithInternal(err)
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("invalid feishu channel config: %w", err))
 	}
 	if feishuCfg.InboundMode != inboundModeWebhook {
-		return echo.NewHTTPError(http.StatusBadRequest, "feishu inbound_mode is not webhook")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("feishu inbound_mode is not webhook"))
 	}
 
 	payload, err := io.ReadAll(io.LimitReader(r.Body, webhookMaxBodyBytes+1))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "read feishu webhook body").WithInternal(err)
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("read feishu webhook body: %w", err))
 	}
 	if int64(len(payload)) > webhookMaxBodyBytes {
 		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, fmt.Sprintf("payload too large: max %d bytes", webhookMaxBodyBytes))
@@ -108,12 +109,12 @@ func (a *FeishuAdapter) HandleWebhook(ctx context.Context, cfg channel.ChannelCo
 func inspectWebhookRequest(ctx context.Context, eventDispatcher *dispatcher.EventDispatcher, req *http.Request, payload []byte) (larkevent.EventFuzzy, error) {
 	plainPayload, err := parseWebhookPayload(ctx, eventDispatcher, req, payload)
 	if err != nil {
-		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, "invalid feishu webhook payload").WithInternal(err)
+		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("invalid feishu webhook payload: %w", err))
 	}
 
 	var fuzzy larkevent.EventFuzzy
 	if err := json.Unmarshal([]byte(plainPayload), &fuzzy); err != nil {
-		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest, "invalid feishu webhook payload").WithInternal(err)
+		return larkevent.EventFuzzy{}, echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("invalid feishu webhook payload: %w", err))
 	}
 	return fuzzy, nil
 }
@@ -122,7 +123,7 @@ func validateWebhookCallbackAuth(fuzzy larkevent.EventFuzzy, cfg Config) error {
 	expectedToken := strings.TrimSpace(cfg.VerificationToken)
 	encryptKey := strings.TrimSpace(cfg.EncryptKey)
 	if expectedToken == "" && encryptKey == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "feishu webhook requires encrypt_key or verification_token")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("feishu webhook requires encrypt_key or verification_token"))
 	}
 
 	requestToken := webhookRequestToken(fuzzy)

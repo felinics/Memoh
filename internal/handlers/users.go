@@ -223,7 +223,7 @@ func (h *UsersHandler) ListUsers(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
 	}
 	if strings.TrimSpace(c.QueryParam("user_type")) != "" || strings.TrimSpace(c.QueryParam("owner_id")) != "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user_type and owner_id are not supported")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("user_type and owner_id are not supported"))
 	}
 	items, err := h.service.ListAccounts(c.Request().Context())
 	if err != nil {
@@ -457,7 +457,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	}
 	req.RequestKey = strings.TrimSpace(c.Request().Header.Get(createRequestKeyHeader))
 	if len(req.RequestKey) > maxCreateRequestKeyLen {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("%s must be at most %d characters", createRequestKeyHeader, maxCreateRequestKeyLen))
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(fmt.Errorf("%s must be at most %d characters", createRequestKeyHeader, maxCreateRequestKeyLen))
 	}
 	// Look a resend up before anything that could refuse it, such as a quota
 	// the first attempt's bot already counts against.
@@ -1188,7 +1188,7 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 		case errors.Is(err, channel.ErrInvalidWebhookEndpoint):
 			return apperror.Wrap(apperror.CodeChannelWebhookEndpointInvalid, err, nil)
 		case errors.Is(err, channel.ErrWebhookEndpointUnsupported):
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return echo.NewHTTPError(http.StatusBadRequest).WithInternal(err)
 		default:
 			return errs.WrapDependency(err, "set channel webhook endpoint")
 		}
@@ -1319,7 +1319,7 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 		return errs.Wrap(err, "get chat route")
 	}
 	if strings.TrimSpace(route.ReplyTarget) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "reply target missing in route")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("reply target missing in route"))
 	}
 	channelType, err := h.registry.ParseChannelType(route.Platform)
 	if err != nil {

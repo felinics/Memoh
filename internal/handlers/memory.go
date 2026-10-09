@@ -729,11 +729,11 @@ func (h *MemoryHandler) ChatDelete(c echo.Context) error {
 		decoder.DisallowUnknownFields()
 		parsed := &payload
 		if err := decoder.Decode(&parsed); err != nil || parsed == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid memory deletion request")
+			return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("invalid memory deletion request"))
 		}
 		var extra any
 		if err := decoder.Decode(&extra); err != io.EOF {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid memory deletion request")
+			return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("invalid memory deletion request"))
 		}
 	}
 

@@ -27,6 +27,7 @@ import { useI18n } from 'vue-i18n'
 import { Spinner } from '@felinic/ui'
 import { CircleCheck, CircleX } from 'lucide-vue-next'
 import { postBotsByBotIdMcpByIdOauthExchange } from '@memohai/sdk'
+import { resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -77,15 +78,7 @@ onMounted(async () => {
   } catch (err: unknown) {
     loading.value = false
     success.value = false
-    let errMsg = t('mcp.oauth.authFailed')
-    const e = err as Record<string, unknown>
-    if (typeof e?.message === 'string') {
-      errMsg = e.message
-    } else if (typeof e?.detail === 'string') {
-      errMsg = e.detail
-    } else if (typeof e?.error === 'string') {
-      errMsg = e.error
-    }
+    const errMsg = resolveApiErrorMessage(err, t('mcp.oauth.authFailed')) || t('mcp.oauth.authFailed')
     message.value = errMsg
     notify('error', errMsg)
   }

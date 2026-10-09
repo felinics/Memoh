@@ -389,7 +389,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		return errs.Wrap(err, "get provider")
 	}
 	if !models.IsLLMClientType(models.ClientType(provider.ClientType)) {
-		return echo.NewHTTPError(http.StatusBadRequest, "import models is not supported for speech providers")
+		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("import models is not supported for speech providers"))
 	}
 
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)

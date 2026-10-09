@@ -180,6 +180,11 @@ A field problem whose fix needs more than the field's name, such as a rule
 between two fields or an action the user has to take first, has a code of its
 own in the domain that checks it.
 
+An `*echo.HTTPError` with a 400 or 422 status carries no message: nothing a
+handler writes there reaches the user. Text kept for the access record goes in
+`WithInternal`. A guard test in `internal/apperror` fails on a 400 or 422
+`echo.NewHTTPError` with a message argument.
+
 `fault` is who the process attributes the failure to, not something derived
 from the status:
 
