@@ -40,7 +40,10 @@ type spanRead struct {
 func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUID, cfg TriggerConfig, measure sqlc.MeasureUncompactedMessagesBySessionRow, minSpanTokens, minBudget int) (spanRead, string, error) {
 	readMaxBytes := compactionReadMaxBytes(cfg)
 	windowBytes := readMaxBytes
-	jointTokens := 2 * minSpanTokens
+	// The joint target follows the floor of ordinary passes, not this
+	// pass's: a rollup claims spans of any size, yet the task it leaves
+	// behind must still clear the floor once the turn is over.
+	jointTokens := 2 * min(minCompactionSpanTokens, minBudget)
 	var read spanRead
 	var after pgtype.UUID
 	var epoch int64
@@ -148,39 +151,53 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 				slog.String("session_id", cfg.SessionID),
 			)
 		}
-		var toCompact []CompactionCandidate
-		switch {
-		case truncated:
+		task := -1
+		if truncated {
 			// An oldest-first window with more history behind it: the recent
 			// tail lies beyond it, so only the current task is held back.
 			// splitByTarget could noop forever because the unseen newest tail
 			// is precisely what should be kept.
 			for i := range items {
 				items[i].Policies = withoutPolicy(items[i].Policies, CompactPolicyPreserveRecent)
-			}
-			for i := range items {
-				if !window[i].LatestUser {
-					continue
-				}
-				// The current task and its joint are held for now.
-				end := len(items) - len(skipJoint(items[i], items[i+1:], jointTokens))
-				for j := i; j < end; j++ {
-					items[j].Policies = appendPolicy(items[j].Policies, CompactPolicyPreserveRecent)
+				if window[i].LatestUser {
+					task = i
 				}
 			}
-			toCompact = items
-		default:
+		} else {
+			task = latestUserIndex(items)
+		}
+		var from, to int
+		var open bool
+		if task >= 0 {
+			// The current task and its joint are held for now; past an
+			// untruncated window's task, the selection policies hold the rest.
+			from, to, open = holdJoint(items, task, jointTokens)
+			end := task
+			if truncated {
+				end = to
+			}
+			for j := from; j < end; j++ {
+				items[j].Policies = appendPolicy(items[j].Policies, CompactPolicyPreserveRecent)
+			}
+		}
+		toCompact := items
+		if !truncated {
 			toCompact = splitRecent(items, cfg)
-			if latestUserIndex(items) == 0 && len(toCompact) > 0 && toCompact[0].ID == items[1].ID {
-				toCompact = skipJoint(items[0], toCompact, jointTokens)
+			if task == 0 && len(toCompact) > 0 && toCompact[0].ID == items[1].ID {
+				toCompact = toCompact[min(len(toCompact), to-1):]
 			}
 		}
 
 		choice := chooseSpan(toCompact, minSpanTokens, minBudget, truncated)
-		read.stats.add(choice.stats)
 		if choice.grow && windowBytes < maxCompactionReadBytes {
 			windowBytes = min(2*windowBytes, maxCompactionReadBytes)
 			continue
+		}
+		read.stats.add(choice.stats)
+		if truncated && open && from > 0 {
+			// The joint runs into the window edge: the next window starts
+			// with it, so the steps behind the edge are held too.
+			choice.resume = min(choice.resume, from)
 		}
 		if settling {
 			settled := 0
@@ -206,7 +223,8 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			// Nothing older than the current turn can be claimed: the turn's
 			// own older steps may still be, behind its task message.
 			if turn := currentTurnItems(items); len(turn) > 0 {
-				steps := skipJoint(turn[0], splitRecent(turn, cfg), jointTokens)
+				steps := splitRecent(turn, cfg)
+				steps = steps[min(len(steps), to-task-1):]
 				if choice := chooseSpan(steps, minSpanTokens, minBudget, false); choice.end > choice.start {
 					read.rows = rows
 					read.span = steps[choice.start:choice.end]

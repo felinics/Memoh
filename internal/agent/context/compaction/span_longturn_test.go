@@ -348,3 +348,173 @@ func TestCompactionReadsARowLargerThanOneWindow(t *testing.T) {
 	}
 	assertClaimsContiguous(t, q)
 }
+
+func TestCompactionRollupKeepsTheCurrentTasksJoint(t *testing.T) {
+	t.Parallel()
+
+	// A rollup may claim a span of any size, but the steps right after the
+	// current task still stay raw with it: claimed now, they would leave the
+	// task alone between two summaries once the turn is over.
+	stub := &stubModel{summary: "rolled up"}
+	cfg := machineryConfig(stub, 300)
+	cfg.AllowFrontierFusion = true
+	cfg.MaxCompactTokens = 4000
+	q := newSessionStore()
+	_, steps := longTurn(t, q, 12)
+	setFusionRowScopeAndTimes(t, cfg, q.history)
+	q.priorLogs = fusionParentLogs(t, cfg, strings.Repeat("a", 2400), strings.Repeat("b", 2400))
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err != nil || res.Status != StatusOK || len(q.markedIDs) == 0 {
+		t.Fatalf("result = %+v, %v; want a rollup over the turn's older steps", res, err)
+	}
+	if markedSet(q)[steps[0].ID] {
+		t.Fatal("the rollup claimed the step right after the current task")
+	}
+}
+
+func TestCompactionJointNeverHoldsALargeStep(t *testing.T) {
+	t.Parallel()
+
+	// A step that replays far larger than its summarizer entry — a 55 KB
+	// command output — compacts while the turn runs instead of staying raw
+	// with the current task.
+	q := newSessionStore()
+	for i := 0; i < 3; i++ {
+		q.append(prose(t, "user", fmt.Sprintf("OLD%d", i), 300, 100), prose(t, "assistant", fmt.Sprintf("OLDA%d", i), 300, 100))
+	}
+	q.append(prose(t, "user", "TASK", 30, 10))
+	big := bigStep(t, 0)
+	big[1].Usage = nil
+	q.append(big...)
+	stub := &stubModel{summary: summaryOfTokens(t, 100)}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 8000)
+	cfg.HardPressure = true
+	for s := 0; s < 40; s++ {
+		q.append(execExchange(t, s)...)
+		for pass := 0; pass < 3; pass++ {
+			if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+				break
+			}
+		}
+	}
+	if q.logStatuses[q.claims[big[1].ID]] != "ok" {
+		t.Fatal("the large step right after the current task stayed raw through the turn")
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionTaskInFrontOfABarrierCompactsAfterItsTurn(t *testing.T) {
+	t.Parallel()
+
+	// A task prompt followed by a reasoning-only row has no steps to join.
+	// The rows right in front of it stay raw with it instead, so once its
+	// turn is over the prompt compacts with them rather than staying raw
+	// alone between a summary and the barrier.
+	q := newSessionStore()
+	stub := &stubModel{summary: summaryOfTokens(t, 120)}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 200)
+	cfg.HardPressure = true
+	drain := func() {
+		for pass := 0; pass < 3; pass++ {
+			if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+				return
+			}
+		}
+	}
+	var tasks []sqlc.ListUncompactedMessagesBySessionRow
+	for turn := 0; turn < 12; turn++ {
+		task := prose(t, "user", fmt.Sprintf("TASK%d", turn), 60, 60)
+		tasks = append(tasks, task)
+		q.append(task, reasoningOnlyRow(t))
+		for s := 0; s < 8; s++ {
+			q.append(execExchange(t, turn*100+s)...)
+			if s%4 == 3 {
+				drain()
+			}
+		}
+		q.append(prose(t, "assistant", fmt.Sprintf("ANSWER%d", turn), 80, 80))
+		drain()
+	}
+	raw := 0
+	for _, task := range tasks[1 : len(tasks)-2] {
+		if q.logStatuses[q.claims[task.ID]] != "ok" {
+			raw++
+		}
+	}
+	if raw > 0 {
+		t.Fatalf("%d of %d finished task prompts stayed raw between a summary and their reasoning row", raw, len(tasks)-3)
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionJointCutByTheWindowEdgeReadsOnFromTheTask(t *testing.T) {
+	t.Parallel()
+
+	// The current task ends a truncated window: the next window must start
+	// at the task, so the steps right after it stay raw with it.
+	q := newSessionStore()
+	task := prose(t, "user", "TASK", 30, 10)
+	var filled int64
+	i := 0
+	for ; filled < minCompactionReadBytes-12_000; i++ {
+		rows := fillerExchange(t, i, 4096)
+		q.append(rows...)
+		filled += payloadBytes(rows[0]) + payloadBytes(rows[1])
+	}
+	probe := fillerExchange(t, i, 4096)
+	over := int(payloadBytes(probe[0])+payloadBytes(probe[1])) - 4096
+	last := fillerExchange(t, i, int(minCompactionReadBytes-filled-payloadBytes(task)-5)-over)
+	q.append(last...)
+	q.append(task)
+	for s := 0; s < 30; s++ {
+		q.append(execExchange(t, s)...)
+	}
+	stub := &stubModel{summary: summaryOfTokens(t, 100)}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 1500)
+	cfg.HardPressure = true
+	drain := func() {
+		for pass := 0; pass < 6; pass++ {
+			if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+				return
+			}
+		}
+	}
+	drain()
+	q.append(prose(t, "assistant", "ANSWER", 80, 80))
+	for n := 0; n < 6; n++ {
+		q.append(prose(t, "user", fmt.Sprintf("NEXT%d", n), 300, 100), prose(t, "assistant", fmt.Sprintf("NEXTA%d", n), 300, 100))
+		drain()
+	}
+	if q.logStatuses[q.claims[task.ID]] != "ok" {
+		t.Fatal("the task prompt at the window edge stayed raw after its turn")
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionGrownWindowCountsItsStatsOnce(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	var parts []string
+	for i := 0; i < 40; i++ {
+		parts = append(parts, fmt.Sprintf(`{"type":"tool-call","toolCallId":"p%d","toolName":"read","input":{"path":"f%d"}}`, i, i))
+	}
+	q.append(mkRow(t, "assistant", "["+strings.Join(parts, ",")+"]", 10))
+	for i := 0; i < 40; i++ {
+		q.append(mkRow(t, "tool", fmt.Sprintf(`[{"type":"tool-result","toolCallId":"p%d","toolName":"read","output":{"type":"text","value":%s}}]`, i, jsonStr(strings.Repeat("file line ok; ", 1500))), 10))
+	}
+	q.append(prose(t, "assistant", "DONE", 300, 10), prose(t, "user", "CURRENT", 10, 10))
+	svc := newMachineryService(q)
+	cfg := machineryConfig(&stubModel{}, 50)
+	measure, _ := q.MeasureUncompactedMessagesBySession(context.Background(), pgtype.UUID{})
+	read, reason, err := svc.readCompactionSpan(context.Background(), pgtype.UUID{}, cfg, measure, minCompactionSpanTokens, 10000)
+	if err != nil || reason != "" || len(read.span) == 0 {
+		t.Fatalf("read = %d rows, %q, %v; want the exchange read whole", len(read.span), reason, err)
+	}
+	if read.windows < 2 || read.stats.OpenGroups != 0 {
+		t.Fatalf("windows=%d open_groups=%d; the window that grew must not count its cut exchange", read.windows, read.stats.OpenGroups)
+	}
+}

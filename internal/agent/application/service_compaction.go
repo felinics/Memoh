@@ -175,7 +175,8 @@ func (s *Service) drainCompactionBacklog(ctx context.Context, cfg compaction.Tri
 		}
 		res, err := s.runCompactionPass(ctx, cfg)
 		if errors.Is(err, compaction.ErrIneffectiveSummary) {
-			// The next pass selects past the rows that did not shrink.
+			// The next pass selects past the rows the summary could not
+			// replace.
 			continue
 		}
 		if err != nil {

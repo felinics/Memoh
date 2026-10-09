@@ -249,28 +249,27 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 
 	summary := strings.TrimSpace(result.Text)
-	if summary == "" {
-		s.failLog(persistCtx, logID, errEmptySummary)
-		return Result{}, errEmptySummary
-	}
-	if result.FinishReason != sdk.FinishReasonStop {
-		err = fmt.Errorf("%w: finish_reason=%s", errIncompleteSummary, result.FinishReason)
-		s.failLog(persistCtx, logID, err)
-		return Result{}, err
-	}
 	replacementTokens := entriesPromptCost(entries)
 	if fusing {
 		replacementTokens = summaryReplacementTokens(entries, frontier.Artifacts)
 	}
 	summaryTokens := estimateSummaryReplayTokens(summary)
-	if summaryTokens >= replacementTokens {
+	switch {
+	case summary == "":
+		err = errEmptySummary
+	case result.FinishReason != sdk.FinishReasonStop:
+		err = fmt.Errorf("%w: finish_reason=%s", errIncompleteSummary, result.FinishReason)
+	case summaryTokens >= replacementTokens && fusing:
+		err = fmt.Errorf("%w: summary_tokens=%d raw_tokens=%d", errIneffectiveRollup, summaryTokens, replacementTokens)
+	case summaryTokens >= replacementTokens:
+		err = fmt.Errorf("summary does not reduce replay tokens: summary_tokens=%d raw_tokens=%d", summaryTokens, replacementTokens)
+	}
+	if err != nil {
 		// A rollup fails with the summaries it absorbs, which says nothing
 		// about the new rows on their own.
-		cause := ErrIneffectiveSummary
-		if fusing {
-			cause = errIneffectiveRollup
+		if !fusing {
+			err = fmt.Errorf("%w: %w", ErrIneffectiveSummary, err)
 		}
-		err = fmt.Errorf("%w: summary_tokens=%d raw_tokens=%d", cause, summaryTokens, replacementTokens)
 		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
@@ -381,9 +380,10 @@ func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, m
 	return expected, nil
 }
 
-// failLog completes a claimed attempt as failed. An ineffective summary is
-// recorded by reason so later passes keep those rows raw instead of resending
-// them; any other failure leaves the rows eligible for a retry.
+// failLog completes a claimed attempt as failed. A summary that cannot
+// replace its rows is recorded by reason so later passes keep those rows raw
+// instead of resending them; any other failure leaves the rows eligible for a
+// retry.
 func (s *Service) failLog(ctx context.Context, logID pgtype.UUID, cause error) {
 	reason := ""
 	if errors.Is(cause, ErrIneffectiveSummary) {

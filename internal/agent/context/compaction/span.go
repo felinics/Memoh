@@ -9,9 +9,10 @@ import "strings"
 // cannot pass the net-reduction check. It stays raw in place instead.
 const minCompactionSpanTokens = 256
 
-// failureReasonIneffectiveSummary marks a claim whose summary was not shorter
-// than its rows. Those rows stay raw within the compaction epoch and later
-// passes select past them.
+// failureReasonIneffectiveSummary marks a claim whose summary could not
+// replace its rows: it was not shorter, or the model returned none usable.
+// Those rows stay raw within the compaction epoch and later passes select
+// past them.
 const failureReasonIneffectiveSummary = "ineffective_summary"
 
 type groupKind int
@@ -115,10 +116,10 @@ type spanChoice struct {
 // minTokens of rows not already proved ineffective, which trimSpan can still
 // claim within budget. Proved rows ride along with new ones but never count
 // toward the floor. Other spans stay raw in place, and so does a row marked
-// PreserveRecent, which also stops the settled prefix: it is protected only
-// while it is the current task. Barriers and gaps bound every span, and the read query
-// marks the row after a claim with a gap, so rows left behind never join a
-// later claim across it.
+// PreserveRecent, which also stops the settled prefix: the current task and
+// the rows held with it are protected only for now. Barriers and gaps bound
+// every span, and the read query marks the row after a claim with a gap, so
+// rows left behind never join a later claim across it.
 //
 // With truncated set, items are one read window with more candidates behind
 // it: the last tool exchange may still have results past the edge, and the
@@ -136,7 +137,8 @@ func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bo
 		cost, kind := groupCost(items, group)
 		switch {
 		case kind == groupMarkable && items[group[0]].HasPolicy(CompactPolicyPreserveRecent):
-			// The current task: held back for now, not for good.
+			// The current task or a row held with it: held back for now,
+			// not for good.
 			recent = min(recent, g)
 		case kind == groupMarkable:
 			costs[g] = cost
@@ -220,55 +222,87 @@ func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bo
 }
 
 // trimSpan caps a chosen span to the entries budget, oldest groups first,
-// keeping at least minTokens of rows not yet proved ineffective in the claim:
-// when the budget cut leaves less, the claim starts at a later group of the
-// span. Rows passed over stay raw in place, and the row after the claim reads
+// keeping in the claim at least minTokens of rows not yet proved ineffective,
+// and at least as many of them as of proved rows: when the budget cut leaves
+// less, the claim starts at a later group of the span. Proved rows thus get
+// another chance only next to as many new ones, and rows the provider keeps
+// refusing drop out of later claims instead of sinking every claim of their
+// run. Rows passed over stay raw in place, and the row after the claim reads
 // as a gap, so they never join a later claim across it.
 func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCandidate {
 	groups := toolExchangeGroups(span)
 	costs := make([]int, len(groups))
-	fresh := make([]bool, len(groups))
+	proved := make([]int, len(groups))
 	for g, group := range groups {
 		costs[g] = markableGroupCost(span, group)
-		fresh[g] = !provedIneffective(span, group)
+		if provedIneffective(span, group) {
+			proved[g] = costs[g]
+		}
 	}
 	need := max(1, minTokens)
-	end, total, freshTotal := 0, 0, 0
+	end, total, provedTotal := 0, 0, 0
 	for start := range groups {
 		if end <= start {
-			end, total, freshTotal = start, 0, 0
+			end, total, provedTotal = start, 0, 0
 		}
 		for end < len(groups) && (end == start || total+costs[end] <= budget) {
 			total += costs[end]
-			if fresh[end] {
-				freshTotal += costs[end]
-			}
+			provedTotal += proved[end]
 			end++
 		}
-		if freshTotal >= need {
+		if fresh := total - provedTotal; fresh >= need && provedTotal <= fresh {
 			last := groups[end-1]
 			return span[groups[start][0] : last[len(last)-1]+1]
 		}
 		total -= costs[start]
-		if fresh[start] {
-			freshTotal -= costs[start]
-		}
+		provedTotal -= proved[start]
 	}
 	return nil
 }
 
-// skipJoint leaves the steps right after the current task raw until they and
-// the task are worth a call together, and returns the steps after them. Once
-// the turn is over, the task and that joint form one claimable span instead
-// of the task staying behind alone between two summaries.
-func skipJoint(task CompactionCandidate, steps []CompactionCandidate, target int) []CompactionCandidate {
-	have := estimateBytesAsTokens(strings.TrimSpace(renderCandidateEntry(task.Record)))
-	for _, group := range toolExchangeGroups(steps) {
-		cost := markableGroupCost(steps, group)
-		if have >= target || cost == 0 || steps[group[0]].GapBefore {
-			return steps[group[0]:]
-		}
-		have += cost
+// holdJoint returns items[from:to], the rows that stay raw with the current
+// task at items[task] while it is current: the steps right after it until
+// they and the task are worth a call together. When a barrier, a gap or a
+// step too large to hold raw ends those first, the rows right in front of the
+// task are held instead, as far as needed. Once the turn is over, they form
+// one claimable span instead of the task staying behind alone between two
+// summaries. open reports steps that ran out before the target, which more
+// steps may still extend.
+func holdJoint(items []CompactionCandidate, task, target int) (from, to int, open bool) {
+	groups := toolExchangeGroups(items)
+	t := 0
+	for groups[t][0] != task {
+		t++
 	}
-	return nil
+	have := estimateBytesAsTokens(strings.TrimSpace(renderCandidateEntry(items[task].Record)))
+	held := 0
+	join := func(g int) bool {
+		cost, replay := markableGroupCost(items, groups[g]), 0
+		for _, idx := range groups[g] {
+			replay += (len(items[idx].RawContent) + 3) / 4
+		}
+		// A step that replays far larger than its summarizer entry costs
+		// more context raw than the joint is worth.
+		if cost == 0 || held+replay > 4*target {
+			return false
+		}
+		have, held = have+cost, held+replay
+		return true
+	}
+	g := t + 1
+	for ; g < len(groups) && have < target; g++ {
+		if items[groups[g][0]].GapBefore || !join(g) {
+			break
+		}
+	}
+	to = len(items)
+	if g < len(groups) {
+		to = groups[g][0]
+	}
+	open = g == len(groups) && have < target
+	from = task
+	for b := t; b > 0 && have < target && !open && !items[groups[b][0]].GapBefore && join(b-1); b-- {
+		from = groups[b-1][0]
+	}
+	return from, to, open
 }

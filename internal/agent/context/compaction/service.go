@@ -30,10 +30,11 @@ var (
 	// other than a natural stop (length cap, content filter): the text is
 	// unusable because it may cut mid-thought.
 	errIncompleteSummary = errors.New("compaction: model returned an incomplete summary")
-	// ErrIneffectiveSummary marks a summary that would replay at least as many
-	// tokens as the raw entries it replaces. Those rows are recorded as such,
-	// so the next pass selects past them; callers may run it right away.
-	ErrIneffectiveSummary = errors.New("compaction: summary does not reduce replay tokens")
+	// ErrIneffectiveSummary marks a summary that cannot replace its rows: it
+	// would replay at least as many tokens as the raw entries it replaces, or
+	// the model returned none usable for them. Those rows are recorded as
+	// such, so the next pass selects past them; callers may run it right away.
+	ErrIneffectiveSummary = errors.New("compaction: summary cannot replace its rows")
 	// errIneffectiveRollup marks a rollup no shorter than everything it
 	// replaces. Nothing is recorded against the rows, so it counts as an
 	// ordinary failure.
@@ -259,6 +260,16 @@ func (s *Service) RunCompaction(ctx context.Context, cfg TriggerConfig) error {
 // seconds away, and waiting removes a duplicate LLM call over the same span; a
 // canceled wait degrades to a noop.
 func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Result, error) {
+	res, err := s.runCompactionSync(ctx, cfg)
+	if cfg.Manual && errors.Is(err, ErrIneffectiveSummary) {
+		// The rows stay raw and the next request moves past them: to the
+		// user, history that does not shrink now, not a failure.
+		return Result{Status: StatusNoop, Reason: ReasonNoBeneficialSpan}, nil
+	}
+	return res, err
+}
+
+func (s *Service) runCompactionSync(ctx context.Context, cfg TriggerConfig) (Result, error) {
 	for {
 		res, owner, err := s.runCompaction(ctx, cfg)
 		if owner == nil {

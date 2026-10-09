@@ -28,14 +28,21 @@ import (
 // countingSummarizer is a scripted OpenAI-compatible summarizer.
 type countingSummarizer struct {
 	summary string
+	refuse  string // a request containing it is refused with content_filter
 	calls   int
 }
 
-func (s *countingSummarizer) RoundTrip(*http.Request) (*http.Response, error) {
+func (s *countingSummarizer) RoundTrip(req *http.Request) (*http.Response, error) {
 	s.calls++
+	finish := "stop"
+	if s.refuse != "" && req.Body != nil {
+		if prompt, _ := io.ReadAll(req.Body); strings.Contains(string(prompt), s.refuse) {
+			finish = "content_filter"
+		}
+	}
 	content, _ := json.Marshal(s.summary)
 	body := `{"id":"stub","object":"chat.completion","created":0,"model":"stub",` +
-		`"choices":[{"index":0,"message":{"role":"assistant","content":` + string(content) + `},"finish_reason":"stop"}],` +
+		`"choices":[{"index":0,"message":{"role":"assistant","content":` + string(content) + `},"finish_reason":"` + finish + `"}],` +
 		`"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -309,8 +316,8 @@ func TestPostgresCompactionAdvancesPastHeldBackHistory(t *testing.T) {
 
 	svc := compaction.NewService(slog.New(slog.DiscardHandler), store)
 	model.summary = summaryTokens(600)
-	if _, err := f.run(svc, model); err == nil {
-		t.Fatal("pass over NEXT-A must reject the ineffective summary")
+	if res, err := f.run(svc, model); err != nil || res.Status != compaction.StatusNoop || res.Reason != compaction.ReasonNoBeneficialSpan {
+		t.Fatalf("manual pass over NEXT-A = %+v, %v; want its summary rejected and reported as history that does not shrink", res, err)
 	}
 	_, claim = f.claims()
 	failed := claim[nextA[0].ID]
@@ -498,7 +505,9 @@ func TestPostgresCompactionPassesOversizedRowAndRetriesProvedRowsWithNewOnes(t *
 
 	// The span behind the oversized row fails as ineffective.
 	model := &countingSummarizer{summary: summaryTokens(600)}
-	if _, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model); !errors.Is(err, compaction.ErrIneffectiveSummary) {
+	auto := f.config(model)
+	auto.Manual = false
+	if _, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, auto); !errors.Is(err, compaction.ErrIneffectiveSummary) {
 		t.Fatalf("first pass = %v, want the span past the oversized row tried and rejected", err)
 	}
 	_, claim := f.claims()
@@ -691,6 +700,10 @@ func TestPostgresCompactionKeepsRowsInFrontOfTheCurrentTaskUnsettled(t *testing.
 	s0 := f.text("user", strings.Repeat("S0 ask. ", 50))
 	f.text("assistant", strings.Repeat("S0 ok. ", 50))
 	task := f.text("user", strings.Repeat("TASK detail. ", 50))
+	// Two ordinary steps make the task's joint; the large ones after it fill
+	// the read windows.
+	f.exec(1)
+	f.exec(2)
 	for n := 1; n <= 2; n++ {
 		id := fmt.Sprintf("big-%d", n)
 		f.persist("assistant", []map[string]any{{"type": "tool-call", "toolCallId": id, "toolName": "exec", "input": map[string]any{"command": "cat big"}}})
@@ -708,5 +721,49 @@ func TestPostgresCompactionKeepsRowsInFrontOfTheCurrentTaskUnsettled(t *testing.
 	}
 	if f.claimStatus(s0.ID) != "ok" || f.claimStatus(task.ID) != "ok" {
 		t.Fatalf("S0 %q, task %q: the rows in front of the then-current task were settled", f.claimStatus(s0.ID), f.claimStatus(task.ID))
+	}
+}
+
+func TestPostgresCompactionRefusedSpanStaysRawAndLaterHistoryCompacts(t *testing.T) {
+	f, store := newProgressFixture(t)
+	labels := map[string]string{}
+	label := func(name string, msgs ...messagepkg.Message) []messagepkg.Message {
+		for i, msg := range msgs {
+			labels[msg.ID] = fmt.Sprintf("%s#%d", name, i)
+		}
+		return msgs
+	}
+	refused := label("refused", f.text("user", strings.Repeat("REFUSED question. ", 80)), f.text("assistant", strings.Repeat("REFUSED answer. ", 80)))
+	label("reasoning", f.reasoning())
+	later := label("later", f.text("user", strings.Repeat("LATER question. ", 80)), f.text("assistant", strings.Repeat("LATER answer. ", 80)))
+	label("current", f.text("user", "current question"))
+
+	// The provider refuses the oldest span: the manual request reports
+	// history that does not shrink, and the attempt is recorded against it.
+	model := &countingSummarizer{summary: summaryTokens(120), refuse: "REFUSED"}
+	svc := compaction.NewService(slog.New(slog.DiscardHandler), store)
+	if res, err := f.run(svc, model); err != nil || res.Status != compaction.StatusNoop || res.Reason != compaction.ReasonNoBeneficialSpan {
+		t.Fatalf("first pass = %+v, %v; want the refusal reported as history that does not shrink", res, err)
+	}
+	_, claim := f.claims()
+	if got := f.compact(claim[refused[0].ID]); got.status != "error" || got.reason != "ineffective_summary" || claim[refused[1].ID] != claim[refused[0].ID] {
+		t.Fatalf("refused attempt = %+v, want an error recorded against both rows", got)
+	}
+
+	// The next request moves past it, on a fresh service as after a restart.
+	res, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model)
+	if err != nil || res.Status != compaction.StatusOK || res.MessageCount != len(later) {
+		t.Fatalf("second pass = %+v, %v; want the later span committed", res, err)
+	}
+	_, claim = f.claims()
+	committed := claim[later[0].ID]
+	if got := f.compact(committed); got.status != "ok" || got.covered != len(later) || claim[later[1].ID] != committed {
+		t.Fatalf("committed summary = %+v, want ok covering the later span", got)
+	}
+	if res, err := f.run(svc, model); err != nil || res.Reason != compaction.ReasonNoBeneficialSpan || model.calls != 2 {
+		t.Fatalf("third pass = %+v, %v after %d calls; want no call resending the refused rows", res, err, model.calls)
+	}
+	if got := strings.Join(f.replay(labels), ","); got != "refused#0,refused#1,reasoning#0,summary:"+committed+",current#0" {
+		t.Fatalf("replay = %s, want the refused rows raw in place before the summary", got)
 	}
 }

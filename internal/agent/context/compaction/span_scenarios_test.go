@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -70,7 +71,6 @@ func TestCompactionMovesPastIneffectiveSpanAcrossRestart(t *testing.T) {
 
 	stub := &stubModel{summary: summaryOfTokens(t, 400)}
 	cfg := machineryConfig(stub, 50)
-	cfg.Manual = true
 
 	_, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
 	if err == nil || !strings.Contains(err.Error(), ErrIneffectiveSummary.Error()) {
@@ -366,7 +366,6 @@ func TestCompactionRetriesIneffectiveRowsWithNewHistory(t *testing.T) {
 	q.append(prose(t, "user", "CURRENT", 10, 10))
 	stub := &stubModel{summary: summaryOfTokens(t, 400)}
 	cfg := machineryConfig(stub, 50)
-	cfg.Manual = true
 	if _, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg); err == nil {
 		t.Fatal("first pass must reject the ineffective summary")
 	}
@@ -395,7 +394,6 @@ func TestCompactionNeverResendsOnlyIneffectiveRows(t *testing.T) {
 	q.append(prose(t, "user", "CURRENT", 10, 10))
 	stub := &stubModel{summary: summaryOfTokens(t, 700)}
 	cfg := machineryConfig(stub, 50)
-	cfg.Manual = true
 	cfg.MaxCompactTokens = 700
 	if _, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg); err == nil {
 		t.Fatal("first pass must reject the ineffective summary")
@@ -565,5 +563,105 @@ func TestCompactionTrimmedClaimStillClearsTheFloor(t *testing.T) {
 	}
 	if marked := markedSet(q); marked[short.ID] || !marked[exchange[0].ID] || !marked[exchange[1].ID] {
 		t.Fatalf("claimed short=%v exchange=%v/%v, want the exchange that clears the floor", marked[short.ID], marked[exchange[0].ID], marked[exchange[1].ID])
+	}
+}
+
+func TestCompactionRefusedSpanDoesNotBlockLaterHistory(t *testing.T) {
+	t.Parallel()
+
+	// The provider refuses (content_filter) every prompt holding the oldest
+	// span. Those rows stay raw; the later spans still compact, one call each.
+	q := newSessionStore()
+	poison := []sqlc.ListUncompactedMessagesBySessionRow{prose(t, "user", "POISON", 300, 100), prose(t, "assistant", "POISONA", 300, 100)}
+	q.append(poison...)
+	q.append(reasoningOnlyRow(t))
+	for i := 0; i < 10; i++ {
+		q.append(prose(t, "user", fmt.Sprintf("LATER%d", i), 300, 100), prose(t, "assistant", fmt.Sprintf("LATERA%d", i), 300, 100), reasoningOnlyRow(t))
+	}
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "POISON"}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	committed, refused := 0, 0
+	for pass := 0; pass < 14; pass++ {
+		clock = clock.Add(time.Minute)
+		res, err := svc.RunCompactionSync(context.Background(), cfg)
+		switch {
+		case err != nil:
+			refused++
+		case res.Status == StatusOK:
+			committed++
+		}
+	}
+	if committed != 10 || refused != 1 || stub.calls != 11 {
+		t.Fatalf("committed=%d refused=%d calls=%d; want every later span committed after one refusal", committed, refused, stub.calls)
+	}
+	if q.logStatuses[q.claims[poison[0].ID]] == "ok" {
+		t.Fatal("the refused rows were committed")
+	}
+}
+
+func TestCompactionRefusedRowsLeaveLaterClaimsOfTheirRun(t *testing.T) {
+	t.Parallel()
+
+	// One step of a long turn is refused by the provider. Rows already sent
+	// with it may join later claims only in part, so it drops out of them
+	// after a bounded number of refusals instead of sinking every later claim
+	// of the run.
+	q := newSessionStore()
+	q.append(prose(t, "user", "TASK", 120, 50))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "POISON"}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 1500)
+	cfg.HardPressure = true
+	refused := 0
+	var steps []sqlc.ListUncompactedMessagesBySessionRow
+	for s := 0; s < 80; s++ {
+		step := execExchange(t, s)
+		if s == 6 {
+			step[1] = mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"exec-6","toolName":"exec","output":{"type":"text","value":"POISON output"}}]`, 10)
+		}
+		steps = append(steps, step...)
+		q.append(step...)
+		if s%4 == 3 {
+			for pass := 0; pass < 3; pass++ {
+				res, err := svc.RunCompactionSync(context.Background(), cfg)
+				if errors.Is(err, ErrIneffectiveSummary) {
+					refused++
+					continue
+				}
+				if err != nil || res.Status != StatusOK {
+					break
+				}
+			}
+		}
+	}
+	compacted := 0
+	for _, row := range steps[len(steps)/2 : len(steps)*3/4] {
+		if q.logStatuses[q.claims[row.ID]] == "ok" {
+			compacted++
+		}
+	}
+	if refused > 3 || compacted != len(steps)/4 {
+		t.Fatalf("refusals=%d, compacted %d of %d rows in the third quarter of the turn", refused, compacted, len(steps)/4)
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestManualCompactionReportsASummaryThatDoesNotShrinkAsBlocked(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "SPAN", 300, 100), prose(t, "assistant", "SPANA", 300, 100), prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 900)}
+	cfg := machineryConfig(stub, 50)
+	cfg.Manual = true
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err != nil || res.Status != StatusNoop || res.Reason != ReasonNoBeneficialSpan {
+		t.Fatalf("result = %+v, %v; want a noop that says the history does not shrink", res, err)
+	}
+	if stub.calls != 1 || q.completed.FailureReason != failureReasonIneffectiveSummary {
+		t.Fatalf("calls=%d failure_reason=%q; want the attempt recorded against its rows", stub.calls, q.completed.FailureReason)
 	}
 }

@@ -23,6 +23,7 @@ import (
 type stubModel struct {
 	summary      string
 	finishReason string // defaults to "stop"
+	refuse       string // a prompt containing it is refused with content_filter
 	calls        int
 	prompt       string // decoded text of the captured request messages
 	maxTokens    int    // captured max_tokens of the last request
@@ -43,6 +44,9 @@ func (s *stubModel) RoundTrip(req *http.Request) (*http.Response, error) {
 	finishReason := s.finishReason
 	if finishReason == "" {
 		finishReason = "stop"
+	}
+	if s.refuse != "" && strings.Contains(s.prompt, s.refuse) {
+		finishReason = "content_filter"
 	}
 	resp := `{"id":"stub","object":"chat.completion","created":0,"model":"stub",` +
 		`"choices":[{"index":0,"message":{"role":"assistant","content":` + jsonStr(s.summary) + `},"finish_reason":` + jsonStr(finishReason) + `}],` +
