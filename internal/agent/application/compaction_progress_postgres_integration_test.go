@@ -22,6 +22,7 @@ import (
 	dbpkg "github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	dbstore "github.com/felinics/memoh/internal/db/store"
 )
 
 // countingSummarizer is a scripted OpenAI-compatible summarizer.
@@ -470,7 +471,7 @@ func TestPostgresCompactionPassesOversizedRowAndRetriesProvedRowsWithNewOnes(t *
 	f := progressFixture{t: t, ctx: ctx, pool: pool, queries: queries, messages: messagepkg.NewService(nil, postgresstore.NewQueries(queries)), botID: botID, sessionID: sessionID}
 	store := postgresstore.NewQueries(queries)
 
-	huge := f.text("assistant", strings.Repeat("H", 600_000))
+	huge := f.text("assistant", strings.Repeat("H", 8_500_000))
 	old := []messagepkg.Message{f.text("user", strings.Repeat("OLD question. ", 50)), f.text("assistant", strings.Repeat("OLD answer. ", 50))}
 	f.text("user", "current question")
 
@@ -522,5 +523,190 @@ func TestPostgresCompactionPassesOversizedRowAndRetriesProvedRowsWithNewOnes(t *
 	}
 	if got := f.compact(committed); got.status != "ok" {
 		t.Fatalf("retry summary = %+v", got)
+	}
+}
+
+func newProgressFixture(t *testing.T) (progressFixture, *postgresstore.Queries) {
+	t.Helper()
+	ctx := context.Background()
+	pool := openTurnAdmissionPostgres(t, ctx)
+	botID, sessionID := createTurnAdmissionFixture(t, ctx, pool)
+	queries := dbsqlc.New(pool)
+	store := postgresstore.NewQueries(queries)
+	return progressFixture{t: t, ctx: ctx, pool: pool, queries: queries, messages: messagepkg.NewService(nil, store), botID: botID, sessionID: sessionID}, store
+}
+
+func (f progressFixture) scanAfter() string {
+	f.t.Helper()
+	var after string
+	if err := f.pool.QueryRow(f.ctx, `SELECT COALESCE(compaction_scan_after::text, '') FROM bot_sessions WHERE id = $1`, f.sessionID).Scan(&after); err != nil {
+		f.t.Fatal(err)
+	}
+	return after
+}
+
+func (f progressFixture) claimStatus(id string) string {
+	f.t.Helper()
+	var status string
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT COALESCE(c.status, '') FROM bot_history_messages m
+		LEFT JOIN bot_history_message_compacts c ON c.id = m.compact_id
+		WHERE m.id = $1`, id).Scan(&status); err != nil {
+		f.t.Fatal(err)
+	}
+	return status
+}
+
+func (f progressFixture) filler(n int) {
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("fill-%d", i)
+		f.persist("assistant", []map[string]any{{"type": "tool-call", "toolCallId": id, "toolName": "ask_user", "input": map[string]any{"question": strings.Repeat("q", 4096)}}})
+		f.persist("tool", []map[string]any{{"type": "tool-result", "toolCallId": id, "toolName": "ask_user", "output": "ok"}})
+	}
+}
+
+func TestPostgresCompactionReadsPastTheCurrentTasksWindow(t *testing.T) {
+	f, store := newProgressFixture(t)
+	// The task is followed by more protected steps than one window holds: the
+	// windows after the task's have no candidate user row at all.
+	task := f.text("user", strings.Repeat("TASK ", 320))
+	f.filler(140)
+	model := &countingSummarizer{summary: summaryTokens(100)}
+	cfg := f.config(model)
+	cfg.Manual = false
+	res, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg)
+	if err != nil || res.Status != compaction.StatusNoop || f.scanAfter() != "" {
+		t.Fatalf("pass during the task = %+v, %v, scan position %q; want a clean noop that settles nothing past the task", res, err, f.scanAfter())
+	}
+	f.text("user", "NEXT-TASK")
+	res, err = f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model)
+	if err != nil || res.Status != compaction.StatusOK || f.claimStatus(task.ID) != "ok" {
+		t.Fatalf("pass after the next task = %+v, %v; want the old task claimed", res, err)
+	}
+}
+
+func TestPostgresCompactionScanStopsAtFreshClaimBehindASummary(t *testing.T) {
+	f, store := newProgressFixture(t)
+	f.askUser(1)
+	p := []messagepkg.Message{f.text("user", strings.Repeat("P question. ", 80)), f.text("assistant", strings.Repeat("P answer. ", 80))}
+	f.text("user", strings.Repeat("S question. ", 80))
+	f.text("assistant", strings.Repeat("S answer. ", 80))
+	f.askUser(2)
+	f.text("user", strings.Repeat("C question. ", 80))
+	f.text("assistant", strings.Repeat("C answer. ", 80))
+	f.text("user", "current question")
+
+	// A process died while summarizing P; later passes commit what follows.
+	var epoch int64
+	if err := f.pool.QueryRow(f.ctx, `SELECT compaction_epoch FROM bot_sessions WHERE id = $1`, f.sessionID).Scan(&epoch); err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := f.queries.CreateCompactionLog(f.ctx, dbsqlc.CreateCompactionLogParams{BotID: f.uuid(f.botID), SessionID: f.uuid(f.sessionID), ExpectedEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.queries.MarkMessagesCompacted(f.ctx, dbsqlc.MarkMessagesCompactedParams{CompactID: attempt.ID, MessageIds: []pgtype.UUID{f.uuid(p[0].ID), f.uuid(p[1].ID)}, ExpectedCompactIds: []pgtype.UUID{{}, {}}}); err != nil {
+		t.Fatal(err)
+	}
+	model := &countingSummarizer{summary: summaryTokens(100)}
+	for pass := 0; pass < 3; pass++ {
+		if _, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET started_at = now() - INTERVAL '16 minutes' WHERE id = $1`, attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model); err != nil || res.Status != compaction.StatusOK || f.claimStatus(p[0].ID) != "ok" {
+		t.Fatalf("pass after the claim lapsed = %+v, %v; P status %q, want it summarized", res, err, f.claimStatus(p[0].ID))
+	}
+}
+
+// epochBumpingQueries raises the session's compaction epoch before the
+// second window of a pass is read.
+type epochBumpingQueries struct {
+	dbstore.Queries
+	reads int
+	bump  func()
+}
+
+func (q *epochBumpingQueries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Context, arg dbsqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]dbsqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
+	if q.reads++; q.reads == 2 {
+		q.bump()
+	}
+	return q.Queries.ListUncompactedMessagesBySessionWithinBytes(ctx, arg)
+}
+
+func TestPostgresCompactionEpochChangeMidPassRecordsNoScanPosition(t *testing.T) {
+	f, store := newProgressFixture(t)
+	early := f.text("user", strings.Repeat("P0 question. ", 80))
+	f.text("assistant", strings.Repeat("P0 answer. ", 80))
+	f.text("user", "q0")
+	model := &countingSummarizer{summary: summaryTokens(100)}
+	if res, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model); err != nil || res.Status != compaction.StatusOK {
+		t.Fatalf("setup pass = %+v, %v", res, err)
+	}
+	f.filler(140)
+	f.text("user", strings.Repeat("LATER question. ", 120))
+	f.text("assistant", strings.Repeat("LATER answer. ", 120))
+	f.text("user", "current question")
+
+	racing := &epochBumpingQueries{Queries: store, bump: func() {
+		if _, err := f.pool.Exec(f.ctx, `UPDATE bot_sessions SET compaction_epoch = compaction_epoch + 1 WHERE id = $1`, f.sessionID); err != nil {
+			t.Fatal(err)
+		}
+	}}
+	if _, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), racing), model); err != nil {
+		t.Fatal(err)
+	}
+	if after := f.scanAfter(); after != "" {
+		var scanEpoch, epoch int64
+		_ = f.pool.QueryRow(f.ctx, `SELECT compaction_scan_epoch, compaction_epoch FROM bot_sessions WHERE id = $1`, f.sessionID).Scan(&scanEpoch, &epoch)
+		if scanEpoch == epoch {
+			t.Fatal("a pass that saw the epoch change recorded a scan position for the new epoch")
+		}
+	}
+	// The voided summary's rows are candidates again and still reached.
+	live := func() bool {
+		var ok bool
+		if err := f.pool.QueryRow(f.ctx, `
+			SELECT EXISTS (SELECT 1 FROM bot_history_messages m JOIN bot_history_message_compacts c ON c.id = m.compact_id
+			JOIN bot_sessions s ON s.id = c.session_id WHERE m.id = $1 AND c.status = 'ok' AND c.compaction_epoch = s.compaction_epoch)`, early.ID).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	for pass := 0; pass < 3 && !live(); pass++ {
+		if _, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !live() {
+		t.Fatal("history voided by the new epoch was not summarized again")
+	}
+}
+
+func TestPostgresCompactionKeepsRowsInFrontOfTheCurrentTaskUnsettled(t *testing.T) {
+	f, store := newProgressFixture(t)
+	s0 := f.text("user", strings.Repeat("S0 ask. ", 50))
+	f.text("assistant", strings.Repeat("S0 ok. ", 50))
+	task := f.text("user", strings.Repeat("TASK detail. ", 50))
+	for n := 1; n <= 2; n++ {
+		id := fmt.Sprintf("big-%d", n)
+		f.persist("assistant", []map[string]any{{"type": "tool-call", "toolCallId": id, "toolName": "exec", "input": map[string]any{"command": "cat big"}}})
+		f.persist("tool", []map[string]any{{"type": "tool-result", "toolCallId": id, "toolName": "exec", "output": map[string]any{"type": "text", "value": strings.Repeat("line ok; ", 33_000)}}})
+	}
+	model := &countingSummarizer{summary: summaryTokens(100)}
+	if _, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model); err != nil {
+		t.Fatal(err)
+	}
+	f.text("user", "next question")
+	for pass := 0; pass < 3 && f.claimStatus(s0.ID) != "ok"; pass++ {
+		if _, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if f.claimStatus(s0.ID) != "ok" || f.claimStatus(task.ID) != "ok" {
+		t.Fatalf("S0 %q, task %q: the rows in front of the then-current task were settled", f.claimStatus(s0.ID), f.claimStatus(task.ID))
 	}
 }

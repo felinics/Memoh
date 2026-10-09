@@ -104,7 +104,11 @@ type spanChoice struct {
 	start, end int
 	resume     int
 	settled    int
-	stats      spanStats
+	// grow reports a window filled from its first row by one span or tool
+	// exchange that may continue past the edge: only a larger window can
+	// read it whole without cutting it.
+	grow  bool
+	stats spanStats
 }
 
 // chooseSpan picks the oldest span worth one summarizer call: at least
@@ -119,9 +123,9 @@ type spanChoice struct {
 // With truncated set, items are one read window with more candidates behind
 // it: the last tool exchange may still have results past the edge, and the
 // last span may still grow. Such a span is deferred and resume points at its
-// start, so the next window reads it whole — unless it starts the window,
-// where re-reading could not advance and the window is passed instead. A
-// window passed over this way is settled too: every pass cuts it the same.
+// start, so the next window reads it whole. When it starts the window, grow
+// asks for a larger window instead; at the largest one the window is passed
+// over and settled, since every pass cuts it the same.
 func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bool) spanChoice {
 	groups := toolExchangeGroups(items)
 	costs := make([]int, len(groups))
@@ -158,7 +162,7 @@ func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bo
 		return end == len(groups) || (open && end == last && !items[groups[last][0]].GapBefore)
 	}
 
-	choice := spanChoice{resume: len(items), settled: len(items)}
+	choice := spanChoice{resume: len(items), settled: len(items), grow: open && last == 0}
 	if open && groups[last][0] > 0 {
 		choice.resume = groups[last][0]
 		choice.settled = groups[last][0]
@@ -191,6 +195,8 @@ func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bo
 				if truncated {
 					choice.resume = groups[first][0]
 				}
+			} else {
+				choice.grow = true
 			}
 			break
 		}
@@ -201,7 +207,13 @@ func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bo
 		}
 	}
 	if recent < len(groups) {
-		choice.settled = min(choice.settled, groups[recent][0])
+		// Rows right in front of the current task may join it once it is no
+		// longer current, so they are not settled either.
+		before := recent
+		for before > 0 && costs[before-1] > 0 && !items[groups[before][0]].GapBefore {
+			before--
+		}
+		choice.settled = min(choice.settled, groups[before][0])
 	}
 	choice.stats = stats
 	return choice
@@ -241,6 +253,22 @@ func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCan
 		if fresh[start] {
 			freshTotal -= costs[start]
 		}
+	}
+	return nil
+}
+
+// skipJoint leaves the steps right after the current task raw until they and
+// the task are worth a call together, and returns the steps after them. Once
+// the turn is over, the task and that joint form one claimable span instead
+// of the task staying behind alone between two summaries.
+func skipJoint(task CompactionCandidate, steps []CompactionCandidate, target int) []CompactionCandidate {
+	have := estimateBytesAsTokens(strings.TrimSpace(renderCandidateEntry(task.Record)))
+	for _, group := range toolExchangeGroups(steps) {
+		cost := markableGroupCost(steps, group)
+		if have >= target || cost == 0 || steps[group[0]].GapBefore {
+			return steps[group[0]:]
+		}
+		have += cost
 	}
 	return nil
 }

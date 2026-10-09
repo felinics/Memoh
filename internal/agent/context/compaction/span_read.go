@@ -12,7 +12,9 @@ import (
 // maxCompactionScanBytes and maxCompactionScanWindows bound how much one
 // pass reads while looking for a span past rows that stay raw. Every window is
 // still bounded by compactionReadMaxBytes, and the next pass continues from
-// the recorded scan position.
+// the recorded scan position. A row, tool exchange or span larger than one
+// window is read again with a window twice the size, up to
+// maxCompactionReadBytes, before it is passed over and left raw.
 const (
 	maxCompactionScanBytes   = 32 << 20
 	maxCompactionScanWindows = 64
@@ -37,8 +39,11 @@ type spanRead struct {
 // reached. A non-empty reason reports why nothing can be claimed now.
 func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUID, cfg TriggerConfig, measure sqlc.MeasureUncompactedMessagesBySessionRow, minSpanTokens, minBudget int) (spanRead, string, error) {
 	readMaxBytes := compactionReadMaxBytes(cfg)
+	windowBytes := readMaxBytes
+	jointTokens := 2 * minSpanTokens
 	var read spanRead
 	var after pgtype.UUID
+	var epoch int64
 	// settledThrough is the last row of the prefix found permanently
 	// unclaimable. Recording it lets later passes start after it instead of
 	// rescanning, so history behind a prefix larger than the scan budget is
@@ -69,7 +74,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 		}
 		window, err := s.queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
 			SessionID:                sessionUUID,
-			MaxBytes:                 readMaxBytes,
+			MaxBytes:                 windowBytes,
 			AfterMessageID:           after,
 			IneffectiveFailureReason: failureReasonIneffectiveSummary,
 		})
@@ -83,15 +88,26 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			return read, ReasonNothingToCompact, nil
 		}
 		read.windows++
+		if read.windows == 1 {
+			epoch = window[0].CompactionEpoch
+		} else if window[0].CompactionEpoch != epoch {
+			// Claims of the old epoch are void: what earlier windows settled
+			// says nothing about the new one.
+			settling = false
+		}
 		truncated := window[0].CandidateCount > int64(len(window))
+		if window[0].Oversized && windowBytes < maxCompactionReadBytes {
+			windowBytes = min(2*windowBytes, maxCompactionReadBytes)
+			continue
+		}
 		if window[0].Oversized {
-			// Larger than a whole window: it stays raw, and the cursor moves
-			// past it so the history behind it is still reached.
+			// Larger than the largest window: it stays raw, and the cursor
+			// moves past it so the history behind it is still reached.
 			read.oversized++
 			s.logger.WarnContext(ctx, "compaction: candidate larger than the read window stays raw",
 				slog.String("session_id", cfg.SessionID),
 				slog.String("message_id", formatUUID(window[0].ID)),
-				slog.Int64("read_max_bytes", readMaxBytes))
+				slog.Int64("read_max_bytes", windowBytes))
 			row := uncompactedRowsFromBounded(window)[0]
 			if window[0].PendingBefore || window[0].LatestUser {
 				settling = false
@@ -101,7 +117,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			if !truncated {
 				return read, ReasonReadBudgetExceeded, nil
 			}
-			after = row.ID
+			after, windowBytes = row.ID, readMaxBytes
 			continue
 		}
 		// Use the count captured by the same SQL statement as the payload rows
@@ -141,17 +157,31 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			// is precisely what should be kept.
 			for i := range items {
 				items[i].Policies = withoutPolicy(items[i].Policies, CompactPolicyPreserveRecent)
-				if window[i].LatestUser {
-					items[i].Policies = appendPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+			}
+			for i := range items {
+				if !window[i].LatestUser {
+					continue
+				}
+				// The current task and its joint are held for now.
+				end := len(items) - len(skipJoint(items[i], items[i+1:], jointTokens))
+				for j := i; j < end; j++ {
+					items[j].Policies = appendPolicy(items[j].Policies, CompactPolicyPreserveRecent)
 				}
 			}
 			toCompact = items
 		default:
 			toCompact = splitRecent(items, cfg)
+			if latestUserIndex(items) == 0 && len(toCompact) > 0 && toCompact[0].ID == items[1].ID {
+				toCompact = skipJoint(items[0], toCompact, jointTokens)
+			}
 		}
 
 		choice := chooseSpan(toCompact, minSpanTokens, minBudget, truncated)
 		read.stats.add(choice.stats)
+		if choice.grow && windowBytes < maxCompactionReadBytes {
+			windowBytes = min(2*windowBytes, maxCompactionReadBytes)
+			continue
+		}
 		if settling {
 			settled := 0
 			if len(toCompact) > 0 && toCompact[0].ID == items[0].ID {
@@ -176,7 +206,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			// Nothing older than the current turn can be claimed: the turn's
 			// own older steps may still be, behind its task message.
 			if turn := currentTurnItems(items); len(turn) > 0 {
-				steps := splitRecent(turn, cfg)
+				steps := skipJoint(turn[0], splitRecent(turn, cfg), jointTokens)
 				if choice := chooseSpan(steps, minSpanTokens, minBudget, false); choice.end > choice.start {
 					read.rows = rows
 					read.span = steps[choice.start:choice.end]
@@ -193,7 +223,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			}
 			return read, ReasonNoBeneficialSpan, nil
 		}
-		after = rows[choice.resume-1].ID
+		after, windowBytes = rows[choice.resume-1].ID, readMaxBytes
 	}
 }
 

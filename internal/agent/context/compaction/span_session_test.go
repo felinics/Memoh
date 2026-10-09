@@ -63,24 +63,26 @@ func (q *sessionStore) candidates(after pgtype.UUID) []storeCandidate {
 	if !after.Valid && q.scanEpoch == q.epoch {
 		after = q.scanAfter
 	}
-	started := !after.Valid
-	var out []storeCandidate
+	start := 0
 	for i, row := range q.history {
-		if !started {
-			started = row.ID == after
-			continue
+		if after.Valid && row.ID == after {
+			start = i + 1
 		}
-		if !q.isCandidate(row) {
+	}
+	var out []storeCandidate
+	gap, pending := false, false
+	if start > 0 {
+		gap, pending = !q.isCandidate(q.history[start-1]), q.heldBy(q.history[start-1]) == "pending"
+	}
+	for _, row := range q.history[start:] {
+		if held := q.heldBy(row); held != "" {
+			gap, pending = true, pending || held == "pending"
 			continue
 		}
 		row.CompactID = q.claims[row.ID]
 		row.CompactionEpoch = q.epoch
-		candidate := storeCandidate{row: row}
-		if i > 0 {
-			held := q.heldBy(q.history[i-1])
-			candidate.gap, candidate.pendingBefore = held != "", held == "pending"
-		}
-		out = append(out, candidate)
+		out = append(out, storeCandidate{row: row, gap: gap, pendingBefore: pending})
+		gap, pending = false, false
 	}
 	return out
 }

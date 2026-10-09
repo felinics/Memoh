@@ -202,8 +202,8 @@ func TestDoCompactionFusionRejectsSummaryNotSmallerThanEverythingReplaced(t *tes
 
 	q := &fakeQueries{uncompacted: rows, priorLogs: parents}
 	_, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
-	if !errors.Is(err, ErrIneffectiveSummary) {
-		t.Fatalf("RunCompactionSync error = %v, want ErrIneffectiveSummary", err)
+	if !errors.Is(err, errIneffectiveRollup) {
+		t.Fatalf("RunCompactionSync error = %v, want errIneffectiveRollup", err)
 	}
 	if stub.calls != 1 {
 		t.Fatalf("provider calls = %d, want 1", stub.calls)

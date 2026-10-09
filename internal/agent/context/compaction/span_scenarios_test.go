@@ -37,22 +37,23 @@ func TestCompactionNeverClaimsAcrossAnEarlierSummary(t *testing.T) {
 	svc := newMachineryService(q)
 	cfg := machineryConfig(stub, 1500)
 
-	// One long turn: the task prompt stays raw while its older steps compact.
+	// One long turn: the task prompt and step 1 (its joint) stay raw while
+	// the older steps behind them compact.
 	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
 		t.Fatalf("first pass = %+v, %v", res, err)
 	}
-	if marked := markedSet(q); marked[task.ID] || len(marked) != 5 {
-		t.Fatalf("first pass claimed %d rows (task claimed: %v), want steps 1-5 only", len(marked), marked[task.ID])
+	if marked := markedSet(q); marked[task.ID] || marked[steps[0].ID] || len(marked) != 4 {
+		t.Fatalf("first pass claimed %d rows (task %v, step 1 %v), want steps 2-5", len(marked), marked[task.ID], marked[steps[0].ID])
 	}
 
-	// The next turn: the task prompt is no longer protected, but the summary
-	// of steps 1-5 sits between it and step 6.
+	// The next turn: the task and its joint are claimable together, but the
+	// summary of steps 2-5 sits between them and step 6.
 	q.append(prose(t, "user", "NEXT", 10, 10), prose(t, "assistant", "NEW", 300, 1000), prose(t, "assistant", "NEW", 300, 1000))
 	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
 		t.Fatalf("second pass = %+v, %v", res, err)
 	}
-	if len(q.markedIDs) != 1 || q.markedIDs[0] != task.ID {
-		t.Fatalf("second pass claimed %d rows, want only the task prompt in front of the earlier summary", len(q.markedIDs))
+	if len(q.markedIDs) != 2 || q.markedIDs[0] != task.ID || q.markedIDs[1] != steps[0].ID {
+		t.Fatalf("second pass claimed %d rows, want the task and its joint in front of the earlier summary", len(q.markedIDs))
 	}
 	assertClaimsContiguous(t, q)
 }
@@ -255,7 +256,7 @@ func TestCompactionClaimsToolExchangeSplitByWindowEdgeWhole(t *testing.T) {
 func TestCompactionOversizedCandidateEndsWithReason(t *testing.T) {
 	t.Parallel()
 
-	q := newSessionStore(prose(t, "user", "HUGE", int(minCompactionReadBytes), 100), prose(t, "user", "CURRENT", 10, 10))
+	q := newSessionStore(prose(t, "user", "HUGE", maxCompactionReadBytes/4+1000, 100), prose(t, "user", "CURRENT", 10, 10))
 	stub := &stubModel{summary: "never"}
 	res, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 5))
 	if err != nil || res.Status != StatusNoop || res.Reason != ReasonReadBudgetExceeded || stub.calls != 0 {
@@ -266,24 +267,32 @@ func TestCompactionOversizedCandidateEndsWithReason(t *testing.T) {
 func TestCompactionSkipsShortRowInFrontOfAnEarlierSummary(t *testing.T) {
 	t.Parallel()
 
+	// A short task already stranded in front of an earlier summary (left by a
+	// pass without a joint) stays raw; it is not combined with the step
+	// behind that summary.
 	task := prose(t, "user", "TASK", 30, 100)
 	q := newSessionStore(task)
+	var steps []sqlc.ListUncompactedMessagesBySessionRow
 	for i := 0; i < 6; i++ {
-		q.append(prose(t, "assistant", fmt.Sprintf("STEP%d", i+1), 300, 1000))
+		steps = append(steps, prose(t, "assistant", fmt.Sprintf("STEP%d", i+1), 300, 1000))
 	}
-	stub := &stubModel{summary: "steps condensed"}
-	svc := newMachineryService(q)
-	cfg := machineryConfig(stub, 1500)
-	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
-		t.Fatalf("first pass = %+v, %v", res, err)
+	q.append(steps...)
+	ctx := context.Background()
+	earlier, _ := q.CreateCompactionLog(ctx, sqlc.CreateCompactionLogParams{})
+	ids := make([]pgtype.UUID, 0, 5)
+	for _, step := range steps[:5] {
+		ids = append(ids, step.ID)
 	}
-	stepSix := q.history[6]
+	_, _ = q.MarkMessagesCompacted(ctx, sqlc.MarkMessagesCompactedParams{CompactID: earlier.ID, MessageIds: ids})
+	_, _ = q.CompleteCompactionLog(ctx, sqlc.CompleteCompactionLogParams{ID: earlier.ID, Status: "ok", Summary: "steps 1-5"})
 	q.append(prose(t, "user", "NEXT", 10, 10), prose(t, "assistant", "NEW", 300, 1000), prose(t, "assistant", "NEW", 300, 1000))
-	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
-		t.Fatalf("second pass = %+v, %v", res, err)
+
+	stub := &stubModel{summary: "steps condensed"}
+	if res, err := newMachineryService(q).RunCompactionSync(ctx, machineryConfig(stub, 1500)); err != nil || res.Status != StatusOK {
+		t.Fatalf("pass = %+v, %v", res, err)
 	}
-	if len(q.markedIDs) != 1 || q.markedIDs[0] != stepSix.ID {
-		t.Fatalf("second pass claimed %d rows, want step 6 alone: the short task prompt ends at the earlier summary", len(q.markedIDs))
+	if len(q.markedIDs) != 1 || q.markedIDs[0] != steps[5].ID {
+		t.Fatalf("claimed %d rows, want step 6 alone: the short task prompt ends at the earlier summary", len(q.markedIDs))
 	}
 	assertClaimsContiguous(t, q)
 }

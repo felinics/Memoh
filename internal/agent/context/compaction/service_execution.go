@@ -119,6 +119,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 
 	s.logger.InfoContext(ctx, "compaction: before trim",
+		slog.String("session_id", cfg.SessionID),
 		slog.Int("messages", len(toCompact)),
 		slog.Int("span_tokens", read.stats.SpanTokens),
 		slog.Int("max_compact_tokens", maxCompactTokens),
@@ -263,14 +264,14 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	}
 	summaryTokens := estimateSummaryReplayTokens(summary)
 	if summaryTokens >= replacementTokens {
-		err = fmt.Errorf("%w: summary_tokens=%d raw_tokens=%d", ErrIneffectiveSummary, summaryTokens, replacementTokens)
+		// A rollup fails with the summaries it absorbs, which says nothing
+		// about the new rows on their own.
+		cause := ErrIneffectiveSummary
 		if fusing {
-			// A rollup failed with the summaries it absorbs; that says nothing
-			// about the new rows on their own.
-			_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil, "")
-		} else {
-			s.failLog(persistCtx, logID, err)
+			cause = errIneffectiveRollup
 		}
+		err = fmt.Errorf("%w: summary_tokens=%d raw_tokens=%d", cause, summaryTokens, replacementTokens)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 

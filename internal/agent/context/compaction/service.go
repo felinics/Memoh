@@ -34,6 +34,10 @@ var (
 	// tokens as the raw entries it replaces. Those rows are recorded as such,
 	// so the next pass selects past them; callers may run it right away.
 	ErrIneffectiveSummary = errors.New("compaction: summary does not reduce replay tokens")
+	// errIneffectiveRollup marks a rollup no shorter than everything it
+	// replaces. Nothing is recorded against the rows, so it counts as an
+	// ordinary failure.
+	errIneffectiveRollup = errors.New("compaction: rollup does not reduce replay tokens")
 	// ErrSummaryWindowTooSmall marks a summarizer whose declared window cannot
 	// hold the fixed prompt plus the output reserve; running it would overflow
 	// on every attempt, so it fails closed before claiming any source rows.
@@ -81,6 +85,9 @@ type Service struct {
 	inflightMu sync.Mutex
 	inflight   map[string]*inflightRun
 	failedAt   map[string]compactionFailure
+	// ineffective marks sessions whose last pass ended in an ineffective
+	// summary; a second one in a row arms the cooldown.
+	ineffective map[string]bool
 }
 
 // compactionFailure tracks one session's most recent failure and how many
@@ -93,11 +100,12 @@ type compactionFailure struct {
 // NewService creates a new compaction Service.
 func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
-		queries:  queries,
-		logger:   log,
-		nowFn:    time.Now,
-		inflight: make(map[string]*inflightRun),
-		failedAt: make(map[string]compactionFailure),
+		queries:     queries,
+		logger:      log,
+		nowFn:       time.Now,
+		inflight:    make(map[string]*inflightRun),
+		failedAt:    make(map[string]compactionFailure),
+		ineffective: make(map[string]bool),
 	}
 }
 
@@ -185,6 +193,17 @@ func (s *Service) clearCompactionFailure(sessionID string) {
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
 	delete(s.failedAt, sessionID)
+	delete(s.ineffective, sessionID)
+}
+
+// recordIneffective reports whether the session's previous pass also ended
+// in an ineffective summary.
+func (s *Service) recordIneffective(sessionID string) bool {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	repeated := s.ineffective[sessionID]
+	s.ineffective[sessionID] = true
+	return repeated
 }
 
 func (s *Service) SetHookService(h *hooks.Service) {
@@ -336,9 +355,11 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		case !preHookRan:
 			// A pre-hook error or deny is bot policy, not a model failure;
 			// it must not arm the cooldown (panics above still do).
-		case errors.Is(compactErr, ErrIneffectiveSummary):
+		case errors.Is(compactErr, ErrIneffectiveSummary) && !s.recordIneffective(cfg.SessionID):
 			// The rows are recorded as not shrinking, so the next pass selects
 			// past them; a cooldown would only hold back the history behind.
+			// A second one in a row does arm it: the summarizer keeps writing
+			// more than it is given.
 		case ctx.Err() != nil:
 			// The caller's request was canceled or hit its deadline — not a
 			// model failure. Arming the five-minute cooldown here would

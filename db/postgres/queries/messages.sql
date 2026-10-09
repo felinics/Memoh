@@ -3005,8 +3005,8 @@ WHERE message.team_id = public.memoh_current_team_id()
 -- GapBefore marks a candidate whose preceding replayed row is not a
 -- candidate (the source of an active summary or of a fresh claim): one
 -- compact_id must never span it, or the read path would fold the later rows
--- in front of that summary. PendingBefore narrows that to a fresh claim,
--- whose rows return as candidates if the claim lapses. IneffectiveClaim
+-- in front of that summary. PendingBefore reports a fresh claim anywhere in
+-- that gap, whose rows return as candidates if the claim lapses. IneffectiveClaim
 -- marks a row whose claim in this epoch failed because the summary was not
 -- shorter than the rows. LatestUser marks the session's newest user message
 -- among the candidates: the task the current turn is working on.
@@ -3059,13 +3059,29 @@ WITH scan_anchor AS MATERIALIZED (
         SELECT scan_anchor.turn_position, scan_anchor.turn_message_seq, scan_anchor.created_at, scan_anchor.id FROM scan_anchor
       )
     )
-), ordered_rows AS MATERIALIZED (
+), sequenced_rows AS MATERIALIZED (
+  -- held rows share the sequence number of the candidate in front of them,
+  -- so each gap is one group keyed by that number.
   SELECT
     session_rows.*,
-    COALESCE(LAG(held_by IS NOT NULL) OVER replay_order, false)::boolean AS gap_before,
-    COALESCE(LAG(held_by = 'pending') OVER replay_order, false)::boolean AS pending_before
+    COUNT(*) FILTER (WHERE held_by IS NULL) OVER (
+      ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC
+    ) AS candidate_seq
   FROM session_rows
-  WINDOW replay_order AS (ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC)
+), held_gaps AS MATERIALIZED (
+  SELECT candidate_seq, bool_or(held_by = 'pending') AS pending
+  FROM sequenced_rows
+  WHERE held_by IS NOT NULL
+  GROUP BY candidate_seq
+), ordered_rows AS MATERIALIZED (
+  SELECT
+    sequenced_rows.*,
+    (gap.candidate_seq IS NOT NULL)::boolean AS gap_before,
+    COALESCE(gap.pending, false)::boolean AS pending_before
+  FROM sequenced_rows
+  LEFT JOIN held_gaps gap
+    ON sequenced_rows.held_by IS NULL
+   AND gap.candidate_seq = sequenced_rows.candidate_seq - 1
 ), candidate_rows AS MATERIALIZED (
   SELECT
     ordered.id,
@@ -3074,14 +3090,14 @@ WITH scan_anchor AS MATERIALIZED (
     ordered.created_at,
     ordered.gap_before,
     ordered.pending_before,
-    ordered.id = (
+    COALESCE(ordered.id = (
       SELECT latest.id
       FROM ordered_rows latest
       WHERE latest.held_by IS NULL
         AND latest.role = 'user'
       ORDER BY latest.turn_position DESC, latest.turn_message_seq DESC, latest.created_at DESC, latest.id DESC
       LIMIT 1
-    ) AS latest_user,
+    ), false) AS latest_user,
     (
       octet_length(m.content::text)
       + octet_length(m.metadata::text)
