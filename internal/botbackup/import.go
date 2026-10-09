@@ -28,6 +28,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
+	"github.com/felinics/memoh/internal/errs"
 	fetchpkg "github.com/felinics/memoh/internal/fetchproviders"
 	"github.com/felinics/memoh/internal/mcp"
 	modelpkg "github.com/felinics/memoh/internal/models"
@@ -549,10 +550,12 @@ func (s *Service) Import(ctx context.Context, actorUserID string, raw []byte, op
 			return err
 		})
 		if bumpErr != nil {
-			return ImportResult{}, errors.Join(
-				ErrHistoryResetUnavailable,
-				fmt.Errorf("advance ACP runtime config generation: %w", bumpErr),
-			)
+			if errors.Is(bumpErr, runtimefence.ErrResetLeaseLost) || errors.Is(bumpErr, runtimefence.ErrTransactionsUnsupported) {
+				bumpErr = fmt.Errorf("advance ACP runtime config generation: %w", bumpErr)
+			} else {
+				bumpErr = errs.WrapDependency(bumpErr, "advance ACP runtime config generation")
+			}
+			return ImportResult{}, errors.Join(ErrHistoryResetUnavailable, bumpErr)
 		}
 	}
 	if err := s.applyRestore(ctx, actorUserID, targetBotID, cfg, deps, opts, state); err != nil {

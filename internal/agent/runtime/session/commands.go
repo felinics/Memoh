@@ -16,6 +16,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 func (m *Manager) RunRef(ctx context.Context, botID, sessionID, runID string) (RunRef, bool, error) {
@@ -118,7 +119,7 @@ func (m *Manager) ValidateRunOwnership(ctx context.Context, handle RunHandle) er
 	if m.distributed == nil {
 		snapshot, ok, err := m.backend.Load(ctx, key)
 		if err != nil {
-			return fmt.Errorf("validate runtime ownership: %w", err)
+			return errs.WrapDependency(err, "validate runtime ownership")
 		}
 		if !ok || !runMatchesHandle(snapshot.CurrentRunView, handle) || !m.runOwnerMatches(snapshot.CurrentRunView) || !isActiveRunStatus(snapshot.CurrentRunView.Status) {
 			return ErrRunOwnershipLost
@@ -133,7 +134,7 @@ func (m *Manager) ValidateRunOwnership(ctx context.Context, handle RunHandle) er
 		if errors.Is(err, ErrRunOwnershipLost) {
 			return ErrRunOwnershipLost
 		}
-		return fmt.Errorf("validate runtime ownership: %w", err)
+		return errs.WrapDependency(err, "validate runtime ownership")
 	}
 	// A Redis round trip can consume the final part of the conservative local
 	// lease window. Recheck after the atomic server-side decision before any
@@ -822,6 +823,10 @@ func (m *Manager) requestAbort(ctx context.Context, ctrl *runControl) (bool, err
 	}, func(snapshot Snapshot) RuntimeDelta {
 		return runtimeRunPatch(snapshot, true, false, false)
 	})
+	if err != nil && !errors.Is(err, ErrRunOwnershipLost) {
+		// The update itself fails nothing: only the runtime backend can.
+		err = errs.WrapDependency(err, "request runtime abort")
+	}
 	return acknowledged, err
 }
 
@@ -850,7 +855,7 @@ func (m *Manager) activeCommandContext(ctx context.Context, cmd Command) (contex
 	lookupElapsed := time.Since(lookupStarted)
 	if err != nil {
 		lookupCancel()
-		return nil, func() {}, fmt.Errorf("load runtime command time: %w", err)
+		return nil, func() {}, errs.WrapDependency(err, "load runtime command time")
 	}
 	expiresAt := cmd.ExpiresAt
 	if expiresAt.IsZero() || (!cmd.CreatedAt.IsZero() && !expiresAt.After(cmd.CreatedAt)) {
@@ -886,7 +891,7 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 	}
 	snapshot, ok, err := m.backend.Load(commandCtx, Key{BotID: cmd.BotID, SessionID: cmd.SessionID})
 	if err != nil {
-		return err
+		return errs.WrapDependency(err, "load runtime snapshot")
 	}
 	if !ok || snapshot.CurrentRunView == nil {
 		return ErrCommandTargetNotActive
@@ -935,7 +940,7 @@ func (m *Manager) executeRoutedCommand(ctx context.Context, cmd Command) Command
 			return newCommandResult(cmd, ctx.Err())
 		}
 		if result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID); err != nil {
-			return newCommandResult(cmd, err)
+			return newCommandResult(cmd, errs.WrapDependency(err, "load runtime command result"))
 		} else if ok {
 			if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
 				return newCommandResult(cmd, ErrCommandPayloadConflict)
@@ -947,7 +952,7 @@ func (m *Manager) executeRoutedCommand(ctx context.Context, cmd Command) Command
 	defer m.finishCommandExecution(cmd.ID, executionDone)
 
 	if result, ok, err := m.loadCommandResultForExecution(ctx, cmd.ID); err != nil {
-		return newCommandResult(cmd, err)
+		return newCommandResult(cmd, errs.WrapDependency(err, "load runtime command result"))
 	} else if ok {
 		if errors.Is(commandResultErrorFor(cmd, result), ErrCommandPayloadConflict) {
 			return newCommandResult(cmd, ErrCommandPayloadConflict)
@@ -973,6 +978,9 @@ func newCommandResult(request Command, err error) Command {
 		return result
 	}
 	result.Error = err.Error()
+	if errs.FaultOf(err) == apperror.FaultDependency {
+		result.ErrorFault = string(apperror.FaultDependency)
+	}
 	switch {
 	case errors.Is(err, ErrCommandTargetNotActive):
 		result.ErrorCode = "target_not_active"
@@ -1089,6 +1097,7 @@ func (m *Manager) commandResultTTL() time.Duration {
 func (m *Manager) waitCommandResult(ctx context.Context, request Command, pending <-chan error, timeout time.Duration, retryOwnerIDs ...string) error {
 	waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
 	defer cancelWait()
+	waitDeadline, _ := waitCtx.Deadline()
 	retryOwnerID := ""
 	if len(retryOwnerIDs) > 0 {
 		retryOwnerID = strings.TrimSpace(retryOwnerIDs[0])
@@ -1116,6 +1125,11 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 		retry = retryTicker.C
 		defer retryTicker.Stop()
 	}
+	// The last lookup that could not read the result: an owner that never
+	// answers leaves lookups that return without a result, a backend that
+	// cannot tell does not. Each lookup has a budget of its own; one the
+	// wait's deadline cut short tells nothing.
+	var unreadable error
 	for {
 		select {
 		case err := <-pending:
@@ -1124,11 +1138,24 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return errors.New("runtime command was not acknowledged")
+			if unreadable != nil {
+				return errs.WrapDependency(unreadable, "load runtime command result")
+			}
+			return ErrCommandNotAcknowledged
 		case <-poll.C:
-			result, ok, loadErr := m.loadCommandResult(waitCtx, request.ID)
+			if waitCtx.Err() != nil {
+				continue
+			}
+			lookupCtx, cancelLookup := context.WithTimeout(waitCtx, m.commandTimeout())
+			result, ok, loadErr := m.loadCommandResult(lookupCtx, request.ID)
+			cancelLookup()
 			if loadErr == nil && ok {
 				return commandResultErrorFor(request, result)
+			}
+			// The wait's deadline cut a lookup that returns at or after it,
+			// whether or not the context has reported it yet.
+			if waitCtx.Err() == nil && time.Now().Before(waitDeadline) {
+				unreadable = loadErr
 			}
 		case <-retry:
 			if err := m.distributed.PublishCommand(waitCtx, retryOwnerID, request); err != nil && waitCtx.Err() == nil {
@@ -1214,6 +1241,14 @@ func commandResultError(result Command) error {
 	if strings.TrimSpace(result.Error) == "" {
 		return nil
 	}
+	err := decodeCommandResultError(result)
+	if result.ErrorFault == string(apperror.FaultDependency) {
+		return errs.WrapDependency(err, "runtime command")
+	}
+	return err
+}
+
+func decodeCommandResultError(result Command) error {
 	switch result.ErrorCode {
 	case "target_not_active":
 		return fmt.Errorf("%w: %s", ErrCommandTargetNotActive, result.Error)

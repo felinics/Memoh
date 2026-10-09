@@ -982,7 +982,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			}
 			resetCtx, releaseRuntimeReset, err := h.runtimeResets.BeginSessionHistoryReset(c.Request().Context(), botID, sessionID)
 			if err != nil {
-				return apperror.Wrap(apperror.CodeSessionResetConflict, err, nil)
+				return historyResetError(err)
 			}
 			defer releaseRuntimeReset()
 			c.SetRequest(c.Request().WithContext(resetCtx))
@@ -1109,7 +1109,7 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 		var resetCtx context.Context
 		resetCtx, releaseRuntimeReset, err = h.runtimeResets.BeginSessionHistoryReset(c.Request().Context(), botID, sessionID)
 		if err != nil {
-			return apperror.Wrap(apperror.CodeSessionResetConflict, err, nil)
+			return historyResetError(err)
 		}
 		defer releaseRuntimeReset()
 		c.SetRequest(c.Request().WithContext(resetCtx))

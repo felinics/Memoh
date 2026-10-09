@@ -50,6 +50,7 @@ var (
 	ErrCommandTargetNotActive  = errors.New("runtime command target is not active")
 	ErrCommandTargetMismatch   = errors.New("run does not belong to this session")
 	ErrCommandExpired          = errors.New("runtime command expired before acknowledgement")
+	ErrCommandNotAcknowledged  = errors.New("runtime command was not acknowledged")
 	ErrCommandBusy             = errors.New("runtime command executor is busy")
 	ErrCommandPayloadConflict  = errors.New("runtime command payload conflicts with an earlier request")
 	ErrDecisionNotFound        = errors.New("runtime decision was not found")
@@ -412,6 +413,9 @@ type Command struct {
 
 	// ErrorArgs are the catalog args of a failure whose ErrorCode is a catalog code.
 	ErrorArgs map[string]string `json:"error_args,omitempty"`
+	// ErrorFault is "dependency" for a failure of a service the executor
+	// called, which its code alone does not tell.
+	ErrorFault string `json:"error_fault,omitempty"`
 
 	// StreamOutput is fixed at admission and travels to the owner with the command.
 	// It must not depend on subscriber liveness: disconnecting cannot change a run.

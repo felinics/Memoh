@@ -2,6 +2,8 @@ package sessionruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +19,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -737,7 +741,7 @@ func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
 			errs = append(errs, liveErr)
 			continue
 		}
-		if errors.Is(liveErr, ErrRunOwnershipLost) && !changed {
+		if errors.Is(liveErr, ErrRunOwnershipLost) && !changed && m.projectionHoldsActiveRun(ctx, handle) {
 			errs = append(errs, liveErr)
 			continue
 		}
@@ -751,6 +755,17 @@ func (m *Manager) reconcileLocalFinishHandoffs(ctx context.Context) error {
 		m.mu.Unlock()
 	}
 	return errors.Join(errs...)
+}
+
+// projectionHoldsActiveRun reports whether the live projection still shows
+// handle's run as active, the only state a durable terminal has to release.
+// A projection it cannot read is assumed to.
+func (m *Manager) projectionHoldsActiveRun(ctx context.Context, handle RunHandle) bool {
+	snapshot, ok, err := m.backend.Load(ctx, handle.key())
+	if err != nil {
+		return true
+	}
+	return ok && runMatchesHandle(snapshot.CurrentRunView, handle) && isActiveRunStatus(snapshot.CurrentRunView.Status)
 }
 
 func (m *Manager) Start(ctx context.Context) error {
@@ -1508,7 +1523,10 @@ func (m *Manager) finishRun(ctx context.Context, handle RunHandle, status, error
 	}
 	if errors.Is(err, ErrRunOwnershipLost) {
 		snapshot, ok, loadErr := m.backend.Load(context.WithoutCancel(ctx), handle.key())
-		if loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
+		// This owner's terminal write landed and then a history reset dropped
+		// the run from the projection: nothing is left to release.
+		released := terminal.Applied && loadErr == nil && (!ok || snapshot.CurrentRunView == nil)
+		if released || loadErr == nil && ok && runMatchesHandle(snapshot.CurrentRunView, handle) && !isActiveRunStatus(snapshot.CurrentRunView.Status) {
 			m.cleanupFinishedRun(context.WithoutCancel(ctx), handle)
 			return terminal, nil
 		}
@@ -2052,6 +2070,27 @@ func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapsh
 	return m.hydrateSnapshotFromLedger(ctx, snapshot), nil
 }
 
+// subscriberSnapshot is Snapshot as a subscriber is sent it. A run read from
+// the ledger is not part of the live sequence, and the ledger can change while
+// the live cursor stands still, as a history reset does to it. A client
+// discards a snapshot that does not move its cursor, so a snapshot with a run
+// from the ledger carries an epoch of its own that changes with that run.
+func (m *Manager) subscriberSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
+	if m == nil || m.backend == nil {
+		return EmptySnapshot(botID, sessionID), nil
+	}
+	snapshot, err := m.liveSnapshot(ctx, botID, sessionID)
+	if err != nil || snapshot.CurrentRunView != nil {
+		return snapshot, err
+	}
+	snapshot = m.hydrateSnapshotFromLedger(ctx, snapshot)
+	if run := snapshot.CurrentRunView; run != nil && strings.TrimSpace(snapshot.Epoch) != "" {
+		sum := sha256.Sum256([]byte(strings.Join([]string{run.RunID, run.Status, run.ErrorCode, run.ProposedTerminalStatus}, "\x00")))
+		snapshot.Epoch = strings.TrimSpace(snapshot.Epoch) + ":ledger-" + hex.EncodeToString(sum[:8])
+	}
+	return snapshot, nil
+}
+
 func (m *Manager) liveSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
 	key := Key{BotID: strings.TrimSpace(botID), SessionID: strings.TrimSpace(sessionID)}
 	snapshot, ok, err := m.backend.Load(ctx, key)
@@ -2211,7 +2250,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		cancel()
 		return Subscription{}, err
 	}
-	baseline, err := m.Snapshot(subCtx, key.BotID, key.SessionID)
+	baseline, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 	if err != nil {
 		backendSub.Close()
 		cancel()
@@ -2270,15 +2309,25 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				Message:   message,
 			})
 		}
+		unreadable := false
 		reconcile := func(observedEpoch string, observedSeq int64, reason string) bool {
-			snapshot, err := m.Snapshot(subCtx, key.BotID, key.SessionID)
+			snapshot, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 			if err != nil {
-				if subCtx.Err() == nil {
-					m.logger.WarnContext(ctx, "reconcile runtime subscription failed", slog.Any("error", err), slog.String("session_id", key.SessionID), slog.String("reason", reason))
-					terminalDrop(reason + ": snapshot unavailable")
+				if subCtx.Err() != nil {
+					return false
 				}
-				return false
+				// The subscription stays and the next reconcile reads again. A
+				// client sent away to subscribe again can be refused, as for a
+				// session deleted meanwhile, and would keep what it shows.
+				if !unreadable {
+					result := errlog.Event(ctx, "session_runtime.subscription", errs.WrapDependency(err, "reconcile runtime subscription",
+						slog.String("session_id", key.SessionID), slog.String("reason", reason)), errlog.Options{})
+					m.logger.LogAttrs(ctx, result.Level, "reconcile runtime subscription failed", result.Attrs()...)
+				}
+				unreadable = true
+				return true
 			}
+			unreadable = false
 			snapshotEpoch := strings.TrimSpace(snapshot.Epoch)
 			observedEpoch = strings.TrimSpace(observedEpoch)
 			if snapshotEpoch == "" {

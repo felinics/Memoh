@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +14,14 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -229,6 +233,53 @@ func TestDeleteMessagesInvalidatesOnlyCommittedHistory(t *testing.T) {
 					t.Fatal("cleared history emitted no invalidation")
 				}
 			}
+		}
+	}
+}
+
+type failingHistoryReset struct{ err error }
+
+func (r failingHistoryReset) BeginSessionHistoryReset(context.Context, string, string) (context.Context, func(), error) {
+	return nil, nil, r.err
+}
+
+func (r failingHistoryReset) BeginBotHistoryReset(context.Context, string) (context.Context, func(), error) {
+	return nil, nil, r.err
+}
+
+// The conversation is busy only while something else holds it; a reset the
+// server cannot coordinate is unavailable, and a runtime backend, database or
+// server failure is answered as that failure, never as a 409.
+func TestDeleteMessagesClassifiesHistoryResetFailures(t *testing.T) {
+	dependency := errs.WrapDependency(errors.New("runtime backend write failed"), "clear runtime snapshots")
+	for _, tc := range []struct {
+		name  string
+		err   error
+		code  apperror.Code
+		fault apperror.Fault
+	}{
+		{"lease busy", sessionruntime.ErrHistoryResetLeaseLost, apperror.CodeSessionResetConflict, apperror.FaultClient},
+		{"lease lost while the backend failed", errors.Join(sessionruntime.ErrHistoryResetLeaseLost, dependency), apperror.CodeSessionResetConflict, apperror.FaultClient},
+		{"run did not stop in time", fmt.Errorf("stop run: %w", sessionruntime.ErrCommandNotAcknowledged), apperror.CodeSessionResetConflict, apperror.FaultClient},
+		{"backend failed", dependency, apperror.CodeInternal, apperror.FaultDependency},
+		{"server failed", errors.New("unexpected reset failure"), apperror.CodeInternal, apperror.FaultServer},
+		{"coordination unavailable", sessionruntime.ErrHistoryResetUnavailable, apperror.CodeSessionResetUnavailable, apperror.FaultServer},
+	} {
+		for _, sessionID := range []string{activityTestSessionID, ""} {
+			t.Run(tc.name+"/"+sessionID, func(t *testing.T) {
+				h, _ := activityTestHandler()
+				h.messageService = activityHistoryStore{}
+				h.SetRuntimeResetService(failingHistoryReset{err: tc.err})
+				req := httptest.NewRequest(http.MethodDelete, "/bots/"+activityTestBotID+"/messages?session_id="+sessionID, nil)
+				c := testAuthContext(echo.New(), req, httptest.NewRecorder(), "user-1")
+				c.SetParamNames("bot_id")
+				c.SetParamValues(activityTestBotID)
+				answer, fault := errs.Answer(context.Background(), h.DeleteMessages(c))
+				code := apperror.CodeOf(answer)
+				if code != tc.code || fault != tc.fault {
+					t.Fatalf("DeleteMessages() answered %q fault %q, want %q / %q", code, fault, tc.code, tc.fault)
+				}
+			})
 		}
 	}
 }

@@ -3,7 +3,6 @@ package sessionruntime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -12,6 +11,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -78,7 +80,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 			return nil, nil, err
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("acquire PostgreSQL history reset fence: %w", err)
+			return nil, nil, errs.WrapDependency(err, "acquire PostgreSQL history reset fence")
 		}
 		if applied {
 			durable = acquired
@@ -117,17 +119,33 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 	renewDone := make(chan struct{})
 	go m.renewHistoryReset(resetCtx, cancelReset, resetStore, ttl, live, liveHeld, durable, stopRenew, renewDone)
 
+	var resetKeys []Key
 	var releaseOnce sync.Once
 	release := func() {
 		releaseOnce.Do(func() {
+			if len(resetKeys) > 0 && context.Cause(resetCtx) == nil {
+				// The deletion has settled while the lease still holds every new
+				// run out: restart the projections once more so subscribers that
+				// fell back to the ledger during the reset read it again.
+				restartCtx, cancel := context.WithTimeout(resetCtx, ttl/3)
+				if err := m.invalidateHistoryResetSnapshots(restartCtx, resetKeys, false); err != nil {
+					result := errlog.Event(ctx, "session_runtime.history_reset", errs.Wrap(err, "restart runtime snapshots after history reset",
+						slog.String("scope", scope.kind()), slog.String("bot_id", scope.BotID), slog.String("session_id", scope.SessionID)), errlog.Options{})
+					m.logger.LogAttrs(ctx, result.Level, "restart runtime snapshots after history reset failed; subscribers reconcile on their own", result.Attrs()...)
+				}
+				cancel()
+			}
 			close(stopRenew)
 			<-renewDone
 			cancelReset(context.Canceled)
-			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(resetCtx), ttl/3)
-			defer cancel()
+			// Each lease gets a budget of its own: a live backend that does not
+			// answer must not spend the one the durable lease is released with.
 			if liveHeld {
 				if resetBackend, hasLive := m.backend.(HistoryResetBackend); hasLive {
-					if released, err := resetBackend.ReleaseHistoryReset(releaseCtx, live); err != nil || !released {
+					liveCtx, cancelLive := context.WithTimeout(context.WithoutCancel(resetCtx), ttl/3)
+					released, err := resetBackend.ReleaseHistoryReset(liveCtx, live)
+					cancelLive()
+					if err != nil || !released {
 						m.logger.WarnContext(ctx, "release live history reset marker failed",
 							slog.Any("error", err),
 							slog.String("scope", scope.kind()),
@@ -137,7 +155,9 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 					}
 				}
 			}
-			if released, err := resetStore.ReleaseReset(releaseCtx, durable); err != nil || !released {
+			durableCtx, cancelDurable := context.WithTimeout(context.WithoutCancel(resetCtx), ttl/3)
+			defer cancelDurable()
+			if released, err := resetStore.ReleaseReset(durableCtx, durable); err != nil || !released {
 				m.logger.WarnContext(ctx, "release PostgreSQL history reset fence failed",
 					slog.Any("error", err),
 					slog.String("scope", scope.kind()),
@@ -149,6 +169,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 	}
 
 	if err := m.drainHistoryReset(resetCtx, scope, resetStore); err != nil {
+		err = runtimefence.NormalizeResetError(resetCtx, err)
 		release()
 		return nil, nil, err
 	}
@@ -159,7 +180,76 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 		}
 		return nil, nil, err
 	}
+	// Every run the reset covers is terminal now and none can start until
+	// release. Drop them from the live projections before the caller deletes
+	// their history; a projection that cannot be cleared fails the reset, so
+	// no deletion proceeds under a view that still shows the run.
+	keys, err := historyResetSessions(resetCtx, scope, resetStore)
+	if err == nil {
+		err = m.invalidateHistoryResetSnapshots(resetCtx, keys, true)
+	}
+	if err != nil {
+		err = runtimefence.NormalizeResetError(resetCtx, err)
+		release()
+		return nil, nil, err
+	}
+	resetKeys = keys
 	return resetCtx, release, nil
+}
+
+func historyResetSessions(ctx context.Context, scope ResetScope, store ledger.ResetStore) ([]Key, error) {
+	if scope.SessionID != "" {
+		return []Key{{BotID: scope.BotID, SessionID: scope.SessionID}}, nil
+	}
+	ids, err := store.SessionIDsByBot(ctx, scope.BotID)
+	if err != nil {
+		return nil, errs.WrapDependency(err, "list history reset sessions")
+	}
+	keys := make([]Key, 0, len(ids))
+	for _, id := range ids {
+		keys = append(keys, Key{BotID: scope.BotID, SessionID: id})
+	}
+	return keys, nil
+}
+
+// invalidateHistoryResetSnapshots restarts each projection under a new epoch,
+// which makes every subscriber reload it. Before the deletion it drops the
+// run a projection shows and leaves projections without one alone; after it,
+// it restarts every projection but never touches an active run.
+func (m *Manager) invalidateHistoryResetSnapshots(ctx context.Context, keys []Key, beforeDeletion bool) error {
+	for _, key := range keys {
+		now, err := m.backend.Now(ctx)
+		if err != nil {
+			return errs.WrapDependency(err, "load runtime backend time")
+		}
+		epoch := m.newEpoch()
+		snapshot, changed, err := m.backend.Update(ctx, key, func(snapshot Snapshot, ok bool) (Snapshot, bool, error) {
+			if !ok {
+				return snapshot, false, nil
+			}
+			run := snapshot.CurrentRunView
+			if beforeDeletion && run == nil || !beforeDeletion && run != nil && isActiveRunStatus(run.Status) {
+				return snapshot, false, nil
+			}
+			snapshot.CurrentRunView = nil
+			snapshot.Epoch = epoch
+			snapshot.Seq = 0
+			snapshot.UpdatedAt = now
+			return snapshot, true, nil
+		})
+		if err != nil {
+			return errs.WrapDependency(err, "invalidate runtime snapshot for history reset")
+		}
+		if !changed {
+			continue
+		}
+		if err := m.publishRuntimeDelta(ctx, snapshot, "", RuntimeDelta{}); err != nil {
+			result := errlog.Event(ctx, "session_runtime.history_reset", errs.WrapDependency(err, "publish history reset snapshot",
+				slog.String("bot_id", key.BotID), slog.String("session_id", key.SessionID)), errlog.Options{})
+			m.logger.LogAttrs(ctx, result.Level, "publish history reset snapshot failed; subscribers will reconcile from snapshot", result.Attrs()...)
+		}
+	}
+	return nil
 }
 
 func (m *Manager) renewHistoryReset(
@@ -241,7 +331,7 @@ func (m *Manager) drainHistoryReset(ctx context.Context, scope ResetScope, store
 			}
 		}
 		if err != nil {
-			return fmt.Errorf("list active history reset runs: %w", err)
+			return errs.WrapDependency(err, "list active history reset runs")
 		}
 		if len(runs) == 0 {
 			return nil
@@ -263,7 +353,7 @@ func (m *Manager) stopRunForHistoryReset(ctx context.Context, run ledger.Run) er
 	}
 	ref, ok, err := m.RunRef(ctx, run.BotID, run.SessionID, run.RunID)
 	if err != nil {
-		return err
+		return errs.WrapDependency(err, "load history reset run route")
 	}
 	if !ok {
 		// The owner route expired or was lost before the durable row was reaped.
@@ -274,7 +364,7 @@ func (m *Manager) stopRunForHistoryReset(ctx context.Context, run ledger.Run) er
 	}
 	now, err := m.backend.Now(ctx)
 	if err != nil {
-		return err
+		return errs.WrapDependency(err, "load runtime backend time")
 	}
 	cmd := Command{
 		Type: CommandHistoryReset, ID: "history-reset-" + uuid.NewString(),
@@ -301,7 +391,10 @@ func (m *Manager) fenceAndFinalizeOrphanForHistoryReset(ctx context.Context, run
 	_, _, err := orphanStore.FenceAndFinalizeOrphan(ctx, ledger.ResetLease{
 		Scope: resetFence.Scope, BotID: resetFence.BotID, SessionID: resetFence.SessionID, Token: resetFence.Token,
 	}, run)
-	return err
+	if err == nil || errors.Is(err, ErrHistoryResetLeaseLost) {
+		return err
+	}
+	return errs.WrapDependency(err, "finalize orphaned run for history reset")
 }
 
 func (m *Manager) dispatchRemoteHistoryReset(ctx context.Context, ownerID string, cmd Command) error {
@@ -322,13 +415,22 @@ func (m *Manager) dispatchRemoteHistoryReset(ctx context.Context, ownerID string
 		m.mu.Unlock()
 	}()
 	if err := m.distributed.PublishCommand(ctx, ownerID, cmd); err != nil {
-		return err
+		if errors.Is(err, ErrCommandOwnerUnavailable) {
+			return err
+		}
+		return errs.WrapDependency(err, "publish history reset command")
 	}
 	timeout := time.Until(cmd.ExpiresAt)
 	if timeout <= 0 {
 		return ErrCommandExpired
 	}
-	return m.waitCommandResult(ctx, cmd, waiter.result, timeout, ownerID)
+	err := m.waitCommandResult(ctx, cmd, waiter.result, timeout, ownerID)
+	if err == nil || errors.Is(err, ErrCommandTargetNotActive) || IsHistoryResetBusy(err) {
+		return err
+	}
+	// The run's owner is another process: its failure reaches this one as a
+	// dependency's.
+	return errs.WrapDependency(err, "reset run on its owner")
 }
 
 func (m *Manager) applyHistoryResetCommand(ctx context.Context, cmd Command, ctrl *runControl) error {
@@ -363,4 +465,24 @@ func waitHistoryResetRetry(ctx context.Context, base time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+// IsHistoryResetBusy reports whether err, from beginning a history reset,
+// means something else holds the conversation: another reset took the lease
+// over or deleted the scope, or a run's owner did not take up the command to
+// stop it. The caller can try again shortly; any other error, a timeout
+// included, is a failure.
+func IsHistoryResetBusy(err error) bool {
+	switch {
+	case errors.Is(err, ErrHistoryResetLeaseLost), errors.Is(err, ledger.ErrResetScopeNotFound):
+		return true
+	case errs.FaultOf(err) == apperror.FaultDependency:
+		return false
+	}
+	for _, busy := range []error{ErrCommandBusy, ErrCommandExpired, ErrCommandNotAcknowledged, ErrCommandOwnerUnavailable} {
+		if errors.Is(err, busy) {
+			return true
+		}
+	}
+	return false
 }
