@@ -45,6 +45,7 @@
     "tabAddSingle": "添加单个",
     "tabImportJson": "导入 JSON",
     "copyAsJson": "复制为 JSON",
+    "requestId": "请求 ID",
     "fillForm": "填入表单",
     "batchSelected": "已选 {count} 项",
     "batchDelete": "批量删除",

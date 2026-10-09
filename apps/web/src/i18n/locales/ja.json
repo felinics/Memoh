@@ -39,6 +39,7 @@
     "tabAddSingle": "1件追加",
     "tabImportJson": "JSONをインポート",
     "copyAsJson": "JSONとしてコピー",
+    "requestId": "リクエスト ID",
     "fillForm": "フォームに入力",
     "batchSelected": "{count}件選択中",
     "batchDelete": "一括削除",

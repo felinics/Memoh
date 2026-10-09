@@ -1,22 +1,43 @@
 <template>
-  <div class="flex items-center justify-center min-h-screen bg-background text-foreground">
-    <div class="text-center space-y-3 p-8 max-w-md">
-      <Spinner
+  <div class="flex items-center justify-center min-h-screen bg-background text-foreground p-4">
+    <Card class="w-full max-w-md">
+      <CardContent
         v-if="loading"
-        class="mx-auto size-8"
-      />
-      <CircleCheck
-        v-else-if="success"
-        class="size-8 text-success"
-      />
-      <CircleX
+        class="flex justify-center py-8"
+      >
+        <Spinner class="size-8" />
+      </CardContent>
+
+      <CardHeader
         v-else
-        class="size-8 text-destructive"
-      />
-      <p class="text-xs text-muted-foreground">
-        {{ message }}
-      </p>
-    </div>
+        class="items-center justify-items-center text-center"
+      >
+        <CircleCheck
+          v-if="success"
+          class="size-8 text-success"
+        />
+        <CircleX
+          v-else
+          class="size-8 text-destructive"
+        />
+        <CardTitle>{{ success ? t('mcp.oauth.authSuccess') : t('mcp.oauth.authFailed') }}</CardTitle>
+        <CardDescription v-if="detail">
+          {{ detail }}
+        </CardDescription>
+      </CardHeader>
+
+      <CardFooter
+        v-if="requestId"
+        class="justify-center gap-1 text-xs text-muted-foreground"
+      >
+        <span>{{ t('common.requestId') }}</span>
+        <span class="font-mono select-all">{{ requestId }}</span>
+        <CopyActionButton
+          :text="requestId"
+          icon-class="size-3.5"
+        />
+      </CardFooter>
+    </Card>
   </div>
 </template>
 
@@ -24,23 +45,33 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Spinner } from '@felinic/ui'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle, Spinner } from '@felinic/ui'
 import { CircleCheck, CircleX } from 'lucide-vue-next'
 import { postBotsByBotIdMcpByIdOauthExchange } from '@memohai/sdk'
-import { resolveApiErrorMessage } from '@/utils/api-error'
+import CopyActionButton from '@/pages/home/components/copy-action-button.vue'
+import { parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
 
 const route = useRoute()
 const { t } = useI18n()
 
 const loading = ref(true)
 const success = ref(false)
-const message = ref(t('common.loading'))
+const detail = ref('')
+const requestId = ref('')
 
+// On success the opener takes over and the popup closes itself. A failure
+// stays open so the reason and request id can be read and copied.
 function notify(status: 'success' | 'error', error?: string) {
-  if (window.opener) {
-    window.opener.postMessage({ type: 'mcp-oauth-callback', status, error }, '*')
-    setTimeout(() => window.close(), 800)
-  }
+  if (!window.opener) return
+  window.opener.postMessage({ type: 'mcp-oauth-callback', status, error }, '*')
+  if (status === 'success') setTimeout(() => window.close(), 800)
+}
+
+function fail(message: string) {
+  loading.value = false
+  success.value = false
+  detail.value = message
+  notify('error', message || t('mcp.oauth.authFailed'))
 }
 
 onMounted(async () => {
@@ -50,18 +81,12 @@ onMounted(async () => {
   const errorDesc = (route.query.error_description as string) ?? ''
 
   if (errorParam) {
-    loading.value = false
-    success.value = false
-    message.value = `${errorParam}: ${errorDesc}`
-    notify('error', message.value)
+    fail(errorDesc ? `${errorParam}: ${errorDesc}` : errorParam)
     return
   }
 
   if (!code || !state) {
-    loading.value = false
-    success.value = false
-    message.value = t('mcp.oauth.callbackMissingParams')
-    notify('error', message.value)
+    fail(t('mcp.oauth.callbackMissingParams'))
     return
   }
 
@@ -73,14 +98,10 @@ onMounted(async () => {
     })
     loading.value = false
     success.value = true
-    message.value = t('mcp.oauth.authSuccess')
     notify('success')
   } catch (err: unknown) {
-    loading.value = false
-    success.value = false
-    const errMsg = resolveApiErrorMessage(err, t('mcp.oauth.authFailed')) || t('mcp.oauth.authFailed')
-    message.value = errMsg
-    notify('error', errMsg)
+    requestId.value = parseMemohError(err)?.requestId ?? ''
+    fail(resolveApiErrorMessage(err, ''))
   }
 })
 </script>

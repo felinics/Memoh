@@ -45,6 +45,7 @@
     "tabAddSingle": "Add single",
     "tabImportJson": "Import JSON",
     "copyAsJson": "Copy as JSON",
+    "requestId": "Request ID",
     "fillForm": "Fill form",
     "batchSelected": "{count} selected",
     "batchDelete": "Batch delete",
