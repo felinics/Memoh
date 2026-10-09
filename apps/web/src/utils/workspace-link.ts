@@ -17,8 +17,12 @@ export type WorkspaceLink =
 // A single leading slash is a workspace path. Protocol-relative URLs and
 // fragments retain their normal web meaning; never turn them into file reads.
 // A query or fragment on a path (e.g. `#L10`) is not part of the file name.
-export function classifyWorkspaceLink(href: string): WorkspaceLink | null {
+//
+// Pass the rendered `label` when it is known, so a bare name the parser
+// auto-linked (see isBareDomainAutolink) is shown as text too.
+export function classifyWorkspaceLink(href: string, label?: string): WorkspaceLink | null {
   const value = href.trim()
+  if (label !== undefined && isBareDomainAutolink(label, value)) return null
   // The browser's own handling is safe here: a fragment scrolls within the
   // page, and mail links are on Desktop's external allowlist.
   if (value.startsWith('#') || /^mailto:/i.test(value)) return { kind: 'native' }
@@ -40,4 +44,21 @@ export function classifyWorkspaceLink(href: string): WorkspaceLink | null {
     } catch { /* Incomplete streaming links do not get an actionable type. */ }
   }
   return null
+}
+
+// The parser auto-links bare domains, and file extensions such as .md, .sh and
+// .ai are also domains, so `summary.md` in prose arrives as a link to
+// http://summary.md. It is recognized by its label: `http://` plus the label
+// gives the destination. `www.` names stay links, as in GFM. A written
+// `[example.com](http://example.com)` looks the same and is shown as text too.
+// The parsed link does not say whether it was auto-linked; replace this check
+// once it does (https://github.com/Simon-He95/markstream-vue/issues/784).
+function isBareDomainAutolink(label: string, href: string): boolean {
+  const text = label.trim()
+  if (!/^http:\/\//i.test(href) || /^www\./i.test(text)) return false
+  try {
+    return new URL(`http://${text}`).href === new URL(href).href
+  } catch {
+    return false
+  }
 }

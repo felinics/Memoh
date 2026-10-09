@@ -2,7 +2,18 @@
 import { computed, provide, reactive, useAttrs, type Component } from 'vue'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@felinic/ui'
 import { FileText, Globe } from 'lucide-vue-next'
-import { LinkNode, type LinkNodeProps } from 'markstream-vue'
+import {
+  EmphasisNode,
+  getCustomNodeComponents,
+  HtmlInlineNode,
+  ImageNode,
+  InlineCodeNode,
+  LinkNode,
+  StrikethroughNode,
+  StrongNode,
+  TextNode,
+  type LinkNodeProps,
+} from 'markstream-vue'
 import { useSiteIcon } from '@/composables/useSiteIcon'
 import { useWorkspaceLink } from '@/composables/useWorkspaceLink'
 import { classifyWorkspaceLink, type WorkspaceLink } from '@/utils/workspace-link'
@@ -16,6 +27,7 @@ defineOptions({ inheritAttrs: false })
 const props = defineProps<{
   node: LinkNodeProps['node']
   indexKey: LinkNodeProps['indexKey']
+  customId?: LinkNodeProps['customId']
 }>()
 
 // The shared Memoh tooltip owns link hints. markstream's injected
@@ -35,12 +47,25 @@ const openWorkspaceLink = useWorkspaceLink()
 // the plain link look.
 const LINK_ICONS: Partial<Record<WorkspaceLink['kind'], Component>> = { file: FileText, browser: Globe, external: Globe }
 
-const link = computed(() => props.node.loading ? null : classifyWorkspaceLink(props.node.href))
+const link = computed(() => props.node.loading ? null : classifyWorkspaceLink(props.node.href, props.node.text))
 const icon = computed(() => link.value ? LINK_ICONS[link.value.kind] : undefined)
 // A link Memoh cannot open renders as its label, so nothing on the page looks
 // clickable without being able to open. Streaming links stay with LinkNode,
 // which owns their loading state until the destination is complete.
 const unopenable = computed(() => !props.node.loading && !link.value)
+// The label keeps its inline formatting (code, emphasis) without the anchor.
+// markstream does not export the child renderer LinkNode uses, so this is the
+// same component table, including the surface's overrides for `customId`.
+const labelComponents = computed<Record<string, Component | undefined>>(() => ({
+  text: TextNode,
+  strong: StrongNode,
+  strikethrough: StrikethroughNode,
+  emphasis: EmphasisNode,
+  image: ImageNode,
+  html_inline: HtmlInlineNode,
+  inline_code: InlineCodeNode,
+  ...getCustomNodeComponents(props.customId),
+}))
 const favicon = reactive(useSiteIcon(() => link.value?.kind === 'external' ? siteIconOrigin(props.node.href) : null))
 </script>
 
@@ -51,7 +76,21 @@ const favicon = reactive(useSiteIcon(() => link.value?.kind === 'external' ? sit
       :disabled="node.loading"
     >
       <TooltipTrigger as-child>
-        <span v-if="unopenable">{{ node.text }}</span>
+        <span v-if="unopenable">
+          <template
+            v-for="(child, index) in node.children"
+            :key="index"
+          >
+            <component
+              :is="labelComponents[child.type]"
+              v-if="labelComponents[child.type]"
+              :node="child"
+              :custom-id="customId"
+              :index-key="`${indexKey}-label-${index}`"
+            />
+            <template v-else>{{ child.raw }}</template>
+          </template>
+        </span>
         <span
           v-else
           class="relative inline-flex align-baseline text-primary"
@@ -89,6 +128,7 @@ const favicon = reactive(useSiteIcon(() => link.value?.kind === 'external' ? sit
             v-without-native-title
             :node="node"
             :index-key="indexKey"
+            :custom-id="customId"
             v-bind="attrs"
             :class="{ 'pl-4.5': icon }"
             :target="link?.kind === 'external' ? '_blank' : undefined"
