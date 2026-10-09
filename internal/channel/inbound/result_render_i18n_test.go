@@ -7,7 +7,6 @@ import (
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/command"
 	"github.com/felinics/memoh/internal/i18n"
-	"github.com/felinics/memoh/internal/slash"
 )
 
 // TestRenderChromeLocalizedButTokensPreserved is the core "not string-replacement"
@@ -166,34 +165,5 @@ func reasoningFallbackResultZh() *command.Result {
 			Kind:    command.InteractiveChoices,
 			Choices: &command.ChoicesView{Title: header, Choices: choices},
 		},
-	}
-}
-
-// Each /permission code has its own IM copy in every locale rather than the
-// generic slash failure.
-func TestSlashChannelMessagePermissionCodes(t *testing.T) {
-	tests := []struct {
-		code string
-		en   string
-	}{
-		{slash.CodePermissionDenied, "You do not have permission to use that slash command."},
-		{slash.CodePermissionSessionRequired, "Open an external-Agent session before using /permission."},
-		{slash.CodePermissionModeUnsupported, "This Agent does not declare selectable session modes."},
-		{slash.CodePermissionModeUnavailable, "That mode is not available for this Agent session."},
-		{slash.CodePermissionModeFailed, "The Agent session mode could not be loaded or changed."},
-	}
-	for _, tt := range tests {
-		t.Run(tt.code, func(t *testing.T) {
-			if got := slashChannelMessage(i18n.New("en"), tt.code); got != tt.en {
-				t.Fatalf("en copy = %q, want %q", got, tt.en)
-			}
-			for _, locale := range []string{"zh", "ja"} {
-				loc := i18n.New(locale)
-				got := slashChannelMessage(loc, tt.code)
-				if got == loc.T("slash.error.generic") || got == tt.en || strings.HasPrefix(got, "slash.error.") {
-					t.Fatalf("%s copy = %q, want its own translation", locale, got)
-				}
-			}
-		})
 	}
 }

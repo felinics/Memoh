@@ -121,8 +121,7 @@ func (s *qqOutboundStream) Push(ctx context.Context, event channel.PreparedStrea
 		channel.StreamEventAgentStart,
 		channel.StreamEventAgentEnd,
 		channel.StreamEventProcessingStarted,
-		channel.StreamEventProcessingCompleted,
-		channel.StreamEventProcessingFailed:
+		channel.StreamEventProcessingCompleted:
 		return nil
 	case channel.StreamEventToolCallEnd:
 		text := strings.TrimSpace(channel.RenderToolCallMessage(channel.BuildToolCallEnd(event.ToolCall)))

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/commandsyntax"
 )
 
@@ -39,7 +40,7 @@ type SkillIntent struct {
 
 type Decision struct {
 	Kind        DecisionKind
-	Code        string
+	Code        apperror.Code
 	Directed    bool
 	Command     Command
 	SkillIntent SkillIntent

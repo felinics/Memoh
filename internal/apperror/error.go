@@ -298,6 +298,29 @@ const (
 	CodeQueueInvocationConflict         Code = "queue_invocation_conflict"
 	CodeQueueUnsupportedSession         Code = "queue_unsupported_session"
 	CodeQueueFollowUpUnsupportedChannel Code = "queue_follow_up_unsupported_channel"
+	// Reasons recorded on a rejected live queue item, registered under the
+	// value the queue state stores (internal/agent/runtime/session/live_queue.go).
+	CodeQueueTargetRunNotActive     Code = "queue_target_run_not_active"
+	CodeQueueFollowUpCommandInvalid Code = "queue_follow_up_command_invalid"
+
+	// Slash request refusals (internal/slash), on the Web composer and in IM
+	// channels alike.
+	CodeSlashAttachmentsUnsupported     Code = "slash.attachments_unsupported"
+	CodeSlashPermissionDenied           Code = "slash.permission_denied"
+	CodeSlashRequiresWebSocket          Code = "slash.requires_websocket"
+	CodeSlashReservedMetadata           Code = "slash.reserved_metadata"
+	CodeSlashSkillActivationUnsupported Code = "slash.skill_activation_unsupported"
+	CodeSlashSkillAmbiguous             Code = "slash.skill_ambiguous"
+	CodeSlashSkillContextTooLarge       Code = "slash.skill_context_too_large"
+	CodeSlashSkillDisabled              Code = "slash.skill_disabled"
+	CodeSlashSkillNotFound              Code = "slash.skill_not_found"
+	CodeSlashSkillNotUsable             Code = "slash.skill_not_usable"
+	CodeSlashSkillSyntaxInvalid         Code = "slash.skill_syntax_invalid"
+	CodeSlashTooManySkills              Code = "slash.too_many_skills"
+	CodeSlashUnknownCommand             Code = "slash.unknown_command"
+	CodeSlashUnsupportedInWeb           Code = "slash.unsupported_in_web"
+
+	CodeMemoryCompactUnsupported Code = "memory.compact_unsupported"
 
 	// Bot and workspace codes published by the workspace HTTP handlers and the
 	// bot creation, display and dependency event streams.
@@ -1228,6 +1251,23 @@ var catalog = map[Code]Definition{
 	CodeQueueInvocationConflict:                 {HTTPStatus: http.StatusConflict, Detail: "This message was already submitted with different content."},
 	CodeQueueUnsupportedSession:                 {HTTPStatus: http.StatusConflict, Detail: "Queue controls are not available in discussion sessions."},
 	CodeQueueFollowUpUnsupportedChannel:         {HTTPStatus: http.StatusConflict, Detail: "Queued follow-ups are not available on this channel. Add to the current reply instead, or queue from the web app."},
+	CodeQueueTargetRunNotActive:                 {HTTPStatus: http.StatusConflict, Detail: "The response ended before this instruction reached it. Send it as a new message."},
+	CodeQueueFollowUpCommandInvalid:             {HTTPStatus: http.StatusInternalServerError, Detail: "This queued message could not be started. Send it again as a new message."},
+	CodeSlashAttachmentsUnsupported:             {HTTPStatus: http.StatusBadRequest, Detail: "Slash commands cannot include attachments. Remove the attachments and send the command again."},
+	CodeSlashPermissionDenied:                   {HTTPStatus: http.StatusForbidden, Detail: "You do not have permission to use this command."},
+	CodeSlashRequiresWebSocket:                  {HTTPStatus: http.StatusBadRequest, Detail: "Skill activation requires a live chat connection. Reconnect and try again."},
+	CodeSlashReservedMetadata:                   {HTTPStatus: http.StatusBadRequest, Detail: "This message carries reserved skill metadata, which clients cannot supply."},
+	CodeSlashSkillActivationUnsupported:         {HTTPStatus: http.StatusConflict, Detail: "Skills can only be activated in a chat session that uses the bot's own model. Switch to such a session and try again."},
+	CodeSlashSkillAmbiguous:                     {HTTPStatus: http.StatusConflict, Detail: "More than one skill has this name. Rename or disable one of them in the bot's skills, then try again."},
+	CodeSlashSkillContextTooLarge:               {HTTPStatus: http.StatusBadRequest, Detail: "The selected skills are too large for one message. Select fewer skills and try again."},
+	CodeSlashSkillDisabled:                      {HTTPStatus: http.StatusConflict, Detail: "This skill is disabled. Enable it in the bot's skills, then try again."},
+	CodeSlashSkillNotFound:                      {HTTPStatus: http.StatusNotFound, Detail: "No skill has this name. Check the name and try again."},
+	CodeSlashSkillNotUsable:                     {HTTPStatus: http.StatusConflict, Detail: "This skill is not available for chat."},
+	CodeSlashSkillSyntaxInvalid:                 {HTTPStatus: http.StatusBadRequest, Detail: "Use /<skill-name> [prompt] to activate a skill."},
+	CodeSlashTooManySkills:                      {HTTPStatus: http.StatusBadRequest, Detail: "Too many skills in one message. Activate fewer skills and try again."},
+	CodeSlashUnknownCommand:                     {HTTPStatus: http.StatusBadRequest, Detail: "Unknown slash command. Send /help to see the available commands."},
+	CodeSlashUnsupportedInWeb:                   {HTTPStatus: http.StatusBadRequest, Detail: "This slash command is not available in Web chat."},
+	CodeMemoryCompactUnsupported:                {HTTPStatus: http.StatusNotImplemented, Detail: "The selected memory provider does not support memory compaction. Choose a provider that supports it in the bot's memory settings."},
 	CodeBotReadyUpdateFailed:                    {HTTPStatus: http.StatusInternalServerError, Detail: "The bot could not be loaded after its workspace was set up. Refresh the page."},
 	CodeWorkspaceSetupTimeout:                   {HTTPStatus: http.StatusGatewayTimeout, Detail: "Workspace setup is still in progress. Check the bot's workspace page."},
 	CodeWorkspaceSetupFailed:                    {HTTPStatus: http.StatusInternalServerError, Detail: "Something went wrong while setting up the workspace."},

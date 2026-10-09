@@ -381,6 +381,14 @@ definitions:
           $ref: '#/definitions/adapters.MemoryItem'
         type: array
     type: object
+  adapters.CompactUnavailableReason:
+    enum:
+    - unsupported
+    - not_configured
+    type: string
+    x-enum-varnames:
+    - CompactUnsupported
+    - CompactNotConfigured
   adapters.DeleteResponse:
     properties:
       message:
@@ -411,7 +419,9 @@ definitions:
       archive:
         type: boolean
       reason:
-        type: string
+        allOf:
+        - $ref: '#/definitions/adapters.CompactUnavailableReason'
+        description: Reason says why Semantic is false.
       rebuild_index:
         type: boolean
       semantic:

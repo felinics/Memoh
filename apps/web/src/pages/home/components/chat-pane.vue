@@ -2346,7 +2346,7 @@ function localQuickActionBlocked(): boolean {
     return true
   }
   if (requestedSkills.value.length > 0) {
-    composerError.value = t('chat.slash.errorMessages.invalid_skill_slash_syntax')
+    composerError.value = t('errors.slash.skill_syntax_invalid')
     return true
   }
   return false
@@ -2385,7 +2385,7 @@ function selectRuntimeCommand(command: RuntimeCommand) {
 
 // Typed forms of the client-side quick actions ("/model") — must
 // be intercepted before the store send path, which would otherwise classify
-// them as skill activation and fail with requested_skill_not_found.
+// them as skill activation and fail with slash.skill_not_found.
 function localQuickActionIDForSlash(text: string): string {
   if (activeIsPendingExternalAgent.value && /^\/permission(?:\s|$)/i.test(text.trim())) return 'permission'
   return composerLocalQuickActionID(
@@ -3162,7 +3162,7 @@ async function setRuntimeMode(modeId: string, modeKind: 'permission' | 'plan' = 
       if (modeKind === 'permission' && activeUsesACPRuntime.value) await setACPMode(modeId)
       else {
         const modes = modeKind === 'plan' ? runtimeControlSnapshot.value?.plan_mode?.available_modes ?? [] : runtimeModes.value
-        if (!modes.some(mode => mode.id === modeId)) throw new UserFacingError(t('chat.slash.errorMessages.permission_mode_unavailable'))
+        if (!modes.some(mode => mode.id === modeId)) throw new UserFacingError(t('errors.runtime_control.mode_unavailable'))
         chatStore.setPendingRuntimeMode(modeId, paneTarget.value, modeKind)
       }
     } else await runtimeControls.setMode(modeId, modeKind)
@@ -4040,7 +4040,7 @@ async function handleSend() {
     if (files.length || skills.length) {
       composerError.value = files.length
         ? t('chat.slash.attachmentsUnsupported')
-        : t('chat.slash.errorMessages.invalid_skill_slash_syntax')
+        : t('errors.slash.skill_syntax_invalid')
       return
     }
     if (!queueCommand.text || !activeSessionId.value) {

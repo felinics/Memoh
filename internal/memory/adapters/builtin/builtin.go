@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/mcp"
 	adapters "github.com/felinics/memoh/internal/memory/adapters"
 )
@@ -160,14 +161,11 @@ func (p *BuiltinProvider) MemoryVersion(ctx context.Context, botID string) strin
 }
 
 func (p *BuiltinProvider) SemanticCompactCapability() adapters.MemoryCompactCapability {
-	if p.service == nil {
-		return adapters.MemoryCompactCapability{Reason: "memory runtime not configured"}
-	}
-	if p.llm == nil {
-		return adapters.MemoryCompactCapability{Reason: "semantic compact requires a configured LLM"}
+	if p.service == nil || p.llm == nil {
+		return adapters.MemoryCompactCapability{Reason: adapters.CompactNotConfigured}
 	}
 	if _, ok := p.service.(llmCompactRuntime); !ok {
-		return adapters.MemoryCompactCapability{Reason: "selected memory runtime does not support semantic compact"}
+		return adapters.MemoryCompactCapability{Reason: adapters.CompactUnsupported}
 	}
 	mode := strings.TrimSpace(p.service.Mode())
 	return adapters.MemoryCompactCapability{
@@ -477,15 +475,11 @@ func (p *BuiltinProvider) DeleteAll(ctx context.Context, req adapters.DeleteAllR
 
 func (p *BuiltinProvider) Compact(ctx context.Context, filters map[string]any, ratio float64, decayDays int) (adapters.CompactResult, error) {
 	if p.service == nil {
-		return adapters.CompactResult{}, errors.New("memory runtime not configured")
+		return adapters.CompactResult{}, errs.New("memory runtime not configured")
 	}
 	capability := p.SemanticCompactCapability()
 	if !capability.Semantic {
-		reason := strings.TrimSpace(capability.Reason)
-		if reason == "" {
-			reason = "semantic compact is not available"
-		}
-		return adapters.CompactResult{}, errors.New(reason)
+		return adapters.CompactResult{}, errs.New("semantic compact unavailable", slog.String("reason", string(capability.Reason)))
 	}
 	return p.service.(llmCompactRuntime).CompactWithLLM(ctx, filters, ratio, decayDays, p.llm)
 }

@@ -132,7 +132,7 @@ func (s *discordOutboundStream) Push(ctx context.Context, event channel.Prepared
 	case channel.StreamEventToolCallEnd:
 		return s.sendToolCallMessage(event.ToolCall, channel.BuildToolCallEnd(event.ToolCall))
 
-	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted, channel.StreamEventProcessingFailed:
+	case channel.StreamEventAgentStart, channel.StreamEventAgentEnd, channel.StreamEventPhaseStart, channel.StreamEventPhaseEnd, channel.StreamEventProcessingStarted, channel.StreamEventProcessingCompleted:
 		// Status events - no action needed for Discord
 		return nil
 

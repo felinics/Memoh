@@ -73,7 +73,10 @@ metadata:
 - **文案**：Web 与 IM 的三语言 locale 各加 `errors.xxx.yyy` 键（code 的点 = JSON 嵌套层级）。
   `errors` 下的键按字母序放（含嵌套层），`codes.golden` 也按 code 排序；新 code 用
   `go test ./internal/apperror -run TestCatalogGolden -update-golden` 写入。
-  `resolveApiErrorMessage` 自动按 `errors.<code>` → `i18n_key`（legacy）→ `detail` 顺序渲染。
+  `resolveApiErrorMessage` 先取 `errors.<code>`（代入 `args`）；没有文案时按 status 取通用文案
+  （4xx 取该 status 对应的 `errors.http.*`，没有则 `http.bad_request`；5xx 取 `errors.internal`；499 不显示），
+  无 status 的流错误事件取 `errors.internal`（fault 为 `canceled` 时不显示），最后是调用方的 fallback。
+  不读 `i18n_key`，也不显示服务端的 `detail`/`message`。
   **错误文案是 UX，不是英文 detail 的翻译**：要回答用户"接下来能做什么"——
   可重试的说"请稍后重试"（如 `workspace.unreachable` 的 zh 文案），需要用户改输入的
   指向那个输入（如 `bot.name_taken`）；无法行动的错误才允许只陈述事实。

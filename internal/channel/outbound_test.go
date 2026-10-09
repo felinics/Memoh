@@ -159,7 +159,6 @@ func TestValidateStreamEventSupportedTypes(t *testing.T) {
 		{name: "agent end", event: StreamEvent{Type: StreamEventAgentEnd}},
 		{name: "processing started", event: StreamEvent{Type: StreamEventProcessingStarted}},
 		{name: "processing completed", event: StreamEvent{Type: StreamEventProcessingCompleted}},
-		{name: "processing failed", event: StreamEvent{Type: StreamEventProcessingFailed, Error: "failed"}},
 		{name: "reset", event: StreamEvent{Type: StreamEventReset}},
 		{name: "final", event: StreamEvent{Type: StreamEventFinal, Final: &StreamFinalizePayload{Message: Message{Text: "done"}}}},
 		{name: "error", event: StreamEvent{Type: StreamEventError, Error: "boom"}},
@@ -187,7 +186,7 @@ func TestValidateStreamEventInvalidPayload(t *testing.T) {
 		{name: "missing status", event: StreamEvent{Type: StreamEventStatus}},
 		{name: "missing tool call payload", event: StreamEvent{Type: StreamEventToolCallStart}},
 		{name: "empty attachment payload", event: StreamEvent{Type: StreamEventAttachment}},
-		{name: "processing failed missing error", event: StreamEvent{Type: StreamEventProcessingFailed}},
+		{name: "processing failed", event: StreamEvent{Type: StreamEventType("processing_failed"), Error: "failed"}},
 		{name: "missing final payload", event: StreamEvent{Type: StreamEventFinal}},
 		{name: "unsupported type", event: StreamEvent{Type: StreamEventType("unknown")}},
 	}

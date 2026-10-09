@@ -459,41 +459,9 @@
       "runToSeeList": " Run {command} to see what's available."
     }
   },
-  "slash": {
-    "error": {
-      "unknownSlash": "Unknown slash command.",
-      "unsupportedWebCommand": "That slash command is not available in Web chat.",
-      "invalidSkillSlashSyntax": "Invalid skill slash syntax. Use /<skill-name> [prompt].",
-      "requestedSkillNotFound": "Requested skill was not found.",
-      "requestedSkillAmbiguous": "Requested skill is ambiguous.",
-      "requestedSkillDisabled": "Requested skill is disabled.",
-      "requestedSkillNotRuntimeUsable": "Requested skill is not available for chat.",
-      "tooManyRequestedSkills": "Too many skills requested.",
-      "requestedSkillContextTooLarge": "Requested skill context is too large.",
-      "slashAttachmentsUnsupported": "Slash commands do not support attachments.",
-      "unsupportedSkillSlashContext": "Requested skills are not supported in this context.",
-      "unsupportedLegacyEndpoint": "This endpoint does not support requested skills.",
-      "invalidQuickActionScope": "This quick action cannot be scoped to a session.",
-      "permissionDenied": "You do not have permission to use that slash command.",
-      "permissionSessionRequired": "Open an external-Agent session before using /permission.",
-      "permissionModeUnsupported": "This Agent does not declare selectable session modes.",
-      "permissionModeUnavailable": "That mode is not available for this Agent session.",
-      "permissionModeFailed": "The Agent session mode could not be loaded or changed.",
-      "reservedSkillMetadata": "Reserved skill metadata cannot be supplied.",
-      "generic": "Slash command failed."
-    }
-  },
   "queue": {
     "steerAccepted": "Steer queued.",
-    "accepted": "Queued.",
-    "noActiveRun": "There is no active response to receive this input.",
-    "overloaded": "Queue admission is busy. Try again shortly.",
-    "unavailable": "Queue admission is unavailable. Try again shortly.",
-    "conflict": "This message was already submitted with different content.",
-    "invalid": "Queue input must include text.",
-    "unsupported": "Queue controls are not available in discussion sessions.",
-    "capacity": "The queue for this session is full. Wait for pending items to run before adding more.",
-    "followUpUnsupportedChannel": "Queued follow-ups are not available on this channel; its replies are delivered from the message you send. Use /steer to add to the current reply, or queue from the web app."
+    "accepted": "Queued."
   },
   "menu": {
     "start": "Show the welcome message",
@@ -707,6 +675,9 @@
       "oauth_discovery_failed": "Could not discover OAuth settings from this MCP server. Check that the URL is correct and that the server supports OAuth.",
       "oauth_not_discovered": "Run OAuth discovery for this connection first."
     },
+    "memory": {
+      "compact_unsupported": "The selected memory provider does not support memory compaction. Choose a provider that supports it in the bot's memory settings."
+    },
     "native_history_lost": "The agent could not restore its previous context and started over. Earlier messages remain as history only. Provide any context needed to continue.",
     "network": {
       "provider_not_configured": "Choose a network provider for this bot first."
@@ -736,12 +707,14 @@
     "queue_admission_overloaded": "The queue is busy. Please retry shortly.",
     "queue_admission_unavailable": "Queue admission is temporarily unavailable. Please retry shortly.",
     "queue_capacity_exceeded": "This session queue is full. Cancel or wait for pending items before adding more.",
+    "queue_follow_up_command_invalid": "This queued message could not be started. Send it again as a new message.",
     "queue_follow_up_unsupported_channel": "Queued follow-ups are not available on this channel; its replies are delivered from the message you send. Use /steer to add to the current reply, or queue from the web app.",
     "queue_invocation_conflict": "This message was already submitted with different content.",
     "queue_item_not_editable": "Only the sender can edit this queued message.",
     "queue_item_not_pending": "This message is no longer pending in the queue.",
     "queue_no_active_run": "The current response has ended. Send this as a new message.",
     "queue_request_invalid": "Enter text after /steer or /queue in an existing conversation.",
+    "queue_target_run_not_active": "The response ended before this instruction reached it. Send it as a new message.",
     "queue_unsupported_session": "Queue controls are not available in discussion sessions.",
     "registry": {
       "app_install_failed": "The app could not be installed. Please try again.",
@@ -813,6 +786,22 @@
       "not_found": "This Skill was not found. Refresh the list and try again.",
       "registry_read_only": "This Skill belongs to a Registry App. Update or uninstall the App instead.",
       "save_failed": "The Skill could not be saved. Please try again."
+    },
+    "slash": {
+      "attachments_unsupported": "Slash commands cannot include attachments. Remove the attachments and send the command again.",
+      "permission_denied": "You do not have permission to use this command.",
+      "requires_websocket": "Skill activation requires a live chat connection. Reconnect and try again.",
+      "reserved_metadata": "This message carries reserved skill metadata, which clients cannot supply.",
+      "skill_activation_unsupported": "Skills can only be activated in a chat session that uses the bot's own model. Switch to such a session and try again.",
+      "skill_ambiguous": "More than one skill has this name. Rename or disable one of them in the bot's skills, then try again.",
+      "skill_context_too_large": "The selected skills are too large for one message. Select fewer skills and try again.",
+      "skill_disabled": "This skill is disabled. Enable it in the bot's skills, then try again.",
+      "skill_not_found": "No skill has this name. Check the name and try again.",
+      "skill_not_usable": "This skill is not available for chat.",
+      "skill_syntax_invalid": "Use /<skill-name> [prompt] to activate a skill.",
+      "too_many_skills": "Too many skills in one message. Activate fewer skills and try again.",
+      "unknown_command": "Unknown slash command. Send /help to see the available commands.",
+      "unsupported_in_web": "This slash command is not available in Web chat."
     },
     "tool_approval": {
       "ambiguous": "More than one approval request matches this response.",

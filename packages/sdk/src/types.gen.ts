@@ -227,6 +227,8 @@ export type AdaptersCompactResult = {
     results?: Array<AdaptersMemoryItem>;
 };
 
+export type AdaptersCompactUnavailableReason = 'unsupported' | 'not_configured';
+
 export type AdaptersDeleteResponse = {
     message?: string;
 };
@@ -251,7 +253,10 @@ export type AdaptersIngestResult = {
 
 export type AdaptersMemoryCompactCapability = {
     archive?: boolean;
-    reason?: string;
+    /**
+     * Reason says why Semantic is false.
+     */
+    reason?: AdaptersCompactUnavailableReason;
     rebuild_index?: boolean;
     semantic?: boolean;
 };

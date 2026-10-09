@@ -40,8 +40,8 @@ func TestBuiltinProviderFileRuntimeDoesNotAdvertiseSemanticCompact(t *testing.T)
 	if withoutLLM.Semantic {
 		t.Fatal("semantic compact should be unavailable without an LLM")
 	}
-	if withoutLLM.Reason == "" {
-		t.Fatal("expected unavailable semantic compact to explain why")
+	if withoutLLM.Reason != adapters.CompactNotConfigured {
+		t.Fatalf("compact reason without an LLM = %q, want %q", withoutLLM.Reason, adapters.CompactNotConfigured)
 	}
 
 	p.SetLLM(&fakeLLM{})
@@ -49,8 +49,12 @@ func TestBuiltinProviderFileRuntimeDoesNotAdvertiseSemanticCompact(t *testing.T)
 	if withLLM.Semantic {
 		t.Fatalf("file runtime should not advertise semantic compact: %+v", withLLM)
 	}
-	if !strings.Contains(withLLM.Reason, "does not support semantic compact") {
-		t.Fatalf("file runtime compact reason = %q", withLLM.Reason)
+	if withLLM.Reason != adapters.CompactUnsupported {
+		t.Fatalf("file runtime compact reason = %q, want %q", withLLM.Reason, adapters.CompactUnsupported)
+	}
+	_, err := p.Compact(context.Background(), nil, 0.5, 0)
+	if err == nil || !strings.Contains(err.Error(), "semantic compact unavailable") {
+		t.Fatalf("Compact() error = %v, want the constant unavailable error", err)
 	}
 }
 

@@ -459,41 +459,9 @@
       "runToSeeList": " 用 {command} 查看可用项。"
     }
   },
-  "slash": {
-    "error": {
-      "unknownSlash": "未知 slash 命令。",
-      "unsupportedWebCommand": "这个 slash 命令不能在 Web Chat 中使用。",
-      "invalidSkillSlashSyntax": "无效的 skill slash 语法。请使用 /<skill-name> [prompt]。",
-      "requestedSkillNotFound": "找不到请求的 skill。",
-      "requestedSkillAmbiguous": "请求的 skill 存在歧义。",
-      "requestedSkillDisabled": "请求的 skill 已被禁用。",
-      "requestedSkillNotRuntimeUsable": "请求的 skill 不能用于本次对话。",
-      "tooManyRequestedSkills": "请求的 skill 数量过多。",
-      "requestedSkillContextTooLarge": "请求的 skill 上下文过大。",
-      "slashAttachmentsUnsupported": "slash 命令不支持附件。",
-      "unsupportedSkillSlashContext": "当前上下文不支持 requested skills。",
-      "unsupportedLegacyEndpoint": "该端点不支持 requested skills。",
-      "invalidQuickActionScope": "该快捷操作不能绑定到 session。",
-      "permissionDenied": "你没有权限使用该 slash 命令。",
-      "permissionSessionRequired": "请先进入一个外部 Agent 会话，再使用 /permission。",
-      "permissionModeUnsupported": "这个 Agent 没有声明可切换的会话模式。",
-      "permissionModeUnavailable": "这个模式不适用于当前 Agent 会话。",
-      "permissionModeFailed": "无法读取或切换 Agent 会话模式。",
-      "reservedSkillMetadata": "不能提交保留的 skill metadata。",
-      "generic": "slash 命令执行失败。"
-    }
-  },
   "queue": {
     "steerAccepted": "已加入 steer 队列。",
-    "accepted": "已加入队列。",
-    "noActiveRun": "当前没有可接收此输入的回复。",
-    "overloaded": "队列正忙，请稍后重试。",
-    "unavailable": "队列暂不可用，请稍后重试。",
-    "conflict": "这条消息已用不同内容提交过。",
-    "invalid": "队列输入需要包含文本。",
-    "unsupported": "讨论会话暂不支持队列操作。",
-    "capacity": "该会话的队列已满，请等待待处理项执行后再添加。",
-    "followUpUnsupportedChannel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。"
+    "accepted": "已加入队列。"
   },
   "menu": {
     "start": "显示欢迎信息",
@@ -707,6 +675,9 @@
       "oauth_discovery_failed": "无法从该 MCP 服务器发现 OAuth 配置。请确认 URL 正确且服务器支持 OAuth。",
       "oauth_not_discovered": "请先对该连接执行 OAuth 发现。"
     },
+    "memory": {
+      "compact_unsupported": "当前记忆提供方不支持记忆压缩，请在 Bot 的记忆设置中换用支持压缩的提供方。"
+    },
     "native_history_lost": "Agent 无法恢复此前的对话上下文，已重新开始。上方消息仅保留作历史记录；继续前，请重新提供所需信息。",
     "network": {
       "provider_not_configured": "请先为此 Bot 选择网络服务。"
@@ -736,12 +707,14 @@
     "queue_admission_overloaded": "队列当前繁忙，请稍后重试。",
     "queue_admission_unavailable": "队列服务暂时不可用，请稍后重试。",
     "queue_capacity_exceeded": "该会话队列已满，请取消或等待待处理项完成后再添加。",
+    "queue_follow_up_command_invalid": "这条排队消息无法启动，请重新作为新消息发送。",
     "queue_follow_up_unsupported_channel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。",
     "queue_invocation_conflict": "这条消息已用不同内容提交过。",
     "queue_item_not_editable": "只有发送者可以编辑这条排队消息。",
     "queue_item_not_pending": "这条消息已不在待处理队列中。",
     "queue_no_active_run": "当前回复已结束，请将内容作为新消息发送。",
     "queue_request_invalid": "请在已有会话中使用 /steer 或 /queue，并在命令后输入内容。",
+    "queue_target_run_not_active": "这条指令送达前回复已结束，请把它作为新消息发送。",
     "queue_unsupported_session": "讨论会话暂不支持队列操作。",
     "registry": {
       "app_install_failed": "应用安装失败，请重试。",
@@ -813,6 +786,22 @@
       "not_found": "未找到该技能，请刷新列表后重试。",
       "registry_read_only": "该 Skill 属于 Registry App，请通过更新或卸载 App 来修改。",
       "save_failed": "Skill 保存失败，请重试。"
+    },
+    "slash": {
+      "attachments_unsupported": "slash 命令不能附带附件，请移除附件后重新发送。",
+      "permission_denied": "你没有使用此命令的权限。",
+      "requires_websocket": "激活 Skill 需要实时对话连接，请重新连接后再试。",
+      "reserved_metadata": "消息中带有保留的 Skill 元数据，客户端不能提交这类数据。",
+      "skill_activation_unsupported": "只有使用 Bot 自身模型的对话会话才能激活 Skill，请切换到这类会话后再试。",
+      "skill_ambiguous": "有多个 Skill 使用这个名称，请在 Bot 的 Skill 中重命名或停用其中一个后再试。",
+      "skill_context_too_large": "所选 Skill 内容过多，一条消息放不下，请减少 Skill 后再试。",
+      "skill_disabled": "该 Skill 已停用，请在 Bot 的 Skill 中启用后再试。",
+      "skill_not_found": "没有这个名称的 Skill，请检查名称后再试。",
+      "skill_not_usable": "该 Skill 不能在对话中使用。",
+      "skill_syntax_invalid": "请用 /<skill-name> [prompt] 激活 Skill。",
+      "too_many_skills": "一条消息里的 Skill 太多，请减少后再试。",
+      "unknown_command": "未知的 slash 命令，发送 /help 可查看可用命令。",
+      "unsupported_in_web": "该 slash 命令不能在 Web 对话中使用。"
     },
     "tool_approval": {
       "ambiguous": "匹配到多条审批请求。",

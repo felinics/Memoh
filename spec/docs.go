@@ -17547,6 +17547,17 @@ const docTemplate = `{
                 }
             }
         },
+        "adapters.CompactUnavailableReason": {
+            "type": "string",
+            "enum": [
+                "unsupported",
+                "not_configured"
+            ],
+            "x-enum-varnames": [
+                "CompactUnsupported",
+                "CompactNotConfigured"
+            ]
+        },
         "adapters.DeleteResponse": {
             "type": "object",
             "properties": {
@@ -17586,7 +17597,12 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "reason": {
-                    "type": "string"
+                    "description": "Reason says why Semantic is false.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/adapters.CompactUnavailableReason"
+                        }
+                    ]
                 },
                 "rebuild_index": {
                     "type": "boolean"

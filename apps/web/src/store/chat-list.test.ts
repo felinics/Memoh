@@ -999,7 +999,7 @@ describe('chat-list store', () => {
 
   it.each([
     ['runtime_control.failed', 'The runtime control could not be completed. Try again.'],
-    ['unknown_slash', 'Unknown slash command.'],
+    ['slash.unknown_command', 'Unknown slash command. Send /help to see the available commands.'],
     ['not.a.catalog.code', 'Slash command failed.'],
   ])('renders a command_error with code %s', async (code, expected) => {
       h.acceptRuns = false
@@ -3992,7 +3992,7 @@ describe('chat-list store', () => {
         session_id: 'created-session',
         composer_scope: 'bot-1:draft-a',
         terminal: true,
-        code: 'unsupported_skill_slash_context',
+        code: 'slash.skill_activation_unsupported',
         message: 'Requested skills are not supported here.',
       })
       const result = await sendPromise
@@ -4060,7 +4060,7 @@ describe('chat-list store', () => {
         session_id: 'created-session',
         composer_scope: 'bot-1:draft-a',
         terminal: true,
-        code: 'unsupported_skill_slash_context',
+        code: 'slash.skill_activation_unsupported',
         message: 'Requested skills are not supported here.',
       })
       const result = await sendPromise

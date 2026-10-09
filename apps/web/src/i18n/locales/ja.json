@@ -301,6 +301,9 @@
       "oauth_discovery_failed": "この MCP サーバーから OAuth 設定を検出できませんでした。URL が正しいこと、サーバーが OAuth に対応していることを確認してください。",
       "oauth_not_discovered": "先にこの接続の OAuth 検出を実行してください。"
     },
+    "memory": {
+      "compact_unsupported": "選択中の Memory Provider は Memory の圧縮に対応していません。Bot の Memory 設定で、圧縮に対応した Provider に切り替えてください。"
+    },
     "native_history_lost": "Agent は以前の会話コンテキストを復元できず、最初から開始しました。上のメッセージは履歴としてのみ残っています。続行に必要な情報をもう一度伝えてください。",
     "network": {
       "provider_not_configured": "先にこの Bot のネットワークプロバイダーを選択してください。"
@@ -330,12 +333,14 @@
     "queue_admission_overloaded": "キューが混雑しています。しばらくしてから再試行してください。",
     "queue_admission_unavailable": "キューサービスは一時的に利用できません。しばらくしてから再試行してください。",
     "queue_capacity_exceeded": "このセッションのキューは満杯です。待機中の項目をキャンセルするか完了を待ってから追加してください。",
+    "queue_follow_up_command_invalid": "キューに入れたメッセージを開始できませんでした。新しいメッセージとしてもう一度送信してください。",
     "queue_follow_up_unsupported_channel": "このチャンネルではキュー投入を利用できません。返信は送信したメッセージに対してのみ届きます。/steer で現在の返信に追加するか、Web アプリからキューに追加してください。",
     "queue_invocation_conflict": "このメッセージは別の内容ですでに送信されています。",
     "queue_item_not_editable": "このキュー内のメッセージは送信者のみ編集できます。",
     "queue_item_not_pending": "このメッセージは待機中のキューにありません。",
     "queue_no_active_run": "現在の応答は終了しています。内容を新しいメッセージとして送信してください。",
     "queue_request_invalid": "既存の会話で /steer または /queue の後に内容を入力してください。",
+    "queue_target_run_not_active": "この指示が届く前に応答が終了しました。新しいメッセージとして送信してください。",
     "queue_unsupported_session": "ディスカッションセッションではキュー操作を利用できません。",
     "registry": {
       "app_install_failed": "アプリをインストールできませんでした。もう一度お試しください。",
@@ -407,6 +412,22 @@
       "not_found": "このスキルが見つかりません。一覧を更新してからやり直してください。",
       "registry_read_only": "この Skill は Registry App に属します。App を更新またはアンインストールしてください。",
       "save_failed": "Skill を保存できませんでした。もう一度お試しください。"
+    },
+    "slash": {
+      "attachments_unsupported": "slash コマンドには添付ファイルを付けられません。添付ファイルを外して、もう一度送信してください。",
+      "permission_denied": "このコマンドを使用する権限がありません。",
+      "requires_websocket": "Skill の有効化にはリアルタイムのチャット接続が必要です。再接続してからもう一度お試しください。",
+      "reserved_metadata": "このメッセージには予約済みの Skill メタデータが含まれています。クライアントからは指定できません。",
+      "skill_activation_unsupported": "Skill を有効化できるのは、Bot 自身のモデルを使うチャットセッションだけです。そのセッションに切り替えてからお試しください。",
+      "skill_ambiguous": "この名前の Skill が複数あります。Bot の Skill でいずれかの名前を変更するか無効にしてから、もう一度お試しください。",
+      "skill_context_too_large": "選択した Skill の内容が多すぎて、1 つのメッセージに収まりません。Skill を減らしてからお試しください。",
+      "skill_disabled": "この Skill は無効になっています。Bot の Skill で有効にしてから、もう一度お試しください。",
+      "skill_not_found": "この名前の Skill はありません。名前を確認してから、もう一度お試しください。",
+      "skill_not_usable": "この Skill はチャットでは使用できません。",
+      "skill_syntax_invalid": "Skill を有効化するには /<skill-name> [prompt] と入力してください。",
+      "too_many_skills": "1 つのメッセージで指定した Skill が多すぎます。数を減らしてからお試しください。",
+      "unknown_command": "不明な slash コマンドです。/help で利用できるコマンドを確認できます。",
+      "unsupported_in_web": "この slash コマンドは Web チャットでは利用できません。"
     },
     "tool_approval": {
       "ambiguous": "複数の承認リクエストが一致しました。",
@@ -1526,25 +1547,6 @@
       "commandError": "slash コマンド",
       "dismiss": "閉じる",
       "errorMessages": {
-        "unknown_slash": "不明な slash コマンドです。",
-        "unsupported_web_command": "この slash コマンドは Web チャットでは利用できません。",
-        "invalid_skill_slash_syntax": "skill slash の構文が無効です。/<skill-name> [prompt] を使用してください。",
-        "requested_skill_not_found": "指定された skill が見つかりません。",
-        "requested_skill_ambiguous": "指定された skill は曖昧です。",
-        "requested_skill_disabled": "指定された skill は無効です。",
-        "requested_skill_not_runtime_usable": "指定された skill はこのチャットでは利用できません。",
-        "too_many_requested_skills": "requested skill が多すぎます。",
-        "requested_skill_context_too_large": "requested skill の context が大きすぎます。",
-        "slash_attachments_unsupported": "slash コマンドでは添付ファイルを利用できません。",
-        "unsupported_skill_slash_context": "この context では requested skill はサポートされていません。",
-        "unsupported_legacy_endpoint": "skill activation には WebSocket が必要です。再接続してからもう一度お試しください。",
-        "invalid_quick_action_scope": "このクイック操作は session に紐づけられません。",
-        "permission_denied": "この slash コマンドを使用する権限がありません。",
-        "permission_session_required": "/permission を使う前に、外部 Agent セッションを開いてください。",
-        "permission_mode_unsupported": "この Agent は選択可能なセッションモードを宣言していません。",
-        "permission_mode_unavailable": "そのモードは現在の Agent セッションでは利用できません。",
-        "permission_mode_failed": "Agent セッションモードを読み込みまたは変更できませんでした。",
-        "reserved_skill_metadata": "予約済みの skill metadata は指定できません。",
         "generic": "slash コマンドに失敗しました。"
       }
     },

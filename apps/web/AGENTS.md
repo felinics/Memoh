@@ -545,7 +545,7 @@ Live conversation turns are read over the **WebSocket**. SSE carries identifiers
 - **Global**: `utils/api-error.ts` — `resolveApiErrorMessage()` extracts error from `message`, `error`, `detail` fields
 - **Mutations**: `useDialogMutation` composable wraps mutations with automatic `toast.error()` on failure
 - **SDK**: All calls use `throwOnError: true`; try/catch at component level
-- **Streams**: `processing_failed` / `error` events appended to message blocks
+- **Streams**: `error` events appended to message blocks
 
 ## i18n
 

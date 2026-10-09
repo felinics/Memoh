@@ -644,10 +644,6 @@ func validateStreamEvent(registry *Registry, channelType ChannelType, event Stre
 		}
 	case StreamEventAgentStart, StreamEventAgentEnd, StreamEventProcessingStarted, StreamEventProcessingCompleted, StreamEventReset:
 		return nil
-	case StreamEventProcessingFailed:
-		if strings.TrimSpace(event.Error) == "" {
-			return errors.New("processing failure error is required")
-		}
 	case StreamEventFinal:
 		if event.Final == nil {
 			return errors.New("stream final payload is required")
