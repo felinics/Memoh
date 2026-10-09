@@ -107,7 +107,10 @@ func (p applyPatchPlan) uiDiff() string {
 			return ""
 		}
 		if diff == "" {
-			if diffDisplayText(change.before) == diffDisplayText(change.after) {
+			// An update that leaves the text as it was has nothing to show,
+			// unless it also moved the file: a pure move has no diff section
+			// to carry its destination, so the whole diff falls back.
+			if change.fromPath == change.toPath && diffDisplayText(change.before) == diffDisplayText(change.after) {
 				continue
 			}
 			return ""

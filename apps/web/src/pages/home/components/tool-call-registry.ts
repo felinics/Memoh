@@ -418,9 +418,14 @@ export function patchFileDiffs(block: ToolCallBlock): PatchFileDiff[] {
     const index = file.operation === 'delete' ? -1 : pending.findIndex(segment => segment.oldPath === key)
     const segment = index >= 0 ? pending.splice(index, 1)[0] : undefined
     const counts = segment ? unifiedDiffLineCounts(segment.diff) : { add: 0, remove: 0 }
+    // A move stays within one path style, so an absolute source gets its
+    // destination's stripped slash back (the row opens it in the file manager).
+    const movedTo = segment && segment.newPath !== segment.oldPath
+      ? (file.path.startsWith('/') ? `/${segment.newPath}` : segment.newPath)
+      : ''
     return {
       ...file,
-      movedTo: segment && segment.newPath !== segment.oldPath ? segment.newPath : '',
+      movedTo,
       diff: segment?.diff ?? '',
       ...counts,
     }

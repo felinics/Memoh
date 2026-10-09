@@ -27,7 +27,7 @@
       >
         <span class="diff-ln">-</span>
         <span class="diff-mk" />
-        <span class="diff-code">---</span>
+        <span class="diff-code text-muted-foreground">---</span>
       </div>
       <div
         v-for="(row, i) in shiki.diffRows.value"
@@ -51,7 +51,7 @@
       >
         <span class="diff-ln">-</span>
         <span class="diff-mk" />
-        <span class="diff-code">---</span>
+        <span class="diff-code text-muted-foreground">---</span>
       </div>
     </div>
   </div>
@@ -119,12 +119,6 @@ watch(
 .shiki-diff-grid .diff-content {
   width: max-content;
   min-width: 100%;
-}
-/* Spacer row: laid out like a code row, with a short dash in place of the
-   line number and the content, so it reads as "the file continues / ends
-   here" rather than stray padding. */
-.shiki-diff-grid .diff-cap .diff-code {
-  color: var(--muted-foreground);
 }
 .shiki-diff-grid .diff-row {
   --row-bg: transparent;
