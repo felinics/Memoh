@@ -58,7 +58,6 @@
 // (account usage, error, command result) are page-level destructive/neutral banners that
 // stack upward one per message, each its own solid surface — no shared wrapper
 // around them. The approval decision surface sits in its own capsule below.
-// Compaction status lives in the session info panel, not here.
 //
 // The dock has TWO tiers, and the distinction is load-bearing:
 // - BOX tier (the input slot): ONE box owns the composer's position at a

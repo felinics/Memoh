@@ -319,9 +319,8 @@ func (h *LocalChannelHandler) executeWebQuickAction(ctx context.Context, botID, 
 		items := []CommandActionListItem{
 			{ID: "help", Title: "/help", Description: "Show available quick actions", Kind: "quick_action"},
 			{ID: "new", Title: "/new", Description: "Start a new session", Kind: "quick_action"},
-			{ID: "compact", Title: "/compact", Description: "Compact the current session history", Kind: "quick_action"},
 		}
-		labels := []string{"/help", "/new", "/compact"}
+		labels := []string{"/help", "/new"}
 		text := "Available Web quick actions: %s."
 		// skillActivationAllowed already reflects a native chat
 		// session, which is also the only context where the model picker

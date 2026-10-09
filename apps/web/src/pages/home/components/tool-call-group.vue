@@ -75,12 +75,12 @@
       <Transition name="preview-layer">
         <div
           v-if="active && !open"
-          class="now-line relative box-content h-[1lh] overflow-hidden text-cop-title [grid-area:1/1] self-start pointer-events-none"
+          class="now-line relative h-[1lh] overflow-hidden mt-[var(--chat-process-gap)] text-cop-title [grid-area:1/1] self-start pointer-events-none"
         >
           <Transition name="now-roll">
             <div
               :key="tickerLabel"
-              class="absolute inset-x-0 top-(--now-line-fade) h-[1lh] truncate"
+              class="absolute inset-0 truncate"
               v-text="tickerLabel"
             />
           </Transition>
@@ -316,24 +316,6 @@ const tickerLabel = computed(() => {
 </script>
 
 <style scoped>
-/* The now line's clip edges are soft: the box extends a fade band above and
-   below the visible line (cancelled by negative margins so layout still sees
-   exactly one line), and a gradient mask dissolves rows as they roll through
-   that band instead of hard-cutting them at the overflow edge. */
-.now-line {
-  --now-line-fade: 0.35lh;
-  padding-block: var(--now-line-fade);
-  margin-top: calc(var(--chat-process-gap) - var(--now-line-fade));
-  margin-bottom: calc(-1 * var(--now-line-fade));
-  mask-image: linear-gradient(
-    to bottom,
-    transparent,
-    #000 var(--now-line-fade),
-    #000 calc(100% - var(--now-line-fade)),
-    transparent
-  );
-}
-
 .preview-layer-enter-active {
   transition: opacity 90ms ease-out 60ms;
 }

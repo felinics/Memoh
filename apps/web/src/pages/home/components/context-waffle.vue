@@ -33,15 +33,18 @@ const COLUMN_CLASS = { 20: 'grid-cols-20', 50: 'grid-cols-50' } as const
 const TOTAL_CELLS = 100
 
 // Split the used cells across groups by largest remainder, giving every
-// present group at least one cell so a small share never disappears.
+// present group at least one cell so a small share never disappears. When
+// there are fewer cells than groups (a large window barely used), the cells
+// go to the largest groups so every colour still matches the legend.
 const cells = computed(() => {
   const raw = Math.min(TOTAL_CELLS, Math.max(0, props.percent))
   const used = raw > 0 ? Math.max(1, Math.round(raw)) : 0
   const result: string[] = []
-  const present = props.groups
+  const largest = new Set([...props.groups].sort((a, b) => b.tokens - a.tokens).slice(0, used))
+  const present = props.groups.filter(group => largest.has(group))
   const total = present.reduce((sum, group) => sum + group.tokens, 0)
 
-  if (!present.length || total <= 0 || used < present.length) {
+  if (!present.length || total <= 0) {
     const fill = contextPressureToneClass(props.percent, 'bg')
     for (let i = 0; i < used; i++) result.push(fill)
   }

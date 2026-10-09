@@ -3,7 +3,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { toast } from '@felinic/ui'
-import { getBotsByBotIdSessionsBySessionIdStatus, postBotsByBotIdSessionsBySessionIdCompact } from '@memohai/sdk'
+import { getBotsByBotIdSessionsBySessionIdStatus } from '@memohai/sdk'
 import type { HandlersSessionInfoResponse } from '@memohai/sdk'
 import { resolveApiErrorMessage } from '@/utils/api-error'
 import { useChatStore } from '@/store/chat-list'
@@ -20,10 +20,6 @@ interface UseSessionInfoOptions {
   // resolve one for the model; until then we fall back to the selected model's
   // configured window so the ring shows real headroom instead of an empty band.
   fallbackContextWindow?: Ref<number | null | undefined>
-}
-
-interface CompactionOptions {
-  quietSuccess?: () => boolean
 }
 
 export function useSessionInfo(options: UseSessionInfoOptions = {}) {
@@ -79,47 +75,32 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     return ((estimatedTokens.value ?? usedTokens.value) / contextWindow.value) * 100
   })
 
-  // Native and runtime-owned compaction share feedback and request lifetime;
-  // callers supply only the transport when the runtime owns the operation.
+  // Runtime-owned compaction shares the session lock and feedback; callers
+  // supply the transport.
   const { t } = useI18n()
   const queryCache = useQueryCache()
   const isCompacting = computed(() => chatStore.isSessionCompacting(
     currentBotId.value ?? '', sessionId.value ?? '',
   ))
 
-  // `quietSuccess` lets a caller that shows its own success state in view
-  // skip the toast; it is read when the request settles, not when it starts.
-  // Failures always toast. Resolves true on success.
-  async function runCompaction(execute: () => Promise<unknown>, opts: CompactionOptions = {}) {
+  async function runCompaction(execute: () => Promise<unknown>) {
     const botId = currentBotId.value
     const sid = sessionId.value
-    if (!botId || !sid) return false
+    if (!botId || !sid) return
     const finish = chatStore.beginSessionCompaction(botId, sid)
-    if (!finish) return false
+    if (!finish) return
 
     try {
       await execute()
-      if (!opts.quietSuccess?.()) toast.success(t('chat.compactSuccess'))
+      toast.success(t('chat.compactSuccess'))
       queryCache.invalidateQueries({ key: ['session-status', botId, sid] })
-      return true
     }
     catch (error) {
       toast.error(resolveApiErrorMessage(error, t('chat.compactFailed')))
-      return false
     }
     finally {
       finish()
     }
-  }
-
-  async function triggerCompact(opts: CompactionOptions = {}) {
-    const botId = currentBotId.value
-    const sid = sessionId.value
-    if (!botId || !sid) return false
-    return runCompaction(() => postBotsByBotIdSessionsBySessionIdCompact({
-      path: { bot_id: botId, session_id: sid },
-      throwOnError: true,
-    }), opts)
   }
 
   installTurnEndInvalidation(storeRefs.streamingSessionIds, queryCache)
@@ -137,7 +118,6 @@ export function useSessionInfo(options: UseSessionInfoOptions = {}) {
     currentBotId,
     sessionId,
     isCompacting,
-    triggerCompact,
     runCompaction,
   }
 }

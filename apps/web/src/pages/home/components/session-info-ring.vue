@@ -84,29 +84,7 @@
       :side-offset="8"
       :collision-padding="8"
     >
-      <!-- An external runtime reports only its total usage and window: no
-           composition, compaction or per-turn history to show. -->
-      <div
-        v-if="externalUsage"
-        class="flex flex-col gap-3 p-4"
-      >
-        <div class="flex items-center gap-2">
-          <span
-            v-if="contextWindow != null"
-            class="text-control font-medium tabular-nums"
-            :class="ringColorClass"
-          >{{ Math.round(contextPercent) }}%</span>
-          <span class="min-w-0 flex-1 truncate text-body text-muted-foreground tabular-nums">{{ externalTokensLabel }}</span>
-        </div>
-        <ContextWaffle
-          v-if="contextWindow != null"
-          :percent="contextPercent"
-          :groups="[]"
-          :columns="20"
-        />
-      </div>
       <SessionInfoPanel
-        v-else
         :visible="open"
         :override-model-id="overrideModelId"
         :fallback-context-window="fallbackContextWindow"
@@ -127,7 +105,6 @@ import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button, Popover, PopoverContent, PopoverTrigger, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@felinic/ui'
 import SessionInfoPanel from './session-info-panel.vue'
-import ContextWaffle from './context-waffle.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import { contextPressureToneClass, formatTokenCount } from '../composables/context-categories'
 
@@ -139,9 +116,6 @@ const props = defineProps<{
   visible?: boolean
   overrideModelId?: string
   fallbackContextWindow?: number | null
-  // Usage reported by an external runtime itself; replaces Memoh's own
-  // context accounting for this session.
-  externalUsage?: { tokens: number | null, window: number | null }
 }>()
 
 const { t } = useI18n()
@@ -166,24 +140,10 @@ function restoreTriggerFocus(event: Event) {
 const visibleRef = computed(() => props.visible ?? true)
 const overrideModelIdRef = computed(() => props.overrideModelId ?? '')
 const fallbackContextWindowRef = computed(() => props.fallbackContextWindow ?? null)
-const memohInfo = useSessionInfo({
-  visible: computed(() => visibleRef.value && !props.externalUsage),
+const { contextPercent, contextWindow, contextTokens, sessionId } = useSessionInfo({
+  visible: visibleRef,
   overrideModelId: overrideModelIdRef,
   fallbackContextWindow: fallbackContextWindowRef,
-})
-const sessionId = memohInfo.sessionId
-const contextTokens = computed(() => props.externalUsage ? props.externalUsage.tokens ?? 0 : memohInfo.contextTokens.value)
-const contextWindow = computed(() => props.externalUsage ? props.externalUsage.window : memohInfo.contextWindow.value)
-const contextPercent = computed(() => {
-  if (!props.externalUsage) return memohInfo.contextPercent.value
-  const window = contextWindow.value
-  return window ? (contextTokens.value / window) * 100 : 0
-})
-const externalTokensLabel = computed(() => {
-  const used = formatTokenCount(contextTokens.value)
-  return contextWindow.value != null
-    ? t('chat.infoContextTokens', { used, window: formatTokenCount(contextWindow.value) })
-    : used
 })
 
 const radius = 10

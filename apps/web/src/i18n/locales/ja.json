@@ -148,8 +148,8 @@
       "reasoning_options_unavailable": "チャットModelの推論オプションを確認できませんでした。しばらくしてからもう一度お試しください。"
     },
     "context": {
-      "budget_unsatisfied": "モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。/compact で古い履歴を要約するか、リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。",
-      "protected_overflow": "必須コンテキストがモデルのコンテキスト予算を超えています。/compact で古い履歴を要約するか、より大きなコンテキストウィンドウのモデルをお試しください。"
+      "budget_unsatisfied": "モデルのコンテキストウィンドウが不足しているため、このリクエストを処理できません。リクエストを短くするか、より大きなコンテキストウィンドウのモデルをお試しください。",
+      "protected_overflow": "必須コンテキストがモデルのコンテキスト予算を超えています。より大きなコンテキストウィンドウのモデルをお試しください。"
     },
     "agent": {
       "response_timeout": "モデルから時間内に応答がありませんでした。もう一度お試しください。",
@@ -1356,18 +1356,6 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoContextTokensEstimate": "~{used} / {window}",
     "infoContextTokensEstimateNoWindow": "~{used} / --",
-    "contextBreakdown": {
-      "system": "システムプロンプト",
-      "rules": "ワークスペースルール",
-      "tools": "ツール",
-      "skills": "スキル",
-      "memory": "メモリ",
-      "summary": "サマリー",
-      "conversation": "会話",
-      "other": "その他",
-      "reserve": "出力リザーブ",
-      "free": "空き容量"
-    },
     "lifecycle": {
       "title": "コンテキストインスペクター",
       "turnCount": "{n} ターン",
@@ -1386,6 +1374,7 @@
       "empty": "このセッションにはまだターンの記録がありません",
       "loadFailed": "コンテキスト履歴を読み込めませんでした",
       "loadOlder": "最大 {n} ターンを読み込む",
+      "moreTurns": "このページより古いターンがあります",
       "legacySource": "旧メッセージデータから復元"
     },
     "compactSuccess": "コンテキストの圧縮が完了しました",
@@ -1410,9 +1399,6 @@
       "permissionModeChangedTitle": "セッションモードを更新しました",
       "permissionModeChangedText": "選択したセッションモードが適用されました。",
       "permissionCurrentMode": "現在のモード",
-      "compactDescription": "このセッションのコンテキストを圧縮します（{percent}% 使用中）",
-      "compactDescriptionNoStats": "このセッションのコンテキストを圧縮します",
-      "compactUnavailable": "このセッションにはまだ圧縮できる内容がありません。",
       "modelDescription": "モデルを切り替えます（現在：{model}）",
       "helpTextWithSkills": "Web で利用できるクイック操作: /help、/skill list。スキルを有効にするには /<skill-name> または /<skill-name> <prompt> を送信してください。",
       "helpTextNoSkills": "Web で利用できるクイック操作: /help。",

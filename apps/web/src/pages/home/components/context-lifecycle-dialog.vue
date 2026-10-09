@@ -6,7 +6,9 @@
         <!-- The session's time range belongs with the turn count, apart from
              the selected turn's own timestamp in the body. -->
         <DialogDescription>
-          {{ turnCountLabel }}
+          <template v-if="data">
+            {{ turnCountLabel }}
+          </template>
           <span
             v-if="turns.length > 1"
             class="ml-3 tabular-nums"
@@ -51,14 +53,14 @@
             >
               <div class="flex h-16 items-end gap-0.5">
                 <button
-                  v-for="(turn, index) in turns"
+                  v-for="turn in turns"
                   :key="turn.key"
                   type="button"
                   class="flex h-full w-6 shrink-0 cursor-pointer flex-col-reverse overflow-hidden rounded-2xs bg-muted outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring/30"
-                  :class="index === selectedIndex ? '' : 'opacity-50 hover:opacity-100'"
+                  :class="turn.key === selected?.key ? '' : 'opacity-50 hover:opacity-100'"
                   :aria-label="`${turn.timeLabel} · ${turn.tokensLabel}`"
-                  :aria-pressed="index === selectedIndex"
-                  @click="selectedIndex = index"
+                  :aria-pressed="turn.key === selected?.key"
+                  @click="selectedKey = turn.key"
                 >
                   <span
                     v-for="group in turn.groups"
@@ -85,6 +87,14 @@
             >
               {{ t('chat.lifecycle.loadOlder', { n: maxLimit }) }}
             </Button>
+            <!-- Past the last page (or before lifecycle records existed) the
+                 count above covers only what is shown, not the session. -->
+            <p
+              v-else-if="hasOlder"
+              class="text-body text-muted-foreground"
+            >
+              {{ t('chat.lifecycle.moreTurns') }}
+            </p>
           </section>
 
           <section
@@ -188,8 +198,8 @@ import ContextWaffle from './context-waffle.vue'
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ closeAutoFocus: [event: Event] }>()
 
-const { t } = useI18n()
-const { data, status, canLoadOlder, loadOlder, maxLimit } = useContextLifecycle()
+const { t, locale } = useI18n()
+const { data, status, hasOlder, canLoadOlder, loadOlder, maxLimit } = useContextLifecycle(open)
 
 interface TurnView {
   key: string
@@ -234,7 +244,7 @@ function toTurnView(turn: HandlersContextLifecycleTurn, index: number): TurnView
   return {
     key: turn.run_id || turn.assistant_message_id || String(index),
     createdAt: turn.created_at ?? '',
-    timeLabel: formatCalendarTime(turn.created_at),
+    timeLabel: formatCalendarTime(turn.created_at, { locale: locale.value }),
     model: snapshot?.model ?? '',
     status: turn.status ?? '',
     statusLabel: STATUS_KEY[turn.status ?? ''] ? t(STATUS_KEY[turn.status ?? '']!) : '',
@@ -264,20 +274,27 @@ function shareOfUsed(turn: TurnView, tokens: number) {
 
 const pageMaxTokens = computed(() => Math.max(1, ...turns.value.map(turn => turn.tokens)))
 
-const selectedIndex = ref(0)
-// Follow the newest turn whenever the page changes (open, new turn, load older).
-watch(() => turns.value.length, (length) => {
-  selectedIndex.value = Math.max(0, length - 1)
-}, { immediate: true })
-const selected = computed(() => turns.value[selectedIndex.value])
+// Tracked by key: a full page shifts by one when a new turn lands, so an
+// index would silently move the selection to a neighbouring turn. Without a
+// pick (or once the picked turn leaves the page) the newest turn is shown.
+const selectedKey = ref('')
+watch(open, (isOpen) => {
+  if (isOpen) selectedKey.value = ''
+})
+const selected = computed(() =>
+  turns.value.find(turn => turn.key === selectedKey.value) ?? turns.value[turns.value.length - 1])
 
 // Once the bars overflow, open the strip at the newest (selected) turn.
 const barStrip = useTemplateRef<HTMLElement>('barStrip')
 const { width: stripWidth } = useElementSize(barStrip)
-// Bar pitch: w-6 (24px) plus the gap-0.5 (2px) between bars.
-const BAR_PITCH = 26
+// Bars are w-6 (1.5rem) with gap-0.5 (0.125rem); derived from the root font
+// size so the slot count follows the UI font scale.
+const BAR_REM = 1.5
+const GAP_REM = 0.125
 const emptySlots = computed(() => {
-  const slots = Math.floor((stripWidth.value + 2) / BAR_PITCH)
+  if (stripWidth.value <= 0) return 0
+  const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+  const slots = Math.floor((stripWidth.value + GAP_REM * rem) / ((BAR_REM + GAP_REM) * rem))
   return Math.max(0, slots - turns.value.length)
 })
 watch([() => turns.value.length, open], async () => {
@@ -291,10 +308,10 @@ function dayLabel(date: Date) {
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
   const diff = Math.round((startOfDay(date) - startOfDay(new Date())) / 86_400_000)
   if (diff === 0 || diff === -1) {
-    const day = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(diff, 'day')
+    const day = new Intl.RelativeTimeFormat(locale.value, { numeric: 'auto' }).format(diff, 'day')
     return `${day.charAt(0).toUpperCase()}${day.slice(1)}`
   }
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString(locale.value, { month: 'short', day: 'numeric' })
 }
 
 const rangeLabel = computed(() => {
@@ -304,7 +321,7 @@ const rangeLabel = computed(() => {
   const from = new Date(first)
   const to = new Date(last)
   if (from.toDateString() === to.toDateString()) {
-    const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    const time = (d: Date) => d.toLocaleTimeString(locale.value, { hour: 'numeric', minute: '2-digit' })
     return `${time(from)} ~ ${time(to)}`
   }
   return `${dayLabel(from)} ~ ${dayLabel(to)}`

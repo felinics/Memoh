@@ -1443,11 +1443,11 @@ func TestExecuteWebQuickActionHelpListsAllQuickActions(t *testing.T) {
 	for _, item := range full.Items {
 		gotIDs = append(gotIDs, item.ID)
 	}
-	wantIDs := []string{"help", "new", "compact", "skill.list", "model"}
+	wantIDs := []string{"help", "new", "skill.list", "model"}
 	if !slices.Equal(gotIDs, wantIDs) {
 		t.Fatalf("item ids = %v, want %v", gotIDs, wantIDs)
 	}
-	for _, label := range []string{"/help", "/new", "/compact", "/skill list", "/model"} {
+	for _, label := range []string{"/help", "/new", "/skill list", "/model"} {
 		if !strings.Contains(full.Text, label) {
 			t.Fatalf("help text = %q, missing %q", full.Text, label)
 		}
@@ -1461,7 +1461,7 @@ func TestExecuteWebQuickActionHelpListsAllQuickActions(t *testing.T) {
 	for _, item := range restricted.Items {
 		gotRestrictedIDs = append(gotRestrictedIDs, item.ID)
 	}
-	wantRestrictedIDs := []string{"help", "new", "compact"}
+	wantRestrictedIDs := []string{"help", "new"}
 	if !slices.Equal(gotRestrictedIDs, wantRestrictedIDs) {
 		t.Fatalf("restricted item ids = %v, want %v", gotRestrictedIDs, wantRestrictedIDs)
 	}

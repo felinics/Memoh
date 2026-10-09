@@ -14,7 +14,6 @@ vi.mock('../composables/useSessionInfo', () => ({
     autoCompactTokens: ref(null),
     compactionAvailable: ref(false),
     isCompacting: ref(false),
-    triggerCompact: vi.fn(),
     contextPercent: ref(9),
     contextWindow: ref(256000),
     contextTokens: ref(22400),

@@ -151,8 +151,8 @@
       "reasoning_options_unavailable": "暂时无法解析对话模型的推理选项，请稍后重试。"
     },
     "context": {
-      "budget_unsatisfied": "模型上下文窗口不足，无法处理当前请求。可尝试 /compact 压缩较早的历史、缩短请求，或改用上下文窗口更大的模型。",
-      "protected_overflow": "必要的上下文内容超出了模型上下文预算。可尝试 /compact 压缩较早的历史，或改用上下文窗口更大的模型。"
+      "budget_unsatisfied": "模型上下文窗口不足，无法处理当前请求。可尝试缩短请求，或改用上下文窗口更大的模型。",
+      "protected_overflow": "必要的上下文内容超出了模型上下文预算。可尝试改用上下文窗口更大的模型。"
     },
     "agent": {
       "response_timeout": "模型未能及时响应，请重试。",
@@ -1390,18 +1390,6 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoContextTokensEstimate": "~{used} / {window}",
     "infoContextTokensEstimateNoWindow": "~{used} / --",
-    "contextBreakdown": {
-      "system": "系统提示词",
-      "rules": "工作区规则",
-      "tools": "工具",
-      "skills": "技能",
-      "memory": "记忆",
-      "summary": "摘要",
-      "conversation": "对话",
-      "other": "其他",
-      "reserve": "输出预留",
-      "free": "剩余空间"
-    },
     "lifecycle": {
       "title": "上下文检查器",
       "turnCount": "{n} 轮",
@@ -1420,6 +1408,7 @@
       "empty": "本会话还没有记录任何轮次",
       "loadFailed": "上下文历史加载失败",
       "loadOlder": "加载至多 {n} 轮",
+      "moreTurns": "本页之外还有更早的轮次",
       "legacySource": "来自旧版消息数据"
     },
     "compactSuccess": "上下文压缩完成",
@@ -1444,9 +1433,6 @@
       "permissionModeChangedTitle": "会话模式已更新",
       "permissionModeChangedText": "已应用所选会话模式。",
       "permissionCurrentMode": "当前模式",
-      "compactDescription": "压缩当前会话上下文（已用 {percent}%）",
-      "compactDescriptionNoStats": "压缩当前会话上下文",
-      "compactUnavailable": "当前会话暂无可压缩的内容。",
       "modelDescription": "切换模型（当前：{model}）",
       "helpTextWithSkills": "Web 可用快捷操作：/help、/skill list。要激活 Skill，请发送 /<skill-name> 或 /<skill-name> <prompt>。",
       "helpTextNoSkills": "Web 可用快捷操作：/help。",

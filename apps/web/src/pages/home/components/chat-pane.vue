@@ -1205,7 +1205,6 @@
                   :visible="isVisible"
                   :override-model-id="overrideModelId"
                   :fallback-context-window="sessionFallbackContextWindow"
-                  :external-usage="activeUsesExternalAgentComposer ? codexContextUsage ?? undefined : undefined"
                 />
               </div>
             </ComposerDock>
@@ -1243,7 +1242,6 @@ import {
   X,
   HelpCircle,
   List,
-  Minimize2,
   Package,
   SquarePen,
   ShieldCheck,
@@ -1913,11 +1911,9 @@ const activeDirectRuntime = computed(() => {
 })
 const activeUsesDirectRuntime = computed(() => activeDirectRuntime.value !== '')
 // For external agents Memoh only sees the part of the context it injects, so
-// a reading built from that would understate the real window. Codex is the
-// exception: it reports its own thread usage and window (see codexContextUsage).
-// ACP and Claude Code get no entry.
-const showSessionInfoRing = computed(() => !isWelcome.value && !!activeSession.value
-  && (!activeUsesExternalAgentComposer.value || codexContextUsage.value != null))
+// a reading built from that would understate the real window; they get no
+// entry until a runtime reports its own current context usage.
+const showSessionInfoRing = computed(() => !isWelcome.value && !!activeSession.value && !activeUsesExternalAgentComposer.value)
 const activeACPAgentId = computed(() => normalizeAgentID(activeSessionMetadata.value.acp_agent_id))
 const composerAgent = computed(() => {
   if (!activeUsesExternalAgentComposer.value) return null
@@ -2081,16 +2077,6 @@ const slashQuickActions = computed(() => [
         icon: Lightbulb,
       }]
     : []),
-  ...(canCompactViaSlash.value
-    ? [{
-        id: 'compact',
-        label: '/compact',
-        description: sessionContextPercentKnown.value
-          ? t('chat.slash.compactDescription', { percent: Math.round(sessionContextPercent.value) })
-          : t('chat.slash.compactDescriptionNoStats'),
-        icon: Minimize2,
-      }]
-    : []),
   ...(!activeIsExternalAgent.value && !activeIsPendingExternalAgent.value
     ? [{
         id: 'model',
@@ -2134,30 +2120,6 @@ const runtimeControls = useRuntimeControls({
   sessionId: computed(() => paneTarget.value.sessionId),
   visible: computed(() => isVisible.value && activeUsesExternalAgentComposer.value),
   draftAgentId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? activeBotAgentID.value : ''),
-})
-// Codex reports its own context usage; `/status` reads the last observed
-// value from the runtime's cache without starting a turn. Refreshed when a
-// turn ends so the ring follows the conversation.
-const codexContextQuery = useQuery({
-  key: () => ['codex-context-usage', currentBotId.value ?? '', paneTarget.value.sessionId ?? ''],
-  enabled: () => activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX && !!currentBotId.value && !!paneTarget.value.sessionId && isVisible.value,
-  query: async () => {
-    const result = await runtimeControls.execute('status')
-    const data = (result.data ?? {}) as { tokens?: unknown, context_window?: unknown }
-    return {
-      tokens: typeof data.tokens === 'number' ? data.tokens : null,
-      window: typeof data.context_window === 'number' && data.context_window > 0 ? data.context_window : null,
-    }
-  },
-  refetchOnWindowFocus: false,
-})
-const codexContextUsage = computed(() => (
-  activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX && codexContextQuery.data.value?.tokens != null
-    ? codexContextQuery.data.value
-    : null
-))
-watch(streaming, (now, before) => {
-  if (before && !now && activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX) void codexContextQuery.refetch()
 })
 // Only a ChatGPT sign-in has usage windows; an API-key Codex Agent is billed per token.
 const codexUsageAgentId = computed(() => {
@@ -2289,17 +2251,12 @@ const slashPanelHasResults = computed(() =>
   || visibleSlashSkills.value.length > 0,
 )
 
-// Session usage for the /compact quick action's live description ("42% full")
-// and its availability. Shares the query key with SessionInfoRing/panel, so
-// this adds no extra fetch.
+// Runtime-owned compaction (an external Agent's own compact command) shares
+// the session's compaction lock and feedback. Shares the query key with
+// SessionInfoRing/panel, so this adds no extra fetch.
 const sessionFallbackContextWindow = computed(() => activeModel.value?.config?.context_window ?? null)
 const {
-  contextTokens: sessionContextTokens,
-  compactionAvailable: sessionCompactionAvailable,
-  contextWindow: sessionContextWindow,
-  contextPercent: sessionContextPercent,
   isCompacting: isCompactingSession,
-  triggerCompact: triggerSessionCompact,
   runCompaction: runSessionCompaction,
 } = useSessionInfo({
   botId: computed(() => paneTarget.value.botId),
@@ -2308,14 +2265,10 @@ const {
   overrideModelId,
   fallbackContextWindow: sessionFallbackContextWindow,
 })
-const sessionContextPercentKnown = computed(() => sessionContextWindow.value != null && sessionContextWindow.value > 0)
-const canCompactViaSlash = computed(() =>
-  !!activeSessionId.value && sessionCompactionAvailable.value && sessionContextTokens.value > 0 && !isCompactingSession.value,
-)
 
 // Client-side quick actions run an existing UI affordance directly instead of
-// round-tripping text through send: /compact triggers the session-info
-// panel's compaction, /model opens the composer's model picker. Everything
+// round-tripping text through send: /model opens the composer's model
+// picker. Everything
 // else keeps the type-and-send flow (the store intercepts /new; /help and
 // /skill list execute server-side).
 async function runPendingPermission(text: string) {
@@ -2376,14 +2329,6 @@ function runLocalQuickAction(id: string, text = ''): boolean {
     void togglePlanMode()
     return true
   }
-  if (id === 'compact') {
-    if (!canCompactViaSlash.value) {
-      composerError.value = t('chat.slash.compactUnavailable')
-      return true
-    }
-    void triggerSessionCompact()
-    return true
-  }
   if (id === 'model') {
     modelPopoverOpen.value = true
     return true
@@ -2438,7 +2383,7 @@ function selectRuntimeCommand(command: RuntimeCommand) {
   void nextTick(focusTextarea)
 }
 
-// Typed forms of the client-side quick actions ("/compact", "/model") — must
+// Typed forms of the client-side quick actions ("/model") — must
 // be intercepted before the store send path, which would otherwise classify
 // them as skill activation and fail with requested_skill_not_found.
 function localQuickActionIDForSlash(text: string): string {

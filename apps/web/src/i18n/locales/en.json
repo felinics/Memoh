@@ -151,8 +151,8 @@
       "reasoning_options_unavailable": "The chat model's reasoning options could not be resolved. Please try again."
     },
     "context": {
-      "budget_unsatisfied": "The model context window is too small for this request. Run /compact to summarize older history, shorten the request, or switch to a model with a larger context window.",
-      "protected_overflow": "Required context exceeds the model context budget. Run /compact to summarize older history, or switch to a model with a larger context window."
+      "budget_unsatisfied": "The model context window is too small for this request. Shorten the request, or switch to a model with a larger context window.",
+      "protected_overflow": "Required context exceeds the model context budget. Switch to a model with a larger context window."
     },
     "agent": {
       "response_timeout": "The model did not respond in time. Please try again.",
@@ -1378,18 +1378,6 @@
     "infoContextTokensNoWindow": "{used} / --",
     "infoContextTokensEstimate": "~{used} / {window}",
     "infoContextTokensEstimateNoWindow": "~{used} / --",
-    "contextBreakdown": {
-      "system": "System prompt",
-      "rules": "Workspace rules",
-      "tools": "Tools",
-      "skills": "Skills",
-      "memory": "Memory",
-      "summary": "Summary",
-      "conversation": "Conversation",
-      "other": "Other",
-      "reserve": "Output reserve",
-      "free": "Free space"
-    },
     "lifecycle": {
       "title": "Context Inspector",
       "turnCount": "{n} turns",
@@ -1408,6 +1396,7 @@
       "empty": "No turns recorded for this session yet",
       "loadFailed": "Couldn't load the context history",
       "loadOlder": "Load up to {n} turns",
+      "moreTurns": "Older turns exist beyond this page",
       "legacySource": "Recovered from older message data"
     },
     "compactSuccess": "Context compaction completed",
@@ -1432,9 +1421,6 @@
       "permissionModeChangedTitle": "Session mode updated",
       "permissionModeChangedText": "The selected session mode is now applied.",
       "permissionCurrentMode": "Current mode",
-      "compactDescription": "Compact this session's context ({percent}% full)",
-      "compactDescriptionNoStats": "Compact this session's context",
-      "compactUnavailable": "Nothing to compact in this session yet.",
       "modelDescription": "Switch model (current: {model})",
       "helpTextWithSkills": "Available Web quick actions: /help, /skill list. To activate a skill, send /<skill-name> or /<skill-name> <prompt>.",
       "helpTextNoSkills": "Available Web quick actions: /help.",

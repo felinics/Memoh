@@ -9,7 +9,6 @@ export interface ContextGroup {
   id: ContextGroupId
   tokens: number
   colorClass: string
-  categories: ContextCategoryStat[]
 }
 
 const GROUP_OF: Record<ContextCategoryId, ContextGroupId> = {
@@ -42,7 +41,7 @@ export function groupContextCategories(categories: ContextCategoryStat[] | undef
   return GROUP_ORDER
     .map(id => {
       const members = byGroup.get(id) ?? []
-      return { id, tokens: members.reduce((sum, c) => sum + c.tokens, 0), colorClass: GROUP_COLOR[id], categories: members }
+      return { id, tokens: members.reduce((sum, c) => sum + c.tokens, 0), colorClass: GROUP_COLOR[id] }
     })
     .filter(group => group.tokens > 0)
 }
