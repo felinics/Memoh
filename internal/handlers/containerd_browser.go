@@ -18,6 +18,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -189,7 +190,7 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 		return err
 	}
 	if err := validateBrowserPort(req.Port); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("port", err)
 	}
 
 	ctx := c.Request().Context()

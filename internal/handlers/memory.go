@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,8 +16,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	memprovider "github.com/felinics/memoh/internal/memory/adapters"
 	"github.com/felinics/memoh/internal/memory/migrate"
 	"github.com/felinics/memoh/internal/settings"
@@ -788,7 +791,7 @@ func (h *MemoryHandler) ChatDeleteOne(c echo.Context) error {
 
 	memoryID := memoryIDFromPath(c)
 	if memoryID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
+		return apperror.FieldRequired("memory_id")
 	}
 	if err := requireMemoryOwnedByBot(botID, memoryID); err != nil {
 		return err
@@ -826,7 +829,7 @@ func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 	}
 	memoryID := memoryIDFromPath(c)
 	if memoryID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "memory_id is required")
+		return apperror.FieldRequired("memory_id")
 	}
 	if err := requireMemoryOwnedByBot(botID, memoryID); err != nil {
 		return err
@@ -836,7 +839,7 @@ func (h *MemoryHandler) ChatUpdate(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(payload.Memory) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "memory is required")
+		return apperror.FieldRequired("memory")
 	}
 	item, err := provider.Update(c.Request().Context(), memprovider.UpdateRequest{
 		BotID:    botID,
@@ -881,7 +884,7 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 		return err
 	}
 	if payload.Ratio <= 0 || payload.Ratio > 1 {
-		return echo.NewHTTPError(http.StatusBadRequest, "ratio is required and must be in range (0, 1]")
+		return apperror.FieldInvalid("ratio", errors.New("ratio must be in range (0, 1]"))
 	}
 	ratio := payload.Ratio
 	var decayDays int
@@ -892,9 +895,6 @@ func (h *MemoryHandler) ChatCompact(c echo.Context) error {
 	scopes, err := h.resolveEnabledScopes(botID)
 	if err != nil {
 		return err
-	}
-	if len(scopes) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "no memory scopes found")
 	}
 
 	provider, checkErr := h.checkService(c.Request().Context(), botID)
@@ -1077,7 +1077,7 @@ func (h *MemoryHandler) ChatStatus(c echo.Context) error {
 func (*MemoryHandler) resolveEnabledScopes(botID string) ([]namespaceScope, error) {
 	botID = strings.TrimSpace(botID)
 	if botID == "" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "bot id is empty")
+		return nil, errs.New("bot id is empty")
 	}
 	return []namespaceScope{{
 		Namespace: sharedMemoryNamespace,
@@ -1099,16 +1099,12 @@ func normalizeSharedMemoryNamespace(raw string) (string, error) {
 	case "", sharedMemoryNamespace:
 		return sharedMemoryNamespace, nil
 	default:
-		return "", echo.NewHTTPError(http.StatusBadRequest, "invalid namespace: "+raw)
+		return "", apperror.FieldInvalid("namespace", fmt.Errorf("invalid namespace: %s", raw))
 	}
 }
 
 func (*MemoryHandler) resolveBotID(c echo.Context) (string, error) {
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
-	}
-	return botID, nil
+	return httpx.RequiredParam(c, "bot_id")
 }
 
 func buildNamespaceFilters(namespace, scopeID string, extra map[string]any) map[string]any {

@@ -109,8 +109,8 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 		if runtimeErr := settingsRuntimeHTTPError(err); runtimeErr != nil {
 			return runtimeErr
 		}
-		if errors.Is(err, settings.ErrInvalidModelRef) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if modelRefErr := settingsModelRefHTTPError(err); modelRefErr != nil {
+			return modelRefErr
 		}
 		if errors.Is(err, settings.ErrModelIDAmbiguous) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; select by model UUID")
@@ -119,6 +119,26 @@ func (h *SettingsHandler) Upsert(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+// settingsModelRefHTTPError names the request field whose model reference
+// matched no model.
+func settingsModelRefHTTPError(err error) error {
+	var ref *settings.InvalidModelRefError
+	if !errors.As(err, &ref) {
+		return nil
+	}
+	switch ref.Field {
+	case "chat_model_id":
+		return apperror.FieldInvalid("chat_model_id", err)
+	case "compaction_model_id":
+		return apperror.FieldInvalid("compaction_model_id", err)
+	case "memory_llm_model_id":
+		return apperror.FieldInvalid("memory_llm_model_id", err)
+	case "image_model_id":
+		return apperror.FieldInvalid("image_model_id", err)
+	}
+	return nil
 }
 
 func settingsReasoningHTTPError(err error) error {

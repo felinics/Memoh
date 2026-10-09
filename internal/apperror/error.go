@@ -21,6 +21,7 @@ const (
 	CodeWorkspaceDependencyDefinitionInvalid     Code = "workspace_dependency.definition_invalid"
 	CodeWorkspaceDependencyCatalogUnavailable    Code = "workspace_dependency.catalog_unavailable"
 	CodeBotNameTaken                             Code = "bot.name_taken"
+	CodeBotNameInvalid                           Code = "bot.name_invalid"
 	CodeBotAgentNotFound                         Code = "bot_agent.not_found"
 	CodeBotAgentNameTaken                        Code = "bot_agent.name_taken"
 	CodeBotAgentInvalidRuntime                   Code = "bot_agent.invalid_runtime"
@@ -30,6 +31,11 @@ const (
 	CodeChannelRuntimeUnavailable                Code = "channel.runtime_unavailable"
 	CodeChannelVerificationFailed                Code = "channel.verification_failed"
 	CodeAgentChatModelNotConfigured              Code = "agent.chat_model_not_configured"
+	CodeChannelEnableFailed                      Code = "channel.enable_failed"
+	CodeChannelWebhookEndpointInvalid            Code = "channel.webhook_endpoint_invalid"
+	CodeChannelBindingRequired                   Code = "channel.binding_required"
+	CodeNetworkProviderNotConfigured             Code = "network.provider_not_configured"
+	CodeUserCannotRemoveSelf                     Code = "user.cannot_remove_self"
 	CodeCompactionModelUnavailable               Code = "compaction.model_unavailable"
 	CodeSettingsReasoningEffortInvalid           Code = "settings.reasoning_effort_invalid"
 	CodeSettingsReasoningUnavailable             Code = "settings.reasoning_options_unavailable"
@@ -413,6 +419,10 @@ var catalog = map[Code]Definition{
 		Detail:      "This name is already taken.",
 		AllowedArgs: []string{"field"},
 	},
+	CodeBotNameInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The bot name is invalid or reserved.",
+	},
 	CodeBotAgentNotFound: {
 		HTTPStatus: http.StatusNotFound,
 		Detail:     "This Agent is no longer available.",
@@ -445,6 +455,26 @@ var catalog = map[Code]Definition{
 	CodeChannelVerificationFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The channel configuration could not be verified. Check the credentials, then try again.",
+	},
+	CodeChannelEnableFailed: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The channel could not be enabled.",
+	},
+	CodeChannelWebhookEndpointInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The webhook endpoint is invalid.",
+	},
+	CodeChannelBindingRequired: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The recipient is not bound to this channel.",
+	},
+	CodeNetworkProviderNotConfigured: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "No network provider is configured for this bot.",
+	},
+	CodeUserCannotRemoveSelf: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "You cannot remove yourself.",
 	},
 	CodeCompactionModelUnavailable: {
 		HTTPStatus:  http.StatusBadRequest,

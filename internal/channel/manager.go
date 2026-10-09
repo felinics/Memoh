@@ -229,6 +229,13 @@ func (m *Manager) Start(ctx context.Context) {
 	}()
 }
 
+var (
+	// ErrSendTargetRequired means a send named neither a target nor a channel identity.
+	ErrSendTargetRequired = errors.New("target or channel_identity_id is required")
+	// ErrChannelBindingRequired means the recipient identity has not linked this channel.
+	ErrChannelBindingRequired = errors.New("channel binding required")
+)
+
 // Send delivers an outbound message to the specified channel, resolving target and config automatically.
 func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelType, req SendRequest) error {
 	if m.service == nil {
@@ -246,14 +253,14 @@ func (m *Manager) Send(ctx context.Context, botID string, channelType ChannelTyp
 	if target == "" {
 		targetChannelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 		if targetChannelIdentityID == "" {
-			return errors.New("target or channel_identity_id is required")
+			return ErrSendTargetRequired
 		}
 		userCfg, err := m.service.GetChannelIdentityConfig(ctx, targetChannelIdentityID, channelType)
 		if err != nil {
 			if m.logger != nil {
 				m.logger.WarnContext(ctx, "channel binding missing", slog.String("channel", channelType.String()), slog.String("channel_identity_id", targetChannelIdentityID))
 			}
-			return errors.New("channel binding required")
+			return ErrChannelBindingRequired
 		}
 		target, err = m.registry.ResolveTargetFromUserConfig(channelType, userCfg.Config)
 		if err != nil {

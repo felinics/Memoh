@@ -461,9 +461,28 @@ func WorkspaceToolApprovalModes(config settings.ToolApprovalConfig) WorkspaceTar
 	}
 }
 
+// InvalidToolApprovalModeError is ErrInvalidWorkspaceToolApprovalMode together
+// with the request field ("read", "write" or "exec") that held the mode.
+type InvalidToolApprovalModeError struct {
+	Field string
+}
+
+func (e *InvalidToolApprovalModeError) Error() string {
+	return ErrInvalidWorkspaceToolApprovalMode.Error() + ": " + e.Field
+}
+
+func (*InvalidToolApprovalModeError) Is(target error) bool {
+	return target == ErrInvalidWorkspaceToolApprovalMode
+}
+
 func ApplyWorkspaceToolApprovalModes(config settings.ToolApprovalConfig, modes WorkspaceTargetToolApproval) (settings.ToolApprovalConfig, error) {
-	if !validToolApprovalMode(modes.Read) || !validToolApprovalMode(modes.Write) || !validToolApprovalMode(modes.Exec) {
-		return settings.ToolApprovalConfig{}, ErrInvalidWorkspaceToolApprovalMode
+	switch {
+	case !validToolApprovalMode(modes.Read):
+		return settings.ToolApprovalConfig{}, &InvalidToolApprovalModeError{Field: "read"}
+	case !validToolApprovalMode(modes.Write):
+		return settings.ToolApprovalConfig{}, &InvalidToolApprovalModeError{Field: "write"}
+	case !validToolApprovalMode(modes.Exec):
+		return settings.ToolApprovalConfig{}, &InvalidToolApprovalModeError{Field: "exec"}
 	}
 	config.Read.Mode = modes.Read
 	config.Write.Mode = modes.Write

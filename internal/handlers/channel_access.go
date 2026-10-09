@@ -9,6 +9,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channelaccess"
 	"github.com/felinics/memoh/internal/errs"
@@ -91,11 +92,11 @@ func (h *ChannelAccessHandler) SetManager(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(req.ChannelIdentityID)
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("channel_identity_id", err)
 	}
 	if err := h.service.SetManager(c.Request().Context(), botID, channelIdentityID, req.Granted, actorID); err != nil {
 		if errors.Is(err, channelaccess.ErrInvalidInput) || errors.Is(err, acl.ErrInvalidRuleSubject) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.FieldInvalid("channel_identity_id", err)
 		}
 		return errs.Wrap(err, "set manager")
 	}
@@ -120,7 +121,7 @@ func (h *ChannelAccessHandler) ClearManagerOverride(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("channel_identity_id", err)
 	}
 	if err := h.service.ClearManagerOverride(c.Request().Context(), botID, channelIdentityID); err != nil {
 		return errs.Wrap(err, "clear manager override")
@@ -148,9 +149,6 @@ func (h *ChannelAccessHandler) IssueLinkCode(c echo.Context) error {
 	}
 	code, err := h.service.IssueLinkCode(c.Request().Context(), userID, strings.TrimSpace(req.ChannelType))
 	if err != nil {
-		if errors.Is(err, channelaccess.ErrInvalidInput) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
 		return errs.Wrap(err, "issue link code")
 	}
 	return c.JSON(http.StatusCreated, code)
@@ -191,7 +189,7 @@ func (h *ChannelAccessHandler) Unbind(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("channel_identity_id", err)
 	}
 	if err := h.service.Unbind(c.Request().Context(), userID, channelIdentityID); err != nil {
 		return errs.Wrap(err, "unbind")

@@ -116,6 +116,9 @@ func (h *BotRemoteRuntimeHandler) Mount(c echo.Context) error {
 	}
 	target, err := h.service.Mount(c.Request().Context(), botID, c.Param("runtime_id"))
 	if err != nil {
+		if errors.Is(err, userruntime.ErrInvalidInput) {
+			return apperror.FieldInvalid("runtime_id", err)
+		}
 		return workspaceTargetHTTPError(err)
 	}
 	return c.JSON(http.StatusOK, target)
@@ -138,7 +141,7 @@ func (h *BotRemoteRuntimeHandler) Delete(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(c.Param("target_id")) == workspace.WorkspaceTargetNative {
-		return echo.NewHTTPError(http.StatusBadRequest, "native workspace target cannot be deleted")
+		return apperror.FieldInvalid("target_id", errors.New("native workspace target cannot be deleted"))
 	}
 	if err := h.service.DeleteMount(c.Request().Context(), botID, c.Param("target_id")); err != nil {
 		return workspaceTargetHTTPError(err)
@@ -247,7 +250,7 @@ func (h *BotRemoteRuntimeHandler) resolveToolApprovalUpdate(
 	hasModes := req.Read != "" || req.Write != "" || req.Exec != ""
 	if !hasModes {
 		if req.ToolApprovalConfig == nil && req.Enabled == nil {
-			return config, workspace.ErrInvalidWorkspaceToolApprovalMode
+			return config, apperror.FieldRequired("tool_approval_config")
 		}
 		return config, nil
 	}
@@ -271,11 +274,26 @@ func (h *BotRemoteRuntimeHandler) requirePermission(c echo.Context, permission s
 	return botID, nil
 }
 
+// toolApprovalModeHTTPError names the mode field that is not allow, ask or deny.
+func toolApprovalModeHTTPError(err error) error {
+	var invalid *workspace.InvalidToolApprovalModeError
+	if errors.As(err, &invalid) {
+		switch invalid.Field {
+		case "read":
+			return apperror.FieldInvalid("read", err)
+		case "write":
+			return apperror.FieldInvalid("write", err)
+		case "exec":
+			return apperror.FieldInvalid("exec", err)
+		}
+	}
+	return errs.Wrap(err, "tool approval mode")
+}
+
 func workspaceTargetHTTPError(err error) error {
 	switch {
-	case errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode),
-		errors.Is(err, userruntime.ErrInvalidInput):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	case errors.Is(err, workspace.ErrInvalidWorkspaceToolApprovalMode):
+		return toolApprovalModeHTTPError(err)
 	case errors.Is(err, workspace.ErrRemoteRuntimeNotUsable),
 		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):

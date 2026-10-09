@@ -261,3 +261,9 @@ mcp.oauth_discovery_failed	502
 mcp.oauth_not_discovered	409
 oauth.state_invalid	400
 mcp.name_taken	409
+bot.name_invalid	400
+channel.binding_required	409
+channel.enable_failed	400
+channel.webhook_endpoint_invalid	400
+network.provider_not_configured	409
+user.cannot_remove_self	400

@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
@@ -249,12 +250,15 @@ func (*BotUserAccessHandler) mapGrantError(err error) error {
 	case errors.Is(err, bots.ErrGrantNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	case errors.Is(err, bots.ErrOwnerUserNotFound):
-		return echo.NewHTTPError(http.StatusBadRequest, "user not found")
-	case errors.Is(err, bots.ErrInvalidPermission),
-		errors.Is(err, bots.ErrInvalidGrantSubject),
-		errors.Is(err, bots.ErrGrantUserRequired),
-		errors.Is(err, bots.ErrGrantOwnerConflict):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("user_id", err)
+	case errors.Is(err, bots.ErrInvalidPermission):
+		return apperror.FieldInvalid("permissions", err)
+	case errors.Is(err, bots.ErrInvalidGrantSubject):
+		return apperror.FieldInvalid("subject_type", err)
+	case errors.Is(err, bots.ErrGrantUserRequired):
+		return apperror.FieldRequired("user_id")
+	case errors.Is(err, bots.ErrGrantOwnerConflict):
+		return apperror.FieldInvalid("user_id", err)
 	case errors.Is(err, bots.ErrGrantExists):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case errors.Is(err, bots.ErrBotNotFound):

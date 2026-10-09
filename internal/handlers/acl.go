@@ -10,6 +10,7 @@ import (
 
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/acl"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel/identities"
 	"github.com/felinics/memoh/internal/errs"
@@ -195,7 +196,7 @@ func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
 	}
 	if err := h.service.SetDefaultEffect(c.Request().Context(), botID, req.DefaultEffect); err != nil {
 		if errors.Is(err, acl.ErrInvalidEffect) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.FieldInvalid("default_effect", err)
 		}
 		return errs.Wrap(err, "set default effect")
 	}
@@ -253,7 +254,7 @@ func (h *ACLHandler) ListObservedConversations(c echo.Context) error {
 	}
 	channelIdentityID := strings.TrimSpace(c.Param("channel_identity_id"))
 	if err := identitypkg.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("channel_identity_id", err)
 	}
 	items, err := h.service.ListObservedConversationsByChannelIdentity(c.Request().Context(), botID, channelIdentityID)
 	if err != nil {
@@ -305,10 +306,13 @@ func (h *ACLHandler) requireManageAccess(c echo.Context) (string, string, error)
 }
 
 func (*ACLHandler) mapRuleError(err error) error {
-	if errors.Is(err, acl.ErrInvalidRuleSubject) ||
-		errors.Is(err, acl.ErrInvalidSourceScope) ||
-		errors.Is(err, acl.ErrInvalidEffect) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	switch {
+	case errors.Is(err, acl.ErrInvalidRuleSubject):
+		return apperror.FieldInvalid("channel_identity_id", err)
+	case errors.Is(err, acl.ErrInvalidSourceScope):
+		return apperror.FieldInvalid("source_scope", err)
+	case errors.Is(err, acl.ErrInvalidEffect):
+		return apperror.FieldInvalid("effect", err)
 	}
 	return errs.Wrap(err, "map rule error")
 }

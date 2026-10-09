@@ -23,7 +23,7 @@ func RequireChannelIdentityID(c echo.Context) (string, error) {
 		return "", err
 	}
 	if err := identity.ValidateChannelIdentityID(channelIdentityID); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return "", errs.Wrap(err, "channel identity id")
 	}
 	return channelIdentityID, nil
 }

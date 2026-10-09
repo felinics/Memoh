@@ -533,7 +533,8 @@
       "steer_unsupported": "当前运行不支持插入消息，请等它结束后再发送。"
     },
     "bot": {
-      "name_taken": "该名称已被占用。"
+      "name_taken": "该名称已被占用。",
+      "name_invalid": "名称需为 2-63 个小写字母、数字或连字符，并以字母或数字开头；部分名称为保留名。"
     },
     "bot_agent": {
       "not_found": "这个 Agent 已不存在。",
@@ -545,7 +546,10 @@
     },
     "channel": {
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。",
-      "verification_failed": "无法验证平台配置，请检查凭据后重试。"
+      "verification_failed": "无法验证平台配置，请检查凭据后重试。",
+      "enable_failed": "渠道启用失败，请检查凭据后重试。",
+      "webhook_endpoint_invalid": "请使用公网 HTTPS 地址，不带端口、凭据、查询串或片段，路径须为该渠道显示的 webhook 路径。",
+      "binding_required": "接收方尚未绑定该渠道。"
     },
     "compaction": {
       "model_unavailable": "压缩模型不可用。请选择一个已启用、且声明了上下文窗口的对话模型。"
@@ -859,7 +863,13 @@
     "invalid_chat_runtime": "选择的对话运行时无效。",
     "queue_invocation_conflict": "这条消息已用不同内容提交过。",
     "queue_unsupported_session": "讨论会话暂不支持队列操作。",
-    "queue_follow_up_unsupported_channel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。"
+    "queue_follow_up_unsupported_channel": "该渠道暂不支持排队消息：渠道回复只能随你发送的消息投递。可用 /steer 补充当前回复，或在 Web 端排队。",
+    "network": {
+      "provider_not_configured": "请先为此 Bot 选择网络服务。"
+    },
+    "user": {
+      "cannot_remove_self": "不能移除自己，请让其他管理员操作。"
+    }
   },
   "runtime": {
     "claudeCode": {

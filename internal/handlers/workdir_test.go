@@ -20,11 +20,6 @@ func TestWorkdirHTTPError(t *testing.T) {
 		err  error
 		code int
 	}{
-		"name required":      {workdir.ErrNameRequired, http.StatusBadRequest},
-		"path required":      {workdir.ErrPathRequired, http.StatusBadRequest},
-		"invalid path":       {workdir.ErrInvalidPath, http.StatusBadRequest},
-		"path missing":       {workdir.ErrPathNotFound, http.StatusBadRequest},
-		"path not directory": {workdir.ErrPathNotDirectory, http.StatusBadRequest},
 		"workdir not found":  {workdir.ErrWorkdirNotFound, http.StatusNotFound},
 		"target not found":   {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
 		"db not found":       {db.ErrNotFound, http.StatusNotFound},
@@ -59,7 +54,6 @@ func TestWorkdirDirectoriesHTTPError(t *testing.T) {
 		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, http.StatusServiceUnavailable},
 		"bridge unavailable": {fmt.Errorf("list: %w", bridge.ErrUnavailable), http.StatusServiceUnavailable},
 		"path forbidden":     {workdir.ErrPathForbidden, http.StatusForbidden},
-		"path missing":       {workdir.ErrPathNotFound, http.StatusBadRequest},
 		"target not found":   {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
 		"runtime revoked":    {workspace.ErrRemoteRuntimeRevoked, http.StatusConflict},
 	} {

@@ -249,12 +249,14 @@ func (h *WorkdirHandler) requirePermission(c echo.Context, permission string) (s
 
 func workdirHTTPError(err error) error {
 	switch {
-	case errors.Is(err, workdir.ErrNameRequired),
-		errors.Is(err, workdir.ErrPathRequired),
-		errors.Is(err, workdir.ErrInvalidPath),
+	case errors.Is(err, workdir.ErrNameRequired):
+		return apperror.FieldRequired("name")
+	case errors.Is(err, workdir.ErrPathRequired):
+		return apperror.FieldRequired("path")
+	case errors.Is(err, workdir.ErrInvalidPath),
 		errors.Is(err, workdir.ErrPathNotFound),
 		errors.Is(err, workdir.ErrPathNotDirectory):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("path", err)
 	case errors.Is(err, workdir.ErrWorkdirNotFound),
 		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):

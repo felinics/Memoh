@@ -96,7 +96,7 @@ func (p *Provider) ExecuteAction(ctx context.Context, cfg netctl.BotOverlayConfi
 			},
 		}, err
 	default:
-		return netctl.ProviderActionExecution{}, fmt.Errorf("unsupported network action %q", actionID)
+		return netctl.ProviderActionExecution{}, fmt.Errorf("%w %q", netctl.ErrUnsupportedAction, actionID)
 	}
 }
 

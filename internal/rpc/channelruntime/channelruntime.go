@@ -29,6 +29,8 @@ const (
 	reasonEnableFailed       = "channel.enable_failed"
 	reasonInvalidWebhook     = "channel.invalid_webhook"
 	reasonWebhookUnsupported = "channel.webhook_unsupported"
+	reasonSendTargetRequired = "channel.send_target_required"
+	reasonBindingRequired    = "channel.binding_required"
 )
 
 type Client struct{ rpc *runtimeRpc.Client }
@@ -100,6 +102,8 @@ var reasons = rpc.Reasons{
 	{Err: channel.ErrEnableChannelFailed, Reason: reasonEnableFailed, Code: codes.FailedPrecondition, Message: "channel enable failed"},
 	{Err: channel.ErrInvalidWebhookEndpoint, Reason: reasonInvalidWebhook, Code: codes.InvalidArgument, Message: "invalid channel webhook endpoint"},
 	{Err: channel.ErrWebhookEndpointUnsupported, Reason: reasonWebhookUnsupported, Code: codes.Unimplemented, Message: "channel webhook endpoint unsupported"},
+	{Err: channel.ErrSendTargetRequired, Reason: reasonSendTargetRequired, Code: codes.InvalidArgument, Message: "channel send target required"},
+	{Err: channel.ErrChannelBindingRequired, Reason: reasonBindingRequired, Code: codes.FailedPrecondition, Message: "channel binding required"},
 }
 
 func (c *Client) call(ctx context.Context, method string, input, output any) error {

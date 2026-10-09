@@ -129,7 +129,8 @@
       "steer_unsupported": "This run cannot accept steer input. Wait for it to finish and send a new message."
     },
     "bot": {
-      "name_taken": "This name is already taken."
+      "name_taken": "This name is already taken.",
+      "name_invalid": "Use 2-63 lowercase letters, digits or hyphens, starting with a letter or digit. Some names are reserved."
     },
     "bot_agent": {
       "not_found": "This Agent no longer exists.",
@@ -141,7 +142,10 @@
     },
     "channel": {
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly.",
-      "verification_failed": "The channel configuration could not be verified. Check the credentials, then try again."
+      "verification_failed": "The channel configuration could not be verified. Check the credentials, then try again.",
+      "enable_failed": "The channel could not be enabled. Check its credentials, then try again.",
+      "webhook_endpoint_invalid": "Use a public HTTPS URL without a port, credentials, query or fragment. Its path must be the webhook path shown for this channel.",
+      "binding_required": "The recipient has not linked this channel yet."
     },
     "compaction": {
       "model_unavailable": "The compaction model is unavailable. Pick an enabled chat model with a declared context window."
@@ -455,7 +459,13 @@
     "invalid_chat_runtime": "The selected chat runtime is invalid.",
     "queue_invocation_conflict": "This message was already submitted with different content.",
     "queue_unsupported_session": "Queue controls are not available in discussion sessions.",
-    "queue_follow_up_unsupported_channel": "Queued follow-ups are not available on this channel; its replies are delivered from the message you send. Use /steer to add to the current reply, or queue from the web app."
+    "queue_follow_up_unsupported_channel": "Queued follow-ups are not available on this channel; its replies are delivered from the message you send. Use /steer to add to the current reply, or queue from the web app.",
+    "network": {
+      "provider_not_configured": "Choose a network provider for this bot first."
+    },
+    "user": {
+      "cannot_remove_self": "You cannot remove yourself. Ask another admin to remove you."
+    }
   },
   "auth": {
     "welcome": "Welcome Back",

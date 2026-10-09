@@ -194,7 +194,7 @@ func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 	}
 	if err := h.service.UpdatePassword(c.Request().Context(), channelIdentityID, req.CurrentPassword, req.NewPassword); err != nil {
 		if errors.Is(err, accounts.ErrInvalidPassword) {
-			return echo.NewHTTPError(http.StatusBadRequest, "current password mismatch")
+			return apperror.FieldInvalid("current_password", err)
 		}
 		return errs.Wrap(err, "update my password")
 	}
@@ -384,7 +384,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 		return err
 	}
 	if targetID == channelIdentityID {
-		return echo.NewHTTPError(http.StatusBadRequest, "cannot remove current member")
+		return apperror.New(apperror.CodeUserCannotRemoveSelf, nil)
 	}
 	if _, err := h.service.Get(c.Request().Context(), targetID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
@@ -436,7 +436,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusForbidden, "admin role required for owner override")
 		}
 		if err := identity.ValidateChannelIdentityID(raw); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return apperror.FieldInvalid("owner_id", err)
 		}
 		ownerID = raw
 		ownerFromToken = false
@@ -452,7 +452,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	}
 	if req.Metadata != nil {
 		if err := validateACPManagedConfig(req.Metadata); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid ACP metadata: "+err.Error())
+			return apperror.Wrap(apperror.CodeBotAgentInvalidMetadata, err, nil)
 		}
 	}
 	req.RequestKey = strings.TrimSpace(c.Request().Header.Get(createRequestKeyHeader))
@@ -524,16 +524,16 @@ func createBotHTTPError(err error, ownerFromToken bool) error {
 		if ownerFromToken {
 			return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, "owner user not found")
+		return apperror.FieldInvalid("owner_id", err)
 	}
 	if errors.Is(err, acl.ErrUnknownPreset) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("acl_preset", err)
 	}
 	if errors.Is(err, bots.ErrBotNameTaken) {
 		return apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"})
 	}
 	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Wrap(apperror.CodeBotNameInvalid, err, nil)
 	}
 	if errors.Is(err, bots.ErrCreateRequestDeleted) {
 		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
@@ -885,7 +885,7 @@ func updateBotHTTPError(err error) error {
 		return apperror.New(apperror.CodeBotNameTaken, map[string]string{"field": "name"})
 	}
 	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.Wrap(apperror.CodeBotNameInvalid, err, nil)
 	}
 	return errs.Wrap(err, "update bot")
 }
@@ -928,7 +928,7 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusNotFound, "bot not found")
 		}
 		if errors.Is(err, bots.ErrOwnerUserNotFound) {
-			return echo.NewHTTPError(http.StatusBadRequest, "owner user not found")
+			return apperror.FieldInvalid("owner_user_id", err)
 		}
 		return errs.Wrap(err, "transfer bot owner")
 	}
@@ -1009,7 +1009,7 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("platform", err)
 	}
 	if h.channelStore == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel store not configured")
@@ -1053,7 +1053,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("platform", err)
 	}
 	var req channel.UpsertConfigRequest
 	if err := c.Bind(&req); err != nil {
@@ -1070,11 +1070,12 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 		if mapped := mapChannelRuntimeError(err); mapped != nil {
 			return mapped
 		}
+		if errors.Is(err, channel.ErrEnableChannelFailed) {
+			return apperror.Wrap(apperror.CodeChannelEnableFailed, err, nil)
+		}
 		status := http.StatusInternalServerError
 		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
 			status = http.StatusBadGateway
-		} else if errors.Is(err, channel.ErrEnableChannelFailed) {
-			status = http.StatusBadRequest
 		}
 		return echo.NewHTTPError(status, err.Error())
 	}
@@ -1110,7 +1111,7 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("platform", err)
 	}
 	var req channel.UpdateChannelStatusRequest
 	if err := c.Bind(&req); err != nil {
@@ -1127,11 +1128,12 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 		if errors.Is(err, channel.ErrChannelConfigNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
+		if errors.Is(err, channel.ErrEnableChannelFailed) {
+			return apperror.Wrap(apperror.CodeChannelEnableFailed, err, nil)
+		}
 		status := http.StatusInternalServerError
 		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
 			status = http.StatusBadGateway
-		} else if errors.Is(err, channel.ErrEnableChannelFailed) {
-			status = http.StatusBadRequest
 		}
 		return echo.NewHTTPError(status, err.Error())
 	}
@@ -1166,7 +1168,7 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("platform", err)
 	}
 	var req channel.SetWebhookEndpointRequest
 	if err := c.Bind(&req); err != nil {
@@ -1183,7 +1185,9 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 		switch {
 		case errors.Is(err, channel.ErrChannelConfigNotFound):
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
-		case errors.Is(err, channel.ErrInvalidWebhookEndpoint), errors.Is(err, channel.ErrWebhookEndpointUnsupported):
+		case errors.Is(err, channel.ErrInvalidWebhookEndpoint):
+			return apperror.Wrap(apperror.CodeChannelWebhookEndpointInvalid, err, nil)
+		case errors.Is(err, channel.ErrWebhookEndpointUnsupported):
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		default:
 			return errs.WrapDependency(err, "set channel webhook endpoint")
@@ -1218,7 +1222,7 @@ func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("platform", err)
 	}
 	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
@@ -1263,7 +1267,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	}
 	channelType, err := h.registry.ParseChannelType(c.Param("platform"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("platform", err)
 	}
 	var req channel.SendRequest
 	if err := c.Bind(&req); err != nil {
@@ -1273,10 +1277,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 		return apperror.FieldRequired("message")
 	}
 	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, req); err != nil {
-		if mapped := mapChannelRuntimeError(err); mapped != nil {
-			return mapped
-		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return sendChannelMessageHTTPError(err, true)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -1312,14 +1313,17 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 	}
 	route, err := h.routeService.GetByID(c.Request().Context(), chatToken.RouteID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "route not found")
+		if accountNotFound(err) {
+			return echo.NewHTTPError(http.StatusNotFound, "route not found")
+		}
+		return errs.Wrap(err, "get chat route")
 	}
 	if strings.TrimSpace(route.ReplyTarget) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "reply target missing in route")
 	}
 	channelType, err := h.registry.ParseChannelType(route.Platform)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return errs.Wrap(err, "route platform")
 	}
 
 	var req channel.SendRequest
@@ -1333,12 +1337,29 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 		Target:  route.ReplyTarget,
 		Message: req.Message,
 	}); err != nil {
-		if mapped := mapChannelRuntimeError(err); mapped != nil {
-			return mapped
-		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return sendChannelMessageHTTPError(err, false)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// sendChannelMessageHTTPError answers a failed outbound send. A missing target
+// or an unbound recipient is the caller's to fix; any other failure is the
+// platform refusing delivery. targetFromRequest is false when the route, not
+// the request, supplies the target.
+func sendChannelMessageHTTPError(err error, targetFromRequest bool) error {
+	if mapped := mapChannelRuntimeError(err); mapped != nil {
+		return mapped
+	}
+	switch {
+	case errors.Is(err, channel.ErrChannelConfigNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	case errors.Is(err, channel.ErrSendTargetRequired) && targetFromRequest:
+		return apperror.FieldRequired("target")
+	case errors.Is(err, channel.ErrChannelBindingRequired):
+		return apperror.Wrap(apperror.CodeChannelBindingRequired, err, nil)
+	default:
+		return errs.WrapDependency(err, "send channel message")
+	}
 }
 
 func mapChannelRuntimeError(err error) error {
