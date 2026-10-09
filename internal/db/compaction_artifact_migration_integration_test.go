@@ -70,6 +70,7 @@ CREATE TABLE bot_history_message_compacts (
   summary TEXT NOT NULL DEFAULT '',
   message_count INTEGER NOT NULL DEFAULT 0,
   error_message TEXT NOT NULL DEFAULT '',
+  failure_reason TEXT NOT NULL DEFAULT '',
   usage JSONB,
   model_id UUID,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),

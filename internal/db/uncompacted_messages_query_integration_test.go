@@ -218,8 +218,10 @@ VALUES
 	if err != nil {
 		t.Fatalf("ListUncompactedMessagesBySessionWithinBytes tiny budget: %v", err)
 	}
-	if len(oversized) != 0 {
-		t.Fatalf("tiny byte budget admitted %d payload rows", len(oversized))
+	// A leading row larger than the budget comes back alone, without its
+	// payload, so the caller can pass over it.
+	if len(oversized) != 1 || !oversized[0].Oversized || len(oversized[0].Content) != 0 {
+		t.Fatalf("tiny byte budget = %+v, want the leading row alone and without its payload", oversized)
 	}
 
 	if _, err := tx.Exec(ctx, `
