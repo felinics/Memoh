@@ -10,35 +10,61 @@ import (
 )
 
 // sessionStore is an in-memory session for multi-pass tests. It applies the
-// bounded read's candidate rules to its whole history: an ok or pending claim
-// takes rows out of the candidate set, GapBefore and IneffectiveClaim follow
-// the query's definitions, and windows are admitted by payload bytes after
-// the cursor. The PostgreSQL integration test pins the SQL itself.
+// bounded read's candidate rules to its whole history: an ok claim or a fresh
+// pending one of the current epoch takes rows out of the candidate set,
+// GapBefore, PendingBefore and IneffectiveClaim follow the query's
+// definitions, windows are admitted by payload bytes after the cursor, and the
+// recorded scan position applies while its epoch is current. The PostgreSQL
+// integration test pins the SQL itself.
 type sessionStore struct {
 	*fakeQueries
-	history   []sqlc.ListUncompactedMessagesBySessionRow
-	reasons   map[pgtype.UUID]string
-	windows   int
-	readBytes int64
+	history    []sqlc.ListUncompactedMessagesBySessionRow
+	reasons    map[pgtype.UUID]string
+	claimEpoch map[pgtype.UUID]int64
+	epoch      int64
+	scanAfter  pgtype.UUID
+	scanEpoch  int64
+	windows    int
+	readBytes  int64
 }
 
 func newSessionStore(history ...sqlc.ListUncompactedMessagesBySessionRow) *sessionStore {
-	return &sessionStore{fakeQueries: &fakeQueries{}, history: history, reasons: map[pgtype.UUID]string{}}
+	return &sessionStore{fakeQueries: &fakeQueries{}, history: history, reasons: map[pgtype.UUID]string{}, claimEpoch: map[pgtype.UUID]int64{}}
 }
 
 func payloadBytes(row sqlc.ListUncompactedMessagesBySessionRow) int64 {
 	return int64(len(row.Content) + len(row.Metadata) + len(row.Usage) + len(row.DisplayText.String))
 }
 
-func (q *sessionStore) isCandidate(row sqlc.ListUncompactedMessagesBySessionRow) bool {
-	status := q.logStatuses[q.claims[row.ID]]
-	return status != "ok" && status != "pending"
+// heldBy reports what keeps a row out of the candidate set: "ok", "pending"
+// or "" for a candidate.
+func (q *sessionStore) heldBy(row sqlc.ListUncompactedMessagesBySessionRow) string {
+	claim := q.claims[row.ID]
+	if !claim.Valid || q.claimEpoch[claim] != q.epoch {
+		return ""
+	}
+	switch status := q.logStatuses[claim]; status {
+	case "ok", "pending":
+		return status
+	}
+	return ""
 }
 
-func (q *sessionStore) candidates(after pgtype.UUID) ([]sqlc.ListUncompactedMessagesBySessionRow, []bool) {
-	var rows []sqlc.ListUncompactedMessagesBySessionRow
-	var gaps []bool
+func (q *sessionStore) isCandidate(row sqlc.ListUncompactedMessagesBySessionRow) bool {
+	return q.heldBy(row) == ""
+}
+
+type storeCandidate struct {
+	row                sqlc.ListUncompactedMessagesBySessionRow
+	gap, pendingBefore bool
+}
+
+func (q *sessionStore) candidates(after pgtype.UUID) []storeCandidate {
+	if !after.Valid && q.scanEpoch == q.epoch {
+		after = q.scanAfter
+	}
 	started := !after.Valid
+	var out []storeCandidate
 	for i, row := range q.history {
 		if !started {
 			started = row.ID == after
@@ -48,16 +74,34 @@ func (q *sessionStore) candidates(after pgtype.UUID) ([]sqlc.ListUncompactedMess
 			continue
 		}
 		row.CompactID = q.claims[row.ID]
-		rows = append(rows, row)
-		gaps = append(gaps, i > 0 && !q.isCandidate(q.history[i-1]))
+		row.CompactionEpoch = q.epoch
+		candidate := storeCandidate{row: row}
+		if i > 0 {
+			held := q.heldBy(q.history[i-1])
+			candidate.gap, candidate.pendingBefore = held != "", held == "pending"
+		}
+		out = append(out, candidate)
 	}
-	return rows, gaps
+	return out
+}
+
+// candidateRows lists every candidate row, ignoring the scan position.
+func (q *sessionStore) candidateRows() []sqlc.ListUncompactedMessagesBySessionRow {
+	var rows []sqlc.ListUncompactedMessagesBySessionRow
+	for _, row := range q.history {
+		if q.isCandidate(row) {
+			rows = append(rows, row)
+		}
+	}
+	return rows
 }
 
 func (q *sessionStore) MeasureUncompactedMessagesBySession(context.Context, pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
-	rows, _ := q.candidates(pgtype.UUID{})
 	var measure sqlc.MeasureUncompactedMessagesBySessionRow
-	for _, row := range rows {
+	for _, row := range q.history {
+		if !q.isCandidate(row) {
+			continue
+		}
 		measure.CandidateCount++
 		measure.CandidateBytes += payloadBytes(row)
 		measure.LargestCandidateBytes = max(measure.LargestCandidateBytes, payloadBytes(row))
@@ -66,32 +110,48 @@ func (q *sessionStore) MeasureUncompactedMessagesBySession(context.Context, pgty
 }
 
 func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Context, arg sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
-	rows, gaps := q.candidates(arg.AfterMessageID)
+	candidates := q.candidates(arg.AfterMessageID)
 	var total int64
-	for _, row := range rows {
-		total += payloadBytes(row)
+	for _, c := range candidates {
+		total += payloadBytes(c.row)
 	}
 	q.windows++
 	var window []sqlc.ListUncompactedMessagesBySessionWithinBytesRow
 	var cumulative int64
-	for i, row := range rows {
-		cumulative += payloadBytes(row)
+	for _, c := range candidates {
+		cumulative += payloadBytes(c.row)
 		if cumulative > arg.MaxBytes {
 			break
 		}
-		bounded := boundedRowsForTest([]sqlc.ListUncompactedMessagesBySessionRow{row})[0]
-		bounded.CandidateCount = int64(len(rows))
+		bounded := boundedRowsForTest([]sqlc.ListUncompactedMessagesBySessionRow{c.row})[0]
+		bounded.CandidateCount = int64(len(candidates))
 		bounded.CandidateBytes = total
 		bounded.CumulativeBytes = cumulative
-		bounded.GapBefore = gaps[i]
-		claim := q.claims[row.ID]
-		bounded.IneffectiveClaim = q.logStatuses[claim] == "error" && q.reasons[claim] == arg.IneffectiveFailureReason
+		bounded.GapBefore = c.gap
+		bounded.PendingBefore = c.pendingBefore
+		claim := q.claims[c.row.ID]
+		bounded.IneffectiveClaim = q.claimEpoch[claim] == q.epoch && q.logStatuses[claim] == "error" && q.reasons[claim] == arg.IneffectiveFailureReason
 		window = append(window, bounded)
 	}
 	if len(window) > 0 {
 		q.readBytes += window[len(window)-1].CumulativeBytes
 	}
 	return window, nil
+}
+
+func (q *sessionStore) AdvanceCompactionScan(_ context.Context, arg sqlc.AdvanceCompactionScanParams) error {
+	if arg.CompactionEpoch == q.epoch {
+		q.scanAfter, q.scanEpoch = arg.AfterMessageID, arg.CompactionEpoch
+	}
+	return nil
+}
+
+func (q *sessionStore) CreateCompactionLog(ctx context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
+	row, err := q.fakeQueries.CreateCompactionLog(ctx, arg)
+	if err == nil {
+		q.claimEpoch[row.ID] = arg.ExpectedEpoch
+	}
+	return row, err
 }
 
 func (q *sessionStore) CompleteCompactionLog(ctx context.Context, arg sqlc.CompleteCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {

@@ -2994,49 +2994,67 @@ WHERE message.team_id = public.memoh_current_team_id()
 
 -- name: ListUncompactedMessagesBySessionWithinBytes :many
 -- Compaction candidates are admitted oldest-first within a hard serialized
--- payload budget, starting after an optional candidate cursor. The cumulative
--- filter is evaluated before the payload join, so an oversized leading row
--- returns no payload instead of crossing the process-memory boundary.
--- CandidateCount counts the candidates after the cursor and reports whether
--- this window was truncated.
+-- payload budget, starting after a candidate cursor: the given one, or else
+-- the session's recorded scan position when it belongs to the current epoch.
+-- The cumulative filter is evaluated before the payload join, so an oversized
+-- leading row returns no payload instead of crossing the process-memory
+-- boundary. CandidateCount counts the candidates after the cursor and reports
+-- whether this window was truncated.
 --
 -- GapBefore marks a candidate whose preceding replayed row is not a
 -- candidate (the source of an active summary or of a fresh claim): one
 -- compact_id must never span it, or the read path would fold the later rows
--- in front of that summary. IneffectiveClaim marks a row whose claim in this
--- epoch failed because the summary was not shorter than the rows.
+-- in front of that summary. PendingBefore narrows that to a fresh claim,
+-- whose rows return as candidates if the claim lapses. IneffectiveClaim
+-- marks a row whose claim in this epoch failed because the summary was not
+-- shorter than the rows.
 WITH session_rows AS MATERIALIZED (
   SELECT
     m.id,
     m.turn_position,
     m.turn_message_seq,
     m.created_at,
-    (m.compact_id IS NULL OR NOT EXISTS (
-      SELECT 1 FROM bot_history_message_compacts c
-      WHERE c.team_id = public.memoh_current_team_id()
-        AND c.id = m.compact_id
-        AND c.bot_id = m.bot_id
-        AND c.session_id = candidate_session.id
-        AND c.compaction_epoch = candidate_session.compaction_epoch
-        AND (
-          (c.status = 'ok' AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
-          OR (c.status = 'pending' AND c.started_at > now() - INTERVAL '15 minutes')
-        )
-    )) AS is_candidate
+    held.status AS held_by
   FROM bot_visible_history_messages m
   JOIN bot_sessions candidate_session
     ON candidate_session.id = m.session_id
    AND candidate_session.team_id = public.memoh_current_team_id()
+  LEFT JOIN LATERAL (
+    SELECT c.status
+    FROM bot_history_message_compacts c
+    WHERE c.team_id = public.memoh_current_team_id()
+      AND c.id = m.compact_id
+      AND c.bot_id = m.bot_id
+      AND c.session_id = candidate_session.id
+      AND c.compaction_epoch = candidate_session.compaction_epoch
+      AND (
+        (c.status = 'ok' AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
+        OR (c.status = 'pending' AND c.started_at > now() - INTERVAL '15 minutes')
+      )
+  ) held ON true
   WHERE m.team_id = public.memoh_current_team_id()
     AND m.session_id = sqlc.arg(session_id)
     AND (m.metadata->>'trigger_mode' IS NULL OR m.metadata->>'trigger_mode' != 'passive_sync')
 ), ordered_rows AS MATERIALIZED (
   SELECT
     session_rows.*,
-    COALESCE(NOT LAG(is_candidate) OVER (
-      ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC
-    ), false)::boolean AS gap_before
+    COALESCE(LAG(held_by IS NOT NULL) OVER replay_order, false)::boolean AS gap_before,
+    COALESCE(LAG(held_by = 'pending') OVER replay_order, false)::boolean AS pending_before
   FROM session_rows
+  WINDOW replay_order AS (ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC)
+), anchor AS MATERIALIZED (
+  SELECT session_rows.turn_position, session_rows.turn_message_seq, session_rows.created_at, session_rows.id
+  FROM session_rows
+  WHERE session_rows.id = COALESCE(
+    sqlc.narg(after_message_id)::uuid,
+    (
+      SELECT scan_session.compaction_scan_after
+      FROM bot_sessions scan_session
+      WHERE scan_session.team_id = public.memoh_current_team_id()
+        AND scan_session.id = sqlc.arg(session_id)
+        AND scan_session.compaction_scan_epoch = scan_session.compaction_epoch
+    )
+  )
 ), candidate_rows AS MATERIALIZED (
   SELECT
     ordered.id,
@@ -3044,6 +3062,7 @@ WITH session_rows AS MATERIALIZED (
     ordered.turn_message_seq,
     ordered.created_at,
     ordered.gap_before,
+    ordered.pending_before,
     (
       octet_length(m.content::text)
       + octet_length(m.metadata::text)
@@ -3054,13 +3073,11 @@ WITH session_rows AS MATERIALIZED (
   JOIN bot_visible_history_messages m
     ON m.id = ordered.id
    AND m.team_id = public.memoh_current_team_id()
-  WHERE ordered.is_candidate
+  WHERE ordered.held_by IS NULL
     AND (
-      sqlc.narg(after_message_id)::uuid IS NULL
+      NOT EXISTS (SELECT 1 FROM anchor)
       OR (ordered.turn_position, ordered.turn_message_seq, ordered.created_at, ordered.id) > (
-        SELECT anchor.turn_position, anchor.turn_message_seq, anchor.created_at, anchor.id
-        FROM session_rows anchor
-        WHERE anchor.id = sqlc.narg(after_message_id)::uuid
+        SELECT anchor.turn_position, anchor.turn_message_seq, anchor.created_at, anchor.id FROM anchor
       )
     )
 ), ranked_candidates AS MATERIALIZED (
@@ -3108,6 +3125,7 @@ SELECT
   admitted.candidate_bytes,
   admitted.cumulative_bytes,
   admitted.gap_before::boolean AS gap_before,
+  admitted.pending_before::boolean AS pending_before,
   (claim.id IS NOT NULL)::boolean AS ineffective_claim
 FROM bot_visible_history_messages m
 JOIN admitted_candidates admitted ON admitted.id = m.id
@@ -3130,6 +3148,16 @@ LEFT JOIN bot_history_message_compacts claim
  AND claim.failure_reason = sqlc.arg(ineffective_failure_reason)::text
 WHERE m.team_id = public.memoh_current_team_id()
 ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC;
+
+-- name: AdvanceCompactionScan :exec
+-- Records the last candidate row a pass found permanently unclaimable in the
+-- current epoch, so later passes start reading after it. A new epoch voids it.
+UPDATE bot_sessions
+SET compaction_scan_after = sqlc.arg(after_message_id),
+    compaction_scan_epoch = sqlc.arg(compaction_epoch)
+WHERE team_id = public.memoh_current_team_id()
+  AND id = sqlc.arg(session_id)
+  AND compaction_epoch = sqlc.arg(compaction_epoch);
 
 -- name: MeasureUncompactedMessagesBySession :one
 -- Metadata-only companion for the bounded compaction read. It never returns

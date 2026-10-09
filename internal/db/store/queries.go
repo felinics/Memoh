@@ -430,6 +430,7 @@ type Queries interface {
 	ListTranscriptionProviders(ctx context.Context) ([]dbsqlc.Provider, error)
 	ListUncompactedMessagesBySession(ctx context.Context, sessionID pgtype.UUID) ([]dbsqlc.ListUncompactedMessagesBySessionRow, error)
 	ListUncompactedMessagesBySessionWithinBytes(ctx context.Context, arg dbsqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]dbsqlc.ListUncompactedMessagesBySessionWithinBytesRow, error)
+	AdvanceCompactionScan(ctx context.Context, arg dbsqlc.AdvanceCompactionScanParams) error
 	MeasureUncompactedMessagesBySession(ctx context.Context, sessionID pgtype.UUID) (dbsqlc.MeasureUncompactedMessagesBySessionRow, error)
 	ListVideoModels(ctx context.Context) ([]dbsqlc.ListVideoModelsRow, error)
 	ListVideoModelsByProviderID(ctx context.Context, providerID pgtype.UUID) ([]dbsqlc.Model, error)

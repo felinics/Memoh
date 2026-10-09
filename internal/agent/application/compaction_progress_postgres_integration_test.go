@@ -252,6 +252,17 @@ func TestPostgresCompactionAdvancesPastHeldBackHistory(t *testing.T) {
 	if got := f.compact(committed); got.status != "ok" || got.count != len(later) || got.covered != len(later) || got.reason != "" {
 		t.Fatalf("committed summary = %+v, want ok covering %d rows", got, len(later))
 	}
+	// The held-back prefix is recorded as scanned through the row in front
+	// of the committed span.
+	var scanAfter string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(compaction_scan_after::text, '') FROM bot_sessions WHERE id = $1`, sessionID).Scan(&scanAfter); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range order {
+		if id == later[0].ID && scanAfter != order[i-1] {
+			t.Fatalf("scan position = %s (%s), want %s", scanAfter, labels[scanAfter], labels[order[i-1]])
+		}
+	}
 
 	// SQL view of the window: the current turn now follows a summary.
 	window, err := queries.ListUncompactedMessagesBySessionWithinBytes(ctx, dbsqlc.ListUncompactedMessagesBySessionWithinBytesParams{
@@ -259,6 +270,9 @@ func TestPostgresCompactionAdvancesPastHeldBackHistory(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(window) == 0 || formatPGUUID(window[0].ID) != current.ID {
+		t.Fatal("a read without a cursor must start after the recorded scan position, at the current turn")
 	}
 	for _, row := range window {
 		id := formatPGUUID(row.ID)
@@ -329,6 +343,9 @@ func TestPostgresCompactionAdvancesPastHeldBackHistory(t *testing.T) {
 			t.Fatalf("row %s still reports an ineffective claim from the old epoch", labels[formatPGUUID(row.ID)])
 		}
 	}
+	if first := formatPGUUID(window[0].ID); first != order[0] {
+		t.Fatalf("new epoch window starts at %s, want the start of the session: the old scan position is void", labels[first])
+	}
 	if elapsed := time.Since(started); elapsed > 30*time.Second {
 		t.Fatalf("integration run took %v", elapsed)
 	}
@@ -375,5 +392,65 @@ func TestPostgresCompactionReachesSpanBeyondReadWindow(t *testing.T) {
 	_, claim := f.claims()
 	if claim[later[0].ID] == "" || claim[later[0].ID] != claim[later[1].ID] || claim[filler[0].ID] != "" {
 		t.Fatal("claims do not cover exactly the later span")
+	}
+}
+
+func TestPostgresCompactionScanStopsAtFreshClaim(t *testing.T) {
+	ctx := context.Background()
+	pool := openTurnAdmissionPostgres(t, ctx)
+	botID, sessionID := createTurnAdmissionFixture(t, ctx, pool)
+	queries := dbsqlc.New(pool)
+	f := progressFixture{t: t, ctx: ctx, pool: pool, queries: queries, messages: messagepkg.NewService(nil, postgresstore.NewQueries(queries)), botID: botID, sessionID: sessionID}
+
+	before := f.askUser(1)
+	claimed := []messagepkg.Message{f.text("user", strings.Repeat("CLAIMED question. ", 80)), f.text("assistant", strings.Repeat("CLAIMED answer. ", 80))}
+	after := f.askUser(2)
+	f.text("user", "current question")
+
+	// An unfinished attempt holds the middle rows.
+	attempt, err := queries.CreateCompactionLog(ctx, dbsqlc.CreateCompactionLogParams{BotID: f.uuid(botID), SessionID: f.uuid(sessionID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queries.MarkMessagesCompacted(ctx, dbsqlc.MarkMessagesCompactedParams{
+		CompactID: attempt.ID, MessageIds: []pgtype.UUID{f.uuid(claimed[0].ID), f.uuid(claimed[1].ID)}, ExpectedCompactIds: []pgtype.UUID{{}, {}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	window, err := queries.ListUncompactedMessagesBySessionWithinBytes(ctx, dbsqlc.ListUncompactedMessagesBySessionWithinBytesParams{
+		SessionID: f.uuid(sessionID), MaxBytes: 1 << 20, IneffectiveFailureReason: "ineffective_summary",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range window {
+		if want := formatPGUUID(row.ID) == after[0].ID; row.PendingBefore != want || row.GapBefore != want {
+			t.Fatalf("row %s: gap=%v pending=%v, want both %v", formatPGUUID(row.ID), row.GapBefore, row.PendingBefore, want)
+		}
+	}
+
+	model := &countingSummarizer{summary: summaryTokens(254)}
+	if res, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), postgresstore.NewQueries(queries)), model); err != nil || res.Status != compaction.StatusNoop || model.calls != 0 {
+		t.Fatalf("pass during the claim = %+v, %v after %d calls", res, err, model.calls)
+	}
+	var scanAfter string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(compaction_scan_after::text, '') FROM bot_sessions WHERE id = $1`, sessionID).Scan(&scanAfter); err != nil {
+		t.Fatal(err)
+	}
+	if scanAfter != before[1].ID {
+		t.Fatalf("scan position = %q, want the row before the fresh claim", scanAfter)
+	}
+
+	// The claim lapses; its rows are reached again.
+	if _, err := pool.Exec(ctx, `UPDATE bot_history_message_compacts SET started_at = now() - INTERVAL '16 minutes' WHERE id = $1`, attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), postgresstore.NewQueries(queries)), model)
+	if err != nil || res.Status != compaction.StatusOK || res.MessageCount != 2 {
+		t.Fatalf("pass after the claim lapsed = %+v, %v", res, err)
+	}
+	_, claim := f.claims()
+	if claim[claimed[0].ID] == formatPGUUID(attempt.ID) || claim[claimed[0].ID] != claim[claimed[1].ID] {
+		t.Fatal("lapsed rows were not reclaimed by the new summary")
 	}
 }

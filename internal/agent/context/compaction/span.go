@@ -97,10 +97,13 @@ func (s *spanStats) add(other spanStats) {
 // spanChoice is where one pass claims rows: items[start:end] is the oldest
 // span worth summarizing — consecutive markable groups with no gap between
 // them. With no such span, start == end and resume is where a truncated read
-// continues.
+// continues. Every row in items[:settled] is permanently unclaimable in this
+// epoch: a barrier, or a span closed by one that stays below the floor or is
+// made only of rows proved ineffective.
 type spanChoice struct {
 	start, end int
 	resume     int
+	settled    int
 	stats      spanStats
 }
 
@@ -115,7 +118,8 @@ type spanChoice struct {
 // it: the last tool exchange may still have results past the edge, and the
 // last span may still grow. Such a span is deferred and resume points at its
 // start, so the next window reads it whole — unless it starts the window,
-// where re-reading could not advance and the window is passed instead.
+// where re-reading could not advance and the window is passed instead. A
+// window passed over this way is settled too: every pass cuts it the same.
 func chooseSpan(items []CompactionCandidate, minTokens int, truncated bool) spanChoice {
 	groups := toolExchangeGroups(items)
 	costs := make([]int, len(groups))
@@ -148,9 +152,10 @@ func chooseSpan(items []CompactionCandidate, minTokens int, truncated bool) span
 		return end == len(groups) || (open && end == last && !items[groups[last][0]].GapBefore)
 	}
 
-	choice := spanChoice{resume: len(items)}
+	choice := spanChoice{resume: len(items), settled: len(items)}
 	if open && groups[last][0] > 0 {
 		choice.resume = groups[last][0]
+		choice.settled = groups[last][0]
 	}
 	for g := 0; g < len(groups); {
 		if costs[g] == 0 {
@@ -168,11 +173,18 @@ func chooseSpan(items []CompactionCandidate, minTokens int, truncated bool) span
 			stats.SpanTokens = cost
 			choice.start = groups[first][0]
 			choice.end = groups[g-1][len(groups[g-1])-1] + 1
+			choice.settled = choice.start
 			break
 		}
-		if truncated && reachesEdge(g) {
-			if groups[first][0] > 0 {
-				choice.resume = groups[first][0]
+		if reachesEdge(g) {
+			// The last span may still grow: in the next window, or when the
+			// kept recent tail moves past it. A window it fills alone is
+			// passed over instead, since re-reading it could not advance.
+			if !truncated || groups[first][0] > 0 {
+				choice.settled = groups[first][0]
+				if truncated {
+					choice.resume = groups[first][0]
+				}
 			}
 			break
 		}
@@ -186,30 +198,40 @@ func chooseSpan(items []CompactionCandidate, minTokens int, truncated bool) span
 	return choice
 }
 
-// trimSpan caps a chosen span to the entries budget, oldest groups first.
-// When the budget leaves less than minTokens of rows not yet proved
-// ineffective, the claim starts at the span's first such group instead, so a
-// pass never resends what failed before without enough new rows to change
-// the outcome.
+// trimSpan caps a chosen span to the entries budget, oldest groups first,
+// keeping at least minTokens of rows not yet proved ineffective in the claim:
+// when the budget cut leaves less, the claim starts at a later group of the
+// span. Rows passed over stay raw in place, and the row after the claim reads
+// as a gap, so they never join a later claim across it.
 func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCandidate {
-	trimmed := trimCompactMessages(span, budget)
-	if freshCost(trimmed) >= max(1, minTokens) {
-		return trimmed
+	groups := toolExchangeGroups(span)
+	costs := make([]int, len(groups))
+	fresh := make([]bool, len(groups))
+	for g, group := range groups {
+		costs[g] = markableGroupCost(span, group)
+		fresh[g] = !provedIneffective(span, group)
 	}
-	for _, group := range toolExchangeGroups(span) {
-		if !provedIneffective(span, group) {
-			return trimCompactMessages(span[group[0]:], budget)
+	need := max(1, minTokens)
+	end, total, freshTotal := 0, 0, 0
+	for start := range groups {
+		if end <= start {
+			end, total, freshTotal = start, 0, 0
+		}
+		for end < len(groups) && (end == start || total+costs[end] <= budget) {
+			total += costs[end]
+			if fresh[end] {
+				freshTotal += costs[end]
+			}
+			end++
+		}
+		if freshTotal >= need {
+			last := groups[end-1]
+			return span[groups[start][0] : last[len(last)-1]+1]
+		}
+		total -= costs[start]
+		if fresh[start] {
+			freshTotal -= costs[start]
 		}
 	}
 	return nil
-}
-
-func freshCost(items []CompactionCandidate) int {
-	total := 0
-	for _, group := range toolExchangeGroups(items) {
-		if !provedIneffective(items, group) {
-			total += markableGroupCost(items, group)
-		}
-	}
-	return total
 }

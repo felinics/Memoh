@@ -117,6 +117,7 @@ type fakeQueries struct {
 	completeErrors  []error
 	rollupCompleted sqlc.CompleteCompactionRollupParams
 	rollupCalls     []sqlc.CompleteCompactionRollupParams
+	scanAdvances    []sqlc.AdvanceCompactionScanParams
 }
 
 func (f *fakeQueries) CreateCompactionLog(_ context.Context, arg sqlc.CreateCompactionLogParams) (sqlc.BotHistoryMessageCompact, error) {
@@ -185,6 +186,11 @@ func boundedRowsForTest(rows []sqlc.ListUncompactedMessagesBySessionRow) []sqlc.
 		}
 	}
 	return converted
+}
+
+func (f *fakeQueries) AdvanceCompactionScan(_ context.Context, arg sqlc.AdvanceCompactionScanParams) error {
+	f.scanAdvances = append(f.scanAdvances, arg)
+	return nil
 }
 
 func (f *fakeQueries) ListMessageAssetsBatch(_ context.Context, _ []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {

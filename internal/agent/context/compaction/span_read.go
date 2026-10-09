@@ -34,6 +34,27 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 	readMaxBytes := compactionReadMaxBytes(cfg)
 	var read spanRead
 	var after pgtype.UUID
+	// settledThrough is the last row of the prefix found permanently
+	// unclaimable. Recording it lets later passes start after it instead of
+	// rescanning, so history behind a prefix larger than the scan budget is
+	// still reached. It never passes a fresh claim, whose rows come back as
+	// candidates if the claim lapses.
+	var settledThrough pgtype.UUID
+	var scanEpoch int64
+	settling := true
+	defer func() {
+		if !settledThrough.Valid {
+			return
+		}
+		if err := s.queries.AdvanceCompactionScan(ctx, sqlc.AdvanceCompactionScanParams{
+			SessionID:       sessionUUID,
+			AfterMessageID:  settledThrough,
+			CompactionEpoch: scanEpoch,
+		}); err != nil {
+			s.logger.WarnContext(ctx, "compaction: record scan position failed",
+				slog.String("session_id", cfg.SessionID), slog.Any("error", err))
+		}
+	}()
 	for {
 		window, err := s.queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
 			SessionID:                sessionUUID,
@@ -95,11 +116,31 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			toCompact = splitByRatio(items, cfg.TotalInputTokens, cfg.Ratio)
 		}
 		if len(toCompact) == 0 {
+			// Rows passed over — in an earlier window or behind the recorded
+			// scan position — are history that cannot shrink, not nothing.
+			if read.windows > 1 || measure.CandidateCount > window[0].CandidateCount {
+				return read, ReasonNoBeneficialSpan, nil
+			}
 			return read, ReasonNothingToCompact, nil
 		}
 
 		choice := chooseSpan(toCompact, minSpanTokens, truncated)
 		read.stats.add(choice.stats)
+		if settling {
+			settled := 0
+			if toCompact[0].ID == items[0].ID {
+				settled = choice.settled
+			}
+			for i := 0; i < settled; i++ {
+				if window[i].PendingBefore {
+					settled, settling = i, false
+				}
+			}
+			if settled > 0 {
+				settledThrough, scanEpoch = rows[settled-1].ID, rows[settled-1].CompactionEpoch
+			}
+			settling = settling && settled == choice.resume
+		}
 		if choice.end > choice.start {
 			read.rows = rows
 			read.span = toCompact[choice.start:choice.end]

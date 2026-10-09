@@ -392,8 +392,8 @@ func TestCompactionNeverResendsOnlyIneffectiveRows(t *testing.T) {
 		t.Fatal("first pass must reject the ineffective summary")
 	}
 
-	// The entries budget only reaches the failed rows; the claim starts at
-	// the first new row instead of resending them.
+	// The entries budget from the span start only reaches the failed rows
+	// and a short one; the claim moves to where new rows clear the floor.
 	current := q.history[len(q.history)-1]
 	q.history = q.history[:len(q.history)-1]
 	q.append(current, fresh, prose(t, "user", "NEXT", 10, 10))
@@ -402,8 +402,8 @@ func TestCompactionNeverResendsOnlyIneffectiveRows(t *testing.T) {
 	if err != nil || res.Status != StatusOK {
 		t.Fatalf("second pass = %+v, %v", res, err)
 	}
-	if marked := markedSet(q); marked[old[0].ID] || marked[old[1].ID] || !marked[fresh.ID] {
-		t.Fatalf("claimed %v, want only rows not yet proved ineffective", q.markedIDs)
+	if marked := markedSet(q); marked[old[0].ID] || !marked[fresh.ID] {
+		t.Fatalf("claimed %v, want the claim to start past the oldest failed row and carry the new row", q.markedIDs)
 	}
 	assertClaimsContiguous(t, q)
 }
@@ -446,7 +446,7 @@ func TestCompactionFusionStillAbsorbsFrontierThroughSmallSpan(t *testing.T) {
 	}
 }
 
-func TestCompactionScanStopsAtItsByteBudget(t *testing.T) {
+func TestCompactionScanResumesPastItsByteBudgetOnTheNextPass(t *testing.T) {
 	t.Parallel()
 
 	q := newSessionStore()
@@ -456,14 +456,105 @@ func TestCompactionScanStopsAtItsByteBudget(t *testing.T) {
 		q.append(rows...)
 		filled += payloadBytes(rows[0]) + payloadBytes(rows[1])
 	}
-	q.append(prose(t, "user", "LATER", 800, 100), prose(t, "assistant", "LATER", 800, 100), prose(t, "user", "CURRENT", 10, 10))
+	later := []sqlc.ListUncompactedMessagesBySessionRow{prose(t, "user", "LATER", 800, 100), prose(t, "assistant", "LATER", 800, 100)}
+	q.append(later...)
+	q.append(prose(t, "user", "CURRENT", 10, 10))
 
-	stub := &stubModel{summary: "never"}
+	stub := &stubModel{summary: summaryOfTokens(t, 254)}
 	res, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 50))
 	if err != nil || res.Status != StatusNoop || res.Reason != ReasonReadBudgetExceeded || stub.calls != 0 {
-		t.Fatalf("result = %+v, %v after %d calls; want the scan to stop at its budget", res, err, stub.calls)
+		t.Fatalf("first pass = %+v, %v after %d calls; want the scan to stop at its budget", res, err, stub.calls)
 	}
-	if q.readBytes > maxCompactionScanBytes+minCompactionReadBytes {
-		t.Fatalf("scanned %d bytes, budget %d plus one window", q.readBytes, int64(maxCompactionScanBytes))
+	if q.readBytes > maxCompactionScanBytes+minCompactionReadBytes || !q.scanAfter.Valid {
+		t.Fatalf("first pass read %d bytes, recorded position %v", q.readBytes, q.scanAfter.Valid)
+	}
+
+	// A restarted service continues after the recorded position instead of
+	// rescanning the protected prefix.
+	q.readBytes, q.windows = 0, 0
+	res, err = newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 50))
+	if err != nil || res.Status != StatusOK || len(q.markedIDs) != 2 || q.markedIDs[0] != later[0].ID {
+		t.Fatalf("second pass = %+v, %v claiming %d rows; want the later span", res, err, len(q.markedIDs))
+	}
+	if q.readBytes > filled-maxCompactionScanBytes+minCompactionReadBytes {
+		t.Fatalf("second pass read %d bytes; it must start where the first one settled", q.readBytes)
+	}
+}
+
+func TestCompactionScanPositionNeverPassesAFreshClaim(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	q.append(askUserExchange(t, 1)...)
+	crashed := []sqlc.ListUncompactedMessagesBySessionRow{prose(t, "user", "CRASHED", 400, 100), prose(t, "assistant", "CRASHED", 400, 100)}
+	q.append(crashed...)
+	q.append(askUserExchange(t, 2)...)
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+
+	// An attempt claimed the span and never finished: its rows are held
+	// back while the claim is fresh.
+	ctx := context.Background()
+	attempt, _ := q.CreateCompactionLog(ctx, sqlc.CreateCompactionLogParams{})
+	_, _ = q.MarkMessagesCompacted(ctx, sqlc.MarkMessagesCompactedParams{CompactID: attempt.ID, MessageIds: []pgtype.UUID{crashed[0].ID, crashed[1].ID}})
+	stub := &stubModel{summary: "crashed span condensed"}
+	cfg := machineryConfig(stub, 5)
+	res, err := newMachineryService(q).RunCompactionSync(ctx, cfg)
+	if err != nil || res.Status != StatusNoop {
+		t.Fatalf("pass during the fresh claim = %+v, %v", res, err)
+	}
+	if q.scanAfter != q.history[1].ID {
+		t.Fatal("scan position passed the freshly claimed rows")
+	}
+
+	// The claim lapses: its rows come back and are still reached.
+	q.logStatuses[attempt.ID] = "error"
+	res, err = newMachineryService(q).RunCompactionSync(ctx, cfg)
+	if err != nil || res.Status != StatusOK || len(q.markedIDs) != 2 || q.markedIDs[0] != crashed[0].ID {
+		t.Fatalf("pass after the claim lapsed = %+v, %v; want the span claimed", res, err)
+	}
+}
+
+func TestCompactionScanPositionResetsWithTheEpoch(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(askUserExchange(t, 1)...)
+	q.append(prose(t, "user", "tiny", 8, 10), reasoningOnlyRow(t), prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: "never"}
+	if res, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 5)); err != nil || res.Reason != ReasonNoBeneficialSpan || !q.scanAfter.Valid {
+		t.Fatalf("first pass = %+v, %v, position recorded %v", res, err, q.scanAfter.Valid)
+	}
+	q.epoch++
+	window, err := q.ListUncompactedMessagesBySessionWithinBytes(context.Background(), sqlc.ListUncompactedMessagesBySessionWithinBytesParams{MaxBytes: minCompactionReadBytes})
+	if err != nil || window[0].ID != q.history[0].ID {
+		t.Fatal("a new epoch must read from the start of the session again")
+	}
+}
+
+func TestCompactionTrimmedClaimStillClearsTheFloor(t *testing.T) {
+	t.Parallel()
+
+	// A short row followed by a tool exchange that alone fills the entries
+	// budget: trimming must not shrink the claim to the short row.
+	short := prose(t, "user", "short", 20, 10)
+	callID := "big"
+	output := strings.Repeat("BIG output line; ", 150)
+	exchange := []sqlc.ListUncompactedMessagesBySessionRow{
+		mkRow(t, "assistant", `[{"type":"tool-call","toolCallId":"`+callID+`","toolName":"exec","input":{"command":"make"}}]`, 10),
+		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"`+callID+`","toolName":"exec","output":{"type":"text","value":`+jsonStr(output)+`}}]`, 10),
+	}
+	q := newSessionStore(short)
+	q.append(exchange...)
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	items, _ := itemsFromRows(exchange)
+	exchangeCost := markableGroupCost(items, []int{0, 1})
+	stub := &stubModel{summary: summaryOfTokens(t, 254)}
+	cfg := machineryConfig(stub, 5)
+	cfg.MaxCompactTokens = exchangeCost + 5
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err != nil || res.Status != StatusOK {
+		t.Fatalf("result = %+v, %v", res, err)
+	}
+	if marked := markedSet(q); marked[short.ID] || !marked[exchange[0].ID] || !marked[exchange[1].ID] {
+		t.Fatalf("claimed short=%v exchange=%v/%v, want the exchange that clears the floor", marked[short.ID], marked[exchange[0].ID], marked[exchange[1].ID])
 	}
 }

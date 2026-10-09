@@ -561,6 +561,8 @@ CREATE TABLE IF NOT EXISTS bot_sessions (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   next_turn_position BIGINT NOT NULL DEFAULT 1,
   compaction_epoch BIGINT NOT NULL DEFAULT 0,
+  compaction_scan_after UUID,
+  compaction_scan_epoch BIGINT NOT NULL DEFAULT 0,
   runtime_fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (runtime_fencing_token >= 0),
   runtime_reset_token UUID,
   runtime_reset_expires_at TIMESTAMPTZ,

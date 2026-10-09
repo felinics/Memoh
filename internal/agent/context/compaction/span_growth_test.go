@@ -119,8 +119,7 @@ func TestCompactionLongHorizonGrowthStaysBoundedAndOrdered(t *testing.T) {
 	}
 
 	// What stays raw outside the kept tail is only what cannot shrink.
-	rows, _ := q.candidates(pgtype.UUID{})
-	items, _ := itemsFromRows(rows)
+	items, _ := itemsFromRows(q.candidateRows())
 	kept := splitByTarget(items, cfg.TargetTokens)
 	rawTokens := 0
 	for _, item := range kept {

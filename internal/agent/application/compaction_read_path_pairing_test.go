@@ -64,6 +64,10 @@ func (*pairingQueries) ListCompactionArtifactLineageBySession(context.Context, p
 	return nil, nil
 }
 
+func (*pairingQueries) AdvanceCompactionScan(context.Context, sqlc.AdvanceCompactionScanParams) error {
+	return nil
+}
+
 func (*pairingQueries) ListMessageAssetsBatch(context.Context, []pgtype.UUID) ([]sqlc.ListMessageAssetsBatchRow, error) {
 	return nil, nil
 }
