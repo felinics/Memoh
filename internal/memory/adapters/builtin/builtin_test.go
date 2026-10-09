@@ -1,7 +1,9 @@
 package builtin
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -304,5 +306,30 @@ func TestNewBuiltinRuntimeFromConfig_GraphRequiresWikiStore(t *testing.T) {
 	// No wiki store -> error.
 	if _, err := NewBuiltinRuntimeFromConfig(nil, cfg, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected error for graph mode without wiki store")
+	}
+}
+
+type searchFailingRuntime struct {
+	capturingRuntime
+	err error
+}
+
+func (r *searchFailingRuntime) Search(context.Context, adapters.SearchRequest) (adapters.SearchResponse, error) {
+	return adapters.SearchResponse{}, r.err
+}
+
+func TestOnBeforeChatReturnsSearchFailureWithoutLogging(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("index unavailable")
+	var buf bytes.Buffer
+	p := NewBuiltinProvider(slog.New(slog.NewJSONHandler(&buf, nil)), &searchFailingRuntime{err: cause})
+
+	_, err := p.OnBeforeChat(context.Background(), adapters.BeforeChatRequest{BotID: "bot-1", Query: "hello"})
+	if !errors.Is(err, cause) {
+		t.Fatalf("OnBeforeChat error = %v, want the search error", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("provider logged the failure its caller records: %s", buf.String())
 	}
 }

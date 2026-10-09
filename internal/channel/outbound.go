@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // ChunkerMode selects the text chunking strategy.
@@ -1151,33 +1153,25 @@ func (s *managerOutboundStream) sendChunkedFinal(ctx context.Context, msg Messag
 	return s.sendPreparedChunkedFinal(ctx, deliveries, startIndex, len(chunks), hasAttachments)
 }
 
+func (s *managerOutboundStream) overflowChunkError(err error, chunkIndex, totalChunks int) error {
+	return errs.WrapWithDepth(1, err, "send stream overflow chunk",
+		slog.String("channel", s.channelType.String()),
+		slog.Int("chunk_index", chunkIndex),
+		slog.Int("total_chunks", totalChunks),
+	)
+}
+
 func (s *managerOutboundStream) sendPreparedChunkedFinal(ctx context.Context, deliveries []preparedOutboundDelivery, startIndex int, totalChunks int, hasAttachments bool) error {
 	if s.sender != nil {
 		for idx, item := range deliveries {
 			if err := s.manager.sendPreparedWithConfig(ctx, s.sender, s.config, item, s.policy); err != nil {
-				if s.manager.logger != nil {
-					s.manager.logger.ErrorContext(ctx, "stream final overflow chunk send failed",
-						slog.String("channel", s.channelType.String()),
-						slog.Int("chunk_index", startIndex+idx+1),
-						slog.Int("total_chunks", totalChunks),
-						slog.Any("error", err),
-					)
-				}
-				return err
+				return s.overflowChunkError(err, startIndex+idx+1, totalChunks)
 			}
 		}
 	} else {
 		for idx, item := range deliveries {
 			if err := s.send(ctx, OutboundMessage{Message: item.message}); err != nil {
-				if s.manager.logger != nil {
-					s.manager.logger.ErrorContext(ctx, "stream final overflow chunk send failed",
-						slog.String("channel", s.channelType.String()),
-						slog.Int("chunk_index", startIndex+idx+1),
-						slog.Int("total_chunks", totalChunks),
-						slog.Any("error", err),
-					)
-				}
-				return err
+				return s.overflowChunkError(err, startIndex+idx+1, totalChunks)
 			}
 		}
 	}

@@ -222,7 +222,6 @@ func (p *BuiltinProvider) OnBeforeChat(ctx context.Context, req adapters.BeforeC
 		NoStats: true,
 	})
 	if err != nil {
-		p.logger.WarnContext(ctx, "memory search for context failed", slog.Any("error", err))
 		return nil, err
 	}
 

@@ -15,6 +15,7 @@ import (
 	ctr "github.com/felinics/memoh/internal/container"
 	"github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
+	"github.com/felinics/memoh/internal/errs"
 	netctl "github.com/felinics/memoh/internal/network"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -214,9 +215,7 @@ func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 		}
 		if err := m.service.DeleteTask(ctx, containerID, &ctr.DeleteTaskOptions{Force: true}); err != nil {
 			if !ctr.IsNotFound(err) {
-				m.logger.WarnContext(ctx, "cleanup: delete task failed",
-					slog.String("container_id", containerID), slog.Any("error", err))
-				return err
+				return errs.Wrap(err, "delete stale task", slog.String("container_id", containerID))
 			}
 		}
 	} else if !ctr.IsNotFound(err) {

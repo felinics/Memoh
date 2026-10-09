@@ -1,6 +1,7 @@
 package inbound
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -872,5 +873,33 @@ func TestHandleNewSessionCommandAnswersCreateFailures(t *testing.T) {
 				t.Fatalf("replies = %+v, want %q", sender.sent, tc.want)
 			}
 		})
+	}
+}
+
+type failingReplySender struct {
+	fakeReplySender
+	err error
+}
+
+func (s *failingReplySender) Send(context.Context, channel.OutboundMessage) error { return s.err }
+
+func TestReplyFailureRecordsUnsentReplyAsEventAndKeepsAttribution(t *testing.T) {
+	var buf bytes.Buffer
+	p := &ChannelInboundProcessor{logger: slog.New(slog.NewJSONHandler(&buf, nil))}
+	sender := &failingReplySender{err: errors.New("telegram down")}
+	msg := channel.InboundMessage{
+		Channel:     channel.ChannelTypeTelegram,
+		Message:     channel.Message{ID: "msg-1"},
+		ReplyTarget: "target-1",
+	}
+
+	failure := apperror.Wrap(apperror.CodeNoWorkspaceExec, errors.New("denied"), nil)
+	got := p.replyFailure(context.Background(), sender, msg, InboundIdentity{BotID: "bot-1"}, failure, "fallback")
+	if got != failure { //nolint:errorlint // identity: the flow's failure is returned unjoined.
+		t.Fatalf("replyFailure() error = %v, want the flow's failure unchanged", got)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], `"msg":"failure reply not sent"`) || !strings.Contains(lines[0], `"level":"WARN"`) {
+		t.Fatalf("records = %q, want one WARN event for the unsent reply", buf.String())
 	}
 }

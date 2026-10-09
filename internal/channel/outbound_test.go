@@ -1,8 +1,10 @@
 package channel
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -2583,5 +2585,44 @@ func TestCoerceFormatForCaps_PreservesPlainEverywhere(t *testing.T) {
 				t.Fatalf("plain must stay plain on %s, got %q", name, coerced.Format)
 			}
 		})
+	}
+}
+
+type failingSendAdapter struct {
+	*targetResolvingAdapter
+	err error
+}
+
+func (a *failingSendAdapter) Send(context.Context, ChannelConfig, PreparedOutboundMessage) error {
+	return a.err
+}
+
+func TestManagerSendFailureIsReturnedWithoutASecondRecord(t *testing.T) {
+	t.Parallel()
+
+	channelType := ChannelType("failing-send")
+	cause := errors.New("platform down")
+	adapter := &failingSendAdapter{
+		targetResolvingAdapter: &targetResolvingAdapter{
+			channelType:    channelType,
+			outboundPolicy: OutboundPolicy{RetryMax: 1},
+		},
+		err: cause,
+	}
+	registry := NewRegistry()
+	if err := registry.Register(adapter); err != nil {
+		t.Fatalf("register adapter failed: %v", err)
+	}
+	var buf bytes.Buffer
+	manager := NewManager(slog.New(slog.NewJSONHandler(&buf, nil)), registry, &fakeConfigStore{
+		effectiveConfig: ChannelConfig{BotID: "bot-1", ChannelType: channelType},
+	}, nil)
+
+	err := manager.Send(context.Background(), "bot-1", channelType, SendRequest{Target: "t", Message: Message{Text: "hi"}})
+	if !errors.Is(err, cause) {
+		t.Fatalf("Send error = %v, want the adapter's error in the chain", err)
+	}
+	if strings.Contains(buf.String(), "send outbound failed") {
+		t.Fatalf("manager logged the failure it returns: %s", buf.String())
 	}
 }

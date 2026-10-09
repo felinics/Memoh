@@ -25,6 +25,7 @@ import (
 
 	"github.com/felinics/memoh/internal/config"
 	containerapi "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
 )
 
@@ -89,7 +90,12 @@ func (s *Service) PullImage(ctx context.Context, ref string, opts *containerapi.
 	}
 	defer func() { _ = reader.Close() }()
 	if opts != nil && opts.OnProgress != nil {
-		_ = decodePullProgress(reader, opts.OnProgress)
+		// GetImage below is the real check that the pull completed; a broken
+		// progress stream only loses progress reports.
+		if err := decodePullProgress(reader, opts.OnProgress); err != nil {
+			result := errlog.Event(ctx, "container.pull_image", errs.Wrap(err, "read image pull progress", slog.String("image", ref)), errlog.Options{})
+			s.logger.LogAttrs(ctx, result.Level, "image pull progress stream failed", result.Attrs()...)
+		}
 	} else {
 		_, _ = io.Copy(io.Discard, reader)
 	}
@@ -975,8 +981,12 @@ func decodePullProgress(reader io.Reader, onProgress func(containerapi.PullProgr
 	var layers []containerapi.LayerStatus
 	for decoder.More() {
 		var event struct {
-			ID             string `json:"id"`
-			Status         string `json:"status"`
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			// Error is set by the daemon when the pull fails after the
+			// response has started, so it arrives in the stream, not as a
+			// status code.
+			Error          string `json:"error"`
 			ProgressDetail struct {
 				Current int64 `json:"current"`
 				Total   int64 `json:"total"`
@@ -987,6 +997,9 @@ func decodePullProgress(reader io.Reader, onProgress func(containerapi.PullProgr
 				return nil
 			}
 			return err
+		}
+		if event.Error != "" {
+			return errs.NewDependency("image pull failed in progress stream", slog.String("detail", event.Error))
 		}
 		if event.ID == "" {
 			continue

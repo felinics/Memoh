@@ -4740,11 +4740,15 @@ func externalAgentExecDenied(reason string) error {
 }
 
 // replyFailure answers a flow that failed with err by sendFailureReply and
-// returns err for the message's result record, with the failure to send the
-// reply when there is one.
+// returns err for the message's result record. A reply that could not be sent
+// is a failure of its own and is recorded as an event, so the result record
+// keeps the attribution of the flow's failure.
 func (p *ChannelInboundProcessor) replyFailure(ctx context.Context, sender channel.StreamReplySender, msg channel.InboundMessage, identity InboundIdentity, err error, fallback string) error {
-	if sendErr := p.sendFailureReply(ctx, sender, msg, identity, err, fallback); sendErr != nil {
-		return errors.Join(err, sendErr)
+	if sendErr := p.sendFailureReply(ctx, sender, msg, identity, err, fallback); sendErr != nil && p.logger != nil {
+		result := errlog.Event(ctx, "channel.failure_reply", errs.Wrap(sendErr, "send failure reply"), errlog.Options{})
+		p.logger.LogAttrs(ctx, result.Level, "failure reply not sent", append([]slog.Attr{
+			slog.String("bot_id", strings.TrimSpace(identity.BotID)), slog.String("channel", msg.Channel.String()),
+		}, result.Attrs()...)...)
 	}
 	return err
 }

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/redact"
 )
 
@@ -237,8 +239,11 @@ func (s *qqOutboundStream) pushShard(ctx context.Context, state int, content str
 		s.streamBroken = true
 		logger := s.logger
 		s.mu.Unlock()
+		// Every caller drops the error and falls back to a regular message, so
+		// this event is the shard failure's only record.
 		if logger != nil {
-			logger.WarnContext(ctx, "qq stream shard failed", slog.String("target", s.target), slog.Int("index", req.Index), slog.Any("error", err))
+			result := errlog.Event(ctx, "channel.qq.stream", errs.Wrap(err, "send qq stream shard", slog.String("target", s.target), slog.Int("index", req.Index)), errlog.Options{})
+			logger.LogAttrs(ctx, result.Level, "qq stream shard failed", result.Attrs()...)
 		}
 		return err
 	}
