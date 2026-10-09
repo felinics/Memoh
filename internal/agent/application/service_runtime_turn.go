@@ -242,8 +242,8 @@ func (s *Service) streamRuntimeWS(ctx context.Context, driver external.Driver, r
 		if err != nil {
 			return failAdmission(err)
 		}
-		// A shutdown resume replays the saved prompt without re-admission, so
-		// the saved prompt must be the admitted one.
+		// A shutdown after dispatch resumes from the admitted batch, never
+		// from input the runtime was not sent.
 		if err := s.recordRunResumeContext(ctx, req); err != nil {
 			return failAdmission(err)
 		}

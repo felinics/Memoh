@@ -450,17 +450,6 @@ func (f *backlogFixture) assertImagesOnOwnMessages(request string, owners map[st
 	return total
 }
 
-func (f *backlogFixture) assertPresentOrOmitted(request, prefix string, count int) {
-	f.t.Helper()
-	omitted := f.omittedInput()
-	for i := range count {
-		id := fmt.Sprintf("%s%d", prefix, i)
-		if !omitted[id] && !strings.Contains(request, id+" ") {
-			f.t.Fatalf("%s vanished from the provider context without a record; omitted=%v", id, omitted)
-		}
-	}
-}
-
 // Images of an unconsumed backlog belong to their own messages: the older
 // ones are history recovery may compact, not protected input riding on the
 // newest message. A backlog whose images exceed the window is answered, and

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/felinics/memoh/internal/agent/turn"
 	"github.com/felinics/memoh/internal/apperror"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -168,25 +170,89 @@ func externalOversizedDiscuss() []turn.DiscussMessage {
 	return sources
 }
 
-// A graceful-shutdown resume replays the saved prompt without re-admission,
-// so the saved prompt must be the one final admission sent.
-func TestExternalDiscussResumeContextSavesTheAdmittedPrompt(t *testing.T) {
+// resumedRequest is the request the resume worker builds from a saved
+// context.
+func resumedRequest(t *testing.T, saved []byte) ChatRequest {
+	t.Helper()
+	const teamID = "00000000-0000-0000-0000-000000000001"
+	runner := &fakeRunner{chunks: []string{`{"type":"agent_end"}`}}
+	s, _ := newAdmittedTurnTestService(runner)
+	s.SetAllowedTeam(teamID)
+	s.logger = slog.New(slog.DiscardHandler)
+	raw, err := json.Marshal(map[string]json.RawMessage{"resume": saved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := s.resumeInterruptedSession(t.Context(), sqlc.SessionRun{
+		TeamID: db.ParseUUIDOrEmpty(teamID), RunID: db.ParseUUIDOrEmpty(uuid.NewString()),
+		BotID: db.ParseUUIDOrEmpty(lifecycleTestBotID), SessionID: db.ParseUUIDOrEmpty(lifecycleTestSessionID), InputJson: raw,
+	})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	<-done
+	return runner.gotReq
+}
+
+// A graceful shutdown can interrupt the turn before final admission or after
+// dispatch. Either saved context resumes by admitting the saved batch again
+// behind the resume instruction, so the resumed prompt fits the budget and
+// still carries the current input.
+func TestExternalDiscussResumeAdmitsEverySavedBatchAgain(t *testing.T) {
 	service, pool, saved, ctx := externalResumeService(t)
-	candidate := discussAgentFullContextPrompt(externalOversizedDiscuss())
 	chunks, errs := service.StreamChat(ctx, ChatRequest{
-		BotID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: uuid.NewString(),
-		Query: candidate, UserMessagePersisted: true, discussMessages: externalOversizedDiscuss(),
+		BotID: lifecycleTestBotID, ChatID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: uuid.NewString(),
+		Query: discussAgentFullContextPrompt(externalOversizedDiscuss()), UserMessagePersisted: true, discussMessages: externalOversizedDiscuss(),
 	})
 	drainStreamChunks(t, chunks)
 	for err := range errs {
 		t.Fatal(err)
 	}
-	var resume resumeContext
-	if err := json.Unmarshal(saved.saved.ResumeContext, &resume); err != nil {
-		t.Fatal(err)
+	if pool.calls != 1 || len(saved.history) != 2 {
+		t.Fatalf("dispatches=%d resume saves=%d, want one dispatch saved before and after final admission", pool.calls, len(saved.history))
 	}
-	if pool.calls != 1 || resume.Query != pool.input.Prompt || resume.Query == candidate {
-		t.Fatalf("resume context saved %d bytes, final prompt %d bytes, candidate %d bytes", len(resume.Query), len(pool.input.Prompt), len(candidate))
+	dispatched := pool.input.Prompt
+	for i, save := range saved.history {
+		calls := pool.calls
+		chunks, errs := service.StreamChat(ctx, resumedRequest(t, save.ResumeContext))
+		drainStreamChunks(t, chunks)
+		for err := range errs {
+			t.Fatalf("save %d: resume failed: %v", i, err)
+		}
+		prompt := pool.input.Prompt
+		if pool.calls != calls+1 || !strings.HasPrefix(prompt, resumeInstruction) || !strings.Contains(prompt, "CURRENT") ||
+			turn.EstimateTokensFromBytes(len(prompt)) > 1000 {
+			t.Fatalf("save %d: dispatches=%d prompt=%d bytes, want one resumed prompt within the budget carrying the current input", i, pool.calls-calls, len(prompt))
+		}
+		if body := strings.TrimPrefix(strings.TrimPrefix(prompt, resumeInstruction), discussAgentPromptPrefix); i == len(saved.history)-1 && !strings.HasSuffix(dispatched, body) {
+			t.Fatal("the resume after dispatch replayed input the dispatched prompt did not carry")
+		}
+	}
+}
+
+// A batch that cannot fit even alone fails boundedly on resume, as it did
+// before the shutdown.
+func TestExternalDiscussResumeOfIrreducibleBatchFailsBounded(t *testing.T) {
+	service, pool, saved, ctx := externalResumeService(t)
+	irreducible := []turn.DiscussMessage{{Role: "user", Content: strings.Repeat("c", 4400)}}
+	chunks, errs := service.StreamChat(ctx, ChatRequest{
+		BotID: lifecycleTestBotID, ChatID: lifecycleTestBotID, ThreadID: lifecycleTestSessionID, RunID: uuid.NewString(),
+		Query: discussAgentFullContextPrompt(irreducible), UserMessagePersisted: true, discussMessages: irreducible,
+	})
+	drainStreamChunks(t, chunks)
+	for range errs {
+	}
+	if pool.calls != 0 || len(saved.history) != 1 {
+		t.Fatalf("dispatches=%d resume saves=%d, want the pre-admission save only", pool.calls, len(saved.history))
+	}
+	chunks, errs = service.StreamChat(ctx, resumedRequest(t, saved.history[0].ResumeContext))
+	drainStreamChunks(t, chunks)
+	var failure error
+	for err := range errs {
+		failure = err
+	}
+	if apperror.CodeOf(failure) != apperror.CodeContextProtectedOverflow || pool.calls != 0 {
+		t.Fatalf("irreducible resume: err=%v dispatches=%d, want a bounded protected_overflow", failure, pool.calls)
 	}
 }
 

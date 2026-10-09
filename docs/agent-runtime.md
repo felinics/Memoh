@@ -231,6 +231,9 @@ bearer tokens. Account-backed credentials are revalidated against current accoun
 state and Bot chat permissions before renewal; scoped chat credentials retain their
 original Bot, chat and route scope. External runtimes retain their existing owner
 and Workspace Exec authorization checks.
+An External Discuss turn saves its composed batch instead of a query, once when it
+starts and again after final admission. A resume admits that batch again behind the
+resume instructions, without compaction, and records the input that no longer fits.
 
 After startup, a bounded worker discovers interrupted sessions, waits for the
 workspace bridge to become reachable, and submits a continuation with the stable

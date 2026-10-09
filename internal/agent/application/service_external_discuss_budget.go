@@ -17,7 +17,7 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 	if err := ctx.Err(); err != nil {
 		return req, err
 	}
-	admitted, admission := admitDiscussAgentContext(req.discussMessages, s.contextAbsoluteMaxTokens(), len(markdown), imageCount)
+	admitted, admission := admitDiscussAgentContext(req.discussMessages, s.contextAbsoluteMaxTokens(), len(markdown)+len(req.discussPromptPrefix)+len(req.discussPromptSuffix), imageCount)
 	if admission.ProtectedOverflow || admission.DroppedMessages > 0 || len(req.discussOmittedSources) > 0 || max(0, req.discussContextTokens-admission.ProtectedTokens) > admission.RecoveryBudgetTokens {
 		if !req.discussRecoveryExhausted && admission.RecoveryBudgetTokens > 0 && s.effectiveSyncCompactionMode() != syncCompactionModeOff && s.compactionService != nil && s.settingsService != nil {
 			recovery := req
@@ -41,7 +41,7 @@ func (s *Service) prepareExternalDiscussContext(ctx context.Context, req ChatReq
 			slog.Int("budget_tokens", admission.BudgetTokens),
 			slog.Int("dropped_messages", admission.DroppedMessages))
 	}
-	req.Query = discussAgentFullContextPrompt(admitted)
+	req.Query = req.discussPromptPrefix + discussAgentFullContextPrompt(admitted) + req.discussPromptSuffix
 	req.RawQuery = req.Query
 	req.discussMessages = admitted
 	req.discussOmittedSources = append(append([]turn.ContextMessageSource(nil), req.discussOmittedSources...), admission.OmittedSources...)

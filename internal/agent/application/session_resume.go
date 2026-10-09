@@ -44,6 +44,10 @@ type resumeContext struct {
 	TokenClaims       map[string]string `json:"token_claims,omitempty"`
 	ChatClaims        map[string]string `json:"chat_claims,omitempty"`
 	DeadlineAt        *time.Time        `json:"deadline_at,omitempty"`
+	// Version 2 carries an External Discuss batch instead of a query: the
+	// resume admits it again behind its instructions.
+	DiscussMessages       []turn.DiscussMessage       `json:"discuss_messages,omitempty"`
+	DiscussOmittedSources []turn.ContextMessageSource `json:"discuss_omitted_sources,omitempty"`
 }
 
 // errResumeUnrecoverable marks an interrupted intent that no later scan can
@@ -82,6 +86,10 @@ func (s *Service) recordRunResumeContext(ctx context.Context, req ChatRequest) e
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		data.DeadlineAt = &deadline
+	}
+	if req.discussMessages != nil {
+		data.Version, data.Query = 2, ""
+		data.DiscussMessages, data.DiscussOmittedSources = req.discussMessages, req.discussOmittedSources
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {
@@ -341,7 +349,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		return nil, fmt.Errorf("%w: %w", errResumeUnrecoverable, err)
 	}
 	data := input.Resume
-	if data == nil || data.Version != 1 || data.ChatID == "" {
+	if data == nil || data.ChatID == "" || !data.resumable() {
 		return nil, fmt.Errorf("%w: unsupported resume context", errResumeUnrecoverable)
 	}
 	if data.DeadlineAt != nil && !time.Now().Before(*data.DeadlineAt) {
@@ -402,7 +410,13 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		UserMessagePersisted: true, SkipMemoryExtraction: true, SkipTitleGeneration: true, ShutdownResume: true,
 	}
 	if decisionContext != "" {
-		req.Query += "\n\n" + decisionContext
+		req.discussPromptSuffix = "\n\n" + decisionContext
+		req.Query += req.discussPromptSuffix
+	}
+	if data.Version == 2 {
+		req.discussMessages, req.discussOmittedSources, req.discussRecoveryExhausted = data.DiscussMessages, data.DiscussOmittedSources, true
+		req.discussPromptPrefix = resumeInstruction
+		req.Query = resumeInstruction + discussAgentFullContextPrompt(data.DiscussMessages) + req.discussPromptSuffix
 	}
 	chunks, errs := s.streamTurnChat(runCtx, req)
 	h := &runHandle{
@@ -415,6 +429,19 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 	go func() { defer close(done); drainDeferredTurn(h) }()
 	s.logger.InfoContext(runCtx, "interrupted session resumed", slog.String("previous_run_id", row.RunID.String()), slog.String("run_id", admission.RunID), slog.String("session_id", req.ThreadID))
 	return done, nil
+}
+
+// resumable reports whether the context names a task to continue. A Discuss
+// run's admission-time context has none; its batch arrives later.
+func (data resumeContext) resumable() bool {
+	switch data.Version {
+	case 1:
+		return data.SessionType != string(turn.ModeDiscuss) || strings.TrimSpace(data.Query) != ""
+	case 2:
+		return len(data.DiscussMessages) > 0
+	default:
+		return false
+	}
 }
 
 // RecordSubagentResume is called after admission and before the first child tool.
