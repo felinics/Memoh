@@ -168,3 +168,77 @@ func TestCompactionLongHorizonGrowthStaysBoundedAndOrdered(t *testing.T) {
 		t.Fatalf("long-horizon run took %v", elapsed)
 	}
 }
+
+func TestCompactionLongHorizonResidueStaysFlat(t *testing.T) {
+	t.Parallel()
+
+	// 120 turns of the production shapes: chat-only turns, an ask_user or a
+	// reasoning-only row right after the task, and long tool turns compacted
+	// while they run. With every summary effective, what stays raw outside
+	// the latest turns must not grow with the turn count.
+	q := newSessionStore()
+	stub := &stubModel{summary: summaryOfTokens(t, 120)}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 300)
+	cfg.HardPressure = true
+	pass := func() {
+		calls := stub.calls
+		if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || stub.calls-calls > 1 {
+			t.Fatalf("pass: %v after %d calls", err, stub.calls-calls)
+		}
+	}
+	turnOf := map[pgtype.UUID]int{}
+	add := func(turn int, rows ...sqlc.ListUncompactedMessagesBySessionRow) {
+		for _, row := range rows {
+			turnOf[row.ID] = turn
+		}
+		q.append(rows...)
+	}
+	residue := func(turn int) int {
+		tokens := 0
+		for _, row := range q.candidateRows() {
+			items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{row})
+			if turnOf[row.ID] < turn-3 && classifyGroup(items, []int{0}, func(int) bool { return strings.TrimSpace(renderCandidateEntry(items[0].Record)) != "" }) == groupMarkable {
+				tokens += estimateBytesAsTokens(renderCandidateEntry(items[0].Record))
+			}
+		}
+		return tokens
+	}
+	measured := map[int]int{}
+	for turn := 1; turn <= 120; turn++ {
+		tokens := 50
+		if turn%3 == 0 {
+			tokens = 4
+		}
+		add(turn, prose(t, "user", fmt.Sprintf("U%d", turn), tokens, tokens))
+		steps := 0
+		switch turn % 4 {
+		case 2:
+			add(turn, askUserExchange(t, turn)...)
+			steps = 6
+		case 3:
+			add(turn, reasoningOnlyRow(t))
+			steps = 12
+		case 0:
+			steps = 16
+		}
+		for s := 0; s < steps; s++ {
+			add(turn, execExchange(t, turn*100+s)...)
+			if s%4 == 3 {
+				pass()
+			}
+		}
+		add(turn, prose(t, "assistant", fmt.Sprintf("A%d", turn), 60, 60))
+		for p := 0; p < 3; p++ {
+			pass()
+		}
+		if turn == 40 || turn == 120 {
+			measured[turn] = residue(turn)
+		}
+	}
+	t.Logf("raw tokens older than three turns: %v, provider calls %d", measured, stub.calls)
+	if measured[120] > measured[40]+minCompactionSpanTokens {
+		t.Fatalf("raw history older than the latest turns grew from %d to %d tokens over 80 turns", measured[40], measured[120])
+	}
+	assertClaimsContiguous(t, q)
+}
