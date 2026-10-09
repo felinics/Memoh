@@ -181,8 +181,11 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 		resp, err = h.modelsService.ListByProviderIDAndType(c.Request().Context(), id, models.ModelType(modelType))
 	}
 	if err != nil {
-		if errors.Is(err, db.ErrInvalidUUID) || errors.Is(err, models.ErrInvalidModelType) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if errors.Is(err, db.ErrInvalidUUID) {
+			return apperror.FieldInvalid("id", err)
+		}
+		if errors.Is(err, models.ErrInvalidModelType) {
+			return apperror.FieldInvalid("type", err)
 		}
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
@@ -367,7 +370,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 		return err
 	}
 	if err := models.ValidateCompatibilities(req.DefaultCompatibilities); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("default_compatibilities", err)
 	}
 
 	ctx := c.Request().Context()

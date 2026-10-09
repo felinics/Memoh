@@ -118,10 +118,7 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
-		if errors.Is(err, models.ErrValidation) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return errs.Wrap(err, "create model")
+		return modelWriteError(err, "create model")
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -246,10 +243,7 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
-		if errors.Is(err, models.ErrValidation) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		return errs.Wrap(err, "update model")
+		return modelWriteError(err, "update model")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -286,16 +280,13 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAlreadyExists) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id already exists under the selected provider")
 		}
-		if errors.Is(err, models.ErrValidation) {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
 		if errors.Is(err, models.ErrModelIDAmbiguous) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
-		return errs.Wrap(err, "update model by model id")
+		return modelWriteError(err, "update model by model id")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -427,4 +418,18 @@ func (h *ModelsHandler) Count(c echo.Context) error {
 		return errs.Wrap(err, "count models")
 	}
 	return c.JSON(http.StatusOK, models.CountResponse{Count: count})
+}
+
+// modelWriteError names the request field a rejected model write came from and
+// treats any other failure as an internal failure of op.
+func modelWriteError(err error, op string) error {
+	var fieldErr *models.FieldError
+	if errors.As(err, &fieldErr) {
+		code := apperror.CodeRequestFieldInvalid
+		if fieldErr.Required {
+			code = apperror.CodeRequestFieldRequired
+		}
+		return apperror.Wrap(code, fieldErr.Err, map[string]string{"field": fieldErr.Field})
+	}
+	return errs.Wrap(err, op)
 }

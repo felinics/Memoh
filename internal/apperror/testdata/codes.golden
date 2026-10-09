@@ -267,3 +267,10 @@ channel.enable_failed	400
 channel.webhook_endpoint_invalid	400
 network.provider_not_configured	409
 user.cannot_remove_self	400
+bot_backup.bundle_invalid	400
+fetch_provider.native_managed	409
+skill.name_invalid	400
+skill.registry_read_only	409
+tts.model_not_configured	409
+tts.text_too_long	400
+workspace.archive_invalid	400

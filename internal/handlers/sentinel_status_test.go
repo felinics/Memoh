@@ -65,17 +65,13 @@ func TestGetChannelIdentityConfigStatusFollowsSentinel(t *testing.T) {
 }
 
 func TestFetchProviderHTTPErrorStatus(t *testing.T) {
-	cases := []struct {
-		err  error
-		want int
-	}{
-		{fmt.Errorf("%w: bogus", fetchproviders.ErrInvalidProvider), http.StatusBadRequest},
-		{fetchproviders.ErrManagedNativeProvider, http.StatusBadRequest},
-		{errors.New("invalid provider row"), http.StatusInternalServerError},
+	invalid := fetchProviderHTTPError(fmt.Errorf("%w: bogus", fetchproviders.ErrInvalidProvider))
+	requireFieldError(t, invalid, apperror.CodeRequestFieldInvalid, "provider")
+	if got := apperror.CodeOf(fetchProviderHTTPError(fetchproviders.ErrManagedNativeProvider)); got != apperror.CodeFetchProviderNativeManaged {
+		t.Fatalf("native provider code = %s, want %s", got, apperror.CodeFetchProviderNativeManaged)
 	}
-	for _, tc := range cases {
-		assertSentinelStatus(t, fetchProviderHTTPError(tc.err), tc.err, tc.want)
-	}
+	cause := errors.New("invalid provider row")
+	assertSentinelStatus(t, fetchProviderHTTPError(cause), cause, http.StatusInternalServerError)
 }
 
 // assertSentinelStatus checks a 4xx answer as an echo.HTTPError. A 500 is the
@@ -107,8 +103,8 @@ func TestProviderAndModelHandlersRejectInvalidInputWith400(t *testing.T) {
 		field  string
 	}{
 		{"provider test id", "not-a-uuid", "/", providersHandler.Test, "id"},
-		{"provider models id", "not-a-uuid", "/", providersHandler.ListModelsByProvider, ""},
-		{"provider models type", uuid.NewString(), "/?type=bogus", providersHandler.ListModelsByProvider, ""},
+		{"provider models id", "not-a-uuid", "/", providersHandler.ListModelsByProvider, "id"},
+		{"provider models type", uuid.NewString(), "/?type=bogus", providersHandler.ListModelsByProvider, "type"},
 		{"model test id", "not-a-uuid", "/", modelsHandler.Test, "id"},
 	}
 	for _, tc := range cases {
@@ -118,15 +114,8 @@ func TestProviderAndModelHandlersRejectInvalidInputWith400(t *testing.T) {
 			c.SetParamNames("id")
 			c.SetParamValues(tc.id)
 			err := tc.call(c)
-			if tc.field != "" {
-				if apperror.CodeOf(err) != apperror.CodeRequestFieldInvalid || apperror.ArgsOf(err)["field"] != tc.field {
-					t.Fatalf("error = %v, want %s for field %q", err, apperror.CodeRequestFieldInvalid, tc.field)
-				}
-				return
-			}
-			var httpErr *echo.HTTPError
-			if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-				t.Fatalf("status = %v, want 400", err)
+			if apperror.CodeOf(err) != apperror.CodeRequestFieldInvalid || apperror.ArgsOf(err)["field"] != tc.field {
+				t.Fatalf("error = %v, want %s for field %q", err, apperror.CodeRequestFieldInvalid, tc.field)
 			}
 		})
 	}

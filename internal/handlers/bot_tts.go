@@ -3,6 +3,7 @@ package handlers
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -73,7 +74,7 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 	}
 	const maxTextLen = 500
 	if len([]rune(text)) > maxTextLen {
-		return echo.NewHTTPError(http.StatusBadRequest, "text too long, max 500 characters")
+		return apperror.New(apperror.CodeTTSTextTooLong, map[string]string{"max": strconv.Itoa(maxTextLen)})
 	}
 
 	botSettings, err := h.settingsService.GetBot(c.Request().Context(), botID)
@@ -81,7 +82,7 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 		return errs.Wrap(err, "load bot settings", slog.String("bot_id", botID))
 	}
 	if botSettings.TtsModelID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot has no TTS model configured")
+		return apperror.New(apperror.CodeTTSModelNotConfigured, nil)
 	}
 
 	tempID, f, err := h.tempStore.Create()

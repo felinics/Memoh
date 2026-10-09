@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -490,7 +491,7 @@ func (h *AudioHandler) TestModel(c echo.Context) error {
 	}
 	const maxTestTextLen = 500
 	if len([]rune(text)) > maxTestTextLen {
-		return echo.NewHTTPError(http.StatusBadRequest, "text too long, max 500 characters")
+		return apperror.New(apperror.CodeTTSTextTooLong, map[string]string{"max": strconv.Itoa(maxTestTextLen)})
 	}
 	audio, contentType, err := h.service.Synthesize(c.Request().Context(), id, text, req.Config)
 	if err != nil {
@@ -523,7 +524,7 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	}
 	src, err := file.Open()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return errs.Wrap(err, "open uploaded audio")
 	}
 	defer func(src multipart.File) {
 		err := src.Close()
@@ -533,7 +534,7 @@ func (h *AudioHandler) TestTranscriptionModel(c echo.Context) error {
 	}(src)
 	audio, err := io.ReadAll(src)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return errs.Wrap(err, "read uploaded audio")
 	}
 	var cfg map[string]any
 	if raw := strings.TrimSpace(c.FormValue("config")); raw != "" {

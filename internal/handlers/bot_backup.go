@@ -63,7 +63,7 @@ func (h *BotBackupHandler) Summary(c echo.Context) error {
 	}
 	res, err := h.service.Summary(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return errs.Wrap(err, "bot backup summary")
 	}
 	return c.JSON(http.StatusOK, res)
 }
@@ -165,7 +165,7 @@ func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 	}
 	preview, err := h.service.Preview(c.Request().Context(), raw, importOptionsFromForm(c), c.FormValue("passphrase"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return botBackupError(err, "preview bot backup")
 	}
 	return c.JSON(http.StatusOK, preview)
 }
@@ -212,9 +212,26 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 			errors.Is(err, botbackup.ErrHistoryResetUnavailable) {
 			return apperror.Wrap(apperror.CodeSessionResetUnavailable, err, nil)
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return botBackupError(err, "import bot backup")
 	}
 	return c.JSON(http.StatusOK, result)
+}
+
+// botBackupError answers the failures the uploaded file or form causes and
+// treats everything else as an internal failure of op.
+func botBackupError(err error, op string) error {
+	switch {
+	case errors.Is(err, secure.ErrPassphraseRequired):
+		return apperror.FieldRequired("passphrase")
+	case errors.Is(err, secure.ErrAuth):
+		return apperror.FieldInvalid("passphrase", err)
+	case errors.Is(err, botbackup.ErrTargetBotRequired):
+		return apperror.FieldRequired("target_bot_id")
+	case errors.Is(err, botbackup.ErrInvalidBundle):
+		return apperror.Wrap(apperror.CodeBotBackupBundleInvalid, err, nil)
+	default:
+		return errs.Wrap(err, op)
+	}
 }
 
 func readUploadedBackup(c echo.Context) ([]byte, error) {
@@ -224,10 +241,14 @@ func readUploadedBackup(c echo.Context) ([]byte, error) {
 	}
 	src, err := file.Open()
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "failed to open uploaded file")
+		return nil, errs.Wrap(err, "open uploaded backup")
 	}
 	defer func() { _ = src.Close() }()
-	return io.ReadAll(src)
+	raw, err := io.ReadAll(src)
+	if err != nil {
+		return nil, errs.Wrap(err, "read uploaded backup")
+	}
+	return raw, nil
 }
 
 func importOptionsFromForm(c echo.Context) botbackup.ImportOptions {

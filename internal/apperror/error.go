@@ -73,6 +73,13 @@ const (
 	CodeSkillBuiltinReadOnly                     Code = "skill.builtin_read_only"
 	CodeSkillNameTaken                           Code = "skill.name_taken"
 	CodeSkillSaveFailed                          Code = "skill.save_failed"
+	CodeSkillRegistryReadOnly                    Code = "skill.registry_read_only"
+	CodeSkillNameInvalid                         Code = "skill.name_invalid"
+	CodeTTSTextTooLong                           Code = "tts.text_too_long"
+	CodeTTSModelNotConfigured                    Code = "tts.model_not_configured"
+	CodeWorkspaceArchiveInvalid                  Code = "workspace.archive_invalid"
+	CodeBotBackupBundleInvalid                   Code = "bot_backup.bundle_invalid"
+	CodeFetchProviderNativeManaged               Code = "fetch_provider.native_managed"
 	CodeAppNotFound                              Code = "app.not_found"
 	CodeAppRequestInvalid                        Code = "app.request_invalid"
 	CodeAppBusy                                  Code = "app.busy"
@@ -636,6 +643,35 @@ var catalog = map[Code]Definition{
 	CodeSkillSaveFailed: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Skill could not be saved.",
+	},
+	CodeSkillRegistryReadOnly: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Registry App Skills are managed by their App and cannot be changed directly.",
+	},
+	CodeSkillNameInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The Skill needs a valid name in its YAML frontmatter.",
+	},
+	CodeTTSTextTooLong: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The text is too long to synthesize.",
+		AllowedArgs: []string{"max"},
+	},
+	CodeTTSModelNotConfigured: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This bot has no text-to-speech model configured.",
+	},
+	CodeWorkspaceArchiveInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The archive cannot be extracted.",
+	},
+	CodeBotBackupBundleInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The backup file is not valid.",
+	},
+	CodeFetchProviderNativeManaged: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The built-in fetch provider is managed by Memoh.",
 	},
 	CodeAppNotFound: {
 		HTTPStatus: http.StatusNotFound,
