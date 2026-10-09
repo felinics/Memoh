@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,11 @@ func TestResolveDescriptorRejectsConflictingACPRuntime(t *testing.T) {
 	// type=acp_agent unambiguously means an ACP runtime, so an explicit non-ACP
 	// runtime_type is contradictory and must error rather than silently
 	// downgrade to a plain model chat session.
+	_, _, _, conflictErr := ResolveDescriptor(TypeACPAgent, "", RuntimeModel)
+	var descErr *DescriptorError
+	if !errors.As(conflictErr, &descErr) || descErr.Field != "runtime_type" {
+		t.Fatalf("ResolveDescriptor(acp_agent, model) error = %v, want DescriptorError on runtime_type", conflictErr)
+	}
 	if _, _, _, err := ResolveDescriptor(TypeACPAgent, "", RuntimeModel); err == nil {
 		t.Fatal("ResolveDescriptor(acp_agent, model) = nil error, want a conflict error")
 	} else if !strings.Contains(err.Error(), "conflicts with runtime_type") {

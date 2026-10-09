@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -142,7 +143,7 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 		return apperror.FieldInvalid("to", err)
 	}
 	if !toDate.After(fromDate) {
-		return echo.NewHTTPError(http.StatusBadRequest, "to must be after from")
+		return apperror.FieldInvalid("to", errors.New("to must be after from"))
 	}
 
 	pgBotID, err := db.ParseUUID(botID)
@@ -391,7 +392,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 		return apperror.FieldInvalid("to", err)
 	}
 	if !toDate.After(fromDate) {
-		return echo.NewHTTPError(http.StatusBadRequest, "to must be after from")
+		return apperror.FieldInvalid("to", errors.New("to must be after from"))
 	}
 
 	pgBotID, err := db.ParseUUID(botID)
@@ -414,7 +415,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 
 	limit, err := parseInt32Query(c.QueryParam("limit"), tokenUsageRecordsDefaultLimit)
 	if err != nil {
-		return err
+		return apperror.FieldInvalid("limit", err)
 	}
 	if limit <= 0 {
 		limit = tokenUsageRecordsDefaultLimit
@@ -424,7 +425,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	}
 	offset, err := parseInt32Query(c.QueryParam("offset"), 0)
 	if err != nil {
-		return err
+		return apperror.FieldInvalid("offset", err)
 	}
 
 	fromTS := pgtype.Timestamptz{Time: fromDate, Valid: true}
@@ -506,7 +507,7 @@ func parseInt32Query(raw string, defaultValue int32) (int32, error) {
 	}
 	parsed, err := strconv.ParseInt(raw, 10, 32)
 	if err != nil {
-		return 0, echo.NewHTTPError(http.StatusBadRequest, "invalid integer query parameter")
+		return 0, err
 	}
 	value := int32(parsed)
 	if value < 0 {

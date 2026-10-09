@@ -274,3 +274,5 @@ skill.registry_read_only	409
 tts.model_not_configured	409
 tts.text_too_long	400
 workspace.archive_invalid	400
+chat.message_empty	400
+workdir.remote_unsupported_for_agent	400

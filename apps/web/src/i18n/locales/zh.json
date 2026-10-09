@@ -355,11 +355,15 @@
       "failed": "账号授权失败，请重试。",
       "code_invalid": "授权码无效或已过期，请复制 Claude 页面上的完整授权码，或重新连接。"
     },
+    "chat": {
+      "message_empty": "请输入消息或添加附件。"
+    },
     "workdir": {
       "git_busy": "有 Agent 正在使用此工作目录，请等待执行结束后再切换分支。",
       "git_branch_unavailable": "该本地分支已不可用，请刷新后选择已有分支。",
       "git_switch_failed": "Git 无法切换分支，请检查未提交的修改，以及目标分支是否被其他 Worktree 使用。",
-      "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试。"
+      "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试。",
+      "remote_unsupported_for_agent": "外部智能体会话不能使用远程电脑，请改选原生工作区中的工作目录。"
     },
     "runtime_control": {
       "goal_requires_default_mode": "请先退出计划模式，再创建或继续目标。",

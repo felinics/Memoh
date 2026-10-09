@@ -173,7 +173,7 @@ func (s *Service) ReconcileSessionModelPreference(ctx context.Context, botID, mo
 		modelID = strings.TrimSpace(botSettings.ChatModelID)
 	}
 	if modelID == "" {
-		return "", "", errors.New("chat model is required to set session model preference")
+		return "", "", invalidPreference(errors.New("chat model is required to set session model preference"))
 	}
 	chatModel, provider, err := s.fetchChatModel(ctx, modelID)
 	if err != nil {
@@ -244,7 +244,7 @@ func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessio
 		modelID, reconciledEffort, err = s.reconcileDirectModelPreference(ctx, sess.BotID.String(), sess.BotAgentID.String(), sess.RuntimeType, projectPath, modelID, targetEffort)
 		externalID = pgtype.Text{String: modelID, Valid: modelID != ""}
 	case sess.RuntimeType == sessionpkg.RuntimeACPAgent:
-		return errors.New("ACP preferences must be changed through the ACP runtime")
+		return ErrACPPreferenceUnsupported
 	default:
 		modelID, reconciledEffort, err = s.ReconcileSessionModelPreference(ctx, botID, modelID, targetEffort)
 		nativeID = db.ParseUUIDOrEmpty(modelID)
@@ -254,7 +254,7 @@ func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessio
 	}
 	revision, err := parsePreferenceRevision(expectedRevision)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrModelPreferenceRevisionInvalid, err)
 	}
 	n, err := s.queries.CompareAndSetSessionModelPreference(ctx, sqlc.CompareAndSetSessionModelPreferenceParams{
 		ID: sessionUUID, RuntimeType: sess.RuntimeType, ExpectedRevision: revision,
@@ -273,7 +273,7 @@ func (s *Service) PatchSessionModelPreference(ctx context.Context, botID, sessio
 func (s *Service) fetchChatModel(ctx context.Context, modelID string) (models.GetResponse, sqlc.Provider, error) {
 	modelRef := strings.TrimSpace(modelID)
 	if modelRef == "" {
-		return models.GetResponse{}, sqlc.Provider{}, errors.New("model id is required")
+		return models.GetResponse{}, sqlc.Provider{}, invalidPreference(errors.New("model id is required"))
 	}
 
 	// Support both model UUID and model_id slug. UUID-formatted slugs still
@@ -291,6 +291,9 @@ func (s *Service) fetchChatModel(ctx context.Context, modelID string) (models.Ge
 	}
 	model, err = s.modelsService.GetByModelID(ctx, modelRef)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.GetResponse{}, sqlc.Provider{}, invalidPreference(err)
+		}
 		return models.GetResponse{}, sqlc.Provider{}, err
 	}
 
@@ -300,10 +303,10 @@ resolved:
 		return models.GetResponse{}, sqlc.Provider{}, err
 	}
 	if err := validateSelectedChatModel(model, prov); err != nil {
-		return models.GetResponse{}, sqlc.Provider{}, err
+		return models.GetResponse{}, sqlc.Provider{}, invalidPreference(err)
 	}
 	if !prov.Enable {
-		return models.GetResponse{}, sqlc.Provider{}, fmt.Errorf("chat model provider %s is disabled", prov.Name)
+		return models.GetResponse{}, sqlc.Provider{}, invalidPreference(fmt.Errorf("chat model provider %s is disabled", prov.Name))
 	}
 	return model, prov, nil
 }
@@ -352,6 +355,29 @@ func (s *Service) listCandidates(ctx context.Context, providerFilter string) ([]
 	}
 	return filtered, nil
 }
+
+// ErrModelPreferenceInvalid marks a model reference the caller can fix by
+// picking another model: missing, unknown, disabled, or not a chat model.
+// Store and settings failures never carry it.
+var ErrModelPreferenceInvalid = errors.New("invalid model preference")
+
+// ErrModelPreferenceRevisionInvalid means expected_model_preference_revision
+// is not a UUID.
+var ErrModelPreferenceRevisionInvalid = errors.New("invalid model preference revision")
+
+// ErrACPPreferenceUnsupported means the session runs on ACP, whose model
+// choice goes through the ACP runtime rather than the session preference.
+var ErrACPPreferenceUnsupported = errors.New("ACP preferences must be changed through the ACP runtime")
+
+type preferenceInvalidError struct{ err error }
+
+func (e preferenceInvalidError) Error() string { return e.err.Error() }
+func (e preferenceInvalidError) Unwrap() error { return e.err }
+func (preferenceInvalidError) Is(target error) bool {
+	return target == ErrModelPreferenceInvalid
+}
+
+func invalidPreference(err error) error { return preferenceInvalidError{err: err} }
 
 // ErrModelPreferenceConflict means a picker read predates a newer write.
 var ErrModelPreferenceConflict = errors.New("session model preference changed")

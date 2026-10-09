@@ -117,6 +117,8 @@ const (
 	CodeWorkdirGitBranchUnavailable              Code = "workdir.git_branch_unavailable"
 	CodeWorkdirGitSwitchFailed                   Code = "workdir.git_switch_failed"
 	CodeWorkdirGitUnavailable                    Code = "workdir.git_unavailable"
+	CodeWorkdirRemoteUnsupportedForAgent         Code = "workdir.remote_unsupported_for_agent"
+	CodeChatMessageEmpty                         Code = "chat.message_empty"
 	CodeRuntimeControlThreadUnavailable          Code = "runtime_control.thread_unavailable"
 	CodeRuntimeControlCancelled                  Code = "runtime_control.cancelled"
 	CodeRuntimeControlFailed                     Code = "runtime_control.failed"
@@ -758,6 +760,8 @@ var catalog = map[Code]Definition{
 	CodeWorkdirGitBranchUnavailable:           {HTTPStatus: http.StatusBadRequest, Detail: "This local branch is unavailable. Refresh and select an existing branch."},
 	CodeWorkdirGitSwitchFailed:                {HTTPStatus: http.StatusConflict, Detail: "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree."},
 	CodeWorkdirGitUnavailable:                 {HTTPStatus: http.StatusInternalServerError, Detail: "The Git working directory could not be read. Check the workspace and try again."},
+	CodeWorkdirRemoteUnsupportedForAgent:      {HTTPStatus: http.StatusBadRequest, Detail: "External agent sessions cannot use a remote computer. Choose a workdir on the native workspace instead."},
+	CodeChatMessageEmpty:                      {HTTPStatus: http.StatusBadRequest, Detail: "Enter a message or attach a file."},
 	CodeRuntimeControlThreadUnavailable:       {HTTPStatus: http.StatusConflict, Detail: "Start a conversation before using this operation."},
 	CodeRuntimeControlCancelled:               {HTTPStatus: http.StatusConflict, Detail: "The runtime operation was cancelled."},
 	CodeRuntimeControlSteerFailed:             {HTTPStatus: http.StatusConflict, Detail: "The additional instruction could not be delivered. Send it again after this turn finishes."},

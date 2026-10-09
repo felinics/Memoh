@@ -147,3 +147,27 @@ func TestQRPollRecordsBindFailureCause(t *testing.T) {
 
 	requireFailureRecord(t, rec, records, http.StatusBadRequest, "client", "unexpected EOF")
 }
+
+func TestQRPollNamesTheFieldTheCallerGotWrong(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, body, code, field string
+	}{
+		{"missing qr_code", `{}`, "request.field_required", "qr_code"},
+		{"foreign poll_host", `{"qr_code":"c","poll_host":"evil.example.com"}`, "request.field_invalid", "poll_host"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rec, _ := serveQR(t, nil, upstreamResponse(http.StatusOK, `{}`), "/bots/bot-1/channel/weixin/qr/poll", tc.body)
+			var problem server.Problem
+			if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusBadRequest || problem.Code != tc.code || problem.Args["field"] != tc.field || problem.Fault != "client" {
+				t.Fatalf("response = %d %+v, want 400 %s field %s client", rec.Code, problem, tc.code, tc.field)
+			}
+		})
+	}
+}

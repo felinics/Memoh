@@ -239,9 +239,8 @@ func TestCreateSessionRejectsSystemACPRuntime(t *testing.T) {
 
 	body := `{"type":"schedule","runtime_type":"acp_agent","metadata":{"acp_agent_id":"acp"}}`
 	err := callCreateSession(handler, botID, body)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("CreateSession() error = %v, want HTTP 400", err)
+	if apperror.CodeOf(err) != apperror.CodeRequestFieldInvalid || apperror.ArgsOf(err)["field"] != "session_mode" {
+		t.Fatalf("CreateSession() error = %v, want field_invalid on session_mode", err)
 	}
 	if queries.createCalled {
 		t.Fatal("CreateSession should not insert system ACP sessions")

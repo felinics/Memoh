@@ -759,11 +759,15 @@
       "failed": "Account authorization failed. Please try again.",
       "code_invalid": "The authorization code is invalid or expired. Copy the complete code from Claude or connect again."
     },
+    "chat": {
+      "message_empty": "Enter a message or attach a file."
+    },
     "workdir": {
       "git_busy": "An agent is using this working directory. Wait for it to finish before switching branches.",
       "git_branch_unavailable": "This local branch is unavailable. Refresh and select an existing branch.",
       "git_switch_failed": "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree.",
-      "git_unavailable": "The Git working directory could not be read. Check the workspace and try again."
+      "git_unavailable": "The Git working directory could not be read. Check the workspace and try again.",
+      "remote_unsupported_for_agent": "External agent sessions cannot use a remote computer. Choose a workdir on the native workspace instead."
     },
     "runtime_control": {
       "goal_requires_default_mode": "Exit Plan mode before creating or resuming a goal.",

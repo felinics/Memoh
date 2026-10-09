@@ -815,7 +815,11 @@ func (h *LocalChannelHandler) PostMessage(c echo.Context) error {
 	}
 	body, readErr := io.ReadAll(c.Request().Body)
 	if readErr != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, readErr.Error())
+		var tooLarge *http.MaxBytesError
+		if errors.As(readErr, &tooLarge) {
+			return echo.NewHTTPError(http.StatusRequestEntityTooLarge).WithInternal(readErr)
+		}
+		return apperror.Wrap(apperror.CodeHTTPBadRequest, readErr, nil)
 	}
 	c.Request().Body = io.NopCloser(bytes.NewReader(body))
 	if jsonBodyHasKey(body, "requested_skills") {
@@ -2270,7 +2274,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 
 			hasSkillActivation := hasRequestedSkills || pendingSkillIntent != nil
 			if text == "" && len(msg.Attachments) == 0 && !hasSkillActivation {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", echo.NewHTTPError(http.StatusBadRequest, "message text or attachments required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.message", apperror.New(apperror.CodeChatMessageEmpty, nil))
 				continue
 			}
 			if sessionID == "" || hasSkillActivation {
@@ -2643,7 +2647,7 @@ func (h *LocalChannelHandler) HandleWebSocket(c echo.Context) error {
 				continue
 			}
 			if text == "" && len(chatAttachments) == 0 {
-				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", echo.NewHTTPError(http.StatusBadRequest, "message text or attachments required"))
+				failWSRequest(streamBaseCtx, h.logger, writer, botID, ref, "ws.edit_message", apperror.New(apperror.CodeChatMessageEmpty, nil))
 				continue
 			}
 			if err := h.authorizeWSSession(c.Request().Context(), channelIdentityID, botID, sessionID); err != nil {
