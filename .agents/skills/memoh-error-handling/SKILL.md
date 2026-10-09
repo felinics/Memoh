@@ -70,7 +70,9 @@ metadata:
 
 - **业务分支**：`isApiErrorCode(error, 'xxx.yyy')` 或 `parseMemohError(error)?.code`。
   禁止 `message.includes('...')` 判断业务状态（legacy 兼容兜底除外，必须带注释说明目标旧版本）。
-- **文案**：三语言 locale 各加 `errors.xxx.yyy` 键（code 的点 = JSON 嵌套层级）。
+- **文案**：Web 与 IM 的三语言 locale 各加 `errors.xxx.yyy` 键（code 的点 = JSON 嵌套层级）。
+  `errors` 下的键按字母序放（含嵌套层），`codes.golden` 也按 code 排序；新 code 用
+  `go test ./internal/apperror -run TestCatalogGolden -update-golden` 写入。
   `resolveApiErrorMessage` 自动按 `errors.<code>` → `i18n_key`（legacy）→ `detail` 顺序渲染。
   **错误文案是 UX，不是英文 detail 的翻译**：要回答用户"接下来能做什么"——
   可重试的说"请稍后重试"（如 `workspace.unreachable` 的 zh 文案），需要用户改输入的
