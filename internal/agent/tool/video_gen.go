@@ -198,9 +198,9 @@ func (p *VideoGenProvider) runVideoTask(ctx context.Context, taskID, botID strin
 		result["receipt_path"] = receiptPath
 		result["warning"] = "The provider job may still be running. Check this job before creating another video."
 		p.logger.WarnContext(ctx, "video job outcome unknown", slog.String("task_id", taskID), slog.Any("error", err))
-		public, _ := apperror.PublicFrom(apperror.New(apperror.CodeVideoJobOutcomeUnknown, nil), "")
-		result["error_code"] = string(public.Code)
-		p.bgManager.CompleteVideoTask(taskID, background.TaskUnknown, result, public.Detail)
+		definition, _ := apperror.Lookup(apperror.CodeVideoJobOutcomeUnknown)
+		result["error_code"] = string(apperror.CodeVideoJobOutcomeUnknown)
+		p.bgManager.CompleteVideoTask(taskID, background.TaskUnknown, result, definition.Detail)
 	}
 	job, err := sdk.CreateVideo(ctx, opts...)
 	if err != nil {

@@ -15,7 +15,7 @@ func TestMissingChatModelHasActionableChannelCopy(t *testing.T) {
 	} {
 		t.Run(tc.locale, func(t *testing.T) {
 			const code apperror.Code = "agent.chat_model_not_configured"
-			event := RunFailureEvent(i18n.New(tc.locale), code, nil)
+			event := CodeEvent(i18n.New(tc.locale), code, nil)
 			if event.ErrorCode != string(code) || event.Error != tc.want {
 				t.Fatalf("channel guidance = %+v, want %q", event, tc.want)
 			}

@@ -106,7 +106,7 @@ func TestServerRendersAppErrorAsProblemWithRequestID(t *testing.T) {
 		t.Fatal("response request ID is empty")
 	}
 
-	var problem apperror.Problem
+	var problem Problem
 	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode problem: %v", err)
 	}

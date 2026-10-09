@@ -61,7 +61,8 @@ function onKeydown(event: KeyboardEvent) {
   // the row. This is the keyboard half of the button-in-button problem; the
   // mouse half is the child's own @click.stop.
   if (event.target !== event.currentTarget) return
-  if (event.key !== 'Enter' && event.key !== ' ') return
+  const plainEnter = event.key === 'Enter' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+  if (!plainEnter && event.key !== ' ') return
   event.preventDefault()
   emit('toggle')
 }

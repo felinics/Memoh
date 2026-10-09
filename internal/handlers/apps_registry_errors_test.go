@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/server"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
 )
 
@@ -25,7 +27,7 @@ func TestAppsHandlerAnswersAnInstallerErrorWithItsRegistryCode(t *testing.T) {
 			t.Fatalf("httpError(%v) = %s caused by %v, want %s caused by the error", tc.err, apperror.CodeOf(got), apperror.CauseOf(got), tc.code)
 		}
 		definition, _ := apperror.Lookup(tc.code)
-		event := newAppErrorEvent(got, "req-app")
+		event, _ := server.NewStreamError(context.Background(), got, "req-app")
 		if event.Code != string(tc.code) || event.Detail != definition.Detail || event.Message != definition.Detail || strings.Contains(event.Message, "PRIVATE") {
 			t.Fatalf("event = %#v, want %s with detail %q", event, tc.code, definition.Detail)
 		}

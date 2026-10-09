@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	sessionpkg "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const sessionRuntimeACPAgent = sessionpkg.RuntimeACPAgent
@@ -58,7 +59,7 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 	handle, err := service.StartTurn(ctx, command)
 	if err != nil {
 		turnErr = fmt.Errorf("start turn: %w", err)
-		if isStartFailure(err) {
+		if isStartFailure(ctx, err) {
 			r.projector.BroadcastFailure(command.BotID, apperror.CodeOf(err), apperror.ArgsOf(err))
 		}
 		return discussRunOutcome{}, false
@@ -158,20 +159,23 @@ func (r discussTurnRunner) Run(ctx context.Context, service turn.Service, comman
 	return outcome, true
 }
 
-// isStartFailure reports whether a StartTurn error is a failure to report. A
-// busy thread, a duplicate, or a deferred turn is an admission answer: the
-// worker retries on the next trigger.
-func isStartFailure(err error) bool {
+// isStartFailure reports whether a StartTurn error under ctx is a failure to
+// report. A busy thread, a duplicate, or a deferred turn is an admission
+// answer: the worker retries on the next trigger. A start that ctx ended was
+// abandoned by the worker; a call the server ended is a failure, also when it
+// ended as canceled.
+func isStartFailure(ctx context.Context, err error) bool {
 	return !errors.Is(err, turn.ErrSessionBusy) &&
 		!errors.Is(err, turn.ErrDuplicateTurn) &&
 		!errors.Is(err, turn.ErrTurnDeferred) &&
-		!errors.Is(err, context.Canceled)
+		ctx.Err() == nil
 }
 
 // runFailure is the error a run that ended with a failed run_terminal event
 // failed with: the turn error when it names the run's code, so its args and
 // origin are kept, and otherwise the run's code. It is nil without the event
-// or for a run that did not fail.
+// or for a run that did not fail. The run's own result record already holds
+// the failure, so the error is marked recorded.
 func runFailure(terminal *turn.RunTerminal, turnErr error) error {
 	if terminal == nil || !terminal.Failed() {
 		return nil
@@ -181,9 +185,9 @@ func runFailure(terminal *turn.RunTerminal, turnErr error) error {
 		code = apperror.CodeRuntimeRunFailed
 	}
 	if apperror.CodeOf(turnErr) == code {
-		return turnErr
+		return errs.Recorded(turnErr)
 	}
-	return apperror.New(code, nil)
+	return errs.Recorded(apperror.New(code, nil))
 }
 
 // discussTurnCause is the error that decides how the turn ended. A turn error

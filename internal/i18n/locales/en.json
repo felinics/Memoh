@@ -708,6 +708,9 @@
     "history": {
       "delete_failed": "The conversation history could not be deleted. Please try again."
     },
+    "hook": {
+      "user_message_failed": "The message could not be accepted by the message hook. Check the Hook configuration and try again."
+    },
     "context_lifecycle": {
       "request_invalid": "The context lifecycle request is invalid.",
       "authentication_required": "Sign in to view context lifecycle diagnostics.",
@@ -716,10 +719,15 @@
       "load_failed": "Context lifecycle diagnostics could not be loaded. Please try again."
     },
     "external_runtime": {
-      "auth_required": "Codex is not connected yet. Open Agent settings to connect ChatGPT or configure an API key.",
+      "auth_required": "Codex is not connected, or its sign-in has expired. Open Agent settings to connect ChatGPT or configure an API key.",
       "unavailable": "The external Agent runtime is unavailable. Check the Agent setup and workspace, then try again.",
       "session_resume_failed": "The session could not be resumed. Try again or start a new conversation.",
-      "usage_limited": "The external Agent's usage limit has been reached. Please try again later."
+      "usage_limited": "The external Agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing.",
+      "rate_limited": "The external Agent was rate limited by its model service. Please wait a moment before sending again.",
+      "context_window_exceeded": "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
+      "overloaded": "The external Agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
+      "upstream_unreachable": "The external Agent could not reach its model service, or the connection dropped. Check the network and the Agent's service address, then try again.",
+      "request_blocked": "The model service's safety policy blocked this request. Change the request and send it again."
     },
     "app": {
       "not_found": "This App installation was not found.",
@@ -775,6 +783,10 @@
       "bad_gateway": "An upstream service returned an invalid response. Please try again.",
       "service_unavailable": "The service is temporarily unavailable. Please try again shortly.",
       "gateway_timeout": "An upstream service did not respond in time. Please try again."
+    },
+    "request": {
+      "field_required": "{field} is required.",
+      "field_invalid": "{field} is invalid."
     },
     "agent_dependency_missing": "{dep_id} is not installed in this workspace. Install it from the bot's dependencies, or wait for the running installation to finish, then send the message again.",
     "runtime_run_failed": "The response could not be completed. Please try again.",

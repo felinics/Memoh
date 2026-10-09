@@ -6,7 +6,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"reflect"
 	"runtime"
 	"strings"
@@ -22,27 +21,23 @@ import (
 func TestAppErrorIsPublic(t *testing.T) {
 	err := fmt.Errorf("create bot: %w", apperror.New(codeClient, map[string]string{"field": "name", "secret": "x"}))
 	r := Analyze(context.Background(), Wrap(err, "handler"))
-	if r.Fault != FaultClient || r.Reason != string(codeClient) || r.Public == nil {
+	if r.Fault != apperror.FaultClient || r.Reason != string(codeClient) || r.answer == nil {
 		t.Fatalf("report=%+v", r)
 	}
-	definition, _ := apperror.Lookup(codeClient)
-	if r.Public.Code != definition.HTTPStatus || r.Public.Message != definition.Detail {
-		t.Fatalf("public=%+v", r.Public)
+	if !reflect.DeepEqual(apperror.ArgsOf(r.answer), map[string]string{"field": "name"}) {
+		t.Fatalf("args=%v, want catalog-allowed args only", apperror.ArgsOf(r.answer))
 	}
-	if !reflect.DeepEqual(r.Public.Metadata, map[string]string{"field": "name"}) {
-		t.Fatalf("metadata=%v, want catalog-allowed args only", r.Public.Metadata)
-	}
-	if apperror.CodeOf(r.Public.Err) != codeClient {
-		t.Fatalf("public err=%v", r.Public.Err)
+	if apperror.CodeOf(r.answer) != codeClient {
+		t.Fatalf("answer=%v", r.answer)
 	}
 
 	server := Analyze(context.Background(), apperror.Wrap(codeServer, New("dial"), nil))
-	if server.Fault != FaultServer || server.Reason != string(codeServer) || server.Public == nil || server.Public.Code != http.StatusServiceUnavailable {
+	if server.Fault != apperror.FaultServer || server.Reason != string(codeServer) || apperror.CodeOf(server.answer) != codeServer {
 		t.Fatalf("5xx apperror: %+v", server)
 	}
 
 	unknown := Analyze(context.Background(), apperror.New("not.registered", nil))
-	if unknown.Public != nil || unknown.Reason != "internal" || unknown.Fault != FaultServer {
+	if unknown.answer != nil || unknown.Reason != "internal" || unknown.Fault != apperror.FaultServer {
 		t.Fatalf("unregistered code must not be public: %+v", unknown)
 	}
 }
@@ -51,11 +46,11 @@ func TestFaults(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
-		want Fault
+		want apperror.Fault
 	}{
-		{"client", Wrap(apperror.New(codeClientBare, nil), "context"), FaultClient},
-		{"dependency", NewDependency("down"), FaultDependency},
-		{"public server", apperror.Wrap(codeServer, New("cause"), nil), FaultServer},
+		{"client", Wrap(apperror.New(codeClientBare, nil), "context"), apperror.FaultClient},
+		{"dependency", NewDependency("down"), apperror.FaultDependency},
+		{"public server", apperror.Wrap(codeServer, New("cause"), nil), apperror.FaultServer},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,15 +61,15 @@ func TestFaults(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if got := Analyze(ctx, stderrors.New("not canceled")).Fault; got == FaultCanceled {
+	if got := Analyze(ctx, stderrors.New("not canceled")).Fault; got == apperror.FaultCanceled {
 		t.Fatal("unrelated error became canceled")
 	}
-	if got := Analyze(ctx, fmt.Errorf("%w", context.Canceled)).Fault; got != FaultCanceled {
+	if got := Analyze(ctx, fmt.Errorf("%w", context.Canceled)).Fault; got != apperror.FaultCanceled {
 		t.Fatal(got)
 	}
 	ctx2, cancel2 := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel2()
-	if got := Analyze(ctx2, context.DeadlineExceeded).Fault; got != FaultServer {
+	if got := Analyze(ctx2, context.DeadlineExceeded).Fault; got != apperror.FaultServer {
 		t.Fatal(got)
 	}
 }
@@ -83,17 +78,17 @@ func TestCanceledRequiresCallerCause(t *testing.T) {
 	internal := stderrors.New("lease lost")
 	cases := map[string]struct {
 		cancel func(context.CancelCauseFunc)
-		want   Fault
+		want   apperror.Fault
 	}{
-		"plain cancel":   {func(c context.CancelCauseFunc) { c(nil) }, FaultCanceled},
-		"canceled cause": {func(c context.CancelCauseFunc) { c(context.Canceled) }, FaultCanceled},
-		"deadline cause": {func(c context.CancelCauseFunc) { c(context.DeadlineExceeded) }, FaultCanceled},
-		"internal cause": {func(c context.CancelCauseFunc) { c(internal) }, FaultServer},
-		"wrapped cancel": {func(c context.CancelCauseFunc) { c(fmt.Errorf("stop: %w", context.Canceled)) }, FaultServer},
+		"plain cancel":   {func(c context.CancelCauseFunc) { c(nil) }, apperror.FaultCanceled},
+		"canceled cause": {func(c context.CancelCauseFunc) { c(context.Canceled) }, apperror.FaultCanceled},
+		"deadline cause": {func(c context.CancelCauseFunc) { c(context.DeadlineExceeded) }, apperror.FaultCanceled},
+		"internal cause": {func(c context.CancelCauseFunc) { c(internal) }, apperror.FaultServer},
+		"wrapped cancel": {func(c context.CancelCauseFunc) { c(fmt.Errorf("stop: %w", context.Canceled)) }, apperror.FaultServer},
 		// The idle watchdog cancels with a public error wrapping DeadlineExceeded.
 		"public cause": {func(c context.CancelCauseFunc) {
 			c(apperror.Wrap(codeServer, context.DeadlineExceeded, nil))
-		}, FaultServer},
+		}, apperror.FaultServer},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -124,26 +119,32 @@ func TestAttributionCases(t *testing.T) {
 		name        string
 		ctx         context.Context
 		err         error
-		want        Fault
+		want        apperror.Fault
 		reason      string
 		remote      bool
-		remoteFault string
+		remoteFault apperror.Fault
 	}{
-		{"local client dominates inner dependency", context.Background(), apperror.Wrap(codeClientBare, WrapDependency(stderrors.New("down"), "down"), nil), FaultClient, string(codeClientBare), false, ""},
-		{"remote client", context.Background(), Wrap(Remote(remoteStatus(t, codes.InvalidArgument, "bad", "bad", "client")), "calling remote"), FaultServer, "bad", true, "client"},
-		{"forwarded remote client", context.Background(), Wrap(Forwarded(Remote(remoteStatus(t, codes.InvalidArgument, "bad", "bad", "client"))), "forwarding"), FaultClient, "bad", true, "client"},
-		{"remote server", context.Background(), Remote(remoteStatus(t, codes.Internal, "failed", "fail", "server")), FaultDependency, "fail", true, "server"},
-		{"remote dependency", context.Background(), Remote(remoteStatus(t, codes.Internal, "failed", "fail", "dependency")), FaultDependency, "fail", true, "dependency"},
-		{"remote fault absent", context.Background(), Remote(remoteStatus(t, codes.InvalidArgument, "bad", "bad", "")), FaultDependency, "internal", true, ""},
-		{"metadata detects remote", context.Background(), remoteStatus(t, codes.InvalidArgument, "bad", "bad", "client"), FaultServer, "bad", true, "client"},
-		{"dependency declared", context.Background(), WrapDependency(stderrors.New("network"), "provider"), FaultDependency, "internal", false, ""},
-		{"server by default", context.Background(), New("bug"), FaultServer, "internal", false, ""},
-		{"context canceled", cancelCtx, Wrap(context.Canceled, "work"), FaultCanceled, "canceled", false, ""},
-		{"grpc canceled", cancelCtx, status.Error(codes.Canceled, "stopped"), FaultCanceled, "canceled", false, ""},
-		{"grpc deadline", cancelCtx, status.Error(codes.DeadlineExceeded, "deadline"), FaultCanceled, "canceled", false, ""},
-		{"grpc canceled without canceled ctx", context.Background(), status.Error(codes.Canceled, "stopped"), FaultServer, "internal", false, ""},
-		{"remote 504", cancelCtx, Remote(remoteStatus(t, codes.DeadlineExceeded, "timeout", "timeout", "dependency")), FaultCanceled, "canceled", true, ""},
-		{"unrelated canceled ctx", cancelCtx, stderrors.New("unrelated"), FaultServer, "internal", false, ""},
+		{"local client dominates inner dependency", context.Background(), apperror.Wrap(codeClientBare, WrapDependency(stderrors.New("down"), "down"), nil), apperror.FaultClient, string(codeClientBare), false, ""},
+		{"remote client", context.Background(), Wrap(Remote(remoteStatus(t, codes.InvalidArgument, "bad", "bad", "client")), "calling remote"), apperror.FaultServer, "bad", true, "client"},
+		{"forwarded remote client", context.Background(), Wrap(Forwarded(Remote(remoteStatus(t, codes.InvalidArgument, "bad", "bad", "client"))), "forwarding"), apperror.FaultClient, "bad", true, "client"},
+		{"remote server", context.Background(), Remote(remoteStatus(t, codes.Internal, "failed", "fail", "server")), apperror.FaultDependency, "fail", true, "server"},
+		{"remote dependency", context.Background(), Remote(remoteStatus(t, codes.Internal, "failed", "fail", "dependency")), apperror.FaultDependency, "fail", true, "dependency"},
+		{"remote fault absent", context.Background(), Remote(remoteStatus(t, codes.InvalidArgument, "bad", "bad", "")), apperror.FaultDependency, "internal", true, ""},
+		// An RPC server writes its fault on the status it returns; its own
+		// result record attributes that status as one this process built.
+		{"unmarked status with fault", context.Background(), remoteStatus(t, codes.InvalidArgument, "bad", "bad", "client"), apperror.FaultClient, "bad", false, ""},
+		{"local 5xx over remote", context.Background(), apperror.Wrap(codeServer, Remote(status.Error(codes.Unavailable, "down")), nil), apperror.FaultDependency, string(codeServer), false, ""},
+		{"local 5xx over remote server", context.Background(), apperror.Wrap(codeServer, Remote(remoteStatus(t, codes.Internal, "failed", "fail", "server")), nil), apperror.FaultDependency, string(codeServer), false, ""},
+		{"local 5xx over remote refusal", context.Background(), apperror.Wrap(codeServer, Remote(remoteStatus(t, codes.InvalidArgument, "bad", "bad", "client")), nil), apperror.FaultServer, string(codeServer), false, ""},
+		{"remote canceled with fault", context.Background(), Remote(remoteStatus(t, codes.Canceled, "turn canceled", "", "server")), apperror.FaultDependency, "internal", true, ""},
+		{"dependency declared", context.Background(), WrapDependency(stderrors.New("network"), "provider"), apperror.FaultDependency, "internal", false, ""},
+		{"server by default", context.Background(), New("bug"), apperror.FaultServer, "internal", false, ""},
+		{"context canceled", cancelCtx, Wrap(context.Canceled, "work"), apperror.FaultCanceled, "canceled", false, ""},
+		{"grpc canceled", cancelCtx, status.Error(codes.Canceled, "stopped"), apperror.FaultCanceled, "canceled", false, ""},
+		{"grpc deadline", cancelCtx, status.Error(codes.DeadlineExceeded, "deadline"), apperror.FaultCanceled, "canceled", false, ""},
+		{"grpc canceled without canceled ctx", context.Background(), status.Error(codes.Canceled, "stopped"), apperror.FaultServer, "internal", false, ""},
+		{"remote 504", cancelCtx, Remote(remoteStatus(t, codes.DeadlineExceeded, "timeout", "timeout", "dependency")), apperror.FaultCanceled, "canceled", true, ""},
+		{"unrelated canceled ctx", cancelCtx, stderrors.New("unrelated"), apperror.FaultServer, "internal", false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -168,13 +169,13 @@ func TestCatalogDeclaredFault(t *testing.T) {
 	} {
 		t.Run(string(code), func(t *testing.T) {
 			r := Analyze(context.Background(), Wrap(apperror.Wrap(code, stderrors.New("api error"), nil), "run turn"))
-			if r.Fault != FaultDependency || r.Reason != string(code) || r.Public == nil || r.Public.Fault != FaultDependency {
+			if r.Fault != apperror.FaultDependency || r.Reason != string(code) || apperror.CodeOf(r.answer) != code {
 				t.Fatalf("report = %+v; want fault=dependency reason=%s with the public error", r, code)
 			}
 		})
 	}
 	undeclared := Analyze(context.Background(), apperror.New(codeClientBare, nil))
-	if undeclared.Fault != FaultClient || undeclared.Public == nil || undeclared.Public.Fault != "" {
+	if undeclared.Fault != apperror.FaultClient || undeclared.answer == nil {
 		t.Fatalf("undeclared 4xx report = %+v; want client from the status", undeclared)
 	}
 }
@@ -190,7 +191,7 @@ func TestJoinTraversal(t *testing.T) {
 		t.Fatal("errors.Is did not cross the join")
 	}
 	r := Analyze(context.Background(), err)
-	if r.Public == nil || r.Public.Err != public || r.Fault != FaultDependency || r.Source == nil || r.Source.File != file || r.Source.Line != line+2 {
+	if r.answer != public || r.Fault != apperror.FaultDependency || r.Source == nil || r.Source.File != file || r.Source.Line != line+2 {
 		t.Fatalf("report = %+v, expected second branch source at %s:%d", r, file, line+2)
 	}
 	if r.Attrs[0].Value.String() != "second" || r.Text != "top: second: second; source: first: sentinel; workspace.unreachable" {
@@ -206,7 +207,7 @@ func TestOuterPublicPrecedence(t *testing.T) {
 	inner := Remote(remoteStatus(t, codes.Internal, "down", "down", "server"))
 	outer := apperror.Wrap(codeClientBare, WrapDependency(inner, "dependency"), nil)
 	r := Analyze(context.Background(), outer)
-	if r.Public == nil || r.Public.Err != outer || r.Fault != FaultClient || r.Reason != string(codeClientBare) {
+	if r.answer != outer || r.Fault != apperror.FaultClient || r.Reason != string(codeClientBare) {
 		t.Fatalf("outer public should decide attribution: %+v", r)
 	}
 }
@@ -216,7 +217,7 @@ func TestCanceledDropsPublic(t *testing.T) {
 	cancel()
 	st := status.New(codes.InvalidArgument, "bad").Err()
 	r := Analyze(ctx, Wrap(stderrors.Join(st, context.Canceled), "call"))
-	if r.Fault != FaultCanceled || r.Public != nil {
+	if r.Fault != apperror.FaultCanceled || r.answer != nil {
 		t.Fatalf("canceled report kept a public error: %+v", r)
 	}
 }
@@ -251,7 +252,7 @@ func TestCauseTraversal(t *testing.T) {
 	// Cancellation below Cause() still counts.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if got := Analyze(ctx, causedError{code: codeServer, cause: context.Canceled}).Fault; got != FaultCanceled {
+	if got := Analyze(ctx, causedError{code: codeServer, cause: context.Canceled}).Fault; got != apperror.FaultCanceled {
 		t.Fatalf("fault=%s, want canceled", got)
 	}
 

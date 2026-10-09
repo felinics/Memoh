@@ -1298,6 +1298,7 @@ import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
 import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
+import { useComposerKeyboardFocus } from '../composables/useComposerKeyboardFocus'
 import { useComposerPair } from '../composables/useComposerPair'
 import { COMPOSER_MASK_BELOW_PX, useComposerLayout } from '../composables/useComposerLayout'
 import { provideChatViewTarget } from '../composables/useChatViewContext'
@@ -3327,6 +3328,21 @@ const inactiveSlotVisible = computed(() => !sendButtonVisible.value)
 type VoiceInputState = 'idle' | 'recording' | 'transcribing'
 
 const voiceInputState = ref<VoiceInputState>('idle')
+
+useComposerKeyboardFocus({
+  textarea: textareaEl,
+  enabled: () => isActive.value && isVisible.value,
+  available: () => (router.currentRoute.value.name === 'home' || router.currentRoute.value.name === 'bot')
+    && !!currentBotId.value && !activeChatReadOnly.value
+    && voiceInputState.value === 'idle',
+  ready: () => !loadingMessages.value && !composerPlacementPending.value,
+  owner: () => `${paneTarget.value.botId}:${paneTarget.value.viewId}:${paneTarget.value.sessionId ?? ''}`,
+  request: () => workspaceTabs.pendingChatInputFocus?.panelId === props.tabId
+    && workspaceTabs.pendingChatInputFocus.botId === paneTarget.value.botId
+    && workspaceTabs.pendingChatInputFocus.sessionId === paneTarget.value.sessionId,
+  consumeRequest: () => { workspaceTabs.pendingChatInputFocus = null },
+})
+
 const voiceInputLabel = computed(() => {
   if (voiceInputState.value === 'recording') return t('chat.voiceInput.stop')
   if (voiceInputState.value === 'transcribing') return t('chat.voiceInput.transcribing')

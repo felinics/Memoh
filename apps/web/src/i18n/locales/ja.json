@@ -301,6 +301,9 @@
     "history": {
       "delete_failed": "会話履歴を削除できませんでした。もう一度お試しください。"
     },
+    "hook": {
+      "user_message_failed": "メッセージ Hook で受け付けられませんでした。Hook の設定を確認して、もう一度お試しください。"
+    },
     "context_lifecycle": {
       "request_invalid": "コンテキストライフサイクルのリクエストが無効です。内容を確認してもう一度お試しください。",
       "authentication_required": "コンテキストライフサイクルの診断情報を表示するにはサインインしてください。",
@@ -309,10 +312,15 @@
       "load_failed": "コンテキストライフサイクルの診断情報を読み込めませんでした。しばらくしてからもう一度お試しください。"
     },
     "external_runtime": {
-      "auth_required": "Codex はまだアカウントに接続されていません。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
+      "auth_required": "Codex のアカウントが未接続か、ログインの有効期限が切れています。Agent の設定で ChatGPT に接続するか、API Key を設定してください。",
       "unavailable": "External Agent の Runtime を利用できません。Agent の設定と Workspace を確認して、もう一度お試しください。",
       "session_resume_failed": "セッションを再開できませんでした。もう一度お試しいただくか、新しい会話を開始してください。",
-      "usage_limited": "外部 Agent の利用上限に達しました。しばらくしてからもう一度お試しください。"
+      "usage_limited": "外部 Agent のアカウントの利用枠を使い切りました。上限がリセットされてからもう一度お試しいただくか、アカウントのプランと請求情報をご確認ください。",
+      "rate_limited": "外部 Agent がモデルサービスのレート制限に達しました。しばらく待ってからもう一度送信してください。",
+      "context_window_exceeded": "この会話はモデルのコンテキストウィンドウを超えました。コンテキストを圧縮するか、新しい会話を開始してください。",
+      "overloaded": "外部 Agent のモデルサービスが一時的に利用できないか、過負荷になっています。しばらくしてからもう一度お試しいただくか、別のモデルに切り替えてください。",
+      "upstream_unreachable": "外部 Agent がモデルサービスに接続できないか、接続が途中で切断されました。ネットワークと Agent のサービスアドレスを確認して、もう一度お試しください。",
+      "request_blocked": "このリクエストはモデルサービスの安全ポリシーによりブロックされました。内容を変更してもう一度送信してください。"
     },
     "app": {
       "not_found": "このアプリのインストールは見つかりませんでした。",
@@ -368,6 +376,10 @@
       "bad_gateway": "上流サービスから無効な応答が返されました。もう一度お試しください。",
       "service_unavailable": "サービスは一時的に利用できません。しばらくしてからもう一度お試しください。",
       "gateway_timeout": "上流サービスが時間内に応答しませんでした。もう一度お試しください。"
+    },
+    "request": {
+      "field_required": "{field} は必須です。",
+      "field_invalid": "{field} の値が無効です。"
     },
     "agent_dependency_missing": "{dep_id} はこの Workspace にインストールされていません。Bot の「依存関係」からインストールするか、実行中のインストールの完了を待ってから、メッセージを再送してください。",
     "runtime_run_failed": "応答を完了できませんでした。もう一度お試しください。",
@@ -678,25 +690,80 @@
     },
     "keyboard": {
       "title": "キーボードショートカット",
-      "intro": "各行の「編集」をクリックしてから、新しい組み合わせを押してください。Cmd/Ctrl + W、Q、T、N はブラウザと OS に予約されているため変更できません。",
+      "intro": "各行の「編集」をクリックしてから、新しい組み合わせを押してください。Cmd/Ctrl + W、Q、T、N はブラウザと OS に予約されているため変更できません。Workspace の既定のショートカットは、macOS では ⌘⌥（US キーボードのキー位置で判定）、Windows と Linux では Alt+Shift を使います。Alt+Shift で入力言語を切り替えている場合は、ここで別のキーに変更してください。",
       "resetAll": "すべてリセット",
       "scopes": {
+        "workspace": "ワークスペース",
         "global": "Global",
         "mediaLightbox": "メディアライトボックス"
       },
       "row": {
-        "reset": "デフォルトに戻す"
+        "reset": "デフォルトに戻す",
+        "ignored": "保存した {combo} はここでは使えないため、既定のショートカットを使用しています。",
+        "shadowed": "{combo} は {command} に割り当てられているため、このショートカットは無効です。別の組み合わせを選んでください。"
       },
       "dialog": {
         "title": "ショートカットを編集",
         "prompt": "新しい組み合わせを押してください…",
         "resetDefault": "デフォルトに戻す",
-        "reservedError": "この組み合わせはブラウザまたは OS に予約されています。",
-        "noModifierError": "グローバルショートカットには Cmd/Ctrl または Alt 修飾キーが必要です（通常入力で誤発火しないように）。",
-        "sameScopeError": "すでに {command} で使用されています。",
+        "reservedError": "この組み合わせはブラウザ、OS、またはアプリのメニューに予約されています。",
+        "editingError": "この組み合わせはテキスト編集（コピー、貼り付け、取り消しなど）に使われます。",
+        "menuPauseFailed": "アプリメニューのショートカットを一時停止できませんでした。記録中に反応する場合があります。",
+        "menuRestoreFailed": "アプリメニューのショートカットを再び有効にできませんでした。反応しない場合はウィンドウを再読み込みしてください。",
+        "noModifierError": "このショートカットには Cmd/Ctrl または Alt 修飾キーが必要です（通常入力で誤発火しないように）。",
+        "typingError": "macOS では Option と文字キーの組み合わせは文字入力になります。Command を加えてください。",
+        "sameScopeError": "このキーの組み合わせは {command} で使用されています。",
         "crossScopeWarn": "{command} でも使用されています（異なるコンテキストでのみ有効）。"
       },
       "commands": {
+        "newChatSession": {
+          "label": "新しいセッション",
+          "description": "現在のグループで新しいチャットを開くか、既存の下書きに移動します。"
+        },
+        "focusChatInput": {
+          "label": "チャット入力にフォーカス",
+          "description": "チャットパネルに移動し、メッセージ入力欄にフォーカスします。"
+        },
+        "showSessions": {
+          "label": "チャットを表示",
+          "description": "チャットのサイドバーとセッション一覧を開きます。"
+        },
+        "showFiles": {
+          "label": "ファイルを表示",
+          "description": "ワークスペースのファイルサイドバーを開きます。"
+        },
+        "showSchedule": {
+          "label": "スケジュールを表示",
+          "description": "スケジュールのサイドバーを開きます。"
+        },
+        "showSupermarket": {
+          "label": "マーケットプレイスを表示",
+          "description": "マーケットプレイスのサイドバーを開きます。"
+        },
+        "nextWorkspaceTab": {
+          "label": "次のタブ",
+          "description": "現在のグループの次のタブに移動します。"
+        },
+        "previousWorkspaceTab": {
+          "label": "前のタブ",
+          "description": "現在のグループの前のタブに移動します。"
+        },
+        "splitWorkspaceRight": {
+          "label": "右に分割",
+          "description": "現在のパネルを右側に分割します。"
+        },
+        "splitWorkspaceBelow": {
+          "label": "下に分割",
+          "description": "現在のパネルを下側に分割します。"
+        },
+        "newTerminal": {
+          "label": "新しいターミナル",
+          "description": "現在のグループでターミナルを開きます。"
+        },
+        "newBrowser": {
+          "label": "新しいブラウザー",
+          "description": "現在のグループでワークスペースのブラウザーを開きます。"
+        },
         "closeCurrentWorkspaceTab": {
           "label": "現在の Workspace タブを閉じる",
           "description": "Workspace ペインで開いているタブを閉じます (OS の閉じる動作にフォールバックします)。"
@@ -828,7 +895,6 @@
     "thinkingDone": "思考完了",
     "actions": {
       "copy": "コピー",
-      "copied": "コピーされました",
       "edit": "編集",
       "share": "共有",
       "retry": "もう一度試す",

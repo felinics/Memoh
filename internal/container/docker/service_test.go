@@ -15,17 +15,11 @@ import (
 	dockernetwork "github.com/docker/docker/api/types/network"
 	dockerclient "github.com/docker/docker/client"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/config"
 	containerapi "github.com/felinics/memoh/internal/container"
+	"github.com/felinics/memoh/internal/errs"
 )
-
-type testStatusErr struct {
-	code int
-}
-
-func (e testStatusErr) Error() string { return http.StatusText(e.code) }
-
-func (e testStatusErr) StatusCode() int { return e.code }
 
 func TestDockerSnapshotImageRefSanitizesRuntimeName(t *testing.T) {
 	ref := dockerSnapshotImageRef("workspace/foo:snapshot@123")
@@ -127,16 +121,94 @@ func TestAppendImageSnapshotsIncludesPreparedTag(t *testing.T) {
 	}
 }
 
-func TestMapDockerErrMapsConflictToAlreadyExists(t *testing.T) {
-	err := mapDockerErr(testStatusErr{code: http.StatusConflict})
-	if !containerapi.IsAlreadyExists(err) {
-		t.Fatalf("mapDockerErr conflict = %v, want already exists", err)
+func TestCreateContainerMapsDockerConflictToAlreadyExists(t *testing.T) {
+	tests := map[string]struct {
+		status        int
+		message       string
+		alreadyExists bool
+	}{
+		"name in use": {
+			status:        http.StatusConflict,
+			message:       `Conflict. The container name "/workspace-bot-1" is already in use by container "abc".`,
+			alreadyExists: true,
+		},
+		"daemon failure mentioning conflict": {
+			status:  http.StatusInternalServerError,
+			message: "failed to create endpoint: address already in use; network conflict",
+		},
 	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			svc := newTestService(t, "", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/containers/create") {
+					t.Errorf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": tt.message})
+			})
 
-	err = mapDockerErr(errors.New("Conflict. The container name is already in use"))
-	if !containerapi.IsAlreadyExists(err) {
-		t.Fatalf("mapDockerErr text conflict = %v, want already exists", err)
+			_, err := svc.CreateContainer(context.Background(), containerapi.CreateContainerRequest{
+				ID:       "workspace-bot-1",
+				ImageRef: "debian:bookworm-slim",
+			})
+			if err == nil {
+				t.Fatal("CreateContainer() error = nil, want error")
+			}
+			if got := containerapi.IsAlreadyExists(err); got != tt.alreadyExists {
+				t.Fatalf("IsAlreadyExists(%v) = %v, want %v", err, got, tt.alreadyExists)
+			}
+		})
 	}
+}
+
+func TestGetImageMapsUnreachableDaemonToUnavailable(t *testing.T) {
+	t.Run("daemon answers 503", func(t *testing.T) {
+		svc := newTestService(t, "", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "daemon is shutting down"})
+		})
+		_, err := svc.GetImage(context.Background(), "debian:bookworm-slim")
+		if !errors.Is(err, containerapi.ErrUnavailable) || !errors.Is(err, containerapi.ErrRuntime) {
+			t.Fatalf("GetImage() error = %v, want ErrUnavailable and ErrRuntime", err)
+		}
+		if fault := errs.FaultOf(err); fault != apperror.FaultDependency {
+			t.Fatalf("GetImage() fault = %s, want dependency", fault)
+		}
+	})
+	t.Run("connection refused", func(t *testing.T) {
+		server := httptest.NewServer(http.NotFoundHandler())
+		host := server.URL
+		server.Close()
+		cli, err := dockerclient.NewClientWithOpts(dockerclient.WithHost(host), dockerclient.WithVersion("1.49"))
+		if err != nil {
+			t.Fatalf("create Docker test client: %v", err)
+		}
+		t.Cleanup(func() { _ = cli.Close() })
+		svc := &Service{client: cli, logger: slog.New(slog.DiscardHandler)}
+		_, err = svc.GetImage(context.Background(), "debian:bookworm-slim")
+		if !errors.Is(err, containerapi.ErrUnavailable) {
+			t.Fatalf("GetImage() error = %v, want ErrUnavailable", err)
+		}
+		if fault := errs.FaultOf(err); fault != apperror.FaultDependency {
+			t.Fatalf("GetImage() fault = %s, want dependency", fault)
+		}
+	})
+	t.Run("daemon failure", func(t *testing.T) {
+		svc := newTestService(t, "", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+		})
+		_, err := svc.GetImage(context.Background(), "debian:bookworm-slim")
+		if errors.Is(err, containerapi.ErrUnavailable) || !errors.Is(err, containerapi.ErrRuntime) {
+			t.Fatalf("GetImage() error = %v, want ErrRuntime only", err)
+		}
+		if fault := errs.FaultOf(err); fault != apperror.FaultServer {
+			t.Fatalf("GetImage() fault = %s, want server", fault)
+		}
+	})
 }
 
 func TestDockerDoesNotExposeHostSnapshotCapabilities(t *testing.T) {

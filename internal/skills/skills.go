@@ -14,7 +14,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/felinics/memoh/internal/config"
-	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
@@ -233,7 +232,7 @@ func metadataBool(metadata map[string]any, key string) (bool, bool) {
 func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string, req ActionRequest) error {
 	targetPath := strings.TrimSpace(req.TargetPath)
 	if targetPath == "" {
-		return bridge.ErrBadRequest
+		return ErrInvalidSkillRequest
 	}
 	if _, _, _, ok := RegistrySkillIDs(targetPath); ok {
 		return ErrRegistrySkillReadOnly
@@ -245,7 +244,7 @@ func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string
 		idx := readIndex(ctx, client)
 		items := scan(ctx, client, roots)
 		if !containsSourcePath(items, targetPath) {
-			return bridge.ErrNotFound
+			return ErrSkillNotFound
 		}
 		if idx.Overrides == nil {
 			idx.Overrides = make(map[string]indexOverride)
@@ -257,7 +256,7 @@ func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string
 		idx := readIndex(ctx, client)
 		items := scan(ctx, client, roots)
 		if !containsSourcePath(items, targetPath) {
-			return bridge.ErrNotFound
+			return ErrSkillNotFound
 		}
 		delete(idx.Overrides, targetPath)
 		writeIndex(ctx, client, idx.withItems(resolve(items, idx.Overrides)))
@@ -266,14 +265,14 @@ func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string
 		items := scan(ctx, client, roots)
 		target, ok := findBySourcePath(items, targetPath)
 		if !ok {
-			return bridge.ErrNotFound
+			return ErrSkillNotFound
 		}
 		if target.Managed {
-			return bridge.ErrBadRequest
+			return ErrInvalidSkillRequest
 		}
 		for _, item := range items {
 			if item.Name == target.Name && item.Managed {
-				return bridge.ErrBadRequest
+				return ErrInvalidSkillRequest
 			}
 		}
 		dirPath, err := userSkillDirForName(target.Name)
@@ -290,7 +289,7 @@ func ApplyAction(ctx context.Context, client fileClient, rawCompatRoots []string
 		writeIndex(ctx, client, idx.withItems(resolve(scan(ctx, client, roots), idx.Overrides)))
 		return nil
 	default:
-		return bridge.ErrBadRequest
+		return ErrInvalidSkillRequest
 	}
 }
 

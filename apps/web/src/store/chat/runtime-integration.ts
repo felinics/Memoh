@@ -420,11 +420,13 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
           aborted.name = 'AbortError'
           deps.assistantStreams.rejectAssistantStream(invocationId, aborted)
         } else {
+          const hasReplacementOutput = currentRun.messages.some(message => message.type !== 'status')
           const stage = failureStage(
             pending.assistantTurn,
             pending.replacesTurn,
-            currentRun.messages.some(message => message.type !== 'status')
-              || Boolean(currentRun.error_code),
+            pending.replacesTurn
+              ? hasReplacementOutput
+              : hasReplacementOutput || Boolean(currentRun.error_code),
           )
           deps.assistantStreams.rejectAssistantStream(
             invocationId,

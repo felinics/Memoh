@@ -13,50 +13,49 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 )
 
-// Reasons used when the chain has no public error. They are the catalog codes
-// apperror uses for the same two outcomes at the HTTP boundary.
-const (
-	reasonInternal = "internal"
-	reasonCanceled = "canceled"
-)
-
-// Public is the public error found on a chain, independent of transport.
-type Public struct {
-	// Code is the HTTP status.
-	Code int
-	// Reason is the apperror catalog code, or the ErrorInfo reason of a
+// public is a public error found on a chain: a catalog apperror, or a native
+// gRPC status. Both take part in attribution; only the apperror can be an
+// answer.
+type public struct {
+	// app is the catalog apperror. It is nil for a native gRPC status.
+	app *apperror.Error
+	// status is the HTTP status of the catalog entry. It is zero for a native
+	// gRPC status: its gRPC code is not converted to an HTTP status here.
+	status int
+	// class is the fault the status alone gives: client for a 4xx catalog
+	// status or a gRPC code that refuses the request, server otherwise.
+	class apperror.Fault
+	// reason is the apperror catalog code, or the ErrorInfo reason of a
 	// native gRPC status.
-	Reason string
-	// Message is the catalog detail, or the status message.
-	Message  string
-	Metadata map[string]string
-	// Fault is the attribution the catalog entry declares for the code. It
-	// is empty when the entry declares none and for a native gRPC status; the
+	reason   string
+	metadata map[string]string
+	// fault is the attribution the catalog entry declares for the code. It is
+	// empty when the entry declares none and for a native gRPC status; the
 	// fault then follows from the status and the rest of the chain.
-	Fault Fault
-	// Err is the chain node recognized as the public error. A gRPC boundary
-	// rebuilds its status from this node so the details survive.
-	Err error
+	fault apperror.Fault
 }
 
 // Report is what Analyze concludes about an error chain at a boundary.
 type Report struct {
-	Fault Fault
-	// Public is the public error to respond with. It is nil when the response
-	// is internal, and also when the chain holds a public error that must not
-	// be returned: the caller has canceled, or a remote refused a request this
-	// process sent (fault server), which says nothing about this process's
-	// caller. Reason still takes that error's reason.
-	Public      *Public
+	Fault       apperror.Fault
 	Reason      string
 	Text        string
 	Source      *Frame
 	Stack       []Frame
 	Attrs       []slog.Attr
 	Remote      bool
-	RemoteFault string
+	RemoteFault apperror.Fault
 	Unlocated   bool
 	Panic       bool
+	// answer is the catalog error Answer returns. It is nil when the chain
+	// holds none, and also when the chain holds one that must not be
+	// returned: the caller has canceled, or a remote refused a request this
+	// process sent (fault server), which says nothing about this process's
+	// caller. Reason still takes that error's reason.
+	answer *apperror.Error
+	// Recorded reports that a nested unit in this process has already
+	// recorded this failure (see Recorded).
+	Recorded bool
 }
 
 type node struct {
@@ -73,8 +72,8 @@ func walk(err error, remote, forwarded bool, visit func(node) bool) {
 	}
 	n := node{err: err, remote: remote, forwarded: forwarded}
 	if m, ok := err.(*marker); ok {
-		n.remote = remote || m.kind == "remote"
-		n.forwarded = forwarded || m.kind == "forwarded"
+		n.remote = remote || m.kind == markerRemote
+		n.forwarded = forwarded || m.kind == markerForwarded
 	}
 	if !visit(n) {
 		return
@@ -115,16 +114,45 @@ func CallerEnded(ctx context.Context) bool {
 	return ctx != nil && ctx.Err() != nil && callerEnded(context.Cause(ctx))
 }
 
+// Answer is the public error a boundary answers err with, and the fault it
+// attributes err to. ctx is the unit's own context; nil means no caller. Every
+// transport renders its answer from it, in this order:
+//
+//  1. The caller has ended and the chain holds a cancellation: canceled.
+//  2. The outermost catalog apperror on the chain, unless it came from a
+//     remote that refused a request this process sent and was not forwarded.
+//  3. The generic code for the fault: http.bad_request for a client fault,
+//     internal otherwise.
+//
+// A native gRPC status takes part in the attribution but is never the
+// answer. The answer of a nil err is nil.
+func Answer(ctx context.Context, err error) (*apperror.Error, apperror.Fault) {
+	if err == nil {
+		return nil, ""
+	}
+	r := Analyze(ctx, err)
+	switch {
+	case r.Fault == apperror.FaultCanceled:
+		return apperror.Wrap(apperror.CodeCanceled, err, nil), r.Fault
+	case r.answer != nil:
+		return r.answer, r.Fault
+	case r.Fault == apperror.FaultClient:
+		return apperror.Wrap(apperror.CodeHTTPBadRequest, err, nil), r.Fault
+	default:
+		return apperror.Wrap(apperror.CodeInternal, err, nil), r.Fault
+	}
+}
+
 // FaultOf is the fault Analyze attributes err to when no caller has canceled
 // the unit. An RPC server sends it to its client with the error.
-func FaultOf(err error) Fault {
+func FaultOf(err error) apperror.Fault {
 	return analyze(err, false).Fault
 }
 
 // analyze attributes err. ended reports that the unit's caller has
 // canceled it or its deadline has passed.
 func analyze(err error, ended bool) Report {
-	r := Report{Fault: FaultServer, Reason: reasonInternal, Text: Text(err)}
+	r := Report{Fault: apperror.FaultServer, Reason: string(apperror.CodeInternal), Text: Text(err)}
 	if err == nil {
 		return r
 	}
@@ -133,23 +161,30 @@ func analyze(err error, ended bool) Report {
 		nodes = append(nodes, n)
 		return true
 	})
+	var found *public
 	publicForwarded := false
 	for i, n := range nodes {
 		if n.remote {
 			r.Remote = true
 		}
-		public, ok := publicOf(n)
+		p, ok := publicOf(n)
 		if !ok {
 			continue
 		}
-		r.Public = public
-		r.Reason = public.Reason
-		r.Remote = n.remote || public.Metadata["fault"] != ""
+		found = p
+		r.Reason = p.reason
+		r.Remote = n.remote
 		publicForwarded = n.forwarded
 		if r.Remote {
-			r.RemoteFault = remoteFaultOf(public, nodes[i+1:])
+			r.RemoteFault = remoteFaultOf(p, nodes[i+1:])
 		}
 		break
+	}
+	for _, n := range nodes {
+		if m, ok := n.err.(*marker); ok && m.kind == markerRecorded {
+			r.Recorded = true
+			break
+		}
 	}
 	for _, n := range nodes {
 		if e, ok := n.err.(*faultError); ok && e.panic {
@@ -177,36 +212,49 @@ func analyze(err error, ended bool) Report {
 	}
 	switch {
 	case ended && containsCanceled(nodes):
-		r.Fault = FaultCanceled
-		r.Reason = reasonCanceled
-	case r.Public != nil && r.Remote:
+		r.Fault = apperror.FaultCanceled
+		r.Reason = string(apperror.CodeCanceled)
+	case found != nil && r.Remote:
 		r.Fault = remoteFault(r.RemoteFault, publicForwarded)
-	case r.Public != nil && r.Public.Fault != "":
-		r.Fault = r.Public.Fault
-	case r.Public != nil && r.Public.Code < http.StatusInternalServerError:
-		r.Fault = FaultClient
-	case r.Remote:
-		r.Fault = FaultDependency
+	case found != nil && found.fault != "":
+		r.Fault = found.fault
+	case found != nil && found.class == apperror.FaultClient:
+		r.Fault = apperror.FaultClient
 	default:
-		for _, n := range nodes {
-			if e, ok := n.err.(*faultError); ok && e.explicit {
-				r.Fault = FaultDependency
-				break
+		r.Fault = causeFault(nodes)
+	}
+	if found != nil && r.Fault != apperror.FaultCanceled && (!r.Remote || r.Fault != apperror.FaultServer) {
+		r.answer = found.app
+	}
+	r.Unlocated = (r.Fault == apperror.FaultServer || r.Fault == apperror.FaultDependency) && len(r.Stack) == 0
+	return r
+}
+
+// causeFault attributes a failure this process answers with a 5xx public
+// error of its own, or with none. It is a dependency's when its cause is
+// marked with WrapDependency or was received from another service, unless
+// that service reported that it refused this process's request; otherwise it
+// is this process's.
+func causeFault(nodes []node) apperror.Fault {
+	for i, n := range nodes {
+		if e, ok := n.err.(*faultError); ok && e.dependency {
+			return apperror.FaultDependency
+		}
+		if n.remote {
+			if reportedFault(nodes[i:]) == apperror.FaultClient {
+				return apperror.FaultServer
 			}
+			return apperror.FaultDependency
 		}
 	}
-	if r.Fault == FaultCanceled || (r.Remote && r.Fault == FaultServer) {
-		r.Public = nil
-	}
-	r.Unlocated = (r.Fault == FaultServer || r.Fault == FaultDependency) && len(r.Stack) == 0
-	return r
+	return apperror.FaultServer
 }
 
 // publicOf recognizes the two forms of public error: an apperror with a
 // catalog code, and a native gRPC status.
-func publicOf(n node) (*Public, bool) {
-	if public, ok := appPublic(n.err); ok {
-		return public, true
+func publicOf(n node) (*public, bool) {
+	if p, ok := appPublic(n.err); ok {
+		return p, true
 	}
 	return grpcPublic(n)
 }
@@ -214,7 +262,7 @@ func publicOf(n node) (*Public, bool) {
 // appPublic recognizes an apperror whose code is in the catalog, with the
 // fault its entry declares. An unregistered code is not a public error: the
 // HTTP boundary cannot render it as a Problem either, and responds internal.
-func appPublic(err error) (*Public, bool) {
+func appPublic(err error) (*public, bool) {
 	e, ok := err.(*apperror.Error)
 	if !ok {
 		return nil, false
@@ -224,7 +272,11 @@ func appPublic(err error) (*Public, bool) {
 	if !ok {
 		return nil, false
 	}
-	return &Public{Code: definition.HTTPStatus, Reason: string(code), Message: definition.Detail, Metadata: apperror.ArgsOf(e), Fault: Fault(definition.Fault), Err: e}, true
+	class := apperror.FaultServer
+	if definition.HTTPStatus < http.StatusInternalServerError {
+		class = apperror.FaultClient
+	}
+	return &public{app: e, status: definition.HTTPStatus, class: class, reason: string(code), metadata: apperror.ArgsOf(e), fault: definition.Fault}, true
 }
 
 // callerEnded reports whether the caller ended the context: its cause is
@@ -250,10 +302,12 @@ func containsCanceled(nodes []node) bool {
 		if isCancellation(n.err) {
 			return true
 		}
-		if public, ok := publicOf(n); ok {
-			// A 499 or 504 received from a peer is the peer reporting a
-			// cancellation or timeout; one built in this process is a public error.
-			if (n.remote || public.Metadata["fault"] != "") && (public.Code == 499 || public.Code == http.StatusGatewayTimeout) {
+		if p, ok := publicOf(n); ok {
+			// A 499 or 504 catalog code received from a peer is the peer
+			// reporting a cancellation or timeout; one built in this process is
+			// a public error. A native status never matches: grpcPublic does not
+			// recognize Canceled or DeadlineExceeded, and its status is zero.
+			if n.remote && (p.status == 499 || p.status == http.StatusGatewayTimeout) {
 				return true
 			}
 			continue

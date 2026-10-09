@@ -36,6 +36,7 @@ import (
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/media"
 	"github.com/felinics/memoh/internal/redact"
+	"github.com/felinics/memoh/internal/server"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/slash"
 	"github.com/felinics/memoh/internal/storage"
@@ -188,7 +189,7 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 		{
 			name: "uncoded stream error",
 			send: func(w *wsWriter) {
-				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Error: "provider said " + secret})
+				sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Error: "provider said " + secret})
 			},
 			wantCode:    "runtime_run_failed",
 			wantMessage: runFailedDetail,
@@ -196,7 +197,7 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 		{
 			name: "uncatalogued stream code",
 			send: func(w *wsWriter) {
-				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Error: "provider said " + secret})
+				sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Error: "provider said " + secret})
 			},
 			wantCode:    "not.in_catalog",
 			wantMessage: runFailedDetail,
@@ -204,14 +205,16 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 		{
 			name: "catalogued stream code",
 			send: func(w *wsWriter) {
-				sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: " agent.provider_overloaded ", Error: "provider said " + secret})
+				sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Code: " agent.provider_overloaded ", Error: "provider said " + secret})
 			},
 			wantCode:    "agent.provider_overloaded",
 			wantMessage: "The model provider is unavailable or overloaded right now. Please try again in a moment.",
 		},
 		{
-			name:        "blank stream error",
-			send:        func(w *wsWriter) { sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Error: "  "}) },
+			name: "blank stream error",
+			send: func(w *wsWriter) {
+				sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Error: "  "})
+			},
 			wantCode:    "runtime_run_failed",
 			wantMessage: runFailedDetail,
 		},
@@ -230,7 +233,7 @@ func TestWSErrorFramesRedactUncodedText(t *testing.T) {
 func TestSendWSAgentErrorCarriesCatalogArgs(t *testing.T) {
 	ref := wsTurn("invocation-1", "session-1").withRun("run-1")
 	event := decodeWSTestEvent(t, func(w *wsWriter) {
-		sendWSAgentError(w, ref, native.StreamEvent{
+		sendWSAgentError(context.Background(), w, ref, native.StreamEvent{
 			Type: native.EventError, Code: string(apperror.CodeAgentDependencyMissing),
 			Args: map[string]string{"dep_id": "python", "secret": "token"},
 		})
@@ -240,24 +243,19 @@ func TestSendWSAgentErrorCarriesCatalogArgs(t *testing.T) {
 		t.Fatalf("event = %#v, want dep_id as its only arg", event)
 	}
 	uncatalogued := decodeWSTestEvent(t, func(w *wsWriter) {
-		sendWSAgentError(w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Args: map[string]string{"dep_id": "python"}})
+		sendWSAgentError(context.Background(), w, ref, native.StreamEvent{Type: native.EventError, Code: "not.in_catalog", Args: map[string]string{"dep_id": "python"}})
 	})
 	if _, ok := uncatalogued["args"]; ok {
 		t.Fatalf("uncatalogued event = %#v, want no args", uncatalogued)
 	}
 }
 
-func TestNewWSAppErrorEventUsesPublicCatalogOnly(t *testing.T) {
+func TestWSErrorEventUsesPublicCatalogOnly(t *testing.T) {
 	t.Parallel()
 
-	event, ok := newWSAppErrorEvent(
-		wsTurnRef{RunID: "run-1", SessionID: "session-1"},
-		apperror.Wrap(apperror.CodeACPConfigUpdateFailed, errors.New("SECRET transport path"), nil),
-	)
-	if !ok {
-		t.Fatal("newWSAppErrorEvent() did not recognize application error")
-	}
-	if event.Code != string(apperror.CodeACPConfigUpdateFailed) || event.Message != "The external agent could not apply the selected settings. Please retry." {
+	frame, _ := server.NewStreamError(context.Background(), apperror.Wrap(apperror.CodeACPConfigUpdateFailed, errors.New("SECRET transport path"), nil), "")
+	event := wsErrorEvent(wsTurnRef{RunID: "run-1", SessionID: "session-1"}, frame)
+	if event.Code != string(apperror.CodeACPConfigUpdateFailed) || event.Message != "The external agent could not apply the selected settings. Please retry." || event.Fault != apperror.FaultDependency {
 		t.Fatalf("event = %#v", event)
 	}
 	data, err := json.Marshal(event)
@@ -1905,9 +1903,9 @@ func TestWebQueueCommandErrorsUsePublicCatalog(t *testing.T) {
 			event := decodeWSTestEvent(t, func(w *wsWriter) {
 				h.executeWSQueueCommand(context.Background(), w, wsClientMessage{SessionID: tc.session, InvocationID: "invocation"}, "user", "bot", action, tc.text)
 			})
-			public, _ := apperror.PublicFrom(apperror.New(tc.code, nil), "")
+			definition, _ := apperror.Lookup(tc.code)
 			_, nested := event["error"]
-			if event["type"] != "command_error" || event["terminal"] != true || event["code"] != string(tc.code) || event["message"] != public.Detail || nested {
+			if event["type"] != "command_error" || event["terminal"] != true || event["code"] != string(tc.code) || event["message"] != definition.Detail || event["fault"] == nil || nested {
 				t.Fatalf("unexpected queue error envelope: %#v", event)
 			}
 		}

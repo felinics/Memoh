@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"strings"
 
 	"github.com/felinics/memoh/internal/apperror"
@@ -8,59 +9,64 @@ import (
 	"github.com/felinics/memoh/internal/i18n"
 )
 
-// ErrorCodeText is the channel copy for code: errors.<code> from the channel
-// locale with args substituted, then the catalog detail. It reports false when
-// neither has copy for code.
-func ErrorCodeText(t *i18n.Localizer, code apperror.Code, args map[string]string) (string, bool) {
-	code = apperror.Code(strings.TrimSpace(string(code)))
-	if code == "" {
-		return "", false
-	}
-	key := "errors." + string(code)
+// ErrorText is the channel copy for a public error: errors.<code> from the
+// channel locale with the error's args substituted, then the catalog detail.
+// public is an answer of errs.Answer, so its code is in the catalog.
+func ErrorText(t *i18n.Localizer, public *apperror.Error) string {
+	code := apperror.CodeOf(public)
 	if t != nil {
+		key := "errors." + string(code)
+		args := apperror.ArgsOf(public)
 		params := make(map[string]any, len(args))
 		for name, value := range args {
 			params[name] = value
 		}
 		if text := t.T(key, params); strings.TrimSpace(text) != "" && text != key {
-			return text, true
+			return text
 		}
 	}
-	if definition, ok := apperror.Lookup(code); ok {
-		return definition.Detail, true
-	}
-	return "", false
+	definition, _ := apperror.Lookup(code)
+	return definition.Detail
 }
 
-// RunFailureEvent is the stream error a channel shows for a failed run. It
-// carries the copy for code, or the copy for runtime_run_failed when code has
-// none, so the text is always catalog copy and never an error's own text.
-func RunFailureEvent(t *i18n.Localizer, code apperror.Code, args map[string]string) StreamEvent {
-	if text, ok := ErrorCodeText(t, code, args); ok {
-		return StreamEvent{Type: StreamEventError, Error: text, ErrorCode: string(code)}
+// CodeEvent is the stream error for a code that was recorded rather than
+// returned: the code a failed run stored, or the code of a history event. It
+// carries the copy for code, or the copy for runtime_run_failed when code is
+// not in the catalog, so the text is always catalog copy and never an error's
+// own text.
+func CodeEvent(t *i18n.Localizer, code apperror.Code, args map[string]string) StreamEvent {
+	code = apperror.Code(strings.TrimSpace(string(code)))
+	if _, ok := apperror.Lookup(code); !ok {
+		code, args = apperror.CodeRuntimeRunFailed, nil
 	}
-	text, _ := ErrorCodeText(t, apperror.CodeRuntimeRunFailed, nil)
-	return StreamEvent{Type: StreamEventError, Error: text, ErrorCode: string(apperror.CodeRuntimeRunFailed)}
+	return StreamEvent{Type: StreamEventError, Error: ErrorText(t, apperror.New(code, args)), ErrorCode: string(code)}
 }
 
-// ErrorEvent is the stream error a channel shows for err. An error whose code
-// has copy is shown with that copy and carries the code. Any other error is
-// shown with the generic copy for its fault, as a Web client shows a Problem
-// whose code it does not know: the copy for a bad request for a client fault,
-// and the copy for internal otherwise. The error's own text is never shown;
-// the unit's result record reports it.
-func ErrorEvent(t *i18n.Localizer, err error) StreamEvent {
-	if err == nil {
-		return StreamEvent{Type: StreamEventError}
+// ErrorEvent is the stream error a channel shows for err, answered by
+// errs.Answer as an HTTP response would be: the copy for the public error,
+// carrying its code. The error's own text is never shown; the unit's result
+// record reports it. It reports false when the caller has canceled, which is
+// not answered.
+func ErrorEvent(ctx context.Context, t *i18n.Localizer, err error) (StreamEvent, bool) {
+	public, fault := errs.Answer(ctx, err)
+	if public == nil || fault == apperror.FaultCanceled {
+		return StreamEvent{}, false
 	}
-	code := apperror.CodeOf(err)
-	if text, ok := ErrorCodeText(t, code, apperror.ArgsOf(err)); ok {
-		return StreamEvent{Type: StreamEventError, Error: text, ErrorCode: string(code)}
+	return StreamEvent{Type: StreamEventError, Error: ErrorText(t, public), ErrorCode: string(apperror.CodeOf(public))}, true
+}
+
+// ReplyText is the reply a flow sends for err. A specific public error is
+// shown with its copy. An error errs.Answer answers with a generic code,
+// internal or http.bad_request, is shown with fallback, the flow's own
+// failure copy, or with the generic copy when fallback is empty. It is empty
+// when the caller has canceled, and the flow then sends no reply.
+func ReplyText(ctx context.Context, t *i18n.Localizer, err error, fallback string) string {
+	public, fault := errs.Answer(ctx, err)
+	if public == nil || fault == apperror.FaultCanceled {
+		return ""
 	}
-	code = apperror.CodeInternal
-	if errs.FaultOf(err) == errs.FaultClient {
-		code = apperror.CodeHTTPBadRequest
+	if code := apperror.CodeOf(public); fallback != "" && (code == apperror.CodeInternal || code == apperror.CodeHTTPBadRequest) {
+		return fallback
 	}
-	text, _ := ErrorCodeText(t, code, nil)
-	return StreamEvent{Type: StreamEventError, Error: text, ErrorCode: string(code)}
+	return ErrorText(t, public)
 }

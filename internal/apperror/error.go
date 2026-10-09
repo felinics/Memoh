@@ -114,6 +114,11 @@ const (
 	CodeExternalRuntimeUnavailable               Code = "external_runtime.unavailable"
 	CodeExternalRuntimeSessionResumeFailed       Code = "external_runtime.session_resume_failed"
 	CodeExternalRuntimeUsageLimited              Code = "external_runtime.usage_limited"
+	CodeExternalRuntimeRateLimited               Code = "external_runtime.rate_limited"
+	CodeExternalRuntimeContextWindowExceeded     Code = "external_runtime.context_window_exceeded"
+	CodeExternalRuntimeOverloaded                Code = "external_runtime.overloaded"
+	CodeExternalRuntimeUpstreamUnreachable       Code = "external_runtime.upstream_unreachable"
+	CodeExternalRuntimeRequestBlocked            Code = "external_runtime.request_blocked"
 	CodeToolApprovalForbidden                    Code = "tool_approval.forbidden"
 	CodeToolApprovalNotFound                     Code = "tool_approval.not_found"
 	CodeToolApprovalExpired                      Code = "tool_approval.expired"
@@ -132,6 +137,7 @@ const (
 	CodeSessionResetUnavailable                  Code = "session_runtime.reset_unavailable"
 	CodeSessionResetConflict                     Code = "session_runtime.reset_conflict"
 	CodeHistoryDeleteFailed                      Code = "history.delete_failed"
+	CodeHookUserMessageFailed                    Code = "hook.user_message_failed"
 	CodeSessionPublishFailed                     Code = "session_runtime.publish_failed"
 	CodeSessionAbortFailed                       Code = "session_runtime.abort_failed"
 	CodeAgentResponseTimeout                     Code = "agent.response_timeout"
@@ -206,6 +212,11 @@ const (
 	CodeHTTPBadGateway           Code = "http.bad_gateway"
 	CodeHTTPServiceUnavailable   Code = "http.service_unavailable"
 	CodeHTTPGatewayTimeout       Code = "http.gateway_timeout"
+
+	// Request field codes: a request that lacks a field or carries an invalid
+	// value in one, named in the field arg as the request names it.
+	CodeRequestFieldRequired Code = "request.field_required"
+	CodeRequestFieldInvalid  Code = "request.field_invalid"
 
 	CodeSessionNotFound Code = "session.not_found"
 
@@ -288,20 +299,39 @@ const (
 	CodeWorkspaceRestoreFailed                  Code = "workspace_restore_failed"
 )
 
-// Fault is the attribution a catalog entry declares for its code: who is at
-// fault when this process answers with it. The values are the fault values of
-// the error contract.
+// Fault is who a failure is attributed to. The values are the fault values of
+// the error contract: the fault field of a Problem and the fault metadata of
+// an RPC ErrorInfo. A catalog entry may declare client, server or dependency;
+// canceled is attributed at a boundary from the caller's context and is never
+// declared.
 type Fault string
 
 const (
-	// FaultClient: the caller must change the request.
+	// FaultClient means the caller's request was refused by this process's
+	// rules; the caller must change the request.
 	FaultClient Fault = "client"
-	// FaultServer: this process failed.
+	// FaultServer means this process failed: its code, data or configuration,
+	// including a bad request this process sent downstream.
 	FaultServer Fault = "server"
-	// FaultDependency: a service outside this process failed or refused the
-	// call, such as an LLM provider or an external agent runtime.
+	// FaultDependency means a service outside this process failed or refused
+	// the call, such as an LLM provider, an external agent runtime, an
+	// internal downstream service or the network.
 	FaultDependency Fault = "dependency"
+	// FaultCanceled means the caller canceled, or the caller's deadline passed.
+	FaultCanceled Fault = "canceled"
 )
+
+// ParseFault reads a fault value received as a string, such as the fault
+// metadata of an RPC ErrorInfo. It reports false for any other string.
+func ParseFault(s string) (Fault, bool) {
+	f := Fault(s)
+	switch f {
+	case FaultClient, FaultServer, FaultDependency, FaultCanceled:
+		return f, true
+	default:
+		return "", false
+	}
+}
 
 // Definition is the single catalog entry for a public error contract.
 // Type URIs and frontend i18n keys are derived mechanically from Code.
@@ -676,13 +706,42 @@ var catalog = map[Code]Definition{
 		Detail:     "The session could not be resumed. Try again or start a new conversation.",
 		Fault:      FaultDependency,
 	},
-	// The external agent's own account (a Codex plan) has used up its usage
-	// allowance. The user waits for it to reset, so the status asks the client
-	// to back off.
+	// The external agent's own account has no usage left: a plan allowance
+	// that resets, a billing quota that does not, or a plan that does not
+	// include the agent. The agent reports them as one condition, so the copy
+	// covers both waiting and checking the plan.
 	CodeExternalRuntimeUsageLimited: {
 		HTTPStatus: http.StatusTooManyRequests,
-		Detail:     "The external agent's usage limit has been reached. Please try again later.",
+		Detail:     "The external agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing.",
 		Fault:      FaultDependency,
+	},
+	CodeExternalRuntimeRateLimited: {
+		HTTPStatus: http.StatusTooManyRequests,
+		Detail:     "The external agent was rate limited by its model service. Please wait a moment before sending again.",
+		Fault:      FaultDependency,
+	},
+	// Like the native runtime's context.* codes: nothing failed, the
+	// conversation has to shrink before a turn can run.
+	CodeExternalRuntimeContextWindowExceeded: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "This conversation no longer fits in the model's context window. Compact the context or start a new conversation.",
+	},
+	CodeExternalRuntimeOverloaded: {
+		HTTPStatus: http.StatusServiceUnavailable,
+		Detail:     "The external agent's model service is unavailable or overloaded right now. Try again in a moment, or switch to another model.",
+		Fault:      FaultDependency,
+	},
+	CodeExternalRuntimeUpstreamUnreachable: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "The external agent could not reach its model service, or the connection dropped. Check the network and the agent's service address, then try again.",
+		Fault:      FaultDependency,
+	},
+	// The model service refused the request under its own policy. Nothing
+	// failed, and the same request is refused again, so this is the request's
+	// fault rather than a dependency's.
+	CodeExternalRuntimeRequestBlocked: {
+		HTTPStatus: http.StatusUnprocessableEntity,
+		Detail:     "The model service's safety policy blocked this request. Change the request and send it again.",
 	},
 	CodeACPModelSelectionUnsupported: {
 		HTTPStatus: http.StatusBadRequest,
@@ -786,6 +845,13 @@ var catalog = map[Code]Definition{
 	CodeSessionHistoryInconsistent: {
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The conversation could not be saved. Refresh and try again.",
+	},
+	// The user-message hook failed before the input was accepted by the agent.
+	// The underlying hook/configuration error remains private; the stable code
+	// lets the client preserve the failed input and retry through the hook.
+	CodeHookUserMessageFailed: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The message could not be accepted by the message hook. Check the Hook configuration and try again.",
 	},
 	// The client named a turn that is no longer the latest visible turn (or
 	// was never persisted). Reloading the conversation resolves it.
@@ -964,6 +1030,8 @@ var catalog = map[Code]Definition{
 	CodeHTTPBadGateway:           {HTTPStatus: http.StatusBadGateway, Detail: "An upstream service returned an invalid response. Please try again."},
 	CodeHTTPServiceUnavailable:   {HTTPStatus: http.StatusServiceUnavailable, Detail: "The service is temporarily unavailable. Please try again shortly."},
 	CodeHTTPGatewayTimeout:       {HTTPStatus: http.StatusGatewayTimeout, Detail: "An upstream service did not respond in time. Please try again."},
+	CodeRequestFieldRequired:     {HTTPStatus: http.StatusBadRequest, Detail: "A required field is missing.", AllowedArgs: []string{"field"}},
+	CodeRequestFieldInvalid:      {HTTPStatus: http.StatusBadRequest, Detail: "A field has an invalid value.", AllowedArgs: []string{"field"}},
 	CodeSessionNotFound:          {HTTPStatus: http.StatusNotFound, Detail: "The conversation was not found."},
 	CodeACPAgentNotFound:         {HTTPStatus: http.StatusBadRequest, Detail: "The selected external agent is unavailable."},
 	CodeACPAgentNotEnabled:       {HTTPStatus: http.StatusForbidden, Detail: "The selected external agent is disabled for this bot."},
@@ -1049,6 +1117,20 @@ func New(code Code, args map[string]string) *Error {
 	return &Error{code: code, args: sanitizeArgs(code, args)}
 }
 
+// FieldRequired is the answer to a request that lacks field. field is the
+// name the request uses for it: the JSON key, query parameter or path
+// parameter, as written there, with dots for a nested key.
+func FieldRequired(field string) *Error {
+	return New(CodeRequestFieldRequired, map[string]string{"field": field})
+}
+
+// FieldInvalid is the answer to a request whose field holds a value this
+// process cannot accept; cause says why and stays private. field is named as
+// for FieldRequired.
+func FieldInvalid(field string, cause error) *Error {
+	return Wrap(CodeRequestFieldInvalid, cause, map[string]string{"field": field})
+}
+
 // Wrap retains a private cause for boundary logging. Only catalog-allowed args
 // are kept for serialization.
 func Wrap(code Code, cause error, args map[string]string) *Error {
@@ -1111,40 +1193,6 @@ func Lookup(code Code) (Definition, bool) {
 	definition, ok := catalog[code]
 	definition.AllowedArgs = append([]string(nil), definition.AllowedArgs...)
 	return definition, ok
-}
-
-// externalAgentCodes are the External Agent codes: an agent that is unknown,
-// disabled or not set up, a workspace the caller cannot run in, a runtime
-// without its owner, or input the agent cannot take.
-var externalAgentCodes = map[Code]bool{
-	CodeACPAgentNotFound:                        true,
-	CodeACPAgentNotEnabled:                      true,
-	CodeACPAgentNotConfigured:                   true,
-	CodeCodexOAuthIncomplete:                    true,
-	CodeCodexAuthTokenMissing:                   true,
-	CodeACPAgentAuthInvalid:                     true,
-	CodeNoWorkspaceExec:                         true,
-	CodeACPRuntimeOwnerMissing:                  true,
-	CodeACPDiscussUnsupported:                   true,
-	CodeGroupChatACPUnsupported:                 true,
-	CodeACPProjectModeInvalid:                   true,
-	CodeACPProjectPathInvalid:                   true,
-	CodeACPDisplayArgsInvalid:                   true,
-	CodeACPRuntimeStartFailed:                   true,
-	CodeACPRuntimeBusy:                          true,
-	CodeACPAttachmentInvalid:                    true,
-	CodeACPAttachmentUnavailable:                true,
-	CodeRuntimeAgentCommandStale:                true,
-	CodeACPImageInputUnsupported:                true,
-	CodeInvalidChatRuntime:                      true,
-	CodeAgentDependencyMissing:                  true,
-	CodeExternalAgentAccountUnbound:             true,
-	CodeExternalAgentContainerWorkspaceRequired: true,
-}
-
-// IsExternalAgentCode reports whether code is an External Agent code.
-func IsExternalAgentCode(code Code) bool {
-	return externalAgentCodes[code]
 }
 
 func TypeURI(code Code) string {

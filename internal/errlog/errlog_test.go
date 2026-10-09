@@ -38,17 +38,22 @@ func TestFinishLevels(t *testing.T) {
 		ctx   context.Context
 		opts  Options
 		level slog.Level
-		fault errs.Fault
+		fault apperror.Fault
 		panic bool
 	}{
-		{name: "server", err: errs.New("server"), level: slog.LevelError, fault: errs.FaultServer},
-		{name: "dependency", err: errs.NewDependency("dependency"), level: slog.LevelError, fault: errs.FaultDependency},
-		{name: "retry", err: errs.NewDependency("dependency"), opts: Options{WillRetry: true}, level: slog.LevelWarn, fault: errs.FaultDependency},
-		{name: "client", err: clientErr, level: slog.LevelInfo, fault: errs.FaultClient},
-		{name: "async_client", err: clientErr, opts: Options{Async: true}, level: slog.LevelError, fault: errs.FaultServer},
-		{name: "canceled", ctx: canceledCtx, err: context.Canceled, level: slog.LevelInfo, fault: errs.FaultCanceled},
-		{name: "internal_cancel", ctx: internalCtx, err: context.Canceled, level: slog.LevelError, fault: errs.FaultServer},
-		{name: "panic", err: recovered(), opts: Options{WillRetry: true}, level: slog.LevelError, fault: errs.FaultServer, panic: true},
+		{name: "server", err: errs.New("server"), level: slog.LevelError, fault: apperror.FaultServer},
+		{name: "dependency", err: errs.NewDependency("dependency"), level: slog.LevelError, fault: apperror.FaultDependency},
+		{name: "retry", err: errs.NewDependency("dependency"), opts: Options{WillRetry: true}, level: slog.LevelWarn, fault: apperror.FaultDependency},
+		{name: "client", err: clientErr, level: slog.LevelInfo, fault: apperror.FaultClient},
+		{name: "async_client", err: clientErr, opts: Options{Async: true}, level: slog.LevelError, fault: apperror.FaultServer},
+		{name: "canceled", ctx: canceledCtx, err: context.Canceled, level: slog.LevelInfo, fault: apperror.FaultCanceled},
+		{name: "internal_cancel", ctx: internalCtx, err: context.Canceled, level: slog.LevelError, fault: apperror.FaultServer},
+		{name: "panic", err: recovered(), opts: Options{WillRetry: true}, level: slog.LevelError, fault: apperror.FaultServer, panic: true},
+		{name: "recorded_server", err: errs.Recorded(errs.Wrap(errs.New("run failed"), "trigger")), level: slog.LevelWarn, fault: apperror.FaultServer},
+		{name: "recorded_dependency", err: errs.Wrap(errs.Recorded(errs.NewDependency("provider down")), "trigger"), level: slog.LevelWarn, fault: apperror.FaultDependency},
+		{name: "recorded_async_client", err: errs.Recorded(clientErr), opts: Options{Async: true}, level: slog.LevelWarn, fault: apperror.FaultServer},
+		{name: "recorded_client", err: errs.Recorded(clientErr), level: slog.LevelInfo, fault: apperror.FaultClient},
+		{name: "recorded_panic", err: errs.Recorded(recovered()), level: slog.LevelError, fault: apperror.FaultServer, panic: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,7 +87,7 @@ func TestRemoteLevels(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := errs.Remote(remoteStatus(t, tc.fault))
-			if got := Finish(context.Background(), "rpc", err, Options{}); got.Level != tc.level || got.Report.Fault != errs.FaultDependency {
+			if got := Finish(context.Background(), "rpc", err, Options{}); got.Level != tc.level || got.Report.Fault != apperror.FaultDependency {
 				t.Fatalf("level=%v fault=%q", got.Level, got.Report.Fault)
 			}
 		})
@@ -203,7 +208,7 @@ func TestEventLeavesSpanUnset(t *testing.T) {
 	ctx, span := provider.Tracer("errlog-test").Start(context.Background(), "unit")
 	result := Event(ctx, "unit", errs.New("mark failed"), Options{Async: true})
 	span.End()
-	if result.Level != slog.LevelWarn || result.Report.Fault != errs.FaultServer {
+	if result.Level != slog.LevelWarn || result.Report.Fault != apperror.FaultServer {
 		t.Fatalf("level=%v fault=%q", result.Level, result.Report.Fault)
 	}
 	ended := recorder.Ended()

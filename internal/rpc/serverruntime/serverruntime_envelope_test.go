@@ -51,7 +51,7 @@ func newQueueClient(t *testing.T, handlers map[string]runtimeRpc.Handler) *Clien
 
 func TestQueueCodesSurviveEnvelope(t *testing.T) {
 	for _, code := range queueCodes {
-		envelope := func(context.Context, json.RawMessage) (any, error) { return nil, queueStatus(code) }
+		envelope := func(ctx context.Context, _ json.RawMessage) (any, error) { return nil, queueStatus(ctx, code) }
 		encodings := map[string]map[string]runtimeRpc.Handler{
 			"envelope": {MethodQueueEnqueueSteer: envelope},
 			"server":   Handlers(nil, &queueHandlerStub{err: inbound.NewQueueCommandError(code)}, nil, nil),

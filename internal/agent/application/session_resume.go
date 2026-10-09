@@ -382,7 +382,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 		cancel()
 		return nil, err
 	}
-	runCtx, admission, _, err := s.admitTriggeredRun(runBase, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil, row.RunID.String())
+	runCtx, admission, _, err := s.admitTriggeredRun(runBase, data.SessionType, row.BotID.String(), row.SessionID.String(), "resume:"+row.RunID.String(), payload, nil, row.RunID.String())
 	if err != nil {
 		cancel()
 		if errors.Is(err, ledger.ErrResumeSuperseded) || errors.Is(err, sessionruntime.ErrInvocationConflict) {
@@ -407,7 +407,7 @@ func (s *Service) resumeInterruptedSession(ctx context.Context, row sqlc.Session
 	chunks, errs := s.streamTurnChat(runCtx, req)
 	h := &runHandle{
 		id: admission.RunID, ctx: runCtx, cancel: cancel, events: make(chan turn.Event, 16), errs: make(chan error, 1), inject: make(chan turn.InjectMessage),
-		finishRun:         s.turnRunFinisher(runCtx, admission),
+		finishRun:         s.turnRunFinisher(runCtx, admission, data.SessionType),
 		publishAgentEvent: s.turnAgentEventPublisher(admission.Handle),
 	}
 	done := make(chan struct{})

@@ -80,7 +80,7 @@ func (h *NetworkHandler) ExecuteAction(c echo.Context) error {
 	}
 	var req netctl.BotActionRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.ExecuteActionBot(c.Request().Context(), botID, actionID, req.Input)
 	if err != nil {

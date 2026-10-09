@@ -35,7 +35,7 @@ func TestBuildBaseRunConfigMissingModelPreservesPublicCode(t *testing.T) {
 	if got := publicFailureCode(err); got != want {
 		t.Fatalf("startup code = %q, want %q (error: %v)", got, want, err)
 	}
-	wire := rpc.AppErrorStatus(fmt.Errorf("SECRET startup context: %w", err))
+	wire := rpc.AnswerStatus(t.Context(), fmt.Errorf("SECRET startup context: %w", err))
 	if got := apperror.CodeOf(rpc.DecodeAppError(wire)); got != want {
 		t.Fatalf("RPC code = %q, want %q", got, want)
 	}

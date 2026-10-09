@@ -127,9 +127,9 @@ func (h *UsersHandler) Register(e *echo.Echo) {
 // @Description Get current user profile
 // @Tags users
 // @Success 200 {object} accounts.Account
-// @Failure 400 {object} apperror.Problem
-// @Failure 401 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/me [get].
 func (h *UsersHandler) GetMe(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -152,8 +152,8 @@ func (h *UsersHandler) GetMe(c echo.Context) error {
 // @Tags users
 // @Param payload body accounts.UpdateProfileRequest true "Profile payload"
 // @Success 200 {object} accounts.Account
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/me [put].
 func (h *UsersHandler) UpdateMe(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -180,8 +180,8 @@ func (h *UsersHandler) UpdateMe(c echo.Context) error {
 // @Tags users
 // @Param payload body accounts.UpdatePasswordRequest true "Password payload"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/me/password [put].
 func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -190,7 +190,7 @@ func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 	}
 	var req accounts.UpdatePasswordRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if err := h.service.UpdatePassword(c.Request().Context(), channelIdentityID, req.CurrentPassword, req.NewPassword); err != nil {
 		if errors.Is(err, accounts.ErrInvalidPassword) {
@@ -206,9 +206,9 @@ func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 // @Description List users
 // @Tags users
 // @Success 200 {object} accounts.ListAccountsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users [get].
 func (h *UsersHandler) ListUsers(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -238,10 +238,10 @@ func (h *UsersHandler) ListUsers(c echo.Context) error {
 // @Tags users
 // @Param id path string true "User ID"
 // @Success 200 {object} accounts.Account
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/{id} [get].
 func (h *UsersHandler) GetUser(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -278,11 +278,11 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 // @Param id path string true "User ID"
 // @Param payload body accounts.UpdateAccountRequest true "User update payload"
 // @Success 200 {object} accounts.Account
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/{id} [put].
 func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -309,7 +309,7 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	}
 	var req accounts.UpdateAccountRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.service.UpdateAdmin(c.Request().Context(), targetID, req)
 	if err != nil {
@@ -327,9 +327,9 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 // @Tags users
 // @Param payload body accounts.CreateAccountRequest true "User payload"
 // @Success 201 {object} accounts.Account
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users [post].
 func (h *UsersHandler) CreateUser(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -345,7 +345,7 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 	}
 	var req accounts.CreateAccountRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	//nolint:staticcheck // Keep backward-compatible behavior: CreateHuman creates backing user when owner id is empty.
 	resp, err := h.service.CreateHuman(c.Request().Context(), "", req)
@@ -361,11 +361,11 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 // @Tags users
 // @Param id path string true "User ID"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /users/{id} [delete].
 func (h *UsersHandler) RemoveMember(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -411,10 +411,10 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 // @Param Idempotency-Key header string false "Client-generated key for one logical create. A resend with the same key is answered with the bot the first attempt created instead of a second one."
 // @Param payload body bots.CreateBotRequest true "Bot payload"
 // @Success 201 {object} bots.Bot
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots [post].
 func (h *UsersHandler) CreateBot(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -423,7 +423,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	}
 	var req bots.CreateBotRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	ownerID := channelIdentityID
 	ownerFromToken := true
@@ -601,7 +601,7 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 
 	readyBot, err := h.botService.Get(streamCtx, bot.ID)
 	if err != nil {
-		return sendWorkspaceStreamFailure(send, apperror.CodeBotReadyUpdateFailed, err, httpx.RequestID(c))
+		return sendWorkspaceStreamFailure(streamCtx, send, apperror.CodeBotReadyUpdateFailed, err, httpx.RequestID(c))
 	}
 	send(createBotStreamBotEvent{Type: "ready", Bot: scrubBotForResponse(readyBot)})
 	return nil
@@ -614,8 +614,8 @@ func (h *UsersHandler) createBotStream(c echo.Context, ownerID string, ownerFrom
 // @Param name query string true "Candidate bot name"
 // @Param exclude_bot_id query string false "Bot ID to exclude from the conflict check (used when renaming)"
 // @Success 200 {object} bots.NameAvailability
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/name-availability [get].
 func (h *UsersHandler) CheckBotName(c echo.Context) error {
 	if _, err := h.requireChannelIdentityID(c); err != nil {
@@ -639,9 +639,9 @@ func (h *UsersHandler) CheckBotName(c echo.Context) error {
 // @Tags bots
 // @Param owner_id query string false "Owner user ID (admin only)"
 // @Success 200 {object} bots.ListBotsResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots [get].
 func (h *UsersHandler) ListBots(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -682,10 +682,10 @@ func (h *UsersHandler) ListBots(c echo.Context) error {
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Success 200 {object} bots.Bot
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{id} [get].
 func (h *UsersHandler) GetBot(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -712,10 +712,10 @@ func (h *UsersHandler) GetBot(c echo.Context) error {
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Success 200 {object} bots.ListChecksResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{id}/checks [get].
 func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -759,11 +759,11 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 // @Param id path string true "Bot ID"
 // @Param payload body bots.UpdateBotRequest true "Bot update payload"
 // @Success 200 {object} bots.Bot
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 409 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 409 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{id} [put].
 func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -780,7 +780,7 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	}
 	var req bots.UpdateBotRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	shouldResetRuntimes := false
 	if req.Metadata != nil {
@@ -897,10 +897,10 @@ func updateBotHTTPError(err error) error {
 // @Param id path string true "Bot ID"
 // @Param payload body bots.TransferBotRequest true "Transfer payload"
 // @Success 200 {object} bots.Bot
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{id}/owner [put].
 func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -920,7 +920,7 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 	}
 	var req bots.TransferBotRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	resp, err := h.botService.TransferOwner(c.Request().Context(), botID, req.OwnerUserID)
 	if err != nil {
@@ -941,10 +941,10 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 // @Tags bots
 // @Param id path string true "Bot ID"
 // @Success 202 {object} map[string]string
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{id} [delete].
 func (h *UsersHandler) DeleteBot(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -990,10 +990,10 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 // @Param id path string true "Bot ID"
 // @Param platform path string true "Channel platform"
 // @Success 200 {object} channel.ChannelConfig
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{id}/channel/{platform} [get].
 func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1032,12 +1032,12 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 // @Param platform path string true "Channel platform"
 // @Param payload body channel.UpsertConfigRequest true "Channel config payload"
 // @Success 200 {object} channel.ChannelConfig
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
+// @Failure 503 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{id}/channel/{platform} [put].
 func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1057,7 +1057,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	}
 	var req channel.UpsertConfigRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Credentials == nil {
 		req.Credentials = map[string]any{}
@@ -1089,12 +1089,12 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 // @Param platform path string true "Channel platform"
 // @Param payload body channel.UpdateChannelStatusRequest true "Channel status payload"
 // @Success 200 {object} channel.ChannelConfig
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
+// @Failure 503 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{id}/channel/{platform}/status [patch].
 func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1114,7 +1114,7 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 	}
 	var req channel.UpdateChannelStatusRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel lifecycle not configured")
@@ -1146,11 +1146,11 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 // @Param platform path string true "Channel platform"
 // @Param payload body channel.SetWebhookEndpointRequest true "Webhook endpoint payload"
 // @Success 200 {object} channel.SetWebhookEndpointResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 502 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 502 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{id}/channel/{platform}/webhook-endpoint [post].
 func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1170,7 +1170,7 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 	}
 	var req channel.SetWebhookEndpointRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if h.channelRuntime == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "channel runtime not configured")
@@ -1199,10 +1199,10 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 // @Param id path string true "Bot ID"
 // @Param platform path string true "Channel platform"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{id}/channel/{platform} [delete].
 func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1240,11 +1240,11 @@ func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 // @Param platform path string true "Channel platform"
 // @Param payload body channel.SendRequest true "Send payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{id}/channel/{platform}/send [post].
 func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	channelIdentityID, err := h.requireChannelIdentityID(c)
@@ -1267,7 +1267,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	}
 	var req channel.SendRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
@@ -1289,11 +1289,11 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 // @Param platform path string true "Channel platform"
 // @Param payload body channel.SendRequest true "Send payload"
 // @Success 200 {object} map[string]string
-// @Failure 400 {object} apperror.Problem
-// @Failure 401 {object} apperror.Problem
-// @Failure 403 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
-// @Failure 503 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 401 {object} server.Problem
+// @Failure 403 {object} server.Problem
+// @Failure 500 {object} server.Problem
+// @Failure 503 {object} server.Problem
 // @Router /bots/{id}/channel/{platform}/send_chat [post].
 func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 	chatToken, err := auth.ChatTokenFromContext(c)
@@ -1324,7 +1324,7 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 
 	var req channel.SendRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 	if req.Message.IsEmpty() {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")

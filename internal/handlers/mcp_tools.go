@@ -51,9 +51,9 @@ func (h *ContainerdHandler) SetACPRuntimeResolver(resolver acpRuntimeContextReso
 // @Param bot_id path string true "Bot ID"
 // @Param payload body object true "JSON-RPC request"
 // @Success 200 {object} object "JSON-RPC response: {jsonrpc,id,result|error}"
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/tools [post].
 func (h *ContainerdHandler) HandleMCPTools(c echo.Context) error {
 	if h.toolGateway == nil {

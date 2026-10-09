@@ -47,7 +47,7 @@ func (s *Service) startDiscussTurn(runCtx context.Context, cmd turn.StartTurnCom
 	if !s.discussRuntimeConfigured() {
 		return nil, errors.New("turn: discuss runtime not configured")
 	}
-	h := newDiscussHandle(runCtx, cmd, cancel, admission.RunID, s.turnRunFinisher(runCtx, admission))
+	h := newDiscussHandle(runCtx, cmd, cancel, admission.RunID, s.turnRunFinisher(runCtx, admission, string(cmd.Mode)))
 	h.publishAgentEvent = s.turnAgentEventPublisher(admission.Handle)
 	go s.pumpDiscuss(runCtx, cmd, h)
 	return h, nil
@@ -404,12 +404,12 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 		return
 	}
 
-	// Compute pressure on this goroutine so the detached trigger holds a few
-	// scalars instead of pinning the whole composed context until it runs.
+	// Compute pressure here so the compaction unit holds a few scalars
+	// instead of pinning the whole composed context until it runs.
 	if compactable := discussCompactableTokens(cmd.DiscussMessages); compactable > 0 && s.compactionService != nil && s.settingsService != nil {
 		// Pressure is measured on the full composed context, not the admitted
 		// window: what admission dropped is exactly what compaction must cover.
-		go s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
+		s.maybeCompactDiscuss(context.WithoutCancel(ctx), cmd.BotID, cmd.ThreadID, resolved.ModelID, compactable)
 	}
 }
 

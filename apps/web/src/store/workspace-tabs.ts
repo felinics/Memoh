@@ -688,6 +688,30 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // ---- panel operations ----------------------------------------------------
 
   const activeId = computed<string | null>(() => activePanelId.value)
+  const pendingChatInputFocus = ref<{ panelId: string; botId: string; sessionId: string | null } | null>(null)
+  watch([activeId, currentBotId, () => selection.sessionId], () => { pendingChatInputFocus.value = null }, { flush: 'sync' })
+
+  function requestChatInputFocus() {
+    if (!activePanelId.value || panelComponentOf(activePanelId.value) !== 'chat') activateChatPanel()
+    const panel = api.value?.activePanel
+    if (!activePanelIsChat.value || !panel || !currentBotId.value) return
+    pendingChatInputFocus.value = {
+      panelId: panel.id,
+      botId: currentBotId.value,
+      sessionId: panel.params?.sessionId ?? null,
+    }
+  }
+
+  function focusAdjacentTab(direction: -1 | 1): boolean {
+    const group = api.value?.activeGroup
+    if (!group || group.panels.length < 2) return false
+    const index = group.panels.findIndex(panel => panel.id === activeId.value)
+    if (index < 0) return false
+    const target = group.panels[(index + direction + group.panels.length) % group.panels.length]
+    if (!target) return false
+    focusPanel(target)
+    return true
+  }
 
   // The mobile top bar picks its left affordance from this: chat active → "≡"
   // opens the navigation; a secondary panel (terminal/browser/…) active → "←"
@@ -2051,6 +2075,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   // shown. Collapsing the whole sidebar lives on the workbench toggle (the
   // chrome button over the dock), not on the nav items.
   function selectSidebarView(view: SidebarView) {
+    if (view === 'files' && !hasCurrentPermission('workspace_read')) return
     sidebarView.value = view
     sidebarOpen.value = true
     setWorkbench(true)
@@ -2334,6 +2359,9 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   return {
     api,
     activeId,
+    pendingChatInputFocus,
+    requestChatInputFocus,
+    focusAdjacentTab,
     isMobile,
     activePanelIsChat,
     mobileNavOpen,

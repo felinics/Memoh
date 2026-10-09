@@ -102,13 +102,13 @@ func (h *ModelsHandler) Register(e *echo.Echo) {
 // @Tags models
 // @Param payload body models.AddRequest true "Model configuration"
 // @Success 201 {object} models.AddResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models [post].
 func (h *ModelsHandler) Create(c echo.Context) error {
 	var req models.AddRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.Create(c.Request().Context(), req)
@@ -131,8 +131,8 @@ func (h *ModelsHandler) Create(c echo.Context) error {
 // @Param type query string false "Model type (chat, embedding)"
 // @Param client_type query string false "Provider client type (openai-responses, openai-completions, anthropic-messages, google-generative-ai)"
 // @Success 200 {array} models.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models [get].
 func (h *ModelsHandler) List(c echo.Context) error {
 	modelType := c.QueryParam("type")
@@ -166,9 +166,9 @@ func (h *ModelsHandler) List(c echo.Context) error {
 // @Tags models
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/{id} [get].
 func (h *ModelsHandler) GetByID(c echo.Context) error {
 	id := c.Param("id")
@@ -189,9 +189,9 @@ func (h *ModelsHandler) GetByID(c echo.Context) error {
 // @Tags models
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/model/{modelId} [get].
 func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
@@ -224,9 +224,9 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 // @Param id path string true "Model internal ID (UUID)"
 // @Param payload body models.UpdateRequest true "Updated model configuration"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/{id} [put].
 func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 	id := c.Param("id")
@@ -236,7 +236,7 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 
 	var req models.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.UpdateByID(c.Request().Context(), id, req)
@@ -259,9 +259,9 @@ func (h *ModelsHandler) UpdateByID(c echo.Context) error {
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Param payload body models.UpdateRequest true "Updated model configuration"
 // @Success 200 {object} models.GetResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/model/{modelId} [put].
 func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
@@ -276,7 +276,7 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 
 	var req models.UpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return err
 	}
 
 	resp, err := h.service.UpdateByModelID(c.Request().Context(), modelID, req)
@@ -304,9 +304,9 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 // @Tags models
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/{id} [delete].
 func (h *ModelsHandler) DeleteByID(c echo.Context) error {
 	id := c.Param("id")
@@ -326,9 +326,9 @@ func (h *ModelsHandler) DeleteByID(c echo.Context) error {
 // @Tags models
 // @Param modelId path string true "Model ID (e.g., gpt-4)"
 // @Success 204 "No Content"
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/model/{modelId} [delete].
 func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 	modelID := c.Param("modelId")
@@ -361,9 +361,9 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 // @Produce json
 // @Param id path string true "Model internal ID (UUID)"
 // @Success 200 {object} models.TestResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 404 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 404 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/{id}/test [post].
 func (h *ModelsHandler) Test(c echo.Context) error {
 	id := c.Param("id")
@@ -406,8 +406,8 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 // @Tags models
 // @Param type query string false "Model type (chat, embedding)"
 // @Success 200 {object} models.CountResponse
-// @Failure 400 {object} apperror.Problem
-// @Failure 500 {object} apperror.Problem
+// @Failure 400 {object} server.Problem
+// @Failure 500 {object} server.Problem
 // @Router /models/count [get].
 func (h *ModelsHandler) Count(c echo.Context) error {
 	modelType := c.QueryParam("type")
