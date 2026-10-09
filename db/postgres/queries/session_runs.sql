@@ -114,7 +114,8 @@ ORDER BY session_id, run_id;
 -- bot_sessions.runtime_fencing_token past the token of every run claimed
 -- before them, and a run a history reset ended, or retired before it was
 -- ever claimed, carries history_reset. Such a run has nothing left to
--- report, and no older run stands in for it.
+-- report, and no older run stands in for it; nor has any run of a deleted
+-- session.
 SELECT *
 FROM session_runs run
 WHERE run.team_id = public.memoh_current_team_id()
@@ -133,8 +134,10 @@ WHERE run.team_id = public.memoh_current_team_id()
     FROM bot_sessions session
     WHERE session.team_id = run.team_id
       AND session.id = run.session_id
-      AND run.fencing_token > 0
-      AND session.runtime_fencing_token > run.fencing_token
+      AND (
+        session.deleted_at IS NOT NULL
+        OR run.fencing_token > 0 AND session.runtime_fencing_token > run.fencing_token
+      )
   );
 
 -- name: LockBotForSessionRunClaim :one

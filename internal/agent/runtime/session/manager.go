@@ -19,6 +19,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/errlog"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -2307,15 +2309,25 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				Message:   message,
 			})
 		}
+		unreadable := false
 		reconcile := func(observedEpoch string, observedSeq int64, reason string) bool {
 			snapshot, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 			if err != nil {
-				if subCtx.Err() == nil {
-					m.logger.WarnContext(ctx, "reconcile runtime subscription failed", slog.Any("error", err), slog.String("session_id", key.SessionID), slog.String("reason", reason))
-					terminalDrop(reason + ": snapshot unavailable")
+				if subCtx.Err() != nil {
+					return false
 				}
-				return false
+				// The subscription stays and the next reconcile reads again. A
+				// client sent away to subscribe again can be refused, as for a
+				// session deleted meanwhile, and would keep what it shows.
+				if !unreadable {
+					result := errlog.Event(ctx, "session_runtime.subscription", errs.Wrap(err, "reconcile runtime subscription",
+						slog.String("session_id", key.SessionID), slog.String("reason", reason)), errlog.Options{})
+					m.logger.LogAttrs(ctx, result.Level, "reconcile runtime subscription failed", result.Attrs()...)
+				}
+				unreadable = true
+				return true
 			}
+			unreadable = false
 			snapshotEpoch := strings.TrimSpace(snapshot.Epoch)
 			observedEpoch = strings.TrimSpace(observedEpoch)
 			if snapshotEpoch == "" {

@@ -343,11 +343,18 @@ func assertHistoryResetClearsRuntimeSnapshot(t *testing.T, h wsStepHistoryHarnes
 	}
 }
 
-// failingUpdateBackend is the memory backend with writes, and a clock, that
-// can be made to fail the way a Redis outage fails them.
+// failingUpdateBackend is the memory backend with writes, reads and a clock
+// that can be made to fail the way a Redis outage fails them.
 type failingUpdateBackend struct {
 	*sessionruntime.MemoryBackend
-	fail, failClock atomic.Bool
+	fail, failClock, failLoad atomic.Bool
+}
+
+func (b *failingUpdateBackend) Load(ctx context.Context, key sessionruntime.Key) (sessionruntime.Snapshot, bool, error) {
+	if b.failLoad.Load() {
+		return sessionruntime.Snapshot{}, false, errors.New("runtime backend unreachable")
+	}
+	return b.MemoryBackend.Load(ctx, key)
 }
 
 func (b *failingUpdateBackend) Update(ctx context.Context, key sessionruntime.Key, update sessionruntime.SnapshotUpdate) (sessionruntime.Snapshot, bool, error) {
@@ -496,54 +503,75 @@ func TestPostgresHistoryResetDrainBackendFailure(t *testing.T) {
 // its token; that takes a process dying between admission and claim, and the
 // reaper marking the admission lost. The clear retires such a run with the
 // history it belonged to, while an admission made after the clear is still
-// reported.
+// reported. Deleting an ACP session takes the same reset without clearing
+// the history first, and a deleted session reports no run at all.
 func TestPostgresHistoryResetRetiresOrphanedAdmission(t *testing.T) {
-	h := newWSStepHistoryHarness(t, wsStepHistorySuccess)
-	h.run(t, nil)
-	ctx := context.Background()
-	runs := ledger.NewPostgres(dbsqlc.New(h.pool), h.pool)
-	admit := func(input string) ledger.Run {
-		t.Helper()
-		run, _, err := runs.Admit(ctx, ledger.AdmitParams{
-			RunID: uuid.NewString(), BotID: h.botID, SessionID: h.sessionID,
-			InvocationID: uuid.NewString(), TurnID: uuid.NewString(),
-			Input: []byte(`{"kind":"message","text":"` + input + `"}`), InputFingerprint: input,
-		})
-		if err != nil {
-			t.Fatalf("admit: %v", err)
-		}
-		return run
-	}
-	const input = "orphaned admission input that was cleared"
-	orphan := admit(input)
-	// The reaper's repair of an admission whose process died before claiming it.
-	if _, applied, err := runs.Finalize(ctx, ledger.FinalizeParams{
-		RunID: orphan.RunID, State: ledger.StateLost, ErrorCode: "runtime_admission_orphaned",
-	}); err != nil || !applied {
-		t.Fatalf("mark orphaned admission lost = (%v, %v)", applied, err)
-	}
-
-	h.clearHistory(t, historyResetSession, nil)
-
-	for name, manager := range map[string]*sessionruntime.Manager{"live": h.manager, "restarted": h.restarted(t)} {
-		snapshot := mustSnapshot(t, manager, h.botID, h.sessionID)
-		if run := snapshot.CurrentRunView; run != nil {
-			t.Errorf("%s snapshot after the clear reports %s, want no run", name, describeRun(run))
-		}
-		raw, err := json.Marshal(snapshot)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, cleared := range []string{input, directLifecyclePrompt, wsStepHistoryPartialText} {
-			if strings.Contains(string(raw), cleared) {
-				t.Errorf("%s snapshot after the clear carries cleared content %q: %s", name, cleared, raw)
+	for _, deleteSession := range []bool{false, true} {
+		t.Run(map[bool]string{false: "history cleared", true: "session deleted"}[deleteSession], func(t *testing.T) {
+			h := newWSStepHistoryHarness(t, wsStepHistorySuccess)
+			h.run(t, nil)
+			ctx := context.Background()
+			runs := ledger.NewPostgres(dbsqlc.New(h.pool), h.pool)
+			admit := func(input string) ledger.Run {
+				t.Helper()
+				run, _, err := runs.Admit(ctx, ledger.AdmitParams{
+					RunID: uuid.NewString(), BotID: h.botID, SessionID: h.sessionID,
+					InvocationID: uuid.NewString(), TurnID: uuid.NewString(),
+					Input: []byte(`{"kind":"message","text":"` + input + `"}`), InputFingerprint: input,
+				})
+				if err != nil {
+					t.Fatalf("admit: %v", err)
+				}
+				return run
 			}
-		}
-	}
+			const input = "orphaned admission input that was cleared"
+			orphan := admit(input)
+			// The reaper's repair of an admission whose process died before
+			// claiming it.
+			if _, applied, err := runs.Finalize(ctx, ledger.FinalizeParams{
+				RunID: orphan.RunID, State: ledger.StateLost, ErrorCode: "runtime_admission_orphaned",
+			}); err != nil || !applied {
+				t.Fatalf("mark orphaned admission lost = (%v, %v)", applied, err)
+			}
 
-	pending := admit("admission after the clear")
-	if got := mustSnapshot(t, h.restarted(t), h.botID, h.sessionID).CurrentRunView; got == nil || got.RunID != pending.RunID {
-		t.Fatalf("ledger fallback after a new admission = %s, want %s", describeRun(got), pending.RunID)
+			if deleteSession {
+				resetCtx, release, err := h.manager.BeginSessionHistoryReset(ctx, h.botID, h.sessionID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				err = dbsqlc.New(h.pool).SoftDeleteSession(resetCtx, dbpkg.ParseUUIDOrEmpty(h.sessionID))
+				release()
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				h.clearHistory(t, historyResetSession, nil)
+			}
+
+			for name, manager := range map[string]*sessionruntime.Manager{"live": h.manager, "restarted": h.restarted(t)} {
+				snapshot := mustSnapshot(t, manager, h.botID, h.sessionID)
+				if run := snapshot.CurrentRunView; run != nil {
+					t.Errorf("%s snapshot afterwards reports %s, want no run", name, describeRun(run))
+				}
+				raw, err := json.Marshal(snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, cleared := range []string{input, directLifecyclePrompt, wsStepHistoryPartialText} {
+					if strings.Contains(string(raw), cleared) {
+						t.Errorf("%s snapshot afterwards carries cleared content %q: %s", name, cleared, raw)
+					}
+				}
+			}
+			if deleteSession {
+				return
+			}
+
+			pending := admit("admission after the clear")
+			if got := mustSnapshot(t, h.restarted(t), h.botID, h.sessionID).CurrentRunView; got == nil || got.RunID != pending.RunID {
+				t.Fatalf("ledger fallback after a new admission = %s, want %s", describeRun(got), pending.RunID)
+			}
+		})
 	}
 }
 
@@ -552,11 +580,20 @@ func TestPostgresHistoryResetRetiresOrphanedAdmission(t *testing.T) {
 // the reset never gets to restart the projections (its release pass skipped,
 // timed out, or its process died after the deletion committed), and even when
 // the session went with its history, as an overwrite import or an ACP session
-// deletion takes it, so the client cannot subscribe to it again.
+// deletion takes it, so the client cannot subscribe to it again. A runtime
+// backend that briefly cannot be read does not end the subscription either.
 func TestPostgresHistoryResetSubscriberHealsWithoutReleasePass(t *testing.T) {
-	for _, deleteSession := range []bool{false, true} {
-		t.Run(map[bool]string{false: "history cleared", true: "session deleted"}[deleteSession], func(t *testing.T) {
-			h := newWSStepHistoryHarness(t, wsStepHistoryAuthFailure)
+	for _, tc := range []struct {
+		name                      string
+		deleteSession, unreadable bool
+	}{
+		{"history cleared", false, false},
+		{"session deleted", true, false},
+		{"session deleted, backend briefly unreadable", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &failingUpdateBackend{MemoryBackend: sessionruntime.NewMemoryBackend()}
+			h := newWSStepHistoryHarnessOn(t, wsStepHistoryAuthFailure, backend)
 			ctx := context.Background()
 			view := h.watch(t)
 			h.run(t, nil)
@@ -580,15 +617,21 @@ func TestPostgresHistoryResetSubscriberHealsWithoutReleasePass(t *testing.T) {
 			if err := h.messages.DeleteBySession(resetCtx, h.sessionID); err != nil {
 				t.Fatal(err)
 			}
-			if deleteSession {
+			if tc.deleteSession {
 				if err := dbsqlc.New(h.pool).SoftDeleteSession(resetCtx, dbpkg.ParseUUIDOrEmpty(h.sessionID)); err != nil {
 					t.Fatal(err)
 				}
 			}
+			if tc.unreadable {
+				// Longer than a reconcile interval of the memory backend.
+				backend.failLoad.Store(true)
+				view.follow(2500*time.Millisecond, nil)
+				backend.failLoad.Store(false)
+			}
 			// No release: the client must be brought to the cleared ledger
 			// without it.
 			view.awaitCleared(before.RunID)
-			if deleteSession {
+			if tc.deleteSession {
 				return
 			}
 
