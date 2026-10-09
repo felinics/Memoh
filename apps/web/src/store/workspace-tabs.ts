@@ -1091,7 +1091,10 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     }
   }
 
-  function syncRestoredChatSelection(options?: { preserveRestoredChat?: boolean }) {
+  function syncRestoredChatSelection(options?: {
+    preserveRestoredChat?: boolean
+    preserveActivePanel?: boolean
+  }) {
     const dock = api.value
     const sid = (chatStore.sessionId ?? '').trim()
     if (!dock) return
@@ -1103,6 +1106,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
     const blockNonExplicitOpen = suppressSelectionDockMutations && !explicitSelection
     const active = dock.activePanel
     const activeIsChat = !!active && panelComponentOf(active.id) === 'chat'
+    const preserveNonChatPanel = options?.preserveActivePanel && active && !activeIsChat
     const activeSession = activeIsChat ? panelSessionId(active) : null
     const groupId = activeIsChat ? active.group.id : undefined
     if (sid) {
@@ -1118,6 +1122,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
       }
       const existing = chatPanelForSession(sid)
       if (existing) {
+        if (preserveNonChatPanel) return
         setNextChatActivationExplicit(existing.id, explicitSelection)
         focusPanel(existing)
         return
@@ -1130,6 +1135,7 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
         adoptActiveRestoredChatSelection(activeSession, active?.id)
         return
       }
+      if (preserveNonChatPanel) return
       openSessionChat({ sessionId: sid, groupId, explicitSelection })
       return
     }
@@ -2319,14 +2325,15 @@ export const useWorkspaceTabsStore = defineStore('workspace-tabs', () => {
   })
 
   watch(
-    () => [chatStore.loadingChats, chatStore.sessions.length, currentBotId.value] as const,
+    [() => chatStore.loadingChats, () => chatStore.sessions.length, currentBotId],
     () => {
       if (chatStore.loadingChats) return
-      // After chats load, reconcile selection ↔ dock. suppressSelectionDockMutations
-      // inside syncRestoredChatSelection still blocks auto-picked opens on a
-      // restored non-empty workspace.
+      // List hydration also runs for background sessions and pagination. Keep
+      // the user's browser/file/terminal panel active; explicit navigation is
+      // handled by openSessionChat and the selection watcher above.
       syncRestoredChatSelection({
         preserveRestoredChat: suppressSelectionDockMutations,
+        preserveActivePanel: true,
       })
     },
   )
