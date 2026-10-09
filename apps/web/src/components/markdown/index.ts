@@ -1,5 +1,5 @@
 import { defineComponent, h, type Component } from 'vue'
-import { setCustomComponents } from 'markstream-vue'
+import { setCustomComponents, type MarkdownIt } from 'markstream-vue'
 import MdCheckbox from './md-checkbox.vue'
 import MdFootnoteReference from './md-footnote-reference.vue'
 import MdFootnoteAnchor from './md-footnote-anchor.vue'
@@ -59,4 +59,23 @@ export function registerSharedMarkdownComponents(
   const merged = { ...sharedComponents, ...extra }
   merged.text = textNodeRouter(extra?.code_block)
   setCustomComponents(customId, merged)
+}
+
+// The parser types `md.linkify` as unknown; at runtime it is a linkify-it
+// instance, whose `set` merges options in place.
+interface LinkifyOptionsTarget {
+  set: (options: { fuzzyLink: boolean }) => unknown
+}
+
+// markstream's parser auto-links bare domains (linkify fuzzyLink). Common file
+// extensions are also country-code TLDs (.md, .sh, .ai, .io, .pl), so a file
+// name in prose such as summary.md became a link to http://summary.md. Only
+// addresses with an explicit scheme are auto-linked; written Markdown links,
+// <autolinks> and e-mail addresses are unaffected. Pass this exact function to
+// every surface's `custom-markdown-it`: markstream caches parsers by its
+// identity, so a fresh closure per render would defeat that cache.
+export function withoutFuzzyLinks(md: MarkdownIt): MarkdownIt {
+  const linkify = md.linkify as LinkifyOptionsTarget | undefined
+  linkify?.set({ fuzzyLink: false })
+  return md
 }

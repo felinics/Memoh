@@ -178,6 +178,7 @@
             :show-tooltips="false"
             :code-block-dark-theme="codeBlockTheme.dark"
             :code-block-light-theme="codeBlockTheme.light"
+            :custom-markdown-it="withoutFuzzyLinks"
             custom-id="release-notes"
           />
         </div>
@@ -304,7 +305,7 @@ import MarkdownRender from 'markstream-vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import ChatCodeBlock from '@/pages/home/components/chat-code-block.vue'
-import { registerSharedMarkdownComponents } from '@/components/markdown'
+import { registerSharedMarkdownComponents, withoutFuzzyLinks } from '@/components/markdown'
 import {
   DesktopShellKey,
 } from '@/lib/desktop-shell'
