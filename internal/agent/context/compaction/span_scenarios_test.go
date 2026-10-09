@@ -665,3 +665,168 @@ func TestManualCompactionReportsASummaryThatDoesNotShrinkAsBlocked(t *testing.T)
 		t.Fatalf("calls=%d failure_reason=%q; want the attempt recorded against its rows", stub.calls, q.completed.FailureReason)
 	}
 }
+
+func TestCompactionUnusableSummaryHoldsItsRowsOnlyForAWhile(t *testing.T) {
+	t.Parallel()
+
+	// The model fails once on the oldest claim — cut off, empty or refused —
+	// and works from then on. Later history compacts right away; the failed
+	// rows are held back, then tried again and compacted.
+	for _, mode := range []string{"length", "empty", "content_filter"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			q := newSessionStore()
+			for i := 0; i < 20; i++ {
+				q.append(prose(t, "user", fmt.Sprintf("OLDU%d", i), 300, 100), prose(t, "assistant", fmt.Sprintf("OLDA%d", i), 300, 100))
+			}
+			q.append(prose(t, "user", "CURRENT", 10, 10))
+			stub := &stubModel{summary: summaryOfTokens(t, 150)}
+			svc := newMachineryService(q)
+			clock := time.Unix(1_800_000_000, 0)
+			svc.nowFn = func() time.Time { return clock }
+			q.now = func() time.Time { return clock }
+			cfg := machineryConfig(stub, 700)
+			cfg.MaxCompactTokens = 6000
+			switch mode {
+			case "empty":
+				stub.summary = ""
+			default:
+				stub.finishReason = mode
+			}
+			if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, ErrIneffectiveSummary) {
+				t.Fatalf("first pass = %v, want the unusable summary recorded", err)
+			}
+			failed := append([]pgtype.UUID(nil), q.markedIDs...)
+			stub.summary, stub.finishReason = summaryOfTokens(t, 150), ""
+			drain := func() {
+				for pass := 0; pass < 3; pass++ {
+					if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+						return
+					}
+				}
+			}
+			raw := func(ids []pgtype.UUID) int {
+				n := 0
+				for _, id := range ids {
+					if q.logStatuses[q.claims[id]] != "ok" {
+						n++
+					}
+				}
+				return n
+			}
+			var later []pgtype.UUID
+			for turn := 0; turn < 10; turn++ {
+				clock = clock.Add(time.Minute)
+				current := q.history[len(q.history)-1]
+				q.history = q.history[:len(q.history)-1]
+				answer := prose(t, "assistant", fmt.Sprintf("NEWA%d", turn), 300, 100)
+				later = append(later, current.ID, answer.ID)
+				q.append(current, answer, prose(t, "user", fmt.Sprintf("NEXT%d", turn), 10, 10))
+				drain()
+			}
+			var rest []pgtype.UUID
+			for _, row := range q.history[:40] {
+				if !idSet(failed)[row.ID] {
+					rest = append(rest, row.ID)
+				}
+			}
+			if raw(failed) != len(failed) || raw(rest) != 0 || raw(later[:4]) != 0 {
+				t.Fatalf("during the hold: %d of %d failed rows raw, %d older and %d later rows raw; want history behind them compacted", raw(failed), len(failed), raw(rest), raw(later[:4]))
+			}
+			clock = clock.Add(unusableSummaryHold)
+			drain()
+			if n := raw(failed); n != 0 {
+				t.Fatalf("%d of %d rows of the once-failed claim stayed raw after the hold", n, len(failed))
+			}
+			assertClaimsContiguous(t, q)
+		})
+	}
+}
+
+func TestCompactionUnusableSummariesCoolDownAcrossNoops(t *testing.T) {
+	t.Parallel()
+
+	// A summarizer that returns nothing, turn after turn. A pass that finds
+	// nothing between two failures must not reset the run of failures: the
+	// cooldown still bounds the calls.
+	q := newSessionStore()
+	stub := &stubModel{summary: ""}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	for turn := 0; turn < 30; turn++ {
+		clock = clock.Add(time.Minute)
+		q.append(reasoningOnlyRow(t), prose(t, "user", fmt.Sprintf("U%d", turn), 300, 100), prose(t, "assistant", fmt.Sprintf("A%d", turn), 300, 100))
+		for pass := 0; pass < 3; pass++ {
+			if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, ErrIneffectiveSummary) {
+				break
+			}
+		}
+	}
+	if stub.calls > 2*(30/5+1) {
+		t.Fatalf("summarizer calls = %d over 30 minutes of empty summaries, want the cooldown to bound them", stub.calls)
+	}
+}
+
+func TestCompactionTrimNeverRejectsASpanItsSmallerBudgetAccepted(t *testing.T) {
+	t.Parallel()
+
+	items, _ := itemsFromRows([]sqlc.ListUncompactedMessagesBySessionRow{
+		prose(t, "user", "FRESH", 450, 50), prose(t, "assistant", "PROVED1", 300, 50), prose(t, "assistant", "PROVED2", 700, 50),
+	})
+	for i := range items {
+		items[i].Policies = withoutPolicy(items[i].Policies, CompactPolicyPreserveRecent)
+	}
+	items[1].IneffectiveClaim, items[2].IneffectiveClaim = true, true
+	small, large := trimSpan(items, 800, minCompactionSpanTokens), trimSpan(items, 1600, minCompactionSpanTokens)
+	if len(small) == 0 || len(large) < len(small) {
+		t.Fatalf("trimSpan claims %d rows within 800 tokens and %d within 1600; a larger budget must not claim less", len(small), len(large))
+	}
+}
+
+func TestCompactionFreshRowsInFrontOfProvedOnesStillCompact(t *testing.T) {
+	t.Parallel()
+
+	// A fresh row comes back in front of rows already proved ineffective (its
+	// own claim was in flight). Claimable within the smaller budget the read
+	// checks, it must be claimable within the pass's larger one too, or the
+	// history behind it never compacts.
+	q := newSessionStore()
+	fresh := prose(t, "user", "FRESH", 450, 50)
+	proved := []sqlc.ListUncompactedMessagesBySessionRow{prose(t, "assistant", "PROVEDONE", 300, 50), prose(t, "assistant", "PROVEDTWO", 700, 50)}
+	q.append(fresh)
+	q.append(proved...)
+	q.append(reasoningOnlyRow(t))
+	var later []sqlc.ListUncompactedMessagesBySessionRow
+	for i := 0; i < 10; i++ {
+		later = append(later, prose(t, "user", fmt.Sprintf("LATERU%d", i), 300, 100), prose(t, "assistant", fmt.Sprintf("LATERA%d", i), 300, 100))
+	}
+	q.append(later...)
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	pending := testUUID(t)
+	q.claims = map[pgtype.UUID]pgtype.UUID{fresh.ID: pending}
+	q.logStatuses = map[pgtype.UUID]string{pending: "pending"}
+	q.claimEpoch[pending] = q.epoch
+	stub := &stubModel{summary: summaryOfTokens(t, 2000)}
+	svc := newMachineryService(q)
+	cfg := machineryConfig(stub, 50)
+	cfg.MaxCompactTokens = 1600
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, ErrIneffectiveSummary) || q.completed.FailureReason != failureReasonIneffectiveSummary {
+		t.Fatalf("first pass = %v (%q), want the proved rows recorded", err, q.completed.FailureReason)
+	}
+	q.logStatuses[pending] = "error"
+	stub.summary = summaryOfTokens(t, 100)
+	for pass := 0; pass < 12; pass++ {
+		if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+			break
+		}
+	}
+	for _, row := range later {
+		if q.logStatuses[q.claims[row.ID]] != "ok" {
+			t.Fatal("history behind the fresh row and the proved ones never compacted")
+		}
+	}
+	assertClaimsContiguous(t, q)
+}

@@ -3005,8 +3005,9 @@ WHERE message.team_id = public.memoh_current_team_id()
 -- GapBefore marks a candidate whose preceding replayed row is not a
 -- candidate (the source of an active summary or of a fresh claim): one
 -- compact_id must never span it, or the read path would fold the later rows
--- in front of that summary. PendingBefore reports a fresh claim anywhere in
--- that gap, whose rows return as candidates if the claim lapses. IneffectiveClaim
+-- in front of that summary. PendingBefore reports a fresh claim, or a
+-- recent attempt whose summary was unusable, anywhere in that gap: their rows
+-- return as candidates once it lapses. IneffectiveClaim
 -- marks a row whose claim in this epoch failed because the summary was not
 -- shorter than the rows. LatestUser marks the session's newest user message
 -- among the candidates: the task the current turn is working on.
@@ -3048,6 +3049,11 @@ WITH scan_anchor AS MATERIALIZED (
       AND (
         (c.status = 'ok' AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
         OR (c.status = 'pending' AND c.started_at > now() - INTERVAL '15 minutes')
+        OR (
+          c.status = 'error'
+          AND c.failure_reason = sqlc.arg(unusable_failure_reason)::text
+          AND c.completed_at > now() - sqlc.arg(unusable_hold_seconds)::bigint * INTERVAL '1 second'
+        )
       )
   ) held ON true
   WHERE m.team_id = public.memoh_current_team_id()
@@ -3069,7 +3075,7 @@ WITH scan_anchor AS MATERIALIZED (
     ) AS candidate_seq
   FROM session_rows
 ), held_gaps AS MATERIALIZED (
-  SELECT candidate_seq, bool_or(held_by = 'pending') AS pending
+  SELECT candidate_seq, bool_or(held_by <> 'ok') AS pending
   FROM sequenced_rows
   WHERE held_by IS NOT NULL
   GROUP BY candidate_seq

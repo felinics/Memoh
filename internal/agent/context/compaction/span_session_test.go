@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -10,48 +11,56 @@ import (
 )
 
 // sessionStore is an in-memory session for multi-pass tests. It applies the
-// bounded read's candidate rules to its whole history: an ok claim or a fresh
-// pending one of the current epoch takes rows out of the candidate set,
-// GapBefore, PendingBefore and IneffectiveClaim follow the query's
-// definitions, windows are admitted by payload bytes after the cursor, and the
-// recorded scan position applies while its epoch is current. The PostgreSQL
-// integration test pins the SQL itself.
+// bounded read's candidate rules to its whole history: an ok claim, a fresh
+// pending one or a recent unusable-summary attempt of the current epoch takes
+// rows out of the candidate set, GapBefore, PendingBefore and
+// IneffectiveClaim follow the query's definitions, windows are admitted by
+// payload bytes after the cursor, and the recorded scan position applies
+// while its epoch is current. The PostgreSQL integration test pins the SQL
+// itself.
 type sessionStore struct {
 	*fakeQueries
-	history    []sqlc.ListUncompactedMessagesBySessionRow
-	reasons    map[pgtype.UUID]string
-	claimEpoch map[pgtype.UUID]int64
-	epoch      int64
-	scanAfter  pgtype.UUID
-	scanEpoch  int64
-	windows    int
-	readBytes  int64
+	history     []sqlc.ListUncompactedMessagesBySessionRow
+	reasons     map[pgtype.UUID]string
+	claimEpoch  map[pgtype.UUID]int64
+	completedAt map[pgtype.UUID]time.Time
+	now         func() time.Time
+	epoch       int64
+	scanAfter   pgtype.UUID
+	scanEpoch   int64
+	windows     int
+	readBytes   int64
 }
 
 func newSessionStore(history ...sqlc.ListUncompactedMessagesBySessionRow) *sessionStore {
-	return &sessionStore{fakeQueries: &fakeQueries{}, history: history, reasons: map[pgtype.UUID]string{}, claimEpoch: map[pgtype.UUID]int64{}}
+	return &sessionStore{fakeQueries: &fakeQueries{}, history: history, reasons: map[pgtype.UUID]string{}, claimEpoch: map[pgtype.UUID]int64{}, completedAt: map[pgtype.UUID]time.Time{}, now: time.Now}
 }
 
 func payloadBytes(row sqlc.ListUncompactedMessagesBySessionRow) int64 {
 	return int64(len(row.Content) + len(row.Metadata) + len(row.Usage) + len(row.DisplayText.String))
 }
 
-// heldBy reports what keeps a row out of the candidate set: "ok", "pending"
-// or "" for a candidate.
+// heldBy reports what keeps a row out of the candidate set: "ok", "pending",
+// "unusable" or "" for a candidate.
 func (q *sessionStore) heldBy(row sqlc.ListUncompactedMessagesBySessionRow) string {
 	claim := q.claims[row.ID]
 	if !claim.Valid || q.claimEpoch[claim] != q.epoch {
 		return ""
 	}
-	switch status := q.logStatuses[claim]; status {
-	case "ok", "pending":
+	switch status := q.logStatuses[claim]; {
+	case status == "ok", status == "pending":
 		return status
+	case status == "error" && q.reasons[claim] == failureReasonUnusableSummary && q.now().Sub(q.completedAt[claim]) < unusableSummaryHold:
+		return "unusable"
 	}
 	return ""
 }
 
-func (q *sessionStore) isCandidate(row sqlc.ListUncompactedMessagesBySessionRow) bool {
-	return q.heldBy(row) == ""
+// isRaw reports a row the replay sends raw: no summary covers it, nor a claim
+// still in flight. MeasureUncompactedMessagesBySession counts these.
+func (q *sessionStore) isRaw(row sqlc.ListUncompactedMessagesBySessionRow) bool {
+	held := q.heldBy(row)
+	return held == "" || held == "unusable"
 }
 
 type storeCandidate struct {
@@ -72,11 +81,12 @@ func (q *sessionStore) candidates(after pgtype.UUID) []storeCandidate {
 	var out []storeCandidate
 	gap, pending := false, false
 	if start > 0 {
-		gap, pending = !q.isCandidate(q.history[start-1]), q.heldBy(q.history[start-1]) == "pending"
+		held := q.heldBy(q.history[start-1])
+		gap, pending = held != "", held != "" && held != "ok"
 	}
 	for _, row := range q.history[start:] {
 		if held := q.heldBy(row); held != "" {
-			gap, pending = true, pending || held == "pending"
+			gap, pending = true, pending || held != "ok"
 			continue
 		}
 		row.CompactID = q.claims[row.ID]
@@ -87,11 +97,11 @@ func (q *sessionStore) candidates(after pgtype.UUID) []storeCandidate {
 	return out
 }
 
-// candidateRows lists every candidate row, ignoring the scan position.
+// candidateRows lists every raw row, ignoring the scan position.
 func (q *sessionStore) candidateRows() []sqlc.ListUncompactedMessagesBySessionRow {
 	var rows []sqlc.ListUncompactedMessagesBySessionRow
 	for _, row := range q.history {
-		if q.isCandidate(row) {
+		if q.isRaw(row) {
 			rows = append(rows, row)
 		}
 	}
@@ -101,7 +111,7 @@ func (q *sessionStore) candidateRows() []sqlc.ListUncompactedMessagesBySessionRo
 func (q *sessionStore) MeasureUncompactedMessagesBySession(context.Context, pgtype.UUID) (sqlc.MeasureUncompactedMessagesBySessionRow, error) {
 	var measure sqlc.MeasureUncompactedMessagesBySessionRow
 	for _, row := range q.history {
-		if !q.isCandidate(row) {
+		if !q.isRaw(row) {
 			continue
 		}
 		measure.CandidateCount++
@@ -176,6 +186,7 @@ func (q *sessionStore) CompleteCompactionLog(ctx context.Context, arg sqlc.Compl
 	row, err := q.fakeQueries.CompleteCompactionLog(ctx, arg)
 	if err == nil {
 		q.reasons[arg.ID] = arg.FailureReason
+		q.completedAt[arg.ID] = q.now()
 	}
 	return row, err
 }

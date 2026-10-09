@@ -1521,6 +1521,7 @@
     "compactSuccess": "コンテキストの圧縮が完了しました",
     "compactNothing": "今は圧縮できる内容がありません",
     "compactBlocked": "残りの履歴は今は圧縮しても短くなりません",
+    "compactUnusable": "モデルから使える要約が返されなかったため、この部分の履歴はしばらくそのままにします",
     "compactingContext": "コンテキストを圧縮中…",
     "codexUsage": {
       "warning": "{window}：{percent}% 使用済み・{time}にリセット",

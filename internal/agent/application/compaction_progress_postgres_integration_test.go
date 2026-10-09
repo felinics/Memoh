@@ -724,7 +724,7 @@ func TestPostgresCompactionKeepsRowsInFrontOfTheCurrentTaskUnsettled(t *testing.
 	}
 }
 
-func TestPostgresCompactionRefusedSpanStaysRawAndLaterHistoryCompacts(t *testing.T) {
+func TestPostgresCompactionRefusedSpanIsHeldThenRetried(t *testing.T) {
 	f, store := newProgressFixture(t)
 	labels := map[string]string{}
 	label := func(name string, msgs ...messagepkg.Message) []messagepkg.Message {
@@ -738,19 +738,21 @@ func TestPostgresCompactionRefusedSpanStaysRawAndLaterHistoryCompacts(t *testing
 	later := label("later", f.text("user", strings.Repeat("LATER question. ", 80)), f.text("assistant", strings.Repeat("LATER answer. ", 80)))
 	label("current", f.text("user", "current question"))
 
-	// The provider refuses the oldest span: the manual request reports
-	// history that does not shrink, and the attempt is recorded against it.
+	// The provider refuses the oldest span: the manual request says so, and
+	// the attempt is recorded against both rows.
 	model := &countingSummarizer{summary: summaryTokens(120), refuse: "REFUSED"}
 	svc := compaction.NewService(slog.New(slog.DiscardHandler), store)
-	if res, err := f.run(svc, model); err != nil || res.Status != compaction.StatusNoop || res.Reason != compaction.ReasonNoBeneficialSpan {
-		t.Fatalf("first pass = %+v, %v; want the refusal reported as history that does not shrink", res, err)
+	if res, err := f.run(svc, model); err != nil || res.Status != compaction.StatusNoop || res.Reason != compaction.ReasonSummaryUnusable {
+		t.Fatalf("first pass = %+v, %v; want the refusal reported as an unusable summary", res, err)
 	}
 	_, claim := f.claims()
-	if got := f.compact(claim[refused[0].ID]); got.status != "error" || got.reason != "ineffective_summary" || claim[refused[1].ID] != claim[refused[0].ID] {
+	failed := claim[refused[0].ID]
+	if got := f.compact(failed); got.status != "error" || got.reason != "unusable_summary" || claim[refused[1].ID] != failed {
 		t.Fatalf("refused attempt = %+v, want an error recorded against both rows", got)
 	}
 
-	// The next request moves past it, on a fresh service as after a restart.
+	// While held, the next request moves past it, on a fresh service as after
+	// a restart, and the scan position stays in front of the held rows.
 	res, err := f.run(compaction.NewService(slog.New(slog.DiscardHandler), store), model)
 	if err != nil || res.Status != compaction.StatusOK || res.MessageCount != len(later) {
 		t.Fatalf("second pass = %+v, %v; want the later span committed", res, err)
@@ -760,10 +762,28 @@ func TestPostgresCompactionRefusedSpanStaysRawAndLaterHistoryCompacts(t *testing
 	if got := f.compact(committed); got.status != "ok" || got.covered != len(later) || claim[later[1].ID] != committed {
 		t.Fatalf("committed summary = %+v, want ok covering the later span", got)
 	}
+	if after := f.scanAfter(); after == refused[0].ID || after == refused[1].ID || labels[after] == "reasoning#0" || labels[after] == "later#1" {
+		t.Fatalf("scan position = %s, want it in front of the held rows", labels[after])
+	}
 	if res, err := f.run(svc, model); err != nil || res.Reason != compaction.ReasonNoBeneficialSpan || model.calls != 2 {
-		t.Fatalf("third pass = %+v, %v after %d calls; want no call resending the refused rows", res, err, model.calls)
+		t.Fatalf("third pass = %+v, %v after %d calls; want no call while the refused rows are held", res, err, model.calls)
 	}
 	if got := strings.Join(f.replay(labels), ","); got != "refused#0,refused#1,reasoning#0,summary:"+committed+",current#0" {
 		t.Fatalf("replay = %s, want the refused rows raw in place before the summary", got)
+	}
+
+	// Once the hold lapses they are tried again and, the provider now
+	// willing, compacted in place.
+	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - INTERVAL '7 hours' WHERE id = $1`, failed); err != nil {
+		t.Fatal(err)
+	}
+	model.refuse = ""
+	if res, err := f.run(svc, model); err != nil || res.Status != compaction.StatusOK || res.MessageCount != len(refused) {
+		t.Fatalf("pass after the hold = %+v, %v; want the refused rows retried and committed", res, err)
+	}
+	_, claim = f.claims()
+	retried := claim[refused[0].ID]
+	if got := strings.Join(f.replay(labels), ","); got != "summary:"+retried+",reasoning#0,summary:"+committed+",current#0" {
+		t.Fatalf("replay = %s, want both summaries in place", got)
 	}
 }

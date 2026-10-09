@@ -1543,6 +1543,7 @@
     "compactSuccess": "Context compaction completed",
     "compactNothing": "Nothing to compact right now",
     "compactBlocked": "The remaining history can't be shortened by compaction right now",
+    "compactUnusable": "The model returned no usable summary, so that part of the history stays as is for now",
     "compactingContext": "Compacting context…",
     "codexUsage": {
       "warning": "{window}: {percent}% used · resets {time}",

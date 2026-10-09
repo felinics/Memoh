@@ -34,6 +34,7 @@ var (
 	// would replay at least as many tokens as the raw entries it replaces, or
 	// the model returned none usable for them. Those rows are recorded as
 	// such, so the next pass selects past them; callers may run it right away.
+	// A manual pass reports it as a noop with its reason instead.
 	ErrIneffectiveSummary = errors.New("compaction: summary cannot replace its rows")
 	// errIneffectiveRollup marks a rollup no shorter than everything it
 	// replaces. Nothing is recorded against the rows, so it counts as an
@@ -190,11 +191,16 @@ func (s *Service) recordCompactionFailure(sessionID string) {
 	s.failedAt[sessionID] = entry
 }
 
-func (s *Service) clearCompactionFailure(sessionID string) {
+// clearCompactionFailure ends the cooldown after a pass that did not fail.
+// Only a committed summary ends a run of ineffective ones: a noop between two
+// of them says nothing about the summarizer.
+func (s *Service) clearCompactionFailure(sessionID string, committed bool) {
 	s.inflightMu.Lock()
 	defer s.inflightMu.Unlock()
 	delete(s.failedAt, sessionID)
-	delete(s.ineffective, sessionID)
+	if committed {
+		delete(s.ineffective, sessionID)
+	}
 }
 
 // recordIneffective reports whether the session's previous pass also ended
@@ -261,12 +267,15 @@ func (s *Service) RunCompaction(ctx context.Context, cfg TriggerConfig) error {
 // canceled wait degrades to a noop.
 func (s *Service) RunCompactionSync(ctx context.Context, cfg TriggerConfig) (Result, error) {
 	res, err := s.runCompactionSync(ctx, cfg)
-	if cfg.Manual && errors.Is(err, ErrIneffectiveSummary) {
-		// The rows stay raw and the next request moves past them: to the
-		// user, history that does not shrink now, not a failure.
-		return Result{Status: StatusNoop, Reason: ReasonNoBeneficialSpan}, nil
+	if !cfg.Manual || !errors.Is(err, ErrIneffectiveSummary) {
+		return res, err
 	}
-	return res, err
+	// The rows stay raw and the next request moves past them: to the user,
+	// history that does not shrink now, not a failure.
+	if errors.Is(err, errEmptySummary) || errors.Is(err, errIncompleteSummary) {
+		return Result{Status: StatusNoop, Reason: ReasonSummaryUnusable}, nil
+	}
+	return Result{Status: StatusNoop, Reason: ReasonNoBeneficialSpan}, nil
 }
 
 func (s *Service) runCompactionSync(ctx context.Context, cfg TriggerConfig) (Result, error) {
@@ -362,7 +371,7 @@ func (s *Service) runCompaction(ctx context.Context, cfg TriggerConfig) (Result,
 		}
 		switch {
 		case compactErr == nil:
-			s.clearCompactionFailure(cfg.SessionID)
+			s.clearCompactionFailure(cfg.SessionID, compactRes.Status == StatusOK)
 		case !preHookRan:
 			// A pre-hook error or deny is bot policy, not a model failure;
 			// it must not arm the cooldown (panics above still do).

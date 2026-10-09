@@ -5358,6 +5358,11 @@ WITH scan_anchor AS MATERIALIZED (
       AND (
         (c.status = 'ok' AND NULLIF(BTRIM(c.summary, E' \t\n\r\f\x0B'), '') IS NOT NULL)
         OR (c.status = 'pending' AND c.started_at > now() - INTERVAL '15 minutes')
+        OR (
+          c.status = 'error'
+          AND c.failure_reason = $4::text
+          AND c.completed_at > now() - $5::bigint * INTERVAL '1 second'
+        )
       )
   ) held ON true
   WHERE m.team_id = public.memoh_current_team_id()
@@ -5379,7 +5384,7 @@ WITH scan_anchor AS MATERIALIZED (
     ) AS candidate_seq
   FROM session_rows
 ), held_gaps AS MATERIALIZED (
-  SELECT candidate_seq, bool_or(held_by = 'pending') AS pending
+  SELECT candidate_seq, bool_or(held_by <> 'ok') AS pending
   FROM sequenced_rows
   WHERE held_by IS NOT NULL
   GROUP BY candidate_seq
@@ -5430,9 +5435,9 @@ WITH scan_anchor AS MATERIALIZED (
     )::BIGINT AS cumulative_bytes
   FROM candidate_rows
 ), admitted_candidates AS MATERIALIZED (
-  SELECT ranked_candidates.id, ranked_candidates.turn_position, ranked_candidates.turn_message_seq, ranked_candidates.created_at, ranked_candidates.gap_before, ranked_candidates.pending_before, ranked_candidates.latest_user, ranked_candidates.payload_bytes, ranked_candidates.candidate_count, ranked_candidates.candidate_bytes, ranked_candidates.cumulative_bytes, payload_bytes > $4::BIGINT AS oversized
+  SELECT ranked_candidates.id, ranked_candidates.turn_position, ranked_candidates.turn_message_seq, ranked_candidates.created_at, ranked_candidates.gap_before, ranked_candidates.pending_before, ranked_candidates.latest_user, ranked_candidates.payload_bytes, ranked_candidates.candidate_count, ranked_candidates.candidate_bytes, ranked_candidates.cumulative_bytes, payload_bytes > $6::BIGINT AS oversized
   FROM ranked_candidates
-  WHERE cumulative_bytes <= $4::BIGINT
+  WHERE cumulative_bytes <= $6::BIGINT
      OR cumulative_bytes = payload_bytes
 )
 SELECT
@@ -5501,6 +5506,8 @@ type ListUncompactedMessagesBySessionWithinBytesParams struct {
 	IneffectiveFailureReason string      `json:"ineffective_failure_reason"`
 	SessionID                pgtype.UUID `json:"session_id"`
 	AfterMessageID           pgtype.UUID `json:"after_message_id"`
+	UnusableFailureReason    string      `json:"unusable_failure_reason"`
+	UnusableHoldSeconds      int64       `json:"unusable_hold_seconds"`
 	MaxBytes                 int64       `json:"max_bytes"`
 }
 
@@ -5549,8 +5556,9 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 // GapBefore marks a candidate whose preceding replayed row is not a
 // candidate (the source of an active summary or of a fresh claim): one
 // compact_id must never span it, or the read path would fold the later rows
-// in front of that summary. PendingBefore reports a fresh claim anywhere in
-// that gap, whose rows return as candidates if the claim lapses. IneffectiveClaim
+// in front of that summary. PendingBefore reports a fresh claim, or a
+// recent attempt whose summary was unusable, anywhere in that gap: their rows
+// return as candidates once it lapses. IneffectiveClaim
 // marks a row whose claim in this epoch failed because the summary was not
 // shorter than the rows. LatestUser marks the session's newest user message
 // among the candidates: the task the current turn is working on.
@@ -5559,6 +5567,8 @@ func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Contex
 		arg.IneffectiveFailureReason,
 		arg.SessionID,
 		arg.AfterMessageID,
+		arg.UnusableFailureReason,
+		arg.UnusableHoldSeconds,
 		arg.MaxBytes,
 	)
 	if err != nil {

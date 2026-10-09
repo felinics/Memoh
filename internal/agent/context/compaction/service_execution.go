@@ -381,12 +381,16 @@ func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, m
 }
 
 // failLog completes a claimed attempt as failed. A summary that cannot
-// replace its rows is recorded by reason so later passes keep those rows raw
-// instead of resending them; any other failure leaves the rows eligible for a
-// retry.
+// replace its rows is recorded by reason so later passes select past those
+// rows: for the epoch when it was not shorter, for a while when it was not
+// usable at all. Any other failure leaves the rows eligible for a retry.
 func (s *Service) failLog(ctx context.Context, logID pgtype.UUID, cause error) {
 	reason := ""
-	if errors.Is(cause, ErrIneffectiveSummary) {
+	switch {
+	case !errors.Is(cause, ErrIneffectiveSummary):
+	case errors.Is(cause, errEmptySummary), errors.Is(cause, errIncompleteSummary):
+		reason = failureReasonUnusableSummary
+	default:
 		reason = failureReasonIneffectiveSummary
 	}
 	_ = s.completeLog(ctx, logID, "error", "", cause.Error(), 0, nil, pgtype.UUID{}, nil, reason)

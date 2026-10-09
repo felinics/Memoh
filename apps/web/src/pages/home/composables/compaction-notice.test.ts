@@ -9,6 +9,7 @@ describe('compactionNoticeKey', () => {
   it('tells held-back history apart from nothing to compact', () => {
     expect(compactionNoticeKey({ status: 'noop', reason: 'no_beneficial_span' })).toBe('chat.compactBlocked')
     expect(compactionNoticeKey({ status: 'noop', reason: 'read_budget_exceeded' })).toBe('chat.compactBlocked')
+    expect(compactionNoticeKey({ status: 'noop', reason: 'summary_unusable' })).toBe('chat.compactUnusable')
     expect(compactionNoticeKey({ status: 'noop', reason: 'nothing_to_compact' })).toBe('chat.compactNothing')
     expect(compactionNoticeKey({ status: 'noop' })).toBe('chat.compactNothing')
   })

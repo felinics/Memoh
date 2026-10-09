@@ -177,4 +177,7 @@ func TestCompactResultMessageSeparatesHeldBackHistory(t *testing.T) {
 	if tooLarge := compactResultMessage(cc, compaction.Result{Status: compaction.StatusNoop, Reason: compaction.ReasonReadBudgetExceeded}); tooLarge != blocked {
 		t.Fatalf("read budget noop = %q, want the held-back message %q", tooLarge, blocked)
 	}
+	if unusable := compactResultMessage(cc, compaction.Result{Status: compaction.StatusNoop, Reason: compaction.ReasonSummaryUnusable}); unusable == blocked || unusable == nothing || strings.Contains(unusable, "cmd.") {
+		t.Fatalf("unusable summary noop = %q, want its own message", unusable)
+	}
 }

@@ -2634,7 +2634,7 @@ export type HandlersTriggerCompactResponse = {
     message_count?: number;
     /**
      * Reason says why a noop claimed nothing: nothing_to_compact,
-     * no_beneficial_span or read_budget_exceeded.
+     * no_beneficial_span, read_budget_exceeded or summary_unusable.
      */
     reason?: string;
     status?: string;

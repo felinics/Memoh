@@ -360,3 +360,15 @@ func TestAsyncDrainContinuesPastAnIneffectiveSummary(t *testing.T) {
 		t.Fatalf("drain ran %d passes, want %d: the next pass selects past the rows that did not shrink", len(runner.configs), maxAsyncCompactionPasses)
 	}
 }
+
+func TestSyncBackstopRunsPastAnIneffectiveSummary(t *testing.T) {
+	t.Parallel()
+
+	service, runner := newControllerPolicyService(t, nil)
+	runner.errs = []error{fmt.Errorf("pass: %w", compaction.ErrIneffectiveSummary)}
+	req := ChatRequest{BotID: "00000000-0000-0000-0000-000000000453", ThreadID: "00000000-0000-0000-0000-000000000454"}
+	result := service.runCompactionSync(context.Background(), req, 150000, 200000, "")
+	if result.Status != compaction.StatusOK || len(runner.configs) != 2 {
+		t.Fatalf("sync backstop = %q after %d passes, want the next pass to move past the rows that did not shrink", result.Status, len(runner.configs))
+	}
+}

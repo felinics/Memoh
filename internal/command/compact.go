@@ -86,6 +86,8 @@ func compactResultMessage(cc CommandContext, res compaction.Result) string {
 		return cc.T("cmd.compact.done")
 	case res.Reason == compaction.ReasonNoBeneficialSpan, res.Reason == compaction.ReasonReadBudgetExceeded:
 		return cc.T("cmd.compact.blocked")
+	case res.Reason == compaction.ReasonSummaryUnusable:
+		return cc.T("cmd.compact.unusable")
 	default:
 		return cc.T("cmd.compact.noop")
 	}

@@ -23829,7 +23829,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "reason": {
-                    "description": "Reason says why a noop claimed nothing: nothing_to_compact,\nno_beneficial_span or read_budget_exceeded.",
+                    "description": "Reason says why a noop claimed nothing: nothing_to_compact,\nno_beneficial_span, read_budget_exceeded or summary_unusable.",
                     "type": "string"
                 },
                 "status": {

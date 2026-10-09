@@ -389,6 +389,7 @@
       "done": "✅ Context compacted.",
       "noop": "Nothing to compact right now.",
       "blocked": "The remaining history can't be shortened by compaction right now.",
+      "unusable": "The model returned no usable summary, so that part of the history stays as is for now.",
       "noModel": "No compaction or chat model is configured for this bot.",
       "modelUnavailable": "The compaction model is unavailable (disabled, missing context window, or its provider cannot cap output).",
       "windowTooSmall": "The compaction model's context window is too small to produce a summary. Choose a compaction model with a larger context window."

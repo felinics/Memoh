@@ -1,6 +1,9 @@
 package compaction
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // minCompactionSpanTokens is the smallest span worth a summarizer call. The
 // prompt asks the model to keep facts, decisions, names and tool outcomes,
@@ -9,11 +12,18 @@ import "strings"
 // cannot pass the net-reduction check. It stays raw in place instead.
 const minCompactionSpanTokens = 256
 
-// failureReasonIneffectiveSummary marks a claim whose summary could not
-// replace its rows: it was not shorter, or the model returned none usable.
-// Those rows stay raw within the compaction epoch and later passes select
-// past them.
+// failureReasonIneffectiveSummary marks a claim whose summary was not
+// shorter than its rows. Those rows stay raw within the compaction epoch and
+// later passes select past them.
 const failureReasonIneffectiveSummary = "ineffective_summary"
+
+// failureReasonUnusableSummary marks a claim the model returned no usable
+// summary for: empty, cut off, or refused. That may pass, so its rows are
+// held back only for unusableSummaryHold, while later passes select past
+// them, and are then tried again.
+const failureReasonUnusableSummary = "unusable_summary"
+
+const unusableSummaryHold = 6 * time.Hour
 
 type groupKind int
 
@@ -202,7 +212,7 @@ func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bo
 			}
 			break
 		}
-		if freshCost > 0 {
+		if freshCost > 0 && freshCost < max(1, minTokens) {
 			stats.SmallSpans++
 		} else {
 			stats.IneffectiveSpans++
@@ -225,10 +235,10 @@ func chooseSpan(items []CompactionCandidate, minTokens, budget int, truncated bo
 // keeping in the claim at least minTokens of rows not yet proved ineffective,
 // and at least as many of them as of proved rows: when the budget cut leaves
 // less, the claim starts at a later group of the span. Proved rows thus get
-// another chance only next to as many new ones, and rows the provider keeps
-// refusing drop out of later claims instead of sinking every claim of their
-// run. Rows passed over stay raw in place, and the row after the claim reads
-// as a gap, so they never join a later claim across it.
+// another chance only next to as many new ones. The claim is the longest such
+// one from its start, so a larger budget never claims less. Rows passed over
+// stay raw in place, and the row after the claim reads as a gap, so they never
+// join a later claim across it.
 func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCandidate {
 	groups := toolExchangeGroups(span)
 	costs := make([]int, len(groups))
@@ -240,32 +250,58 @@ func trimSpan(span []CompactionCandidate, budget, minTokens int) []CompactionCan
 		}
 	}
 	need := max(1, minTokens)
-	end, total, provedTotal := 0, 0, 0
 	for start := range groups {
-		if end <= start {
-			end, total, provedTotal = start, 0, 0
-		}
-		for end < len(groups) && (end == start || total+costs[end] <= budget) {
+		total, provedTotal, last := 0, 0, -1
+		for end := start; end < len(groups) && (end == start || total+costs[end] <= budget); end++ {
 			total += costs[end]
 			provedTotal += proved[end]
-			end++
+			if fresh := total - provedTotal; fresh >= need && provedTotal <= fresh {
+				last = end
+			}
 		}
-		if fresh := total - provedTotal; fresh >= need && provedTotal <= fresh {
-			last := groups[end-1]
-			return span[groups[start][0] : last[len(last)-1]+1]
+		if last >= 0 {
+			return span[groups[start][0] : groups[last][len(groups[last])-1]+1]
 		}
-		total -= costs[start]
-		provedTotal -= proved[start]
 	}
 	return nil
+}
+
+// closeRun extends the claimable prefix items[:n] — what the recent tail
+// leaves — over the rest of its run when a barrier or a gap closes that rest
+// below floor: left raw, it would stay alone between this claim and the
+// barrier for good once the tail moves past it. A rest that reaches a row held
+// with the current task, or the end of the window, may still grow and stays.
+func closeRun(items []CompactionCandidate, n, floor int) int {
+	if n == 0 || n >= len(items) || items[n].GapBefore {
+		return n
+	}
+	rest := items[n:]
+	cost := 0
+	for _, group := range toolExchangeGroups(rest) {
+		if group[0] > 0 && rest[group[0]].GapBefore {
+			return n + group[0]
+		}
+		c, kind := groupCost(rest, group)
+		switch {
+		case kind != groupMarkable:
+			return n + group[0]
+		case rest[group[0]].HasPolicy(CompactPolicyPreserveRecent):
+			return n
+		}
+		if cost += c; cost >= floor {
+			return n
+		}
+	}
+	return n
 }
 
 // holdJoint returns items[from:to], the rows that stay raw with the current
 // task at items[task] while it is current: the steps right after it until
 // they and the task are worth a call together. When a barrier, a gap or a
-// step too large to hold raw ends those first, the rows right in front of the
-// task are held instead, as far as needed. Once the turn is over, they form
-// one claimable span instead of the task staying behind alone between two
+// step whose replay dwarfs its summarizer entry ends those first, or while a
+// running turn's steps do not reach that yet, the rows right in front of the
+// task are held too, as far as needed. Once the turn is over, they form one
+// claimable span instead of the task staying behind alone between two
 // summaries. open reports steps that ran out before the target, which more
 // steps may still extend.
 func holdJoint(items []CompactionCandidate, task, target int) (from, to int, open bool) {
@@ -275,18 +311,17 @@ func holdJoint(items []CompactionCandidate, task, target int) (from, to int, ope
 		t++
 	}
 	have := estimateBytesAsTokens(strings.TrimSpace(renderCandidateEntry(items[task].Record)))
-	held := 0
 	join := func(g int) bool {
 		cost, replay := markableGroupCost(items, groups[g]), 0
 		for _, idx := range groups[g] {
 			replay += (len(items[idx].RawContent) + 3) / 4
 		}
-		// A step that replays far larger than its summarizer entry costs
-		// more context raw than the joint is worth.
-		if cost == 0 || held+replay > 4*target {
+		// Most of such a step never reaches the summarizer: held raw, it
+		// costs far more context than the joint is worth.
+		if cost == 0 || replay > 4*cost {
 			return false
 		}
-		have, held = have+cost, held+replay
+		have += cost
 		return true
 	}
 	g := t + 1
@@ -301,7 +336,14 @@ func holdJoint(items []CompactionCandidate, task, target int) (from, to int, ope
 	}
 	open = g == len(groups) && have < target
 	from = task
-	for b := t; b > 0 && have < target && !open && !items[groups[b][0]].GapBefore && join(b-1); b-- {
+	if open && (g == t+1 || !items[groups[g-1][0]].HasPolicy(CompactPolicyPreserveToolClosure)) {
+		// No step yet, or the turn already answered: the run in front of the
+		// task simply continues into the next one. A turn whose latest step
+		// is a tool exchange is still running, and its next step may end the
+		// joint.
+		return from, to, open
+	}
+	for b := t; b > 0 && have < target && !items[groups[b][0]].GapBefore && join(b-1); b-- {
 		from = groups[b-1][0]
 	}
 	return from, to, open

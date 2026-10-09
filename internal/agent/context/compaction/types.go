@@ -21,6 +21,10 @@ const (
 	// ReasonReadBudgetExceeded: a single row is larger than one read window,
 	// or the scan budget ran out before a span qualified.
 	ReasonReadBudgetExceeded = "read_budget_exceeded"
+	// ReasonSummaryUnusable: a manual pass got no usable summary from the
+	// model (empty, cut off, or refused); those rows are held back for a
+	// while and the next pass moves past them.
+	ReasonSummaryUnusable = "summary_unusable"
 )
 
 // Result is the scoped outcome of a synchronous compaction. Callers use it to

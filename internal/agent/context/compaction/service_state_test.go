@@ -900,7 +900,7 @@ func TestFailureBackoffCapsBelowExpiryAndPersistsAttempts(t *testing.T) {
 		t.Fatal("attempts must persist across a capped retry, not reset to the first step")
 	}
 
-	svc.clearCompactionFailure("session-1")
+	svc.clearCompactionFailure("session-1", true)
 	svc.recordCompactionFailure("session-1")
 	now = now.Add(compactionFailureRetryBase + time.Second)
 	if svc.inHardPressureCooldown("session-1") {

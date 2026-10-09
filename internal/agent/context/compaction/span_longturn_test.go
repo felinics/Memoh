@@ -518,3 +518,66 @@ func TestCompactionGrownWindowCountsItsStatsOnce(t *testing.T) {
 		t.Fatalf("windows=%d open_groups=%d; the window that grew must not count its cut exchange", read.windows, read.stats.OpenGroups)
 	}
 }
+
+func TestCompactionTasksOfRunningTurnsCompactAfterTheirTurn(t *testing.T) {
+	t.Parallel()
+
+	// A pass runs while the current task has one small step, then the turn
+	// hits a large output, an ask_user or a reasoning-only row; each turn
+	// ends with a long answer. The rows in front of a running task stay with
+	// it, so once its turn is over it compacts instead of staying raw alone.
+	for _, shape := range []string{"large", "ask_user", "reasoning"} {
+		t.Run(shape, func(t *testing.T) {
+			t.Parallel()
+			q := newSessionStore()
+			stub := &stubModel{summary: summaryOfTokens(t, 100)}
+			svc := newMachineryService(q)
+			cfg := machineryConfig(stub, 400)
+			cfg.HardPressure = true
+			drain := func() {
+				for pass := 0; pass < 3; pass++ {
+					if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+						return
+					}
+				}
+			}
+			var tasks []sqlc.ListUncompactedMessagesBySessionRow
+			for turn := 1; turn <= 12; turn++ {
+				task := prose(t, "user", fmt.Sprintf("TASK%d", turn), 40, 20)
+				tasks = append(tasks, task)
+				q.append(task)
+				q.append(mkRow(t, "assistant", fmt.Sprintf(`[{"type":"tool-call","toolCallId":"ls-%d","toolName":"exec","input":{"command":"ls"}}]`, turn), 20),
+					mkRow(t, "tool", fmt.Sprintf(`[{"type":"tool-result","toolCallId":"ls-%d","toolName":"exec","output":{"type":"text","value":"a.go b.go"}}]`, turn), 10))
+				drain()
+				switch shape {
+				case "large":
+					big := bigStep(t, turn)
+					big[1].Usage = nil
+					q.append(big...)
+				case "ask_user":
+					q.append(askUserExchange(t, turn)...)
+				case "reasoning":
+					q.append(reasoningOnlyRow(t))
+				}
+				for s := 0; s < 8; s++ {
+					q.append(execExchange(t, turn*100+s)...)
+					if s%4 == 3 {
+						drain()
+					}
+				}
+				q.append(prose(t, "assistant", fmt.Sprintf("ANSWER%d", turn), 2500, 2500))
+				drain()
+			}
+			raw := 0
+			for _, task := range tasks[1 : len(tasks)-2] {
+				if q.logStatuses[q.claims[task.ID]] != "ok" {
+					raw++
+				}
+			}
+			if raw > 0 {
+				t.Fatalf("%d of %d finished task prompts stayed raw", raw, len(tasks)-3)
+			}
+			assertClaimsContiguous(t, q)
+		})
+	}
+}

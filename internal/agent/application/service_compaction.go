@@ -239,6 +239,10 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 	done := s.enterSessionCompactionForRun(req.BotID, req.ThreadID, strings.TrimSpace(req.RunID))
 	defer done()
 	res, err := s.compactionService.RunCompactionSync(ctx, cfg)
+	if errors.Is(err, compaction.ErrIneffectiveSummary) {
+		// Those rows are recorded; one more pass moves past them.
+		res, err = s.compactionService.RunCompactionSync(ctx, cfg)
+	}
 	if err != nil {
 		s.logger.WarnContext(ctx, "compaction sync: failed", slog.Any("error", err))
 		return compaction.Result{}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -175,11 +176,27 @@ func TestCompactionLongHorizonResidueStaysFlat(t *testing.T) {
 	// 120 turns of the production shapes: chat-only turns, an ask_user or a
 	// reasoning-only row right after the task, and long tool turns compacted
 	// while they run. With every summary effective, what stays raw outside
-	// the latest turns must not grow with the turn count.
+	// the latest turns must not grow with the turn count, whether the kept
+	// recent tail is shorter than one turn or spans several.
+	for _, target := range []int{300, 2000, 4000} {
+		t.Run(strconv.Itoa(target), func(t *testing.T) {
+			t.Parallel()
+			measured := longHorizonResidue(t, target)
+			if measured[120] > measured[40]+minCompactionSpanTokens {
+				t.Fatalf("raw history older than the latest turns grew from %d to %d tokens over 80 turns", measured[40], measured[120])
+			}
+		})
+	}
+}
+
+// longHorizonResidue runs the turns and reports the raw markable tokens older
+// than three turns after turn 40 and turn 120.
+func longHorizonResidue(t *testing.T, target int) map[int]int {
+	t.Helper()
 	q := newSessionStore()
 	stub := &stubModel{summary: summaryOfTokens(t, 120)}
 	svc := newMachineryService(q)
-	cfg := machineryConfig(stub, 300)
+	cfg := machineryConfig(stub, target)
 	cfg.HardPressure = true
 	pass := func() {
 		calls := stub.calls
@@ -236,9 +253,7 @@ func TestCompactionLongHorizonResidueStaysFlat(t *testing.T) {
 			measured[turn] = residue(turn)
 		}
 	}
-	t.Logf("raw tokens older than three turns: %v, provider calls %d", measured, stub.calls)
-	if measured[120] > measured[40]+minCompactionSpanTokens {
-		t.Fatalf("raw history older than the latest turns grew from %d to %d tokens over 80 turns", measured[40], measured[120])
-	}
+	t.Logf("target %d: raw tokens older than three turns: %v, provider calls %d", target, measured, stub.calls)
 	assertClaimsContiguous(t, q)
+	return measured
 }

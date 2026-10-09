@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -40,10 +41,11 @@ type spanRead struct {
 func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUID, cfg TriggerConfig, measure sqlc.MeasureUncompactedMessagesBySessionRow, minSpanTokens, minBudget int) (spanRead, string, error) {
 	readMaxBytes := compactionReadMaxBytes(cfg)
 	windowBytes := readMaxBytes
-	// The joint target follows the floor of ordinary passes, not this
-	// pass's: a rollup claims spans of any size, yet the task it leaves
-	// behind must still clear the floor once the turn is over.
-	jointTokens := 2 * min(minCompactionSpanTokens, minBudget)
+	// Rows left behind follow the floor of ordinary passes, not this pass's:
+	// a rollup claims spans of any size, yet what it leaves raw must still
+	// clear the floor once it can be claimed.
+	floor := min(minCompactionSpanTokens, minBudget)
+	jointTokens := 2 * floor
 	var read spanRead
 	var after pgtype.UUID
 	var epoch int64
@@ -80,6 +82,8 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			MaxBytes:                 windowBytes,
 			AfterMessageID:           after,
 			IneffectiveFailureReason: failureReasonIneffectiveSummary,
+			UnusableFailureReason:    failureReasonUnusableSummary,
+			UnusableHoldSeconds:      int64(unusableSummaryHold / time.Second),
 		})
 		if err != nil {
 			return spanRead{}, "", err
@@ -183,7 +187,12 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 		toCompact := items
 		if !truncated {
 			toCompact = splitRecent(items, cfg)
-			if task == 0 && len(toCompact) > 0 && toCompact[0].ID == items[1].ID {
+			switch {
+			case len(toCompact) == 0:
+			case toCompact[0].ID == items[0].ID:
+				toCompact = items[:closeRun(items, len(toCompact), floor)]
+			case task == 0 && toCompact[0].ID == items[1].ID:
+				toCompact = items[1:closeRun(items, 1+len(toCompact), floor)]
 				toCompact = toCompact[min(len(toCompact), to-1):]
 			}
 		}
@@ -224,6 +233,9 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			// own older steps may still be, behind its task message.
 			if turn := currentTurnItems(items); len(turn) > 0 {
 				steps := splitRecent(turn, cfg)
+				if len(steps) > 0 {
+					steps = turn[1:closeRun(turn, 1+len(steps), floor)]
+				}
 				steps = steps[min(len(steps), to-task-1):]
 				if choice := chooseSpan(steps, minSpanTokens, minBudget, false); choice.end > choice.start {
 					read.rows = rows
