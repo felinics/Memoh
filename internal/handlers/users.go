@@ -314,7 +314,7 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	resp, err := h.service.UpdateAdmin(c.Request().Context(), targetID, req)
 	if err != nil {
 		if errors.Is(err, db.ErrLastActiveAdmin) {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
 		}
 		return errs.Wrap(err, "update user")
 	}
@@ -394,7 +394,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 	}
 	if err := h.service.RemoveMember(c.Request().Context(), targetID); err != nil {
 		if errors.Is(err, db.ErrLastActiveAdmin) {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
 		}
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "member not found")
@@ -1017,7 +1017,7 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 	resp, err := h.channelStore.ResolveEffectiveConfig(c.Request().Context(), botID, channelType)
 	if err != nil {
 		if errors.Is(err, channel.ErrChannelConfigNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 		}
 		return errs.Wrap(err, "get bot channel config")
 	}
@@ -1077,7 +1077,7 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
 			status = http.StatusBadGateway
 		}
-		return echo.NewHTTPError(status, err.Error())
+		return echo.NewHTTPError(status).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -1126,7 +1126,7 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 			return mapped
 		}
 		if errors.Is(err, channel.ErrChannelConfigNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 		}
 		if errors.Is(err, channel.ErrEnableChannelFailed) {
 			return apperror.Wrap(apperror.CodeChannelEnableFailed, err, nil)
@@ -1135,7 +1135,7 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 		if errors.Is(err, channel.ErrChannelDiscoveryFailed) {
 			status = http.StatusBadGateway
 		}
-		return echo.NewHTTPError(status, err.Error())
+		return echo.NewHTTPError(status).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -1184,7 +1184,7 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 		}
 		switch {
 		case errors.Is(err, channel.ErrChannelConfigNotFound):
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 		case errors.Is(err, channel.ErrInvalidWebhookEndpoint):
 			return apperror.Wrap(apperror.CodeChannelWebhookEndpointInvalid, err, nil)
 		case errors.Is(err, channel.ErrWebhookEndpointUnsupported):
@@ -1352,7 +1352,7 @@ func sendChannelMessageHTTPError(err error, targetFromRequest bool) error {
 	}
 	switch {
 	case errors.Is(err, channel.ErrChannelConfigNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	case errors.Is(err, channel.ErrSendTargetRequired) && targetFromRequest:
 		return apperror.FieldRequired("target")
 	case errors.Is(err, channel.ErrChannelBindingRequired):

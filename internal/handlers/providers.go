@@ -148,7 +148,7 @@ func (h *ProvidersHandler) Get(c echo.Context) error {
 
 	resp, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -187,11 +187,11 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 		if errors.Is(err, models.ErrInvalidModelType) {
 			return apperror.FieldInvalid("type", err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	}
 	provider, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	}
 	return c.JSON(http.StatusOK, withReasoningForClientType(resp, provider.ClientType))
 }
@@ -216,7 +216,7 @@ func (h *ProvidersHandler) GetByName(c echo.Context) error {
 
 	resp, err := h.service.GetByName(c.Request().Context(), name)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 	}
 
 	return c.JSON(http.StatusOK, resp)

@@ -52,7 +52,7 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	resp, err := h.store.GetChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType)
 	if err != nil {
 		if errors.Is(err, channel.ErrChannelIdentityConfigNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
 		}
 		return errs.Wrap(err, "get channel identity config")
 	}

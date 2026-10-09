@@ -140,7 +140,7 @@ func (h *PublicMediaHandler) openImage(c echo.Context, botID, contentHash string
 		if errors.Is(err, media.ErrAssetNotFound) {
 			return nil, media.Asset{}, echo.NewHTTPError(http.StatusNotFound, "media not found")
 		}
-		return nil, media.Asset{}, echo.NewHTTPError(http.StatusInternalServerError, "open media failed")
+		return nil, media.Asset{}, echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
 	}
 	asset.Mime = attachment.NormalizeMime(asset.Mime)
 	if asset.Mime != "image/jpeg" && asset.Mime != "image/png" {
