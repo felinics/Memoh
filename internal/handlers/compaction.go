@@ -126,6 +126,9 @@ type TriggerCompactResponse struct {
 	Status       string `json:"status"`
 	Summary      string `json:"summary,omitempty"`
 	MessageCount int    `json:"message_count"`
+	// Reason says why a noop claimed nothing: nothing_to_compact,
+	// no_beneficial_span or read_budget_exceeded.
+	Reason string `json:"reason,omitempty"`
 }
 
 // TriggerCompact godoc
@@ -186,6 +189,7 @@ func (h *CompactionHandler) TriggerCompact(c echo.Context) error {
 		Status:       res.Status,
 		Summary:      res.Summary,
 		MessageCount: res.MessageCount,
+		Reason:       res.Reason,
 	})
 }
 

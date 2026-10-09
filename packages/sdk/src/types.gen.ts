@@ -2632,6 +2632,11 @@ export type HandlersToolDefBucket = {
 
 export type HandlersTriggerCompactResponse = {
     message_count?: number;
+    /**
+     * Reason says why a noop claimed nothing: nothing_to_compact,
+     * no_beneficial_span or read_budget_exceeded.
+     */
+    reason?: string;
     status?: string;
     summary?: string;
 };

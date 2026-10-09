@@ -1541,6 +1541,8 @@
     "infoNoData": "No data available",
     "compactNow": "Compact Now",
     "compactSuccess": "Context compaction completed",
+    "compactNothing": "Nothing to compact right now",
+    "compactBlocked": "The remaining history can't be shortened by compaction right now",
     "compactingContext": "Compacting context…",
     "codexUsage": {
       "warning": "{window}: {percent}% used · resets {time}",

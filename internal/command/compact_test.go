@@ -163,3 +163,18 @@ func TestBuildCompactConfigFallsBackWhenChatWindowIsUnavailable(t *testing.T) {
 		})
 	}
 }
+
+func TestCompactResultMessageSeparatesHeldBackHistory(t *testing.T) {
+	t.Parallel()
+
+	cc := CommandContext{L: i18n.New("en")}
+	done := compactResultMessage(cc, compaction.Result{Status: compaction.StatusOK})
+	nothing := compactResultMessage(cc, compaction.Result{Status: compaction.StatusNoop, Reason: compaction.ReasonNothingToCompact})
+	blocked := compactResultMessage(cc, compaction.Result{Status: compaction.StatusNoop, Reason: compaction.ReasonNoBeneficialSpan})
+	if done == nothing || nothing == blocked || blocked == done {
+		t.Fatalf("messages must differ: done=%q nothing=%q blocked=%q", done, nothing, blocked)
+	}
+	if tooLarge := compactResultMessage(cc, compaction.Result{Status: compaction.StatusNoop, Reason: compaction.ReasonReadBudgetExceeded}); tooLarge != blocked {
+		t.Fatalf("read budget noop = %q, want the held-back message %q", tooLarge, blocked)
+	}
+}

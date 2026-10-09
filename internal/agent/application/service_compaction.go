@@ -241,6 +241,7 @@ func (s *Service) runCompactionSync(ctx context.Context, req ChatRequest, inputT
 		slog.String("bot_id", req.BotID),
 		slog.String("session_id", req.ThreadID),
 		slog.String("status", res.Status),
+		slog.String("reason", res.Reason),
 	)
 	return res
 }

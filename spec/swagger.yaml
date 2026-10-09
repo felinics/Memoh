@@ -4721,6 +4721,11 @@ definitions:
     properties:
       message_count:
         type: integer
+      reason:
+        description: |-
+          Reason says why a noop claimed nothing: nothing_to_compact,
+          no_beneficial_span or read_budget_exceeded.
+        type: string
       status:
         type: string
       summary:

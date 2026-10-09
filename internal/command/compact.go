@@ -72,13 +72,23 @@ func (h *Handler) buildCompactGroup() *CommandGroup {
 			if err != nil {
 				return h.compactRunError(cc, err), nil
 			}
-			if res.Status != compaction.StatusOK {
-				return cc.T("cmd.compact.noop"), nil
-			}
-			return cc.T("cmd.compact.done"), nil
+			return compactResultMessage(cc, res), nil
 		},
 	})
 	return g
+}
+
+// compactResultMessage tells a committed summary apart from a pass that
+// claimed nothing, and history that cannot shrink from nothing to compact.
+func compactResultMessage(cc CommandContext, res compaction.Result) string {
+	switch {
+	case res.Status == compaction.StatusOK:
+		return cc.T("cmd.compact.done")
+	case res.Reason == compaction.ReasonNoBeneficialSpan, res.Reason == compaction.ReasonReadBudgetExceeded:
+		return cc.T("cmd.compact.blocked")
+	default:
+		return cc.T("cmd.compact.noop")
+	}
 }
 
 // compactRunError maps a summarizer run failure to a localized chat message:

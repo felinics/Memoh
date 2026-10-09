@@ -23828,6 +23828,10 @@ const docTemplate = `{
                 "message_count": {
                     "type": "integer"
                 },
+                "reason": {
+                    "description": "Reason says why a noop claimed nothing: nothing_to_compact,\nno_beneficial_span or read_budget_exceeded.",
+                    "type": "string"
+                },
                 "status": {
                     "type": "string"
                 },

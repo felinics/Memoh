@@ -1553,6 +1553,8 @@
     "infoNoData": "暂无数据",
     "compactNow": "立即压缩",
     "compactSuccess": "上下文压缩完成",
+    "compactNothing": "当前没有可压缩的内容",
+    "compactBlocked": "剩余历史暂时无法通过压缩变短",
     "compactingContext": "正在压缩上下文…",
     "codexUsage": {
       "warning": "{window}已用 {percent}%，{time}重置",
