@@ -170,8 +170,10 @@ func TestCommandResultKeepsDependencyFault(t *testing.T) {
 			}
 		})
 	}
-	if got := commandResultErrorFor(request, newCommandResult(request, context.DeadlineExceeded)); !IsHistoryResetBusy(got) {
-		t.Fatalf("a command that ran out of time = %v, want the busy conversation", got)
+	// Running out of time is no evidence that something else holds the
+	// conversation.
+	if got := commandResultErrorFor(request, newCommandResult(request, context.DeadlineExceeded)); IsHistoryResetBusy(got) {
+		t.Fatalf("a command that ran out of time = %v, want no busy conversation", got)
 	}
 }
 
@@ -179,7 +181,7 @@ func TestCommandResultKeepsDependencyFault(t *testing.T) {
 // runtime backend: reading its own result, or the time it runs until.
 func TestBeginHistoryResetLocalCommandBackendFailure(t *testing.T) {
 	t.Parallel()
-	for name, reads := range map[string]int64{"result": 1, "deadline": 2} {
+	for name, reads := range map[string]int64{"result": 1, "deadline": 2, "abort": 3} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			backend := newFailingClockBackend()
@@ -266,5 +268,38 @@ func TestRedisCommandResultWaitReportsUnreadableResults(t *testing.T) {
 	err = manager.waitCommandResult(context.Background(), Command{Type: CommandHistoryReset, ID: "cmd-1"}, make(chan error), 200*time.Millisecond)
 	if errs.FaultOf(err) != apperror.FaultDependency || IsHistoryResetBusy(err) {
 		t.Fatalf("wait with unreadable results = %v (fault %q), want a dependency failure", err, errs.FaultOf(err))
+	}
+}
+
+// hangingLiveReleaseBackend is the memory backend whose live reset marker
+// cannot be released, the way an unresponsive Redis holds a release until its
+// deadline, and whose writes fail.
+type hangingLiveReleaseBackend struct{ *MemoryBackend }
+
+func (hangingLiveReleaseBackend) ReleaseHistoryReset(ctx context.Context, _ ResetLease) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+
+func (hangingLiveReleaseBackend) Update(context.Context, Key, SnapshotUpdate) (Snapshot, bool, error) {
+	return Snapshot{}, false, errors.New("runtime backend write failed")
+}
+
+// A reset that fails gives its PostgreSQL lease back even when the live
+// marker's release hangs: the durable release has a budget of its own. The
+// live release waits out its budget, ten seconds at the shortest.
+func TestBeginHistoryResetReleasesDurableLeaseWhenLiveReleaseHangs(t *testing.T) {
+	t.Parallel()
+	runs := newFakeResetLedger()
+	manager := NewManager(hangingLiveReleaseBackend{NewMemoryBackend()}, Options{Ledger: runs, OwnerLeaseTTL: 40 * time.Millisecond})
+	t.Cleanup(func() { _ = manager.Close() })
+
+	_, _, err := manager.BeginSessionHistoryReset(context.Background(), "bot-1", "session-1")
+	assertHistoryResetDrainFailure(t, err, false, runs)
+	runs.resetMu.Lock()
+	releaseErr := runs.releaseCtxErr
+	runs.resetMu.Unlock()
+	if releaseErr != nil {
+		t.Fatalf("durable release ran with a spent context: %v", releaseErr)
 	}
 }

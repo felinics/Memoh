@@ -26,6 +26,8 @@ type fakeResetLedger struct {
 	renews          int
 	released        []ledger.ResetLease
 	releaseCtx      context.Context
+	// releaseCtxErr is the release context's error when ReleaseReset ran.
+	releaseCtxErr error
 	// activeRunsByBot is consumed one call at a time; when exhausted the bot
 	// has no active runs left.
 	activeRunsByBot [][]ledger.Run
@@ -82,6 +84,7 @@ func (f *fakeResetLedger) ReleaseReset(ctx context.Context, lease ledger.ResetLe
 	f.resetMu.Lock()
 	defer f.resetMu.Unlock()
 	f.releaseCtx = ctx
+	f.releaseCtxErr = ctx.Err()
 	f.released = append(f.released, lease)
 	return true, nil
 }

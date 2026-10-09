@@ -174,6 +174,32 @@ func TestRuntimeCommandResultPollingHonorsAcknowledgementDeadline(t *testing.T) 
 	}
 }
 
+// slowCommandResultLoadBackend answers every result lookup, without a result,
+// after a delay.
+type slowCommandResultLoadBackend struct {
+	DistributedBackend
+	delay time.Duration
+}
+
+func (b slowCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
+	select {
+	case <-time.After(b.delay):
+		return Command{}, false, nil
+	case <-ctx.Done():
+		return Command{}, false, ctx.Err()
+	}
+}
+
+// A lookup the acknowledgement deadline cuts short just after it started is
+// no evidence against a backend that answered every lookup before it.
+func TestRuntimeCommandResultPollingIgnoresALookupTheDeadlineCut(t *testing.T) {
+	manager := NewManager(slowCommandResultLoadBackend{delay: 60 * time.Millisecond}, Options{CommandAckTTL: 200 * time.Millisecond})
+	err := manager.waitCommandResult(context.Background(), Command{ID: "command-slow"}, make(chan error), manager.commandTimeout())
+	if !errors.Is(err, ErrCommandNotAcknowledged) {
+		t.Fatalf("wait error = %v (fault %q), want ErrCommandNotAcknowledged", err, errs.FaultOf(err))
+	}
+}
+
 // An owner that never answers leaves lookups that return without a result.
 func TestRuntimeCommandResultPollingReportsAnUnansweredCommand(t *testing.T) {
 	backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}

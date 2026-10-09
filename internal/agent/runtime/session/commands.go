@@ -823,6 +823,10 @@ func (m *Manager) requestAbort(ctx context.Context, ctrl *runControl) (bool, err
 	}, func(snapshot Snapshot) RuntimeDelta {
 		return runtimeRunPatch(snapshot, true, false, false)
 	})
+	if err != nil && !errors.Is(err, ErrRunOwnershipLost) {
+		// The update itself fails nothing: only the runtime backend can.
+		err = errs.WrapDependency(err, "request runtime abort")
+	}
 	return acknowledged, err
 }
 
@@ -1120,9 +1124,10 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 		retry = retryTicker.C
 		defer retryTicker.Stop()
 	}
-	// The last lookup that could not read the result, including one the
-	// deadline cut short: an owner that never answers leaves lookups that
-	// return without a result, a backend that cannot tell does not.
+	// The last lookup that could not read the result: an owner that never
+	// answers leaves lookups that return without a result, a backend that
+	// cannot tell does not. A lookup the deadline cut short counts once it
+	// ran longer than a poll interval, the time a backend that answers takes.
 	var unreadable error
 	for {
 		select {
@@ -1140,11 +1145,14 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 			if waitCtx.Err() != nil {
 				continue
 			}
+			started := time.Now()
 			result, ok, loadErr := m.loadCommandResult(waitCtx, request.ID)
 			if loadErr == nil && ok {
 				return commandResultErrorFor(request, result)
 			}
-			unreadable = loadErr
+			if loadErr == nil || waitCtx.Err() == nil || time.Since(started) >= pollEvery {
+				unreadable = loadErr
+			}
 		case <-retry:
 			if err := m.distributed.PublishCommand(waitCtx, retryOwnerID, request); err != nil && waitCtx.Err() == nil {
 				m.logger.DebugContext(ctx, "retry runtime command publish failed", slog.Any("error", err), slog.String("command_id", request.ID))

@@ -2320,7 +2320,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				// client sent away to subscribe again can be refused, as for a
 				// session deleted meanwhile, and would keep what it shows.
 				if !unreadable {
-					result := errlog.Event(ctx, "session_runtime.subscription", errs.Wrap(err, "reconcile runtime subscription",
+					result := errlog.Event(ctx, "session_runtime.subscription", errs.WrapDependency(err, "reconcile runtime subscription",
 						slog.String("session_id", key.SessionID), slog.String("reason", reason)), errlog.Options{})
 					m.logger.LogAttrs(ctx, result.Level, "reconcile runtime subscription failed", result.Attrs()...)
 				}
