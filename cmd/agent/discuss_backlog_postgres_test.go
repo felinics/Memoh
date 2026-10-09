@@ -568,3 +568,35 @@ func TestPostgresDiscussCompactedImageInputIsRecorded(t *testing.T) {
 		}
 	}
 }
+
+// Recovery that compacts older input of the batch keeps it raw by the cost of
+// its text, so an older message is not summarized for its image while newer
+// ones keep theirs: images go before text, oldest first.
+func TestPostgresDiscussCompactionKeepsBatchTextOverImages(t *testing.T) {
+	f := newBacklogFixture(t)
+	f.enableVision()
+	for i := range 2 {
+		id := fmt.Sprintf("old-%d", i)
+		f.appendMessage(id, id+" "+strings.Repeat("h", 2400))
+		f.answer(id, id+" ")
+	}
+	for i := range 3 {
+		id := fmt.Sprintf("img-%d", i)
+		f.appendImageMessage(id, id+" look "+strings.Repeat("t", 1200), fmt.Sprintf("hash-%d", i))
+	}
+	f.appendMessage("newest", "newest small message")
+	request := f.answer("batch", "newest small message")
+	if _, compacted := f.backlogRowsPrefixed("img-"); compacted != 0 {
+		t.Fatalf("%d batch messages were summarized for their images", compacted)
+	}
+	images, shed := f.requestImages(request), f.omittedImages()
+	for i := range 3 {
+		id := fmt.Sprintf("img-%d", i)
+		if !strings.Contains(request, id+" look ") {
+			t.Fatalf("%s lost its text", id)
+		}
+		if len(images[id+" look "+strings.Repeat("t", 1200)]) == 0 && !shed[id] {
+			t.Fatalf("%s: image neither delivered nor recorded; shed=%v", id, shed)
+		}
+	}
+}

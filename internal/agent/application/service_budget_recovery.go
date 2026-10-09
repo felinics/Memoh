@@ -260,10 +260,13 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 				protected = append(protected, source)
 			}
 		case frag.Kind == contextfrag.KindConversationSummary || (frag.Slot == contextfrag.SlotHistory && frag.Kind == contextfrag.KindConversationEvent):
-			cost := contextfrag.ResolveProviderBudgetFragTokens(frag)
-			pressure += cost
+			pressure += contextfrag.ResolveProviderBudgetFragTokens(frag)
 			if inBatch {
-				older = append(older, batchInput{source: source, cost: cost})
+				// Priced by its text: its images go before it does.
+				if msg := contextfrag.FragMessage(frag); msg != nil {
+					frag = contextfrag.RebuildFragMessage(frag, withoutImages(*msg))
+				}
+				older = append(older, batchInput{source: source, cost: contextfrag.ResolveProviderBudgetFragTokens(frag)})
 			}
 		default:
 			available -= contextfrag.ResolveProviderBudgetFragTokens(frag)
@@ -329,11 +332,7 @@ func shedOlderBatchImages(cfg native.RunConfig, batch map[string]turn.ContextMes
 			frag.Kind != contextfrag.KindConversationEvent || frag.Provenance.Collector != discussContextCollector {
 			continue
 		}
-		text := *msg
-		text.Content = slices.DeleteFunc(slices.Clone(msg.Content), func(part sdk.MessagePart) bool {
-			_, image := part.(sdk.ImagePart)
-			return image
-		})
+		text := withoutImages(*msg)
 		if len(text.Content) == len(msg.Content) {
 			continue
 		}
@@ -352,4 +351,12 @@ func shedOlderBatchImages(cfg native.RunConfig, batch map[string]turn.ContextMes
 		cfg.ContextMutations.Record(contextfrag.MutationCurrentInputImagesOmitted, "sources="+strings.Join(shed, ","))
 	}
 	return cfg.RefreshContextFrag(), true
+}
+
+func withoutImages(msg sdk.Message) sdk.Message {
+	msg.Content = slices.DeleteFunc(slices.Clone(msg.Content), func(part sdk.MessagePart) bool {
+		_, image := part.(sdk.ImagePart)
+		return image
+	})
+	return msg
 }

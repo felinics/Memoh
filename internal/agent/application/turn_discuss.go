@@ -274,8 +274,8 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	idleCtx, idleCancel := s.withStreamIdleTimeout(ctx, reasoningEffortForIdle(runConfig))
 	defer idleCancel.Stop()
 	outcome.watchIdle(idleCtx, idleCancel)
-	// A run compacts at most once; the last attempt a recompose budget
-	// allows only sheds images.
+	// Budget recovery compacts at most once per run; the last attempt a
+	// recompose budget allows only sheds images.
 	compacted := cmd.DiscussRecoveryExhausted
 	runConfig.RecoverContextBudget = func(ctx context.Context, cfg native.RunConfig) (native.RunConfig, bool, error) {
 		return s.recoverDiscussContextBudget(ctx, cmd, admitted, resolved.ModelID, cfg, &compacted)
