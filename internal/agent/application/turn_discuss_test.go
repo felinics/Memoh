@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -275,8 +276,8 @@ func TestDiscussInlinesImagesOnTheirAdmittedMessages(t *testing.T) {
 	}
 	drainDiscuss(t, h)
 
-	if strings.Join(requested, ",") != "older-image,newest-image,unattributed-image" {
-		t.Fatalf("loaded images %v, want only those of admitted messages", requested)
+	if strings.Join(requested, ",") != "unattributed-image,newest-image,older-image" {
+		t.Fatalf("loaded images %v, want only those of admitted messages, newest first", requested)
 	}
 	images := map[string][]string{}
 	for _, message := range agent.lastConfig.Messages {
@@ -289,6 +290,76 @@ func TestDiscussInlinesImagesOnTheirAdmittedMessages(t *testing.T) {
 	}
 	if len(images) != 2 || strings.Join(images["older"], ",") != "older-image" || strings.Join(images["newest"], ",") != "newest-image,unattributed-image" {
 		t.Fatalf("images by message = %v, want each on its own message and the unattributed one on the current input", images)
+	}
+}
+
+// The turn-wide vision budget goes to the newest input first: older images
+// are history a budget may trim, the newest input's own images are protected.
+func TestDiscussVisionBudgetKeepsTheNewestInputImages(t *testing.T) {
+	assets := map[string][]byte{}
+	cmd := discussCommand()
+	cmd.DiscussMessages = nil
+	for i := range maxTurnVisionImages + 1 {
+		id := fmt.Sprintf("m%02d", i)
+		assets[id] = rasterPNG(t)
+		cmd.DiscussMessages = append(cmd.DiscussMessages, turn.DiscussMessage{Role: "user", Content: id, Source: &turn.ContextMessageSource{Kind: "external", ID: id, Current: true}})
+		cmd.DiscussImageRefs = append(cmd.DiscussImageRefs, turn.DiscussImageRef{ContentHash: id, Mime: "image/png", MessageID: id})
+	}
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{RunConfig: native.RunConfig{SupportsImageInput: true}, ModelID: "model-1"}}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	a.turnHooks.inlineImages = imageInputService(t, assets).InlineImageAttachments
+
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	var withImage []string
+	for _, message := range agent.lastConfig.Messages {
+		for _, part := range message.Content {
+			if _, ok := part.(sdk.ImagePart); ok {
+				withImage = append(withImage, message.Content[0].(sdk.TextPart).Text)
+			}
+		}
+	}
+	newest := fmt.Sprintf("m%02d", maxTurnVisionImages)
+	if len(withImage) != maxTurnVisionImages || withImage[0] != "m01" || withImage[len(withImage)-1] != newest {
+		t.Fatalf("images on %v, want the budget spent newest first and kept in message order", withImage)
+	}
+}
+
+// A repeated image belongs to its newest sender: the older message is history
+// a budget may trim, the newest input is protected.
+func TestDiscussRepeatedImageRidesOnTheNewestInput(t *testing.T) {
+	agent := &fakeAgentStreamer{}
+	resolver := &fakeDiscussService{resolveResult: ResolveRunConfigResult{RunConfig: native.RunConfig{SupportsImageInput: true}, ModelID: "model-1"}}
+	a := newDiscussTestService(&fakeRunner{}, agent, resolver)
+	a.turnHooks.inlineImages = imageInputService(t, map[string][]byte{"sticker": rasterPNG(t)}).InlineImageAttachments
+	cmd := discussCommand()
+	cmd.DiscussMessages = []turn.DiscussMessage{
+		{Role: "user", Content: "alice", Source: &turn.ContextMessageSource{Kind: "external", ID: "alice", Current: true}},
+		{Role: "user", Content: "bob", Source: &turn.ContextMessageSource{Kind: "external", ID: "bob", Current: true}},
+	}
+	cmd.DiscussImageRefs = []turn.DiscussImageRef{{ContentHash: "sticker", Mime: "image/png", MessageID: "alice"}, {ContentHash: "sticker", Mime: "image/png", MessageID: "bob"}}
+
+	h, err := a.StartTurn(context.Background(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainDiscuss(t, h)
+
+	var withImage []string
+	for _, message := range agent.lastConfig.Messages {
+		for _, part := range message.Content {
+			if _, ok := part.(sdk.ImagePart); ok {
+				withImage = append(withImage, message.Content[0].(sdk.TextPart).Text)
+			}
+		}
+	}
+	if strings.Join(withImage, ",") != "bob" {
+		t.Fatalf("repeated image rides on %v, want only the newest sender", withImage)
 	}
 }
 

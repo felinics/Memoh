@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
@@ -448,7 +449,7 @@ func (s *Service) persistDiscussTerminalSnapshot(
 // message it arrived with; a ref naming no message rides on the current input.
 // A message admission left out takes its images with it, so older input of
 // the batch carries its own images as history instead of growing the
-// protected current input.
+// protected current input. The vision budget is spent newest first.
 func (s *Service) discussImageParts(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage) ([]sdk.ImagePart, map[string][]sdk.ImagePart) {
 	admittedIDs := make(map[string]bool, len(admitted))
 	for _, message := range admitted {
@@ -467,13 +468,15 @@ func (s *Service) discussImageParts(ctx context.Context, cmd turn.StartTurnComma
 	if len(refs) == 0 {
 		return nil, nil
 	}
+	slices.Reverse(refs)
+	inlined := s.inlineDiscussImages(ctx, cmd.BotID, refs)
 	var current []sdk.ImagePart
 	bySource := make(map[string][]sdk.ImagePart)
-	for i, parts := range s.inlineDiscussImages(ctx, cmd.BotID, refs) {
-		if owners[i] == "" {
-			current = append(current, parts...)
+	for i := len(inlined) - 1; i >= 0; i-- {
+		if owner := owners[len(owners)-1-i]; owner == "" {
+			current = append(current, inlined[i]...)
 		} else {
-			bySource[owners[i]] = append(bySource[owners[i]], parts...)
+			bySource[owner] = append(bySource[owner], inlined[i]...)
 		}
 	}
 	return current, bySource
