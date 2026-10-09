@@ -12,6 +12,7 @@ import (
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -128,12 +129,9 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 				// fell back to the ledger during the reset read it again.
 				restartCtx, cancel := context.WithTimeout(resetCtx, ttl/3)
 				if err := m.invalidateHistoryResetSnapshots(restartCtx, resetKeys, false); err != nil {
-					m.logger.WarnContext(ctx, "restart runtime snapshots after history reset failed; subscribers keep the projection read during the reset",
-						slog.Any("error", err),
-						slog.String("scope", scope.kind()),
-						slog.String("bot_id", scope.BotID),
-						slog.String("session_id", scope.SessionID),
-					)
+					result := errlog.Event(ctx, "session_runtime.history_reset", errs.Wrap(err, "restart runtime snapshots after history reset",
+						slog.String("scope", scope.kind()), slog.String("bot_id", scope.BotID), slog.String("session_id", scope.SessionID)), errlog.Options{})
+					m.logger.LogAttrs(ctx, result.Level, "restart runtime snapshots after history reset failed; subscribers reconcile on their own", result.Attrs()...)
 				}
 				cancel()
 			}
@@ -241,11 +239,9 @@ func (m *Manager) invalidateHistoryResetSnapshots(ctx context.Context, keys []Ke
 			continue
 		}
 		if err := m.publishRuntimeDelta(ctx, snapshot, "", RuntimeDelta{}); err != nil {
-			m.logger.WarnContext(ctx, "publish history reset snapshot failed; subscribers will reconcile from snapshot",
-				slog.Any("error", err),
-				slog.String("bot_id", key.BotID),
-				slog.String("session_id", key.SessionID),
-			)
+			result := errlog.Event(ctx, "session_runtime.history_reset", errs.Wrap(err, "publish history reset snapshot",
+				slog.String("bot_id", key.BotID), slog.String("session_id", key.SessionID)), errlog.Options{})
+			m.logger.LogAttrs(ctx, result.Level, "publish history reset snapshot failed; subscribers will reconcile from snapshot", result.Attrs()...)
 		}
 	}
 	return nil
