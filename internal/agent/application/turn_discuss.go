@@ -249,7 +249,11 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	var currentImages []sdk.ImagePart
 	var sourceImages map[string][]sdk.ImagePart
 	if runConfig.SupportsImageInput && len(cmd.DiscussImageRefs) > 0 {
-		currentImages, sourceImages = s.discussImageParts(ctx, cmd, admitted)
+		var withheld []string
+		currentImages, sourceImages, withheld = s.discussImageParts(ctx, cmd, admitted)
+		if len(withheld) > 0 {
+			runConfig.ContextMutations.Record(contextfrag.MutationCurrentInputImagesOmitted, "sources="+strings.Join(withheld, ","))
+		}
 	}
 	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, currentImages, sourceImages)
 	for _, frag := range runConfig.ContextSourceFrags {
@@ -452,8 +456,9 @@ const discussContextCollector = "discuss_context"
 // message it arrived with; a ref naming no message rides on the current input.
 // A message admission left out takes its images with it, so older input of
 // the batch carries its own images as history instead of growing the
-// protected current input. The vision budget is spent newest first.
-func (s *Service) discussImageParts(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage) ([]sdk.ImagePart, map[string][]sdk.ImagePart) {
+// protected current input. The vision budget is spent newest first; the
+// messages whose images neither it nor a repeat delivers are reported.
+func (s *Service) discussImageParts(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage) ([]sdk.ImagePart, map[string][]sdk.ImagePart, []string) {
 	admittedIDs := make(map[string]bool, len(admitted))
 	for _, message := range admitted {
 		if message.Source != nil && message.Source.Kind == "external" {
@@ -469,20 +474,30 @@ func (s *Service) discussImageParts(ctx context.Context, cmd turn.StartTurnComma
 		}
 	}
 	if len(refs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	slices.Reverse(refs)
 	inlined := s.inlineDiscussImages(ctx, cmd.BotID, refs)
 	var current []sdk.ImagePart
 	bySource := make(map[string][]sdk.ImagePart)
+	delivered := make(map[string]bool)
 	for i := len(inlined) - 1; i >= 0; i-- {
+		if len(inlined[i]) > 0 {
+			delivered[refs[i].ContentHash] = true
+		}
 		if owner := owners[len(owners)-1-i]; owner == "" {
 			current = append(current, inlined[i]...)
 		} else {
 			bySource[owner] = append(bySource[owner], inlined[i]...)
 		}
 	}
-	return current, bySource
+	var withheld []string
+	for i, owner := range owners {
+		if hash := refs[len(refs)-1-i].ContentHash; owner != "" && !delivered[hash] && !slices.Contains(withheld, owner) {
+			withheld = append(withheld, owner)
+		}
+	}
+	return current, bySource, withheld
 }
 
 func (s *Service) collectDiscussSourceFrags(

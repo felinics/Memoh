@@ -328,6 +328,10 @@ func TestDiscussVisionBudgetKeepsTheNewestInputImages(t *testing.T) {
 	if len(withImage) != maxTurnVisionImages || withImage[0] != "m01" || withImage[len(withImage)-1] != newest {
 		t.Fatalf("images on %v, want the budget spent newest first and kept in message order", withImage)
 	}
+	if records := agent.lastConfig.ContextMutations.Records(); len(records) != 1 ||
+		records[0].Kind != contextfrag.MutationCurrentInputImagesOmitted || records[0].Detail != "sources=m00" {
+		t.Fatalf("mutations = %+v, want the image the budget left out recorded", records)
+	}
 }
 
 // A repeated image belongs to its newest sender: the older message is history
