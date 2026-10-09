@@ -89,6 +89,7 @@ import ToolCallDetailWebFetch from './tool-call-detail-web-fetch.vue'
 import ToolCallDetailWebSearch from './tool-call-detail-web-search.vue'
 import ToolCallDetailWrite from './tool-call-detail-write.vue'
 import { isGuiToolName } from '@/utils/gui-tools'
+import { splitUnifiedDiffFiles } from '@/composables/useShikiHighlighter'
 
 export interface ToolDisplay {
   icon: Component
@@ -388,6 +389,43 @@ function patchLineCounts(patch: string): { add: number; remove: number } {
     else if (line.startsWith('-') && !line.startsWith('***')) remove++
   }
   return { add, remove }
+}
+
+// PatchFileDiff is one file of a successful apply_patch call, ready to render
+// as its own edit-style row: the result file list paired with its section of
+// the server-attached diff. Deleted files have no section (diff "").
+export interface PatchFileDiff {
+  operation: PatchFileTarget['operation']
+  path: string
+  movedTo: string
+  diff: string
+  add: number
+  remove: number
+}
+
+// patchFileDiffs pairs apply_patch's result files with the per-file sections
+// of the server-computed diff. Returns [] when there is nothing reliable to
+// split — failed calls, older records without a diff, diffs past the server's
+// size bound, or a diff section no result file claims — so the caller keeps
+// the single raw-patch row: a partial split would hide a change.
+export function patchFileDiffs(block: ToolCallBlock): PatchFileDiff[] {
+  if (block.toolName !== 'apply_patch' || !block.diff) return []
+  const pending = splitUnifiedDiffFiles(block.diff)
+  if (pending.length === 0) return []
+  const out = patchFilesFromResult(block).map((file) => {
+    // Diff headers drop the leading slash of absolute paths (a/data/x).
+    const key = file.path.replace(/^\//, '')
+    const index = file.operation === 'delete' ? -1 : pending.findIndex(segment => segment.oldPath === key)
+    const segment = index >= 0 ? pending.splice(index, 1)[0] : undefined
+    const counts = segment ? unifiedDiffLineCounts(segment.diff) : { add: 0, remove: 0 }
+    return {
+      ...file,
+      movedTo: segment && segment.newPath !== segment.oldPath ? segment.newPath : '',
+      diff: segment?.diff ?? '',
+      ...counts,
+    }
+  })
+  return pending.length > 0 ? [] : out
 }
 
 // The server-attached unified diff is the ground truth for what changed, so
@@ -721,7 +759,13 @@ export function getToolDisplay(block: ToolCallBlock): ToolDisplay {
       const fullTarget = fileTargets
         .map(file => `${PATCH_OPERATION_MARK[file.operation]} ${file.path}`)
         .join('\n')
-      const counts = patchLineCounts(patch)
+      // The server-attached diff counts what actually changed; the raw patch
+      // also carries the model's context lines. Group headers sum this total,
+      // so it stays correct when the row itself renders per file.
+      const fileDiffs = patchFileDiffs(block)
+      const counts = fileDiffs.length > 0
+        ? fileDiffs.reduce((sum, file) => ({ add: sum.add + file.add, remove: sum.remove + file.remove }), { add: 0, remove: 0 })
+        : patchLineCounts(patch)
       return {
         icon: FilePen,
         actionKey: 'apply_patch',

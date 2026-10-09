@@ -79,6 +79,48 @@ type applyPatchPlan struct {
 	added      []string
 	modified   []string
 	deleted    []string
+	// displayChanges records, in patch order, each added or updated file's
+	// content before and after its hunk, for the UI-only diff. Deletions are
+	// absent: the plan never reads a deleted file, and reading it only for
+	// display is not worth a bridge round trip.
+	displayChanges []applyPatchDisplayChange
+}
+
+type applyPatchDisplayChange struct {
+	fromPath string
+	toPath   string
+	before   string
+	after    string
+}
+
+// uiDiff renders the plan's changes as one unified diff with a git-style
+// section per file, the multi-file form of the edit tool's context diff; the
+// chat card splits it back into per-file panels. It returns "" when any
+// section cannot be shown (file past the line-diff bound) or the whole diff
+// exceeds maxUIDiffBytes — a partial diff would list fewer files than the
+// patch touched, so the card falls back to the raw patch instead.
+func (p applyPatchPlan) uiDiff() string {
+	var b strings.Builder
+	for _, change := range p.displayChanges {
+		diff, err := contextDiffBetween(change.fromPath, change.toPath, change.before, change.after)
+		if err != nil {
+			return ""
+		}
+		if diff == "" {
+			if diffDisplayText(change.before) == diffDisplayText(change.after) {
+				continue
+			}
+			return ""
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(diff)
+		if b.Len() > maxUIDiffBytes {
+			return ""
+		}
+	}
+	return b.String()
 }
 
 func (p applyPatchPlan) files() []map[string]any {
@@ -234,14 +276,21 @@ func (p *ContainerProvider) execApplyPatch(ctx context.Context, session SessionC
 		p.logWorkspaceToolHookError(hooks.EventAfterFileWrite, session.BotID, session.SessionID, err)
 	}
 
-	return map[string]any{
+	result := map[string]any{
 		"ok":       true,
 		"summary":  plan.summary(),
 		"added":    plan.added,
 		"modified": plan.modified,
 		"deleted":  plan.deleted,
 		"files":    plan.files(),
-	}, nil
+	}
+	// Same UI-only diff channel as edit and write (see execEdit), computed
+	// from the plan's real before/after content rather than the model's patch
+	// text, and stripped before the model sees the tool result.
+	if diff := plan.uiDiff(); diff != "" {
+		result[UIOutputMetadataKey] = map[string]any{"diff": diff}
+	}
+	return result, nil
 }
 
 func commitApplyPatchPlan(ctx context.Context, client *bridge.Client, plan *applyPatchPlan) error {
@@ -504,6 +553,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace too
 			files[path] = applyPatchVirtualFile{exists: true, content: hunk.contents, contentLoaded: true}
 			plan.operations = append(plan.operations, applyPatchOperation{kind: applyPatchOperationWrite, path: path, content: hunk.contents})
 			plan.added = append(plan.added, path)
+			plan.displayChanges = append(plan.displayChanges, applyPatchDisplayChange{fromPath: path, toPath: path, after: hunk.contents})
 		case applyPatchHunkDelete:
 			info, err := statApplyPatchVirtualFile(ctx, fs, files, path)
 			if err != nil {
@@ -527,6 +577,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace too
 			if err != nil {
 				return nil, err
 			}
+			display := applyPatchDisplayChange{fromPath: path, toPath: path, before: original, after: newContent}
 			if hunk.movePath != "" {
 				movePath, err := normalizeApplyPatchPath(hunk.movePath, workspace)
 				if err != nil {
@@ -543,6 +594,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace too
 					if info.exists && info.isDir {
 						return nil, fmt.Errorf("cannot move file over directory: %s", movePath)
 					}
+					display.toPath = movePath
 					files[path] = applyPatchVirtualFile{exists: false, contentLoaded: true}
 					files[movePath] = applyPatchVirtualFile{exists: true, content: newContent, contentLoaded: true}
 					plan.operations = append(plan.operations,
@@ -555,6 +607,7 @@ func buildApplyPatchPlan(ctx context.Context, fs applyPatchReadFS, workspace too
 				plan.operations = append(plan.operations, applyPatchOperation{kind: applyPatchOperationWrite, path: path, content: newContent})
 			}
 			plan.modified = append(plan.modified, path)
+			plan.displayChanges = append(plan.displayChanges, display)
 		default:
 			return nil, fmt.Errorf("unknown apply_patch hunk kind %q", hunk.kind)
 		}

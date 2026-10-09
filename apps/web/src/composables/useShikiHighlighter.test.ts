@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { parseUnifiedDiffRows } from './useShikiHighlighter'
+import { parseUnifiedDiffRows, splitUnifiedDiffFiles } from './useShikiHighlighter'
 
 describe('parseUnifiedDiffRows', () => {
   it('renders context, removal, and addition rows with their gutter line numbers', () => {
@@ -47,5 +47,22 @@ describe('parseUnifiedDiffRows', () => {
     expect(rows.map((row) => row.kind)).toEqual(['remove', 'context', 'add'])
     expect(rows[0]?.text).toBe('---')
     expect(rows[2]?.text).toBe('+++')
+  })
+})
+
+describe('splitUnifiedDiffFiles', () => {
+  it('keeps ---/+++ content lines inside the hunk they belong to', () => {
+    // A removed "-- old" and an added "++ new" line read exactly like a file
+    // header pair; only the hunk line counts say they are still content.
+    const first = '--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +1,2 @@\n select 1\n--- old\n+++ new'
+    const second = '--- a/r.sql\n+++ b/r.sql\n@@ -1 +1 @@\n-a\n+b'
+    const files = splitUnifiedDiffFiles(`${first}\n${second}`)
+    expect(files.map((file) => file.diff)).toEqual([first, second])
+  })
+
+  it('returns nothing for input it cannot split reliably', () => {
+    expect(splitUnifiedDiffFiles('*** Begin Patch\n*** Update File: a.txt\n@@\n-a\n+b\n*** End Patch')).toEqual([])
+    // Hunk header promises more lines than the text holds.
+    expect(splitUnifiedDiffFiles('--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n a\n-b')).toEqual([])
   })
 })
