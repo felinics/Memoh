@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -99,7 +100,12 @@ func TestQRPollRecordsUpstreamFailureOnce(t *testing.T) {
 	rec, records := serveQR(t, nil, upstreamResponse(http.StatusForbidden, "ilink secret refusal"),
 		"/bots/bot-1/channel/weixin/qr/poll", `{"qr_code":"code-1"}`)
 
-	requireFailureRecord(t, rec, records, http.StatusInternalServerError, "dependency", "ilink secret refusal")
+	requireFailureRecord(t, rec, records, http.StatusInternalServerError, "dependency", "weixin qrstatus request failed")
+	for _, record := range records {
+		if strings.Contains(fmt.Sprint(record), "ilink secret refusal") {
+			t.Fatalf("record carries the upstream body: %#v", record)
+		}
+	}
 }
 
 func TestQRPollRecordsCredentialSaveFailureOnce(t *testing.T) {

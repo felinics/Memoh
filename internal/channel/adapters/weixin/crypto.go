@@ -11,10 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/felinics/memoh/internal/errs"
 )
 
 // encryptAESECB encrypts plaintext with AES-128-ECB and PKCS7 padding.
@@ -174,8 +177,7 @@ func fetchURL(u string) ([]byte, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("cdn %d: %s", resp.StatusCode, string(body))
+		return nil, errs.NewDependency("weixin cdn download failed", slog.Int("status", resp.StatusCode))
 	}
 	return io.ReadAll(resp.Body)
 }
@@ -203,8 +205,7 @@ func uploadToCDN(cdnBaseURL string, upload *GetUploadURLResponse, filekey string
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("cdn upload %d: %s", resp.StatusCode, string(body))
+		return "", errs.NewDependency("weixin cdn upload failed", slog.Int("status", resp.StatusCode))
 	}
 	downloadParam := resp.Header.Get("x-encrypted-param")
 	if downloadParam == "" {

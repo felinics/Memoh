@@ -431,7 +431,7 @@ func (s *Service) StartOpenAICodexACPDeviceAuthorization(ctx context.Context) (O
 		if resp.StatusCode == http.StatusNotFound {
 			return OpenAICodexACPDeviceAuthorization{}, errs.NewDependency("device code login is not enabled for this Codex server; use browser login or verify the server URL")
 		}
-		return OpenAICodexACPDeviceAuthorization{}, errs.NewDependency(fmt.Sprintf("codex device user code request failed with status %d", resp.StatusCode))
+		return OpenAICodexACPDeviceAuthorization{}, errs.NewDependency("codex device user code request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var decoded struct {
@@ -507,7 +507,7 @@ func (s *Service) PollOpenAICodexACPDeviceAuthorization(ctx context.Context, dev
 		return OpenAICodexACPDevicePollResult{Pending: true}, nil
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return OpenAICodexACPDevicePollResult{}, errs.NewDependency(fmt.Sprintf("codex device auth failed with status %d", resp.StatusCode))
+		return OpenAICodexACPDevicePollResult{}, errs.NewDependency("codex device auth failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var decoded struct {
@@ -763,7 +763,7 @@ func (s *Service) pollGitHubCopilotProviderAuthorization(ctx context.Context, pr
 			}
 			return s.GetOAuthStatus(ctx, providerID)
 		default:
-			return nil, errs.NewDependency(fmt.Sprintf("oauth device token request failed: %s", firstNonEmpty(resp.Description, resp.Error)))
+			return nil, errs.NewDependency("oauth device token request failed", slog.String("oauth_error", resp.Error))
 		}
 	}
 
@@ -1163,7 +1163,7 @@ func (s *Service) fetchGitHubOAuthAccount(ctx context.Context, accessToken strin
 		return oauthAccountMetadata{}, errs.WrapDependency(err, "read github oauth account response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return oauthAccountMetadata{}, errs.NewDependency(fmt.Sprintf("github oauth account request failed: %s", strings.TrimSpace(string(payload))))
+		return oauthAccountMetadata{}, errs.NewDependency("github oauth account request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var profile struct {
@@ -1219,7 +1219,7 @@ func (s *Service) fetchGitHubPrimaryEmail(ctx context.Context, accessToken strin
 		return "", errs.WrapDependency(err, "read github oauth emails response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", errs.NewDependency(fmt.Sprintf("github oauth emails request failed: %s", strings.TrimSpace(string(payload))))
+		return "", errs.NewDependency("github oauth emails request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var emails []struct {
@@ -1283,7 +1283,7 @@ func (s *Service) requestDeviceAuthorization(ctx context.Context, cfg oauthConfi
 		return nil, errs.WrapDependency(err, "read oauth device response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errs.NewDependency(fmt.Sprintf("oauth device request failed: %s", strings.TrimSpace(string(payload))))
+		return nil, errs.NewDependency("oauth device request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var deviceResp deviceAuthorizationResponse
@@ -1291,7 +1291,7 @@ func (s *Service) requestDeviceAuthorization(ctx context.Context, cfg oauthConfi
 		return nil, errs.WrapDependency(err, "decode oauth device response")
 	}
 	if deviceResp.Error != "" {
-		return nil, errs.NewDependency(fmt.Sprintf("oauth device request failed: %s", firstNonEmpty(deviceResp.Description, deviceResp.Error)))
+		return nil, errs.NewDependency("oauth device request failed", slog.String("oauth_error", deviceResp.Error))
 	}
 	if strings.TrimSpace(deviceResp.DeviceCode) == "" || strings.TrimSpace(deviceResp.UserCode) == "" || strings.TrimSpace(deviceResp.VerificationURI) == "" {
 		return nil, errs.NewDependency("oauth device request returned incomplete device authorization data")
@@ -1342,7 +1342,7 @@ func (s *Service) exchangeDeviceCode(ctx context.Context, cfg oauthConfig, devic
 		if tokenResp.Error != "" {
 			return &tokenResp, nil
 		}
-		return nil, errs.NewDependency(fmt.Sprintf("oauth device token request failed: %s", strings.TrimSpace(string(payload))))
+		return nil, errs.NewDependency("oauth device token request failed", slog.Int("status", resp.StatusCode))
 	}
 	return &tokenResp, nil
 }
@@ -1397,7 +1397,7 @@ func (s *Service) postTokenRequest(ctx context.Context, cfg oauthConfig, body ur
 		return nil, errs.WrapDependency(err, "read oauth response")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errs.NewDependency(fmt.Sprintf("oauth token request failed: %s", strings.TrimSpace(string(payload))))
+		return nil, errs.NewDependency("oauth token request failed", slog.Int("status", resp.StatusCode))
 	}
 
 	var tokenResp oauthTokenResponse
@@ -1405,7 +1405,7 @@ func (s *Service) postTokenRequest(ctx context.Context, cfg oauthConfig, body ur
 		return nil, errs.WrapDependency(err, "decode oauth response")
 	}
 	if tokenResp.Error != "" {
-		return nil, errs.NewDependency(fmt.Sprintf("oauth token request failed: %s", firstNonEmpty(tokenResp.Description, tokenResp.Error)))
+		return nil, errs.NewDependency("oauth token request failed", slog.String("oauth_error", tokenResp.Error))
 	}
 	return &tokenResp, nil
 }
