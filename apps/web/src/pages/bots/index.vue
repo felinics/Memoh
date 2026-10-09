@@ -103,12 +103,13 @@ import {
   SurfaceCard,
 } from '@felinic/ui'
 import { Search, Plus, Upload } from 'lucide-vue-next'
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { PersonaTile } from '@felinic/ui'
 import BotCard from './components/bot-card.vue'
-import { useQuery, useQueryCache } from '@pinia/colada'
-import { getBotsQuery, getBotsQueryKey } from '@memohai/sdk/colada'
+import { useQuery } from '@pinia/colada'
+import { getBotsQuery } from '@memohai/sdk/colada'
+import { usePendingBotsRefresh } from '@/composables/usePendingBotsRefresh'
 
 declare global {
   interface Window {
@@ -118,7 +119,6 @@ declare global {
 
 const router = useRouter()
 const searchText = ref('')
-const queryCache = useQueryCache()
 
 const { data: botData, status } = useQuery(getBotsQuery())
 
@@ -166,31 +166,5 @@ const filteredBots = computed(() => {
   )
 })
 
-const hasPendingBots = computed(() =>
-  allBots.value.some(bot => bot.status === 'creating' || bot.status === 'deleting'),
-)
-
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-watch(hasPendingBots, (pending) => {
-  if (pending) {
-    if (pollTimer == null) {
-      pollTimer = setInterval(() => {
-        queryCache.invalidateQueries({ key: getBotsQueryKey() })
-      }, 2000)
-    }
-    return
-  }
-  if (pollTimer != null) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-}, { immediate: true })
-
-onUnmounted(() => {
-  if (pollTimer != null) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-})
+usePendingBotsRefresh(realBots)
 </script>
