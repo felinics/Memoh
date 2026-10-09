@@ -2,6 +2,8 @@ package sessionruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -2056,31 +2058,35 @@ func (m *Manager) resumeWaitingDecision(ctx context.Context, handle RunHandle) e
 // answers first because it is the only place a run in flight exists; the ledger
 // fallback below covers the case where it cannot answer at all.
 func (m *Manager) Snapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
-	snapshot, _, err := m.observedSnapshot(ctx, botID, sessionID)
-	return snapshot, err
-}
-
-// observedSnapshot is Snapshot together with the identity of the run it
-// reports from the ledger rather than the live projection, empty when it
-// reports none. The ledger can change under an unchanged live cursor, and a
-// subscriber compares this identity to notice it.
-func (m *Manager) observedSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, string, error) {
 	if m == nil || m.backend == nil {
-		return EmptySnapshot(botID, sessionID), "", nil
+		return EmptySnapshot(botID, sessionID), nil
 	}
 	snapshot, err := m.liveSnapshot(ctx, botID, sessionID)
 	if err != nil {
-		return Snapshot{}, "", err
+		return Snapshot{}, err
 	}
-	if snapshot.CurrentRunView != nil {
-		return snapshot, "", nil
+	return m.hydrateSnapshotFromLedger(ctx, snapshot), nil
+}
+
+// subscriberSnapshot is Snapshot as a subscriber is sent it. A run read from
+// the ledger is not part of the live sequence, and the ledger can change while
+// the live cursor stands still, as a history reset does to it. A client
+// discards a snapshot that does not move its cursor, so a snapshot with a run
+// from the ledger carries an epoch of its own that changes with that run.
+func (m *Manager) subscriberSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
+	if m == nil || m.backend == nil {
+		return EmptySnapshot(botID, sessionID), nil
+	}
+	snapshot, err := m.liveSnapshot(ctx, botID, sessionID)
+	if err != nil || snapshot.CurrentRunView != nil {
+		return snapshot, err
 	}
 	snapshot = m.hydrateSnapshotFromLedger(ctx, snapshot)
-	run := snapshot.CurrentRunView
-	if run == nil {
-		return snapshot, "", nil
+	if run := snapshot.CurrentRunView; run != nil && strings.TrimSpace(snapshot.Epoch) != "" {
+		sum := sha256.Sum256([]byte(strings.Join([]string{run.RunID, run.Status, run.ErrorCode, run.ProposedTerminalStatus}, "\x00")))
+		snapshot.Epoch = strings.TrimSpace(snapshot.Epoch) + ":ledger-" + hex.EncodeToString(sum[:8])
 	}
-	return snapshot, strings.Join([]string{run.RunID, run.Status, run.ErrorCode, run.ProposedTerminalStatus}, "\x00"), nil
+	return snapshot, nil
 }
 
 func (m *Manager) liveSnapshot(ctx context.Context, botID, sessionID string) (Snapshot, error) {
@@ -2242,7 +2248,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		cancel()
 		return Subscription{}, err
 	}
-	baseline, baselineLedgerRun, err := m.observedSnapshot(subCtx, key.BotID, key.SessionID)
+	baseline, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 	if err != nil {
 		backendSub.Close()
 		cancel()
@@ -2290,7 +2296,6 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 		ticker := time.NewTicker(reconcileInterval)
 		defer ticker.Stop()
 		lastEpoch := baseline.Epoch
-		lastLedgerRun := baselineLedgerRun
 		lastSeq := baseline.Seq
 		terminalDrop := func(message string) {
 			_ = send(Event{
@@ -2303,7 +2308,7 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 			})
 		}
 		reconcile := func(observedEpoch string, observedSeq int64, reason string) bool {
-			snapshot, ledgerRun, err := m.observedSnapshot(subCtx, key.BotID, key.SessionID)
+			snapshot, err := m.subscriberSnapshot(subCtx, key.BotID, key.SessionID)
 			if err != nil {
 				if subCtx.Err() == nil {
 					m.logger.WarnContext(ctx, "reconcile runtime subscription failed", slog.Any("error", err), slog.String("session_id", key.SessionID), slog.String("reason", reason))
@@ -2326,18 +2331,10 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				return false
 			}
 			if snapshotEpoch == lastEpoch && snapshot.Seq == lastSeq {
-				if ledgerRun == lastLedgerRun {
-					return true
-				}
-				// A client drops a snapshot that does not move its cursor, so
-				// a ledger change under an unchanged cursor has to make it
-				// subscribe again.
-				terminalDrop(reason + ": ledger run changed")
-				return false
+				return true
 			}
 			lastEpoch = snapshotEpoch
 			lastSeq = snapshot.Seq
-			lastLedgerRun = ledgerRun
 			return send(Event{
 				Type:      EventRuntimeSnapshot,
 				BotID:     key.BotID,

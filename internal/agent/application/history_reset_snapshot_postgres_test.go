@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/apperror"
+	dbpkg "github.com/felinics/memoh/internal/db"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
 	"github.com/felinics/memoh/internal/errs"
@@ -111,9 +113,12 @@ func describeRun(run *sessionruntime.CurrentRunView) string {
 // page shows rather than the frames it was sent: a snapshot applies only while
 // the client awaits one or when it moves the cursor forward, and a dropped or
 // closed stream makes the client subscribe again and await the next snapshot.
+// The socket refuses to subscribe to a deleted session, and the client then
+// keeps what it shows.
 type webRuntimeView struct {
 	t                *testing.T
 	manager          *sessionruntime.Manager
+	pool             *pgxpool.Pool
 	botID, sessionID string
 	sub              sessionruntime.Subscription
 	awaiting         bool
@@ -124,7 +129,7 @@ type webRuntimeView struct {
 
 func (h wsStepHistoryHarness) watch(t *testing.T) *webRuntimeView {
 	t.Helper()
-	v := &webRuntimeView{t: t, manager: h.manager, botID: h.botID, sessionID: h.sessionID}
+	v := &webRuntimeView{t: t, manager: h.manager, pool: h.pool, botID: h.botID, sessionID: h.sessionID}
 	v.resubscribe()
 	t.Cleanup(func() { v.sub.Close() })
 	return v
@@ -135,12 +140,20 @@ func (v *webRuntimeView) resubscribe() {
 	if v.sub.Close != nil {
 		v.sub.Close()
 	}
+	v.awaiting = true
+	var deleted bool
+	if err := v.pool.QueryRow(context.Background(), `SELECT deleted_at IS NOT NULL FROM bot_sessions WHERE id = $1`, v.sessionID).Scan(&deleted); err != nil {
+		v.t.Fatal(err)
+	}
+	if deleted {
+		v.sub = sessionruntime.Subscription{Close: func() {}}
+		return
+	}
 	sub, err := v.manager.Subscribe(context.Background(), v.botID, v.sessionID)
 	if err != nil {
 		v.t.Fatalf("Subscribe() error = %v", err)
 	}
 	v.sub = sub
-	v.awaiting = true
 }
 
 func (v *webRuntimeView) apply(event sessionruntime.Event, open bool) {
@@ -527,42 +540,57 @@ func TestPostgresHistoryResetOrphanedAdmissionExposesNoContent(t *testing.T) {
 // A subscriber that read the cleared run from the ledger while the reset was
 // under way catches up on its own within the reconcile interval, even when
 // the reset never gets to restart the projections (its release pass skipped,
-// timed out, or its process died after the deletion committed).
+// timed out, or its process died after the deletion committed), and even when
+// the session went with its history, as an overwrite import or an ACP session
+// deletion takes it, so the client cannot subscribe to it again.
 func TestPostgresHistoryResetSubscriberHealsWithoutReleasePass(t *testing.T) {
-	h := newWSStepHistoryHarness(t, wsStepHistoryAuthFailure)
-	ctx := context.Background()
-	view := h.watch(t)
-	h.run(t, nil)
-	before := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
-	if before == nil {
-		t.Fatal("failed run is missing from the live snapshot")
-	}
-	view.drain()
-	epoch := view.epoch
+	for _, deleteSession := range []bool{false, true} {
+		t.Run(map[bool]string{false: "history cleared", true: "session deleted"}[deleteSession], func(t *testing.T) {
+			h := newWSStepHistoryHarness(t, wsStepHistoryAuthFailure)
+			ctx := context.Background()
+			view := h.watch(t)
+			h.run(t, nil)
+			before := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
+			if before == nil {
+				t.Fatal("failed run is missing from the live snapshot")
+			}
+			view.drain()
+			epoch := view.epoch
 
-	resetCtx, release, err := h.manager.BeginSessionHistoryReset(ctx, h.botID, h.sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
-	if !view.follow(5*time.Second, func() bool {
-		return !view.awaiting && view.epoch != epoch && view.run != nil && view.run.RunID == before.RunID
-	}) {
-		t.Fatalf("client did not reload the run from the ledger when the reset began; it shows %s", describeRun(view.run))
-	}
-	if err := h.messages.DeleteBySession(resetCtx, h.sessionID); err != nil {
-		t.Fatal(err)
-	}
-	// No release: the client must be brought to the cleared ledger without it.
-	view.awaitCleared(before.RunID)
+			resetCtx, release, err := h.manager.BeginSessionHistoryReset(ctx, h.botID, h.sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+			if !view.follow(5*time.Second, func() bool {
+				return !view.awaiting && view.epoch != epoch && view.run != nil && view.run.RunID == before.RunID
+			}) {
+				t.Fatalf("client did not reload the run from the ledger when the reset began; it shows %s", describeRun(view.run))
+			}
+			if err := h.messages.DeleteBySession(resetCtx, h.sessionID); err != nil {
+				t.Fatal(err)
+			}
+			if deleteSession {
+				if err := dbsqlc.New(h.pool).SoftDeleteSession(resetCtx, dbpkg.ParseUUIDOrEmpty(h.sessionID)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// No release: the client must be brought to the cleared ledger
+			// without it.
+			view.awaitCleared(before.RunID)
+			if deleteSession {
+				return
+			}
 
-	release()
-	h.run(t, nil)
-	next := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
-	if next == nil || next.RunID == before.RunID {
-		t.Fatalf("live run after the next turn = %s, want a new run", describeRun(next))
+			release()
+			h.run(t, nil)
+			next := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
+			if next == nil || next.RunID == before.RunID {
+				t.Fatalf("live run after the next turn = %s, want a new run", describeRun(next))
+			}
+			view.awaitRun(next.RunID)
+		})
 	}
-	view.awaitRun(next.RunID)
 }
 
 // A bot-wide clear reaches every session of the bot, not only the first.
