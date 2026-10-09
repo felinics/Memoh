@@ -1121,9 +1121,9 @@ func (h *ContainerdHandler) requireBotAccessWithPermission(c echo.Context, permi
 	if err != nil {
 		return "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
 	}
 	if _, err := h.authorizeBotAccessWithPermission(c.Request().Context(), channelIdentityID, botID, permission); err != nil {
 		return "", err
@@ -1146,9 +1146,9 @@ func (h *ContainerdHandler) requireBotAccessWithGuest(c echo.Context) (string, e
 	if err != nil {
 		return "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
 		return "", err

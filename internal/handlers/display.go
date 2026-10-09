@@ -125,6 +125,26 @@ func (h *ContainerdHandler) GetDisplayInfo(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+// displayOfferHTTPError answers a refused offer. Only a bad offer or a
+// disabled display is the caller's to fix; an unavailable encoder or display
+// server is a 503 and anything else is an internal failure.
+func displayOfferHTTPError(err error) error {
+	switch {
+	case errors.Is(err, displaypkg.ErrDisplayDisabled):
+		return apperror.Wrap(apperror.CodeWorkspaceDisplayDisabled, err, nil)
+	case errors.Is(err, displaypkg.ErrOfferRequired):
+		return apperror.FieldRequired("sdp")
+	case errors.Is(err, displaypkg.ErrOfferTypeUnsupported):
+		return apperror.FieldInvalid("type", err)
+	case errors.Is(err, displaypkg.ErrOfferInvalid), errors.Is(err, displaypkg.ErrCodecUnsupported):
+		return apperror.FieldInvalid("sdp", err)
+	case errors.Is(err, displaypkg.ErrEncoderUnavailable), errors.Is(err, displaypkg.ErrDisplayUnavailable):
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	default:
+		return errs.Wrap(err, "display webrtc offer")
+	}
+}
+
 // HandleDisplayWebRTCOffer godoc
 // @Summary Create a WebRTC answer for bot workspace display
 // @Tags containerd
@@ -155,16 +175,7 @@ func (h *ContainerdHandler) HandleDisplayWebRTCOffer(c echo.Context) error {
 		NATIPs:    h.displayNATIPs(c, req.CandidateHost),
 	})
 	if err != nil {
-		status := http.StatusServiceUnavailable
-		if errors.Is(err, displaypkg.ErrDisplayDisabled) {
-			status = http.StatusBadRequest
-		}
-		if !errors.Is(err, displaypkg.ErrEncoderUnavailable) &&
-			!errors.Is(err, displaypkg.ErrDisplayUnavailable) &&
-			!errors.Is(err, displaypkg.ErrDisplayDisabled) {
-			status = http.StatusBadRequest
-		}
-		return echo.NewHTTPError(status, err.Error())
+		return displayOfferHTTPError(err)
 	}
 
 	h.applyDisplayStyleAsync(c.Request().Context(), botID)
@@ -209,9 +220,9 @@ func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "display session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
 	if h.displayService == nil || !h.displayService.CloseSession(botID, sessionID) {
 		return echo.NewHTTPError(http.StatusNotFound, "display session not found")

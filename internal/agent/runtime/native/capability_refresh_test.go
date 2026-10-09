@@ -14,6 +14,7 @@ import (
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 type capabilityRefreshProvider struct {
@@ -171,7 +172,7 @@ func TestCapabilityRefreshSurvivesMidStreamRetry(t *testing.T) {
 		SupportsToolCall: true,
 		Messages:         []sdk.Message{sdk.UserMessage("install, survive a retry, then use")},
 		Model:            &sdk.Model{ID: "test", Provider: provider},
-		Retry:            RetryConfig{MaxAttempts: 3, FastAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
+		Retry:            modelretry.Config{MaxAttempts: 3, FastAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()

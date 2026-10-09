@@ -10,7 +10,9 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type AuthHandler struct {
@@ -76,8 +78,11 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		return err
 	}
 	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" || strings.TrimSpace(req.Password) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "username and password are required")
+	if req.Username == "" {
+		return apperror.FieldRequired("username")
+	}
+	if strings.TrimSpace(req.Password) == "" {
+		return apperror.FieldRequired("password")
 	}
 
 	account, err := h.accountService.Login(c.Request().Context(), req.Username, req.Password)
@@ -88,11 +93,11 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		if errors.Is(err, accounts.ErrInactiveAccount) {
 			return echo.NewHTTPError(http.StatusUnauthorized, "user is inactive")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "login")
 	}
 	token, expiresAt, err := auth.GenerateToken(account.ID, h.jwtSecret, h.expiresIn)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "generate token")
 	}
 
 	return c.JSON(http.StatusOK, LoginResponse{

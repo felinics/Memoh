@@ -146,8 +146,11 @@ func (h *ExternalAgentCodexHandler) PollDevice(c echo.Context) error {
 		return err
 	}
 	var req CodexDeviceLoginPollRequest
-	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.LoginID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "login_id is required")
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.LoginID) == "" {
+		return apperror.FieldRequired("login_id")
 	}
 	loginID := strings.TrimSpace(req.LoginID)
 	status := h.driver.PollDeviceLogin(botID, botAgentID, loginID)
@@ -179,8 +182,11 @@ func (h *ExternalAgentCodexHandler) CancelDevice(c echo.Context) error {
 		return err
 	}
 	var req CodexDeviceLoginPollRequest
-	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.LoginID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "login_id is required")
+	if err := c.Bind(&req); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.LoginID) == "" {
+		return apperror.FieldRequired("login_id")
 	}
 	if err := h.driver.CancelDeviceLogin(c.Request().Context(), botID, botAgentID, strings.TrimSpace(req.LoginID)); err != nil {
 		return apperror.Wrap(

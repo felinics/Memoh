@@ -908,18 +908,6 @@ func prepareMidStreamRetryConfigWithMessages(
 	return cfg
 }
 
-// sleepWithContext sleeps for the given duration or returns context error.
-func sleepWithContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
 func detectGenerateLoopAbort(ctx context.Context, err error) error {
 	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		return nil

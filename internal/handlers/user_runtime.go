@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/userruntime"
@@ -58,6 +59,9 @@ func (h *UserRuntimeHandler) Create(c echo.Context) error {
 	}
 	resp, err := h.service.CreateRuntime(c.Request().Context(), userID, req)
 	if err != nil {
+		if errors.Is(err, userruntime.ErrInvalidName) {
+			return apperror.FieldInvalid("name", err)
+		}
 		return runtimeHTTPError(err)
 	}
 	return c.JSON(http.StatusCreated, resp)
@@ -97,15 +101,15 @@ func (h *UserRuntimeHandler) Delete(c echo.Context) error {
 		return err
 	}
 	if err := h.service.RevokeRuntime(c.Request().Context(), userID, strings.TrimSpace(c.Param("id"))); err != nil {
+		if errors.Is(err, userruntime.ErrInvalidInput) {
+			return apperror.FieldInvalid("id", err)
+		}
 		return runtimeHTTPError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
 func runtimeHTTPError(err error) error {
-	if errors.Is(err, userruntime.ErrInvalidInput) || errors.Is(err, userruntime.ErrInvalidKey) {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
 	if errors.Is(err, db.ErrNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
 	}

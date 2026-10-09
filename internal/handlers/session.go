@@ -21,6 +21,8 @@ import (
 	"github.com/felinics/memoh/internal/botagents"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/runtimefence"
 	"github.com/felinics/memoh/internal/runtimekind"
 	"github.com/felinics/memoh/internal/workdir"
@@ -225,9 +227,9 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	var req createSessionRequest
 	if err := c.Bind(&req); err != nil {
@@ -238,7 +240,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		sessionType = session.TypeChat
 	}
 	if !session.IsKnownType(sessionType) {
-		return echo.NewHTTPError(http.StatusBadRequest, "unknown session type")
+		return apperror.FieldInvalid("type", nil)
 	}
 	botAgentID := strings.TrimSpace(req.BotAgentID)
 	var botAgent botagents.BotAgent
@@ -279,7 +281,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 	}
 	targetType, targetMode, targetRuntimeType, err := session.ResolveDescriptor(sessionType, req.SessionMode, req.RuntimeType)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return descriptorFieldError(err)
 	}
 	if err := rejectSystemExternalRuntime(targetMode, targetRuntimeType); err != nil {
 		return err
@@ -312,7 +314,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 				return err
 			}
 		} else if sessionMetadataString(req.Metadata, "project_path") == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, session.ErrACPProjectPathMissing.Error())
+			return apperror.FieldRequired("metadata.project_path")
 		}
 	}
 	createInput := session.CreateInput{
@@ -349,7 +351,7 @@ func (h *SessionHandler) CreateSession(c echo.Context) error {
 		}
 		prefModelID, prefEffort, prefErr := h.modelPrefs.ReconcileSessionModelPreference(c.Request().Context(), bot.ID, modelRef, effortRef)
 		if prefErr != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, prefErr.Error())
+			return modelPreferenceError(prefErr, "reconcile session model preference")
 		}
 		createInput.PreferredChatModelID = prefModelID
 		createInput.PreferredReasoningEffort = prefEffort
@@ -399,13 +401,13 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
 	bot, perms, source, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
@@ -422,14 +424,14 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 	turnID := strings.TrimSpace(req.TurnID)
 	legacyMessageID := strings.TrimSpace(req.MessageID)
 	if turnID == "" && legacyMessageID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "turn_id is required")
+		return apperror.FieldRequired("turn_id")
 	}
 	if turnID != "" {
 		if _, err := uuid.Parse(turnID); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid turn_id")
+			return apperror.FieldInvalid("turn_id", err)
 		}
 	} else if _, err := uuid.Parse(legacyMessageID); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid message_id")
+		return apperror.FieldInvalid("message_id", err)
 	}
 
 	// External runtimes fork their own conversation first; the returned
@@ -448,7 +450,7 @@ func (h *SessionHandler) ForkSession(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "agent runtime service unavailable")
 		}
 		if turnID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "turn_id is required to fork this session")
+			return apperror.FieldRequired("turn_id")
 		}
 		override, forkErr := h.agentRuntimes.PrepareExternalFork(c.Request().Context(), bot.ID, sessionID, turnID)
 		if forkErr != nil {
@@ -512,16 +514,16 @@ func (h *SessionHandler) ModelPreferenceSeed(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, _, err := h.authorizeBotSessionAccess(c, channelIdentityID, botID); err != nil {
 		return err
 	}
 	modelID, effort, err := h.sessionService.LatestModelPreferenceSeed(c.Request().Context(), botID, channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "load model preference seed")
 	}
 	return c.JSON(http.StatusOK, modelPreferenceSeedResponse{ModelID: modelID, ReasoningEffort: effort})
 }
@@ -544,9 +546,9 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	bot, perms, err := h.authorizeBotSessionAccess(c, channelIdentityID, botID)
 	if err != nil {
@@ -584,7 +586,7 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 			filter.WorkdirUnassigned = true
 		} else {
 			if _, parseErr := uuid.Parse(workdirParam); parseErr != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, "invalid workdir_id")
+				return apperror.FieldInvalid("workdir_id", parseErr)
 			}
 			filter.WorkdirID = workdirParam
 		}
@@ -625,12 +627,12 @@ func (h *SessionHandler) ListSessions(c echo.Context) error {
 		}
 	}
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list sessions")
 	}
 	if h.threadEnricher != nil {
 		sessions, err = h.threadEnricher.EnrichThreads(c.Request().Context(), bot.ID, sessions)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return errs.Wrap(err, "enrich sessions")
 		}
 	}
 
@@ -679,7 +681,7 @@ func rejectSystemExternalRuntime(mode, runtimeType string) error {
 	// schedule mode, but those sessions are created by the schedule service —
 	// this user-facing endpoint stays limited to chat and discuss.
 	if runtimekind.IsExternal(runtimeType) && mode != session.TypeChat && mode != session.TypeDiscuss {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("runtime type %q is only supported for %s or %s sessions here", runtimeType, session.TypeChat, session.TypeDiscuss))
+		return apperror.FieldInvalid("session_mode", fmt.Errorf("runtime type %q is only supported for %s or %s sessions here", runtimeType, session.TypeChat, session.TypeDiscuss))
 	}
 	return nil
 }
@@ -705,7 +707,7 @@ func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, bool, e
 			continue
 		}
 		if !session.IsKnownType(token) {
-			return nil, false, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("unknown session type %q", token))
+			return nil, false, apperror.FieldInvalid("types", nil)
 		}
 		if _, ok := seen[token]; ok {
 			continue
@@ -714,7 +716,7 @@ func parseSessionTypesParam(raw string, hasParentFilter bool) ([]string, bool, e
 		out = append(out, token)
 	}
 	if len(out) == 0 {
-		return nil, false, echo.NewHTTPError(http.StatusBadRequest, "types must contain at least one session type")
+		return nil, false, apperror.FieldInvalid("types", nil)
 	}
 	return out, false, nil
 }
@@ -726,10 +728,10 @@ func parseSessionLimitParam(raw string) (int64, error) {
 	}
 	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return 0, echo.NewHTTPError(http.StatusBadRequest, "limit must be an integer")
+		return 0, apperror.FieldInvalid("limit", err)
 	}
 	if value < 1 || value > sessionListMaxLimit {
-		return 0, echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("limit must be between 1 and %d", sessionListMaxLimit))
+		return 0, apperror.FieldInvalid("limit", fmt.Errorf("limit must be between 1 and %d", sessionListMaxLimit))
 	}
 	return value, nil
 }
@@ -740,7 +742,7 @@ func parseSessionParentIDParam(raw string) (string, error) {
 		return "", nil
 	}
 	if _, err := uuid.Parse(value); err != nil {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "parent_session_id must be a UUID")
+		return "", apperror.FieldInvalid("parent_session_id", err)
 	}
 	return value, nil
 }
@@ -760,18 +762,18 @@ func decodeSessionCursor(raw string) (session.Cursor, error) {
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
-		return session.Cursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+		return session.Cursor{}, apperror.FieldInvalid("cursor", err)
 	}
 	parts := strings.SplitN(string(decoded), "|", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return session.Cursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+		return session.Cursor{}, apperror.FieldInvalid("cursor", nil)
 	}
 	updatedAt, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
-		return session.Cursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+		return session.Cursor{}, apperror.FieldInvalid("cursor", err)
 	}
 	if _, err := uuid.Parse(parts[1]); err != nil {
-		return session.Cursor{}, echo.NewHTTPError(http.StatusBadRequest, "invalid cursor")
+		return session.Cursor{}, apperror.FieldInvalid("cursor", err)
 	}
 	return session.Cursor{UpdatedAt: updatedAt, ID: parts[1]}, nil
 }
@@ -791,13 +793,13 @@ func (h *SessionHandler) GetSession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
 	_, _, sess, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
@@ -823,13 +825,13 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
 
 	bot, perms, existing, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
@@ -850,7 +852,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		legacyType := strings.TrimSpace(*req.Type)
 		runtimeType := strings.TrimSpace(*req.RuntimeType)
 		if legacyType == session.TypeACPAgent && runtimeType != "" && runtimeType != session.RuntimeACPAgent {
-			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("session type %q conflicts with runtime_type %q", session.TypeACPAgent, runtimeType))
+			return apperror.FieldInvalid("runtime_type", fmt.Errorf("session type %q conflicts with runtime_type %q", session.TypeACPAgent, runtimeType))
 		}
 	}
 
@@ -871,18 +873,18 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			targetMode, targetRuntime = session.DescriptorFromLegacyType(targetType)
 		}
 		if !session.IsKnownType(targetType) {
-			return echo.NewHTTPError(http.StatusBadRequest, "unknown session type")
+			return apperror.FieldInvalid("type", nil)
 		}
 		if req.SessionMode != nil {
 			targetMode = strings.TrimSpace(*req.SessionMode)
 			if !session.IsKnownSessionMode(targetMode) {
-				return echo.NewHTTPError(http.StatusBadRequest, "unknown session mode")
+				return apperror.FieldInvalid("session_mode", nil)
 			}
 		}
 		if req.RuntimeType != nil {
 			targetRuntime = strings.TrimSpace(*req.RuntimeType)
 			if !session.IsKnownRuntimeType(targetRuntime) {
-				return echo.NewHTTPError(http.StatusBadRequest, "unknown runtime type")
+				return apperror.FieldInvalid("runtime_type", nil)
 			}
 		}
 		var targetAgent botagents.BotAgent
@@ -930,7 +932,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 		}
 		targetType, targetMode, targetRuntime, err = session.ResolveDescriptor(targetType, targetMode, targetRuntime)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return descriptorFieldError(err)
 		}
 		if err := rejectSystemExternalRuntime(targetMode, targetRuntime); err != nil {
 			return err
@@ -1027,7 +1029,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "model preference service not configured")
 		}
 		if req.ExpectedModelPreferenceRevision == nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "expected_model_preference_revision is required when changing the model preference; send \"\" for a session without one")
+			return apperror.FieldRequired("expected_model_preference_revision")
 		}
 		if prefErr := h.modelPrefs.PatchSessionModelPreference(c.Request().Context(), botID, sessionID, req.PreferredChatModelID, req.PreferredReasoningEffort, *req.ExpectedModelPreferenceRevision); prefErr != nil {
 			if errors.Is(prefErr, application.ErrModelPreferenceConflict) {
@@ -1039,7 +1041,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 				}
 				return apperror.Wrap(apperror.CodeACPOperationFailed, prefErr, nil)
 			}
-			return echo.NewHTTPError(http.StatusBadRequest, prefErr.Error())
+			return modelPreferenceError(prefErr, "patch session model preference")
 		}
 		result, err = h.sessionService.Get(c.Request().Context(), sessionID)
 		if err != nil {
@@ -1056,7 +1058,7 @@ func (h *SessionHandler) UpdateSession(c echo.Context) error {
 			if leaseErr := runtimefence.ResetLeaseFailure(c.Request().Context(), err); leaseErr != nil {
 				return apperror.Wrap(apperror.CodeSessionResetConflict, leaseErr, nil)
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return errs.Wrap(err, "update session")
 		}
 	}
 	if req.Title == nil && req.BotAgentID == nil && req.Metadata == nil && req.Type == nil && req.SessionMode == nil && req.RuntimeType == nil && req.RuntimeMetadata == nil && req.PreferredChatModelID == nil && req.PreferredReasoningEffort == nil {
@@ -1079,13 +1081,13 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
 	_, perms, existing, err := h.authorizeSession(c, channelIdentityID, botID, sessionID)
 	if err != nil {
@@ -1119,7 +1121,7 @@ func (h *SessionHandler) DeleteSession(c echo.Context) error {
 		if leaseErr := runtimefence.ResetLeaseFailure(c.Request().Context(), err); leaseErr != nil {
 			return apperror.Wrap(apperror.CodeSessionResetConflict, leaseErr, nil)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "reset session")
 	}
 	if session.IsDirectRuntime(existing) {
 		// A direct-runtime session being deleted must not leave its active
@@ -1174,11 +1176,11 @@ func (h *SessionHandler) resolveCurrentUserPermissions(c echo.Context, channelId
 	}
 	isAdmin, err := h.accountService.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, errs.Wrap(err, "check admin")
 	}
 	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), botID, channelIdentityID, isAdmin)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, errs.Wrap(err, "resolve bot permissions")
 	}
 	return perms, nil
 }
@@ -1285,8 +1287,7 @@ func (h *SessionHandler) resolveCreateSessionWorkdir(ctx context.Context, botID,
 		return nil, workdirHTTPError(err)
 	}
 	if (runtimeType == session.RuntimeACPAgent || session.IsDirectRuntimeType(runtimeType)) && bound.TargetKind == workdir.TargetKindRemote {
-		return nil, echo.NewHTTPError(http.StatusBadRequest,
-			"external agent sessions cannot use a remote computer workdir yet; bind a native workspace workdir instead")
+		return nil, apperror.New(apperror.CodeWorkdirRemoteUnsupportedForAgent, nil)
 	}
 	return &bound, nil
 }
@@ -1296,15 +1297,45 @@ func (h *SessionHandler) resolveCreateSessionWorkdir(ctx context.Context, botID,
 func (h *SessionHandler) validateACPCreate(ctx context.Context, bot bots.Bot, metadata map[string]any) error {
 	agentID := sessionMetadataString(metadata, "acp_agent_id")
 	if agentID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, session.ErrACPAgentIDRequired.Error())
+		return apperror.FieldRequired("metadata.acp_agent_id")
 	}
 	if sessionMetadataString(metadata, "project_path") == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, session.ErrACPProjectPathMissing.Error())
+		return apperror.FieldRequired("metadata.project_path")
 	}
 	if err := acpAgentSetupError(ctx, h.botAgents, bot, "", agentID); err != nil {
 		return err
 	}
 	return nil
+}
+
+// descriptorFieldError answers an unusable session descriptor with the request
+// field the caller has to change.
+func descriptorFieldError(err error) error {
+	var descErr *session.DescriptorError
+	if errors.As(err, &descErr) {
+		switch descErr.Field {
+		case "session_mode":
+			return apperror.FieldInvalid("session_mode", err)
+		case "runtime_type":
+			return apperror.FieldInvalid("runtime_type", err)
+		}
+	}
+	return errs.Wrap(err, "resolve session descriptor")
+}
+
+// modelPreferenceError splits the picker's errors: what the caller can fix by
+// choosing again is a field error, store and settings failures are internal.
+func modelPreferenceError(err error, op string) error {
+	switch {
+	case errors.Is(err, application.ErrModelPreferenceInvalid):
+		return apperror.FieldInvalid("preferred_chat_model_id", err)
+	case errors.Is(err, application.ErrModelPreferenceRevisionInvalid):
+		return apperror.FieldInvalid("expected_model_preference_revision", err)
+	case errors.Is(err, application.ErrACPPreferenceUnsupported):
+		return apperror.Wrap(apperror.CodeACPModelSelectionUnsupported, err, nil)
+	default:
+		return errs.Wrap(err, op)
+	}
 }
 
 func sessionServiceError(err error) error {
@@ -1323,7 +1354,7 @@ func sessionServiceError(err error) error {
 	case errors.Is(err, session.ErrACPProjectModeInvalid):
 		return apperror.Wrap(apperror.CodeACPProjectModeInvalid, err, nil)
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "map session service error")
 	}
 }
 

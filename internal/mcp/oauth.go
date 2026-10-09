@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/felinics/memoh/internal/db"
@@ -200,11 +201,14 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 
 	token, err := s.queries.GetMCPOAuthToken(ctx, connUUID)
 	if err != nil {
-		return nil, fmt.Errorf("oauth not discovered for this connection: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("%w: %w", ErrOAuthNotDiscovered, err)
+		}
+		return nil, fmt.Errorf("get oauth token: %w", err)
 	}
 
 	if token.AuthorizationEndpoint == "" {
-		return nil, errors.New("authorization endpoint not configured")
+		return nil, fmt.Errorf("%w: authorization endpoint not configured", ErrOAuthNotDiscovered)
 	}
 
 	// Resolve client_id via priority chain
@@ -242,7 +246,7 @@ func (s *OAuthService) StartAuthorization(ctx context.Context, connectionID, cli
 		}
 	}
 	if clientID == "" {
-		return nil, errors.New("client_id is required: the authorization server does not support automatic registration, please provide a client_id from a registered OAuth application")
+		return nil, fmt.Errorf("%w: the authorization server does not support automatic registration, please provide a client_id from a registered OAuth application", ErrClientIDRequired)
 	}
 
 	// Persist client_secret if provided by the user
@@ -311,11 +315,14 @@ func (s *OAuthService) HandleCallback(ctx context.Context, state, code string) (
 
 	token, err := s.queries.GetMCPOAuthTokenByState(ctx, state)
 	if err != nil {
-		return "", fmt.Errorf("invalid or expired state parameter: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("%w: %w", ErrOAuthStateInvalid, err)
+		}
+		return "", fmt.Errorf("get oauth token by state: %w", err)
 	}
 
 	if token.TokenEndpoint == "" || token.PkceCodeVerifier == "" {
-		return "", errors.New("invalid OAuth state: missing token endpoint or code verifier")
+		return "", fmt.Errorf("%w: missing token endpoint or code verifier", ErrOAuthStateInvalid)
 	}
 
 	redirectURI := token.RedirectUri
@@ -324,7 +331,7 @@ func (s *OAuthService) HandleCallback(ctx context.Context, state, code string) (
 	}
 	tokenResp, err := s.exchangeCode(ctx, token.TokenEndpoint, code, token.PkceCodeVerifier, token.ClientID, token.ClientSecret, token.ResourceUri, redirectURI)
 	if err != nil {
-		return "", fmt.Errorf("token exchange failed: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrTokenExchange, err)
 	}
 
 	var expiresAt pgtype.Timestamptz

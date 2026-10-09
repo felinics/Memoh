@@ -2,6 +2,7 @@ package skills
 
 import (
 	"errors"
+	"fmt"
 	"path"
 	"strings"
 )
@@ -89,11 +90,11 @@ type UpsertPlan struct {
 func PlanUpsert(raw, sourcePath string) (UpsertPlan, error) {
 	parsed := ParseFile(raw, "")
 	if !IsValidName(parsed.Name) {
-		return UpsertPlan{}, ErrInvalidSkillRequest
+		return UpsertPlan{}, ErrInvalidSkillName
 	}
 	userDir, err := userSkillDirForName(parsed.Name)
 	if err != nil {
-		return UpsertPlan{}, err
+		return UpsertPlan{}, fmt.Errorf("%w: %w", ErrInvalidSkillName, err)
 	}
 	userWrite := path.Join(userDir, "SKILL.md")
 
@@ -232,6 +233,8 @@ var (
 	// ErrInvalidSkillRequest reports a Skill name, path, identity or action
 	// that the Skill layout does not accept.
 	ErrInvalidSkillRequest = errors.New("invalid skill request")
+	// ErrInvalidSkillName reports that the Skill content has no usable name.
+	ErrInvalidSkillName = errors.New("invalid skill name")
 	// ErrSkillNotFound reports that the Skill an action names is not among
 	// the discovered Skills.
 	ErrSkillNotFound = errors.New("skill not found")

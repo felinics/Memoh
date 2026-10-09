@@ -21,6 +21,7 @@ const (
 	CodeWorkspaceDependencyDefinitionInvalid     Code = "workspace_dependency.definition_invalid"
 	CodeWorkspaceDependencyCatalogUnavailable    Code = "workspace_dependency.catalog_unavailable"
 	CodeBotNameTaken                             Code = "bot.name_taken"
+	CodeBotNameInvalid                           Code = "bot.name_invalid"
 	CodeBotAgentNotFound                         Code = "bot_agent.not_found"
 	CodeBotAgentNameTaken                        Code = "bot_agent.name_taken"
 	CodeBotAgentInvalidRuntime                   Code = "bot_agent.invalid_runtime"
@@ -30,6 +31,11 @@ const (
 	CodeChannelRuntimeUnavailable                Code = "channel.runtime_unavailable"
 	CodeChannelVerificationFailed                Code = "channel.verification_failed"
 	CodeAgentChatModelNotConfigured              Code = "agent.chat_model_not_configured"
+	CodeChannelEnableFailed                      Code = "channel.enable_failed"
+	CodeChannelWebhookEndpointInvalid            Code = "channel.webhook_endpoint_invalid"
+	CodeChannelBindingRequired                   Code = "channel.binding_required"
+	CodeNetworkProviderNotConfigured             Code = "network.provider_not_configured"
+	CodeUserCannotRemoveSelf                     Code = "user.cannot_remove_self"
 	CodeCompactionModelUnavailable               Code = "compaction.model_unavailable"
 	CodeSettingsReasoningEffortInvalid           Code = "settings.reasoning_effort_invalid"
 	CodeSettingsReasoningUnavailable             Code = "settings.reasoning_options_unavailable"
@@ -67,6 +73,13 @@ const (
 	CodeSkillBuiltinReadOnly                     Code = "skill.builtin_read_only"
 	CodeSkillNameTaken                           Code = "skill.name_taken"
 	CodeSkillSaveFailed                          Code = "skill.save_failed"
+	CodeSkillRegistryReadOnly                    Code = "skill.registry_read_only"
+	CodeSkillNameInvalid                         Code = "skill.name_invalid"
+	CodeTTSTextTooLong                           Code = "tts.text_too_long"
+	CodeTTSModelNotConfigured                    Code = "tts.model_not_configured"
+	CodeWorkspaceArchiveInvalid                  Code = "workspace.archive_invalid"
+	CodeBotBackupBundleInvalid                   Code = "bot_backup.bundle_invalid"
+	CodeFetchProviderNativeManaged               Code = "fetch_provider.native_managed"
 	CodeAppNotFound                              Code = "app.not_found"
 	CodeAppRequestInvalid                        Code = "app.request_invalid"
 	CodeAppBusy                                  Code = "app.busy"
@@ -104,6 +117,8 @@ const (
 	CodeWorkdirGitBranchUnavailable              Code = "workdir.git_branch_unavailable"
 	CodeWorkdirGitSwitchFailed                   Code = "workdir.git_switch_failed"
 	CodeWorkdirGitUnavailable                    Code = "workdir.git_unavailable"
+	CodeWorkdirRemoteUnsupportedForAgent         Code = "workdir.remote_unsupported_for_agent"
+	CodeChatMessageEmpty                         Code = "chat.message_empty"
 	CodeRuntimeControlThreadUnavailable          Code = "runtime_control.thread_unavailable"
 	CodeRuntimeControlCancelled                  Code = "runtime_control.cancelled"
 	CodeRuntimeControlFailed                     Code = "runtime_control.failed"
@@ -219,6 +234,15 @@ const (
 	CodeRequestFieldInvalid  Code = "request.field_invalid"
 
 	CodeSessionNotFound Code = "session.not_found"
+
+	// MCP connection codes, and the OAuth state code that MCP shares with
+	// provider sign-in.
+	CodeMCPEndpointInvalid       Code = "mcp.endpoint_invalid"
+	CodeMCPNameTaken             Code = "mcp.name_taken"
+	CodeMCPOAuthDiscoveryFailed  Code = "mcp.oauth_discovery_failed"
+	CodeMCPOAuthNotDiscovered    Code = "mcp.oauth_not_discovered"
+	CodeMCPOAuthClientIDRequired Code = "mcp.oauth_client_id_required"
+	CodeOAuthStateInvalid        Code = "oauth.state_invalid"
 
 	// External Agent codes. They keep the values the removed agent feedback
 	// protocol published and history rows still store.
@@ -404,6 +428,10 @@ var catalog = map[Code]Definition{
 		Detail:      "This name is already taken.",
 		AllowedArgs: []string{"field"},
 	},
+	CodeBotNameInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The bot name is invalid or reserved.",
+	},
 	CodeBotAgentNotFound: {
 		HTTPStatus: http.StatusNotFound,
 		Detail:     "This Agent is no longer available.",
@@ -436,6 +464,26 @@ var catalog = map[Code]Definition{
 	CodeChannelVerificationFailed: {
 		HTTPStatus: http.StatusBadGateway,
 		Detail:     "The channel configuration could not be verified. Check the credentials, then try again.",
+	},
+	CodeChannelEnableFailed: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The channel could not be enabled.",
+	},
+	CodeChannelWebhookEndpointInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The webhook endpoint is invalid.",
+	},
+	CodeChannelBindingRequired: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The recipient is not bound to this channel.",
+	},
+	CodeNetworkProviderNotConfigured: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "No network provider is configured for this bot.",
+	},
+	CodeUserCannotRemoveSelf: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "You cannot remove yourself.",
 	},
 	CodeCompactionModelUnavailable: {
 		HTTPStatus:  http.StatusBadRequest,
@@ -598,6 +646,35 @@ var catalog = map[Code]Definition{
 		HTTPStatus: http.StatusInternalServerError,
 		Detail:     "The Skill could not be saved.",
 	},
+	CodeSkillRegistryReadOnly: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "Registry App Skills are managed by their App and cannot be changed directly.",
+	},
+	CodeSkillNameInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The Skill needs a valid name in its YAML frontmatter.",
+	},
+	CodeTTSTextTooLong: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "The text is too long to synthesize.",
+		AllowedArgs: []string{"max"},
+	},
+	CodeTTSModelNotConfigured: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "This bot has no text-to-speech model configured.",
+	},
+	CodeWorkspaceArchiveInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The archive cannot be extracted.",
+	},
+	CodeBotBackupBundleInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The backup file is not valid.",
+	},
+	CodeFetchProviderNativeManaged: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "The built-in fetch provider is managed by Memoh.",
+	},
 	CodeAppNotFound: {
 		HTTPStatus: http.StatusNotFound,
 		Detail:     "This App installation was not found.",
@@ -683,6 +760,8 @@ var catalog = map[Code]Definition{
 	CodeWorkdirGitBranchUnavailable:           {HTTPStatus: http.StatusBadRequest, Detail: "This local branch is unavailable. Refresh and select an existing branch."},
 	CodeWorkdirGitSwitchFailed:                {HTTPStatus: http.StatusConflict, Detail: "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree."},
 	CodeWorkdirGitUnavailable:                 {HTTPStatus: http.StatusInternalServerError, Detail: "The Git working directory could not be read. Check the workspace and try again."},
+	CodeWorkdirRemoteUnsupportedForAgent:      {HTTPStatus: http.StatusBadRequest, Detail: "External agent sessions cannot use a remote computer. Choose a workdir on the native workspace instead."},
+	CodeChatMessageEmpty:                      {HTTPStatus: http.StatusBadRequest, Detail: "Enter a message or attach a file."},
 	CodeRuntimeControlThreadUnavailable:       {HTTPStatus: http.StatusConflict, Detail: "Start a conversation before using this operation."},
 	CodeRuntimeControlCancelled:               {HTTPStatus: http.StatusConflict, Detail: "The runtime operation was cancelled."},
 	CodeRuntimeControlSteerFailed:             {HTTPStatus: http.StatusConflict, Detail: "The additional instruction could not be delivered. Send it again after this turn finishes."},
@@ -1033,6 +1112,33 @@ var catalog = map[Code]Definition{
 	CodeRequestFieldRequired:     {HTTPStatus: http.StatusBadRequest, Detail: "A required field is missing.", AllowedArgs: []string{"field"}},
 	CodeRequestFieldInvalid:      {HTTPStatus: http.StatusBadRequest, Detail: "A field has an invalid value.", AllowedArgs: []string{"field"}},
 	CodeSessionNotFound:          {HTTPStatus: http.StatusNotFound, Detail: "The conversation was not found."},
+	CodeMCPEndpointInvalid: {
+		HTTPStatus:  http.StatusBadRequest,
+		Detail:      "Specify either a command or a URL for the MCP server, not both and not neither.",
+		AllowedArgs: []string{"server"},
+	},
+	CodeMCPNameTaken: {
+		HTTPStatus:  http.StatusConflict,
+		Detail:      "An MCP connection with this name already exists.",
+		AllowedArgs: []string{"field"},
+	},
+	CodeMCPOAuthDiscoveryFailed: {
+		HTTPStatus: http.StatusBadGateway,
+		Detail:     "OAuth discovery against the MCP server failed.",
+		Fault:      FaultDependency,
+	},
+	CodeMCPOAuthNotDiscovered: {
+		HTTPStatus: http.StatusConflict,
+		Detail:     "OAuth has not been discovered for this connection.",
+	},
+	CodeMCPOAuthClientIDRequired: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The authorization server cannot register a client automatically; a client_id is required.",
+	},
+	CodeOAuthStateInvalid: {
+		HTTPStatus: http.StatusBadRequest,
+		Detail:     "The authorization is unknown or has expired.",
+	},
 	CodeACPAgentNotFound:         {HTTPStatus: http.StatusBadRequest, Detail: "The selected external agent is unavailable."},
 	CodeACPAgentNotEnabled:       {HTTPStatus: http.StatusForbidden, Detail: "The selected external agent is disabled for this bot."},
 	CodeACPAgentNotConfigured:    {HTTPStatus: http.StatusBadRequest, Detail: "External agent setup is incomplete for this bot."},

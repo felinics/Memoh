@@ -19,6 +19,7 @@ import (
 	"github.com/felinics/memoh/internal/botbackup"
 	"github.com/felinics/memoh/internal/botbackup/secure"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -62,7 +63,7 @@ func (h *BotBackupHandler) Summary(c echo.Context) error {
 	}
 	res, err := h.service.Summary(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return errs.Wrap(err, "bot backup summary")
 	}
 	return c.JSON(http.StatusOK, res)
 }
@@ -113,10 +114,10 @@ func (h *BotBackupHandler) Export(c echo.Context) error {
 	}()
 
 	if err := h.service.Export(c.Request().Context(), botID, botbackup.ExportOptions{Sections: req.Sections}, tmp); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "export failed: "+err.Error())
+		return errs.Wrap(err, "export bot backup")
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "rewind backup file")
 	}
 
 	filename := fmt.Sprintf("bot-%s-backup-%s.memoh.zip", safeFilename(bot.DisplayName, bot.ID), time.Now().UTC().Format("20060102T150405Z"))
@@ -164,7 +165,7 @@ func (h *BotBackupHandler) PreviewImport(c echo.Context) error {
 	}
 	preview, err := h.service.Preview(c.Request().Context(), raw, importOptionsFromForm(c), c.FormValue("passphrase"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return botBackupError(err, "preview bot backup")
 	}
 	return c.JSON(http.StatusOK, preview)
 }
@@ -211,22 +212,43 @@ func (h *BotBackupHandler) Import(c echo.Context) error {
 			errors.Is(err, botbackup.ErrHistoryResetUnavailable) {
 			return apperror.Wrap(apperror.CodeSessionResetUnavailable, err, nil)
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return botBackupError(err, "import bot backup")
 	}
 	return c.JSON(http.StatusOK, result)
+}
+
+// botBackupError answers the failures the uploaded file or form causes and
+// treats everything else as an internal failure of op.
+func botBackupError(err error, op string) error {
+	switch {
+	case errors.Is(err, secure.ErrPassphraseRequired):
+		return apperror.FieldRequired("passphrase")
+	case errors.Is(err, secure.ErrAuth):
+		return apperror.FieldInvalid("passphrase", err)
+	case errors.Is(err, botbackup.ErrTargetBotRequired):
+		return apperror.FieldRequired("target_bot_id")
+	case errors.Is(err, botbackup.ErrInvalidBundle):
+		return apperror.Wrap(apperror.CodeBotBackupBundleInvalid, err, nil)
+	default:
+		return errs.Wrap(err, op)
+	}
 }
 
 func readUploadedBackup(c echo.Context) ([]byte, error) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "file is required")
+		return nil, apperror.FieldRequired("file")
 	}
 	src, err := file.Open()
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "failed to open uploaded file")
+		return nil, errs.Wrap(err, "open uploaded backup")
 	}
 	defer func() { _ = src.Close() }()
-	return io.ReadAll(src)
+	raw, err := io.ReadAll(src)
+	if err != nil {
+		return nil, errs.Wrap(err, "read uploaded backup")
+	}
+	return raw, nil
 }
 
 func importOptionsFromForm(c echo.Context) botbackup.ImportOptions {

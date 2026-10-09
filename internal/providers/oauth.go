@@ -571,6 +571,9 @@ func (s *Service) ExchangeOpenAICodexACPDeviceCode(ctx context.Context, authoriz
 func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (string, error) {
 	token, err := s.getOAuthTokenByState(ctx, state)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("%w: %w", ErrOAuthStateInvalid, err)
+		}
 		return "", err
 	}
 	providerUUID, err := db.ParseUUID(token.ProviderID)
@@ -582,7 +585,7 @@ func (s *Service) HandleOAuthCallback(ctx context.Context, state, code string) (
 		return "", errs.Wrap(err, "get provider")
 	}
 	if !supportsOAuth(provider) {
-		return "", errs.New("provider does not support oauth")
+		return "", errs.Wrap(ErrOAuthUnsupported, "")
 	}
 
 	cfg := s.oauthConfigForProvider(provider)
@@ -713,7 +716,7 @@ func (s *Service) PollOAuthAuthorization(ctx context.Context, providerID string)
 	case models.ClientTypeGitHubCopilot:
 		return s.pollGitHubCopilotProviderAuthorization(ctx, provider)
 	default:
-		return nil, errs.New("provider does not support device authorization")
+		return nil, errs.Wrap(ErrOAuthUnsupported, "device authorization")
 	}
 }
 
@@ -837,7 +840,7 @@ func (s *Service) RevokeOAuthToken(ctx context.Context, providerID string) error
 		return err
 	}
 	if !supportsOAuth(provider) {
-		return errs.New("provider does not support oauth")
+		return errs.Wrap(ErrOAuthUnsupported, "")
 	}
 
 	return errs.Wrap(s.queries.DeleteProviderOAuthToken(ctx, provider.ID), "")
@@ -896,10 +899,13 @@ func (s *Service) loadOAuthProvider(ctx context.Context, providerID string) (sql
 	}
 	provider, err := s.queries.GetProviderByID(ctx, providerUUID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.Provider{}, errs.Wrap(fmt.Errorf("%w: %w", ErrProviderNotFound, err), "get provider")
+		}
 		return sqlc.Provider{}, errs.Wrap(err, "get provider")
 	}
 	if !supportsOAuth(provider) {
-		return sqlc.Provider{}, errs.New("provider does not support oauth")
+		return sqlc.Provider{}, errs.Wrap(ErrOAuthUnsupported, "")
 	}
 	return provider, nil
 }

@@ -8,7 +8,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 // BotUserGrantListResponse wraps the list of workspace user access grants for a bot.
@@ -127,9 +130,9 @@ func (h *BotUserAccessHandler) UpdateGrant(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	grantID := strings.TrimSpace(c.Param("grant_id"))
-	if grantID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "grant_id is required")
+	grantID, err := httpx.RequiredParam(c, "grant_id")
+	if err != nil {
+		return err
 	}
 	var req bots.UpdateUserGrantRequest
 	if err := c.Bind(&req); err != nil {
@@ -159,9 +162,9 @@ func (h *BotUserAccessHandler) DeleteGrant(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	grantID := strings.TrimSpace(c.Param("grant_id"))
-	if grantID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "grant_id is required")
+	grantID, err := httpx.RequiredParam(c, "grant_id")
+	if err != nil {
+		return err
 	}
 	if err := h.botService.DeleteUserGrant(c.Request().Context(), botID, grantID); err != nil {
 		return h.mapGrantError(err)
@@ -210,7 +213,7 @@ func (h *BotUserAccessHandler) ListNewBotCandidates(c echo.Context) error {
 func (h *BotUserAccessHandler) respondCandidates(c echo.Context) error {
 	accountsList, err := h.accountService.SearchAccounts(c.Request().Context(), strings.TrimSpace(c.QueryParam("q")), parseLimit(c.QueryParam("limit")))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "search accounts")
 	}
 	items := make([]BotUserCandidate, 0, len(accountsList))
 	for _, account := range accountsList {
@@ -232,9 +235,9 @@ func (h *BotUserAccessHandler) requireManageAccess(c echo.Context) (string, stri
 	if err != nil {
 		return "", "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err
@@ -247,17 +250,20 @@ func (*BotUserAccessHandler) mapGrantError(err error) error {
 	case errors.Is(err, bots.ErrGrantNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	case errors.Is(err, bots.ErrOwnerUserNotFound):
-		return echo.NewHTTPError(http.StatusBadRequest, "user not found")
-	case errors.Is(err, bots.ErrInvalidPermission),
-		errors.Is(err, bots.ErrInvalidGrantSubject),
-		errors.Is(err, bots.ErrGrantUserRequired),
-		errors.Is(err, bots.ErrGrantOwnerConflict):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("user_id", err)
+	case errors.Is(err, bots.ErrInvalidPermission):
+		return apperror.FieldInvalid("permissions", err)
+	case errors.Is(err, bots.ErrInvalidGrantSubject):
+		return apperror.FieldInvalid("subject_type", err)
+	case errors.Is(err, bots.ErrGrantUserRequired):
+		return apperror.FieldRequired("user_id")
+	case errors.Is(err, bots.ErrGrantOwnerConflict):
+		return apperror.FieldInvalid("user_id", err)
 	case errors.Is(err, bots.ErrGrantExists):
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	case errors.Is(err, bots.ErrBotNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "bot not found")
 	default:
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "grant bot access")
 	}
 }

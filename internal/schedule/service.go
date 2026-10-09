@@ -137,11 +137,17 @@ func (s *Service) Create(ctx context.Context, botID string, req CreateRequest) (
 	if s.queries == nil {
 		return Schedule{}, errors.New("schedule queries not configured")
 	}
-	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Pattern) == "" || strings.TrimSpace(req.Command) == "" {
-		return Schedule{}, invalidRequest("name, pattern, command are required")
+	if strings.TrimSpace(req.Name) == "" {
+		return Schedule{}, requiredField("name", "name, pattern, command are required")
+	}
+	if strings.TrimSpace(req.Pattern) == "" {
+		return Schedule{}, requiredField("pattern", "name, pattern, command are required")
+	}
+	if strings.TrimSpace(req.Command) == "" {
+		return Schedule{}, requiredField("command", "name, pattern, command are required")
 	}
 	if _, err := s.parser.Parse(req.Pattern); err != nil {
-		return Schedule{}, fmt.Errorf("invalid cron pattern: %w", err)
+		return Schedule{}, invalidFieldf("pattern", "invalid cron pattern: %v", err)
 	}
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
@@ -244,7 +250,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Sch
 	pattern := existing.Pattern
 	if req.Pattern != nil {
 		if _, err := s.parser.Parse(*req.Pattern); err != nil {
-			return Schedule{}, fmt.Errorf("invalid cron pattern: %w", err)
+			return Schedule{}, invalidFieldf("pattern", "invalid cron pattern: %v", err)
 		}
 		pattern = *req.Pattern
 	}

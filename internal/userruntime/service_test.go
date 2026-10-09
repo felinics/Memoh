@@ -272,8 +272,8 @@ func TestCreateRuntimeCapsNameLength(t *testing.T) {
 		"invalid utf8": "work\xffstation",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: value}); !errors.Is(err, ErrInvalidInput) {
-				t.Fatalf("CreateRuntime error = %v, want ErrInvalidInput", err)
+			if _, err := service.CreateRuntime(context.Background(), "user-1", CreateRuntimeRequest{Name: value}); !errors.Is(err, ErrInvalidName) {
+				t.Fatalf("CreateRuntime error = %v, want ErrInvalidName", err)
 			}
 		})
 	}

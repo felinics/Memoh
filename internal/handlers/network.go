@@ -1,14 +1,17 @@
 package handlers
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	netctl "github.com/felinics/memoh/internal/network"
 )
 
@@ -52,7 +55,7 @@ func (h *NetworkHandler) Status(c echo.Context) error {
 	}
 	status, err := h.service.StatusBot(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return networkHTTPError(err, "network status")
 	}
 	return c.JSON(http.StatusOK, status)
 }
@@ -64,7 +67,7 @@ func (h *NetworkHandler) ListNodes(c echo.Context) error {
 	}
 	resp, err := h.service.ListBotNodes(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return networkHTTPError(err, "list network nodes")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -74,9 +77,9 @@ func (h *NetworkHandler) ExecuteAction(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	actionID := strings.TrimSpace(c.Param("action_id"))
-	if actionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "action_id is required")
+	actionID, err := httpx.RequiredParam(c, "action_id")
+	if err != nil {
+		return err
 	}
 	var req netctl.BotActionRequest
 	if err := c.Bind(&req); err != nil {
@@ -84,9 +87,22 @@ func (h *NetworkHandler) ExecuteAction(c echo.Context) error {
 	}
 	resp, err := h.service.ExecuteActionBot(c.Request().Context(), botID, actionID, req.Input)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return networkHTTPError(err, "execute network action")
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// networkHTTPError answers the failures a user can act on and wraps the rest
+// as internal faults.
+func networkHTTPError(err error, op string) error {
+	switch {
+	case errors.Is(err, netctl.ErrProviderNotConfigured):
+		return apperror.Wrap(apperror.CodeNetworkProviderNotConfigured, err, nil)
+	case errors.Is(err, netctl.ErrUnsupportedAction):
+		return apperror.FieldInvalid("action_id", err)
+	default:
+		return errs.Wrap(err, op)
+	}
 }
 
 func (h *NetworkHandler) authorize(c echo.Context) (string, error) {
@@ -94,9 +110,9 @@ func (h *NetworkHandler) authorize(c echo.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, channelIdentityID, botID); err != nil {
 		return "", err

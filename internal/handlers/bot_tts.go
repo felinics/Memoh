@@ -3,12 +3,15 @@ package handlers
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	audiopkg "github.com/felinics/memoh/internal/audio"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/settings"
 )
 
@@ -56,9 +59,9 @@ type synthesizeResponse struct {
 // @Failure 500 {object} server.Problem
 // @Router /bots/{bot_id}/tts/synthesize [post].
 func (h *BotAudioHandler) Synthesize(c echo.Context) error {
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 
 	var req synthesizeRequest
@@ -67,11 +70,11 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "text is required")
+		return apperror.FieldRequired("text")
 	}
 	const maxTextLen = 500
 	if len([]rune(text)) > maxTextLen {
-		return echo.NewHTTPError(http.StatusBadRequest, "text too long, max 500 characters")
+		return apperror.New(apperror.CodeTTSTextTooLong, map[string]string{"max": strconv.Itoa(maxTextLen)})
 	}
 
 	botSettings, err := h.settingsService.GetBot(c.Request().Context(), botID)
@@ -79,7 +82,7 @@ func (h *BotAudioHandler) Synthesize(c echo.Context) error {
 		return errs.Wrap(err, "load bot settings", slog.String("bot_id", botID))
 	}
 	if botSettings.TtsModelID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot has no TTS model configured")
+		return apperror.New(apperror.CodeTTSModelNotConfigured, nil)
 	}
 
 	tempID, f, err := h.tempStore.Create()

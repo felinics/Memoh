@@ -17,10 +17,10 @@ import (
 	"github.com/felinics/memoh/internal/agent/step"
 	tools "github.com/felinics/memoh/internal/agent/tool"
 	"github.com/felinics/memoh/internal/agent/toolexec"
-	"github.com/felinics/memoh/internal/errlog"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 // runStream runs the streaming agent invocation with a Memoh-owned step loop:
@@ -540,9 +540,6 @@ func (e *streamEngine) run() {
 	}()
 
 	retryCfg := e.baseCfg.Retry
-	if retryCfg.MaxAttempts <= 0 {
-		retryCfg = DefaultRetryConfig()
-	}
 	retryAttempts := 0
 
 	// attemptSteps are the steps committed by the current dispatch, in
@@ -597,10 +594,12 @@ func (e *streamEngine) run() {
 		// Mid-stream retry: the errored step never committed, so the rebuilt
 		// dispatch regenerates it from the last committed boundary and the
 		// loop continues with the same durable step counting.
-		if retryAttempts >= retryCfg.MaxAttempts {
+		retry, ok := retryCfg.Next(retryAttempts, failure, nil)
+		if !ok {
 			// The giving-up error is the only failure the run publishes: an
-			// EventRetry carries none, so without it a consumer would see the
-			// run end with nothing to explain why it stopped.
+			// EventRetry carries only the failure's class, so without it a
+			// consumer would see the run end with nothing to explain why it
+			// stopped.
 			e.endWithFailure(StreamEvent{Type: EventError, Cause: errs.Wrap(failure, "model call retries exhausted", slog.Int("attempts", retryAttempts))})
 			return
 		}
@@ -620,27 +619,16 @@ func (e *streamEngine) run() {
 			e.resetTextLoopGuard()
 		}
 		// The failed attempt is recorded here and only here: the stream tells
-		// its consumers that it retries, not why.
-		result := errlog.Event(e.streamCtx, "agent.model_call", failure, errlog.Options{})
-		e.agent.logger.LogAttrs(e.streamCtx, result.Level, "model call failed, retrying", append([]slog.Attr{
-			slog.String("run_id", e.cfg.RunID),
-			slog.Int("attempt", retryAttempts+1),
-			slog.Int("max_attempts", retryCfg.MaxAttempts),
-			slog.Int("step", e.stepNumber),
-		}, result.Attrs()...)...)
-		if !e.emit(StreamEvent{
-			Type:       EventRetry,
-			Attempt:    retryAttempts + 1,
-			MaxAttempt: retryCfg.MaxAttempts,
-		}) {
+		// its consumers that it retries, how long it waits and the failure's
+		// class, never the provider's text.
+		e.agent.logModelRetry(e.streamCtx, e.cfg.RunID, e.stepNumber, retry, failure)
+		if !e.emit(retryEvent(retry)) {
 			e.aborted = true
 			return
 		}
-		if delay := retryDelay(retryAttempts, retryCfg); delay > 0 {
-			if err := sleepWithContext(e.streamCtx, delay); err != nil {
-				e.aborted = true
-				return
-			}
+		if err := modelretry.Sleep(e.streamCtx, retry.Delay); err != nil {
+			e.aborted = true
+			return
 		}
 		retryAttempts++
 		// Re-invoke from the failed attempt's exact provider input plus its
@@ -978,7 +966,9 @@ partLoop:
 		if e.steeredAttempt() {
 			return e.checkpointSteeredStep(attemptStep, attemptSteps)
 		}
-		retry = e.providerFailure(errs.NewDependency("model stream ended before finish-step", slog.Int("step", attemptStep)))
+		// The stream closed without its terminal part: the response was cut
+		// off, so it is retried like the SDK's own ErrStreamIncomplete.
+		retry = e.providerFailure(errs.WrapDependency(sdk.ErrStreamIncomplete, "model stream ended before finish-step", slog.Int("step", attemptStep)))
 		return e.aborted, retry
 	}
 
@@ -1060,7 +1050,7 @@ func (e *streamEngine) providerFailure(err error) (retry error) {
 		e.aborted = true
 		return nil
 	}
-	if retryableProviderFailure(err) {
+	if _, ok := modelretry.Retryable(err); ok {
 		return err
 	}
 	e.endWithFailure(StreamEvent{Type: EventError, Cause: err})

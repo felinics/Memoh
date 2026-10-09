@@ -48,7 +48,7 @@ func (s *Service) Create(ctx context.Context, req AddRequest) (AddResponse, erro
 		return AddResponse{}, err
 	}
 	if err := model.Validate(); err != nil {
-		return AddResponse{}, fmt.Errorf("%w: %w", ErrValidation, err)
+		return AddResponse{}, err
 	}
 
 	providerID, err := db.ParseUUID(model.ProviderID)
@@ -298,7 +298,7 @@ func (s *Service) UpdateByID(ctx context.Context, id string, req UpdateRequest) 
 		return GetResponse{}, err
 	}
 	if err := model.Validate(); err != nil {
-		return GetResponse{}, fmt.Errorf("%w: %w", ErrValidation, err)
+		return GetResponse{}, err
 	}
 
 	providerID, err := db.ParseUUID(model.ProviderID)
@@ -360,7 +360,7 @@ func (s *Service) UpdateByModelID(ctx context.Context, modelID string, req Updat
 		return GetResponse{}, err
 	}
 	if err := model.Validate(); err != nil {
-		return GetResponse{}, fmt.Errorf("%w: %w", ErrValidation, err)
+		return GetResponse{}, err
 	}
 
 	providerID, err := db.ParseUUID(model.ProviderID)

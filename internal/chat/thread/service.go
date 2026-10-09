@@ -1720,6 +1720,16 @@ type descriptor struct {
 	RuntimeMetadata map[string]any
 }
 
+// DescriptorError is a session descriptor the caller can fix by changing
+// the request field named Field (wire name).
+type DescriptorError struct {
+	Field string
+	Err   error
+}
+
+func (e *DescriptorError) Error() string { return e.Err.Error() }
+func (e *DescriptorError) Unwrap() error { return e.Err }
+
 // ResolveDescriptor returns the normalized compatibility type plus split
 // session-mode/runtime descriptor without applying metadata side effects.
 func ResolveDescriptor(legacyType, sessionMode, runtimeType string) (string, string, string, error) {
@@ -1728,7 +1738,7 @@ func ResolveDescriptor(legacyType, sessionMode, runtimeType string) (string, str
 	// alongside it must fail loudly rather than silently degrade to a plain
 	// model chat session.
 	if rt := strings.TrimSpace(runtimeType); strings.TrimSpace(legacyType) == TypeACPAgent && rt != "" && rt != RuntimeACPAgent {
-		return "", "", "", fmt.Errorf("session type %q conflicts with runtime_type %q", TypeACPAgent, rt)
+		return "", "", "", &DescriptorError{Field: "runtime_type", Err: fmt.Errorf("session type %q conflicts with runtime_type %q", TypeACPAgent, rt)}
 	}
 	desc, err := normalizeDescriptor(legacyType, sessionMode, runtimeType, nil, nil)
 	if err != nil {
@@ -1754,15 +1764,15 @@ func normalizeDescriptor(legacyType, sessionMode, runtimeType string, metadata, 
 		}
 	}
 	if !IsKnownSessionMode(sessionMode) {
-		return descriptor{}, fmt.Errorf("unknown session mode %q", sessionMode)
+		return descriptor{}, &DescriptorError{Field: "session_mode", Err: fmt.Errorf("unknown session mode %q", sessionMode)}
 	}
 	if !IsKnownRuntimeType(runtimeType) {
-		return descriptor{}, fmt.Errorf("unknown runtime type %q", runtimeType)
+		return descriptor{}, &DescriptorError{Field: "runtime_type", Err: fmt.Errorf("unknown runtime type %q", runtimeType)}
 	}
 	// The runtime capability table owns which modes each runtime can host
 	// (e.g. agent runtimes never back subagent loops).
 	if !runtimekind.SupportsSessionMode(runtimeType, sessionMode) {
-		return descriptor{}, fmt.Errorf("runtime type %q is only supported for %s session modes", runtimeType, strings.Join(runtimekind.SupportedSessionModes(runtimeType), ", "))
+		return descriptor{}, &DescriptorError{Field: "session_mode", Err: fmt.Errorf("runtime type %q is only supported for %s session modes", runtimeType, strings.Join(runtimekind.SupportedSessionModes(runtimeType), ", "))}
 	}
 	out := descriptor{
 		LegacyType:      legacyTypeForDescriptor(sessionMode, runtimeType),

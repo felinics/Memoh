@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/channel"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 type ChannelHandler struct {
@@ -53,7 +54,7 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 		if errors.Is(err, channel.ErrChannelIdentityConfigNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get channel identity config")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -86,7 +87,7 @@ func (h *ChannelHandler) UpsertChannelIdentityConfig(c echo.Context) error {
 	}
 	resp, err := h.store.UpsertChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType, req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "upsert channel identity config")
 	}
 	return c.JSON(http.StatusOK, resp)
 }

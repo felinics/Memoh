@@ -12,6 +12,7 @@ import (
 
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	skillset "github.com/felinics/memoh/internal/skills"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -112,7 +113,7 @@ func (h *ContainerdHandler) ListSafeSkills(c echo.Context) error {
 	}
 	catalog, err := h.buildSafeSkillCatalog(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "build skill catalog")
 	}
 	return c.JSON(http.StatusOK, SafeSkillsResponse{Skills: catalog})
 }
@@ -140,11 +141,11 @@ func (h *ContainerdHandler) UpsertSkills(c echo.Context) error {
 		return err
 	}
 	if len(req.Skills) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "skills is required")
+		return apperror.FieldRequired("skills")
 	}
 	sourcePath := strings.TrimSpace(req.SourcePath)
 	if sourcePath != "" && len(req.Skills) != 1 {
-		return echo.NewHTTPError(http.StatusBadRequest, "source_path requires exactly one skill")
+		return apperror.FieldInvalid("source_path", nil)
 	}
 
 	if err := h.upsertSkills(c.Request().Context(), botID, sourcePath, req.Skills); err != nil {
@@ -163,7 +164,7 @@ func (h *ContainerdHandler) upsertSkills(
 		return workspaceUnavailableError(err)
 	}
 	if _, _, _, ok := skillset.RegistrySkillIDs(sourcePath); ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "Registry App Skills cannot be edited directly")
+		return apperror.New(apperror.CodeSkillRegistryReadOnly, nil)
 	}
 
 	for i, raw := range rawSkills {
@@ -177,9 +178,15 @@ func (h *ContainerdHandler) upsertSkills(
 				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
 			}
 			if errors.Is(planErr, skillset.ErrRegistrySkillReadOnly) {
-				return echo.NewHTTPError(http.StatusBadRequest, "Registry App Skills cannot be edited directly")
+				return apperror.New(apperror.CodeSkillRegistryReadOnly, nil)
 			}
-			return echo.NewHTTPError(http.StatusBadRequest, "skill must have a valid name in YAML frontmatter")
+			if errors.Is(planErr, skillset.ErrInvalidSkillName) {
+				return apperror.Wrap(apperror.CodeSkillNameInvalid, planErr, nil)
+			}
+			if errors.Is(planErr, skillset.ErrInvalidSkillRequest) {
+				return apperror.FieldInvalid("source_path", planErr)
+			}
+			return errs.Wrap(planErr, "plan skill upsert")
 		}
 		dirPath := path.Dir(plan.WritePath)
 		if plan.RenameFromDir != "" {
@@ -225,7 +232,7 @@ func skillActionHTTPError(err error) error {
 	case errors.Is(err, skillset.ErrSkillNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	case errors.Is(err, skillset.ErrInvalidSkillRequest):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("target_path", err)
 	default:
 		return fsHTTPError(err)
 	}
@@ -267,7 +274,7 @@ func (h *ContainerdHandler) DeleteSkills(c echo.Context) error {
 		return err
 	}
 	if len(req.SourcePaths) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "source_paths is required")
+		return apperror.FieldRequired("source_paths")
 	}
 
 	if err := h.deleteSkills(c.Request().Context(), botID, req.SourcePaths); err != nil {
@@ -298,9 +305,12 @@ func (h *ContainerdHandler) deleteSkills(ctx context.Context, botID string, sour
 				return apperror.New(apperror.CodeSkillBuiltinReadOnly, nil)
 			}
 			if errors.Is(dirErr, skillset.ErrRegistrySkillReadOnly) {
-				return echo.NewHTTPError(http.StatusBadRequest, "Registry App Skills cannot be deleted directly")
+				return apperror.New(apperror.CodeSkillRegistryReadOnly, nil)
 			}
-			return echo.NewHTTPError(http.StatusBadRequest, "only Memoh-managed skills can be deleted")
+			if errors.Is(dirErr, skillset.ErrInvalidSkillRequest) {
+				return apperror.FieldInvalid("source_paths", dirErr)
+			}
+			return errs.Wrap(dirErr, "resolve skill directory")
 		}
 		target := deleteTarget{sourcePath: path.Clean(strings.TrimSpace(sourcePath)), skillDir: skillDir}
 		targets = append(targets, target)
@@ -383,6 +393,17 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 		return err
 	}
 
+	if strings.TrimSpace(req.TargetPath) == "" {
+		return apperror.FieldRequired("target_path")
+	}
+	switch strings.TrimSpace(req.Action) {
+	case skillset.ActionAdopt, skillset.ActionDisable, skillset.ActionEnable:
+	case "":
+		return apperror.FieldRequired("action")
+	default:
+		return apperror.FieldInvalid("action", nil)
+	}
+
 	if err := h.applySkillAction(c.Request().Context(), botID, req); err != nil {
 		return err
 	}
@@ -391,7 +412,7 @@ func (h *ContainerdHandler) ApplySkillAction(c echo.Context) error {
 
 func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, req SkillsActionRequest) error {
 	if _, _, _, ok := skillset.RegistrySkillIDs(req.TargetPath); ok {
-		return echo.NewHTTPError(http.StatusBadRequest, "Registry App Skills are read-only")
+		return apperror.New(apperror.CodeSkillRegistryReadOnly, nil)
 	}
 	ctx, _, err := h.pinCurrentWorkspaceTarget(ctx, botID)
 	if err != nil {
@@ -403,7 +424,7 @@ func (h *ContainerdHandler) applySkillAction(ctx context.Context, botID string, 
 	}
 	roots, err := h.skillDiscoveryRoots(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "discover skill roots")
 	}
 
 	if err := skillset.ApplyAction(ctx, client, roots, skillset.ActionRequest{

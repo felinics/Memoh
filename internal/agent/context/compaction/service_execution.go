@@ -13,6 +13,7 @@ import (
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
 func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (Result, error) {
@@ -332,11 +333,13 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		selectedSystemPrompt, []sdk.Message{sdk.UserMessage(userPrompt)}, nil,
 	)
 
-	result, err := model.Generate(models.WithModelSession(ctx, cfg.SessionID), sdk.Request{
+	request := sdk.Request{
 		System:    systemPromptDecorated,
 		Messages:  sdkMessages,
 		MaxTokens: &maxOutputTokens,
-	})
+	}
+	result, err := modelretry.Do(models.WithModelSession(ctx, cfg.SessionID), s.logger, "agent.compaction", modelretry.Config{}, modelretry.Retryable,
+		func(ctx context.Context) (sdk.ModelResult, error) { return model.Generate(ctx, request) })
 	if err != nil {
 		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
 		return Result{}, err

@@ -18,6 +18,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -189,12 +190,12 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 		return err
 	}
 	if err := validateBrowserPort(req.Port); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("port", err)
 	}
 
 	ctx := c.Request().Context()
 	if _, err := h.manager.NativeMCPClient(ctx, botID); err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
+		return errs.WrapDependency(err, "connect workspace")
 	}
 
 	session, err := h.browserSessions.create(botID, req.Port, time.Now())
@@ -274,7 +275,7 @@ func (h *ContainerdHandler) HandleBrowserProxy(c echo.Context) error {
 	}
 	client, err := h.manager.NativeMCPClient(c.Request().Context(), session.BotID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
+		return errs.WrapDependency(err, "connect workspace")
 	}
 
 	proxy := newBrowserReverseProxy(client, session.Port)

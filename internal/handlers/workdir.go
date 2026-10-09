@@ -14,6 +14,7 @@ import (
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/workdir"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
@@ -187,9 +188,9 @@ func (h *WorkdirHandler) Rename(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	workdirID := strings.TrimSpace(c.Param("workdir_id"))
-	if workdirID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "workdir_id is required")
+	workdirID, err := httpx.RequiredParam(c, "workdir_id")
+	if err != nil {
+		return err
 	}
 	var req workdir.UpdateRequest
 	if err := c.Bind(&req); err != nil {
@@ -217,9 +218,9 @@ func (h *WorkdirHandler) Archive(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	workdirID := strings.TrimSpace(c.Param("workdir_id"))
-	if workdirID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "workdir_id is required")
+	workdirID, err := httpx.RequiredParam(c, "workdir_id")
+	if err != nil {
+		return err
 	}
 	if err := h.service.Archive(c.Request().Context(), botID, workdirID); err != nil {
 		return workdirHTTPError(err)
@@ -235,9 +236,9 @@ func (h *WorkdirHandler) requirePermission(c echo.Context, permission string) (s
 	if err != nil {
 		return "", "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", "", err
 	}
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.bots, h.accounts, identityID, botID, permission)
 	if err != nil {
@@ -248,12 +249,14 @@ func (h *WorkdirHandler) requirePermission(c echo.Context, permission string) (s
 
 func workdirHTTPError(err error) error {
 	switch {
-	case errors.Is(err, workdir.ErrNameRequired),
-		errors.Is(err, workdir.ErrPathRequired),
-		errors.Is(err, workdir.ErrInvalidPath),
+	case errors.Is(err, workdir.ErrNameRequired):
+		return apperror.FieldRequired("name")
+	case errors.Is(err, workdir.ErrPathRequired):
+		return apperror.FieldRequired("path")
+	case errors.Is(err, workdir.ErrInvalidPath),
 		errors.Is(err, workdir.ErrPathNotFound),
 		errors.Is(err, workdir.ErrPathNotDirectory):
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return apperror.FieldInvalid("path", err)
 	case errors.Is(err, workdir.ErrWorkdirNotFound),
 		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):

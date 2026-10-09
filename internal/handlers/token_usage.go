@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -13,12 +14,14 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	session "github.com/felinics/memoh/internal/chat/thread"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/db/postgres/sqlc"
 	dbstore "github.com/felinics/memoh/internal/db/store"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 type TokenUsageHandler struct {
@@ -115,9 +118,9 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID); err != nil {
 		return err
@@ -125,31 +128,34 @@ func (h *TokenUsageHandler) GetTokenUsage(c echo.Context) error {
 
 	fromStr := strings.TrimSpace(c.QueryParam("from"))
 	toStr := strings.TrimSpace(c.QueryParam("to"))
-	if fromStr == "" || toStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "from and to query parameters are required (YYYY-MM-DD)")
+	if fromStr == "" {
+		return apperror.FieldRequired("from")
+	}
+	if toStr == "" {
+		return apperror.FieldRequired("to")
 	}
 	fromDate, err := time.Parse("2006-01-02", fromStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid from date format, expected YYYY-MM-DD")
+		return apperror.FieldInvalid("from", err)
 	}
 	toDate, err := time.Parse("2006-01-02", toStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid to date format, expected YYYY-MM-DD")
+		return apperror.FieldInvalid("to", err)
 	}
 	if !toDate.After(fromDate) {
-		return echo.NewHTTPError(http.StatusBadRequest, "to must be after from")
+		return apperror.FieldInvalid("to", errors.New("to must be after from"))
 	}
 
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid bot id")
+		return apperror.FieldInvalid("bot_id", err)
 	}
 
 	var pgModelID pgtype.UUID
 	if modelIDStr := strings.TrimSpace(c.QueryParam("model_id")); modelIDStr != "" {
 		pgModelID, err = db.ParseUUID(modelIDStr)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid model_id")
+			return apperror.FieldInvalid("model_id", err)
 		}
 	}
 	pgSessionType, err := parseTokenUsageSessionType(c)
@@ -361,9 +367,9 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, userID, botID); err != nil {
 		return err
@@ -371,31 +377,34 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 
 	fromStr := strings.TrimSpace(c.QueryParam("from"))
 	toStr := strings.TrimSpace(c.QueryParam("to"))
-	if fromStr == "" || toStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "from and to query parameters are required (YYYY-MM-DD)")
+	if fromStr == "" {
+		return apperror.FieldRequired("from")
+	}
+	if toStr == "" {
+		return apperror.FieldRequired("to")
 	}
 	fromDate, err := time.Parse("2006-01-02", fromStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid from date format, expected YYYY-MM-DD")
+		return apperror.FieldInvalid("from", err)
 	}
 	toDate, err := time.Parse("2006-01-02", toStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid to date format, expected YYYY-MM-DD")
+		return apperror.FieldInvalid("to", err)
 	}
 	if !toDate.After(fromDate) {
-		return echo.NewHTTPError(http.StatusBadRequest, "to must be after from")
+		return apperror.FieldInvalid("to", errors.New("to must be after from"))
 	}
 
 	pgBotID, err := db.ParseUUID(botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid bot id")
+		return apperror.FieldInvalid("bot_id", err)
 	}
 
 	var pgModelID pgtype.UUID
 	if modelIDStr := strings.TrimSpace(c.QueryParam("model_id")); modelIDStr != "" {
 		pgModelID, err = db.ParseUUID(modelIDStr)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid model_id")
+			return apperror.FieldInvalid("model_id", err)
 		}
 	}
 
@@ -406,7 +415,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 
 	limit, err := parseInt32Query(c.QueryParam("limit"), tokenUsageRecordsDefaultLimit)
 	if err != nil {
-		return err
+		return apperror.FieldInvalid("limit", err)
 	}
 	if limit <= 0 {
 		limit = tokenUsageRecordsDefaultLimit
@@ -416,7 +425,7 @@ func (h *TokenUsageHandler) ListTokenUsageRecords(c echo.Context) error {
 	}
 	offset, err := parseInt32Query(c.QueryParam("offset"), 0)
 	if err != nil {
-		return err
+		return apperror.FieldInvalid("offset", err)
 	}
 
 	fromTS := pgtype.Timestamptz{Time: fromDate, Valid: true}
@@ -480,7 +489,7 @@ func parseTokenUsageSessionType(c echo.Context) (pgtype.Text, error) {
 	case session.TypeChat, session.TypeDiscuss, session.TypeSchedule, session.TypeACPAgent, tokenUsageTypeMemory:
 		return pgtype.Text{String: sessionType, Valid: true}, nil
 	default:
-		return pgtype.Text{}, echo.NewHTTPError(http.StatusBadRequest, "invalid session_type, expected one of: chat, discuss, schedule, acp_agent, memory")
+		return pgtype.Text{}, apperror.FieldInvalid("session_type", nil)
 	}
 }
 
@@ -498,7 +507,7 @@ func parseInt32Query(raw string, defaultValue int32) (int32, error) {
 	}
 	parsed, err := strconv.ParseInt(raw, 10, 32)
 	if err != nil {
-		return 0, echo.NewHTTPError(http.StatusBadRequest, "invalid integer query parameter")
+		return 0, err
 	}
 	value := int32(parsed)
 	if value < 0 {

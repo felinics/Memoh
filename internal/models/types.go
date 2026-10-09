@@ -9,6 +9,33 @@ import (
 	"github.com/felinics/memoh/internal/reasoning"
 )
 
+// FieldError is a model write rejected because of one request field. Field is
+// the name the request uses for it, with dots for a nested key; Required says
+// the field is missing or empty rather than holding a bad value. Err is the
+// private reason.
+type FieldError struct {
+	Field    string
+	Required bool
+	Err      error
+}
+
+func (e *FieldError) Error() string {
+	if e.Err == nil {
+		return e.Field
+	}
+	return e.Field + ": " + e.Err.Error()
+}
+
+func (e *FieldError) Unwrap() error { return e.Err }
+
+func fieldRequired(field string) error {
+	return &FieldError{Field: field, Required: true, Err: errors.New("is required")}
+}
+
+func fieldInvalid(field string, cause error) error {
+	return &FieldError{Field: field, Err: cause}
+}
+
 type ModelType string
 
 const (
@@ -208,40 +235,42 @@ func ResolveEnable(override *bool, current bool) bool {
 	return *override
 }
 
+// Validate checks a model write. Every failure is a *FieldError naming the
+// request field that holds the offending value.
 func (m *Model) Validate() error {
 	if m.ModelID == "" {
-		return errors.New("model ID is required")
+		return fieldRequired("model_id")
 	}
 	if m.ProviderID == "" {
-		return errors.New("provider ID is required")
+		return fieldRequired("provider_id")
 	}
 	if _, err := uuid.Parse(m.ProviderID); err != nil {
-		return errors.New("provider ID must be a valid UUID")
+		return fieldInvalid("provider_id", err)
 	}
 	if !IsValidModelType(m.Type) {
-		return ErrInvalidModelType
+		return fieldInvalid("type", ErrInvalidModelType)
 	}
 	if m.Type == ModelTypeEmbedding {
 		if m.Config.Dimensions == nil || *m.Config.Dimensions <= 0 {
-			return errors.New("dimensions must be greater than 0 for embedding models")
+			return fieldRequired("config.dimensions")
 		}
 	}
 	if err := ValidateCompatibilities(m.Config.Compatibilities); err != nil {
-		return err
+		return fieldInvalid("config.compatibilities", err)
 	}
 	for _, effort := range m.Config.ReasoningEfforts {
 		if !IsValidReasoningEffort(effort) {
-			return errors.New("invalid reasoning effort: " + effort)
+			return fieldInvalid("config.reasoning_efforts", errors.New("invalid reasoning effort: "+effort))
 		}
 	}
 	if m.Config.ThinkingMode != "" && !reasoning.IsValidMode(m.Config.ThinkingMode) {
-		return errors.New("invalid thinking mode: " + m.Config.ThinkingMode)
+		return fieldInvalid("config.thinking_mode", errors.New("invalid thinking mode: "+m.Config.ThinkingMode))
 	}
 	if !reasoning.IsValidDialect(m.Config.ReasoningDialect) {
-		return errors.New("invalid reasoning dialect: " + m.Config.ReasoningDialect)
+		return fieldInvalid("config.reasoning_dialect", errors.New("invalid reasoning dialect: "+m.Config.ReasoningDialect))
 	}
 	if !reasoning.IsValidOffSupport(m.Config.ReasoningOffSupport) {
-		return errors.New("invalid reasoning off support: " + m.Config.ReasoningOffSupport)
+		return fieldInvalid("config.reasoning_off_support", errors.New("invalid reasoning off support: "+m.Config.ReasoningOffSupport))
 	}
 	return nil
 }

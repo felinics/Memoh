@@ -13,8 +13,11 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/agent/runtime/native"
 	"github.com/felinics/memoh/internal/agent/toolexec"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/hooks"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
@@ -91,9 +94,9 @@ func (h *HooksHandler) Events(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.PermissionChat); err != nil {
 		return err
@@ -126,9 +129,9 @@ func (h *HooksHandler) Test(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
 	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.accountService, userID, botID, bots.PermissionWorkspaceExec); err != nil {
 		return err
@@ -139,7 +142,7 @@ func (h *HooksHandler) Test(c echo.Context) error {
 	}
 	eventName := strings.TrimSpace(input.Event)
 	if eventName == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "event is required")
+		return apperror.FieldRequired("event")
 	}
 	if h.service == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "hooks service is not configured")
@@ -147,7 +150,7 @@ func (h *HooksHandler) Test(c echo.Context) error {
 	ctx := c.Request().Context()
 	cfg, exists, err := h.service.LoadEffective(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "load effective")
 	}
 	req := hooks.Request{
 		Version:   1,
@@ -177,7 +180,7 @@ func (h *HooksHandler) Test(c echo.Context) error {
 		if errors.Is(err, hooks.ErrDenied) {
 			return c.JSON(http.StatusOK, HookTestResponse{ConfigExists: exists, Result: result})
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "test hook")
 	}
 	return c.JSON(http.StatusOK, HookTestResponse{ConfigExists: exists, Result: result})
 }

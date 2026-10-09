@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -103,15 +104,8 @@ type fsOpResponse struct {
 // ---------- helpers ----------
 
 // resolveContainerPath cleans and validates a container-relative path.
-func resolveContainerPath(rawPath string) (string, error) {
-	cleaned := path.Clean("/" + strings.ReplaceAll(strings.TrimSpace(rawPath), "\\", "/"))
-	if cleaned == "" {
-		cleaned = "/"
-	}
-	if strings.HasPrefix(cleaned, "..") {
-		return "", errors.New("invalid path")
-	}
-	return cleaned, nil
+func resolveContainerPath(rawPath string) string {
+	return path.Clean("/" + strings.ReplaceAll(strings.TrimSpace(rawPath), "\\", "/"))
 }
 
 func isContainerMediaPath(containerPath string) bool {
@@ -124,17 +118,16 @@ func isPathWithin(parentPath, childPath string) bool {
 	return childPath == parentPath || strings.HasPrefix(childPath, strings.TrimRight(parentPath, "/")+"/")
 }
 
-func dedupeArchivePaths(paths []string) ([]string, error) {
+// dedupeArchivePaths cleans paths and drops duplicates and entries nested in
+// another selected path. The result is empty when no path was given.
+func dedupeArchivePaths(paths []string) []string {
 	seen := make(map[string]struct{}, len(paths))
 	cleaned := make([]string, 0, len(paths))
 	for _, raw := range paths {
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		containerPath, err := resolveContainerPath(raw)
-		if err != nil {
-			return nil, err
-		}
+		containerPath := resolveContainerPath(raw)
 		if _, ok := seen[containerPath]; ok {
 			continue
 		}
@@ -154,10 +147,7 @@ func dedupeArchivePaths(paths []string) ([]string, error) {
 			parentsOnly = append(parentsOnly, candidate)
 		}
 	}
-	if len(parentsOnly) == 0 {
-		return nil, errors.New("paths are required")
-	}
-	return parentsOnly, nil
+	return parentsOnly
 }
 
 func uniqueArchiveName(containerPath string, used map[string]int) string {
@@ -308,10 +298,7 @@ func (h *ContainerdHandler) FSStat(c echo.Context) error {
 		rawPath = "/"
 	}
 
-	containerPath, err := resolveContainerPath(rawPath)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(rawPath)
 
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
@@ -356,10 +343,7 @@ func (h *ContainerdHandler) FSList(c echo.Context) error {
 		rawPath = "/"
 	}
 
-	containerPath, err := resolveContainerPath(rawPath)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(rawPath)
 
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
@@ -410,15 +394,12 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	rawPath := c.QueryParam("path")
-	if strings.TrimSpace(rawPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+	rawPath, err := httpx.RequiredQuery(c, "path")
+	if err != nil {
+		return err
 	}
 
-	containerPath, err := resolveContainerPath(rawPath)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(rawPath)
 
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
@@ -434,7 +415,7 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read file")
+		return errs.Wrap(err, "read file")
 	}
 
 	return c.JSON(http.StatusOK, FSReadResponse{
@@ -459,15 +440,12 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 // @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/download [get].
 func (h *ContainerdHandler) FSDownload(c echo.Context) error {
-	rawPath := c.QueryParam("path")
-	if strings.TrimSpace(rawPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+	rawPath, err := httpx.RequiredQuery(c, "path")
+	if err != nil {
+		return err
 	}
 
-	containerPath, err := resolveContainerPath(rawPath)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(rawPath)
 
 	requireAccess := func(c echo.Context) (string, error) {
 		return h.requireBotAccessWithPermission(c, bots.PermissionWorkspaceRead)
@@ -505,7 +483,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read file")
+		return errs.Wrap(err, "read file")
 	}
 
 	fileName := path.Base(containerPath)
@@ -541,9 +519,9 @@ func (h *ContainerdHandler) FSArchive(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	paths, err := dedupeArchivePaths(req.Paths)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	paths := dedupeArchivePaths(req.Paths)
+	if len(paths) == 0 {
+		return apperror.FieldRequired("paths")
 	}
 
 	ctx := c.Request().Context()
@@ -568,10 +546,7 @@ func (h *ContainerdHandler) writeArchive(ctx context.Context, client *bridge.Cli
 	tw := tar.NewWriter(gw)
 	defer func() { _ = tw.Close() }()
 
-	paths, err := dedupeArchivePaths(containerPaths)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	paths := dedupeArchivePaths(containerPaths)
 	usedNames := make(map[string]int, len(paths))
 	for _, containerPath := range paths {
 		entry, err := client.Stat(ctx, containerPath)
@@ -589,7 +564,7 @@ func (h *ContainerdHandler) writeArchive(ctx context.Context, client *bridge.Cli
 func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridge.Client, tw *tar.Writer, containerPath, archivePath string, isDir bool) error {
 	archivePath, err := safeArchiveEntryPath(archivePath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return errs.Wrap(err, "archive entry path")
 	}
 	if archivePath == "" {
 		return nil
@@ -610,7 +585,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 		header.Name = strings.TrimRight(archivePath, "/") + "/"
 		header.Size = 0
 		if err := tw.WriteHeader(header); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive directory: %v", err))
+			return errs.Wrap(err, "archive directory")
 		}
 		entries, err := client.ListDirAll(ctx, containerPath, false)
 		if err != nil {
@@ -633,7 +608,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 	header.Typeflag = tar.TypeReg
 	header.Mode = 0o644
 	if err := tw.WriteHeader(header); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive file: %v", err))
+		return errs.Wrap(err, "archive file")
 	}
 	rc, err := client.ReadRaw(ctx, containerPath)
 	if err != nil {
@@ -641,7 +616,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 	}
 	defer func() { _ = rc.Close() }()
 	if _, err := io.Copy(tw, rc); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive copy: %v", err))
+		return errs.Wrap(err, "archive copy")
 	}
 	return nil
 }
@@ -668,13 +643,10 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 
-	containerPath, err := resolveContainerPath(req.Path)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(req.Path)
 
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
@@ -690,7 +662,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 		// write. Reject the ambiguous form; clients should omit the field
 		// instead.
 		if *req.ExpectedRevision == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "expectedRevision must be non-empty; omit the field for an unconditional write")
+			return apperror.FieldInvalid("expectedRevision", nil)
 		}
 		currentRevision, err := readContainerFileRevision(ctx, client, containerPath)
 		if err != nil {
@@ -730,13 +702,10 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	}
 	destPath := strings.TrimSpace(c.FormValue("path"))
 	if destPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 
-	containerPath, err := resolveContainerPath(destPath)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(destPath)
 
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
@@ -746,11 +715,11 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 
 	file, err := c.FormFile("file")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "file is required")
+		return apperror.FieldRequired("file")
 	}
 	src, err := file.Open()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "open uploaded file")
 	}
 	defer func() { _ = src.Close() }()
 
@@ -788,13 +757,10 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 
-	containerPath, err := resolveContainerPath(req.Path)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(req.Path)
 
 	ctx := c.Request().Context()
 	targetID := strings.TrimSpace(req.WorkspaceTargetID)
@@ -839,13 +805,10 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 
-	containerPath, err := resolveContainerPath(req.Path)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(req.Path)
 
 	if containerPath == "/" {
 		return echo.NewHTTPError(http.StatusForbidden, "cannot delete root directory")
@@ -886,18 +849,15 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if strings.TrimSpace(req.OldPath) == "" || strings.TrimSpace(req.NewPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "oldPath and newPath are required")
+	if strings.TrimSpace(req.OldPath) == "" {
+		return apperror.FieldRequired("oldPath")
+	}
+	if strings.TrimSpace(req.NewPath) == "" {
+		return apperror.FieldRequired("newPath")
 	}
 
-	oldPath, err := resolveContainerPath(req.OldPath)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	newPath, err := resolveContainerPath(req.NewPath)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	oldPath := resolveContainerPath(req.OldPath)
+	newPath := resolveContainerPath(req.NewPath)
 
 	ctx := c.Request().Context()
 	client, err := h.getGRPCClient(ctx, botID)
@@ -936,15 +896,12 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
-	containerPath, err := resolveContainerPath(req.Path)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
+	containerPath := resolveContainerPath(req.Path)
 	lower := strings.ToLower(containerPath)
 	if !strings.HasSuffix(lower, ".zip") && !strings.HasSuffix(lower, ".tar.gz") && !strings.HasSuffix(lower, ".tgz") {
-		return echo.NewHTTPError(http.StatusBadRequest, "unsupported archive format")
+		return apperror.New(apperror.CodeWorkspaceArchiveInvalid, nil)
 	}
 
 	ctx := c.Request().Context()
@@ -957,7 +914,7 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 		return fsHTTPError(err)
 	}
 	if entry.GetIsDir() {
-		return echo.NewHTTPError(http.StatusBadRequest, "path must be an archive file")
+		return apperror.New(apperror.CodeWorkspaceArchiveInvalid, nil)
 	}
 
 	destination := defaultExtractDestination(containerPath)
@@ -994,17 +951,17 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destination string) (int, int, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return 0, 0, echo.NewHTTPError(http.StatusInternalServerError, "failed to read archive")
+		return 0, 0, errs.Wrap(err, "read archive")
 	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return 0, 0, echo.NewHTTPError(http.StatusBadRequest, "invalid zip archive")
+		return 0, 0, apperror.Wrap(apperror.CodeWorkspaceArchiveInvalid, err, nil)
 	}
 	files, dirs := 0, 0
 	for _, file := range zr.File {
 		entryPath, err := safeArchiveEntryPath(file.Name)
 		if err != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return files, dirs, apperror.Wrap(apperror.CodeWorkspaceArchiveInvalid, err, nil)
 		}
 		if entryPath == "" {
 			continue
@@ -1019,7 +976,7 @@ func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destina
 		}
 		src, err := file.Open()
 		if err != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusBadRequest, "invalid zip entry")
+			return files, dirs, apperror.Wrap(apperror.CodeWorkspaceArchiveInvalid, err, nil)
 		}
 		written, writeErr := client.WriteRaw(ctx, targetPath, src)
 		closeErr := src.Close()
@@ -1027,7 +984,7 @@ func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destina
 			return files, dirs, fsHTTPError(writeErr)
 		}
 		if closeErr != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusInternalServerError, closeErr.Error())
+			return files, dirs, errs.Wrap(closeErr, "close zip entry")
 		}
 		if written >= 0 {
 			files++
@@ -1039,7 +996,7 @@ func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destina
 func extractTarGz(ctx context.Context, client *bridge.Client, r io.Reader, destination string) (int, int, error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
-		return 0, 0, echo.NewHTTPError(http.StatusBadRequest, "invalid gzip archive")
+		return 0, 0, apperror.Wrap(apperror.CodeWorkspaceArchiveInvalid, err, nil)
 	}
 	defer func() { _ = gr.Close() }()
 
@@ -1051,11 +1008,11 @@ func extractTarGz(ctx context.Context, client *bridge.Client, r io.Reader, desti
 			break
 		}
 		if err != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusBadRequest, "invalid tar archive")
+			return files, dirs, apperror.Wrap(apperror.CodeWorkspaceArchiveInvalid, err, nil)
 		}
 		entryPath, err := safeArchiveEntryPath(header.Name)
 		if err != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			return files, dirs, apperror.Wrap(apperror.CodeWorkspaceArchiveInvalid, err, nil)
 		}
 		if entryPath == "" {
 			continue
