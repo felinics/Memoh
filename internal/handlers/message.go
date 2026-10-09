@@ -20,13 +20,13 @@ import (
 	"github.com/felinics/memoh/internal/agent/background"
 	toolapproval "github.com/felinics/memoh/internal/agent/decision/approval"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	chatview "github.com/felinics/memoh/internal/agent/view"
 	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	messageevent "github.com/felinics/memoh/internal/chat/event"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	session "github.com/felinics/memoh/internal/chat/thread"
-	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/media"
 )
 
@@ -752,15 +752,17 @@ func (h *MessageHandler) DeleteMessages(c echo.Context) error {
 
 // --- helpers ---
 
-// historyResetError translates a failure to begin a history reset. A reset
-// lease another operation holds or took over is the client's conflict; a
-// runtime backend or database the reset could not use is a dependency's
-// failure (docs/errors.md).
+// historyResetError translates a failure to begin a history reset. The
+// conversation is busy only while something else holds it; any other failure
+// is answered by its fault (docs/errors.md).
 func historyResetError(err error) error {
-	if errs.FaultOf(err) == apperror.FaultDependency {
-		return apperror.Wrap(apperror.CodeInternal, err, nil)
+	switch {
+	case sessionruntime.IsHistoryResetBusy(err):
+		return apperror.Wrap(apperror.CodeSessionResetConflict, err, nil)
+	case errors.Is(err, sessionruntime.ErrHistoryResetUnavailable):
+		return apperror.Wrap(apperror.CodeSessionResetUnavailable, err, nil)
 	}
-	return apperror.Wrap(apperror.CodeSessionResetConflict, err, nil)
+	return err
 }
 
 func (*MessageHandler) requireChannelIdentityID(c echo.Context) (string, error) {

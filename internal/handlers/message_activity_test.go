@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -246,9 +247,11 @@ func (r failingHistoryReset) BeginBotHistoryReset(context.Context, string) (cont
 	return nil, nil, r.err
 }
 
-// A busy reset lease is the client's conflict; a runtime backend or database
-// the reset could not use is a dependency failure, never a 409.
+// The conversation is busy only while something else holds it; a reset the
+// server cannot coordinate is unavailable, and a runtime backend, database or
+// server failure is answered as that failure, never as a 409.
 func TestDeleteMessagesClassifiesHistoryResetFailures(t *testing.T) {
+	dependency := errs.WrapDependency(errors.New("runtime backend write failed"), "clear runtime snapshots")
 	for _, tc := range []struct {
 		name  string
 		err   error
@@ -256,7 +259,11 @@ func TestDeleteMessagesClassifiesHistoryResetFailures(t *testing.T) {
 		fault apperror.Fault
 	}{
 		{"lease busy", sessionruntime.ErrHistoryResetLeaseLost, apperror.CodeSessionResetConflict, apperror.FaultClient},
-		{"backend failed", errs.WrapDependency(errors.New("runtime backend write failed"), "clear runtime snapshots"), apperror.CodeInternal, apperror.FaultDependency},
+		{"lease lost while the backend failed", errors.Join(sessionruntime.ErrHistoryResetLeaseLost, dependency), apperror.CodeSessionResetConflict, apperror.FaultClient},
+		{"run did not stop in time", fmt.Errorf("stop run: %w", sessionruntime.ErrCommandNotAcknowledged), apperror.CodeSessionResetConflict, apperror.FaultClient},
+		{"backend failed", dependency, apperror.CodeInternal, apperror.FaultDependency},
+		{"server failed", errors.New("unexpected reset failure"), apperror.CodeInternal, apperror.FaultServer},
+		{"coordination unavailable", sessionruntime.ErrHistoryResetUnavailable, apperror.CodeSessionResetUnavailable, apperror.FaultServer},
 	} {
 		for _, sessionID := range []string{activityTestSessionID, ""} {
 			t.Run(tc.name+"/"+sessionID, func(t *testing.T) {
@@ -267,9 +274,10 @@ func TestDeleteMessagesClassifiesHistoryResetFailures(t *testing.T) {
 				c := testAuthContext(echo.New(), req, httptest.NewRecorder(), "user-1")
 				c.SetParamNames("bot_id")
 				c.SetParamValues(activityTestBotID)
-				err := h.DeleteMessages(c)
-				if apperror.CodeOf(err) != tc.code || errs.FaultOf(err) != tc.fault {
-					t.Fatalf("DeleteMessages() = code %q fault %q (%v), want %q / %q", apperror.CodeOf(err), errs.FaultOf(err), err, tc.code, tc.fault)
+				answer, fault := errs.Answer(context.Background(), h.DeleteMessages(c))
+				code := apperror.CodeOf(answer)
+				if code != tc.code || fault != tc.fault {
+					t.Fatalf("DeleteMessages() answered %q fault %q, want %q / %q", code, fault, tc.code, tc.fault)
 				}
 			})
 		}

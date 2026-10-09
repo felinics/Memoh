@@ -15,8 +15,10 @@ import (
 
 	sessionruntime "github.com/felinics/memoh/internal/agent/runtime/session"
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/apperror"
 	dbsqlc "github.com/felinics/memoh/internal/db/postgres/sqlc"
 	postgresstore "github.com/felinics/memoh/internal/db/postgres/store"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
 
@@ -328,11 +330,11 @@ func assertHistoryResetClearsRuntimeSnapshot(t *testing.T, h wsStepHistoryHarnes
 	}
 }
 
-// failingUpdateBackend is the memory backend with writes that can be made to
-// fail, the way a Redis outage fails them.
+// failingUpdateBackend is the memory backend with writes, and a clock, that
+// can be made to fail the way a Redis outage fails them.
 type failingUpdateBackend struct {
 	*sessionruntime.MemoryBackend
-	fail atomic.Bool
+	fail, failClock atomic.Bool
 }
 
 func (b *failingUpdateBackend) Update(ctx context.Context, key sessionruntime.Key, update sessionruntime.SnapshotUpdate) (sessionruntime.Snapshot, bool, error) {
@@ -340,6 +342,13 @@ func (b *failingUpdateBackend) Update(ctx context.Context, key sessionruntime.Ke
 		return sessionruntime.Snapshot{}, false, errors.New("runtime backend write failed")
 	}
 	return b.MemoryBackend.Update(ctx, key, update)
+}
+
+func (b *failingUpdateBackend) Now(ctx context.Context) (time.Time, error) {
+	if b.failClock.Load() {
+		return time.Time{}, errors.New("runtime backend unreachable")
+	}
+	return b.MemoryBackend.Now(ctx)
 }
 
 // A reset that cannot clear the live projection must not let the history go:
@@ -416,6 +425,55 @@ func TestPostgresHistoryResetDuringActiveRun(t *testing.T) {
 			}
 			if rows, err := h.messages.ListBySession(context.Background(), h.sessionID); err != nil || len(rows) != 0 {
 				t.Fatalf("history after clearing an active run = (%d rows, %v), want empty", len(rows), err)
+			}
+		})
+	}
+}
+
+// A clear that cannot reach the runtime backend while it stops a streaming
+// run fails as that backend's failure, not as a busy conversation. The run
+// streams on and the lease is given back, so the retried clear stops the run
+// and goes through.
+func TestPostgresHistoryResetDrainBackendFailure(t *testing.T) {
+	for _, scope := range []historyResetScope{historyResetSession, historyResetBot} {
+		t.Run(string(scope), func(t *testing.T) {
+			backend := &failingUpdateBackend{MemoryBackend: sessionruntime.NewMemoryBackend()}
+			h := newWSStepHistoryHarnessOn(t, wsStepHistoryBlock, backend)
+			h.manager.SetHistoryResetHandler(func(context.Context, sessionruntime.ResetScope) error { return nil })
+			var failed error
+			var during *sessionruntime.CurrentRunView
+			retried := make(chan error, 1)
+			got := h.run(t, func(ctx context.Context, _ string) {
+				backend.failClock.Store(true)
+				failed = h.clearHistoryErr(ctx, scope, nil)
+				backend.failClock.Store(false)
+				if snapshot, err := h.manager.Snapshot(ctx, h.botID, h.sessionID); err == nil {
+					during = snapshot.CurrentRunView
+				}
+				retried <- h.clearHistoryErr(ctx, scope, nil)
+			})
+			select {
+			case err := <-retried:
+				if err != nil {
+					t.Fatalf("retried clear = %v", err)
+				}
+			case <-time.After(20 * time.Second):
+				t.Fatal("retried clear did not finish")
+			}
+			if failed == nil || sessionruntime.IsHistoryResetBusy(failed) || errs.FaultOf(failed) != apperror.FaultDependency {
+				t.Fatalf("clear with the backend down = %v (fault %q), want a dependency failure", failed, errs.FaultOf(failed))
+			}
+			if during == nil || during.Status != sessionruntime.RunStatusRunning {
+				t.Fatalf("run after the failed clear = %s, want it still streaming", describeRun(during))
+			}
+			if got.sessionRun[0] != "aborted" {
+				t.Fatalf("session_runs state = %q, want aborted by the retried clear", got.sessionRun[0])
+			}
+			if got := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView; got != nil {
+				t.Errorf("live snapshot after the retried clear holds %s", describeRun(got))
+			}
+			if rows, err := h.messages.ListBySession(context.Background(), h.sessionID); err != nil || len(rows) != 0 {
+				t.Fatalf("history after the retried clear = (%d rows, %v), want empty", len(rows), err)
 			}
 		})
 	}

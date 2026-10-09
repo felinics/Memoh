@@ -50,6 +50,7 @@ var (
 	ErrCommandTargetNotActive  = errors.New("runtime command target is not active")
 	ErrCommandTargetMismatch   = errors.New("run does not belong to this session")
 	ErrCommandExpired          = errors.New("runtime command expired before acknowledgement")
+	ErrCommandNotAcknowledged  = errors.New("runtime command was not acknowledged")
 	ErrCommandBusy             = errors.New("runtime command executor is busy")
 	ErrCommandPayloadConflict  = errors.New("runtime command payload conflicts with an earlier request")
 	ErrDecisionNotFound        = errors.New("runtime decision was not found")

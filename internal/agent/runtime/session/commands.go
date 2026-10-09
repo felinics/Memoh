@@ -1124,7 +1124,7 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return errors.New("runtime command was not acknowledged")
+			return ErrCommandNotAcknowledged
 		case <-poll.C:
 			result, ok, loadErr := m.loadCommandResult(waitCtx, request.ID)
 			if loadErr == nil && ok {

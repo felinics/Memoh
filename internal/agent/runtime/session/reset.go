@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/runtimefence"
 )
@@ -165,6 +166,7 @@ func (m *Manager) beginHistoryReset(ctx context.Context, scope ResetScope) (cont
 	}
 
 	if err := m.drainHistoryReset(resetCtx, scope, resetStore); err != nil {
+		err = runtimefence.NormalizeResetError(resetCtx, err)
 		release()
 		return nil, nil, err
 	}
@@ -349,7 +351,7 @@ func (m *Manager) stopRunForHistoryReset(ctx context.Context, run ledger.Run) er
 	}
 	ref, ok, err := m.RunRef(ctx, run.BotID, run.SessionID, run.RunID)
 	if err != nil {
-		return err
+		return errs.WrapDependency(err, "load history reset run route")
 	}
 	if !ok {
 		// The owner route expired or was lost before the durable row was reaped.
@@ -360,7 +362,7 @@ func (m *Manager) stopRunForHistoryReset(ctx context.Context, run ledger.Run) er
 	}
 	now, err := m.backend.Now(ctx)
 	if err != nil {
-		return err
+		return errs.WrapDependency(err, "load runtime backend time")
 	}
 	cmd := Command{
 		Type: CommandHistoryReset, ID: "history-reset-" + uuid.NewString(),
@@ -387,7 +389,10 @@ func (m *Manager) fenceAndFinalizeOrphanForHistoryReset(ctx context.Context, run
 	_, _, err := orphanStore.FenceAndFinalizeOrphan(ctx, ledger.ResetLease{
 		Scope: resetFence.Scope, BotID: resetFence.BotID, SessionID: resetFence.SessionID, Token: resetFence.Token,
 	}, run)
-	return err
+	if err == nil || errors.Is(err, ErrHistoryResetLeaseLost) {
+		return err
+	}
+	return errs.WrapDependency(err, "finalize orphaned run for history reset")
 }
 
 func (m *Manager) dispatchRemoteHistoryReset(ctx context.Context, ownerID string, cmd Command) error {
@@ -408,7 +413,10 @@ func (m *Manager) dispatchRemoteHistoryReset(ctx context.Context, ownerID string
 		m.mu.Unlock()
 	}()
 	if err := m.distributed.PublishCommand(ctx, ownerID, cmd); err != nil {
-		return err
+		if errors.Is(err, ErrCommandOwnerUnavailable) {
+			return err
+		}
+		return errs.WrapDependency(err, "publish history reset command")
 	}
 	timeout := time.Until(cmd.ExpiresAt)
 	if timeout <= 0 {
@@ -449,4 +457,23 @@ func waitHistoryResetRetry(ctx context.Context, base time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+// IsHistoryResetBusy reports whether err, from beginning a history reset,
+// means something else holds the conversation: another reset took the lease
+// over or deleted the scope, or a run's owner did not stop it in time. The
+// caller can try again shortly; any other error is a failure.
+func IsHistoryResetBusy(err error) bool {
+	switch {
+	case errors.Is(err, ErrHistoryResetLeaseLost), errors.Is(err, ledger.ErrResetScopeNotFound):
+		return true
+	case errs.FaultOf(err) == apperror.FaultDependency:
+		return false
+	}
+	for _, busy := range []error{ErrCommandBusy, ErrCommandExpired, ErrCommandNotAcknowledged, ErrCommandOwnerUnavailable, context.DeadlineExceeded} {
+		if errors.Is(err, busy) {
+			return true
+		}
+	}
+	return false
 }
