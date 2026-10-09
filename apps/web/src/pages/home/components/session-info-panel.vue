@@ -19,44 +19,6 @@
       :disable-hoverable-content="true"
     >
       <div class="absolute top-2 right-2 flex items-center gap-0.5">
-        <!-- Compaction rewrites earlier history into a summary, so it asks
-             first; the confirm opens under its button, right-aligned to it and growing
-             down-left, since the button sits at the card's right edge. -->
-        <Tooltip
-          v-if="compactionAvailable"
-          ignore-non-keyboard-focus
-        >
-          <ConfirmPopover
-            :title="t('chat.compactConfirmTitle')"
-            :message="t('chat.compactConfirmMessage')"
-            :confirm-text="t('chat.compactConfirmAction')"
-            :cancel-text="t('common.cancel')"
-            :loading="isCompacting"
-            align="end"
-            @confirm="compact"
-          >
-            <template #trigger>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  tone="muted"
-                  size="icon-sm"
-                  :loading="isCompacting"
-                  :aria-label="t('chat.compactHint')"
-                >
-                  <CheckDrawIcon v-if="compacted" />
-                  <FoldVertical v-else />
-                </Button>
-              </TooltipTrigger>
-            </template>
-          </ConfirmPopover>
-          <TooltipContent
-            side="top"
-            class="max-w-64"
-          >
-            {{ isCompacting ? t('chat.compactingContext') : compacted ? t('chat.compactSuccess') : t('chat.compactHint') }}
-          </TooltipContent>
-        </Tooltip>
         <Tooltip ignore-non-keyboard-focus>
           <TooltipTrigger as-child>
             <Button
@@ -75,10 +37,7 @@
         </Tooltip>
       </div>
     </TooltipProvider>
-    <div
-      class="flex items-center gap-2"
-      :class="compactionAvailable ? 'pr-15' : 'pr-6'"
-    >
+    <div class="flex items-center gap-2 pr-6">
       <span
         v-if="contextWindow != null"
         class="text-control font-medium tabular-nums"
@@ -123,11 +82,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, toRef } from 'vue'
+import { computed, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Button, ConfirmPopover, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@felinic/ui'
-import { FoldVertical, ScanSearch } from 'lucide-vue-next'
-import CheckDrawIcon from '@/components/check-draw-icon/index.vue'
+import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@felinic/ui'
+import { ScanSearch } from 'lucide-vue-next'
 import { useSessionInfo } from '../composables/useSessionInfo'
 import { contextPressureToneClass, formatTokenCount } from '../composables/context-categories'
 import { groupContextCategories } from '../composables/context-groups'
@@ -143,29 +101,11 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-const { composition, contextWindow, contextTokens, contextPercent, autoCompactTokens, compactionAvailable, isCompacting, triggerCompact, sessionId } = useSessionInfo({
+const { composition, contextWindow, contextTokens, contextPercent, autoCompactTokens, sessionId } = useSessionInfo({
   visible: toRef(props, 'visible'),
   overrideModelId: computed(() => props.overrideModelId ?? ''),
   fallbackContextWindow: computed(() => props.fallbackContextWindow ?? null),
 })
-
-// Success shows on the button itself, like copy's check, while the card is
-// open; the toast is only for a compaction that finishes after it closed.
-const compacted = ref(false)
-let alive = true
-let compactedTimer: ReturnType<typeof setTimeout> | null = null
-onBeforeUnmount(() => {
-  alive = false
-  if (compactedTimer) clearTimeout(compactedTimer)
-})
-
-async function compact() {
-  const ok = await triggerCompact({ quietSuccess: () => alive && props.visible })
-  if (!ok || !alive) return
-  compacted.value = true
-  if (compactedTimer) clearTimeout(compactedTimer)
-  compactedTimer = setTimeout(() => { compacted.value = false }, 1500)
-}
 
 const percent = computed(() => Math.round(contextPercent.value))
 const toneClass = computed(() => contextPercent.value >= 70 ? contextPressureToneClass(contextPercent.value, 'text') : '')

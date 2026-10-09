@@ -1405,18 +1405,12 @@
       "reasonProtectedOverflow": "Protected content over limit",
       "reasonSummaryCoverage": "Covered by summary",
       "reasonBudget": "Over budget",
-      "memoryRecalled": "Recalled {n} memories",
       "empty": "No turns recorded for this session yet",
       "loadFailed": "Couldn't load the context history",
       "loadOlder": "Load up to {n} turns",
       "legacySource": "Recovered from older message data"
     },
-    "compactHint": "Compact context: summarize earlier conversation to free up space",
-    "compactConfirmTitle": "Compact context?",
-    "compactConfirmMessage": "Earlier conversation will be summarized to free up context space.",
-    "compactConfirmAction": "Compact",
     "compactSuccess": "Context compaction completed",
-    "compactingContext": "Compacting context…",
     "codexUsage": {
       "warning": "{window}: {percent}% used · resets {time}",
       "warningNoReset": "{window}: {percent}% used",

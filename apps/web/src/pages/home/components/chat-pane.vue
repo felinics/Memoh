@@ -1205,6 +1205,7 @@
                   :visible="isVisible"
                   :override-model-id="overrideModelId"
                   :fallback-context-window="sessionFallbackContextWindow"
+                  :external-usage="activeUsesExternalAgentComposer ? codexContextUsage ?? undefined : undefined"
                 />
               </div>
             </ComposerDock>
@@ -1911,7 +1912,12 @@ const activeDirectRuntime = computed(() => {
   return ''
 })
 const activeUsesDirectRuntime = computed(() => activeDirectRuntime.value !== '')
-const showSessionInfoRing = computed(() => !isWelcome.value && !!activeSession.value && (!activeUsesExternalAgentComposer.value || activeUsesACPRuntime.value))
+// For external agents Memoh only sees the part of the context it injects, so
+// a reading built from that would understate the real window. Codex is the
+// exception: it reports its own thread usage and window (see codexContextUsage).
+// ACP and Claude Code get no entry.
+const showSessionInfoRing = computed(() => !isWelcome.value && !!activeSession.value
+  && (!activeUsesExternalAgentComposer.value || codexContextUsage.value != null))
 const activeACPAgentId = computed(() => normalizeAgentID(activeSessionMetadata.value.acp_agent_id))
 const composerAgent = computed(() => {
   if (!activeUsesExternalAgentComposer.value) return null
@@ -2128,6 +2134,30 @@ const runtimeControls = useRuntimeControls({
   sessionId: computed(() => paneTarget.value.sessionId),
   visible: computed(() => isVisible.value && activeUsesExternalAgentComposer.value),
   draftAgentId: computed(() => activeIsPendingExternalAgent.value && !activeUsesACPRuntime.value ? activeBotAgentID.value : ''),
+})
+// Codex reports its own context usage; `/status` reads the last observed
+// value from the runtime's cache without starting a turn. Refreshed when a
+// turn ends so the ring follows the conversation.
+const codexContextQuery = useQuery({
+  key: () => ['codex-context-usage', currentBotId.value ?? '', paneTarget.value.sessionId ?? ''],
+  enabled: () => activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX && !!currentBotId.value && !!paneTarget.value.sessionId && isVisible.value,
+  query: async () => {
+    const result = await runtimeControls.execute('status')
+    const data = (result.data ?? {}) as { tokens?: unknown, context_window?: unknown }
+    return {
+      tokens: typeof data.tokens === 'number' ? data.tokens : null,
+      window: typeof data.context_window === 'number' && data.context_window > 0 ? data.context_window : null,
+    }
+  },
+  refetchOnWindowFocus: false,
+})
+const codexContextUsage = computed(() => (
+  activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX && codexContextQuery.data.value?.tokens != null
+    ? codexContextQuery.data.value
+    : null
+))
+watch(streaming, (now, before) => {
+  if (before && !now && activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX) void codexContextQuery.refetch()
 })
 // Only a ChatGPT sign-in has usage windows; an API-key Codex Agent is billed per token.
 const codexUsageAgentId = computed(() => {

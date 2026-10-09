@@ -1417,18 +1417,12 @@
       "reasonProtectedOverflow": "受保护内容超限",
       "reasonSummaryCoverage": "已由摘要覆盖",
       "reasonBudget": "超出预算",
-      "memoryRecalled": "召回了 {n} 条记忆",
       "empty": "本会话还没有记录任何轮次",
       "loadFailed": "上下文历史加载失败",
       "loadOlder": "加载至多 {n} 轮",
       "legacySource": "来自旧版消息数据"
     },
-    "compactHint": "压缩上下文：把较早的对话整理成摘要，腾出空间",
-    "compactConfirmTitle": "压缩上下文？",
-    "compactConfirmMessage": "较早的对话会被整理成摘要，以腾出上下文空间。",
-    "compactConfirmAction": "压缩",
     "compactSuccess": "上下文压缩完成",
-    "compactingContext": "正在压缩上下文…",
     "codexUsage": {
       "warning": "{window}已用 {percent}%，{time}重置",
       "warningNoReset": "{window}已用 {percent}%",

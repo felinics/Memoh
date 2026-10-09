@@ -39,86 +39,78 @@
           v-else
           class="flex flex-col gap-6"
         >
-          <!-- Bars on the left, the selected turn's summary on the right, so the
-               chart and its reading share one row. The summary keeps a fixed
-               width; bars shrink from 24px to 4px as turns accumulate, then the
-               strip scrolls, opened at the newest turn. -->
-          <section class="flex items-end gap-6">
+          <!-- One fixed-width bar per turn, oldest to newest, padded with empty
+               slots to the strip's width so a short session still reads as a
+               full strip — the same "unused stays dark" language as the grid
+               below. Past the width the strip scrolls instead of thinning the
+               bars, opened at the newest turn. -->
+          <section class="flex flex-col gap-2">
             <div
-              v-if="turns.length > 1 || canLoadOlder"
-              class="flex min-w-0 flex-1 flex-col gap-2"
+              ref="barStrip"
+              class="overflow-x-auto"
             >
-              <div
-                v-if="turns.length > 1"
-                ref="barStrip"
-                class="overflow-x-auto"
-              >
-                <div class="flex h-16 items-end gap-0.5">
-                  <button
-                    v-for="(turn, index) in turns"
-                    :key="turn.key"
-                    type="button"
-                    class="flex h-full w-6 min-w-1 shrink cursor-pointer flex-col-reverse overflow-hidden rounded-2xs bg-muted outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring/30"
-                    :class="index === selectedIndex ? '' : 'opacity-50 hover:opacity-100'"
-                    :aria-label="`${turn.timeLabel} · ${turn.tokensLabel}`"
-                    :aria-pressed="index === selectedIndex"
-                    @click="selectedIndex = index"
-                  >
-                    <span
-                      v-for="group in turn.groups"
-                      :key="group.id"
-                      class="w-full shrink-0"
-                      :class="group.colorClass"
-                      :style="{ height: `${(group.tokens / pageMaxTokens) * 100}%` }"
-                    />
-                  </button>
-                </div>
-              </div>
-              <Button
-                v-if="canLoadOlder"
-                variant="ghost"
-                size="sm"
-                class="self-start"
-                @click="loadOlder"
-              >
-                {{ t('chat.lifecycle.loadOlder', { n: maxLimit }) }}
-              </Button>
-            </div>
-
-            <div
-              v-if="selected"
-              class="flex w-56 shrink-0 flex-col gap-1"
-              :class="turns.length > 1 || canLoadOlder ? '' : 'w-auto flex-1'"
-            >
-              <div class="flex items-center gap-2 text-body text-muted-foreground">
-                <span class="truncate">{{ selected.timeLabel }}</span>
-                <Badge
-                  v-if="selected.statusLabel"
-                  :variant="selected.status === 'fallback' ? 'warning' : 'destructive'"
-                  class="ml-auto"
+              <div class="flex h-16 items-end gap-0.5">
+                <button
+                  v-for="(turn, index) in turns"
+                  :key="turn.key"
+                  type="button"
+                  class="flex h-full w-6 shrink-0 cursor-pointer flex-col-reverse overflow-hidden rounded-2xs bg-muted outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring/30"
+                  :class="index === selectedIndex ? '' : 'opacity-50 hover:opacity-100'"
+                  :aria-label="`${turn.timeLabel} · ${turn.tokensLabel}`"
+                  :aria-pressed="index === selectedIndex"
+                  @click="selectedIndex = index"
                 >
-                  {{ selected.statusLabel }}
-                </Badge>
-              </div>
-              <span
-                v-if="selected.model"
-                class="truncate text-body text-muted-foreground"
-              >{{ selected.model }}</span>
-              <div class="flex items-baseline gap-2">
+                  <span
+                    v-for="group in turn.groups"
+                    :key="group.id"
+                    class="w-full shrink-0"
+                    :class="group.colorClass"
+                    :style="{ height: `${(group.tokens / pageMaxTokens) * 100}%` }"
+                  />
+                </button>
                 <span
-                  v-if="selected.percent != null"
-                  class="text-control font-medium tabular-nums"
-                  :class="selected.percent >= 70 ? contextPressureToneClass(selected.percent, 'text') : ''"
-                >{{ Math.round(selected.percent) }}%</span>
-                <span class="truncate text-body text-muted-foreground tabular-nums">{{ selected.tokensLabel }}</span>
+                  v-for="n in emptySlots"
+                  :key="`empty-${n}`"
+                  aria-hidden="true"
+                  class="h-full w-6 shrink-0 rounded-2xs bg-muted opacity-50"
+                />
               </div>
             </div>
+            <Button
+              v-if="canLoadOlder"
+              variant="ghost"
+              size="sm"
+              class="self-start"
+              @click="loadOlder"
+            >
+              {{ t('chat.lifecycle.loadOlder', { n: maxLimit }) }}
+            </Button>
           </section>
 
           <section
             v-if="selected"
             class="flex flex-col gap-4"
           >
+            <!-- The selected turn's reading heads the grid it describes. -->
+            <div class="flex items-baseline gap-2">
+              <span
+                v-if="selected.percent != null"
+                class="text-control font-medium tabular-nums"
+                :class="selected.percent >= 70 ? contextPressureToneClass(selected.percent, 'text') : ''"
+              >{{ Math.round(selected.percent) }}%</span>
+              <span class="shrink-0 text-body text-muted-foreground tabular-nums">{{ selected.tokensLabel }}</span>
+              <span class="ml-auto min-w-0 truncate text-body text-muted-foreground">
+                {{ selected.timeLabel }}<template v-if="selected.model"> · {{ selected.model }}</template>
+              </span>
+              <Badge
+                v-if="selected.statusLabel"
+                :variant="selected.status === 'fallback' ? 'warning' : 'destructive'"
+                class="shrink-0 self-center"
+              >
+                {{ selected.statusLabel }}
+              </Badge>
+            </div>
+
             <ContextWaffle
               v-if="selected.percent != null"
               :percent="selected.percent"
@@ -174,13 +166,6 @@
                 {{ t('chat.lifecycle.trimmed', { n: selected.trimmed }) }}
               </p>
             </div>
-
-            <p
-              v-if="selected.memories > 0"
-              class="text-body text-muted-foreground"
-            >
-              {{ t('chat.lifecycle.memoryRecalled', { n: selected.memories }) }}
-            </p>
           </section>
         </div>
       </DialogBody>
@@ -191,6 +176,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useElementSize } from '@vueuse/core'
 import { Badge, Button, Dialog, DialogBody, DialogDescription, DialogHeader, DialogPanel, DialogTitle, Empty, EmptyDescription, Skeleton } from '@felinic/ui'
 import type { HandlersContextLifecycleTurn } from '@memohai/sdk'
 import { formatCalendarTime } from '@/utils/date-time'
@@ -221,7 +207,6 @@ interface TurnView {
   droppedTokens: number
   trimmed: number
   reasons: Array<{ id: string, label: string, count: number }>
-  memories: number
 }
 
 const STATUS_KEY: Record<string, string> = {
@@ -266,7 +251,6 @@ function toTurnView(turn: HandlersContextLifecycleTurn, index: number): TurnView
     reasons: Object.entries(selection?.drop_reasons ?? {})
       .filter(([, count]) => count > 0)
       .map(([id, count]) => ({ id, count, label: REASON_KEY[id] ? t(REASON_KEY[id]!) : id })),
-    memories: snapshot?.memory_recall?.result?.count ?? 0,
   }
 }
 
@@ -289,6 +273,13 @@ const selected = computed(() => turns.value[selectedIndex.value])
 
 // Once the bars overflow, open the strip at the newest (selected) turn.
 const barStrip = useTemplateRef<HTMLElement>('barStrip')
+const { width: stripWidth } = useElementSize(barStrip)
+// Bar pitch: w-6 (24px) plus the gap-0.5 (2px) between bars.
+const BAR_PITCH = 26
+const emptySlots = computed(() => {
+  const slots = Math.floor((stripWidth.value + 2) / BAR_PITCH)
+  return Math.max(0, slots - turns.value.length)
+})
 watch([() => turns.value.length, open], async () => {
   await nextTick()
   if (barStrip.value) barStrip.value.scrollLeft = barStrip.value.scrollWidth

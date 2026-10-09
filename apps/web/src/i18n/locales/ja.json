@@ -1383,18 +1383,12 @@
       "reasonProtectedOverflow": "保護コンテンツが上限超過",
       "reasonSummaryCoverage": "要約で置き換え済み",
       "reasonBudget": "予算超過",
-      "memoryRecalled": "{n} 件の記憶を想起",
       "empty": "このセッションにはまだターンの記録がありません",
       "loadFailed": "コンテキスト履歴を読み込めませんでした",
       "loadOlder": "最大 {n} ターンを読み込む",
       "legacySource": "旧メッセージデータから復元"
     },
-    "compactHint": "コンテキストを圧縮：古い会話を要約して空きを作ります",
-    "compactConfirmTitle": "コンテキストを圧縮しますか？",
-    "compactConfirmMessage": "古い会話を要約して、コンテキストの空きを作ります。",
-    "compactConfirmAction": "圧縮",
     "compactSuccess": "コンテキストの圧縮が完了しました",
-    "compactingContext": "コンテキストを圧縮中…",
     "codexUsage": {
       "warning": "{window}：{percent}% 使用済み・{time}にリセット",
       "warningNoReset": "{window}：{percent}% 使用済み",
