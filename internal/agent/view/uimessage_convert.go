@@ -49,6 +49,7 @@ type uiContentPart struct {
 	Input            any            `json:"input,omitempty"`
 	Output           any            `json:"output,omitempty"`
 	Result           any            `json:"result,omitempty"`
+	IsError          bool           `json:"isError,omitempty"`
 	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
@@ -1085,6 +1086,9 @@ func extractPersistedToolResults(message *uiDecodedModelMessage) []uiExtractedTo
 		if output == nil {
 			output = part.Result
 		}
+		if part.IsError {
+			output = failedToolOutput(output)
+		}
 		results = append(results, uiExtractedToolResult{
 			ToolCallID: strings.TrimSpace(part.ToolCallID),
 			Output:     output,
@@ -1433,6 +1437,36 @@ func stripPersistedAgentTags(text string) string {
 	}
 	stripped := uiMessageAgentTagsRe.ReplaceAllString(text, "")
 	return strings.TrimSpace(uiMessageCollapsedNewlinesRe.ReplaceAllString(stripped, "\n\n"))
+}
+
+// failedToolOutput gives a failed tool result the shape the web client reads
+// failure from: an object carrying isError plus text content, as MCP results
+// already are. A native tool that returns a Go error is recorded as plain text
+// with the flag on the tool-result part (and streams only an error string),
+// so without this the client cannot tell the call failed and renders the
+// tool's success detail for it.
+func failedToolOutput(output any) any {
+	if payload, ok := output.(map[string]any); ok {
+		if failed, _ := payload["isError"].(bool); failed {
+			return payload
+		}
+		marked := make(map[string]any, len(payload)+1)
+		for key, value := range payload {
+			marked[key] = value
+		}
+		marked["isError"] = true
+		return marked
+	}
+	text, ok := output.(string)
+	if !ok && output != nil {
+		if encoded, err := json.Marshal(output); err == nil {
+			text = string(encoded)
+		}
+	}
+	return map[string]any{
+		"isError": true,
+		"content": []any{map[string]any{"type": "text", "text": text}},
+	}
 }
 
 func applyToolResultToUIMessage(message *UIMessage, output any) {
