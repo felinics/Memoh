@@ -1126,8 +1126,8 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 	}
 	// The last lookup that could not read the result: an owner that never
 	// answers leaves lookups that return without a result, a backend that
-	// cannot tell does not. A lookup the deadline cut short counts once it
-	// ran longer than a poll interval, the time a backend that answers takes.
+	// cannot tell does not. Each lookup has a budget of its own; one the
+	// wait's deadline cut short tells nothing.
 	var unreadable error
 	for {
 		select {
@@ -1145,12 +1145,13 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 			if waitCtx.Err() != nil {
 				continue
 			}
-			started := time.Now()
-			result, ok, loadErr := m.loadCommandResult(waitCtx, request.ID)
+			lookupCtx, cancelLookup := context.WithTimeout(waitCtx, m.commandTimeout())
+			result, ok, loadErr := m.loadCommandResult(lookupCtx, request.ID)
+			cancelLookup()
 			if loadErr == nil && ok {
 				return commandResultErrorFor(request, result)
 			}
-			if loadErr == nil || waitCtx.Err() == nil || time.Since(started) >= pollEvery {
+			if waitCtx.Err() == nil {
 				unreadable = loadErr
 			}
 		case <-retry:

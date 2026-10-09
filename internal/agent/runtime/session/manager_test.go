@@ -145,30 +145,44 @@ func (b *gatedCommandResultLoadBackend) LoadCommandResult(ctx context.Context, c
 	return b.DistributedBackend.LoadCommandResult(ctx, commandID)
 }
 
-// A result lookup the backend never answers ends with the acknowledgement
-// deadline, and as the backend's failure: an owner that does not answer is
-// told apart by lookups that do return, without a result.
 func TestRuntimeCommandResultPollingHonorsAcknowledgementDeadline(t *testing.T) {
+	backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
+	manager := NewManager(backend, Options{CommandAckTTL: 40 * time.Millisecond})
+	request := Command{ID: "command-deadline", PayloadHash: commandPayloadHash([]byte(`{"decision":"approve"}`))}
+
+	startedAt := time.Now()
+	err := manager.waitCommandResult(context.Background(), request, make(chan error), manager.commandTimeout())
+	elapsed := time.Since(startedAt)
+	if err == nil || !strings.Contains(err.Error(), "not acknowledged") {
+		t.Fatalf("wait error = %v, want acknowledgement timeout", err)
+	}
+	if elapsed > 250*time.Millisecond {
+		t.Fatalf("blocked result lookup exceeded acknowledgement deadline: %s", elapsed)
+	}
+	select {
+	case <-backend.started:
+	default:
+		t.Fatal("result polling did not reach the backend")
+	}
+}
+
+// A lookup that outlives its own budget is the backend's failure, whether it
+// is the first lookup or one after lookups that found no result yet.
+func TestRuntimeCommandResultPollingReportsALookupOverItsBudget(t *testing.T) {
 	for name, answered := range map[string]int32{"first lookup blocks": 0, "a later lookup blocks": 1} {
 		t.Run(name, func(t *testing.T) {
 			backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
 			backend.answered.Store(answered)
-			manager := NewManager(backend, Options{CommandAckTTL: 200 * time.Millisecond})
-			request := Command{ID: "command-deadline", PayloadHash: commandPayloadHash([]byte(`{"decision":"approve"}`))}
+			manager := NewManager(backend, Options{CommandAckTTL: 50 * time.Millisecond})
 
 			startedAt := time.Now()
-			err := manager.waitCommandResult(context.Background(), request, make(chan error), manager.commandTimeout())
+			err := manager.waitCommandResult(context.Background(), Command{ID: "command-blocked"}, make(chan error), 400*time.Millisecond)
 			elapsed := time.Since(startedAt)
-			if err == nil || errs.FaultOf(err) != apperror.FaultDependency || errors.Is(err, ErrCommandNotAcknowledged) {
+			if errs.FaultOf(err) != apperror.FaultDependency || errors.Is(err, ErrCommandNotAcknowledged) {
 				t.Fatalf("wait error = %v (fault %q), want the backend's failure", err, errs.FaultOf(err))
 			}
-			if elapsed > 450*time.Millisecond {
-				t.Fatalf("blocked result lookup exceeded acknowledgement deadline: %s", elapsed)
-			}
-			select {
-			case <-backend.started:
-			default:
-				t.Fatal("result polling did not reach the backend")
+			if elapsed > 650*time.Millisecond {
+				t.Fatalf("blocked result lookup exceeded the wait: %s", elapsed)
 			}
 		})
 	}
@@ -190,13 +204,15 @@ func (b slowCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ s
 	}
 }
 
-// A lookup the acknowledgement deadline cuts short just after it started is
-// no evidence against a backend that answered every lookup before it.
+// A slow backend that answers every lookup within its budget is no evidence
+// of a failure, though the wait's deadline cuts its last lookup short.
 func TestRuntimeCommandResultPollingIgnoresALookupTheDeadlineCut(t *testing.T) {
-	manager := NewManager(slowCommandResultLoadBackend{delay: 60 * time.Millisecond}, Options{CommandAckTTL: 200 * time.Millisecond})
-	err := manager.waitCommandResult(context.Background(), Command{ID: "command-slow"}, make(chan error), manager.commandTimeout())
-	if !errors.Is(err, ErrCommandNotAcknowledged) {
-		t.Fatalf("wait error = %v (fault %q), want ErrCommandNotAcknowledged", err, errs.FaultOf(err))
+	for _, delay := range []time.Duration{60 * time.Millisecond, 90 * time.Millisecond, 120 * time.Millisecond} {
+		manager := NewManager(slowCommandResultLoadBackend{delay: delay}, Options{CommandAckTTL: 200 * time.Millisecond})
+		err := manager.waitCommandResult(context.Background(), Command{ID: "command-slow"}, make(chan error), 500*time.Millisecond)
+		if !errors.Is(err, ErrCommandNotAcknowledged) {
+			t.Fatalf("lookups of %s: wait error = %v (fault %q), want ErrCommandNotAcknowledged", delay, err, errs.FaultOf(err))
+		}
 	}
 }
 
