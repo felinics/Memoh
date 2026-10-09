@@ -1,7 +1,6 @@
-import { ref, type Ref } from 'vue'
+import type { Ref } from 'vue'
 import type { UIStreamEvent } from '@/composables/api/useChat'
 import { resolveApiErrorMessage } from '@/utils/api-error'
-import { isGuiToolName } from '@/utils/gui-tools'
 import { createInvocationId, stringRecord } from '../chat-list.normalize'
 import { provisionalSessionTitle } from '../chat-list.utils'
 import type { createAssistantStreamRegistry } from './assistant-streams'
@@ -30,14 +29,6 @@ type Decisions = ReturnType<typeof createChatDecisions>
 type Realtime = ReturnType<typeof createChatRealtimeController>
 type SessionList = ReturnType<typeof createSessionList>
 type ChatViews = ReturnType<typeof createChatViewRegistry>
-
-interface GuiToolUseRequest {
-  botId: string
-  sessionId: string
-  toolCallId: string
-  toolName: string
-  seq: number
-}
 
 export interface RuntimeIntegrationDeps {
   currentBotId: Ref<string | null>
@@ -102,12 +93,10 @@ export interface RuntimeIntegrationDeps {
 }
 
 export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
-  const guiToolUseRequested = ref<GuiToolUseRequest | null>(null)
   const deferredAbortByInvocation = new Map<string, {
     runId: string
     botId: string
   }>()
-  let guiRequestSequence = 0
 
   function handleSessionCreated(
     event: { invocation_id: string; session_id: string },
@@ -380,29 +369,6 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       return
     }
 
-    for (const message of currentRun.messages) {
-      if (message.type !== 'tool' || !message.running || !isGuiToolName(message.name)) {
-        continue
-      }
-      const previous = previousRun?.run_id === currentRun.run_id
-        ? previousRun.messages.find(candidate =>
-            candidate.type === 'tool'
-            && (
-              candidate.tool_call_id === message.tool_call_id
-              || (!message.tool_call_id && candidate.id === message.id)
-            ),
-          )
-        : undefined
-      if (previous?.type === 'tool' && previous.running) continue
-      guiToolUseRequested.value = {
-        botId,
-        sessionId,
-        toolCallId: message.tool_call_id?.trim() ?? '',
-        toolName: message.name,
-        seq: ++guiRequestSequence,
-      }
-    }
-
     const wasActive = previousRun?.run_id === currentRun.run_id
       && isRuntimeRunActive(previousRun.status)
     const isActive = isRuntimeRunActive(currentRun.status)
@@ -552,7 +518,6 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
   }
 
   return {
-    guiToolUseRequested,
     handleWebSocketEvent,
     handleProjection,
     prepareSessionRuntime,

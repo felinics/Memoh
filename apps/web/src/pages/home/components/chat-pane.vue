@@ -3021,9 +3021,13 @@ function pendingMatchesDefaultExternalAgent(input: ExternalAgentSessionInput): b
     && chatStore.pendingExternalAgentMatchesInput(input, paneTarget.value)
 }
 
+// The Bot's default External Agent only applies to an empty draft. A pane that
+// already renders a Session keeps it: staging a default there would clear the
+// selection behind the tab the user is looking at.
 watch([defaultExternalAgentUnavailableMessage, defaultExternalAgentLoading, currentBotId, hasExplicitSessionSelection, isActive], ([message, loading, _bot, _explicit, focused]) => {
   if (!focused) return
   clearDefaultExternalAgentComposerError()
+  if (hasRenderedSession.value) return
   if (!message || !currentBotId.value) return
   if (hasExplicitSessionSelection.value) return
   if (!loading) {
@@ -3040,13 +3044,13 @@ watch([defaultExternalAgentSessionInput, defaultExternalAgentLoading, currentBot
     if (!loading) {
       chatStore.cacheDefaultExternalAgentSession(null)
     }
-    if (!loading && !hasExplicitSessionSelection.value && activeIsPendingExternalAgent.value) {
+    if (!loading && !hasExplicitSessionSelection.value && !hasRenderedSession.value && activeIsPendingExternalAgent.value) {
       chatStore.resetToEmptyComposer({}, paneTarget.value)
     }
     return
   }
   chatStore.cacheDefaultExternalAgentSession(input)
-  if (hasExplicitSessionSelection.value) return
+  if (hasExplicitSessionSelection.value || hasRenderedSession.value) return
   clearDefaultExternalAgentComposerError()
   if (pendingMatchesDefaultExternalAgent(input)) return
   chatStore.stageDefaultExternalAgentSession(input, paneTarget.value)

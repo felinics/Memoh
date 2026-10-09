@@ -27,6 +27,16 @@ export interface ChatViewsDeps {
 
 export function createChatViews(deps: ChatViewsDeps) {
   const focusedViewId = ref('chat')
+  // Emitted the moment a draft view becomes a session view. The workspace
+  // repoints that panel's session param synchronously, because the send that
+  // created the session resumes right after and matches the pane against it.
+  const draftPromoted = ref<{
+    botId: string
+    viewId: string
+    sessionId: string
+    seq: number
+  } | null>(null)
+  let draftPromotedSeq = 0
   let runtimeProjectionProbe: (sessionId: string) => RuntimeProjectionState | undefined =
     () => undefined
   let refreshAppliedHook: (
@@ -366,6 +376,12 @@ export function createChatViews(deps: ChatViewsDeps) {
     if (promoted.visiblePanelIds.size > 0 && promoted.sessionId) {
       startSessionRuntime(promoted.botId, promoted.sessionId)
     }
+    draftPromoted.value = {
+      botId: promoted.botId,
+      viewId: target.viewId,
+      sessionId: promoted.sessionId ?? sessionId,
+      seq: ++draftPromotedSeq,
+    }
     return promoted
   }
 
@@ -393,6 +409,7 @@ export function createChatViews(deps: ChatViewsDeps) {
 
   return {
     focusedViewId,
+    draftPromoted,
     projectionVersion,
     chatViews,
     assistantStreams,
@@ -437,6 +454,9 @@ export function createChatViews(deps: ChatViewsDeps) {
     focusChatView,
     promoteDraftChatView,
     configure,
-    reset: () => chatViews.resetAll(),
+    reset: () => {
+      draftPromoted.value = null
+      chatViews.resetAll()
+    },
   }
 }

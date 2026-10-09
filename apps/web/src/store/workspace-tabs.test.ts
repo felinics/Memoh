@@ -159,11 +159,10 @@ const chatStoreMock = vi.hoisted(() => ({
     wasDraft: boolean
     seq: number
   } | null>>,
-  guiToolUseRequested: undefined as unknown as ReturnType<typeof ref<{
+  draftPromoted: undefined as unknown as ReturnType<typeof ref<{
     botId: string
+    viewId: string
     sessionId: string
-    toolCallId: string
-    toolName: string
     seq: number
   } | null>>,
   focusChatView: vi.fn(),
@@ -210,8 +209,8 @@ vi.mock('@/store/chat-list', () => ({
     get userSentInSession() {
       return chatStoreMock.userSentInSession.value
     },
-    get guiToolUseRequested() {
-      return chatStoreMock.guiToolUseRequested.value
+    get draftPromoted() {
+      return chatStoreMock.draftPromoted.value
     },
     get pendingExternalAgentSessionInput() {
       return chatStoreMock.pendingExternalAgentSessionInput.value
@@ -666,13 +665,20 @@ describe('workspace layout store', () => {
     chatStoreMock.applyDraftViewRequest.mockClear()
     chatStoreMock.sessionId = null
     chatStoreMock.hasExplicitSessionSelection = false
-    chatStoreMock.loadingChats = false
+    // Reactive like the real store's ref: the workspace aligns its selection
+    // when initialize() finishes loading.
+    const loadingChats = ref(false)
+    Object.defineProperty(chatStoreMock, 'loadingChats', {
+      configurable: true,
+      get: () => loadingChats.value,
+      set: (value: boolean) => { loadingChats.value = value },
+    })
     chatStoreMock.deletedSession = ref(null)
     chatStoreMock.pendingExternalAgentSessionInput = ref(null)
     chatStoreMock.draftViewRequested = ref(null)
     chatStoreMock.forkedSessionRequested = ref(null)
     chatStoreMock.userSentInSession = ref(null)
-    chatStoreMock.guiToolUseRequested = ref(null)
+    chatStoreMock.draftPromoted = ref(null)
     chatStoreMock.sessions = reactive([]) as typeof chatStoreMock.sessions
     chatStoreMock.knownSessions = reactive([]) as typeof chatStoreMock.knownSessions
     chatStoreMock.knownSessionSummary.mockImplementation((sessionId: string) =>
@@ -724,16 +730,74 @@ describe('workspace layout store', () => {
     }
   }
 
-  function emitGuiToolUse(toolName = 'browser_action') {
-    const prevSeq = chatStoreMock.guiToolUseRequested.value?.seq ?? 0
-    chatStoreMock.guiToolUseRequested.value = {
-      botId: 'bot-1',
-      sessionId: 'session-1',
-      toolCallId: `call-${prevSeq + 1}`,
-      toolName,
-      seq: prevSeq + 1,
-    }
-  }
+  it('keeps a non-chat tab active when the session list changes during a running turn', async () => {
+    // Background session-list refreshes and initialize() re-runs must not pull
+    // the user back to the chat tab of the selected session.
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    chatStoreMock.sessions.push({ id: 's1', title: 'One' })
+    chatStoreMock.sessionId = 's1'
+    chatStoreMock.hasExplicitSessionSelection = true
+    useChatSelectionStore().setSession('s1', { explicitSelection: true })
+    store.openSessionChat({ sessionId: 's1' })
+    await nextTick()
+    expect(store.openBrowserAt('http://localhost:5173/app')).toBe(true)
+    expect(dock.activePanel?.component).toBe('browser')
+
+    chatStoreMock.sessions.push({ id: 's2', title: 'Spawned' })
+    await nextTick()
+    expect(dock.activePanel?.component).toBe('browser')
+
+    chatStoreMock.loadingChats = true
+    await nextTick()
+    chatStoreMock.loadingChats = false
+    await nextTick()
+    expect(dock.activePanel?.component).toBe('browser')
+  })
+
+  it('repoints a promoted draft tab before the send that created its session resumes', async () => {
+    // The pane matches its send against its own session param when it appends
+    // the optimistic turn; that happens right after session creation returns.
+    // The tab must already point at the new session by then, or the send's
+    // scroll pin and turn entrance are dropped.
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openDraftChat({ title: 'Draft', explicitSelection: true })
+    const draft = dock.activePanel!
+    await nextTick()
+
+    chatStoreMock.sessions.push({ id: 'created-1', title: 'New' })
+    chatStoreMock.draftPromoted.value = { botId: 'bot-1', viewId: draft.id, sessionId: 'created-1', seq: 1 }
+    await Promise.resolve()
+
+    expect(draft.params.sessionId).toBe('created-1')
+    expect(dock.activePanel).toBe(draft)
+    expect(store.ephemeralPanels[draft.id]).toBe(true)
+  })
+
+  it('keeps a non-chat tab active when a first send promotes its draft to a session', async () => {
+    // Sending from a draft and switching to a file before the server creates
+    // the session: promotion repoints only the draft tab's content.
+    const store = useWorkspaceTabsStore()
+    const dock = createFakeDock()
+    store.registerApi(dock as never)
+    store.openDraftChat({ title: 'Draft', explicitSelection: true })
+    const draft = dock.activePanel!
+    await nextTick()
+    store.openFilePinned('/data/AGENTS.md')
+    expect(dock.activePanel?.component).toBe('file')
+
+    chatStoreMock.sessions.push({ id: 'created-1', title: 'New' })
+    emitUserSentInSession('created-1', draft.id, true)
+    await nextTick()
+    await nextTick()
+
+    expect(draft.params.sessionId).toBe('created-1')
+    expect(dock.panels.filter(panel => panel.component === 'chat')).toHaveLength(1)
+    expect(dock.activePanel?.component).toBe('file')
+  })
 
   it('opens browser panels and updates their address', () => {
     const store = useWorkspaceTabsStore()
@@ -926,67 +990,6 @@ describe('workspace layout store', () => {
     expect(store.openBrowserAt('localhost:5173/app')).toBe(true)
     expect(dock.panels.filter(p => p.component === 'browser')).toHaveLength(2)
     expect(dock.activePanel?.id).toBe('browser:1')
-  })
-
-  it('opens Desktop in a new right region when a GUI tool starts from a single region', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openDraftChat({ title: 'Session' })
-
-    emitGuiToolUse()
-
-    const display = dock.getPanel('display:1')
-    expect(display?.component).toBe('display')
-    expect(display?.group?.id).not.toBe('group-1')
-    expect(dock.activePanel?.id).toBe('display:1')
-  })
-
-  it('opens Desktop as a tab in the existing right region when a GUI tool starts', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openDraftChat({ title: 'Session' })
-    store.splitGroup('group-1', 'right')
-    const rightGroup = dock.activePanel!.group!
-
-    emitGuiToolUse('computer_observe')
-
-    expect(dock.getPanel('display:1')?.group?.id).toBe(rightGroup.id)
-    expect(dock.groups).toHaveLength(2)
-  })
-
-  it('creates a right Desktop region when the existing second region is below', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openDraftChat({ title: 'Session' })
-    store.splitGroup('group-1', 'below')
-    const belowGroup = dock.activePanel!.group!
-
-    emitGuiToolUse()
-
-    const display = dock.getPanel('display:1')!
-    expect(display.group?.id).not.toBe(belowGroup.id)
-    expect(dock.groups).toHaveLength(3)
-  })
-
-  it('focuses the existing Desktop tab in the right region when a GUI tool starts again', () => {
-    const store = useWorkspaceTabsStore()
-    const dock = createFakeDock()
-    store.registerApi(dock as never)
-    store.openDraftChat({ title: 'Session' })
-    store.splitGroup('group-1', 'right')
-    const rightChat = dock.activePanel!
-    emitGuiToolUse()
-    const display = dock.getPanel('display:1')!
-    rightChat.api.setActive()
-    expect(dock.activePanel?.id).toBe(rightChat.id)
-
-    emitGuiToolUse('computer_action')
-
-    expect(dock.activePanel?.id).toBe(display.id)
-    expect(display.group?.id).toBe(rightChat.group?.id)
   })
 
   it('refuses to open a browser tab for a non-local address', () => {
@@ -1300,25 +1303,28 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
   })
 
-  it('opens an explicit draft from a stale active chat session', async () => {
+  it('keeps the focused chat tab when the selection changes in the background', async () => {
     const selection = useChatSelectionStore()
+    chatStoreMock.sessions.push({ id: 'a', title: 'A' }, { id: 'b', title: 'B' })
     const store = useWorkspaceTabsStore()
     const dock = createFakeDock()
     store.registerApi(dock as never)
 
-    store.openSessionChat({ sessionId: 's1', title: 'Session 1' })
-    expect(dock.activePanel?.params.sessionId).toBe('s1')
+    store.openSessionChatPinned({ sessionId: 'a', title: 'A' })
+    store.openSessionChat({ sessionId: 'b', title: 'B' })
+    const tabB = dock.activePanel!
+    expect(tabB.params.sessionId).toBe('b')
 
-    selection.setSession('s1', { explicitSelection: true })
+    chatStoreMock.sessionId = 'a'
+    chatStoreMock.hasExplicitSessionSelection = true
+    selection.setSession('a', { explicitSelection: true })
     await nextTick()
     chatStoreMock.sessionId = null
-    chatStoreMock.hasExplicitSessionSelection = true
     selection.setSession(null, { explicitSelection: true })
     await nextTick()
 
-    expect(dock.activePanel?.component).toBe('chat')
-    expect(dock.activePanel?.params).toMatchObject({ sessionId: null, explicitSelection: true })
-    expect(chatStoreMock.selectDraft).toHaveBeenLastCalledWith({ explicitSelection: true })
+    expect(dock.activePanel).toBe(tabB)
+    expect(tabB.params.sessionId).toBe('b')
   })
 
   it('does not let restored draft panel params clear an explicit empty composer', async () => {
@@ -1421,14 +1427,16 @@ describe('workspace layout store', () => {
 
     // initialize() auto-picks a newer Untitled while the dock still shows the
     // restored conversation — selection must snap back to the open panel.
+    chatStoreMock.loadingChats = true
+    await nextTick()
     chatStoreMock.sessionId = 'untitled-latest'
     chatStoreMock.hasExplicitSessionSelection = false
-    chatStoreMock.loadingChats = false
     chatStoreMock.sessions.push(
       { id: 'untitled-latest', title: '' },
       { id: 'restored-session', title: 'Restored' },
     )
     useChatSelectionStore().setSession('untitled-latest', { explicitSelection: false })
+    chatStoreMock.loadingChats = false
     await nextTick()
     await flushDraftChatFallback()
 
@@ -1476,11 +1484,13 @@ describe('workspace layout store', () => {
 
     // Simulate initialize() finishing: it writes the latest history item into
     // selection with explicitSelection=false (see bootstrap.ts).
+    chatStoreMock.loadingChats = true
+    await nextTick()
     chatStoreMock.sessionId = 'untitled-1'
     chatStoreMock.hasExplicitSessionSelection = false
-    chatStoreMock.loadingChats = false
     chatStoreMock.sessions.push({ id: 'untitled-1', title: '' })
     useChatSelectionStore().setSession('untitled-1', { explicitSelection: false })
+    chatStoreMock.loadingChats = false
     await nextTick()
     await flushDraftChatFallback()
 
@@ -1496,7 +1506,7 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
   })
 
-  it('still opens a chat tab on explicit session selection after a file/preview restore', async () => {
+  it('does not open a chat tab for a selection written over a restored file workspace', async () => {
     localStorage.setItem('workspace-layout', JSON.stringify({
       'bot-1': {
         layout: {
@@ -1524,7 +1534,8 @@ describe('workspace layout store', () => {
     useChatSelectionStore().setSession('picked-1', { explicitSelection: true })
     await nextTick()
 
-    expect(dock.panels.some(panel => panel.component === 'chat' && panel.params.sessionId === 'picked-1')).toBe(true)
+    expect(dock.panels.some(panel => panel.component === 'chat')).toBe(false)
+    expect(dock.activePanel?.component).toBe('file')
   })
 
   it('does not promote a restored auto-selected native session into explicit selection while chats load', async () => {
@@ -1696,7 +1707,7 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
   })
 
-  it('closes the active deleted chat tab and opens the newly selected session', async () => {
+  it('closes the active deleted chat tab without opening a replacement session', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s1')
     chatStoreMock.sessions.push(
@@ -1712,14 +1723,14 @@ describe('workspace layout store', () => {
 
     emitDeletedSession('s1')
     chatStoreMock.sessions.splice(0, chatStoreMock.sessions.length, { id: 's2', title: 'Next session' })
-    selection.setSession('s2')
-    await nextTick()
+    chatStoreMock.sessionId = null
+    selection.setSession(null)
+    await flushDraftChatFallback()
 
     expect(dock.getPanel(chatPanel.id)).toBeUndefined()
-    const nextChatPanel = dock.panels.find(panel => panel.component === 'chat')
-    expect(nextChatPanel?.params.sessionId).toBe('s2')
-    expect(nextChatPanel?.title).toBe('Next session')
-    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
+    expect(dock.panels.some(panel => panel.params.sessionId === 's2')).toBe(false)
+    expect(dock.activePanel?.component).toBe('chat')
+    expect(dock.activePanel?.params.sessionId ?? null).toBeNull()
   })
 
   it('resets a failed deferred-session chat panel to draft when its composer scope matches', async () => {
@@ -1746,7 +1757,7 @@ describe('workspace layout store', () => {
     expect(chatStoreMock.selectDraft).toHaveBeenCalled()
   })
 
-  it('does not let deleted-tab auto-activation override the fallback session', async () => {
+  it('lets the neighbor tab take over when the focused session is deleted', async () => {
     const selection = useChatSelectionStore()
     selection.setSession('s1')
     chatStoreMock.sessions.push(
@@ -1771,17 +1782,15 @@ describe('workspace layout store', () => {
       { id: 's3', title: 'Neighbor session' },
     )
     emitDeletedSession('s1')
-    chatStoreMock.hasExplicitSessionSelection = false
-    selection.setSession('s2')
+    chatStoreMock.sessionId = null
+    selection.setSession(null)
     await nextTick()
     await nextTick()
 
     expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
-    expect(selection.sessionId).toBe('s2')
-    expect(chatStoreMock.selectSession).not.toHaveBeenCalledWith('s3')
-    expect(dock.activePanel?.params.sessionId).toBe('s2')
-    expect(chatStoreMock.hasExplicitSessionSelection).toBe(false)
-    expect(chatStoreMock.selectDraft).not.toHaveBeenCalled()
+    expect(dock.activePanel?.params.sessionId).toBe('s3')
+    expect(selection.sessionId).toBe('s3')
+    expect(dock.panels.some(panel => panel.params.sessionId === 's2')).toBe(false)
   })
 
   it('keeps open chat tabs when a paginated session list refresh drops their id', async () => {
@@ -1819,10 +1828,13 @@ describe('workspace layout store', () => {
     store.openSessionChat({ sessionId: 's1', title: 'Deleted session' })
     const deletedPanel = dock.panels.find(panel => panel.component === 'chat')!
 
+    // chat-list selectBot clears the previous bot's session.
+    selection.setSession(null)
+    chatStoreMock.sessionId = null
     selection.setBot('bot-without-layout')
     emitDeletedSession('s1', 'bot-1')
     await nextTick()
-    expect(dock.getPanel(deletedPanel.id)).toBeUndefined()
+    expect(dock.panels.some(panel => panel.params.sessionId === 's1')).toBe(false)
 
     selection.setBot('bot-1')
     await nextTick()
@@ -2842,31 +2854,5 @@ describe('workspace layout store', () => {
       expect(dock.activePanel?.id).toBe('browser:1')
     })
 
-    it('never opens or focuses Desktop when a GUI tool starts on mobile', async () => {
-      mobileBreakpoint.setMobile(true)
-      const store = useWorkspaceTabsStore()
-      const dock = createFakeDock()
-      store.registerApi(dock as never)
-      await flushDraftChatFallback()
-
-      // The runtime fires one guiToolUseRequested per GUI tool CALL, so a turn
-      // with several calls used to re-open/re-focus the viewer every time —
-      // on the single stack each focus steals the whole screen from chat.
-      const chatPanelId = dock.activePanel?.id
-      emitGuiToolUse()
-      emitGuiToolUse('computer_observe')
-
-      expect(dock.getPanel('display:1')).toBeUndefined()
-      expect(dock.activePanel?.id).toBe(chatPanelId)
-
-      // Even a Desktop the user opened MANUALLY must not be re-focused by
-      // later tool calls: after going back to chat, chat stays on top.
-      store.openDisplay()
-      expect(dock.activePanel?.id).toBe('display:1')
-      store.activateChatPanel()
-      emitGuiToolUse()
-      expect(dock.activePanel?.id).not.toBe('display:1')
-      expect(dock.activePanel?.id).toBe(chatPanelId)
-    })
   })
 })
