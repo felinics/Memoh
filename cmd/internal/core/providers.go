@@ -1460,6 +1460,7 @@ func (c *lazyLLMClient) resolve(ctx context.Context, botID string) (memprovider.
 		ChatCompletionsCompat: providers.ProviderConfigString(memoryProvider, models.ChatCompletionsCompatConfigKey),
 		Timeout:               c.timeout,
 		PromptCacheTTL:        providers.ProviderConfigString(memoryProvider, "prompt_cache_ttl"),
+		Logger:                c.logger,
 		OnUsage: func(ctx context.Context, operation string, usage sdk.Usage) {
 			c.recordUsage(ctx, botID, memoryModel.ID, operation, usage)
 		},

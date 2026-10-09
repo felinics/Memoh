@@ -23,11 +23,19 @@ func refusedConnection() error {
 }
 
 // The non-streaming loop marks a failed model call as the streaming loop does,
-// leaving the text and the chain of the failure as they were.
+// whether the call was retried until the attempts ran out or failed for good
+// at once, leaving the text and the chain of the failure as they were.
 func TestAgentGenerateMarksModelCallFailures(t *testing.T) {
 	t.Parallel()
 
-	for _, want := range []error{refusedConnection(), rejectedErr()} {
+	for _, tc := range []struct {
+		err  error
+		text string
+	}{
+		{refusedConnection(), "model call retries exhausted: generate: " + refusedConnection().Error()},
+		{rejectedErr(), "generate: " + rejectedErr().Error()},
+	} {
+		want := tc.err
 		provider := &atomicMockProvider{handler: func(int, sdk.Request) (sdk.ModelResult, error) {
 			return sdk.ModelResult{}, want
 		}}
@@ -36,12 +44,13 @@ func TestAgentGenerateMarksModelCallFailures(t *testing.T) {
 			Messages:         []sdk.Message{sdk.UserMessage("task")},
 			Identity:         SessionContext{BotID: "bot-1"},
 			ContextMutations: contextfrag.NewMutationLedger(),
+			Retry:            fastRetry,
 		})
 		if !IsModelCallFailure(err) {
 			t.Fatalf("IsModelCallFailure(%v) = false, want true", err)
 		}
-		if !errors.Is(err, want) || err.Error() != "generate: "+want.Error() {
-			t.Fatalf("Generate() error = %v, want the model call's failure %v", err, want)
+		if !errors.Is(err, want) || err.Error() != tc.text {
+			t.Fatalf("Generate() error = %v, want %s", err, tc.text)
 		}
 	}
 }

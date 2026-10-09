@@ -32,6 +32,7 @@ import (
 	"github.com/felinics/memoh/internal/apperror"
 	messagepkg "github.com/felinics/memoh/internal/chat/message"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/models/modelretry"
 	"github.com/felinics/memoh/internal/testutil/sessionledger"
 )
 
@@ -74,7 +75,7 @@ func charModelCallFailure(t *testing.T, err error) error {
 		Messages:         []sdk.Message{sdk.UserMessage("hello")},
 		Identity:         native.SessionContext{BotID: "char-bot"},
 		ContextMutations: contextfrag.NewMutationLedger(),
-		Retry:            native.RetryConfig{MaxAttempts: 1, FastAttempts: 1},
+		Retry:            modelretry.Config{MaxAttempts: 1, FastAttempts: 1},
 	}) {
 		if event.Type == native.EventError {
 			cause = event.Cause

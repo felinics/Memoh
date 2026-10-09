@@ -522,15 +522,56 @@ func TestDoCompactionEmptyHistoryNoOp(t *testing.T) {
 	}
 }
 
+// failingModel refuses every request with an answer the summarizer does not
+// retry, so each compaction attempt makes exactly one call.
 type failingModel struct{ calls int }
 
 func (f *failingModel) RoundTrip(*http.Request) (*http.Response, error) {
 	f.calls++
 	return &http.Response{
-		StatusCode: http.StatusInternalServerError,
+		StatusCode: http.StatusBadRequest,
 		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"boom"}}`)),
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 	}, nil
+}
+
+// rateLimitedOnce answers the first request with a rate limit and passes the
+// rest to the stub.
+type rateLimitedOnce struct {
+	stub  *stubModel
+	calls int
+}
+
+func (r *rateLimitedOnce) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.calls++
+	if r.calls == 1 {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"slow down","type":"rate_limit_error"}}`)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	}
+	return r.stub.RoundTrip(req)
+}
+
+// A summarizer call the provider rate-limits is made again, and the pass
+// completes with the retried call's summary.
+func TestDoCompactionRetriesRateLimitedSummarizerCall(t *testing.T) {
+	t.Parallel()
+
+	q := &fakeQueries{uncompacted: machineryCorpus(t)}
+	stub := &stubModel{summary: "SUMMARY-RETRIED"}
+	transport := &rateLimitedOnce{stub: stub}
+	cfg := machineryConfig(stub, 450)
+	cfg.HTTPClient = &http.Client{Transport: transport}
+
+	res, err := newMachineryService(q).RunCompactionSync(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("RunCompactionSync: %v", err)
+	}
+	if transport.calls != 2 || res.Status != StatusOK || res.Summary != "SUMMARY-RETRIED" {
+		t.Fatalf("result = %+v after %d calls, want the retried summary after 2", res, transport.calls)
+	}
 }
 
 func TestDoCompactionSummarizerFailureRecordsErrorWithReclaimableClaims(t *testing.T) {

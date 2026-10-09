@@ -20,6 +20,7 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/job"
 	"github.com/felinics/memoh/internal/models"
+	"github.com/felinics/memoh/internal/models/modelretry"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
 )
@@ -295,11 +296,13 @@ func (s *Service) generateTitle(ctx context.Context, userID string, model models
 	)
 
 	maxTokens := titleGenerateMaxTokens
-	result, err := sdkModel.Generate(genCtx, sdk.Request{
+	request := sdk.Request{
 		System:    system,
 		Messages:  messages,
 		MaxTokens: &maxTokens,
-	})
+	}
+	result, err := modelretry.Do(genCtx, s.logger, "agent.title", modelretry.Config{}, modelretry.Retryable,
+		func(ctx context.Context) (sdk.ModelResult, error) { return sdkModel.Generate(ctx, request) })
 	if err != nil {
 		return "", errs.WrapDependency(err, "generate title")
 	}
