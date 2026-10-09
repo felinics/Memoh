@@ -212,6 +212,15 @@ func (f *backlogFixture) backlogRows() (raw, compacted int) {
 // omittedInput collects the current input runs recorded as left out of the
 // provider context: omission mutations and non-selected fragment decisions.
 func (f *backlogFixture) omittedInput() map[string]bool {
+	return f.recordedOmissions("current_input_omitted", true)
+}
+
+// omittedImages collects the inputs whose images runs recorded as shed.
+func (f *backlogFixture) omittedImages() map[string]bool {
+	return f.recordedOmissions("current_input_images_omitted", false)
+}
+
+func (f *backlogFixture) recordedOmissions(kind string, withSelections bool) map[string]bool {
 	f.t.Helper()
 	omitted := map[string]bool{}
 	rows, err := f.pool.Query(f.ctx, `SELECT coalesce(snapshot->'mutations','[]'::jsonb)::text, coalesce(selection_decisions,'[]'::jsonb)::text FROM context_lifecycles WHERE session_id=$1`, f.sessionID)
@@ -227,7 +236,7 @@ func (f *backlogFixture) omittedInput() map[string]bool {
 		var records []struct{ Kind, Detail string }
 		_ = json.Unmarshal([]byte(mutations), &records)
 		for _, record := range records {
-			if record.Kind == "current_input_omitted" {
+			if record.Kind == kind {
 				for _, id := range strings.Split(strings.TrimPrefix(record.Detail, "sources="), ",") {
 					omitted[id] = true
 				}
@@ -239,6 +248,9 @@ func (f *backlogFixture) omittedInput() map[string]bool {
 		}
 		_ = json.Unmarshal([]byte(decisions), &selections)
 		for _, selection := range selections {
+			if !withSelections {
+				break
+			}
 			if selection.Decision != "selected" && selection.SourceID != "" {
 				omitted[selection.SourceID] = true
 			}
@@ -466,7 +478,19 @@ func TestPostgresDiscussImageBacklogKeepsImagesOnTheirMessages(t *testing.T) {
 	if f.assertImagesOnOwnMessages(request, owners) == 0 || len(f.requestImages(request)["image-5 look at this"]) != 1 {
 		t.Fatalf("the newest input lost its image: %v", f.requestImages(request))
 	}
-	f.assertPresentOrOmitted(request, "image-", 6)
+	images, shed := f.requestImages(request), f.omittedImages()
+	for i := range 6 {
+		id := fmt.Sprintf("image-%d", i)
+		if !strings.Contains(request, id+" look at this") {
+			t.Fatalf("%s lost its text to image pressure", id)
+		}
+		if len(images[id+" look at this"]) == 0 && !shed[id] {
+			t.Fatalf("%s lost its image without a record; shed=%v", id, shed)
+		}
+	}
+	if len(images) < 2 {
+		t.Fatalf("shedding must stop once the history fits, but only %v kept images", images)
+	}
 	f.appendMessage("next-round", "next-round small message")
 	request = f.answer("next round", "next-round small message")
 	f.assertImagesOnOwnMessages(request, owners)
@@ -492,8 +516,11 @@ func TestPostgresDiscussOversizedImageInputFailsOnceThenNextMessageIsAnswered(t 
 	f.appendMessage("next-round", "next-round small message")
 	request := f.answer("next round", "next-round small message")
 	f.assertImagesOnOwnMessages(request, owners)
-	if !strings.Contains(request, "album of six") && !f.omittedInput()["album"] {
-		t.Fatal("the demoted album left the provider context without a record")
+	if !strings.Contains(request, "album of six") {
+		t.Fatal("the demoted album lost its text to its images")
+	}
+	if len(f.requestImages(request)["album of six"]) < len(hashes) && !f.omittedImages()["album"] {
+		t.Fatal("the demoted album shed images without a record")
 	}
 	t.Logf("summary_calls=%d provider_calls=%d", f.summaries.Load(), f.modelCalls.Load())
 }

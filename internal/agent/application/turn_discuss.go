@@ -253,7 +253,7 @@ func (s *Service) pumpDiscussNative(ctx context.Context, cmd turn.StartTurnComma
 	}
 	runConfig.ContextSourceFrags = s.collectDiscussSourceFrags(ctx, runConfig, admitted, currentImages, sourceImages)
 	for _, frag := range runConfig.ContextSourceFrags {
-		if frag.Provenance.Collector == "discuss_context" &&
+		if frag.Provenance.Collector == discussContextCollector &&
 			(frag.Kind == contextfrag.KindCurrentUserMessage || len(sourceImages[frag.Provenance.SourceID]) > 0) {
 			if message := contextfrag.FragMessage(frag); message != nil {
 				runConfig.Messages[frag.Provenance.Index] = *message
@@ -444,6 +444,9 @@ func (s *Service) persistDiscussTerminalSnapshot(
 		ReasoningTiming:  reasoningTiming,
 	})
 }
+
+// discussContextCollector names the collector of composed discuss messages.
+const discussContextCollector = "discuss_context"
 
 // discussImageParts inlines the batch's new images, each on the admitted
 // message it arrived with; a ref naming no message rides on the current input.

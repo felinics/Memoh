@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 
 	sdk "github.com/felinics/twilight/sdk"
 
@@ -227,7 +229,7 @@ func (l chatHistoryLayout) replaceSourceFrags(ctx context.Context, old, cfg nati
 
 func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.StartTurnCommand, admitted []turn.DiscussMessage, modelID string, cfg native.RunConfig) (native.RunConfig, bool, error) {
 	plan := cfg.ContextManifest.BudgetPlan
-	if s.effectiveSyncCompactionMode() == syncCompactionModeOff || plan == nil || ctx.Err() != nil {
+	if plan == nil || ctx.Err() != nil {
 		return cfg, false, nil
 	}
 	batch := make(map[string]turn.ContextMessageSource)
@@ -237,6 +239,10 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 			batch[message.Source.ID] = *message.Source
 			newestTokens = discussMessageTokens(message)
 		}
+	}
+	cfg, shed := shedOlderBatchImages(cfg, batch, plan.HistoryBudget)
+	if s.effectiveSyncCompactionMode() == syncCompactionModeOff {
+		return cfg, shed, nil
 	}
 	type batchInput struct {
 		source turn.ContextMessageSource
@@ -266,7 +272,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	originalHistory := max(0, cmd.DiscussContextTokens-newestTokens)
 	pressure = max(pressure, contextfrag.ProviderBudgetTokensFromBytes(int(contextfrag.BudgetBytesForTokens(originalHistory))))
 	if pressure <= available || available <= 0 {
-		return cfg, false, nil
+		return cfg, shed, nil
 	}
 	// Older input of the batch stays raw while it fits, leaving a tenth of the
 	// allowance for the summary of what does not; only the rest is compacted.
@@ -278,7 +284,54 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	}
 	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: protected}, pressure, historyBudget, modelID)
 	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
-		return cfg, false, nil
+		return cfg, shed, nil
 	}
 	return cfg, false, native.ErrContextRecompose
+}
+
+// shedOlderBatchImages strips the images of older input of the batch, oldest
+// first, until the history fits the budget. An image costs far more than its
+// message's text and no summary can carry it, so the text survives its
+// images; the newest input keeps its own. It reports whether any were shed.
+func shedOlderBatchImages(cfg native.RunConfig, batch map[string]turn.ContextMessageSource, historyBudget int) (native.RunConfig, bool) {
+	excess := -historyBudget
+	for _, frag := range cfg.ContextSourceFrags {
+		if frag.Slot != contextfrag.SlotSystem && frag.Slot != contextfrag.SlotCurrentUser && frag.Kind != contextfrag.KindCurrentUserMessage {
+			excess += contextfrag.ResolveProviderBudgetFragTokens(frag)
+		}
+	}
+	var shed []string
+	frags, messages := slices.Clone(cfg.ContextSourceFrags), slices.Clone(cfg.Messages)
+	for i, frag := range frags {
+		if excess <= 0 {
+			break
+		}
+		msg := contextfrag.FragMessage(frag)
+		if _, inBatch := batch[frag.Provenance.SourceID]; !inBatch || msg == nil || msg.Role != sdk.MessageRoleUser ||
+			frag.Kind != contextfrag.KindConversationEvent || frag.Provenance.Collector != discussContextCollector {
+			continue
+		}
+		text := *msg
+		text.Content = slices.DeleteFunc(slices.Clone(msg.Content), func(part sdk.MessagePart) bool {
+			_, image := part.(sdk.ImagePart)
+			return image
+		})
+		if len(text.Content) == len(msg.Content) {
+			continue
+		}
+		frags[i] = contextfrag.RebuildFragMessage(frag, text)
+		excess -= contextfrag.ResolveProviderBudgetFragTokens(frag) - contextfrag.ResolveProviderBudgetFragTokens(frags[i])
+		if index := frag.Provenance.Index; index >= 0 && index < len(messages) {
+			messages[index] = text
+		}
+		shed = append(shed, frag.Provenance.SourceID)
+	}
+	if len(shed) == 0 {
+		return cfg, false
+	}
+	cfg.ContextSourceFrags, cfg.Messages = frags, messages
+	if cfg.ContextMutations != nil {
+		cfg.ContextMutations.Record(contextfrag.MutationCurrentInputImagesOmitted, "sources="+strings.Join(shed, ","))
+	}
+	return cfg.RefreshContextFrag(), true
 }
