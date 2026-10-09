@@ -15,6 +15,8 @@ import (
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/agent/turn"
 	chatview "github.com/felinics/memoh/internal/agent/view"
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
 )
 
 const (
@@ -93,6 +95,8 @@ type blockingCommandResultLoadBackend struct {
 	DistributedBackend
 	started chan struct{}
 	once    sync.Once
+	// answered is how many reads find no result before the reads block.
+	answered atomic.Int32
 }
 
 type closeErrorBackend struct {
@@ -124,6 +128,9 @@ type gatedCommandResultLoadBackend struct {
 
 func (b *blockingCommandResultLoadBackend) LoadCommandResult(ctx context.Context, _ string) (Command, bool, error) {
 	b.once.Do(func() { close(b.started) })
+	if b.answered.Add(-1) >= 0 {
+		return Command{}, false, nil
+	}
 	<-ctx.Done()
 	return Command{}, false, ctx.Err()
 }
@@ -138,24 +145,43 @@ func (b *gatedCommandResultLoadBackend) LoadCommandResult(ctx context.Context, c
 	return b.DistributedBackend.LoadCommandResult(ctx, commandID)
 }
 
+// A result lookup the backend never answers ends with the acknowledgement
+// deadline, and as the backend's failure: an owner that does not answer is
+// told apart by lookups that do return, without a result.
 func TestRuntimeCommandResultPollingHonorsAcknowledgementDeadline(t *testing.T) {
-	backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
-	manager := NewManager(backend, Options{CommandAckTTL: 40 * time.Millisecond})
-	request := Command{ID: "command-deadline", PayloadHash: commandPayloadHash([]byte(`{"decision":"approve"}`))}
+	for name, answered := range map[string]int32{"first lookup blocks": 0, "a later lookup blocks": 1} {
+		t.Run(name, func(t *testing.T) {
+			backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
+			backend.answered.Store(answered)
+			manager := NewManager(backend, Options{CommandAckTTL: 200 * time.Millisecond})
+			request := Command{ID: "command-deadline", PayloadHash: commandPayloadHash([]byte(`{"decision":"approve"}`))}
 
-	startedAt := time.Now()
-	err := manager.waitCommandResult(context.Background(), request, make(chan error), manager.commandTimeout())
-	elapsed := time.Since(startedAt)
-	if err == nil || !strings.Contains(err.Error(), "not acknowledged") {
-		t.Fatalf("wait error = %v, want acknowledgement timeout", err)
+			startedAt := time.Now()
+			err := manager.waitCommandResult(context.Background(), request, make(chan error), manager.commandTimeout())
+			elapsed := time.Since(startedAt)
+			if err == nil || errs.FaultOf(err) != apperror.FaultDependency || errors.Is(err, ErrCommandNotAcknowledged) {
+				t.Fatalf("wait error = %v (fault %q), want the backend's failure", err, errs.FaultOf(err))
+			}
+			if elapsed > 450*time.Millisecond {
+				t.Fatalf("blocked result lookup exceeded acknowledgement deadline: %s", elapsed)
+			}
+			select {
+			case <-backend.started:
+			default:
+				t.Fatal("result polling did not reach the backend")
+			}
+		})
 	}
-	if elapsed > 250*time.Millisecond {
-		t.Fatalf("blocked result lookup exceeded acknowledgement deadline: %s", elapsed)
-	}
-	select {
-	case <-backend.started:
-	default:
-		t.Fatal("result polling did not reach the backend")
+}
+
+// An owner that never answers leaves lookups that return without a result.
+func TestRuntimeCommandResultPollingReportsAnUnansweredCommand(t *testing.T) {
+	backend := &blockingCommandResultLoadBackend{started: make(chan struct{})}
+	backend.answered.Store(1 << 20)
+	manager := NewManager(backend, Options{CommandAckTTL: 40 * time.Millisecond})
+	err := manager.waitCommandResult(context.Background(), Command{ID: "command-unanswered"}, make(chan error), manager.commandTimeout())
+	if !errors.Is(err, ErrCommandNotAcknowledged) {
+		t.Fatalf("wait error = %v, want ErrCommandNotAcknowledged", err)
 	}
 }
 

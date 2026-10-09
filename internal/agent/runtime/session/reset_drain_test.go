@@ -175,23 +175,28 @@ func TestCommandResultKeepsDependencyFault(t *testing.T) {
 	}
 }
 
-// The owner of a run is this process and the reset's command fails reading
-// its own result from the runtime backend.
+// The owner of a run is this process and the reset's command cannot reach the
+// runtime backend: reading its own result, or the time it runs until.
 func TestBeginHistoryResetLocalCommandBackendFailure(t *testing.T) {
 	t.Parallel()
-	backend := newFailingClockBackend()
-	runs := newFakeResetLedger()
-	manager := NewManager(backend, Options{
-		OwnerID: "owner-reset-command", StateTTL: time.Minute, OwnerLeaseTTL: time.Second,
-		Ledger: runs, Fence: &fakeFence{},
-	})
-	t.Cleanup(func() { _ = manager.Close() })
-	admitResetRaceRun(t, manager)
+	for name, reads := range map[string]int64{"result": 1, "deadline": 2} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			backend := newFailingClockBackend()
+			runs := newFakeResetLedger()
+			manager := NewManager(backend, Options{
+				OwnerID: "owner-reset-command", StateTTL: time.Minute, OwnerLeaseTTL: time.Second,
+				Ledger: runs, Fence: &fakeFence{},
+			})
+			t.Cleanup(func() { _ = manager.Close() })
+			admitResetRaceRun(t, manager)
 
-	backend.failAfter.Store(1)
-	_, _, err := manager.BeginSessionHistoryReset(context.Background(), testBotID, testSessionID)
-	backend.failAfter.Store(-1)
-	assertHistoryResetDrainFailure(t, err, false, runs)
+			backend.failAfter.Store(reads)
+			_, _, err := manager.BeginSessionHistoryReset(context.Background(), testBotID, testSessionID)
+			backend.failAfter.Store(-1)
+			assertHistoryResetDrainFailure(t, err, false, runs)
+		})
+	}
 }
 
 // failingRunRefBackend is the Redis backend unable to read a run's route.

@@ -119,7 +119,7 @@ func (m *Manager) ValidateRunOwnership(ctx context.Context, handle RunHandle) er
 	if m.distributed == nil {
 		snapshot, ok, err := m.backend.Load(ctx, key)
 		if err != nil {
-			return fmt.Errorf("validate runtime ownership: %w", err)
+			return errs.WrapDependency(err, "validate runtime ownership")
 		}
 		if !ok || !runMatchesHandle(snapshot.CurrentRunView, handle) || !m.runOwnerMatches(snapshot.CurrentRunView) || !isActiveRunStatus(snapshot.CurrentRunView.Status) {
 			return ErrRunOwnershipLost
@@ -134,7 +134,7 @@ func (m *Manager) ValidateRunOwnership(ctx context.Context, handle RunHandle) er
 		if errors.Is(err, ErrRunOwnershipLost) {
 			return ErrRunOwnershipLost
 		}
-		return fmt.Errorf("validate runtime ownership: %w", err)
+		return errs.WrapDependency(err, "validate runtime ownership")
 	}
 	// A Redis round trip can consume the final part of the conservative local
 	// lease window. Recheck after the atomic server-side decision before any
@@ -851,7 +851,7 @@ func (m *Manager) activeCommandContext(ctx context.Context, cmd Command) (contex
 	lookupElapsed := time.Since(lookupStarted)
 	if err != nil {
 		lookupCancel()
-		return nil, func() {}, fmt.Errorf("load runtime command time: %w", err)
+		return nil, func() {}, errs.WrapDependency(err, "load runtime command time")
 	}
 	expiresAt := cmd.ExpiresAt
 	if expiresAt.IsZero() || (!cmd.CreatedAt.IsZero() && !expiresAt.After(cmd.CreatedAt)) {
@@ -887,7 +887,7 @@ func (m *Manager) applyRoutedCommand(ctx context.Context, cmd Command) error {
 	}
 	snapshot, ok, err := m.backend.Load(commandCtx, Key{BotID: cmd.BotID, SessionID: cmd.SessionID})
 	if err != nil {
-		return err
+		return errs.WrapDependency(err, "load runtime snapshot")
 	}
 	if !ok || snapshot.CurrentRunView == nil {
 		return ErrCommandTargetNotActive
@@ -1120,8 +1120,9 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 		retry = retryTicker.C
 		defer retryTicker.Stop()
 	}
-	// The last poll that could not read the result: an owner that never
-	// answers is not the same as a backend that cannot tell.
+	// The last lookup that could not read the result, including one the
+	// deadline cut short: an owner that never answers leaves lookups that
+	// return without a result, a backend that cannot tell does not.
 	var unreadable error
 	for {
 		select {
@@ -1136,13 +1137,14 @@ func (m *Manager) waitCommandResult(ctx context.Context, request Command, pendin
 			}
 			return ErrCommandNotAcknowledged
 		case <-poll.C:
+			if waitCtx.Err() != nil {
+				continue
+			}
 			result, ok, loadErr := m.loadCommandResult(waitCtx, request.ID)
 			if loadErr == nil && ok {
 				return commandResultErrorFor(request, result)
 			}
-			if waitCtx.Err() == nil {
-				unreadable = loadErr
-			}
+			unreadable = loadErr
 		case <-retry:
 			if err := m.distributed.PublishCommand(waitCtx, retryOwnerID, request); err != nil && waitCtx.Err() == nil {
 				m.logger.DebugContext(ctx, "retry runtime command publish failed", slog.Any("error", err), slog.String("command_id", request.ID))
