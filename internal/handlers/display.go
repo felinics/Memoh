@@ -209,9 +209,9 @@ func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "display session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
 	if h.displayService == nil || !h.displayService.CloseSession(botID, sessionID) {
 		return echo.NewHTTPError(http.StatusNotFound, "display session not found")

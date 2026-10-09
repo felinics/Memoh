@@ -21,6 +21,7 @@ import (
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/workspace"
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -410,9 +411,9 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	rawPath := c.QueryParam("path")
-	if strings.TrimSpace(rawPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+	rawPath, err := httpx.RequiredQuery(c, "path")
+	if err != nil {
+		return err
 	}
 
 	containerPath, err := resolveContainerPath(rawPath)
@@ -434,7 +435,7 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read file")
+		return errs.Wrap(err, "read file")
 	}
 
 	return c.JSON(http.StatusOK, FSReadResponse{
@@ -459,9 +460,9 @@ func (h *ContainerdHandler) FSRead(c echo.Context) error {
 // @Failure 503 {object} server.Problem
 // @Router /bots/{bot_id}/container/fs/download [get].
 func (h *ContainerdHandler) FSDownload(c echo.Context) error {
-	rawPath := c.QueryParam("path")
-	if strings.TrimSpace(rawPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+	rawPath, err := httpx.RequiredQuery(c, "path")
+	if err != nil {
+		return err
 	}
 
 	containerPath, err := resolveContainerPath(rawPath)
@@ -505,7 +506,7 @@ func (h *ContainerdHandler) FSDownload(c echo.Context) error {
 
 	data, err := io.ReadAll(rc)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read file")
+		return errs.Wrap(err, "read file")
 	}
 
 	fileName := path.Base(containerPath)
@@ -610,7 +611,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 		header.Name = strings.TrimRight(archivePath, "/") + "/"
 		header.Size = 0
 		if err := tw.WriteHeader(header); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive directory: %v", err))
+			return errs.Wrap(err, "archive directory")
 		}
 		entries, err := client.ListDirAll(ctx, containerPath, false)
 		if err != nil {
@@ -633,7 +634,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 	header.Typeflag = tar.TypeReg
 	header.Mode = 0o644
 	if err := tw.WriteHeader(header); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive file: %v", err))
+		return errs.Wrap(err, "archive file")
 	}
 	rc, err := client.ReadRaw(ctx, containerPath)
 	if err != nil {
@@ -641,7 +642,7 @@ func (h *ContainerdHandler) writeArchiveEntry(ctx context.Context, client *bridg
 	}
 	defer func() { _ = rc.Close() }()
 	if _, err := io.Copy(tw, rc); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("archive copy: %v", err))
+		return errs.Wrap(err, "archive copy")
 	}
 	return nil
 }
@@ -668,7 +669,7 @@ func (h *ContainerdHandler) FSWrite(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 
 	containerPath, err := resolveContainerPath(req.Path)
@@ -730,7 +731,7 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 	}
 	destPath := strings.TrimSpace(c.FormValue("path"))
 	if destPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 
 	containerPath, err := resolveContainerPath(destPath)
@@ -746,11 +747,11 @@ func (h *ContainerdHandler) FSUpload(c echo.Context) error {
 
 	file, err := c.FormFile("file")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "file is required")
+		return apperror.FieldRequired("file")
 	}
 	src, err := file.Open()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "open uploaded file")
 	}
 	defer func() { _ = src.Close() }()
 
@@ -788,7 +789,7 @@ func (h *ContainerdHandler) FSMkdir(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 
 	containerPath, err := resolveContainerPath(req.Path)
@@ -839,7 +840,7 @@ func (h *ContainerdHandler) FSDelete(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 
 	containerPath, err := resolveContainerPath(req.Path)
@@ -886,8 +887,11 @@ func (h *ContainerdHandler) FSRename(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return err
 	}
-	if strings.TrimSpace(req.OldPath) == "" || strings.TrimSpace(req.NewPath) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "oldPath and newPath are required")
+	if strings.TrimSpace(req.OldPath) == "" {
+		return apperror.FieldRequired("oldPath")
+	}
+	if strings.TrimSpace(req.NewPath) == "" {
+		return apperror.FieldRequired("newPath")
 	}
 
 	oldPath, err := resolveContainerPath(req.OldPath)
@@ -936,7 +940,7 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Path) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "path is required")
+		return apperror.FieldRequired("path")
 	}
 	containerPath, err := resolveContainerPath(req.Path)
 	if err != nil {
@@ -994,7 +998,7 @@ func (h *ContainerdHandler) FSExtract(c echo.Context) error {
 func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destination string) (int, int, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return 0, 0, echo.NewHTTPError(http.StatusInternalServerError, "failed to read archive")
+		return 0, 0, errs.Wrap(err, "read archive")
 	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -1027,7 +1031,7 @@ func extractZip(ctx context.Context, client *bridge.Client, r io.Reader, destina
 			return files, dirs, fsHTTPError(writeErr)
 		}
 		if closeErr != nil {
-			return files, dirs, echo.NewHTTPError(http.StatusInternalServerError, closeErr.Error())
+			return files, dirs, errs.Wrap(closeErr, "close zip entry")
 		}
 		if written >= 0 {
 			files++

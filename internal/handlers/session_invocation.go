@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/agent/runtime/session/ledger"
 	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/httpx"
 )
 
 // sessionInvocationLookup is the read-only slice of the session run ledger
@@ -61,17 +61,17 @@ func (h *SessionHandler) GetSessionInvocation(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
 	}
-	sessionID := strings.TrimSpace(c.Param("session_id"))
-	if sessionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "session id is required")
+	sessionID, err := httpx.RequiredParam(c, "session_id")
+	if err != nil {
+		return err
 	}
-	invocationID := strings.TrimSpace(c.Param("invocation_id"))
-	if invocationID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "invocation id is required")
+	invocationID, err := httpx.RequiredParam(c, "invocation_id")
+	if err != nil {
+		return err
 	}
 	// Same gate as reading the session itself, so a caller who cannot read
 	// the session learns nothing more here than from GetSession.

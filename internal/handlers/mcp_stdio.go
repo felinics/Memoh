@@ -20,6 +20,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/felinics/memoh/internal/apperror"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	mcptools "github.com/felinics/memoh/internal/mcp"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
@@ -433,11 +436,11 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.Command) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "command is required")
+		return apperror.FieldRequired("command")
 	}
 	ctx := c.Request().Context()
 	if err := h.manager.EnsureRunning(ctx, botID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "start workspace runtime")
 	}
 	containerID, err := h.manager.ContainerID(ctx, botID)
 	if err != nil {
@@ -460,7 +463,7 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	// list — without burning the session's handshake on memoh's capabilities.
 	probeSess, err := h.startContainerdMCPCommandSession(ctx, botID, containerID, req, nil, defaultStdioSDKClient())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "probe stdio mcp command")
 	}
 	tools := h.probeMCPTools(ctx, probeSess, botID, strings.TrimSpace(req.Name))
 	probeSess.Close()
@@ -521,9 +524,9 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	connectionID := strings.TrimSpace(c.Param("connection_id"))
-	if connectionID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "connection_id is required")
+	connectionID, err := httpx.RequiredParam(c, "connection_id")
+	if err != nil {
+		return err
 	}
 	h.mcpStdioMu.Lock()
 	record := h.mcpStdioSess[connectionID]
@@ -545,7 +548,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 
 	sess, err := h.ensureStdioSession(c.Request().Context(), record, &req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "open stdio mcp session")
 	}
 	select {
 	case <-sess.done:

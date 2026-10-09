@@ -12,6 +12,8 @@ import (
 	"github.com/felinics/memoh/internal/acl"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/channel/identities"
+	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	identitypkg "github.com/felinics/memoh/internal/identity"
 )
 
@@ -61,7 +63,7 @@ func (h *ACLHandler) ListRules(c echo.Context) error {
 	}
 	items, err := h.service.ListRules(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list rules")
 	}
 	return c.JSON(http.StatusOK, acl.ListRulesResponse{Items: items})
 }
@@ -109,9 +111,9 @@ func (h *ACLHandler) UpdateRule(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
 		return err
 	}
-	ruleID := strings.TrimSpace(c.Param("rule_id"))
-	if ruleID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "rule_id is required")
+	ruleID, err := httpx.RequiredParam(c, "rule_id")
+	if err != nil {
+		return err
 	}
 	var req acl.UpdateRuleRequest
 	if err := c.Bind(&req); err != nil {
@@ -139,12 +141,12 @@ func (h *ACLHandler) DeleteRule(c echo.Context) error {
 	if _, _, err := h.requireManageAccess(c); err != nil {
 		return err
 	}
-	ruleID := strings.TrimSpace(c.Param("rule_id"))
-	if ruleID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "rule_id is required")
+	ruleID, err := httpx.RequiredParam(c, "rule_id")
+	if err != nil {
+		return err
 	}
 	if err := h.service.DeleteRule(c.Request().Context(), ruleID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete rule")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -166,7 +168,7 @@ func (h *ACLHandler) GetDefaultEffect(c echo.Context) error {
 	}
 	effect, err := h.service.GetDefaultEffect(c.Request().Context(), botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get default effect")
 	}
 	return c.JSON(http.StatusOK, acl.DefaultEffectResponse{DefaultEffect: effect})
 }
@@ -195,7 +197,7 @@ func (h *ACLHandler) SetDefaultEffect(c echo.Context) error {
 		if errors.Is(err, acl.ErrInvalidEffect) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "set default effect")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -218,7 +220,7 @@ func (h *ACLHandler) SearchChannelIdentities(c echo.Context) error {
 	}
 	items, err := h.identityService.Search(c.Request().Context(), strings.TrimSpace(c.QueryParam("q")), parseLimit(c.QueryParam("limit")))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "search channel identities")
 	}
 	result := make([]acl.ChannelIdentityCandidate, 0, len(items))
 	for _, item := range items {
@@ -255,7 +257,7 @@ func (h *ACLHandler) ListObservedConversations(c echo.Context) error {
 	}
 	items, err := h.service.ListObservedConversationsByChannelIdentity(c.Request().Context(), botID, channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list observed conversations by channel identity")
 	}
 	return c.JSON(http.StatusOK, acl.ObservedConversationCandidateListResponse{Items: items})
 }
@@ -276,13 +278,13 @@ func (h *ACLHandler) ListObservedConversationsByChannelType(c echo.Context) erro
 	if err != nil {
 		return err
 	}
-	channelType := strings.TrimSpace(c.Param("channel_type"))
-	if channelType == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "channel_type is required")
+	channelType, err := httpx.RequiredParam(c, "channel_type")
+	if err != nil {
+		return err
 	}
 	items, err := h.service.ListObservedConversationsByChannelType(c.Request().Context(), botID, channelType)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list observed conversations by channel type")
 	}
 	return c.JSON(http.StatusOK, acl.ObservedConversationCandidateListResponse{Items: items})
 }
@@ -292,9 +294,9 @@ func (h *ACLHandler) requireManageAccess(c echo.Context) (string, string, error)
 	if err != nil {
 		return "", "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", "", err
 	}
 	if _, err := AuthorizeBotAccess(c.Request().Context(), h.botService, h.accountService, actorID, botID); err != nil {
 		return "", "", err
@@ -308,7 +310,7 @@ func (*ACLHandler) mapRuleError(err error) error {
 		errors.Is(err, acl.ErrInvalidEffect) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	return errs.Wrap(err, "map rule error")
 }
 
 func parseLimit(raw string) int {

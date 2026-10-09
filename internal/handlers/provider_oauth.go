@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/auth"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/oauthctx"
 	"github.com/felinics/memoh/internal/providers"
 )
@@ -38,9 +39,9 @@ func (h *ProviderOAuthHandler) Register(e *echo.Echo) {
 // @Failure 404 {object} server.Problem
 // @Router /providers/{id}/oauth/authorize [get].
 func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
-	providerID := strings.TrimSpace(c.Param("id"))
-	if providerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	providerID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	ctx := c.Request().Context()
 	if userID, err := auth.UserIDFromContext(c); err == nil {
@@ -62,9 +63,9 @@ func (h *ProviderOAuthHandler) Authorize(c echo.Context) error {
 // @Failure 404 {object} server.Problem
 // @Router /providers/{id}/oauth/poll [post].
 func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
-	providerID := strings.TrimSpace(c.Param("id"))
-	if providerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	providerID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	ctx := c.Request().Context()
 	if userID, err := auth.UserIDFromContext(c); err == nil {
@@ -86,9 +87,9 @@ func (h *ProviderOAuthHandler) Poll(c echo.Context) error {
 // @Failure 404 {object} server.Problem
 // @Router /providers/{id}/oauth/status [get].
 func (h *ProviderOAuthHandler) Status(c echo.Context) error {
-	providerID := strings.TrimSpace(c.Param("id"))
-	if providerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	providerID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	ctx := c.Request().Context()
 	if userID, err := auth.UserIDFromContext(c); err == nil {
@@ -110,9 +111,9 @@ func (h *ProviderOAuthHandler) Status(c echo.Context) error {
 // @Failure 404 {object} server.Problem
 // @Router /providers/{id}/oauth/token [delete].
 func (h *ProviderOAuthHandler) Revoke(c echo.Context) error {
-	providerID := strings.TrimSpace(c.Param("id"))
-	if providerID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "id is required")
+	providerID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	ctx := c.Request().Context()
 	if userID, err := auth.UserIDFromContext(c); err == nil {
@@ -133,13 +134,13 @@ func (h *ProviderOAuthHandler) Revoke(c echo.Context) error {
 // @Failure 400 {object} server.Problem
 // @Router /providers/oauth/callback [get].
 func (h *ProviderOAuthHandler) Callback(c echo.Context) error {
-	code := strings.TrimSpace(c.QueryParam("code"))
-	state := strings.TrimSpace(c.QueryParam("state"))
-	if code == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "code is required")
+	code, err := httpx.RequiredQuery(c, "code")
+	if err != nil {
+		return err
 	}
-	if state == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "state is required")
+	state, err := httpx.RequiredQuery(c, "state")
+	if err != nil {
+		return err
 	}
 	providerID, err := h.service.HandleOAuthCallback(c.Request().Context(), state, code)
 	if err != nil {

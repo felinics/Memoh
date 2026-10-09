@@ -12,6 +12,7 @@ import (
 	"github.com/felinics/memoh/internal/accounts"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/identity"
 )
 
@@ -41,7 +42,7 @@ func AuthorizeBotAccessWithPermission(ctx context.Context, botService *bots.Serv
 	}
 	isAdmin, err := accountService.IsAdmin(ctx, channelIdentityID)
 	if err != nil {
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return bots.Bot{}, errs.Wrap(err, "check bot admin")
 	}
 	bot, err := botService.AuthorizeAccessWithPermission(ctx, channelIdentityID, botID, isAdmin, requiredPermission)
 	if err != nil {
@@ -51,7 +52,7 @@ func AuthorizeBotAccessWithPermission(ctx context.Context, botService *bots.Serv
 		if errors.Is(err, bots.ErrBotAccessDenied) {
 			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
 		}
-		return bots.Bot{}, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return bots.Bot{}, errs.Wrap(err, "authorize bot access")
 	}
 	return bot, nil
 }

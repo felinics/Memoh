@@ -10,9 +10,11 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/userruntime"
 	"github.com/felinics/memoh/internal/workspace"
@@ -165,7 +167,7 @@ func (h *BotRemoteRuntimeHandler) SetPrimary(c echo.Context) error {
 		return err
 	}
 	if strings.TrimSpace(req.TargetID) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "target_id is required")
+		return apperror.FieldRequired("target_id")
 	}
 	if err := h.service.SetPrimary(c.Request().Context(), botID, req.TargetID); err != nil {
 		return workspaceTargetHTTPError(err)
@@ -259,9 +261,9 @@ func (h *BotRemoteRuntimeHandler) requirePermission(c echo.Context, permission s
 	if err != nil {
 		return "", err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	if botID == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "bot_id is required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return "", err
 	}
 	if _, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.bots, h.accounts, identityID, botID, permission); err != nil {
 		return "", err

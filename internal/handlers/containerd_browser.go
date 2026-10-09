@@ -194,7 +194,7 @@ func (h *ContainerdHandler) CreateBrowserSession(c echo.Context) error {
 
 	ctx := c.Request().Context()
 	if _, err := h.manager.NativeMCPClient(ctx, botID); err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
+		return errs.WrapDependency(err, "connect workspace")
 	}
 
 	session, err := h.browserSessions.create(botID, req.Port, time.Now())
@@ -274,7 +274,7 @@ func (h *ContainerdHandler) HandleBrowserProxy(c echo.Context) error {
 	}
 	client, err := h.manager.NativeMCPClient(c.Request().Context(), session.BotID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "workspace is not reachable: "+err.Error())
+		return errs.WrapDependency(err, "connect workspace")
 	}
 
 	proxy := newBrowserReverseProxy(client, session.Port)

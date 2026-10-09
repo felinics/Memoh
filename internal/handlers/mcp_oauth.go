@@ -11,8 +11,10 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/bots"
 	"github.com/felinics/memoh/internal/errs"
+	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/mcp"
 )
 
@@ -63,10 +65,13 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	connID := strings.TrimSpace(c.Param("id"))
-	if botID == "" || connID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and id are required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
+	}
+	connID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -77,7 +82,7 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get mcp connection")
 	}
 
 	var req oauthDiscoverRequest
@@ -126,10 +131,13 @@ func (h *MCPOAuthHandler) Authorize(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	connID := strings.TrimSpace(c.Param("id"))
-	if botID == "" || connID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and id are required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
+	}
+	connID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -167,8 +175,11 @@ func (h *MCPOAuthHandler) Exchange(c echo.Context) error {
 
 	code := strings.TrimSpace(req.Code)
 	state := strings.TrimSpace(req.State)
-	if code == "" || state == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "code and state are required")
+	if code == "" {
+		return apperror.FieldRequired("code")
+	}
+	if state == "" {
+		return apperror.FieldRequired("state")
 	}
 
 	_, err := h.oauthService.HandleCallback(c.Request().Context(), state, code)
@@ -234,10 +245,13 @@ func (h *MCPOAuthHandler) Status(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	connID := strings.TrimSpace(c.Param("id"))
-	if botID == "" || connID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and id are required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
+	}
+	connID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
@@ -245,7 +259,7 @@ func (h *MCPOAuthHandler) Status(c echo.Context) error {
 
 	status, err := h.oauthService.GetStatus(c.Request().Context(), connID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get oauth status")
 	}
 
 	return c.JSON(http.StatusOK, status)
@@ -264,17 +278,20 @@ func (h *MCPOAuthHandler) RevokeToken(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("bot_id"))
-	connID := strings.TrimSpace(c.Param("id"))
-	if botID == "" || connID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot_id and id are required")
+	botID, err := httpx.RequiredParam(c, "bot_id")
+	if err != nil {
+		return err
+	}
+	connID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), userID, botID); err != nil {
 		return err
 	}
 
 	if err := h.oauthService.RevokeToken(c.Request().Context(), connID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "revoke oauth token")
 	}
 
 	return c.NoContent(http.StatusNoContent)

@@ -141,7 +141,7 @@ func (h *UsersHandler) GetMe(c echo.Context) error {
 		if accountNotFound(err) {
 			return echo.NewHTTPError(http.StatusUnauthorized, "current user not found, please login again")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get me")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -196,7 +196,7 @@ func (h *UsersHandler) UpdateMyPassword(c echo.Context) error {
 		if errors.Is(err, accounts.ErrInvalidPassword) {
 			return echo.NewHTTPError(http.StatusBadRequest, "current password mismatch")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update my password")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -217,7 +217,7 @@ func (h *UsersHandler) ListUsers(c echo.Context) error {
 	}
 	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list users")
 	}
 	if !isAdmin {
 		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
@@ -227,7 +227,7 @@ func (h *UsersHandler) ListUsers(c echo.Context) error {
 	}
 	items, err := h.service.ListAccounts(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list users")
 	}
 	return c.JSON(http.StatusOK, accounts.ListAccountsResponse{Items: items})
 }
@@ -248,14 +248,14 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	targetID := strings.TrimSpace(c.Param("id"))
-	if targetID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
+	targetID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if targetID != channelIdentityID {
 		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return errs.Wrap(err, "get user")
 		}
 		if !isAdmin {
 			return echo.NewHTTPError(http.StatusForbidden, "user access denied")
@@ -266,7 +266,7 @@ func (h *UsersHandler) GetUser(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get user")
 	}
 	return c.JSON(http.StatusOK, user)
 }
@@ -291,21 +291,21 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 	}
 	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update user")
 	}
 	if !isAdmin {
 		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
 	}
-	targetID := strings.TrimSpace(c.Param("id"))
-	if targetID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
+	targetID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	_, err = h.service.Get(c.Request().Context(), targetID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update user")
 	}
 	var req accounts.UpdateAccountRequest
 	if err := c.Bind(&req); err != nil {
@@ -316,7 +316,7 @@ func (h *UsersHandler) UpdateUser(c echo.Context) error {
 		if errors.Is(err, db.ErrLastActiveAdmin) {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "update user")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -338,7 +338,7 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 	}
 	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "create user")
 	}
 	if !isAdmin {
 		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
@@ -350,7 +350,7 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 	//nolint:staticcheck // Keep backward-compatible behavior: CreateHuman creates backing user when owner id is empty.
 	resp, err := h.service.CreateHuman(c.Request().Context(), "", req)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "create user")
 	}
 	return c.JSON(http.StatusCreated, resp)
 }
@@ -374,14 +374,14 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 	}
 	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "remove member")
 	}
 	if !isAdmin {
 		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
 	}
-	targetID := strings.TrimSpace(c.Param("id"))
-	if targetID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "user id is required")
+	targetID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if targetID == channelIdentityID {
 		return echo.NewHTTPError(http.StatusBadRequest, "cannot remove current member")
@@ -390,7 +390,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "member not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "remove member")
 	}
 	if err := h.service.RemoveMember(c.Request().Context(), targetID); err != nil {
 		if errors.Is(err, db.ErrLastActiveAdmin) {
@@ -399,7 +399,7 @@ func (h *UsersHandler) RemoveMember(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "member not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "remove member")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -430,7 +430,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 	if raw := strings.TrimSpace(c.QueryParam("owner_id")); raw != "" {
 		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return errs.Wrap(err, "create bot")
 		}
 		if !isAdmin {
 			return echo.NewHTTPError(http.StatusForbidden, "admin role required for owner override")
@@ -446,7 +446,7 @@ func (h *UsersHandler) CreateBot(c echo.Context) error {
 			if accountNotFound(err) {
 				return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")
 			} else {
-				return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+				return errs.Wrap(err, "create bot")
 			}
 		}
 	}
@@ -621,14 +621,14 @@ func (h *UsersHandler) CheckBotName(c echo.Context) error {
 	if _, err := h.requireChannelIdentityID(c); err != nil {
 		return err
 	}
-	name := strings.TrimSpace(c.QueryParam("name"))
-	if name == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	name, err := httpx.RequiredQuery(c, "name")
+	if err != nil {
+		return err
 	}
 	excludeBotID := strings.TrimSpace(c.QueryParam("exclude_bot_id"))
 	result, err := h.botService.CheckNameAvailability(c.Request().Context(), name, excludeBotID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "check bot name")
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -652,26 +652,26 @@ func (h *UsersHandler) ListBots(c echo.Context) error {
 	if ownerID != "" {
 		isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return errs.Wrap(err, "list bots")
 		}
 		if !isAdmin {
 			return echo.NewHTTPError(http.StatusForbidden, "admin role required for owner filter")
 		}
 		items, err := h.botService.ListByOwner(c.Request().Context(), ownerID)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return errs.Wrap(err, "list bots")
 		}
 		if err := h.attachCurrentUserPermissionsList(c.Request().Context(), channelIdentityID, items); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+			return errs.Wrap(err, "list bots")
 		}
 		return c.JSON(http.StatusOK, bots.ListBotsResponse{Items: scrubBotsForResponse(items)})
 	}
 	items, err := h.botService.ListAccessible(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list bots")
 	}
 	if err := h.attachCurrentUserPermissionsList(c.Request().Context(), channelIdentityID, items); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list bots")
 	}
 	return c.JSON(http.StatusOK, bots.ListBotsResponse{Items: scrubBotsForResponse(items)})
 }
@@ -692,16 +692,16 @@ func (h *UsersHandler) GetBot(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	bot, err := AuthorizeBotAccessWithPermission(c.Request().Context(), h.botService, h.service, channelIdentityID, botID, bots.PermissionChat)
 	if err != nil {
 		return err
 	}
 	if err := h.attachCurrentUserPermissions(c.Request().Context(), channelIdentityID, &bot); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get bot")
 	}
 	return c.JSON(http.StatusOK, scrubBotForResponse(bot))
 }
@@ -722,9 +722,9 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	// Health checks are read-only status; members with chat access may view them.
 	// Detailed diagnostics can contain runtime paths, registry output, or host
@@ -738,15 +738,15 @@ func (h *UsersHandler) ListBotChecks(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "bot not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list bot checks")
 	}
 	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list bot checks")
 	}
 	perms, err := h.botService.ResolveUserPermissions(c.Request().Context(), bot.ID, channelIdentityID, isAdmin)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "list bot checks")
 	}
 	includeDetails := bots.HasPermission(perms, bots.PermissionManage)
 	return c.JSON(http.StatusOK, bots.ListChecksResponse{Items: scrubBotChecksForResponse(items, includeDetails)})
@@ -770,9 +770,9 @@ func (h *UsersHandler) UpdateBot(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	bot, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID)
 	if err != nil {
@@ -887,7 +887,7 @@ func updateBotHTTPError(err error) error {
 	if errors.Is(err, bots.ErrBotNameInvalid) || errors.Is(err, bots.ErrBotNameReserved) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	return errs.Wrap(err, "update bot")
 }
 
 // TransferBotOwner godoc
@@ -909,14 +909,14 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 	}
 	isAdmin, err := h.service.IsAdmin(c.Request().Context(), channelIdentityID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "transfer bot owner")
 	}
 	if !isAdmin {
 		return echo.NewHTTPError(http.StatusForbidden, "admin role required")
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	var req bots.TransferBotRequest
 	if err := c.Bind(&req); err != nil {
@@ -930,7 +930,7 @@ func (h *UsersHandler) TransferBotOwner(c echo.Context) error {
 		if errors.Is(err, bots.ErrOwnerUserNotFound) {
 			return echo.NewHTTPError(http.StatusBadRequest, "owner user not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "transfer bot owner")
 	}
 	return c.JSON(http.StatusOK, scrubBotForResponse(resp))
 }
@@ -951,9 +951,9 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -975,7 +975,7 @@ func (h *UsersHandler) DeleteBot(c echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "bot not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete bot")
 	}
 	return c.JSON(http.StatusAccepted, map[string]string{
 		"id":     botID,
@@ -1000,9 +1000,9 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -1019,7 +1019,7 @@ func (h *UsersHandler) GetBotChannelConfig(c echo.Context) error {
 		if errors.Is(err, channel.ErrChannelConfigNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "get bot channel config")
 	}
 	return c.JSON(http.StatusOK, resp)
 }
@@ -1044,9 +1044,9 @@ func (h *UsersHandler) UpsertBotChannelConfig(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -1101,9 +1101,9 @@ func (h *UsersHandler) UpdateBotChannelStatus(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -1157,9 +1157,9 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -1186,7 +1186,7 @@ func (h *UsersHandler) SetBotChannelWebhookEndpoint(c echo.Context) error {
 		case errors.Is(err, channel.ErrInvalidWebhookEndpoint), errors.Is(err, channel.ErrWebhookEndpointUnsupported):
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		default:
-			return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+			return errs.WrapDependency(err, "set channel webhook endpoint")
 		}
 	}
 	return c.JSON(http.StatusOK, resp)
@@ -1209,9 +1209,9 @@ func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -1227,7 +1227,7 @@ func (h *UsersHandler) DeleteBotChannelConfig(c echo.Context) error {
 		if mapped := mapChannelRuntimeError(err); mapped != nil {
 			return mapped
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return errs.Wrap(err, "delete bot channel config")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -1251,9 +1251,9 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if _, err := h.authorizeBotAccess(c.Request().Context(), channelIdentityID, botID); err != nil {
 		return err
@@ -1270,7 +1270,7 @@ func (h *UsersHandler) SendBotMessage(c echo.Context) error {
 		return err
 	}
 	if req.Message.IsEmpty() {
-		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+		return apperror.FieldRequired("message")
 	}
 	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, req); err != nil {
 		if mapped := mapChannelRuntimeError(err); mapped != nil {
@@ -1300,9 +1300,9 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	botID := strings.TrimSpace(c.Param("id"))
-	if botID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "bot id is required")
+	botID, err := httpx.RequiredParam(c, "id")
+	if err != nil {
+		return err
 	}
 	if chatToken.BotID != botID {
 		return echo.NewHTTPError(http.StatusForbidden, "token bot mismatch")
@@ -1327,7 +1327,7 @@ func (h *UsersHandler) SendBotMessageSession(c echo.Context) error {
 		return err
 	}
 	if req.Message.IsEmpty() {
-		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+		return apperror.FieldRequired("message")
 	}
 	if err := h.channelRuntime.Send(c.Request().Context(), botID, channelType, channel.SendRequest{
 		Target:  route.ReplyTarget,

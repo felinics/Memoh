@@ -1,12 +1,13 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 // A session's contents are read through the session runtime, over the chat
@@ -60,11 +61,5 @@ func TestListMessagesRequiresSessionID(t *testing.T) {
 	if err == nil {
 		t.Fatalf("ListMessages() err = nil, want HTTP 400")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("error type = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != http.StatusBadRequest {
-		t.Fatalf("HTTPError.Code = %d, want 400", httpErr.Code)
-	}
+	requireFieldError(t, err, apperror.CodeRequestFieldRequired, "session_id")
 }
