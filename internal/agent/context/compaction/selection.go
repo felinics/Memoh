@@ -30,6 +30,12 @@ type CompactionCandidate struct {
 	Record       historyfrag.HistoryRecord
 	Policies     []CompactPolicy
 	IsToolResult bool
+	// GapBefore reports that the replayed row before this one is not a
+	// candidate, so no claim may span from the previous candidate to this one.
+	GapBefore bool
+	// IneffectiveClaim reports that this row's claim in the current epoch
+	// failed because its summary was not shorter than the rows.
+	IneffectiveClaim bool
 }
 
 func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {
@@ -45,7 +51,8 @@ func (c CompactionCandidate) HasPolicy(policy CompactPolicy) bool {
 // starting at a non-result row that carries the tool-closure policy (an
 // assistant tool-call row) followed by every immediately-adjacent tool-result
 // row answering it. Rows outside any exchange are returned as singleton
-// groups, so an exchange can never be split by ID-blind index slicing.
+// groups, so an exchange can never be split by ID-blind index slicing. A
+// result behind a gap is not adjacent to the call before it.
 func toolExchangeGroups(items []CompactionCandidate) [][]int {
 	groups := make([][]int, 0, len(items))
 	for i := 0; i < len(items); {
@@ -56,7 +63,7 @@ func toolExchangeGroups(items []CompactionCandidate) [][]int {
 		}
 		group := []int{i}
 		j := i + 1
-		for j < len(items) && isToolResultItem(items[j]) {
+		for j < len(items) && isToolResultItem(items[j]) && !items[j].GapBefore {
 			group = append(group, j)
 			j++
 		}
@@ -354,88 +361,51 @@ func isToolResultItem(item CompactionCandidate) bool {
 }
 
 // buildEntriesAndIDs renders the summarizer entries and the ids to mark
-// compacted from one contiguous sequence of complete tool-exchange groups (see
-// toolExchangeGroups). A group is complete only when every row in it renders
-// non-empty; an incomplete group — a reasoning-only message, or a tool call
-// whose result renders empty — is never marked. Must-keep groups (ask_user,
-// unparseable barriers) stay in raw history and split the span into runs.
-//
-// Within the span, the first run holding at least one markable sequence wins:
-// leading must-keep islands and runs made only of unmarkable groups are
-// skipped instead of ending the whole pass, so a permanently-empty island can
-// never starve the compactable history behind it. Within the winning run,
-// marking stops at the first skipped group so the marked ids stay a contiguous
-// history range under one compact_id — were a later complete group marked
-// across a skipped raw row, the read path (replaceCompactedHistoryRecords)
-// would emit the summary at the first marked row and fold the later rows in
-// front of the still-raw skipped row, reordering history. Everything left raw
-// by this pass sits before the marked range or after it, and compacts on a
-// later pass. Emitting entries and ids together keeps them aligned, so the
-// summarizer never sees content that would remain in raw history.
+// compacted from one contiguous sequence of markable tool-exchange groups (see
+// toolExchangeGroups and classifyGroup): the first group that is complete,
+// not must-keep, not an orphaned result and not already proved ineffective,
+// plus every following markable group up to the first one that is not, or
+// that sits behind a gap. The marked ids therefore stay a contiguous history
+// range under one compact_id — were a later group marked across a skipped
+// raw row, the read path (replaceCompactedHistoryRecords) would emit the
+// summary at the first marked row and fold the later rows in front of the
+// still-raw skipped row, reordering history. Emitting entries and ids
+// together keeps them aligned, so the summarizer never sees content that
+// would remain in raw history.
 func buildEntriesAndIDs(items []CompactionCandidate) ([]messageEntry, []pgtype.UUID) {
 	rendered := make([]string, len(items))
-	renderedOK := make([]bool, len(items))
 	for i, it := range items {
-		content := renderCandidateEntry(it.Record)
-		if strings.TrimSpace(content) == "" {
-			continue
+		if content := renderCandidateEntry(it.Record); strings.TrimSpace(content) != "" {
+			rendered[i] = content
 		}
-		rendered[i] = content
-		renderedOK[i] = true
 	}
+	renders := func(idx int) bool { return rendered[idx] != "" }
+	markable := func(group []int) bool { return classifyGroup(items, group, renders) == groupMarkable }
 
 	groups := toolExchangeGroups(items)
-	mustKeep := func(group []int) bool {
+	start := 0
+	for start < len(groups) && !markable(groups[start]) {
+		start++
+	}
+	end := start
+	for end < len(groups) && markable(groups[end]) && (end == start || !items[groups[end][0]].GapBefore) {
+		end++
+	}
+	if end == start {
+		return nil, nil
+	}
+	entries := make([]messageEntry, 0, len(items))
+	ids := make([]pgtype.UUID, 0, len(items))
+	for _, group := range groups[start:end] {
 		for _, idx := range group {
-			if items[idx].HasPolicy(CompactPolicyMustKeep) {
-				return true
-			}
+			entries = append(entries, messageEntry{
+				Role:    items[idx].Record.ModelMessage.Role,
+				Content: rendered[idx],
+			})
+			ids = append(ids, items[idx].ID)
 		}
-		return false
 	}
-	complete := func(group []int) bool {
-		for _, idx := range group {
-			if !renderedOK[idx] {
-				return false
-			}
-		}
-		return true
-	}
-
-	for g := 0; g < len(groups); {
-		if mustKeep(groups[g]) {
-			g++
-			continue
-		}
-		runEnd := g
-		for runEnd < len(groups) && !mustKeep(groups[runEnd]) {
-			runEnd++
-		}
-		start := g
-		for start < runEnd && !complete(groups[start]) {
-			start++
-		}
-		end := start
-		for end < runEnd && complete(groups[end]) {
-			end++
-		}
-		if end > start {
-			entries := make([]messageEntry, 0, len(items))
-			ids := make([]pgtype.UUID, 0, len(items))
-			for _, group := range groups[start:end] {
-				for _, idx := range group {
-					entries = append(entries, messageEntry{
-						Role:    items[idx].Record.ModelMessage.Role,
-						Content: rendered[idx],
-					})
-					ids = append(ids, items[idx].ID)
-				}
-			}
-			return entries, ids
-		}
-		g = runEnd
-	}
-	return nil, nil
+	return entries, ids
 }
 
 // trimCompactMessages caps one compaction call's input to maxTokens by keeping
@@ -481,7 +451,7 @@ func trimCompactMessages(items []CompactionCandidate, maxTokens int) []Compactio
 }
 
 // markableGroupCost is the summarizer-prompt cost of one tool-exchange group:
-// zero for unmarkable groups (must-keep, or any row rendering empty), and for
+// zero for unmarkable groups (see classifyGroup), and for
 // markable groups the rendered entry text — what buildUserPrompt actually
 // emits, headers included — plus the per-entry role prefix, with a floor of
 // one token per row so tiny-but-real entries can never ride along for free. A
@@ -490,16 +460,9 @@ func trimCompactMessages(items []CompactionCandidate, maxTokens int) []Compactio
 // usage estimate matters: a row whose generation cost five tokens can still
 // render a two-kilobyte tool outcome into the prompt.
 func markableGroupCost(items []CompactionCandidate, group []int) int {
-	cost := 0
-	for _, idx := range group {
-		if items[idx].HasPolicy(CompactPolicyMustKeep) {
-			return 0
-		}
-		rendered := strings.TrimSpace(renderCandidateEntry(items[idx].Record))
-		if rendered == "" {
-			return 0
-		}
-		cost += estimateBytesAsTokens(rendered) + estimateBytesAsTokens(items[idx].Record.ModelMessage.Role) + 1
+	cost, kind := groupCost(items, group)
+	if kind != groupMarkable {
+		return 0
 	}
 	return cost
 }

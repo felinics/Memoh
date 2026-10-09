@@ -3,6 +3,7 @@ package compaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,72 +23,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		return Result{}, err
 	}
 	if measure.CandidateCount == 0 {
-		return Result{Status: StatusNoop}, nil
-	}
-	readMaxBytes := compactionReadMaxBytes(cfg)
-	boundedRows, err := s.queries.ListUncompactedMessagesBySessionWithinBytes(ctx, sqlc.ListUncompactedMessagesBySessionWithinBytesParams{
-		SessionID: sessionUUID,
-		MaxBytes:  readMaxBytes,
-	})
-	if err != nil {
-		return Result{}, err
-	}
-	rows := uncompactedRowsFromBounded(boundedRows)
-	if len(rows) == 0 {
-		s.logger.WarnContext(ctx, "compaction: no candidate fits the database read budget",
-			slog.String("session_id", cfg.SessionID),
-			slog.Int64("candidate_count", measure.CandidateCount),
-			slog.Int64("candidate_bytes", measure.CandidateBytes),
-			slog.Int64("largest_candidate_bytes", measure.LargestCandidateBytes),
-			slog.Int64("read_max_bytes", readMaxBytes))
-		return Result{Status: StatusNoop}, nil
-	}
-	// Use the count captured by the same SQL statement as the payload rows for
-	// the selection decision. The metadata-only measure above is observability
-	// and oversized-head handling; concurrent claims may legitimately change
-	// eligibility between the two statements.
-	candidateCount := boundedRows[0].CandidateCount
-	candidateBytes := boundedRows[0].CandidateBytes
-	truncatedRead := candidateCount > int64(len(rows))
-	s.logger.InfoContext(ctx, "compaction: bounded candidate read",
-		slog.String("session_id", cfg.SessionID),
-		slog.Int("loaded_messages", len(rows)),
-		slog.Int64("candidate_count", candidateCount),
-		slog.Int64("candidate_bytes", candidateBytes),
-		slog.Int64("loaded_bytes", boundedRows[len(boundedRows)-1].CumulativeBytes),
-		slog.Int64("read_max_bytes", readMaxBytes),
-		slog.Bool("truncated", truncatedRead))
-
-	messages, barrierCount := itemsFromRows(rows)
-	if barrierCount > 0 {
-		s.logger.WarnContext(ctx, "compaction: kept unparseable history rows as span barriers",
-			slog.Int("barrier_count", barrierCount),
-			slog.String("session_id", cfg.SessionID),
-		)
-	}
-	if len(messages) == 0 {
-		return Result{Status: StatusNoop}, nil
-	}
-
-	var toCompact []CompactionCandidate
-	switch {
-	case truncatedRead:
-		// Rows are an oldest-first prefix. When more history exists outside the
-		// database admission boundary, compact the admitted prefix and let the
-		// existing prompt trim/closure rules choose the largest safe claim. Using
-		// splitByTarget here could noop forever because the unseen newest tail is
-		// precisely what should be kept.
-		toCompact = messages
-	case cfg.TargetTokens > 0:
-		// Sync compaction: compress enough messages to bring context
-		// down to TargetTokens. Calculate how many tokens to keep
-		// (newest messages) and compact everything older.
-		toCompact = splitByTarget(messages, cfg.TargetTokens)
-	default:
-		toCompact = splitByRatio(messages, cfg.TotalInputTokens, cfg.Ratio)
-	}
-	if len(toCompact) == 0 {
-		return Result{Status: StatusNoop}, nil
+		return Result{Status: StatusNoop, Reason: ReasonNothingToCompact}, nil
 	}
 
 	// Cap the compaction input to avoid exceeding the compaction model's
@@ -128,13 +64,28 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		fusing = false
 	}
 	selectedSystemPrompt := systemPrompt
+	// Every span the floor admits must fit the smallest entries budget.
+	minSpanTokens := min(minCompactionSpanTokens, maxCompactTokens/2)
 	if fusing {
 		selectedSystemPrompt = fusionSystemPrompt
 		maxCompactTokens, err = boundedCompactionInputTokens(cfg, baseMaxCompactTokens, maxOutputTokens, selectedSystemPrompt)
 		if err != nil {
 			return Result{}, err
 		}
+		// A rollup also replaces the frontier summaries it absorbs, so even a
+		// small span shrinks the replayed context.
+		minSpanTokens = 0
 	}
+
+	read, reason, err := s.readCompactionSpan(ctx, sessionUUID, cfg, measure, minSpanTokens)
+	if err != nil {
+		return Result{}, err
+	}
+	if reason != "" {
+		s.logger.LogAttrs(ctx, slog.LevelInfo, "compaction: no span to claim", read.attrs(cfg, reason)...)
+		return Result{Status: StatusNoop, Reason: reason}, nil
+	}
+	rows, toCompact := read.rows, read.span
 
 	var priorSummaries []string
 	var absorbedSegments []absorbedSegment
@@ -167,7 +118,7 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 
 	s.logger.InfoContext(ctx, "compaction: before trim",
 		slog.Int("messages", len(toCompact)),
-		slog.Int("total_uncompacted", len(messages)),
+		slog.Int("span_tokens", read.stats.SpanTokens),
 		slog.Int("max_compact_tokens", maxCompactTokens),
 		slog.Int("prior_context_tokens", priorTokens),
 		slog.Int("absorbed_context_tokens", absorbTokens),
@@ -180,21 +131,20 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		priorSummaries = capPriorSummaries(priorSummaries, maxCompactTokens-entriesCost)
 		priorTokens = priorContextTokens(priorSummaries)
 	}
-	s.logger.InfoContext(ctx, "compaction: after trim",
-		slog.Int("messages", len(toCompact)),
-		slog.Int("prior_summaries", len(priorSummaries)),
-		slog.Int("absorbed_segments", len(absorbedSegments)),
-	)
 
 	entries, compactedMessageIDs := buildEntriesAndIDs(toCompact)
 	if len(entries) == 0 || len(compactedMessageIDs) == 0 {
-		// No complete group survived: every selected group had a row that rendered
-		// empty (a reasoning-only message, or a tool exchange whose result renders
-		// empty). buildEntriesAndIDs withholds such a group from both entries and
-		// ids, so summarizing here would either destroy rows for a junk summary or
-		// mark rows we cannot faithfully summarize. Leave them in raw history.
-		return Result{Status: StatusNoop}, nil
+		return Result{Status: StatusNoop, Reason: ReasonNoBeneficialSpan}, nil
 	}
+	s.logger.InfoContext(ctx, "compaction: after trim",
+		slog.Int("selected_entry_count", len(entries)),
+		slog.Int("claimed_row_count", len(compactedMessageIDs)),
+		slog.String("first_message_id", formatUUID(compactedMessageIDs[0])),
+		slog.String("last_message_id", formatUUID(compactedMessageIDs[len(compactedMessageIDs)-1])),
+		slog.Int("entry_tokens", entriesPromptCost(entries)),
+		slog.Int("prior_summaries", len(priorSummaries)),
+		slog.Int("absorbed_segments", len(absorbedSegments)),
+	)
 	// Cap the rendered entries and verify the final prompt cost before any
 	// row is claimed: a selection that cannot fit (an unsplittable tool
 	// exchange larger than the budget) must fail closed with zero claims and
@@ -229,35 +179,35 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		ExpectedCompactIds: expectedCompactIDs,
 	})
 	if err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 	if marked != int64(len(compactedMessageIDs)) {
 		err = fmt.Errorf("marked %d of %d compaction source rows", marked, len(compactedMessageIDs))
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 
 	assetRows, err := s.queries.ListMessageAssetsBatch(persistCtx, compactedMessageIDs)
 	if err != nil {
 		err = fmt.Errorf("load compaction message assets: %w", err)
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 	toCompact, err = candidatesWithAssets(toCompact, rows, assetRows)
 	if err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 	artifact, err := artifactMetadataFor(toCompact, compactedMessageIDs)
 	if err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 	if fusing {
 		artifact, err = rollupArtifactMetadata(frontier.Artifacts, artifact)
 		if err != nil {
-			_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+			s.failLog(persistCtx, logID, err)
 			return Result{}, err
 		}
 	}
@@ -290,27 +240,28 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	result, err := modelretry.Do(models.WithModelSession(ctx, cfg.SessionID), s.logger, "agent.compaction", modelretry.Config{}, modelretry.Retryable,
 		func(ctx context.Context) (sdk.ModelResult, error) { return model.Generate(ctx, request) })
 	if err != nil {
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 
 	summary := strings.TrimSpace(result.Text)
 	if summary == "" {
-		_ = s.completeLog(persistCtx, logID, "error", "", errEmptySummary.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, errEmptySummary)
 		return Result{}, errEmptySummary
 	}
 	if result.FinishReason != sdk.FinishReasonStop {
 		err = fmt.Errorf("%w: finish_reason=%s", errIncompleteSummary, result.FinishReason)
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 	replacementTokens := entriesPromptCost(entries)
 	if fusing {
 		replacementTokens = summaryReplacementTokens(entries, frontier.Artifacts)
 	}
-	if summaryTokens := estimateSummaryReplayTokens(summary); summaryTokens >= replacementTokens {
+	summaryTokens := estimateSummaryReplayTokens(summary)
+	if summaryTokens >= replacementTokens {
 		err = fmt.Errorf("%w: summary_tokens=%d raw_tokens=%d", errIneffectiveSummary, summaryTokens, replacementTokens)
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
 
@@ -320,15 +271,21 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	if fusing {
 		err = s.completeRollupLog(persistCtx, logID, summary, len(compactedMessageIDs), usageJSON, modelUUID, artifact, frontier.Artifacts)
 	} else {
-		err = s.completeLog(persistCtx, logID, "ok", summary, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact)
+		err = s.completeLog(persistCtx, logID, "ok", summary, "", len(compactedMessageIDs), usageJSON, modelUUID, &artifact, "")
 	}
 	if err != nil {
 		// The rows are already marked, but the log never reached status=ok, so
 		// the reclaim SQL keeps them eligible for a later pass. Reporting ok
 		// here would claim a summary that was never persisted.
-		_ = s.completeLog(persistCtx, logID, "error", "", err.Error(), 0, nil, pgtype.UUID{}, nil)
+		s.failLog(persistCtx, logID, err)
 		return Result{}, err
 	}
+	s.logger.InfoContext(ctx, "compaction: summary committed",
+		slog.String("session_id", cfg.SessionID),
+		slog.Int("claimed_row_count", len(compactedMessageIDs)),
+		slog.Int("replaced_tokens", replacementTokens),
+		slog.Int("summary_tokens", summaryTokens),
+	)
 	return Result{Status: StatusOK, Summary: summary, MessageCount: len(compactedMessageIDs)}, nil
 }
 
@@ -414,7 +371,18 @@ func expectedCompactionClaims(rows []sqlc.ListUncompactedMessagesBySessionRow, m
 	return expected, nil
 }
 
-func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata) error {
+// failLog completes a claimed attempt as failed. An ineffective summary is
+// recorded by reason so later passes keep those rows raw instead of resending
+// them; any other failure leaves the rows eligible for a retry.
+func (s *Service) failLog(ctx context.Context, logID pgtype.UUID, cause error) {
+	reason := ""
+	if errors.Is(cause, errIneffectiveSummary) {
+		reason = failureReasonIneffectiveSummary
+	}
+	_ = s.completeLog(ctx, logID, "error", "", cause.Error(), 0, nil, pgtype.UUID{}, nil, reason)
+}
+
+func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, summary, errMsg string, messageCount int, usage []byte, modelID pgtype.UUID, artifact *artifactMetadata, failureReason string) error {
 	coverage := []byte("[]")
 	var anchorStartMs, anchorEndMs int64
 	if artifact != nil {
@@ -433,6 +401,7 @@ func (s *Service) completeLog(ctx context.Context, logID pgtype.UUID, status, su
 		Coverage:      coverage,
 		AnchorStartMs: anchorStartMs,
 		AnchorEndMs:   anchorEndMs,
+		FailureReason: failureReason,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "failed to complete compaction log", slog.String("error", err.Error()))

@@ -115,8 +115,8 @@ func TestSelectorToReadPathPreservesOrderEndToEnd(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		pairingRow(t, "user", `"old q with plenty of extra descriptive words so the raw exchange clearly outweighs its summary"`),
-		pairingRow(t, "assistant", `"old a walking through the answer in enough detail that compaction genuinely shrinks it"`),
+		pairingRow(t, "user", `"old q with plenty of extra descriptive words so the raw exchange clearly outweighs its summary`+strings.Repeat(", and more context", 30)+`"`),
+		pairingRow(t, "assistant", `"old a walking through the answer in enough detail that compaction genuinely shrinks it`+strings.Repeat(", and more detail", 30)+`"`),
 		pairingRow(t, "assistant", `[{"type":"tool-call","toolCallId":"ask-1","toolName":"ask_user","input":{"questions":[]}}]`),
 		pairingRow(t, "tool", `[{"type":"tool-result","toolCallId":"ask-1","toolName":"ask_user","output":"answered"}]`),
 		pairingRow(t, "user", `"mid q"`),

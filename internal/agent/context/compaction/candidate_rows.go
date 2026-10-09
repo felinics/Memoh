@@ -18,6 +18,26 @@ import (
 // aborting the whole compaction. Keeping its position prevents compact spans on
 // either side from sharing an ID and being reordered by the read path.
 func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]CompactionCandidate, int) {
+	items, barrierCount := classifyRows(rows)
+	finishCandidatePolicies(items)
+	return items, barrierCount
+}
+
+// itemsFromWindow classifies one bounded read window, carrying the
+// window's gap and ineffective-claim flags into the candidates before the
+// selection policies are derived from them.
+func itemsFromWindow(window []sqlc.ListUncompactedMessagesBySessionWithinBytesRow) ([]sqlc.ListUncompactedMessagesBySessionRow, []CompactionCandidate, int) {
+	rows := uncompactedRowsFromBounded(window)
+	items, barrierCount := classifyRows(rows)
+	for i := range items {
+		items[i].GapBefore = window[i].GapBefore
+		items[i].IneffectiveClaim = window[i].IneffectiveClaim
+	}
+	finishCandidatePolicies(items)
+	return rows, items, barrierCount
+}
+
+func classifyRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]CompactionCandidate, int) {
 	items := make([]CompactionCandidate, 0, len(rows))
 	barrierCount := 0
 	for _, row := range rows {
@@ -47,11 +67,14 @@ func itemsFromRows(rows []sqlc.ListUncompactedMessagesBySessionRow) ([]Compactio
 			IsToolResult: strings.EqualFold(strings.TrimSpace(record.ModelMessage.Role), "tool"),
 		})
 	}
+	return items, barrierCount
+}
+
+func finishCandidatePolicies(items []CompactionCandidate) {
 	if len(items) > 0 {
 		propagateMustKeepAcrossToolExchanges(items)
 		markSelectionPolicies(items)
 	}
-	return items, barrierCount
 }
 
 func candidatesWithAssets(items []CompactionCandidate, rows []sqlc.ListUncompactedMessagesBySessionRow, assetRows []sqlc.ListMessageAssetsBatchRow) ([]CompactionCandidate, error) {

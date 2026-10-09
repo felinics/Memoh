@@ -26,8 +26,8 @@ func TestDoCompactionDoesNotSplitToolExchangeAtUnparseableBarrier(t *testing.T) 
 			rows := []sqlc.ListUncompactedMessagesBySessionRow{
 				toolCallRow(t, 100),
 				toolResultRow(t, 100),
-				mkRow(t, "user", `"old question"`, 100),
-				mkRow(t, "assistant", `"old answer"`, 100),
+				mkRow(t, "user", jsonStr("old question, "+compactableDetail), 100),
+				mkRow(t, "assistant", jsonStr("old answer, "+compactableDetail), 100),
 				mkRow(t, "user", `"current question"`, 100),
 				mkRow(t, "assistant", `"current answer"`, 100),
 			}

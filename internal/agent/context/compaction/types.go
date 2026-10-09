@@ -11,6 +11,18 @@ const (
 	StatusNoop = "noop" // nothing to compact (already compact, cooled down, or in flight)
 )
 
+// Reasons a pass claimed nothing, reported with StatusNoop.
+const (
+	// ReasonNothingToCompact: every candidate is inside the kept recent tail.
+	ReasonNothingToCompact = "nothing_to_compact"
+	// ReasonNoBeneficialSpan: candidates exist, but each is protected,
+	// unrenderable, already proved ineffective, or too small to shrink.
+	ReasonNoBeneficialSpan = "no_beneficial_span"
+	// ReasonReadBudgetExceeded: a single row or tool exchange is larger than
+	// one read window, or the scan budget ran out before a span qualified.
+	ReasonReadBudgetExceeded = "read_budget_exceeded"
+)
+
 // Result is the scoped outcome of a synchronous compaction. Callers use it to
 // respond with this session's own result instead of reading unscoped bot-wide
 // logs. A failed attempt returns an error, not a Result.
@@ -18,6 +30,9 @@ type Result struct {
 	Status       string
 	Summary      string
 	MessageCount int
+	// Reason says why a noop claimed nothing; empty for a skipped pass (in
+	// flight or cooling down).
+	Reason string
 }
 
 // Log represents a compaction log entry.

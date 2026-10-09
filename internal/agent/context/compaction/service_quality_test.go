@@ -12,8 +12,8 @@ import (
 func qualityRows(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {
 	t.Helper()
 	return []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 40)), 100),
-		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 40)), 100),
+		mkRow(t, "user", jsonStr(strings.Repeat("old question ", 60)), 100),
+		mkRow(t, "assistant", jsonStr(strings.Repeat("old answer ", 60)), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}

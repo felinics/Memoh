@@ -41,8 +41,8 @@ func TestDoCompactionPersistsDurableCoverageAndAnchor(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr("old question, "+compactableDetail), 100),
+		mkRow(t, "assistant", jsonStr("old answer, "+compactableDetail), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
@@ -75,8 +75,8 @@ func TestDoCompactionOrdersDurableCoverageBySourceTime(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr("old question, "+compactableDetail), 100),
+		mkRow(t, "assistant", jsonStr("old answer, "+compactableDetail), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
@@ -106,8 +106,8 @@ func TestDoCompactionCoverageHashIncludesMessageAssets(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr("old question, "+compactableDetail), 100),
+		mkRow(t, "assistant", jsonStr("old answer, "+compactableDetail), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
@@ -174,8 +174,8 @@ func TestDoCompactionStopsWhenAssetsCannotBeLoaded(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr("old question, "+compactableDetail), 100),
+		mkRow(t, "assistant", jsonStr("old answer, "+compactableDetail), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
@@ -198,8 +198,8 @@ func TestDoCompactionReturnsSuccessfulArtifactFinalizationError(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr("old question, "+compactableDetail), 100),
+		mkRow(t, "assistant", jsonStr("old answer, "+compactableDetail), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}
@@ -222,8 +222,8 @@ func TestDoCompactionRejectsPartialSourceMarking(t *testing.T) {
 	t.Parallel()
 
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `"old question"`, 100),
-		mkRow(t, "assistant", `"old answer"`, 100),
+		mkRow(t, "user", jsonStr("old question, "+compactableDetail), 100),
+		mkRow(t, "assistant", jsonStr("old answer, "+compactableDetail), 100),
 		mkRow(t, "user", `"current question"`, 100),
 		mkRow(t, "assistant", `"current answer"`, 100),
 	}

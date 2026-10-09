@@ -290,6 +290,14 @@ func idSet(ids []pgtype.UUID) map[pgtype.UUID]bool {
 	return m
 }
 
+// compactableDetail pads fixture text so a fixture span costs more than
+// minCompactionSpanTokens and is worth a summarizer call.
+var compactableDetail = strings.Repeat("with the release checklist details ", 32)
+
+func textParts(text string) string {
+	return `[{"type":"text","text":` + jsonStr(text) + `}]`
+}
+
 // machineryCorpus returns a deterministic session whose oldest portion contains
 // two tool exchanges (one base64-image result, one structured stdout result),
 // plus recent text turns. Indices are returned for precise assertions.
@@ -297,14 +305,14 @@ func machineryCorpus(t *testing.T) []sqlc.ListUncompactedMessagesBySessionRow {
 	t.Helper()
 	b64 := strings.Repeat("QUJD", 100) // 400 base64 chars
 	return []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `[{"type":"text","text":"deploy please"}]`, 100),                                                                                          // 0
+		mkRow(t, "user", textParts("deploy please, "+compactableDetail), 100),                                                                                      // 0
 		mkRow(t, "assistant", `[{"type":"text","text":"on it"},{"type":"tool-call","toolCallId":"A","toolName":"screenshot","input":{}}]`, 100),                    // 1 call A
 		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"A","toolName":"screenshot","result":{"mime":"image/png","data":"`+b64+`"}}]`, 100),                  // 2 result A (base64)
-		mkRow(t, "assistant", `[{"type":"text","text":"captured the screen"}]`, 100),                                                                               // 3
-		mkRow(t, "user", `[{"type":"text","text":"now build"}]`, 100),                                                                                              // 4
+		mkRow(t, "assistant", textParts("captured the screen, "+compactableDetail), 100),                                                                           // 3
+		mkRow(t, "user", textParts("now build, "+compactableDetail), 100),                                                                                          // 4
 		mkRow(t, "assistant", `[{"type":"text","text":"running"},{"type":"tool-call","toolCallId":"B","toolName":"exec_command","input":{"cmd":"make"}}]`, 100),    // 5 call B
 		mkRow(t, "tool", `[{"type":"tool-result","toolCallId":"B","toolName":"exec_command","result":{"exit_code":0,"stdout":"build ok done","stderr":""}}]`, 100), // 6 result B (structured)
-		mkRow(t, "assistant", `[{"type":"text","text":"build finished"}]`, 100),                                                                                    // 7
+		mkRow(t, "assistant", textParts("build finished, "+compactableDetail), 100),                                                                                // 7
 		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),                                                                                        // 8
 		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100),                                                                                     // 9
 	}
@@ -485,11 +493,11 @@ func TestDoCompactionMarksOnlyContiguousRunAcrossEmptyMiddleRow(t *testing.T) {
 	// order. doCompaction must mark only the first contiguous run (row 0) and
 	// leave row 2 for a later pass.
 	rows := []sqlc.ListUncompactedMessagesBySessionRow{
-		mkRow(t, "user", `[{"type":"text","text":"old question about a long-running project with plenty of detail to summarize"}]`, 100), // 0
-		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 100),                                                           // 1 renders empty
-		mkRow(t, "assistant", `[{"type":"text","text":"old answer covering the whole project state in enough words to compress"}]`, 100), // 2
-		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),                                                              // 3 kept
-		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100),                                                           // 4 kept
+		mkRow(t, "user", textParts("old question about a long-running project, "+compactableDetail), 100),        // 0
+		mkRow(t, "assistant", `[{"type":"reasoning","text":"thinking"}]`, 100),                                   // 1 renders empty
+		mkRow(t, "assistant", textParts("old answer covering the whole project state, "+compactableDetail), 100), // 2
+		mkRow(t, "user", `[{"type":"text","text":"recent question"}]`, 100),                                      // 3 kept
+		mkRow(t, "assistant", `[{"type":"text","text":"recent answer"}]`, 100),                                   // 4 kept
 	}
 	q := &fakeQueries{uncompacted: rows}
 	stub := &stubModel{summary: "SUMMARY"}
