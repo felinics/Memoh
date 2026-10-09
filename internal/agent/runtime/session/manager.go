@@ -2325,8 +2325,15 @@ func (m *Manager) Subscribe(ctx context.Context, botID, sessionID string) (Subsc
 				terminalDrop(reason + ": snapshot sequence regressed")
 				return false
 			}
-			if snapshotEpoch == lastEpoch && snapshot.Seq == lastSeq && ledgerRun == lastLedgerRun {
-				return true
+			if snapshotEpoch == lastEpoch && snapshot.Seq == lastSeq {
+				if ledgerRun == lastLedgerRun {
+					return true
+				}
+				// A client drops a snapshot that does not move its cursor, so
+				// a ledger change under an unchanged cursor has to make it
+				// subscribe again.
+				terminalDrop(reason + ": ledger run changed")
+				return false
 			}
 			lastEpoch = snapshotEpoch
 			lastSeq = snapshot.Seq

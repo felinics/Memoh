@@ -104,73 +104,125 @@ func describeRun(run *sessionruntime.CurrentRunView) string {
 	return run.RunID + " status=" + run.Status + " error_code=" + run.ErrorCode
 }
 
-// drainSubscription consumes everything a subscriber has been sent so far.
-func drainSubscription(sub sessionruntime.Subscription) {
-	for {
-		select {
-		case <-sub.C:
-		case <-time.After(200 * time.Millisecond):
+// webRuntimeView follows a session the way the Web runtime client
+// (apps/web/src/store/chat/runtime-client.ts) does, so a test sees the run the
+// page shows rather than the frames it was sent: a snapshot applies only while
+// the client awaits one or when it moves the cursor forward, and a dropped or
+// closed stream makes the client subscribe again and await the next snapshot.
+type webRuntimeView struct {
+	t                *testing.T
+	manager          *sessionruntime.Manager
+	botID, sessionID string
+	sub              sessionruntime.Subscription
+	awaiting         bool
+	epoch            string
+	seq              int64
+	run              *sessionruntime.CurrentRunView
+}
+
+func (h wsStepHistoryHarness) watch(t *testing.T) *webRuntimeView {
+	t.Helper()
+	v := &webRuntimeView{t: t, manager: h.manager, botID: h.botID, sessionID: h.sessionID}
+	v.resubscribe()
+	t.Cleanup(func() { v.sub.Close() })
+	return v
+}
+
+func (v *webRuntimeView) resubscribe() {
+	v.t.Helper()
+	if v.sub.Close != nil {
+		v.sub.Close()
+	}
+	sub, err := v.manager.Subscribe(context.Background(), v.botID, v.sessionID)
+	if err != nil {
+		v.t.Fatalf("Subscribe() error = %v", err)
+	}
+	v.sub = sub
+	v.awaiting = true
+}
+
+func (v *webRuntimeView) apply(event sessionruntime.Event, open bool) {
+	v.t.Helper()
+	switch {
+	case !open || event.Type == sessionruntime.EventRuntimeDropped:
+		if !v.awaiting || !open {
+			v.resubscribe()
+		}
+	case event.Type == sessionruntime.EventRuntimeSnapshot && event.Snapshot != nil:
+		if !v.awaiting && event.Epoch == v.epoch && event.Seq <= v.seq {
 			return
+		}
+		v.awaiting = false
+		v.epoch, v.seq, v.run = event.Epoch, event.Seq, event.Snapshot.CurrentRunView
+	case event.Type == sessionruntime.EventRuntimeDelta && event.Delta != nil && !v.awaiting:
+		switch {
+		case event.Epoch != v.epoch || event.Seq > v.seq+1:
+			v.resubscribe()
+			return
+		case event.Seq <= v.seq:
+			return
+		}
+		v.seq = event.Seq
+		if event.Delta.CurrentRunView != nil {
+			v.run = event.Delta.CurrentRunView
+		}
+		if patch := event.Delta.Run; patch != nil && v.run != nil && v.run.RunID == patch.RunID {
+			run := *v.run
+			if patch.Status != nil {
+				run.Status = *patch.Status
+			}
+			if patch.ErrorCode != nil {
+				run.ErrorCode = *patch.ErrorCode
+			}
+			v.run = &run
 		}
 	}
 }
 
-// awaitSnapshotEvent lets a reload the reset triggered reach the subscriber
-// before the test goes on; a reset that does not trigger one leaves nothing
-// to wait for.
-func awaitSnapshotEvent(t *testing.T, sub sessionruntime.Subscription) {
-	t.Helper()
-	deadline := time.After(time.Second)
-	for {
+// follow applies what the stream delivers for d, or until settled returns
+// true, and reports whether it did.
+func (v *webRuntimeView) follow(d time.Duration, settled func() bool) bool {
+	v.t.Helper()
+	deadline := time.After(d)
+	for settled == nil || !settled() {
 		select {
-		case event, ok := <-sub.C:
-			if !ok {
-				t.Fatal("subscription closed during the reset")
-			}
-			if event.Type == sessionruntime.EventRuntimeSnapshot {
-				return
-			}
+		case event, open := <-v.sub.C:
+			v.apply(event, open)
 		case <-deadline:
-			return
+			return settled == nil
 		}
+	}
+	return true
+}
+
+// drain applies everything the client has been sent so far.
+func (v *webRuntimeView) drain() { v.follow(200*time.Millisecond, nil) }
+
+// awaitReload lets a reload the reset triggered reach the client before the
+// test goes on; a reset that does not trigger one leaves nothing to wait for.
+func (v *webRuntimeView) awaitReload() {
+	epoch, seq := v.epoch, v.seq
+	v.follow(time.Second, func() bool { return !v.awaiting && (v.epoch != epoch || v.seq != seq) })
+}
+
+// awaitRun follows the stream until the client shows runID.
+func (v *webRuntimeView) awaitRun(runID string) {
+	v.t.Helper()
+	if !v.follow(5*time.Second, func() bool { return !v.awaiting && v.run != nil && v.run.RunID == runID }) {
+		v.t.Fatalf("client shows %s, want run %s", describeRun(v.run), runID)
 	}
 }
 
-// awaitClearedSubscription reads a subscriber's stream until it carries a
-// snapshot without a run, then checks nothing that follows brings one back.
-func awaitClearedSubscription(t *testing.T, sub sessionruntime.Subscription, staleRunID string) {
-	t.Helper()
-	deadline := time.After(5 * time.Second)
-	cleared := false
-	for !cleared {
-		select {
-		case event, ok := <-sub.C:
-			if !ok {
-				t.Fatal("subscription closed before the cleared snapshot arrived")
-			}
-			if event.Type == sessionruntime.EventRuntimeSnapshot && event.Snapshot != nil && event.Snapshot.CurrentRunView == nil {
-				cleared = true
-			}
-		case <-deadline:
-			t.Fatal("subscriber never received a snapshot without the cleared run")
-		}
+// awaitCleared follows the stream until the client shows no run, then checks
+// nothing that follows brings the cleared run back.
+func (v *webRuntimeView) awaitCleared(staleRunID string) {
+	v.t.Helper()
+	if !v.follow(5*time.Second, func() bool { return !v.awaiting && v.run == nil }) {
+		v.t.Fatalf("client still shows %s after the clear", describeRun(v.run))
 	}
-	settle := time.After(300 * time.Millisecond)
-	for {
-		select {
-		case event, ok := <-sub.C:
-			if !ok {
-				return
-			}
-			if event.Snapshot != nil && event.Snapshot.CurrentRunView != nil && event.Snapshot.CurrentRunView.RunID == staleRunID {
-				t.Fatalf("cleared run came back to the subscriber: %s", describeRun(event.Snapshot.CurrentRunView))
-			}
-			if event.Delta != nil && event.RunID == staleRunID {
-				t.Fatalf("cleared run streamed a delta after the reset: %+v", event)
-			}
-		case <-settle:
-			return
-		}
+	v.follow(300*time.Millisecond, nil)
+	if v.run != nil && v.run.RunID == staleRunID {
+		v.t.Fatalf("cleared run came back to the client: %s", describeRun(v.run))
 	}
 }
 
@@ -226,11 +278,7 @@ func TestPostgresRedisHistoryResetClearsRuntimeSnapshot(t *testing.T) {
 func assertHistoryResetClearsRuntimeSnapshot(t *testing.T, h wsStepHistoryHarness, scope historyResetScope, reopen func(*testing.T) *sessionruntime.Manager) {
 	t.Helper()
 	ctx := context.Background()
-	sub, err := h.manager.Subscribe(ctx, h.botID, h.sessionID)
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
-	defer sub.Close()
+	view := h.watch(t)
 
 	h.run(t, nil)
 	before := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
@@ -238,15 +286,15 @@ func assertHistoryResetClearsRuntimeSnapshot(t *testing.T, h wsStepHistoryHarnes
 		t.Fatal("finished run is missing from the live snapshot before the clear")
 	}
 
-	drainSubscription(sub)
-	// The subscriber reloads while the reset is under way, before the history
-	// is gone; what it reads then must not be what it is left with.
-	h.clearHistory(t, scope, func() { awaitSnapshotEvent(t, sub) })
+	view.drain()
+	// The client reloads while the reset is under way, before the history is
+	// gone; what it reads then must not be what it is left with.
+	h.clearHistory(t, scope, view.awaitReload)
 
 	if got := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView; got != nil {
 		t.Errorf("live snapshot after clearing history still holds %s", describeRun(got))
 	}
-	awaitClearedSubscription(t, sub, before.RunID)
+	view.awaitCleared(before.RunID)
 	if got := mustSnapshot(t, h.restarted(t), h.botID, h.sessionID).CurrentRunView; got != nil {
 		t.Errorf("ledger fallback after clearing history reports %s", describeRun(got))
 	}
@@ -269,6 +317,7 @@ func assertHistoryResetClearsRuntimeSnapshot(t *testing.T, h wsStepHistoryHarnes
 	if after == nil || after.RunID == before.RunID {
 		t.Fatalf("live run after the next turn = %s, want a new run", describeRun(after))
 	}
+	view.awaitRun(after.RunID)
 	if got := mustSnapshot(t, h.restarted(t), h.botID, h.sessionID).CurrentRunView; got == nil || got.RunID != after.RunID {
 		t.Fatalf("ledger fallback after the next turn = %s, want %s", describeRun(got), describeRun(after))
 	}
@@ -424,39 +473,38 @@ func TestPostgresHistoryResetOrphanedAdmissionExposesNoContent(t *testing.T) {
 func TestPostgresHistoryResetSubscriberHealsWithoutReleasePass(t *testing.T) {
 	h := newWSStepHistoryHarness(t, wsStepHistoryAuthFailure)
 	ctx := context.Background()
-	sub, err := h.manager.Subscribe(ctx, h.botID, h.sessionID)
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
-	defer sub.Close()
+	view := h.watch(t)
 	h.run(t, nil)
 	before := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
 	if before == nil {
 		t.Fatal("failed run is missing from the live snapshot")
 	}
-	drainSubscription(sub)
+	view.drain()
+	epoch := view.epoch
 
 	resetCtx, release, err := h.manager.BeginSessionHistoryReset(ctx, h.botID, h.sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	stale := false
-	deadline := time.After(5 * time.Second)
-	for !stale {
-		select {
-		case event := <-sub.C:
-			stale = event.Type == sessionruntime.EventRuntimeSnapshot && event.Snapshot != nil &&
-				event.Snapshot.CurrentRunView != nil && event.Snapshot.CurrentRunView.RunID == before.RunID
-		case <-deadline:
-			t.Fatal("subscriber did not reload from the ledger when the reset began")
-		}
+	if !view.follow(5*time.Second, func() bool {
+		return !view.awaiting && view.epoch != epoch && view.run != nil && view.run.RunID == before.RunID
+	}) {
+		t.Fatalf("client did not reload the run from the ledger when the reset began; it shows %s", describeRun(view.run))
 	}
 	if err := h.messages.DeleteBySession(resetCtx, h.sessionID); err != nil {
 		t.Fatal(err)
 	}
-	// No release: the subscriber must notice the cleared ledger by itself.
-	awaitClearedSubscription(t, sub, before.RunID)
+	// No release: the client must be brought to the cleared ledger without it.
+	view.awaitCleared(before.RunID)
+
+	release()
+	h.run(t, nil)
+	next := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
+	if next == nil || next.RunID == before.RunID {
+		t.Fatalf("live run after the next turn = %s, want a new run", describeRun(next))
+	}
+	view.awaitRun(next.RunID)
 }
 
 // A bot-wide clear reaches every session of the bot, not only the first.
@@ -472,15 +520,10 @@ func TestPostgresHistoryResetClearsEveryBotSession(t *testing.T) {
 		t.Fatalf("create second session: %v", err)
 	}
 	sessions := []wsStepHistoryHarness{first, second}
-	subs := make([]sessionruntime.Subscription, len(sessions))
+	views := make([]*webRuntimeView, len(sessions))
 	runs := make([]string, len(sessions))
 	for i, h := range sessions {
-		sub, err := h.manager.Subscribe(ctx, h.botID, h.sessionID)
-		if err != nil {
-			t.Fatalf("Subscribe() error = %v", err)
-		}
-		defer sub.Close()
-		subs[i] = sub
+		views[i] = h.watch(t)
 		h.run(t, nil)
 		run := mustSnapshot(t, h.manager, h.botID, h.sessionID).CurrentRunView
 		if run == nil {
@@ -488,8 +531,8 @@ func TestPostgresHistoryResetClearsEveryBotSession(t *testing.T) {
 		}
 		runs[i] = run.RunID
 	}
-	for _, sub := range subs {
-		drainSubscription(sub)
+	for _, view := range views {
+		view.drain()
 	}
 
 	first.clearHistory(t, historyResetBot, nil)
@@ -502,6 +545,6 @@ func TestPostgresHistoryResetClearsEveryBotSession(t *testing.T) {
 		if got := mustSnapshot(t, restarted, h.botID, h.sessionID).CurrentRunView; got != nil {
 			t.Errorf("session %d: ledger fallback after the bot clear reports %s", i, describeRun(got))
 		}
-		awaitClearedSubscription(t, subs[i], runs[i])
+		views[i].awaitCleared(runs[i])
 	}
 }
