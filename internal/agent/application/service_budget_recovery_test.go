@@ -601,3 +601,33 @@ func TestShedOlderBatchImagesChargesTheTrimNotice(t *testing.T) {
 		t.Fatal("an image that fits beside the trim notice was shed")
 	}
 }
+
+// A message sheds only as many of its images as the budget needs, oldest
+// first.
+func TestShedOlderBatchImagesShedsOnlyTheImagesNeeded(t *testing.T) {
+	image := func(data string) sdk.ImagePart { return sdk.ImagePart{Image: "data:image/png;base64," + data} }
+	album := sdk.UserMessage("album", image("MQ=="), image("Mg=="), image("Mw=="))
+	frags := []contextfrag.ContextFrag{
+		discussHistoryFrag(0, "album", contextfrag.KindConversationEvent, album),
+		discussHistoryFrag(1, "newest", contextfrag.KindCurrentUserMessage, sdk.UserMessage("newest input")),
+	}
+	batch := map[string]turn.ContextMessageSource{"album": {Kind: "external", ID: "album", Current: true}, "newest": {Kind: "external", ID: "newest", Current: true}}
+	cfg := native.RunConfig{ContextSourceFrags: frags, Messages: []sdk.Message{album, sdk.UserMessage("newest input")}, ContextMutations: contextfrag.NewMutationLedger()}
+	budget := contextfrag.ResolveProviderBudgetFragTokens(frags[0]) - contextfrag.EstimateImageTokens
+	shed, ok := shedOlderBatchImages(cfg, batch, budget)
+	if !ok {
+		t.Fatal("an album over budget shed nothing")
+	}
+	var kept []string
+	for _, part := range shed.Messages[0].Content {
+		if image, isImage := part.(sdk.ImagePart); isImage {
+			kept = append(kept, image.Image)
+		}
+	}
+	if len(kept) != 2 || kept[0] != image("Mg==").Image {
+		t.Fatalf("album kept %v, want only its oldest image shed", kept)
+	}
+	if records := cfg.ContextMutations.Records(); len(records) != 1 || records[0].Detail != "sources=album" {
+		t.Fatalf("mutations = %+v", records)
+	}
+}

@@ -28,9 +28,9 @@ const (
 	// MutationCurrentInputOmitted records older unconsumed input the run
 	// proceeds without because recovery could not compact it into the budget.
 	MutationCurrentInputOmitted MutationKind = "current_input_omitted"
-	// MutationCurrentInputImagesOmitted records unconsumed input whose images
-	// the provider context goes without: shed so that older text still fits,
-	// summarized or left out with their message, or not delivered at all.
+	// MutationCurrentInputImagesOmitted records unconsumed input the provider
+	// context goes without some or all images of: shed so that older text
+	// still fits, summarized or left out with their message, or not delivered.
 	MutationCurrentInputImagesOmitted MutationKind = "current_input_images_omitted"
 	// MutationRunAbortObserved marks a terminal classification where durable
 	// budget evidence outranked an explicit user cancellation: the run died of

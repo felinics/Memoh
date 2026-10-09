@@ -285,6 +285,9 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 		limit -= older[i].cost
 		historyBudget -= older[i].cost
 	}
+	if historyBudget <= 0 {
+		return cfg, shed, nil
+	}
 	*compacted = true
 	result := s.runBudgetCompactionSync(ctx, ChatRequest{BotID: cmd.BotID, ChatID: cmd.BotID, ThreadID: cmd.ThreadID, RunID: cfg.RunID, discussCurrentSources: protected}, pressure, historyBudget, modelID)
 	if result.Status != compaction.StatusOK && result.Status != compaction.StatusProgress {
@@ -293,7 +296,7 @@ func (s *Service) recoverDiscussContextBudget(ctx context.Context, cmd turn.Star
 	return cfg, false, native.ErrContextRecompose
 }
 
-// shedOlderBatchImages strips the images of older input of the batch, oldest
+// shedOlderBatchImages strips images of older input of the batch, oldest
 // first, until what must stay fits the budget. Answered history before the
 // batch is what selection trims first, so it does not count; an image costs
 // far more than its message's text and no summary can carry it, so the text
@@ -332,14 +335,26 @@ func shedOlderBatchImages(cfg native.RunConfig, batch map[string]turn.ContextMes
 			frag.Kind != contextfrag.KindConversationEvent || frag.Provenance.Collector != discussContextCollector {
 			continue
 		}
-		text := withoutImages(*msg)
-		if len(text.Content) == len(msg.Content) {
+		// Oldest image first, only as many as the budget needs.
+		kept := *msg
+		for excess > 0 {
+			image := slices.IndexFunc(kept.Content, func(part sdk.MessagePart) bool {
+				_, isImage := part.(sdk.ImagePart)
+				return isImage
+			})
+			if image < 0 {
+				break
+			}
+			before := contextfrag.ResolveProviderBudgetFragTokens(frags[i])
+			kept.Content = slices.Delete(slices.Clone(kept.Content), image, image+1)
+			frags[i] = contextfrag.RebuildFragMessage(frag, kept)
+			excess -= before - contextfrag.ResolveProviderBudgetFragTokens(frags[i])
+		}
+		if len(kept.Content) == len(msg.Content) {
 			continue
 		}
-		frags[i] = contextfrag.RebuildFragMessage(frag, text)
-		excess -= contextfrag.ResolveProviderBudgetFragTokens(frag) - contextfrag.ResolveProviderBudgetFragTokens(frags[i])
 		if index := frag.Provenance.Index; index >= 0 && index < len(messages) {
-			messages[index] = text
+			messages[index] = kept
 		}
 		shed = append(shed, frag.Provenance.SourceID)
 	}
