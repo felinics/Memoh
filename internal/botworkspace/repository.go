@@ -23,6 +23,7 @@ type ObservedWrite struct {
 	ObservedGeneration int64
 	MarkReady          bool
 	LastError          string
+	LastErrorCode      string
 	LastErrorPhase     string
 	Attempts           int32
 	NextAttemptAt      time.Time
@@ -148,6 +149,7 @@ func (r *postgresRepository) WriteObserved(ctx context.Context, w ObservedWrite)
 		ObservedGeneration: w.ObservedGeneration,
 		MarkReady:          w.MarkReady,
 		LastError:          w.LastError,
+		LastErrorCode:      w.LastErrorCode,
 		LastErrorPhase:     w.LastErrorPhase,
 		Attempts:           w.Attempts,
 		NextAttemptAt:      pgtype.Timestamptz{Time: w.NextAttemptAt, Valid: true},
@@ -204,6 +206,7 @@ func fromRow(row dbsqlc.BotWorkspace) Workspace {
 		ObservedGeneration: row.ObservedGeneration,
 		EverReady:          row.EverReady,
 		LastError:          row.LastError,
+		LastErrorCode:      row.LastErrorCode,
 		LastErrorPhase:     row.LastErrorPhase,
 		Attempts:           row.Attempts,
 		LeaseOwner:         row.LeaseOwner,

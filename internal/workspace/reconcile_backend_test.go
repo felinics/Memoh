@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/felinics/memoh/internal/botworkspace"
 	ctr "github.com/felinics/memoh/internal/container"
 )
 
@@ -43,6 +44,42 @@ func TestIsTransientClassifiesByErrorChain(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if got := isTransient(tt.err); got != tt.want {
 				t.Fatalf("isTransient(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestImagePullErrorSeparatesMissingImageFromUnreachableRegistry(t *testing.T) {
+	tests := map[string]struct {
+		err  error
+		want error
+	}{
+		"image missing":    {err: errors.Join(ctr.ErrNotFound, errors.New("registry: manifest unknown")), want: botworkspace.ErrImageNotFound},
+		"invalid name":     {err: errors.Join(ctr.ErrInvalidArgument, errors.New("invalid reference format")), want: botworkspace.ErrImageNotFound},
+		"runtime down":     {err: errors.Join(ctr.ErrUnavailable, ctr.ErrRuntime, errors.New("daemon down")), want: botworkspace.ErrImageRegistryUnavailable},
+		"connection reset": {err: errors.Join(ctr.ErrRuntime, os.NewSyscallError("read", syscall.ECONNRESET)), want: botworkspace.ErrImageRegistryUnavailable},
+		"dns failure": {
+			err:  errors.Join(ctr.ErrRuntime, &url.Error{Op: "Get", URL: "https://registry.example/v2/", Err: &net.DNSError{Err: "no such host", Name: "registry.example", IsNotFound: true}}),
+			want: botworkspace.ErrImageRegistryUnavailable,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := imagePullError(tt.err)
+			if !errors.Is(got, tt.want) || !errors.Is(got, tt.err) {
+				t.Fatalf("imagePullError = %v, want %v with the cause kept", got, tt.want)
+			}
+		})
+	}
+	for name, err := range map[string]error{
+		"budget spent": fmt.Errorf("pull: %w", context.DeadlineExceeded),
+		"canceled":     context.Canceled,
+		"other":        errors.Join(ctr.ErrRuntime, errors.New("unpack failed")),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := imagePullError(err)
+			if errors.Is(got, botworkspace.ErrImageNotFound) || errors.Is(got, botworkspace.ErrImageRegistryUnavailable) {
+				t.Fatalf("imagePullError(%v) = %v, want untagged", err, got)
 			}
 		})
 	}

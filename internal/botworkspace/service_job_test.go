@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/felinics/memoh/internal/apperror"
 )
 
 type logBuffer struct {
@@ -86,9 +89,28 @@ func TestProvisionAttemptIsOneUnitMarkedWhileRetrying(t *testing.T) {
 			t.Fatalf("attempt %d error = %v, want the step's failure", attempt+1, record["error"])
 		}
 	}
-	// The persisted message is the step's own text, not the unit's wrap.
-	if got := repo.get(bot).LastError; got != "start failed" {
-		t.Fatalf("last_error = %q, want the step error unchanged", got)
+	// The row keeps the code; the step's text lives in the unit's record.
+	if got := repo.get(bot); got.LastError != "" || got.LastErrorCode != "workspace_setup_failed" {
+		t.Fatalf("last_error/code = %q/%q, want empty/workspace_setup_failed", got.LastError, got.LastErrorCode)
+	}
+}
+
+// A workspace image the user named wrong is recorded under the same code in
+// the row and in the unit's result.
+func TestProvisionImageNotFoundNamesTheCodeInTheResult(t *testing.T) {
+	backend := &fakeBackend{provisionErr: &StepError{Phase: PhaseImagePrepare, Err: fmt.Errorf("pull image: %w", ErrImageNotFound)}}
+	svc, repo, _, _ := newTestService(t, backend)
+	buf := withJobLog(svc)
+	ctx := context.Background()
+	_, _ = svc.EnsurePresent(ctx, bot, "")
+	_, _ = svc.ReconcileOnce(ctx)
+
+	record := oneJob(t, buf, "workspace.provision")
+	if record["reason"] != "workspace.image_not_found" {
+		t.Fatalf("record reason = %v, want workspace.image_not_found", record["reason"])
+	}
+	if got := repo.get(bot).LastErrorCode; got != "workspace.image_not_found" {
+		t.Fatalf("last_error_code = %q, want workspace.image_not_found", got)
 	}
 }
 
@@ -122,7 +144,7 @@ func TestSupersededProvisionIsASkip(t *testing.T) {
 
 func TestTeardownAttemptIsOneUnitMarkedWhileRetrying(t *testing.T) {
 	backend := &fakeBackend{}
-	svc, _, _, clk := newTestService(t, backend)
+	svc, repo, _, clk := newTestService(t, backend)
 	ctx := context.Background()
 	_, _ = svc.EnsurePresent(ctx, bot, "")
 	_, _ = svc.ReconcileOnce(ctx)
@@ -141,5 +163,15 @@ func TestTeardownAttemptIsOneUnitMarkedWhileRetrying(t *testing.T) {
 		if got, _ := record["will_retry"].(bool); got != wantRetry {
 			t.Fatalf("attempt %d will_retry = %v, want %v", attempt+1, record["will_retry"], wantRetry)
 		}
+	}
+
+	// The row carries the catalog code, not the backend's message: ListChecks
+	// hands LastError straight to the bot checks panel.
+	row := repo.get(bot)
+	if row.LastErrorCode != string(apperror.CodeWorkspaceTeardownFailed) {
+		t.Fatalf("last_error_code = %q, want %q", row.LastErrorCode, apperror.CodeWorkspaceTeardownFailed)
+	}
+	if row.LastError != "" {
+		t.Fatalf("last_error = %q, want empty", row.LastError)
 	}
 }

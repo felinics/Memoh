@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -82,7 +83,7 @@ func (m *Manager) provisionWorkspace(ctx context.Context, botID, imageOverride s
 		// A registry that says the image does not exist will keep saying so;
 		// only transport-level failures are worth retrying. The wrap adds the
 		// image to the record and leaves the persisted message as it is.
-		return stepError(botworkspace.PhaseImagePrepare, errs.Wrap(err, "", slog.String("image", image)), isTransient(err))
+		return stepError(botworkspace.PhaseImagePrepare, errs.Wrap(imagePullError(err), "", slog.String("image", image)), isTransient(err))
 	}
 	if strings.TrimSpace(result.ImageRef) != "" {
 		image = result.ImageRef
@@ -149,6 +150,35 @@ func stepError(phase string, err error, retryable bool) error {
 		retryable = true
 	}
 	return &botworkspace.StepError{Phase: phase, Retryable: retryable, Err: err}
+}
+
+// imagePullError tags a failed image preparation with the conditions the user
+// acts on differently: an image that does not exist or whose name is invalid,
+// and a registry that cannot be reached. Any other failure is returned as is.
+// The runtime backends report both through their container sentinels, so no
+// error text is read.
+func imagePullError(err error) error {
+	switch {
+	case errors.Is(err, ctr.ErrNotFound), errors.Is(err, ctr.ErrInvalidArgument):
+		return fmt.Errorf("%w: %w", botworkspace.ErrImageNotFound, err)
+	case isRegistryUnreachable(err):
+		return fmt.Errorf("%w: %w", botworkspace.ErrImageRegistryUnavailable, err)
+	}
+	return err
+}
+
+// isRegistryUnreachable is the subset of transient failures that mean the
+// remote end did not answer. A spent time budget is not one: it says nothing
+// about the registry.
+func isRegistryUnreachable(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, ctr.ErrUnavailable) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 // isTransient classifies runtime errors that a later attempt may not see

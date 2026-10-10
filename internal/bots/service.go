@@ -276,6 +276,17 @@ func (s *Service) FindCreated(ctx context.Context, ownerUserID, requestKey strin
 	return bot, true, nil
 }
 
+// WorkspaceSetupError is a failed workspace observation that recorded the
+// catalog code of its cause. The API layer answers with that code.
+type WorkspaceSetupError struct {
+	Code  string
+	Phase string
+}
+
+func (e *WorkspaceSetupError) Error() string {
+	return "workspace setup failed (" + e.Phase + "): " + e.Code
+}
+
 // workspaceOutcomeError turns a failed observation into the stable errors the
 // API layer maps to user-facing codes.
 func workspaceOutcomeError(outcome WorkspaceOutcome) error {
@@ -285,6 +296,9 @@ func workspaceOutcomeError(outcome WorkspaceOutcome) error {
 	}
 	if outcome.LastErrorPhase == WorkspacePhaseBootstrap {
 		return fmt.Errorf("%w: %s", workspace.ErrWorkspaceTemplateBootstrapFailed, message)
+	}
+	if outcome.LastErrorCode != "" {
+		return &WorkspaceSetupError{Code: outcome.LastErrorCode, Phase: outcome.LastErrorPhase}
 	}
 	return fmt.Errorf("workspace setup failed (%s): %s", outcome.LastErrorPhase, message)
 }
@@ -959,10 +973,11 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 			initCheck.Status = BotCheckStatusError
 			initCheck.Summary = "Workspace initialization failed."
 			initCheck.Detail = "Bot resources failed to provision. Retry the workspace or delete the bot."
-			if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && strings.TrimSpace(outcome.LastError) != "" {
+			if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && (strings.TrimSpace(outcome.LastError) != "" || outcome.LastErrorCode != "") {
 				initCheck.Detail = outcome.LastError
 				initCheck.Metadata = map[string]any{
 					"setup_error_phase": outcome.LastErrorPhase,
+					"setup_error_code":  outcome.LastErrorCode,
 				}
 			}
 		}
@@ -1044,7 +1059,7 @@ func (s *Service) buildRuntimeChecks(ctx context.Context, row sqlc.Bot, includeD
 	// startup for an existing container.
 	if outcome, ok := s.workspaceOutcome(ctx, row.ID.String()); ok && outcome.Observed == WorkspaceObservedFailed {
 		hasSetupFailure = true
-		setupFailure = containerSetupFailure{Phase: outcome.LastErrorPhase, Message: outcome.LastError}
+		setupFailure = containerSetupFailure{Phase: outcome.LastErrorPhase, Message: outcome.LastError, Code: outcome.LastErrorCode}
 	}
 	initCheck := BotCheck{
 		ID:       BotCheckTypeContainerInit,

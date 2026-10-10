@@ -26181,7 +26181,11 @@ const docTemplate = `{
                 "completed_at": {
                     "type": "string"
                 },
+                "error_code": {
+                    "type": "string"
+                },
                 "error_message": {
+                    "description": "ErrorMessage is the text an earlier server stored; new failures set\nErrorCode and leave it empty.",
                     "type": "string"
                 },
                 "id": {

@@ -60,14 +60,17 @@ type Workspace struct {
 	Observed           string
 	ObservedGeneration int64
 	EverReady          bool
-	LastError          string
-	LastErrorPhase     string
-	Attempts           int32
-	NextAttemptAt      time.Time
-	LeaseOwner         string
-	LeaseUntil         time.Time
-	Version            int64
-	UpdatedAt          time.Time
+	// LastError is the text an earlier server stored; new failures set
+	// LastErrorCode and leave it empty.
+	LastError      string
+	LastErrorCode  string
+	LastErrorPhase string
+	Attempts       int32
+	NextAttemptAt  time.Time
+	LeaseOwner     string
+	LeaseUntil     time.Time
+	Version        int64
+	UpdatedAt      time.Time
 }
 
 // Settled reports whether the observation is a stable answer to the current

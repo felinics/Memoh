@@ -520,6 +520,10 @@ func createBotHTTPError(err error, ownerFromToken bool) error {
 	if errors.Is(err, workspace.ErrWorkspaceTemplateBootstrapFailed) {
 		return apperror.Wrap(apperror.CodeWorkspaceTemplateBootstrapFailed, err, nil)
 	}
+	var setup *bots.WorkspaceSetupError
+	if errors.As(err, &setup) {
+		return apperror.Wrap(apperror.Code(setup.Code), err, nil)
+	}
 	if errors.Is(err, bots.ErrOwnerUserNotFound) {
 		if ownerFromToken {
 			return echo.NewHTTPError(http.StatusUnauthorized, "owner user not found, please login again")

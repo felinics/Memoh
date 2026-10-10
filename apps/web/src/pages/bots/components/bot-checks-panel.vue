@@ -106,7 +106,7 @@
                 </p>
 
                 <div
-                  v-if="item.detail"
+                  v-if="checkDetail(item)"
                   class="group/code relative rounded border bg-muted/30"
                 >
                   <div class="absolute right-1.5 top-1.5 opacity-0 transition-opacity group-hover/code:opacity-100">
@@ -115,12 +115,12 @@
                       size="icon"
                       class="size-6"
                       :aria-label="$t('common.copy')"
-                      @click.stop="copyToClipboard(item.detail)"
+                      @click.stop="copyToClipboard(checkDetail(item))"
                     >
                       <Copy class="size-3" />
                     </Button>
                   </div>
-                  <pre class="max-h-[240px] select-text overflow-x-auto overflow-y-auto whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed"><code>{{ item.detail }}</code></pre>
+                  <pre class="max-h-[240px] select-text overflow-x-auto overflow-y-auto whitespace-pre-wrap p-3 font-mono text-[11px] leading-relaxed"><code>{{ checkDetail(item) }}</code></pre>
                 </div>
               </div>
             </CollapsibleContent>
@@ -160,6 +160,7 @@ import {
 } from 'lucide-vue-next'
 import { useClipboard } from '@felinic/ui'
 import { resolveApiErrorMessage } from '@/utils/api-error'
+import { botCheckDetail } from '@/utils/bot-check'
 
 type BotCheck = BotsBotCheck
 
@@ -238,6 +239,10 @@ function getStatusColor(status: BotCheck['status']) {
   if (status === 'warn') return 'text-warning'
   if (status === 'ok') return 'text-foreground/40'
   return 'text-muted-foreground'
+}
+
+function checkDetail(item: BotCheck): string {
+  return botCheckDetail(item, key => t(key))
 }
 
 // Prefer the server-provided i18n title key; fall back to type/id when missing.

@@ -520,6 +520,9 @@
     "workspace": {
       "archive_invalid": "The archive cannot be extracted. Use a valid .zip, .tar.gz or .tgz file.",
       "display_prepare_failed": "Display preparation failed.",
+      "image_not_found": "The workspace image does not exist, needs registry credentials, or its name is invalid. Check the image name and try again.",
+      "image_registry_unavailable": "The image registry could not be reached. Please try again later.",
+      "teardown_failed": "Workspace removal failed. Retry deleting the bot.",
       "template_bootstrap_failed": "The workspace files could not be initialized. Please try rebuilding the workspace.",
       "unreachable": "The workspace could not be reached."
     },

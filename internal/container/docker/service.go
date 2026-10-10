@@ -950,6 +950,9 @@ func mapDockerErr(err error) error {
 	if errdefs.IsNotFound(err) {
 		return errors.Join(containerapi.ErrNotFound, err)
 	}
+	if errdefs.IsInvalidArgument(err) {
+		return errors.Join(containerapi.ErrInvalidArgument, err)
+	}
 	// The Docker client classifies a 409 answer as errdefs.ErrConflict; a
 	// container name already in use is answered with 409.
 	if errdefs.IsAlreadyExists(err) || errdefs.IsConflict(err) {

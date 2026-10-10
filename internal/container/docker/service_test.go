@@ -587,3 +587,27 @@ func TestDecodePullProgressReturnsDaemonErrorFromStream(t *testing.T) {
 		t.Fatalf("fault = %q, want dependency", got)
 	}
 }
+
+func TestPullImageMapsMissingImageAndInvalidName(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		want   error
+	}{
+		{"daemon answers 404", http.StatusNotFound, containerapi.ErrNotFound},
+		{"daemon answers 400", http.StatusBadRequest, containerapi.ErrInvalidArgument},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := newTestService(t, "", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": "pull failed"})
+			})
+			_, err := svc.PullImage(context.Background(), "registry.example/nope:1", nil)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("PullImage() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
