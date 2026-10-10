@@ -130,10 +130,17 @@ func TestDirectModelSwitchReconcilesAgainstNewModel(t *testing.T) {
 	catalog := external.ModelCatalog{Models: []external.ModelOption{
 		{ID: "A", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "medium"}, {ID: "high"}}},
 		{ID: "B", DefaultReasoningEffort: "low", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "low"}}},
+		{ID: "no-default", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "low"}, {ID: "max"}}},
 	}}
 	id, effort, err := reconcileDirectPair(catalog, "B", "high")
 	if err != nil || id != "B" || effort != "low" {
 		t.Fatalf("pair=%s/%s err=%v", id, effort, err)
+	}
+	// Without a model default the effort stays unset until a level is picked.
+	for sent, want := range map[string]string{"": "", "max": "max", "high": ""} {
+		if _, effort, err = reconcileDirectPair(catalog, "no-default", sent); err != nil || effort != want {
+			t.Fatalf("no-default effort %q = %q, want %q (err=%v)", sent, effort, want, err)
+		}
 	}
 	if _, _, err = reconcileDirectPair(catalog, "", ""); err == nil {
 		t.Fatal("accepted empty model without a configured or advertised default")

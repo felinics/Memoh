@@ -58,9 +58,9 @@ const activeModel = computed(() => {
   return props.models.find(model => (model.id || model.model_id) === id)
 })
 const efforts = computed(() => props.reasoningOptions !== undefined
-  ? props.reasoningOptions.flatMap(option => {
+  ? props.reasoningOptions.map(option => {
       const value = option.value.trim()
-      return value ? [{ value, label: option.label.trim() || value, description: option.description?.trim() }] : []
+      return { value, label: option.label.trim() || value, description: option.description?.trim() }
     })
   : selectableEfforts(activeModel.value?.reasoning).map(value => ({
       value,

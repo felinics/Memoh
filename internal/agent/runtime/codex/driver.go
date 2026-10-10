@@ -151,22 +151,50 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 		return external.ModelCatalog{}, err
 	}
 	if cfg.Auth == AuthAPIKey && strings.TrimSpace(cfg.BaseURL) != "" {
-		return customBaseURLModelCatalog(ctx, cfg, nil)
+		catalog, err := customBaseURLModelCatalog(ctx, cfg, nil)
+		if err != nil {
+			return external.ModelCatalog{}, err
+		}
+		// Reasoning levels only enrich the endpoint's own list, which must stay
+		// usable while the workspace or app-server is not.
+		native, err := d.nativeModels(ctx, botID, botAgentID, cfg, true)
+		if err != nil {
+			if ctx.Err() != nil {
+				return external.ModelCatalog{}, err
+			}
+			d.logger.WarnContext(ctx, "codex reasoning levels unavailable for custom Base URL models",
+				slog.String("bot_id", botID),
+				slog.Any("error", err))
+			return catalog, nil
+		}
+		applyNativeReasoning(catalog.Models, native)
+		return catalog, nil
 	}
-	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
+	models, err := d.nativeModels(ctx, botID, botAgentID, cfg, false)
 	if err != nil {
 		return external.ModelCatalog{}, err
+	}
+	return external.ModelCatalog{
+		Models:                    models,
+		ConfiguredModelID:         cfg.Model,
+		ConfiguredReasoningEffort: cfg.ReasoningEffort,
+	}, nil
+}
+
+func (d *Driver) nativeModels(ctx context.Context, botID, botAgentID string, cfg Config, includeHidden bool) ([]external.ModelOption, error) {
+	srv, releaseServer, err := d.acquireServer(ctx, botID, botAgentID)
+	if err != nil {
+		return nil, err
 	}
 	defer releaseServer()
 	if err := srv.ensureAuth(ctx, cfg); err != nil {
 		if errors.Is(err, ErrAuthRequired) {
-			return external.ModelCatalog{}, external.Fail(external.FailureAuthRequired, err)
+			return nil, external.Fail(external.FailureAuthRequired, err)
 		}
-		return external.ModelCatalog{}, err
+		return nil, err
 	}
 
 	const pageSize = uint64(100)
-	includeHidden := false
 	limit := pageSize
 	var cursor *string
 	models := make([]external.ModelOption, 0, 16)
@@ -178,10 +206,10 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 			IncludeHidden: &includeHidden,
 			Limit:         &limit,
 		}, &response); err != nil {
-			return external.ModelCatalog{}, fmt.Errorf("codex model/list: %w", err)
+			return nil, fmt.Errorf("codex model/list: %w", err)
 		}
 		for _, model := range response.Data {
-			if model.Hidden {
+			if model.Hidden && !includeHidden {
 				continue
 			}
 			// turn/start accepts the catalog's concrete `model` value. `id` is
@@ -217,17 +245,12 @@ func (d *Driver) ModelCatalog(ctx context.Context, request external.ModelCatalog
 		}
 		next := strings.TrimSpace(*response.NextCursor)
 		if _, exists := seenCursors[next]; exists {
-			return external.ModelCatalog{}, errs.NewDependency("codex model/list returned a repeated cursor")
+			return nil, errs.NewDependency("codex model/list returned a repeated cursor")
 		}
 		seenCursors[next] = struct{}{}
 		cursor = &next
 	}
-
-	return external.ModelCatalog{
-		Models:                    models,
-		ConfiguredModelID:         cfg.Model,
-		ConfiguredReasoningEffort: cfg.ReasoningEffort,
-	}, nil
+	return models, nil
 }
 
 // Prompt implements external.Driver: it runs one turn on the bot's
@@ -339,7 +362,7 @@ func (d *Driver) Prompt(ctx context.Context, input external.PromptInput) (extern
 	if turnParams.Model != nil {
 		settings.Model = *turnParams.Model
 	}
-	if turnParams.Effort != nil {
+	if turnParams.Effort != nil || turnParams.CollaborationMode != nil {
 		settings.ReasoningEffort = turnParams.Effort
 	}
 	srv.rememberThreadSettings(threadID, settings.Model, settings.ReasoningEffort)

@@ -57,3 +57,60 @@ func customBaseURLModelCatalog(ctx context.Context, cfg Config, httpClient *http
 		ConfiguredReasoningEffort: cfg.ReasoningEffort,
 	}, nil
 }
+
+// genericReasoningEfforts are the Responses API levels offered for a model
+// Codex has no metadata for. Whether the endpoint honors, remaps, or rejects
+// one is its own decision, so none of them is ever the default. `ultra` is
+// left out: Codex rewrites it to `medium` for such a model before sending.
+var genericReasoningEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// applyNativeReasoning gives each endpoint model the reasoning levels Codex
+// itself will assume for that ID. Models Codex has no metadata for get the
+// generic levels without a default, which leaves the effort to the endpoint
+// until the user picks one.
+func applyNativeReasoning(models, native []external.ModelOption) {
+	generic := make([]external.ReasoningEffortOption, 0, len(genericReasoningEfforts))
+	for _, id := range genericReasoningEfforts {
+		generic = append(generic, external.ReasoningEffortOption{ID: id, Name: id})
+	}
+	for i := range models {
+		models[i].ReasoningEfforts = generic
+		if match, ok := nativeModelFor(models[i].ID, native); ok {
+			models[i].DefaultReasoningEffort = match.DefaultReasoningEffort
+			models[i].ReasoningEfforts = match.ReasoningEfforts
+		}
+	}
+}
+
+// nativeModelFor follows Codex's own metadata lookup for a model ID
+// (models-manager construct_model_info_from_candidates): the longest catalog
+// ID that prefixes it, then one retry without a leading `provider/` segment.
+// Matching any other way would show levels the runtime does not apply.
+func nativeModelFor(id string, native []external.ModelOption) (external.ModelOption, bool) {
+	if match, ok := longestPrefixModel(id, native); ok {
+		return match, true
+	}
+	namespace, suffix, found := strings.Cut(id, "/")
+	if !found || namespace == "" || strings.Contains(suffix, "/") {
+		return external.ModelOption{}, false
+	}
+	for _, r := range namespace {
+		isSimple := r == '_' || r == '-' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !isSimple {
+			return external.ModelOption{}, false
+		}
+	}
+	return longestPrefixModel(suffix, native)
+}
+
+func longestPrefixModel(id string, native []external.ModelOption) (external.ModelOption, bool) {
+	var best external.ModelOption
+	found := false
+	for _, candidate := range native {
+		if !strings.HasPrefix(id, candidate.ID) || (found && len(candidate.ID) <= len(best.ID)) {
+			continue
+		}
+		best, found = candidate, true
+	}
+	return best, found
+}

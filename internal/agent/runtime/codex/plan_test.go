@@ -24,6 +24,25 @@ func TestPlanModeCarriesEffectiveSettingsIndependentlyOfPermissions(t *testing.T
 	}
 }
 
+func TestTurnWithoutEffortDropsTheThreadsEarlierLevel(t *testing.T) {
+	held := protocol.ReasoningEffort("high")
+	params := protocol.TurnStartParams{}
+	if err := applyCollaborationMode(&params, external.PromptInput{}, protocol.Settings{Model: "thread-model", ReasoningEffort: &held}); err != nil {
+		t.Fatal(err)
+	}
+	if got := params.CollaborationMode; got == nil || got.Mode != "default" || got.Settings.Model != "thread-model" || got.Settings.ReasoningEffort != nil {
+		t.Fatalf("preset must drop the held level: %+v", got)
+	}
+
+	params = protocol.TurnStartParams{}
+	if err := applyCollaborationMode(&params, external.PromptInput{}, protocol.Settings{Model: "thread-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if params.CollaborationMode != nil {
+		t.Fatalf("nothing to drop, preset must stay unset: %+v", params.CollaborationMode)
+	}
+}
+
 func TestCompletedPlanBecomesAssistantTranscript(t *testing.T) {
 	turn := newTurnState(t.Context(), external.PromptInput{Sink: &captureSink{}}, "thread", nil, nil, nil, nil, slog.Default())
 	defer turn.close()

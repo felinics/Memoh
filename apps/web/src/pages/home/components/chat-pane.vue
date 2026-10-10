@@ -2615,7 +2615,7 @@ const composerReasoningEffort = computed(() => {
 const composerReasoningOptions = computed(() => {
   const efforts = composerModelCatalog.value.reasoningEfforts
   if (!efforts) return undefined
-  return efforts.flatMap((effort) => {
+  const options = efforts.flatMap((effort) => {
     const value = effort.id?.trim() ?? ''
     if (!value) return []
     const runtimeLabel = effort.name?.trim() ?? ''
@@ -2626,6 +2626,12 @@ const composerReasoningOptions = computed(() => {
       description: effort.description?.trim() || undefined,
     }]
   })
+  // A Codex model without a default level sends none until one is picked, so
+  // the menu needs a way back to that state.
+  if (activeDirectRuntime.value === BOT_AGENT_RUNTIME_CODEX && options.length && !composerModelCatalog.value.defaultReasoningEffort) {
+    options.unshift({ value: '', label: t('chat.modelDefault'), description: undefined })
+  }
+  return options
 })
 
 function openAgentSettings(addAgent: boolean) {

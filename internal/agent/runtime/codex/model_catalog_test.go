@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/felinics/memoh/internal/agent/runtime/external"
 )
 
 func TestCustomBaseURLModelCatalogUsesConfiguredEndpointAndCredential(t *testing.T) {
@@ -47,5 +49,36 @@ func TestCustomBaseURLModelCatalogUsesConfiguredEndpointAndCredential(t *testing
 	}
 	if catalog.Models[0].Name != "deepseek-v4-flash" || catalog.Models[0].ReasoningEfforts == nil {
 		t.Fatalf("normalized model = %#v", catalog.Models[0])
+	}
+}
+
+func TestApplyNativeReasoningFollowsCodexModelLookup(t *testing.T) {
+	t.Parallel()
+
+	type want struct {
+		defaultEffort string
+		efforts       int
+	}
+	native := []external.ModelOption{
+		{ID: "gpt-5.4", DefaultReasoningEffort: "medium", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "low"}, {ID: "medium"}}},
+		{ID: "gpt-5.4-mini", DefaultReasoningEffort: "low", ReasoningEfforts: []external.ReasoningEffortOption{{ID: "low"}}},
+	}
+	// A model Codex cannot place gets every generic level and no default, so
+	// nothing is sent until the user picks one.
+	unplaced := want{efforts: len(genericReasoningEfforts)}
+	cases := map[string]want{
+		"gpt-5.4":              {defaultEffort: "medium", efforts: 2},
+		"gpt-5.4-mini-2026":    {defaultEffort: "low", efforts: 1},
+		"openai/gpt-5.4-codex": {defaultEffort: "medium", efforts: 2},
+		"deepseek-v4-pro":      unplaced,
+		"relay/openai/gpt-5.4": unplaced,
+		"open ai/gpt-5.4":      unplaced,
+	}
+	for id, want := range cases {
+		models := []external.ModelOption{{ID: id}}
+		applyNativeReasoning(models, native)
+		if got := models[0]; got.DefaultReasoningEffort != want.defaultEffort || len(got.ReasoningEfforts) != want.efforts {
+			t.Errorf("%s: default = %q, efforts = %#v", id, got.DefaultReasoningEffort, got.ReasoningEfforts)
+		}
 	}
 }
