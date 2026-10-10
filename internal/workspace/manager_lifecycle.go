@@ -222,7 +222,15 @@ func (m *Manager) EnsureNativeRunning(ctx context.Context, botID string) error {
 		return err
 	}
 
-	return m.startTaskAndEnsureNetwork(ctx, botID, containerID)
+	if err := m.startTaskAndEnsureNetwork(ctx, botID, containerID); err != nil {
+		return err
+	}
+	// This task was restarted, not provisioned: the provisioning path never
+	// ran, so its WorkspaceStart hook would be lost. Report the start we just
+	// performed so workspace boot hooks (service self-heal, registration)
+	// also run when a workspace comes back from a restart or a reboot.
+	m.emitWorkspaceStartHook(ctx, botID, containerID)
+	return nil
 }
 
 // StopBot stops the container task for a bot and marks it stopped in DB.
