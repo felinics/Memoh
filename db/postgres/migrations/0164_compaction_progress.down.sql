@@ -5,6 +5,9 @@ ALTER TABLE bot_history_message_compacts
   DROP COLUMN IF EXISTS failure_attempts;
 
 ALTER TABLE bot_sessions
+  DROP COLUMN IF EXISTS compaction_scan_at;
+
+ALTER TABLE bot_sessions
   DROP COLUMN IF EXISTS compaction_scan_epoch;
 
 ALTER TABLE bot_sessions

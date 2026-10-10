@@ -10,8 +10,9 @@
 -- still be halved: the next pass retries half of them. For both,
 -- message_count is how many rows the attempt claimed.
 -- compaction_scan_after is the last candidate row a pass found permanently
--- unclaimable in compaction_scan_epoch; later passes in that epoch start
--- reading after it instead of rescanning the same prefix.
+-- unclaimable in compaction_scan_epoch, recorded at compaction_scan_at; later
+-- passes in that epoch start reading after it instead of rescanning the same
+-- prefix, until rows it passed while they were held become candidates again.
 
 ALTER TABLE bot_history_message_compacts
   ADD COLUMN IF NOT EXISTS failure_reason TEXT NOT NULL DEFAULT '';
@@ -24,3 +25,6 @@ ALTER TABLE bot_sessions
 
 ALTER TABLE bot_sessions
   ADD COLUMN IF NOT EXISTS compaction_scan_epoch BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE bot_sessions
+  ADD COLUMN IF NOT EXISTS compaction_scan_at TIMESTAMPTZ;

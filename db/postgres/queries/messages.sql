@@ -2995,7 +2995,12 @@ WHERE message.team_id = public.memoh_current_team_id()
 -- name: ListUncompactedMessagesBySessionWithinBytes :many
 -- Compaction candidates are admitted oldest-first within a hard serialized
 -- payload budget, starting after a candidate cursor: the given one, or else
--- the session's recorded scan position when it belongs to the current epoch.
+-- the session's recorded scan position when it belongs to the current epoch
+-- and no row held after an unusable summary has become a candidate again
+-- since it was recorded: the scan may pass such rows while they are held.
+-- ReadFromStart ignores the recorded position. HeldClaims counts the
+-- session's attempts in this epoch whose summary was unusable and that are
+-- still the latest claim of some row.
 -- Only rows from the cursor on are read. The cumulative filter is evaluated
 -- before the payload join, so a leading row larger than the budget comes back
 -- alone and Oversized, without its payload, instead of crossing the
@@ -3005,9 +3010,10 @@ WHERE message.team_id = public.memoh_current_team_id()
 -- GapBefore marks a candidate whose preceding replayed row is not a
 -- candidate (the source of an active summary or of a fresh claim): one
 -- compact_id must never span it, or the read path would fold the later rows
--- in front of that summary. PendingBefore reports a fresh claim, or a
--- recent attempt whose summary was unusable, anywhere in that gap: their rows
--- return as candidates once it lapses. An unusable attempt holds its rows for
+-- in front of that summary. PendingBefore reports a fresh claim anywhere in
+-- that gap: its rows return as candidates if it lapses. HeldBefore reports
+-- any row in the gap that is held for now, a fresh claim or a recent attempt
+-- whose summary was unusable. An unusable attempt holds its rows for
 -- the hold seconds, four times as long for each consecutive such attempt on
 -- them, up to the max hold. IneffectiveClaim marks a row whose claim in this
 -- epoch failed because the summary was not shorter than the rows. For a row
@@ -3031,6 +3037,25 @@ WITH scan_anchor AS MATERIALIZED (
         WHERE scan_session.team_id = public.memoh_current_team_id()
           AND scan_session.id = sqlc.arg(session_id)
           AND scan_session.compaction_scan_epoch = scan_session.compaction_epoch
+          AND NOT sqlc.arg(read_from_start)::boolean
+          AND NOT EXISTS (
+            SELECT 1
+            FROM bot_history_message_compacts lapsed
+            WHERE lapsed.team_id = public.memoh_current_team_id()
+              AND lapsed.bot_id = scan_session.bot_id
+              AND lapsed.session_id = scan_session.id
+              AND lapsed.compaction_epoch = scan_session.compaction_epoch
+              AND lapsed.status = 'error'
+              AND lapsed.failure_reason = sqlc.arg(unusable_failure_reason)::text
+              AND lapsed.completed_at + LEAST(
+              sqlc.arg(unusable_max_hold_seconds)::bigint,
+              sqlc.arg(unusable_hold_seconds)::bigint * power(4, LEAST(GREATEST(lapsed.failure_attempts, 1), 8) - 1)::bigint
+            ) * INTERVAL '1 second' <= now()
+              AND lapsed.completed_at + LEAST(
+              sqlc.arg(unusable_max_hold_seconds)::bigint,
+              sqlc.arg(unusable_hold_seconds)::bigint * power(4, LEAST(GREATEST(lapsed.failure_attempts, 1), 8) - 1)::bigint
+            ) * INTERVAL '1 second' > COALESCE(scan_session.compaction_scan_at, '-infinity'::timestamptz)
+          )
       )
     )
 ), session_rows AS MATERIALIZED (
@@ -3085,7 +3110,7 @@ WITH scan_anchor AS MATERIALIZED (
     ) AS candidate_seq
   FROM session_rows
 ), held_gaps AS MATERIALIZED (
-  SELECT candidate_seq, bool_or(held_by <> 'ok') AS pending
+  SELECT candidate_seq, bool_or(held_by = 'pending') AS pending, bool_or(held_by <> 'ok') AS held
   FROM sequenced_rows
   WHERE held_by IS NOT NULL
   GROUP BY candidate_seq
@@ -3093,7 +3118,8 @@ WITH scan_anchor AS MATERIALIZED (
   SELECT
     sequenced_rows.*,
     (gap.candidate_seq IS NOT NULL)::boolean AS gap_before,
-    COALESCE(gap.pending, false)::boolean AS pending_before
+    COALESCE(gap.pending, false)::boolean AS pending_before,
+    COALESCE(gap.held, false)::boolean AS held_before
   FROM sequenced_rows
   LEFT JOIN held_gaps gap
     ON sequenced_rows.held_by IS NULL
@@ -3106,6 +3132,7 @@ WITH scan_anchor AS MATERIALIZED (
     ordered.created_at,
     ordered.gap_before,
     ordered.pending_before,
+    ordered.held_before,
     COALESCE(ordered.id = (
       SELECT latest.id
       FROM ordered_rows latest
@@ -3126,6 +3153,22 @@ WITH scan_anchor AS MATERIALIZED (
    AND m.team_id = public.memoh_current_team_id()
   WHERE ordered.held_by IS NULL
     AND NOT EXISTS (SELECT 1 FROM scan_anchor WHERE scan_anchor.id = ordered.id)
+), held_claims AS MATERIALIZED (
+  SELECT count(*)::BIGINT AS held_claims
+  FROM bot_history_message_compacts held_claim
+  JOIN bot_sessions held_session
+    ON held_session.id = held_claim.session_id
+   AND held_session.team_id = held_claim.team_id
+  WHERE held_claim.team_id = public.memoh_current_team_id()
+    AND held_claim.session_id = sqlc.arg(session_id)
+    AND held_claim.compaction_epoch = held_session.compaction_epoch
+    AND held_claim.status = 'error'
+    AND held_claim.failure_reason = sqlc.arg(unusable_failure_reason)::text
+    AND EXISTS (
+      SELECT 1 FROM bot_history_messages held_row
+      WHERE held_row.compact_id = held_claim.id
+        AND held_row.team_id = held_claim.team_id
+    )
 ), ranked_candidates AS MATERIALIZED (
   SELECT
     candidate_rows.*,
@@ -3173,6 +3216,8 @@ SELECT
   admitted.cumulative_bytes,
   admitted.gap_before::boolean AS gap_before,
   admitted.pending_before::boolean AS pending_before,
+  admitted.held_before::boolean AS held_before,
+  held_claims.held_claims,
   admitted.latest_user::boolean AS latest_user,
   admitted.oversized::boolean AS oversized,
   COALESCE(claim.failure_reason = sqlc.arg(ineffective_failure_reason)::text, false)::boolean AS ineffective_claim,
@@ -3180,6 +3225,7 @@ SELECT
   CASE WHEN claim.failure_reason <> sqlc.arg(ineffective_failure_reason)::text THEN claim.message_count ELSE 0 END::integer AS retry_rows
 FROM bot_visible_history_messages m
 JOIN admitted_candidates admitted ON admitted.id = m.id
+CROSS JOIN held_claims
 LEFT JOIN bot_history_messages payload
   ON payload.id = m.id
  AND payload.team_id = public.memoh_current_team_id()
@@ -3206,10 +3252,12 @@ ORDER BY m.turn_position ASC, m.turn_message_seq ASC, m.created_at ASC, m.id ASC
 
 -- name: AdvanceCompactionScan :exec
 -- Records the last candidate row a pass found permanently unclaimable in the
--- current epoch, so later passes start reading after it. A new epoch voids it.
+-- current epoch, and when, so later passes start reading after it. A new
+-- epoch voids it.
 UPDATE bot_sessions
 SET compaction_scan_after = sqlc.arg(after_message_id),
-    compaction_scan_epoch = sqlc.arg(compaction_epoch)
+    compaction_scan_epoch = sqlc.arg(compaction_epoch),
+    compaction_scan_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = sqlc.arg(session_id)
   AND compaction_epoch = sqlc.arg(compaction_epoch);

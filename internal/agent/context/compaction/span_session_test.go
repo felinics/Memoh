@@ -31,6 +31,7 @@ type sessionStore struct {
 	epoch       int64
 	scanAfter   pgtype.UUID
 	scanEpoch   int64
+	scanAt      time.Time
 	windows     int
 	readBytes   int64
 }
@@ -44,8 +45,7 @@ func payloadBytes(row sqlc.ListUncompactedMessagesBySessionRow) int64 {
 }
 
 // heldBy reports what keeps a row out of the candidate set: "ok", "pending",
-// "unusable" or "" for a candidate. An unusable attempt holds its rows for
-// hold, four times as long for each further consecutive one, up to maxHold.
+// "unusable" or "" for a candidate.
 func (q *sessionStore) heldBy(row sqlc.ListUncompactedMessagesBySessionRow, hold, maxHold time.Duration) string {
 	claim := q.claims[row.ID]
 	if !claim.Valid || q.claimEpoch[claim] != q.epoch {
@@ -54,15 +54,33 @@ func (q *sessionStore) heldBy(row sqlc.ListUncompactedMessagesBySessionRow, hold
 	switch status := q.logStatuses[claim]; {
 	case status == "ok", status == "pending":
 		return status
-	case status == "error" && q.reasons[claim] == failureReasonUnusableSummary:
-		for n := 1; n < min(max(q.attempts[claim], 1), 8); n++ {
-			hold *= 4
-		}
-		if q.now().Sub(q.completedAt[claim]) < min(hold, maxHold) {
-			return "unusable"
-		}
+	case status == "error" && q.reasons[claim] == failureReasonUnusableSummary && q.now().Before(q.lapse(claim, hold, maxHold)):
+		return "unusable"
 	}
 	return ""
+}
+
+// lapse is when an unusable attempt stops holding its rows: after hold, four
+// times as long for each further consecutive one, up to maxHold.
+func (q *sessionStore) lapse(claim pgtype.UUID, hold, maxHold time.Duration) time.Time {
+	for n := 1; n < min(max(q.attempts[claim], 1), 8); n++ {
+		hold *= 4
+	}
+	return q.completedAt[claim].Add(min(hold, maxHold))
+}
+
+// lapsedSinceScan reports a hold that lapsed after the scan position was
+// recorded: rows the scan may have passed are candidates again.
+func (q *sessionStore) lapsedSinceScan(hold, maxHold time.Duration) bool {
+	for claim, reason := range q.reasons {
+		if reason != failureReasonUnusableSummary || q.claimEpoch[claim] != q.epoch || q.logStatuses[claim] != "error" {
+			continue
+		}
+		if at := q.lapse(claim, hold, maxHold); at.After(q.scanAt) && !at.After(q.now()) {
+			return true
+		}
+	}
+	return false
 }
 
 // isRaw reports a row the replay sends raw: no summary covers it, nor a claim
@@ -73,12 +91,12 @@ func (q *sessionStore) isRaw(row sqlc.ListUncompactedMessagesBySessionRow) bool 
 }
 
 type storeCandidate struct {
-	row                sqlc.ListUncompactedMessagesBySessionRow
-	gap, pendingBefore bool
+	row                            sqlc.ListUncompactedMessagesBySessionRow
+	gap, pendingBefore, heldBefore bool
 }
 
-func (q *sessionStore) candidates(after pgtype.UUID, hold, maxHold time.Duration) []storeCandidate {
-	if !after.Valid && q.scanEpoch == q.epoch {
+func (q *sessionStore) candidates(after pgtype.UUID, hold, maxHold time.Duration, fromStart bool) []storeCandidate {
+	if !after.Valid && !fromStart && q.scanEpoch == q.epoch && !q.lapsedSinceScan(hold, maxHold) {
 		after = q.scanAfter
 	}
 	start := 0
@@ -88,20 +106,20 @@ func (q *sessionStore) candidates(after pgtype.UUID, hold, maxHold time.Duration
 		}
 	}
 	var out []storeCandidate
-	gap, pending := false, false
+	gap, pending, heldBefore := false, false, false
 	if start > 0 {
 		held := q.heldBy(q.history[start-1], hold, maxHold)
-		gap, pending = held != "", held != "" && held != "ok"
+		gap, pending, heldBefore = held != "", held == "pending", held != "" && held != "ok"
 	}
 	for _, row := range q.history[start:] {
 		if held := q.heldBy(row, hold, maxHold); held != "" {
-			gap, pending = true, pending || held != "ok"
+			gap, pending, heldBefore = true, pending || held == "pending", heldBefore || held != "ok"
 			continue
 		}
 		row.CompactID = q.claims[row.ID]
 		row.CompactionEpoch = q.epoch
-		out = append(out, storeCandidate{row: row, gap: gap, pendingBefore: pending})
-		gap, pending = false, false
+		out = append(out, storeCandidate{row: row, gap: gap, pendingBefore: pending, heldBefore: heldBefore})
+		gap, pending, heldBefore = false, false, false
 	}
 	return out
 }
@@ -131,7 +149,19 @@ func (q *sessionStore) MeasureUncompactedMessagesBySession(context.Context, pgty
 }
 
 func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Context, arg sqlc.ListUncompactedMessagesBySessionWithinBytesParams) ([]sqlc.ListUncompactedMessagesBySessionWithinBytesRow, error) {
-	candidates := q.candidates(arg.AfterMessageID, time.Duration(arg.UnusableHoldSeconds)*time.Second, time.Duration(arg.UnusableMaxHoldSeconds)*time.Second)
+	candidates := q.candidates(arg.AfterMessageID, time.Duration(arg.UnusableHoldSeconds)*time.Second, time.Duration(arg.UnusableMaxHoldSeconds)*time.Second, arg.ReadFromStart)
+	heldClaims := int64(0)
+	for claim, reason := range q.reasons {
+		if reason != arg.UnusableFailureReason || q.claimEpoch[claim] != q.epoch || q.logStatuses[claim] != "error" {
+			continue
+		}
+		for _, id := range q.claims {
+			if id == claim {
+				heldClaims++
+				break
+			}
+		}
+	}
 	var total int64
 	for _, c := range candidates {
 		total += payloadBytes(c.row)
@@ -163,6 +193,8 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 		bounded.CumulativeBytes = cumulative
 		bounded.GapBefore = c.gap
 		bounded.PendingBefore = c.pendingBefore
+		bounded.HeldBefore = c.heldBefore
+		bounded.HeldClaims = heldClaims
 		claim := q.claims[c.row.ID]
 		failed := q.claimEpoch[claim] == q.epoch && q.logStatuses[claim] == "error"
 		bounded.IneffectiveClaim = failed && q.reasons[claim] == arg.IneffectiveFailureReason
@@ -183,7 +215,7 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 
 func (q *sessionStore) AdvanceCompactionScan(_ context.Context, arg sqlc.AdvanceCompactionScanParams) error {
 	if arg.CompactionEpoch == q.epoch {
-		q.scanAfter, q.scanEpoch = arg.AfterMessageID, arg.CompactionEpoch
+		q.scanAfter, q.scanEpoch, q.scanAt = arg.AfterMessageID, arg.CompactionEpoch, q.now()
 	}
 	return nil
 }

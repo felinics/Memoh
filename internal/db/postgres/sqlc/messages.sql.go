@@ -14,7 +14,8 @@ import (
 const advanceCompactionScan = `-- name: AdvanceCompactionScan :exec
 UPDATE bot_sessions
 SET compaction_scan_after = $1,
-    compaction_scan_epoch = $2
+    compaction_scan_epoch = $2,
+    compaction_scan_at = now()
 WHERE team_id = public.memoh_current_team_id()
   AND id = $3
   AND compaction_epoch = $2
@@ -27,7 +28,8 @@ type AdvanceCompactionScanParams struct {
 }
 
 // Records the last candidate row a pass found permanently unclaimable in the
-// current epoch, so later passes start reading after it. A new epoch voids it.
+// current epoch, and when, so later passes start reading after it. A new
+// epoch voids it.
 func (q *Queries) AdvanceCompactionScan(ctx context.Context, arg AdvanceCompactionScanParams) error {
 	_, err := q.db.Exec(ctx, advanceCompactionScan, arg.AfterMessageID, arg.CompactionEpoch, arg.SessionID)
 	return err
@@ -5333,6 +5335,25 @@ WITH scan_anchor AS MATERIALIZED (
         WHERE scan_session.team_id = public.memoh_current_team_id()
           AND scan_session.id = $4
           AND scan_session.compaction_scan_epoch = scan_session.compaction_epoch
+          AND NOT $6::boolean
+          AND NOT EXISTS (
+            SELECT 1
+            FROM bot_history_message_compacts lapsed
+            WHERE lapsed.team_id = public.memoh_current_team_id()
+              AND lapsed.bot_id = scan_session.bot_id
+              AND lapsed.session_id = scan_session.id
+              AND lapsed.compaction_epoch = scan_session.compaction_epoch
+              AND lapsed.status = 'error'
+              AND lapsed.failure_reason = $2::text
+              AND lapsed.completed_at + LEAST(
+              $7::bigint,
+              $8::bigint * power(4, LEAST(GREATEST(lapsed.failure_attempts, 1), 8) - 1)::bigint
+            ) * INTERVAL '1 second' <= now()
+              AND lapsed.completed_at + LEAST(
+              $7::bigint,
+              $8::bigint * power(4, LEAST(GREATEST(lapsed.failure_attempts, 1), 8) - 1)::bigint
+            ) * INTERVAL '1 second' > COALESCE(scan_session.compaction_scan_at, '-infinity'::timestamptz)
+          )
       )
     )
 ), session_rows AS MATERIALIZED (
@@ -5362,8 +5383,8 @@ WITH scan_anchor AS MATERIALIZED (
           c.status = 'error'
           AND c.failure_reason = $2::text
           AND c.completed_at > now() - LEAST(
-            $6::bigint,
-            $7::bigint * power(4, LEAST(GREATEST(c.failure_attempts, 1), 8) - 1)::bigint
+            $7::bigint,
+            $8::bigint * power(4, LEAST(GREATEST(c.failure_attempts, 1), 8) - 1)::bigint
           ) * INTERVAL '1 second'
         )
       )
@@ -5387,7 +5408,7 @@ WITH scan_anchor AS MATERIALIZED (
     ) AS candidate_seq
   FROM session_rows
 ), held_gaps AS MATERIALIZED (
-  SELECT candidate_seq, bool_or(held_by <> 'ok') AS pending
+  SELECT candidate_seq, bool_or(held_by = 'pending') AS pending, bool_or(held_by <> 'ok') AS held
   FROM sequenced_rows
   WHERE held_by IS NOT NULL
   GROUP BY candidate_seq
@@ -5395,7 +5416,8 @@ WITH scan_anchor AS MATERIALIZED (
   SELECT
     sequenced_rows.id, sequenced_rows.turn_position, sequenced_rows.turn_message_seq, sequenced_rows.created_at, sequenced_rows.starts_turn, sequenced_rows.held_by, sequenced_rows.candidate_seq,
     (gap.candidate_seq IS NOT NULL)::boolean AS gap_before,
-    COALESCE(gap.pending, false)::boolean AS pending_before
+    COALESCE(gap.pending, false)::boolean AS pending_before,
+    COALESCE(gap.held, false)::boolean AS held_before
   FROM sequenced_rows
   LEFT JOIN held_gaps gap
     ON sequenced_rows.held_by IS NULL
@@ -5408,6 +5430,7 @@ WITH scan_anchor AS MATERIALIZED (
     ordered.created_at,
     ordered.gap_before,
     ordered.pending_before,
+    ordered.held_before,
     COALESCE(ordered.id = (
       SELECT latest.id
       FROM ordered_rows latest
@@ -5428,9 +5451,25 @@ WITH scan_anchor AS MATERIALIZED (
    AND m.team_id = public.memoh_current_team_id()
   WHERE ordered.held_by IS NULL
     AND NOT EXISTS (SELECT 1 FROM scan_anchor WHERE scan_anchor.id = ordered.id)
+), held_claims AS MATERIALIZED (
+  SELECT count(*)::BIGINT AS held_claims
+  FROM bot_history_message_compacts held_claim
+  JOIN bot_sessions held_session
+    ON held_session.id = held_claim.session_id
+   AND held_session.team_id = held_claim.team_id
+  WHERE held_claim.team_id = public.memoh_current_team_id()
+    AND held_claim.session_id = $4
+    AND held_claim.compaction_epoch = held_session.compaction_epoch
+    AND held_claim.status = 'error'
+    AND held_claim.failure_reason = $2::text
+    AND EXISTS (
+      SELECT 1 FROM bot_history_messages held_row
+      WHERE held_row.compact_id = held_claim.id
+        AND held_row.team_id = held_claim.team_id
+    )
 ), ranked_candidates AS MATERIALIZED (
   SELECT
-    candidate_rows.id, candidate_rows.turn_position, candidate_rows.turn_message_seq, candidate_rows.created_at, candidate_rows.gap_before, candidate_rows.pending_before, candidate_rows.latest_user, candidate_rows.payload_bytes,
+    candidate_rows.id, candidate_rows.turn_position, candidate_rows.turn_message_seq, candidate_rows.created_at, candidate_rows.gap_before, candidate_rows.pending_before, candidate_rows.held_before, candidate_rows.latest_user, candidate_rows.payload_bytes,
     COUNT(*) OVER ()::BIGINT AS candidate_count,
     COALESCE(SUM(payload_bytes) OVER (), 0)::BIGINT AS candidate_bytes,
     SUM(payload_bytes) OVER (
@@ -5438,9 +5477,9 @@ WITH scan_anchor AS MATERIALIZED (
     )::BIGINT AS cumulative_bytes
   FROM candidate_rows
 ), admitted_candidates AS MATERIALIZED (
-  SELECT ranked_candidates.id, ranked_candidates.turn_position, ranked_candidates.turn_message_seq, ranked_candidates.created_at, ranked_candidates.gap_before, ranked_candidates.pending_before, ranked_candidates.latest_user, ranked_candidates.payload_bytes, ranked_candidates.candidate_count, ranked_candidates.candidate_bytes, ranked_candidates.cumulative_bytes, payload_bytes > $8::BIGINT AS oversized
+  SELECT ranked_candidates.id, ranked_candidates.turn_position, ranked_candidates.turn_message_seq, ranked_candidates.created_at, ranked_candidates.gap_before, ranked_candidates.pending_before, ranked_candidates.held_before, ranked_candidates.latest_user, ranked_candidates.payload_bytes, ranked_candidates.candidate_count, ranked_candidates.candidate_bytes, ranked_candidates.cumulative_bytes, payload_bytes > $9::BIGINT AS oversized
   FROM ranked_candidates
-  WHERE cumulative_bytes <= $8::BIGINT
+  WHERE cumulative_bytes <= $9::BIGINT
      OR cumulative_bytes = payload_bytes
 )
 SELECT
@@ -5475,6 +5514,8 @@ SELECT
   admitted.cumulative_bytes,
   admitted.gap_before::boolean AS gap_before,
   admitted.pending_before::boolean AS pending_before,
+  admitted.held_before::boolean AS held_before,
+  held_claims.held_claims,
   admitted.latest_user::boolean AS latest_user,
   admitted.oversized::boolean AS oversized,
   COALESCE(claim.failure_reason = $1::text, false)::boolean AS ineffective_claim,
@@ -5482,6 +5523,7 @@ SELECT
   CASE WHEN claim.failure_reason <> $1::text THEN claim.message_count ELSE 0 END::integer AS retry_rows
 FROM bot_visible_history_messages m
 JOIN admitted_candidates admitted ON admitted.id = m.id
+CROSS JOIN held_claims
 LEFT JOIN bot_history_messages payload
   ON payload.id = m.id
  AND payload.team_id = public.memoh_current_team_id()
@@ -5513,6 +5555,7 @@ type ListUncompactedMessagesBySessionWithinBytesParams struct {
 	RetryHalfFailureReason   string      `json:"retry_half_failure_reason"`
 	SessionID                pgtype.UUID `json:"session_id"`
 	AfterMessageID           pgtype.UUID `json:"after_message_id"`
+	ReadFromStart            bool        `json:"read_from_start"`
 	UnusableMaxHoldSeconds   int64       `json:"unusable_max_hold_seconds"`
 	UnusableHoldSeconds      int64       `json:"unusable_hold_seconds"`
 	MaxBytes                 int64       `json:"max_bytes"`
@@ -5546,6 +5589,8 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 	CumulativeBytes         int64              `json:"cumulative_bytes"`
 	GapBefore               bool               `json:"gap_before"`
 	PendingBefore           bool               `json:"pending_before"`
+	HeldBefore              bool               `json:"held_before"`
+	HeldClaims              int64              `json:"held_claims"`
 	LatestUser              bool               `json:"latest_user"`
 	Oversized               bool               `json:"oversized"`
 	IneffectiveClaim        bool               `json:"ineffective_claim"`
@@ -5555,7 +5600,12 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 
 // Compaction candidates are admitted oldest-first within a hard serialized
 // payload budget, starting after a candidate cursor: the given one, or else
-// the session's recorded scan position when it belongs to the current epoch.
+// the session's recorded scan position when it belongs to the current epoch
+// and no row held after an unusable summary has become a candidate again
+// since it was recorded: the scan may pass such rows while they are held.
+// ReadFromStart ignores the recorded position. HeldClaims counts the
+// session's attempts in this epoch whose summary was unusable and that are
+// still the latest claim of some row.
 // Only rows from the cursor on are read. The cumulative filter is evaluated
 // before the payload join, so a leading row larger than the budget comes back
 // alone and Oversized, without its payload, instead of crossing the
@@ -5565,9 +5615,10 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 // GapBefore marks a candidate whose preceding replayed row is not a
 // candidate (the source of an active summary or of a fresh claim): one
 // compact_id must never span it, or the read path would fold the later rows
-// in front of that summary. PendingBefore reports a fresh claim, or a
-// recent attempt whose summary was unusable, anywhere in that gap: their rows
-// return as candidates once it lapses. An unusable attempt holds its rows for
+// in front of that summary. PendingBefore reports a fresh claim anywhere in
+// that gap: its rows return as candidates if it lapses. HeldBefore reports
+// any row in the gap that is held for now, a fresh claim or a recent attempt
+// whose summary was unusable. An unusable attempt holds its rows for
 // the hold seconds, four times as long for each consecutive such attempt on
 // them, up to the max hold. IneffectiveClaim marks a row whose claim in this
 // epoch failed because the summary was not shorter than the rows. For a row
@@ -5585,6 +5636,7 @@ func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Contex
 		arg.RetryHalfFailureReason,
 		arg.SessionID,
 		arg.AfterMessageID,
+		arg.ReadFromStart,
 		arg.UnusableMaxHoldSeconds,
 		arg.UnusableHoldSeconds,
 		arg.MaxBytes,
@@ -5624,6 +5676,8 @@ func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Contex
 			&i.CumulativeBytes,
 			&i.GapBefore,
 			&i.PendingBefore,
+			&i.HeldBefore,
+			&i.HeldClaims,
 			&i.LatestUser,
 			&i.Oversized,
 			&i.IneffectiveClaim,

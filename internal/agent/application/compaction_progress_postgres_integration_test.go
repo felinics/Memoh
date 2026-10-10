@@ -559,6 +559,18 @@ func (f progressFixture) scanAfter() string {
 	return after
 }
 
+// elapse moves the session's recorded attempt and scan times back by d, as if
+// that much time had passed.
+func (f progressFixture) elapse(d string) {
+	f.t.Helper()
+	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = completed_at - $2::interval WHERE session_id = $1`, f.sessionID, d); err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE bot_sessions SET compaction_scan_at = compaction_scan_at - $2::interval WHERE id = $1`, f.sessionID, d); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func (f progressFixture) claimStatus(id string) string {
 	f.t.Helper()
 	var status string
@@ -767,8 +779,8 @@ func TestPostgresCompactionRefusedSpanIsHeldThenRetried(t *testing.T) {
 	if got := f.compact(committed); got.status != "ok" || got.covered != len(later) || claim[later[1].ID] != committed {
 		t.Fatalf("committed summary = %+v, want ok covering the later span", got)
 	}
-	if after := f.scanAfter(); after == refused[0].ID || after == refused[1].ID || labels[after] == "reasoning#0" || labels[after] == "later#1" {
-		t.Fatalf("scan position = %s, want it in front of the held rows", labels[after])
+	if after := f.scanAfter(); labels[after] != "reasoning#0" {
+		t.Fatalf("scan position = %s, want it past the held rows: they no longer pin it", labels[after])
 	}
 	auto := f.config(model)
 	auto.Manual = false
@@ -790,23 +802,17 @@ func TestPostgresCompactionRefusedSpanIsHeldThenRetried(t *testing.T) {
 	if got := f.compact(again); again == failed || got.status != "error" || got.attempts != 2 || got.count != 1 || claim[refused[1].ID] != failed {
 		t.Fatalf("manual retry = %+v, want a second unusable attempt on the first half only", got)
 	}
-	shift := func(id, ago string) {
-		if _, err := f.pool.Exec(f.ctx, `UPDATE bot_history_message_compacts SET completed_at = now() - $2::interval WHERE id = $1`, id, ago); err != nil {
-			t.Fatal(err)
-		}
-	}
 	// Fresh services, as after a restart: only the recorded holds apply.
 	restarted := func() *compaction.Service { return compaction.NewService(slog.New(slog.DiscardHandler), store) }
 	model.refuse = ""
-	shift(failed, "16 minutes")
-	shift(again, "30 minutes")
+	f.elapse("16 minutes")
 	if res, err := restarted().RunCompactionSync(f.ctx, auto); err != nil || res.Status != compaction.StatusOK || res.MessageCount != 1 {
 		t.Fatalf("pass a quarter of an hour on = %+v, %v; want the once-refused answer retried", res, err)
 	}
 	if _, claim = f.claims(); claim[refused[0].ID] != again {
 		t.Fatal("the twice-refused question was retried within the hour")
 	}
-	shift(again, "61 minutes")
+	f.elapse("45 minutes")
 	if res, err := restarted().RunCompactionSync(f.ctx, auto); err != nil || res.Status != compaction.StatusOK || res.MessageCount != 1 {
 		t.Fatalf("pass an hour on = %+v, %v; want the twice-refused question retried", res, err)
 	}
@@ -906,5 +912,41 @@ func TestPostgresCompactionUnusableHoldIsCapped(t *testing.T) {
 	hold("6 hours 1 minute")
 	if res, err := compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg); err != nil || res.Status != compaction.StatusOK {
 		t.Fatalf("pass after six hours = %+v, %v; want the rows retried", res, err)
+	}
+}
+
+func TestPostgresCompactionScanPassesHeldRowsAndComesBackForThem(t *testing.T) {
+	f, store := newProgressFixture(t)
+	refused := []messagepkg.Message{f.text("user", strings.Repeat("REFUSED question. ", 80)), f.text("assistant", strings.Repeat("REFUSED answer. ", 80))}
+	f.reasoning()
+	f.filler(20)
+	f.text("user", "current question")
+	model := &countingSummarizer{summary: summaryTokens(120), refuse: "REFUSED"}
+	cfg := f.config(model)
+	cfg.Manual = false
+	pass := func() (compaction.Result, error) {
+		return compaction.NewService(slog.New(slog.DiscardHandler), store).RunCompactionSync(f.ctx, cfg)
+	}
+	if _, err := pass(); err == nil {
+		t.Fatal("first pass succeeded, want the refusal recorded")
+	}
+	if _, err := pass(); err != nil {
+		t.Fatal(err)
+	}
+	order, _ := f.claims()
+	position := map[string]int{}
+	for i, id := range order {
+		position[id] = i
+	}
+	if after := f.scanAfter(); after == "" || position[after] <= position[refused[1].ID] {
+		t.Fatalf("scan position %q is not past the held rows", after)
+	}
+
+	// The hold lapses after the scan position was recorded: the next pass
+	// reads from the start again.
+	f.elapse("16 minutes")
+	model.refuse = ""
+	if res, err := pass(); err != nil || res.Status != compaction.StatusOK || f.claimStatus(refused[0].ID) != "ok" {
+		t.Fatalf("pass after the hold = %+v, %v; want the held rows behind the scan position tried again", res, err)
 	}
 }

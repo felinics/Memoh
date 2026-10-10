@@ -31,6 +31,9 @@ type spanRead struct {
 	loadedRows   int
 	oversized    int
 	scannedBytes int64
+	// heldClaims counts attempts whose summary was unusable and whose rows
+	// wait for a retry.
+	heldClaims int64
 }
 
 // readCompactionSpan reads candidate windows oldest-first until one holds a
@@ -38,7 +41,8 @@ type spanRead struct {
 // unrenderable, already proved ineffective, too small, or too large to read —
 // moves the cursor past them, so a span beyond the first window is still
 // reached. A non-empty reason reports why nothing can be claimed now. With
-// retryHeld, rows held back after an unusable summary are candidates again.
+// retryHeld, rows held back after an unusable summary are candidates again,
+// and the read starts from the first row.
 func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUID, cfg TriggerConfig, measure sqlc.MeasureUncompactedMessagesBySessionRow, minSpanTokens, minBudget int, retryHeld bool) (spanRead, string, error) {
 	readMaxBytes := compactionReadMaxBytes(cfg)
 	windowBytes := readMaxBytes
@@ -58,7 +62,9 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 	// unclaimable. Recording it lets later passes start after it instead of
 	// rescanning, so history behind a prefix larger than the scan budget is
 	// still reached. It never passes a fresh claim, whose rows come back as
-	// candidates if the claim lapses, nor the current task.
+	// candidates if the claim lapses, nor the current task. It may pass rows
+	// held after an unusable summary: once their hold lapses, the read starts
+	// over from the first row.
 	var settledThrough pgtype.UUID
 	var scanEpoch int64
 	settling := true
@@ -91,6 +97,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			RetryHalfFailureReason:   failureReasonRetryHalf,
 			UnusableHoldSeconds:      int64(hold / time.Second),
 			UnusableMaxHoldSeconds:   int64(maxHold / time.Second),
+			ReadFromStart:            retryHeld,
 		})
 		if err != nil {
 			return spanRead{}, "", err
@@ -102,6 +109,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 			return read, ReasonNothingToCompact, nil
 		}
 		read.windows++
+		read.heldClaims = window[0].HeldClaims
 		if read.windows == 1 {
 			epoch = window[0].CompactionEpoch
 		} else if window[0].CompactionEpoch != epoch {
@@ -211,7 +219,7 @@ func (s *Service) readCompactionSpan(ctx context.Context, sessionUUID pgtype.UUI
 		}
 		read.stats.add(choice.stats)
 		for _, row := range window {
-			if row.PendingBefore {
+			if row.HeldBefore {
 				read.stats.HeldGaps++
 			}
 		}

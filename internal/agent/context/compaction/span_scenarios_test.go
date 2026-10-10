@@ -1341,3 +1341,37 @@ func TestCompactionRejectedRequestRetriesHalfTheRows(t *testing.T) {
 	}
 	assertClaimsContiguous(t, q)
 }
+
+func TestCompactionScanPassesHeldRowsAndComesBackForThem(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore(prose(t, "user", "POISON question", 300, 100), prose(t, "assistant", "POISON answer", 300, 100), reasoningOnlyRow(t))
+	for i := 0; i < 60; i++ {
+		q.append(screenshotFeedback(t), reasoningOnlyRow(t))
+	}
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	stub := &stubModel{summary: summaryOfTokens(t, 100), refuse: "POISON"}
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	cfg := machineryConfig(stub, 50)
+	for pass := 0; pass < 4; pass++ {
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+		clock = clock.Add(time.Minute)
+	}
+	windows := q.windows
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || q.windows-windows > 2 {
+		t.Fatalf("a pass read %d windows (%v); the residue behind the held rows was read again instead of being passed", q.windows-windows, err)
+	}
+	q.append(prose(t, "assistant", "LATER answer", 300, 100), prose(t, "user", "LATER question", 300, 100), prose(t, "assistant", "LATER answer", 300, 100), prose(t, "user", "NEXT", 10, 10))
+	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+		t.Fatalf("pass with later history = %+v, %v", res, err)
+	}
+	clock = clock.Add(unusableSummaryHold)
+	calls := stub.calls
+	_, _ = svc.RunCompactionSync(context.Background(), cfg)
+	if stub.calls == calls || !strings.Contains(stub.prompt, "POISON") {
+		t.Fatal("rows whose hold lapsed behind the scan position were not tried again")
+	}
+}

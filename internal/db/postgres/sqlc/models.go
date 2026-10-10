@@ -377,6 +377,7 @@ type BotSession struct {
 	CompactionEpoch          int64              `json:"compaction_epoch"`
 	CompactionScanAfter      pgtype.UUID        `json:"compaction_scan_after"`
 	CompactionScanEpoch      int64              `json:"compaction_scan_epoch"`
+	CompactionScanAt         pgtype.Timestamptz `json:"compaction_scan_at"`
 	RuntimeFencingToken      int64              `json:"runtime_fencing_token"`
 	RuntimeResetToken        pgtype.UUID        `json:"runtime_reset_token"`
 	RuntimeResetExpiresAt    pgtype.Timestamptz `json:"runtime_reset_expires_at"`
