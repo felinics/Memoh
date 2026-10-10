@@ -51,6 +51,7 @@ import (
 	"github.com/felinics/memoh/internal/reasoning"
 	"github.com/felinics/memoh/internal/settings"
 	"github.com/felinics/memoh/internal/workspace"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
 const (
@@ -975,23 +976,6 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		ContextWindow:         contextBudgetFromChatModel(chatModel),
 	})
 
-	var agentSkills []native.SkillEntry
-	if s.skillLoader != nil {
-		entries, skillErr := s.skillLoader.LoadSkills(ctx, p.BotID)
-		if skillErr != nil {
-			s.logger.WarnContext(ctx, "failed to load skills", slog.String("bot_id", p.BotID), slog.Any("error", skillErr))
-		} else {
-			for _, e := range entries {
-				if skill, ok := normalizeGatewaySkill(e); ok {
-					agentSkills = append(agentSkills, skill)
-				}
-			}
-		}
-	}
-	if agentSkills == nil {
-		agentSkills = []native.SkillEntry{}
-	}
-
 	cfg := native.RunConfig{
 		Model:                    sdkModel,
 		CurrentModelUUID:         chatModel.ID,
@@ -1020,11 +1004,12 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 			TimezoneLocation:  userClockLocation,
 			SessionToken:      p.SessionToken,
 		},
-		Bot:               botInfo,
-		Skills:            agentSkills,
-		LoopDetection:     native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
-		BackgroundManager: s.bgManager,
-		ContextLifecycle:  contextfrag.NewLifecycleHolder(),
+		Bot:                  botInfo,
+		Skills:               []native.SkillEntry{},
+		WorkspaceUnavailable: bridge.WorkspaceUnavailableFromContext(ctx),
+		LoopDetection:        native.LoopDetectionConfig{Enabled: loopDetectionEnabled},
+		BackgroundManager:    s.bgManager,
+		ContextLifecycle:     contextfrag.NewLifecycleHolder(),
 		ContextScope: contextfrag.Scope{
 			BotID:             p.BotID,
 			ChatID:            chatID,
@@ -1046,15 +1031,51 @@ func (s *Service) buildBaseRunConfig(ctx context.Context, p baseRunConfigParams)
 		// including its error path when the target is unreachable.
 		ctx = workspace.WithWorkspaceTarget(ctx, bound.TargetID)
 	}
-	if s.workspaceTargets != nil {
-		if target, targetErr := s.workspaceTargets.ResolveWorkspaceTarget(ctx, p.BotID, ""); targetErr == nil {
-			cfg.Identity.WorkspaceTargetID = strings.TrimSpace(target.TargetID)
-			cfg.Identity.WorkspaceTargetKind = strings.TrimSpace(target.Kind)
-			cfg.Identity.WorkspaceTargetName = strings.TrimSpace(target.Name)
-		} else if workspace.WorkspaceTargetFromContext(ctx) != "" {
-			return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, targetErr
+	if target, prepared := ctx.Value(preparedWorkspaceTargetKey{}).(workspace.ResolvedWorkspaceTarget); prepared {
+		cfg.Identity.WorkspaceTargetID, cfg.Identity.WorkspaceTargetKind, cfg.Identity.WorkspaceTargetName = target.TargetID, target.Kind, target.Name
+	} else if s.workspaceTargets != nil {
+		target, targetErr := s.resolveChatWorkspaceTarget(ctx, p.BotID, "")
+		if targetErr != nil {
+			if !errors.Is(targetErr, workspace.ErrCapabilityUnavailable) || target.TargetID == "" {
+				return native.RunConfig{}, models.GetResponse{}, sqlc.Provider{}, targetErr
+			}
+			cfg.WorkspaceUnavailable = true
+		}
+		cfg.Identity.WorkspaceTargetID, cfg.Identity.WorkspaceTargetKind, cfg.Identity.WorkspaceTargetName = target.TargetID, target.Kind, target.Name
+	}
+	if cfg.WorkspaceUnavailable {
+		cfg.SupportsToolCall = false
+		cfg.LoadNotices = append(cfg.LoadNotices, "The selected workspace or its approval configuration is unavailable for this turn. Continue with a text-only conversation. Workspace actions and tools are unavailable; the selected target and fixed working directory have not changed.")
+	}
+
+	ctx = workspace.WithWorkspaceTarget(ctx, cfg.Identity.WorkspaceTargetID)
+	var agentSkills []native.SkillEntry
+	if s.skillLoader != nil {
+		skillCtx, cancel := context.WithTimeout(ctx, 1200*time.Millisecond)
+		var entries []SkillEntry
+		var skillErr error
+		if cfg.WorkspaceUnavailable {
+			skillErr = bridge.ErrUnavailable
+		} else {
+			entries, skillErr = s.skillLoader.LoadSkills(skillCtx, p.BotID)
+		}
+		cancel()
+		if skillErr != nil {
+			s.logger.WarnContext(ctx, "failed to load skills", slog.String("bot_id", p.BotID), slog.Any("error", skillErr))
+			cfg.LoadNotices = append(cfg.LoadNotices, "Skills discovery could not be completed for this turn. The installed skills are unknown or incomplete; do not infer that none are installed. Only successfully loaded skills are available.")
+		}
+		for _, e := range entries {
+			if skill, ok := normalizeGatewaySkill(e); ok {
+				agentSkills = append(agentSkills, skill)
+			}
 		}
 	}
+
+	if agentSkills == nil {
+		agentSkills = []native.SkillEntry{}
+	}
+
+	cfg.Skills = agentSkills
 
 	return cfg, chatModel, provider, nil
 }
@@ -1365,6 +1386,7 @@ func buildModelSelectionRequest(p baseRunConfigParams, chatID string) ChatReques
 // The caller is responsible for filling RunConfig.Messages.
 // Used by discuss turns to reuse the service's model, tools, and prompt pipeline.
 func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channelIdentityID, currentPlatform, replyTarget, conversationType, chatToken string) (ResolveRunConfigResult, error) {
+	ctx = hooks.WithLoadState(ctx)
 	if strings.TrimSpace(botID) == "" {
 		return ResolveRunConfigResult{}, errors.New("bot id is required")
 	}
@@ -1427,6 +1449,12 @@ func (s *Service) ResolveRunConfig(ctx context.Context, botID, sessionID, channe
 
 // prepareRunConfig generates the system prompt and appends the user message.
 func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) native.RunConfig {
+	if cfg.Identity.WorkspaceTargetID != "" {
+		ctx = workspace.WithWorkspaceTarget(ctx, cfg.Identity.WorkspaceTargetID)
+	}
+	if cfg.WorkspaceUnavailable {
+		ctx = bridge.WithWorkspaceUnavailable(ctx)
+	}
 	cfg.ContextHookText = ""
 	beforePromptResult := s.runPromptHook(ctx, agentRunConfigView{
 		BotID:        cfg.Identity.BotID,
@@ -1467,6 +1495,8 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		Bot:                       cfg.Bot,
 		Skills:                    cfg.Skills,
 		Files:                     files,
+		LoadNotices:               cfg.LoadNotices,
+		HooksLoadNotice:           hooks.LoadNotice(ctx),
 		MaxFilesBytes:             limits.SystemFilesMaxBytes,
 		Timezone:                  cfg.Identity.Timezone,
 		PlatformIdentitiesSection: platformIdentitiesSection,
@@ -1494,6 +1524,9 @@ func (s *Service) prepareRunConfig(ctx context.Context, cfg native.RunConfig) na
 		promptHookTexts = append(promptHookTexts, text)
 	}
 	cfg.ContextHookText = strings.Join(promptHookTexts, "\n\n")
+	systemParams.HooksLoadNotice = hooks.LoadNotice(ctx)
+	cfg.HooksLoadNotice = systemParams.HooksLoadNotice
+	cfg.System = native.GenerateSystemPrompt(systemParams)
 
 	if cfg.Query != "" {
 		var extra []sdk.MessagePart

@@ -1,10 +1,12 @@
 package skills
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"path"
 	"slices"
@@ -14,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/felinics/memoh/internal/config"
+	"github.com/felinics/memoh/internal/workspace/bridge"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
@@ -132,7 +135,10 @@ func DiscoveryRoots(rawCompatRoots []string) []Root {
 }
 
 func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	idx := readIndex(ctx, client)
+	idx, err := readIndexChecked(ctx, client)
+	if err != nil {
+		return nil, err
+	}
 	roots := orderedDiscoveryRoots(ctx, client, rawCompatRoots)
 	items := scan(ctx, client, roots)
 	resolved := resolve(items, idx.Overrides)
@@ -140,18 +146,92 @@ func List(ctx context.Context, client fileClient, rawCompatRoots []string) ([]En
 	return resolved, nil
 }
 
+// LoadEffective is read-only and reports incomplete discovery separately from
+// an empty catalog. An unreadable override index cannot reactivate disabled skills.
 func LoadEffective(ctx context.Context, client fileClient, rawCompatRoots []string) ([]Entry, error) {
-	items, err := List(ctx, client, rawCompatRoots)
+	idx, err := readIndexChecked(ctx, client)
 	if err != nil {
 		return nil, err
 	}
+	report := &discoveryClient{fileClient: client}
+	roots := orderedDiscoveryRoots(ctx, report, rawCompatRoots)
+	items := resolve(scan(ctx, report, roots), idx.Overrides)
 	out := make([]Entry, 0, len(items))
 	for _, item := range items {
 		if item.State == StateEffective {
 			out = append(out, item)
 		}
 	}
+	if report.incomplete {
+		return out, errors.New("skills discovery incomplete")
+	}
 	return out, nil
+}
+
+type discoveryClient struct {
+	fileClient
+	incomplete bool
+}
+
+func (c *discoveryClient) ListDirAll(ctx context.Context, dir string, recursive bool) ([]*pb.FileEntry, error) {
+	items, err := c.fileClient.ListDirAll(ctx, dir, recursive)
+	if err != nil && !errors.Is(err, bridge.ErrNotFound) {
+		c.incomplete = true
+	}
+	return items, err
+}
+
+func (c *discoveryClient) ReadRaw(ctx context.Context, file string) (io.ReadCloser, error) {
+	rc, err := c.fileClient.ReadRaw(ctx, file)
+	if err != nil && !errors.Is(err, bridge.ErrNotFound) {
+		c.incomplete = true
+	}
+	if err == nil {
+		rc = &discoveryReader{ReadCloser: rc, report: c}
+	}
+	return rc, err
+}
+
+type discoveryReader struct {
+	io.ReadCloser
+	report *discoveryClient
+}
+
+func (r *discoveryReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		r.report.incomplete = true
+	}
+	return n, err
+}
+
+func readIndexChecked(ctx context.Context, client fileClient) (indexState, error) {
+	idx := indexState{Version: 1, Overrides: make(map[string]indexOverride)}
+	rc, err := client.ReadRaw(ctx, IndexFilePath)
+	if errors.Is(err, bridge.ErrNotFound) {
+		return idx, nil
+	}
+	if err != nil {
+		return idx, err
+	}
+	defer func() { _ = rc.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(rc, 1024*1024+1))
+	if err != nil {
+		return idx, err
+	}
+	if len(raw) > 1024*1024 {
+		return idx, errors.New("skills index exceeds size limit")
+	}
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return idx, errors.New("skills index must be an object")
+	}
+	if err := json.Unmarshal(raw, &idx); err != nil {
+		return idx, err
+	}
+	if idx.Version < 0 || idx.Version > 1 {
+		return idx, errors.New("unsupported skills index version")
+	}
+	return idx, nil
 }
 
 func normalizeRuntimeUsabilityEntries(entries []Entry) []Entry {

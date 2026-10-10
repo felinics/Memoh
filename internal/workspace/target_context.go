@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
@@ -18,3 +19,7 @@ func WithWorkspaceTarget(ctx context.Context, targetID string) context.Context {
 func WorkspaceTargetFromContext(ctx context.Context) string {
 	return bridge.WorkspaceTargetFromContext(ctx)
 }
+
+// ErrCapabilityUnavailable means target identity is known, but its runtime or
+// approval configuration cannot support workspace operations for this turn.
+var ErrCapabilityUnavailable = errors.New("workspace capability unavailable")

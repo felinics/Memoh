@@ -761,11 +761,17 @@ func TestPreHookPanicArmsCooldownAndReleasesSlot(t *testing.T) {
 
 	manual := cfg
 	manual.Manual = true
-	if _, err := svc.RunCompactionSync(context.Background(), manual); err == nil {
-		t.Fatal("manual bypass must reach the failing pre-hook, proving the slot was released")
+	// Configuration loading failures are auxiliary: after the panic is
+	// disarmed, a manual retry skips unavailable hooks and can compact.
+	res, err = svc.RunCompactionSync(context.Background(), manual)
+	if err != nil || res.Status != StatusOK {
+		t.Fatalf("manual retry with unavailable hooks: res=%#v err=%v", res, err)
 	}
-	if stub.calls != 0 {
-		t.Fatalf("model called %d times behind the failing pre-hook, want 0", stub.calls)
+	if provider.calls.Load() <= before || stub.calls != 1 {
+		t.Fatalf("manual retry did not release the slot and reach the model: hook calls=%d before=%d model calls=%d", provider.calls.Load(), before, stub.calls)
+	}
+	if svc.inFailureCooldown(cfg.SessionID) {
+		t.Fatal("successful manual retry must clear the panic cooldown")
 	}
 }
 

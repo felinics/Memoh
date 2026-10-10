@@ -35,6 +35,7 @@ const (
 	sectionIDSkills           = "system.skills"
 	sectionIDSkill            = "system.skill"
 	sectionIDWorkspaceFile    = "system.workspace_file"
+	sectionIDHookLoadStatus   = "system.hooks_load_status"
 	sectionIDFallback         = "system.prompt.fallback"
 )
 
@@ -94,7 +95,15 @@ func GenerateSystemSections(params SystemPromptParams) []SystemSection {
 	}
 
 	sections = append(sections, buildPlatformIdentitySections(params)...)
+	if notice := buildLoadNotices(params); notice != "" {
+		sections = append(sections, SystemSection{
+			ID: "system.auxiliary_load_status", Kind: contextfrag.KindSystemPrompt,
+			Priority: priorityPlatformIdentity, RetentionTier: contextfrag.RetentionRequired,
+			Text: notice,
+		})
+	}
 
+	sections = append(sections, hookLoadStatusSections(params.HooksLoadNotice)...)
 	if isSubagent {
 		return sections
 	}
@@ -193,13 +202,17 @@ func degradedSystemSections(params SystemPromptParams, home, timezone string, ca
 	if params.SessionType != sessionmode.Subagent {
 		text += "\n\n" + strings.TrimSpace(includes["_memory"])
 	}
-	return []SystemSection{{
+	sections := []SystemSection{{
 		ID:            sectionIDFallback,
 		Kind:          contextfrag.KindSystemPrompt,
 		Priority:      priorityBody,
 		RetentionTier: contextfrag.RetentionRequired,
 		Text:          text,
 	}}
+	if notice := buildLoadNotices(params); notice != "" {
+		sections = append(sections, SystemSection{ID: "system.auxiliary_load_status", Kind: contextfrag.KindSystemPrompt, Priority: priorityPlatformIdentity, RetentionTier: contextfrag.RetentionRequired, Text: notice})
+	}
+	return append(sections, hookLoadStatusSections(params.HooksLoadNotice)...)
 }
 
 // SystemSectionFrags converts typed system prompt sections into context
@@ -305,4 +318,53 @@ func cutModeContractTmpl(tmpl, placeholder string) (string, error) {
 		return "", fmt.Errorf("agent: mode template is missing expected placeholder %s", placeholder)
 	}
 	return strings.TrimSpace(tmpl[:idx]), nil
+}
+
+func buildLoadNotices(params SystemPromptParams) string {
+	items := append([]string(nil), params.LoadNotices...)
+	for _, file := range params.Files {
+		switch file.LoadStatus {
+		case "missing":
+			items = append(items, fmt.Sprintf("%s does not exist in the current workspace.", file.Filename))
+		case "unavailable":
+			items = append(items, fmt.Sprintf("%s could not be read for this turn. Its contents are unknown; do not infer that it is empty or that no prior memory or instructions exist.", file.Filename))
+		}
+	}
+	var unique []string
+	seen := map[string]bool{}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" && !seen[item] {
+			unique = append(unique, "- "+item)
+			seen[item] = true
+		}
+	}
+	if len(unique) == 0 {
+		return ""
+	}
+	return "## Capability and context loading status\n\nService-provided status for this turn. Continue with the available context; do not claim unavailable capabilities or skipped checks were used.\n\n" + strings.Join(unique, "\n")
+}
+
+func hookLoadStatusSections(notice string) []SystemSection {
+	if strings.TrimSpace(notice) == "" {
+		return nil
+	}
+	return []SystemSection{{ID: sectionIDHookLoadStatus, Kind: contextfrag.KindSystemPrompt, Priority: priorityPlatformIdentity, RetentionTier: contextfrag.RetentionRequired, Text: hookLoadStatusText(notice)}}
+}
+
+func hookLoadStatusText(notice string) string {
+	if strings.TrimSpace(notice) == "" {
+		return ""
+	}
+	return "## Hooks configuration loading status\n\n" + strings.TrimSpace(notice)
+}
+
+func replaceHookLoadStatus(system, previous, current string) string {
+	if previous != "" {
+		system = strings.Replace(system, hookLoadStatusText(previous), "", 1)
+	}
+	if current != "" && !strings.Contains(system, hookLoadStatusText(current)) {
+		system += "\n\n" + hookLoadStatusText(current)
+	}
+	return strings.TrimSpace(system)
 }

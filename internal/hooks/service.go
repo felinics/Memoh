@@ -11,6 +11,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/felinics/memoh/internal/prune"
@@ -28,6 +29,7 @@ type workspaceTargetIDResolver interface {
 type Service struct {
 	logger   *slog.Logger
 	provider bridge.Provider
+	repairMu sync.Mutex
 }
 
 var emptyConfigFile = []byte("{\n  \"version\": 1,\n  \"enabled\": true,\n  \"hooks\": []\n}\n")
@@ -127,16 +129,20 @@ func (s *Service) Run(ctx context.Context, req Request, runner ToolRunner) (Resu
 	if strings.TrimSpace(req.Event) == "" {
 		return Result{}, errors.New("hook event is required")
 	}
+	if bridge.WorkspaceUnavailableFromContext(ctx) {
+		recordLoadNotice(ctx, emptyRuntimeLoad("unavailable"))
+		return Result{Decision: DecisionAllow, RuntimeSupported: RuntimeSupported(req.Event)}, nil
+	}
 	targetID, err := s.currentWorkspaceTargetID(ctx, req.BotID)
 	if err != nil {
-		return Result{}, err
+		s.logLoadError(err)
+		recordLoadNotice(ctx, emptyRuntimeLoad("unavailable"))
+		return Result{Decision: DecisionAllow, RuntimeSupported: RuntimeSupported(req.Event)}, nil
 	}
 	ctx = bridge.WithWorkspaceTarget(ctx, targetID)
-	cfg, _, err := s.LoadEffective(ctx, req.BotID)
-	if err != nil {
-		return Result{}, err
-	}
-	return s.RunConfig(ctx, cfg, req, runner)
+	loaded := s.loadRuntime(ctx, req.BotID)
+	recordLoadNotice(ctx, loaded)
+	return s.RunConfig(ctx, loaded.config, req, runner)
 }
 
 func (s *Service) RunConfig(ctx context.Context, cfg Config, req Request, runner ToolRunner) (Result, error) {

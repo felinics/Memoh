@@ -89,3 +89,17 @@ func TestWriteFileHonorsCancelledContext(t *testing.T) {
 		t.Fatalf("cancelled write left file behind: %v", err)
 	}
 }
+
+func TestReadFileSeparatesMissingFromUnreadableContent(t *testing.T) {
+	root := t.TempDir()
+	srv := New(Options{DefaultWorkDir: root, WorkspaceRoot: root, DataMount: "/data"})
+	if _, err := srv.ReadFile(t.Context(), &pb.ReadFileRequest{Path: "/data/missing.md"}); status.Code(err) != codes.NotFound {
+		t.Fatalf("missing error=%v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "MEMORY.md"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.ReadFile(t.Context(), &pb.ReadFileRequest{Path: "/data/MEMORY.md"}); status.Code(err) == codes.NotFound || err == nil {
+		t.Fatalf("unreadable content error=%v", err)
+	}
+}

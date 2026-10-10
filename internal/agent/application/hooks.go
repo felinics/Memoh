@@ -101,7 +101,7 @@ func (s *Service) hookWorkspace(ctx context.Context, botID string) hooks.Workspa
 		CWD:     hooks.DefaultWorkDir,
 		Runtime: bridge.WorkspaceBackendContainer,
 	}
-	if s == nil || s.agent == nil {
+	if s == nil || s.agent == nil || bridge.WorkspaceUnavailableFromContext(ctx) {
 		return info
 	}
 	provider, ok := s.agent.BridgeProvider().(bridge.WorkspaceInfoProvider)
