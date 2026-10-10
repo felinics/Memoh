@@ -1764,6 +1764,7 @@
   "chatExamples": {
     "noBot": "Create a bot first to try this.",
     "createBot": "Create bot",
+    "tryThese": "Try one of these",
     "needs": "Needs {capability}",
     "capability": {
       "web_search": "web search",
@@ -1773,7 +1774,12 @@
       "browser": "the browser",
       "schedule": "schedules",
       "channel": "a channel"
-    }
+    },
+    "sidebarEntry": "See what it can do",
+    "galleryTitle": "See what Memoh can do",
+    "galleryDescription": "Pick an example to put it in the chat box. You can edit it before sending.",
+    "viewAll": "See all",
+    "dismiss": "Hide suggestions"
   },
   "models": {
     "title": "Models",

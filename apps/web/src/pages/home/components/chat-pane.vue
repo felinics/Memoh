@@ -1199,6 +1199,20 @@
                   </Button>
                 </div>
 
+                <!-- Brings back the hidden welcome suggestions. It lives on this
+                     row so it lines up with the other session controls, in
+                     the slot the context ring takes once a chat starts. -->
+                <Button
+                  v-if="isWelcome && welcomeDismissed && voiceInputState === 'idle'"
+                  type="button"
+                  variant="quiet"
+                  size="sm"
+                  class="ml-auto shrink-0 gap-1.5 px-1.5 font-normal max-md:h-11"
+                  @click="welcomeDismissed = false"
+                >
+                  <Lightbulb class="size-3.5 shrink-0" />
+                  <span class="text-label">{{ $t('chatExamples.tryThese') }}</span>
+                </Button>
                 <SessionInfoRing
                   v-if="showSessionInfoRing && voiceInputState === 'idle'"
                   class="ml-auto shrink-0"
@@ -1209,6 +1223,12 @@
               </div>
             </ComposerDock>
           </div>
+          <!-- Usage examples under the welcome composer; they yield first
+               when the pane is short (style.css welcome tiers). -->
+          <ChatExampleSuggestions
+            v-if="isWelcome && currentBotId"
+            :bot-id="currentBotId"
+          />
         </div>
       </div>
     </template>
@@ -1295,6 +1315,8 @@ import { EFFORT_LABELS, REASONING_EFFORT_DISABLE, displayedEffort, reconcileStor
 import { useMediaGallery } from '../composables/useMediaGallery'
 import { ATTACHMENT_ANIM_MS, attachmentToFile, fileToAttachment, useComposerAttachments } from '../composables/useComposerAttachments'
 import { useComposerDrafts } from '../composables/useComposerDrafts'
+import ChatExampleSuggestions from './chat-example-suggestions.vue'
+import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import { useComposerPrefillConsumer } from '../composables/useComposerPrefillConsumer'
 import { useUnfocusedComposerInput } from '../composables/useUnfocusedComposerInput'
 import { useComposerKeyboardFocus } from '../composables/useComposerKeyboardFocus'
@@ -1382,6 +1404,7 @@ const {
 } = storeToRefs(chatStore)
 
 const isActive = computed(() => props.active !== false)
+const { welcomeDismissed } = useChatExamplesUi()
 const isVisible = computed(() => props.visible !== false)
 const paneTarget = computed(() => ({
   botId: currentBotId.value?.trim() ?? '',
@@ -3649,6 +3672,7 @@ useComposerPrefillConsumer({
   botId: () => paneTarget.value.botId,
   active: () => isActive.value,
   writable: () => !activeChatReadOnly.value,
+  ready: () => !loadingChats.value,
   apply: (text) => {
     inputText.value = text
     saveInputDraft(inputDraftKey.value, text)

@@ -1733,6 +1733,7 @@
   "chatExamples": {
     "noBot": "試すには、まず Bot を作成してください。",
     "createBot": "Bot を作成",
+    "tryThese": "こんなことを試せます",
     "needs": "{capability}が必要",
     "capability": {
       "web_search": "Web 検索",
@@ -1742,7 +1743,12 @@
       "browser": "ブラウザ",
       "schedule": "スケジュール",
       "channel": "チャンネル"
-    }
+    },
+    "sidebarEntry": "できることを見る",
+    "galleryTitle": "Memoh でできること",
+    "galleryDescription": "例を選ぶと入力欄に入ります。送信前に編集できます。",
+    "viewAll": "もっと見る",
+    "dismiss": "おすすめを非表示"
   },
   "models": {
     "title": "モデル",

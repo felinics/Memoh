@@ -52,7 +52,9 @@ const composerPrefill = useComposerPrefillStore()
 useComposerPrefillResolver({
   pending: () => composerPrefill.pending,
   currentBotId: () => currentBotId.value,
-  dockReady: () => !!workspaceTabs.api,
+  // Wait out a bot switch: until the new bot's chats load, the dock may still
+  // show the previous bot's panels.
+  dockReady: () => !!workspaceTabs.api && !chatStore.loadingChats,
   activeChatWritable: () => !!workspaceTabs.activeId && workspaceTabs.activePanelIsChat && !chatStore.activeChatReadOnly,
   openDraftChat: () => workspaceTabs.openDraftChat({ title: t('chat.newSession'), explicitSelection: false }),
 })

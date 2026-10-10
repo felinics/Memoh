@@ -62,6 +62,7 @@
         </div>
 
         <div class="relative z-1 shrink-0 bg-sidebar px-2 pt-1 pb-2">
+          <SidebarExamplesEntry />
           <SidebarNavButton
             :aria-label="t('sidebar.settings')"
             @click="goSettings"
@@ -97,6 +98,7 @@ import { useChatSelectionStore } from '@/store/chat-selection'
 import { useWorkspaceTabsStore, type SidebarView } from '@/store/workspace-tabs'
 import { hasBotPermission } from '@/utils/bot-permissions'
 import BotSwitcher from '@/components/sidebar/bot-switcher.vue'
+import SidebarExamplesEntry from '@/components/sidebar/examples-entry.vue'
 import SidebarNavButton from '@/components/sidebar/nav-button.vue'
 import PanelSessions from '@/components/sidebar/panel-sessions.vue'
 import PanelFiles from '@/components/sidebar/panel-files.vue'

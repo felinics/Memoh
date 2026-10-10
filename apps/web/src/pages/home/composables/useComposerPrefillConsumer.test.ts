@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useComposerPrefillStore } from '@/store/composer-prefill'
 import { useComposerPrefillConsumer } from './useComposerPrefillConsumer'
 
-function mountPane(state: { botId?: string, active?: boolean, writable?: boolean } = {}) {
+function mountPane(state: { botId?: string, active?: boolean, writable?: boolean, ready?: boolean } = {}) {
   const botId = ref(state.botId ?? 'bot-a')
+  const ready = ref(state.ready ?? true)
   const active = ref(state.active ?? true)
   const writable = ref(state.writable ?? true)
   const apply = vi.fn()
@@ -13,9 +14,10 @@ function mountPane(state: { botId?: string, active?: boolean, writable?: boolean
     botId: () => botId.value,
     active: () => active.value,
     writable: () => writable.value,
+    ready: () => ready.value,
     apply,
   }))
-  return { botId, active, writable, apply }
+  return { botId, active, writable, ready, apply }
 }
 
 describe('useComposerPrefillConsumer', () => {
@@ -53,6 +55,16 @@ describe('useComposerPrefillConsumer', () => {
     pane.writable.value = true
     await nextTick()
     expect(pane.apply).toHaveBeenCalledOnce()
+  })
+
+  it('waits while the bot is still loading, so a pane of the previous bot cannot take it', async () => {
+    const pane = mountPane({ ready: false })
+    useComposerPrefillStore().request('bot-a', 'hello')
+    await nextTick()
+    expect(pane.apply).not.toHaveBeenCalled()
+    pane.ready.value = true
+    await nextTick()
+    expect(pane.apply).toHaveBeenCalledWith('hello')
   })
 
   it('lets only the active pane of two consume the request', async () => {

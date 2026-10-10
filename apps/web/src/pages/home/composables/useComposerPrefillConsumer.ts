@@ -7,6 +7,11 @@ export interface ComposerPrefillConsumerDeps {
   active: () => boolean
   /** The pane's session accepts input (not read-only). */
   writable: () => boolean
+  /**
+   * The current bot has finished loading. While a bot switch is loading, the
+   * previous bot's panes are still mounted and must not take the request.
+   */
+  ready: () => boolean
   /** Write the text into the composer; it replaces any unsent text. */
   apply: (text: string) => void
 }
@@ -19,9 +24,9 @@ export interface ComposerPrefillConsumerDeps {
 export function useComposerPrefillConsumer(deps: ComposerPrefillConsumerDeps) {
   const store = useComposerPrefillStore()
   watch(
-    () => [store.pending?.id, deps.active(), deps.writable(), deps.botId()] as const,
+    () => [store.pending?.id, deps.active(), deps.writable(), deps.ready(), deps.botId()] as const,
     () => {
-      if (!deps.active() || !deps.writable()) return
+      if (!deps.active() || !deps.writable() || !deps.ready()) return
       const text = store.take(deps.botId())
       if (text !== null) deps.apply(text)
     },

@@ -27,6 +27,12 @@
         <MainContainer />
       </div>
       <MobileNavSheet v-if="isMobile" />
+      <!-- The one usage-example gallery; the sidebar entry and the welcome
+           suggestions' "See all" open it through useChatExamplesUi. -->
+      <ChatExampleGalleryDialog
+        v-model:open="galleryOpen"
+        :bot-id="currentBotId ?? ''"
+      />
       <FileDropOverlay
         :active="baseDropActive"
         :bounds="baseDropBounds"
@@ -52,6 +58,9 @@ import { KEYBOARD_REGISTRY, useKeyboardCommand } from '@/composables/useKeyboard
 import { registerWorkbenchCommands } from '@/pages/home/commands/workbench-commands'
 import { appKeyboardCommands } from '@/lib/keyboard-commands'
 import { useWorkspaceTabsStore } from '@/store/workspace-tabs'
+import { useChatStore } from '@/store/chat-list'
+import ChatExampleGalleryDialog from '@/components/chat-examples/chat-example-gallery-dialog.vue'
+import { useChatExamplesUi } from '@/components/chat-examples/use-chat-examples-ui'
 import { useI18n } from 'vue-i18n'
 import { ImagePlus } from 'lucide-vue-next'
 import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
@@ -102,6 +111,8 @@ const workspaceTabs = useWorkspaceTabsStore()
 const keyboardRegistry = inject(KEYBOARD_REGISTRY, null)
 if (keyboardRegistry) onScopeDispose(registerWorkbenchCommands(keyboardRegistry, workspaceTabs))
 const { isMobile } = storeToRefs(workspaceTabs)
+const { currentBotId } = storeToRefs(useChatStore())
+const { galleryOpen } = useChatExamplesUi()
 const route = useRoute()
 useKeyboardCommand(appKeyboardCommands.toggleSidebar, () => {
   if (route.path.startsWith('/settings')) return true
