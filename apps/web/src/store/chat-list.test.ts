@@ -3896,12 +3896,6 @@ describe('chat-list store', () => {
       store.abort()
       expect(h.abortedWSRuns).toEqual([])
 
-      // A first send creates its session in-band, named before the run.
-      h.streamHandler?.({
-        type: 'session_created',
-        invocation_id: invocationId,
-        session_id: 'session-1',
-      })
       h.streamHandler?.({
         type: 'run_accepted',
         run_id: 'run-late',
@@ -3911,14 +3905,9 @@ describe('chat-list store', () => {
         epoch: 'epoch-session-1',
         seq: 1,
       })
-      expect(h.abortedWSRuns).toEqual(['run-late'])
 
-      // Before the run had a name, the stop could not fail the send locally
-      // without orphaning the run the server was about to start; the send
-      // ends when the server reports the run aborted.
-      emitRuntimeSnapshot(h.streamHandler!, 'session-1')
-      emitRuntimeTo(h.streamHandler ?? undefined, { kind: 'run', status: 'aborted' }, 'session-1', 'run-late')
-      await expect(sending).resolves.toMatchObject({ ok: false, stage: 'stream' })
+      await expect(sending).resolves.toMatchObject({ ok: false })
+      expect(h.abortedWSRuns).toEqual(['run-late'])
     })
 
   it('fails a rejected submission with the code the server refused it by', async () => {

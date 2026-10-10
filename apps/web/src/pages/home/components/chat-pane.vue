@@ -896,7 +896,7 @@
                         :disabled="streaming ? false : (!showSend || !currentBotId || activeChatReadOnly || loadingMessages || composerConfigPending || composerHasNoModel || goalSubmissionBlocked || !!runtimeModeUnavailableReason)"
                         :title="goalSubmissionBlocked ? goalExecutionBlockedReason : undefined"
                         :class="runtimeModeChanging && !streaming && showSend && !!currentBotId && !activeChatReadOnly && !loadingMessages && !composerAgentConfigPending && !composerHasNoModel ? 'disabled:opacity-100' : undefined"
-                        :aria-busy="sendButtonBusy || undefined"
+                        :aria-busy="firstSendAwaiting || undefined"
                         :aria-label="streaming && showSend ? $t(composerQueueCommand?.mode === 'steer' ? 'chat.queue.enqueueSteer' : 'chat.queue.enqueueFollowUp') : (streaming ? 'Stop generating response' : 'Send message')"
                         class="size-full"
                         @click="handleSendButton"
@@ -906,18 +906,17 @@
                           aria-hidden="true"
                         >
                           <!-- The arrow, which bends into the busy ring while a
-                               first send waits for the server or a stop waits
-                               for the run to end. -->
+                               first send waits for the server. -->
                           <SendMorphIcon
-                            :busy="sendButtonBusy"
+                            :busy="firstSendAwaiting"
                             class="col-start-1 row-start-1 size-[18px] max-md:size-5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                            :class="streaming && !sendButtonBusy ? 'opacity-0' : 'opacity-100'"
+                            :class="streaming && !firstSendAwaiting ? 'opacity-0' : 'opacity-100'"
                           />
                           <svg
                             viewBox="0 0 24 24"
                             fill="currentColor"
                             class="col-start-1 row-start-1 size-4 max-md:size-4.5 transition-opacity duration-200 ease-out motion-reduce:transition-none"
-                            :class="streaming && !sendButtonBusy ? 'opacity-100' : 'opacity-0'"
+                            :class="streaming && !firstSendAwaiting ? 'opacity-100' : 'opacity-0'"
                           >
                             <rect
                               x="4"
@@ -1441,8 +1440,6 @@ const hasRenderedSession = computed(() =>
 // it. It is keyed by the pane's view id, so it outlives the draft -> session
 // repoint.
 const firstSendEntry = computed(() => chatStore.firstSendFor(paneTarget.value))
-const firstSendPhase = computed(() => firstSendEntry.value?.phase ?? 'idle')
-const firstSendStopPending = computed(() => firstSendEntry.value?.stopRequested === true)
 // From Enter on a draft until the server confirms the send. The pane stays on
 // welcome with the input in a locked composer. draftSendStarting covers the
 // part before the store has registered the send (attachment encoding, an
@@ -1450,10 +1447,9 @@ const firstSendStopPending = computed(() => firstSendEntry.value?.stopRequested 
 const draftSendStarting = ref(false)
 const firstSendAwaiting = computed(() =>
   draftSendStarting.value || (!!firstSendEntry.value && !firstSendEntry.value.revealed))
-const sendButtonBusy = computed(() => firstSendAwaiting.value || firstSendStopPending.value)
 // A draft whose first message is in flight is committed to its setup (the
 // folder travels with that message), even before a session id exists.
-const draftSetupEditable = computed(() => !hasRenderedSession.value && firstSendPhase.value === 'idle' && !draftSendStarting.value)
+const draftSetupEditable = computed(() => !hasRenderedSession.value && !firstSendEntry.value && !draftSendStarting.value)
 
 // A fresh, writable chat opens with the composer centred and a greeting above
 // it. Read-only sessions (system / synced channel threads) hide the composer
@@ -4237,9 +4233,8 @@ async function handleSend() {
 }
 
 function handleSendButton() {
-  // A first send waits for the server to confirm it; a stop already sent
-  // waits for the server to end the run.
-  if (sendButtonBusy.value) return
+  // A first send waits for the server to confirm it.
+  if (firstSendAwaiting.value) return
   if (streaming.value && !showSend.value) {
     chatStore.abort(paneTarget.value)
     return

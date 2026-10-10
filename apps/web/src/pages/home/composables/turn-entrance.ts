@@ -7,10 +7,6 @@ export const CHAT_SEND_MOTION = {
   duration: 0.4,
 } as const
 
-// The farthest a turn travels on entrance; the viewport scroll covers any
-// longer distance.
-export const TURN_MOTION_MAX_DISTANCE_PX = 80
-
 export function animateTurnEntrance(
   turn: HTMLElement,
   fromY: number,

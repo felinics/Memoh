@@ -6,43 +6,31 @@ import type { ChatViewTarget } from './types'
 // promotion, the sidebar row and the composer leaving welcome all happen at
 // run_accepted. Before that the pane stays on welcome with the composer locked
 // and the input still in it, so a failure has nothing on screen to undo; the
-// input and the error are simply shown in place. The store advances this
-// phase; panes only read it.
+// input and the error are simply shown in place. The store updates the
+// entry; panes only read it.
 //
-//   pending    the message is on the wire; nothing is on screen
-//   admitted   session_created arrived; the session exists server-side but the
-//              view is still the draft
-//   streaming  run_accepted arrived; the turns are on screen in a session view
-//
-// No entry means idle. Until the send is revealed the session it created is
-// tentative (see isSessionTentative). The phase is keyed by (bot, view id)
-// because the promotion (draft -> session) keeps the pane's view id, so the
-// phase survives that rebind.
-export type FirstSendPhase = 'pending' | 'admitted' | 'streaming'
-
+// The server confirms in two events, in either order: session_created names
+// the session (sessionId) and run_accepted takes the run (accepted). The send
+// is revealed once both have arrived. No entry means no first send. Until the
+// send is revealed the session it created is tentative (see
+// isSessionTentative). Entries are keyed by (bot, view id) because the
+// promotion (draft -> session) keeps the pane's view id, so the entry
+// survives that rebind.
 export interface FirstSendEntry {
   readonly key: string
   readonly invocationId: string
-  phase: FirstSendPhase
-  // Stop pressed before the run could be addressed. The stream stays open
-  // until the server confirms the abort, so the pane shows a pending stop.
-  stopRequested: boolean
+  // run_accepted arrived.
+  accepted: boolean
   // The workdir this send asked the server to bind the new session to. Empty
   // when none was requested.
   readonly requestedWorkdirId: string
   // The session the server created for this send, and the workdir it bound.
-  // Empty until admitted.
+  // Empty until session_created.
   sessionId: string
   workdirId: string
   // True once the held turns are on screen (run_accepted). From here on the
   // view is an ordinary session and a failure stays in its history.
   revealed: boolean
-}
-
-const PHASE_ORDER: Record<FirstSendPhase, number> = {
-  pending: 0,
-  admitted: 1,
-  streaming: 2,
 }
 
 export function firstSendKey(botId: string, viewId: string): string {
@@ -80,8 +68,7 @@ export function createFirstSendTracker() {
     entries.set(key, {
       key,
       invocationId: id,
-      phase: 'pending',
-      stopRequested: false,
+      accepted: false,
       requestedWorkdirId: requestedWorkdirId.trim(),
       sessionId: '',
       workdirId: '',
@@ -89,24 +76,19 @@ export function createFirstSendTracker() {
     })
   }
 
-  // Phases only move forward. Events can repeat (a reconnect replays
-  // reliable requests) and a stale one must not reopen an earlier phase.
-  function advance(invocationId: string, phase: 'streaming') {
+  function accept(invocationId: string) {
     const entry = entryForInvocation(invocationId)
-    if (!entry) return
-    if (PHASE_ORDER[phase] > PHASE_ORDER[entry.phase]) entry.phase = phase
+    if (entry) entry.accepted = true
   }
 
   // The server named the send's session (session_created, or the REST
-  // creation that preceded the send).
+  // creation that preceded the send). Events can repeat (a reconnect replays
+  // reliable requests); the first name stands.
   function admit(invocationId: string, sessionId: string, workdirId = '') {
     const entry = entryForInvocation(invocationId)
-    if (!entry) return
-    if (!entry.sessionId) {
-      entry.sessionId = sessionId.trim()
-      entry.workdirId = workdirId.trim()
-    }
-    if (PHASE_ORDER.admitted > PHASE_ORDER[entry.phase]) entry.phase = 'admitted'
+    if (!entry || entry.sessionId) return
+    entry.sessionId = sessionId.trim()
+    entry.workdirId = workdirId.trim()
   }
 
   // Puts the held turns on screen. Returns false when there is nothing to
@@ -148,22 +130,6 @@ export function createFirstSendTracker() {
     return false
   }
 
-  // True while the run cannot yet be addressed by an abort control, which is
-  // when a stop must wait for the server instead of failing the stream.
-  function isAwaitingRun(invocationId: string): boolean {
-    const phase = entryForInvocation(invocationId)?.phase
-    return phase === 'pending' || phase === 'admitted'
-  }
-
-  function requestStop(invocationId: string) {
-    const entry = entryForInvocation(invocationId)
-    if (entry) entry.stopRequested = true
-  }
-
-  function sessionIdFor(invocationId: string): string {
-    return entryForInvocation(invocationId)?.sessionId ?? ''
-  }
-
   function requestedWorkdirFor(invocationId: string): string {
     return entryForInvocation(invocationId)?.requestedWorkdirId ?? ''
   }
@@ -192,17 +158,14 @@ export function createFirstSendTracker() {
 
   return {
     begin,
-    advance,
+    accept,
     admit,
     reveal,
     isRevealed,
     isAwaitingConfirmation,
     awaitingConfirmationIds,
-    isAwaitingRun,
     isSessionTentative,
-    requestStop,
     requestedWorkdirFor,
-    sessionIdFor,
     entryForInvocation,
     finish,
     entryFor,

@@ -180,7 +180,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
   // one step.
   function revealConfirmedFirstSend(invocationId: string, sourceBotId: string) {
     const entry = deps.firstSend.entryForInvocation(invocationId)
-    if (!entry || entry.revealed || !entry.sessionId || entry.phase !== 'streaming') return
+    if (!entry || entry.revealed || !entry.sessionId || !entry.accepted) return
     const held = deps.assistantStreams.getAssistantStream(invocationId)
     const botId = (held?.botId || sourceBotId || deps.currentBotId.value || '').trim()
     if (!botId || !deps.firstSend.reveal(invocationId)) return
@@ -272,7 +272,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
         event.run_id,
         turnId,
       )
-      deps.firstSend.advance(event.invocation_id, 'streaming')
+      deps.firstSend.accept(event.invocation_id)
       revealConfirmedFirstSend(event.invocation_id, sourceBotId)
       const sessionId = event.session_id.trim()
       const botId = (
@@ -595,15 +595,6 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
     }
     for (const invocationId of invocationIds) {
       if (!runtimeAborted) abortRun(invocationId)
-      // A first send whose run the server has not named yet may still be
-      // created and started. Failing it locally would leave that run going
-      // with nobody watching, so the stream stays open: the stop is replayed
-      // when run_accepted arrives and the aborted run's terminal frame ends
-      // the send. The pane shows the stop as pending meanwhile.
-      if (deps.firstSend.isAwaitingRun(invocationId)) {
-        deps.firstSend.requestStop(invocationId)
-        continue
-      }
       deps.assistantStreams.rejectAssistantStream(invocationId, abortError)
     }
     deps.chatViews.prune()

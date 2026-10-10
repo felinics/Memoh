@@ -57,14 +57,6 @@ export interface LocateMessageResult {
 // Owns the single active transcript view and every mutation of that view.
 // Streams for inactive sessions may keep mutating their detached turn objects,
 // but only this controller can add, remove, reconcile, or reorder visible turns.
-// Whether the reply has shown anything yet. Status lines do not count, nor
-// does an empty error placeholder.
-export function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
-  return turn.messages.some(block =>
-    block.type !== 'status' && (block.type !== 'error' || Boolean(block.code || block.content)),
-  )
-}
-
 export function createTranscriptController({
   currentBotId,
   sessionId,
@@ -602,6 +594,12 @@ export function createTranscriptController({
 
   function nextAssistantMessageId(turn: ChatAssistantTurn): number {
     return turn.messages.reduce((maxId, message) => Math.max(maxId, message.id), -1) + 1
+  }
+
+  function hasVisibleAssistantBlocks(turn: ChatAssistantTurn): boolean {
+    return turn.messages.some(block =>
+      block.type !== 'status' && (block.type !== 'error' || Boolean(block.code || block.content)),
+    )
   }
 
   function finishAssistantTurn(turn: ChatAssistantTurn) {

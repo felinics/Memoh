@@ -8,8 +8,10 @@ import {
 } from 'vue'
 import { useScroll } from '@vueuse/core'
 import type { ChatMessage } from '@/store/chat-list'
-import { animateTurnEntrance, TURN_MOTION_MAX_DISTANCE_PX } from './turn-entrance'
+import { animateTurnEntrance } from './turn-entrance'
 import { nativeScrollTo } from './native-scroll'
+
+const TURN_ENTRANCE_MAX_DISTANCE_PX = 80
 
 // "At the bottom" is a threshold, not a pixel-perfect landing: sub-pixel
 // rounding, the last line growing mid-stream, and fractional zoom all leave a
@@ -448,7 +450,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     const promptTop = containerTop + promptOffsetInTurn - target
     // The viewport already covers the travel distance; keep the turn entrance local.
     const fromY = Math.max(0, Math.min(
-      TURN_MOTION_MAX_DISTANCE_PX,
+      TURN_ENTRANCE_MAX_DISTANCE_PX,
       el.clientHeight - below - promptEl.offsetHeight - promptTop,
       container.offsetHeight - promptEl.offsetHeight,
     ))

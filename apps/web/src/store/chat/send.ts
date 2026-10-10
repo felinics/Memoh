@@ -154,7 +154,7 @@ export interface ChatSendDeps {
   rememberStartupSendFailure: (failure: Omit<StartupSendFailure, 'id'>) => void
   // The workdir a native draft is bound to; sent with its first message.
   draftWorkdirIdFor: (botId: string) => string
-  firstSend: Pick<FirstSendTracker, 'begin' | 'admit' | 'reveal' | 'finish' | 'isRevealed' | 'sessionIdFor'>
+  firstSend: Pick<FirstSendTracker, 'begin' | 'admit' | 'reveal' | 'finish' | 'isRevealed'>
   // Starts the limit on how long an in-band first send waits for the server
   // to confirm it; returns its cancel.
   watchFirstSendConfirmation: (invocationId: string) => () => void
@@ -397,7 +397,6 @@ export function createChatSend(deps: ChatSendDeps) {
         : (revealedFirstSend ? 'stream' : reportedStage)
       const createdSessionId = sendInvocationId
         ? deps.createdSessionIdForInvocation(sendInvocationId)
-          || deps.firstSend.sessionIdFor(sendInvocationId)
         : ''
       const botId = sendBotId || viewTarget.botId || deps.currentBotId.value || ''
       const targetSessionId = sendSessionId || createdSessionId
