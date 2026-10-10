@@ -405,11 +405,10 @@ func (s *Service) materialize(ctx context.Context, botID string, release superma
 	return result, nil
 }
 
-// failInstallation records a failed operation. last_error_code keeps only
-// the public catalog code; the cause with its infrastructure detail is logged.
+// failInstallation records a failed operation. last_error_code keeps only the
+// public catalog code; the caller records the returned cause with its
+// infrastructure detail.
 func (s *Service) failInstallation(ctx context.Context, inst Installation, cause error) error {
-	s.logger.WarnContext(ctx, "App operation failed",
-		slog.String("installation_id", inst.ID), slog.String("app_id", inst.AppID), slog.Any("error", cause))
 	if _, err := s.store.SetStatus(ctx, inst.BotID, inst.ID, StatusFailed, string(publicCode(cause))); err != nil {
 		s.logger.WarnContext(ctx, "record failed App installation", slog.String("installation_id", inst.ID), slog.Any("error", err))
 	}
