@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	mcpgw "github.com/felinics/memoh/internal/mcp"
 )
@@ -73,11 +74,11 @@ func (h *ContainerdHandler) handleMCPToolsWithBotID(c echo.Context, botID string
 	// foreign runtime never falls back to header-supplied identity.
 	if runtimeID := strings.TrimSpace(c.Request().Header.Get(mcpgw.ToolHeaderRuntimeID)); runtimeID != "" {
 		if h.acpRuntimes == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
+			return apperror.New(apperror.CodeACPRuntimeNotFound, nil)
 		}
 		session, ok := h.acpRuntimes.ResolveRuntimeToolContext(botID, runtimeID, c.Request().Header.Get(mcpgw.ToolHeaderRuntimeToken))
 		if !ok {
-			return echo.NewHTTPError(http.StatusNotFound, "runtime not found")
+			return apperror.New(apperror.CodeACPRuntimeNotFound, nil)
 		}
 		mcpgw.ServeToolMCPHTTP(c.Response().Writer, c.Request(), h.logger, h.toolGateway, h.toolContexts, session)
 		return nil

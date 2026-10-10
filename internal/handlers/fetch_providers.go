@@ -111,7 +111,7 @@ func (h *FetchProvidersHandler) Get(c echo.Context) error {
 	}
 	resp, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return resourceLookupError(err, "id", apperror.CodeFetchProviderNotFound, "get fetch provider")
 	}
 	return c.JSON(http.StatusOK, resp)
 }

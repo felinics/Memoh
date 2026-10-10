@@ -564,7 +564,11 @@
     },
     "bot": {
       "name_invalid": "名前は小文字、数字、ハイフンの 2〜63 文字で、先頭は英字または数字にしてください。一部の名前は予約されています。",
-      "name_taken": "この名前はすでに使用されています。"
+      "name_taken": "この名前はすでに使用されています。",
+      "not_found": "このボットは存在しなくなりました。ボット一覧に戻って選び直してください。"
+    },
+    "bot_access": {
+      "grant_not_found": "このアクセス権限は存在しなくなりました。メンバー一覧を更新してからやり直してください。"
     },
     "bot_agent": {
       "default_in_use": "別のデフォルト Agent を選択してから、この Agent を無効化または削除してください。",
@@ -579,6 +583,9 @@
       "bundle_invalid": "バックアップファイルが破損しているか、非対応のバージョンです。"
     },
     "bot_ready_update_failed": "Workspace の作成後に Bot を読み込めませんでした。ページを更新してください。",
+    "browser": {
+      "session_not_found": "このブラウザセッションは期限切れか終了しています。新しく開いてください。"
+    },
     "canceled": "リクエストはキャンセルされました。",
     "capability": {
       "access_denied": "機能を管理するには、この Bot の管理権限が必要です。",
@@ -589,10 +596,15 @@
     },
     "channel": {
       "binding_required": "受信者はまだこのチャンネルを連携していません。",
+      "config_not_found": "このボットにはまだこのチャンネルが設定されていません。先に設定してからやり直してください。",
       "enable_failed": "チャンネルを有効にできませんでした。認証情報を確認して再試行してください。",
+      "identity_config_not_found": "このチャンネルはまだ設定されていません。先に設定してからやり直してください。",
       "runtime_unavailable": "Channel サービスに接続できません。しばらくしてからもう一度お試しください。",
       "verification_failed": "プラットフォーム設定を検証できませんでした。認証情報を確認して、もう一度お試しください。",
       "webhook_endpoint_invalid": "ポート、認証情報、クエリ、フラグメントを含まない公開 HTTPS URL を指定してください。パスはこのチャンネルに表示される webhook パスにしてください。"
+    },
+    "channel_route": {
+      "not_found": "この会話ルートは存在しなくなりました。チャンネルから新しい会話を始めてください。"
     },
     "chat": {
       "message_empty": "メッセージを入力するか、ファイルを添付してください。"
@@ -622,6 +634,9 @@
       "not_found": "会話が見つかりませんでした。",
       "request_invalid": "コンテキストライフサイクルのリクエストが無効です。内容を確認してもう一度お試しください。"
     },
+    "display": {
+      "session_not_found": "この画面セッションは終了しました。新しく開いてください。"
+    },
     "elicitation_declined": "ツールが要求した対話を表示できなかったため、その要求は拒否されました。",
     "external_agent": {
       "account_unbound": "この IM アカウントはまだ Memoh アカウントと連携されていないため、この Bot のワークスペースを利用できません。あなたが所有者の場合は、Memoh の Web 画面で「プロフィール → 連携済みアカウント」からリンクコードを取得し、ここで {link} <コード> を送信してください。",
@@ -640,7 +655,8 @@
       "usage_limited": "外部 Agent のアカウントの利用枠を使い切りました。上限がリセットされてからもう一度お試しいただくか、アカウントのプランと請求情報をご確認ください。"
     },
     "fetch_provider": {
-      "native_managed": "組み込みの取得プロバイダーは Memoh が管理しており、この方法では変更できません。"
+      "native_managed": "組み込みの取得プロバイダーは Memoh が管理しており、この方法では変更できません。",
+      "not_found": "この取得プロバイダーは存在しなくなりました。一覧を更新して選び直してください。"
     },
     "group_chat_acp_unsupported": "グループチャットではチャットモードの外部Agent Sessionを作成できません。/new codex または /new discuss codex を使用してください。",
     "history": {
@@ -669,14 +685,24 @@
     "internal": "サーバーでエラーが発生しました。もう一度お試しください。",
     "invalid_chat_runtime": "選択されたチャットruntimeが無効です。",
     "mcp": {
+      "connection_not_found": "この MCP 接続は存在しないか、すでに閉じています。一覧を更新して接続し直してください。",
       "endpoint_invalid": "コマンド（ローカルサーバー）または URL（リモートサーバー）のどちらか一方を入力してください。",
       "name_taken": "同じ名前の MCP 接続がすでに存在します。",
       "oauth_client_id_required": "このサーバーではクライアントの自動登録を利用できません。登録済み OAuth アプリのクライアント ID を入力してください。",
       "oauth_discovery_failed": "この MCP サーバーから OAuth 設定を検出できませんでした。URL が正しいこと、サーバーが OAuth に対応していることを確認してください。",
       "oauth_not_discovered": "先にこの接続の OAuth 検出を実行してください。"
     },
+    "media": {
+      "asset_not_found": "このファイルは存在しなくなりました。必要な場合は再度アップロードしてください。"
+    },
     "memory": {
       "compact_unsupported": "選択中の Memory Provider は Memory の圧縮に対応していません。Bot の Memory 設定で、圧縮に対応した Provider に切り替えてください。"
+    },
+    "message": {
+      "not_found": "このメッセージは存在しなくなりました。会話を更新してからやり直してください。"
+    },
+    "model": {
+      "not_found": "このモデルは存在しなくなりました。一覧を更新して選び直してください。"
     },
     "native_history_lost": "Agent は以前の会話コンテキストを復元できず、最初から開始しました。上のメッセージは履歴としてのみ残っています。続行に必要な情報をもう一度伝えてください。",
     "network": {
@@ -692,7 +718,8 @@
       "update_failed": "プロフィールを更新できませんでした。"
     },
     "provider": {
-      "name_taken": "同じ名前のプロバイダーがすでに存在します。"
+      "name_taken": "同じ名前のプロバイダーがすでに存在します。",
+      "not_found": "このプロバイダーは存在しなくなりました。一覧を更新して選び直してください。"
     },
     "provider_template": {
       "domain_invalid": "プロバイダーテンプレートの種類が無効です。",
@@ -752,11 +779,13 @@
       "model_conflict": "モデル設定がこの定期実行のランタイムと合っていません。ランタイムに対応するモデル項目を選択してください。",
       "model_required": "このボットには既定のモデルがないため、定期実行にはモデルの指定が必要です。モデルを選択するか、既定のモデルを設定してください。",
       "model_unusable": "このモデルは定期実行に使えません。有効なチャットモデルを選択してください。",
+      "not_found": "この定期実行は存在しなくなりました。一覧を更新して選び直してください。",
       "run_target_conflict": "この定期実行の実行対象、ランタイム、Agent、セッションの設定は同時に指定できません。見直してからやり直してください。",
       "session_mode_unsupported": "定期実行は、チャットまたは定期実行のセッションにのみ続けて実行できます。別の対象セッションを選択してください。"
     },
     "search_provider": {
       "invalid_provider": "このWeb検索プロバイダーはサポートされていません。",
+      "not_found": "この検索プロバイダーは存在しなくなりました。一覧を更新して選び直してください。",
       "type_conflict": "このWeb検索プロバイダーはすでに設定されています。"
     },
     "session": {
@@ -803,6 +832,9 @@
       "unknown_command": "不明な slash コマンドです。/help で利用できるコマンドを確認できます。",
       "unsupported_in_web": "この slash コマンドは Web チャットでは利用できません。"
     },
+    "supermarket": {
+      "not_found": "この項目はマーケットから削除されました。一覧を更新してからやり直してください。"
+    },
     "tool_approval": {
       "ambiguous": "複数の承認リクエストが一致しました。",
       "expired": "この承認リクエストは期限切れか、すでに回答済みです。",
@@ -812,26 +844,46 @@
       "request_invalid": "承認の回答形式が無効です。更新してからもう一度お試しください。"
     },
     "tools_unavailable": "この会話では Memoh のツールを利用できません。新しい会話を開始して再試行してください。",
+    "transcription_model": {
+      "not_found": "この文字起こしモデルは存在しなくなりました。一覧を更新して選び直してください。"
+    },
     "tts": {
       "model_not_configured": "この Bot には音声合成モデルが設定されていません。Bot 設定で選択してください。",
       "text_too_long": "テキストが長すぎます。上限は{max}文字です。"
     },
+    "tts_model": {
+      "not_found": "この音声合成モデルは存在しなくなりました。一覧を更新して選び直してください。"
+    },
+    "tts_provider": {
+      "not_found": "この音声プロバイダーは存在しなくなりました。一覧を更新して選び直してください。"
+    },
     "user": {
-      "cannot_remove_self": "自分自身は削除できません。他の管理者に依頼してください。"
+      "cannot_remove_self": "自分自身は削除できません。他の管理者に依頼してください。",
+      "not_found": "このユーザーは存在しなくなりました。メンバー一覧を更新してからやり直してください。"
     },
     "user_input": {
       "expired": "この質問は期限切れか、すでに回答済みです。",
       "forbidden": "この質問に回答する権限がありません。",
       "operation_failed": "回答を処理できませんでした。"
     },
+    "user_runtime": {
+      "not_found": "このランタイムはアカウントに登録されていません。一覧を更新してからやり直してください。"
+    },
     "video": {
       "job_outcome_unknown": "動画ジョブの状態を確認できませんでした。再生成する前に保存済みのジョブを確認してください。"
+    },
+    "video_model": {
+      "not_found": "この動画モデルは存在しなくなりました。一覧を更新して選び直してください。"
+    },
+    "video_provider": {
+      "not_found": "この動画プロバイダーは存在しなくなりました。一覧を更新して選び直してください。"
     },
     "workdir": {
       "git_branch_unavailable": "このローカルブランチは利用できません。更新して既存のブランチを選択してください。",
       "git_busy": "Agent がこの作業ディレクトリを使用中です。実行が終わってからブランチを切り替えてください。",
       "git_switch_failed": "Git ブランチを切り替えられませんでした。未コミットの変更や、別の Worktree で使用中のブランチでないか確認してください。",
       "git_unavailable": "Git 作業ディレクトリを読み取れません。ワークスペースを確認して再試行してください。",
+      "not_found": "この作業ディレクトリは存在しなくなりました。一覧を更新して選び直してください。",
       "remote_unsupported_for_agent": "外部エージェントのセッションではリモートコンピューターを使えません。ネイティブワークスペースの作業ディレクトリを選んでください。"
     },
     "workspace": {
@@ -863,6 +915,9 @@
     },
     "workspace_dependency_operation_unknown": "操作の結果はまだ確認できていません。依存関係を更新して状態を確認してください。",
     "workspace_display_disabled": "Workspace のデスクトップが有効になっていません。",
+    "workspace_file": {
+      "not_found": "このファイルまたはフォルダーはワークスペースに存在しません。更新してからやり直してください。"
+    },
     "workspace_load_failed": "Workspace 情報を読み込めませんでした。もう一度お試しください。",
     "workspace_manager_unavailable": "Workspace マネージャーが設定されていません。",
     "workspace_metrics_load_failed": "メトリクスを読み込めませんでした。もう一度お試しください。",
@@ -885,7 +940,10 @@
     "workspace_snapshots_unsupported": "この Workspace のランタイムはスナップショットをサポートしていません。",
     "workspace_snapshotter_mismatch": "スナップショッターが Workspace のランタイムと一致しません。",
     "workspace_start_failed": "Workspace を起動できませんでした。もう一度お試しください。",
-    "workspace_stop_failed": "Workspace を停止できませんでした。もう一度お試しください。"
+    "workspace_stop_failed": "Workspace を停止できませんでした。もう一度お試しください。",
+    "workspace_target": {
+      "not_found": "このワークスペースの接続先は利用できなくなりました。更新して選び直してください。"
+    }
   },
   "runtime": {
     "claudeCode": {

@@ -148,7 +148,7 @@ func (h *ProvidersHandler) Get(c echo.Context) error {
 
 	resp, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "get provider")
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -187,11 +187,11 @@ func (h *ProvidersHandler) ListModelsByProvider(c echo.Context) error {
 		if errors.Is(err, models.ErrInvalidModelType) {
 			return apperror.FieldInvalid("type", err)
 		}
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "list provider models")
 	}
 	provider, err := h.service.Get(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "get provider")
 	}
 	return c.JSON(http.StatusOK, withReasoningForClientType(resp, provider.ClientType))
 }
@@ -216,7 +216,10 @@ func (h *ProvidersHandler) GetByName(c echo.Context) error {
 
 	resp, err := h.service.GetByName(c.Request().Context(), name)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
+			return apperror.Wrap(apperror.CodeProviderNotFound, err, nil)
+		}
+		return errs.Wrap(err, "get provider by name")
 	}
 
 	return c.JSON(http.StatusOK, resp)
@@ -325,13 +328,7 @@ func (h *ProvidersHandler) Test(c echo.Context) error {
 
 	resp, err := h.service.Test(ctx, id)
 	if err != nil {
-		if errors.Is(err, db.ErrInvalidUUID) {
-			return apperror.FieldInvalid("id", err)
-		}
-		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
-		}
-		return errs.Wrap(err, "test provider")
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "test provider")
 	}
 	if resp.Cause != nil {
 		// The response carries only the code; this event is where the cause
@@ -380,13 +377,7 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 
 	provider, err := h.service.Get(ctx, id)
 	if err != nil {
-		if errors.Is(err, db.ErrInvalidUUID) {
-			return apperror.FieldInvalid("id", err)
-		}
-		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
-		}
-		return errs.Wrap(err, "get provider")
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "get provider")
 	}
 	if !models.IsLLMClientType(models.ClientType(provider.ClientType)) {
 		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(errors.New("import models is not supported for speech providers"))
@@ -394,16 +385,10 @@ func (h *ProvidersHandler) ImportModels(c echo.Context) error {
 
 	remoteModels, err := h.service.FetchRemoteModels(ctx, id)
 	if err != nil {
-		if errors.Is(err, db.ErrInvalidUUID) {
-			return apperror.FieldInvalid("id", err)
-		}
-		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "provider not found").WithInternal(err)
-		}
 		if translated := probeError(err, false); apperror.CodeOf(translated) != "" {
 			return translated
 		}
-		return errs.Wrap(err, "fetch provider models")
+		return resourceLookupError(err, "id", apperror.CodeProviderNotFound, "fetch provider models")
 	}
 
 	resp := providers.ImportModelsResponse{

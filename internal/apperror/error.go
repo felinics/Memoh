@@ -170,6 +170,7 @@ const (
 	CodeScheduleModelUnusable                    Code = "schedule.model_unusable"
 	CodeScheduleModelRequired                    Code = "schedule.model_required"
 	CodeScheduleSessionModeUnsupported           Code = "schedule.session_mode_unsupported"
+	CodeScheduleNotFound                         Code = "schedule.not_found"
 	CodeAgentResponseInterrupted                 Code = "agent.response_interrupted"
 	CodeAgentProviderOverloaded                  Code = "agent.provider_overloaded"
 	CodeAgentProviderRateLimited                 Code = "agent.provider_rate_limited"
@@ -244,6 +245,33 @@ const (
 	CodeRequestFieldInvalid  Code = "request.field_invalid"
 
 	CodeSessionNotFound Code = "session.not_found"
+
+	// Resources a request named that do not exist (or no longer exist).
+	CodeBotNotFound                   Code = "bot.not_found"
+	CodeBotAccessGrantNotFound        Code = "bot_access.grant_not_found"
+	CodeChannelConfigNotFound         Code = "channel.config_not_found"
+	CodeChannelIdentityConfigNotFound Code = "channel.identity_config_not_found"
+	CodeChannelRouteNotFound          Code = "channel_route.not_found"
+	CodeBrowserSessionNotFound        Code = "browser.session_not_found"
+	CodeDisplaySessionNotFound        Code = "display.session_not_found"
+	CodeFetchProviderNotFound         Code = "fetch_provider.not_found"
+	CodeSearchProviderNotFound        Code = "search_provider.not_found"
+	CodeWorkspaceFileNotFound         Code = "workspace_file.not_found"
+	CodeMCPConnectionNotFound         Code = "mcp.connection_not_found"
+	CodeMediaAssetNotFound            Code = "media.asset_not_found"
+	CodeMessageNotFound               Code = "message.not_found"
+	CodeModelNotFound                 Code = "model.not_found"
+	CodeProviderNotFound              Code = "provider.not_found"
+	CodeTTSProviderNotFound           Code = "tts_provider.not_found"
+	CodeTTSModelNotFound              Code = "tts_model.not_found"
+	CodeTranscriptionModelNotFound    Code = "transcription_model.not_found"
+	CodeVideoProviderNotFound         Code = "video_provider.not_found"
+	CodeVideoModelNotFound            Code = "video_model.not_found"
+	CodeUserNotFound                  Code = "user.not_found"
+	CodeUserRuntimeNotFound           Code = "user_runtime.not_found"
+	CodeWorkdirNotFound               Code = "workdir.not_found"
+	CodeWorkspaceTargetNotFound       Code = "workspace_target.not_found"
+	CodeSupermarketNotFound           Code = "supermarket.not_found"
 
 	// MCP connection codes, and the OAuth state code that MCP shares with
 	// provider sign-in.
@@ -1051,6 +1079,7 @@ var catalog = map[Code]Definition{
 		Detail:      "This bot has no default model, so the schedule needs an explicit model. Choose a model or set a default one.",
 		AllowedArgs: []string{"field"},
 	},
+	CodeScheduleNotFound: {HTTPStatus: http.StatusNotFound, Detail: "This scheduled task no longer exists. Refresh the list and choose another one."},
 	CodeScheduleSessionModeUnsupported: {
 		HTTPStatus: http.StatusConflict,
 		Detail:     "Scheduled runs can only continue chat or schedule sessions. Choose another target session.",
@@ -1175,24 +1204,49 @@ var catalog = map[Code]Definition{
 	// Returned when a failure has no public error of its own.
 	CodeInternal: {HTTPStatus: http.StatusInternalServerError, Detail: "Something went wrong on the server. Please try again."},
 	// 499 is the de facto status for a request the client canceled.
-	CodeCanceled:                 {HTTPStatus: 499, Detail: "The request was canceled."},
-	CodeHTTPBadRequest:           {HTTPStatus: http.StatusBadRequest, Detail: "The request is invalid."},
-	CodeHTTPUnauthorized:         {HTTPStatus: http.StatusUnauthorized, Detail: "Sign in to continue."},
-	CodeHTTPForbidden:            {HTTPStatus: http.StatusForbidden, Detail: "You do not have permission to perform this action."},
-	CodeHTTPNotFound:             {HTTPStatus: http.StatusNotFound, Detail: "The requested resource was not found."},
-	CodeHTTPMethodNotAllowed:     {HTTPStatus: http.StatusMethodNotAllowed, Detail: "This request method is not allowed here."},
-	CodeHTTPConflict:             {HTTPStatus: http.StatusConflict, Detail: "The request conflicts with the current state. Refresh and try again."},
-	CodeHTTPPayloadTooLarge:      {HTTPStatus: http.StatusRequestEntityTooLarge, Detail: "The request is too large."},
-	CodeHTTPUnsupportedMediaType: {HTTPStatus: http.StatusUnsupportedMediaType, Detail: "The request content type is not supported."},
-	CodeHTTPUpgradeRequired:      {HTTPStatus: http.StatusUpgradeRequired, Detail: "This endpoint requires a different protocol."},
-	CodeHTTPTooManyRequests:      {HTTPStatus: http.StatusTooManyRequests, Detail: "Too many requests. Please wait a moment and try again."},
-	CodeHTTPNotImplemented:       {HTTPStatus: http.StatusNotImplemented, Detail: "This operation is not supported by the server."},
-	CodeHTTPBadGateway:           {HTTPStatus: http.StatusBadGateway, Detail: "An upstream service returned an invalid response. Please try again."},
-	CodeHTTPServiceUnavailable:   {HTTPStatus: http.StatusServiceUnavailable, Detail: "The service is temporarily unavailable. Please try again shortly."},
-	CodeHTTPGatewayTimeout:       {HTTPStatus: http.StatusGatewayTimeout, Detail: "An upstream service did not respond in time. Please try again."},
-	CodeRequestFieldRequired:     {HTTPStatus: http.StatusBadRequest, Detail: "A required field is missing.", AllowedArgs: []string{"field"}},
-	CodeRequestFieldInvalid:      {HTTPStatus: http.StatusBadRequest, Detail: "A field has an invalid value.", AllowedArgs: []string{"field"}},
-	CodeSessionNotFound:          {HTTPStatus: http.StatusNotFound, Detail: "The conversation was not found."},
+	CodeCanceled:                      {HTTPStatus: 499, Detail: "The request was canceled."},
+	CodeHTTPBadRequest:                {HTTPStatus: http.StatusBadRequest, Detail: "The request is invalid."},
+	CodeHTTPUnauthorized:              {HTTPStatus: http.StatusUnauthorized, Detail: "Sign in to continue."},
+	CodeHTTPForbidden:                 {HTTPStatus: http.StatusForbidden, Detail: "You do not have permission to perform this action."},
+	CodeHTTPNotFound:                  {HTTPStatus: http.StatusNotFound, Detail: "The requested resource was not found."},
+	CodeHTTPMethodNotAllowed:          {HTTPStatus: http.StatusMethodNotAllowed, Detail: "This request method is not allowed here."},
+	CodeHTTPConflict:                  {HTTPStatus: http.StatusConflict, Detail: "The request conflicts with the current state. Refresh and try again."},
+	CodeHTTPPayloadTooLarge:           {HTTPStatus: http.StatusRequestEntityTooLarge, Detail: "The request is too large."},
+	CodeHTTPUnsupportedMediaType:      {HTTPStatus: http.StatusUnsupportedMediaType, Detail: "The request content type is not supported."},
+	CodeHTTPUpgradeRequired:           {HTTPStatus: http.StatusUpgradeRequired, Detail: "This endpoint requires a different protocol."},
+	CodeHTTPTooManyRequests:           {HTTPStatus: http.StatusTooManyRequests, Detail: "Too many requests. Please wait a moment and try again."},
+	CodeHTTPNotImplemented:            {HTTPStatus: http.StatusNotImplemented, Detail: "This operation is not supported by the server."},
+	CodeHTTPBadGateway:                {HTTPStatus: http.StatusBadGateway, Detail: "An upstream service returned an invalid response. Please try again."},
+	CodeHTTPServiceUnavailable:        {HTTPStatus: http.StatusServiceUnavailable, Detail: "The service is temporarily unavailable. Please try again shortly."},
+	CodeHTTPGatewayTimeout:            {HTTPStatus: http.StatusGatewayTimeout, Detail: "An upstream service did not respond in time. Please try again."},
+	CodeRequestFieldRequired:          {HTTPStatus: http.StatusBadRequest, Detail: "A required field is missing.", AllowedArgs: []string{"field"}},
+	CodeRequestFieldInvalid:           {HTTPStatus: http.StatusBadRequest, Detail: "A field has an invalid value.", AllowedArgs: []string{"field"}},
+	CodeSessionNotFound:               {HTTPStatus: http.StatusNotFound, Detail: "The conversation was not found."},
+	CodeBotNotFound:                   {HTTPStatus: http.StatusNotFound, Detail: "This bot no longer exists. Go back to the bot list and pick another one."},
+	CodeBotAccessGrantNotFound:        {HTTPStatus: http.StatusNotFound, Detail: "This access grant no longer exists. Refresh the member list and try again."},
+	CodeChannelConfigNotFound:         {HTTPStatus: http.StatusNotFound, Detail: "This channel is not configured for the bot. Set it up first, then try again."},
+	CodeChannelIdentityConfigNotFound: {HTTPStatus: http.StatusNotFound, Detail: "You have not set up this channel yet. Set it up first, then try again."},
+	CodeChannelRouteNotFound:          {HTTPStatus: http.StatusNotFound, Detail: "This conversation route no longer exists. Start a new conversation from the channel."},
+	CodeBrowserSessionNotFound:        {HTTPStatus: http.StatusNotFound, Detail: "This browser session has expired or was closed. Open a new one."},
+	CodeDisplaySessionNotFound:        {HTTPStatus: http.StatusNotFound, Detail: "This display session has ended. Open a new one."},
+	CodeFetchProviderNotFound:         {HTTPStatus: http.StatusNotFound, Detail: "This fetch provider no longer exists. Refresh the list and choose another one."},
+	CodeSearchProviderNotFound:        {HTTPStatus: http.StatusNotFound, Detail: "This search provider no longer exists. Refresh the list and choose another one."},
+	CodeWorkspaceFileNotFound:         {HTTPStatus: http.StatusNotFound, Detail: "This file or folder no longer exists in the workspace. Refresh and try again."},
+	CodeMCPConnectionNotFound:         {HTTPStatus: http.StatusNotFound, Detail: "This MCP connection no longer exists or has closed. Refresh the list and reconnect."},
+	CodeMediaAssetNotFound:            {HTTPStatus: http.StatusNotFound, Detail: "This file no longer exists. Upload it again if you still need it."},
+	CodeMessageNotFound:               {HTTPStatus: http.StatusNotFound, Detail: "This message no longer exists. Refresh the conversation and try again."},
+	CodeModelNotFound:                 {HTTPStatus: http.StatusNotFound, Detail: "This model no longer exists. Refresh the list and choose another one."},
+	CodeProviderNotFound:              {HTTPStatus: http.StatusNotFound, Detail: "This provider no longer exists. Refresh the list and choose another one."},
+	CodeTTSProviderNotFound:           {HTTPStatus: http.StatusNotFound, Detail: "This speech provider no longer exists. Refresh the list and choose another one."},
+	CodeTTSModelNotFound:              {HTTPStatus: http.StatusNotFound, Detail: "This speech model no longer exists. Refresh the list and choose another one."},
+	CodeTranscriptionModelNotFound:    {HTTPStatus: http.StatusNotFound, Detail: "This transcription model no longer exists. Refresh the list and choose another one."},
+	CodeVideoProviderNotFound:         {HTTPStatus: http.StatusNotFound, Detail: "This video provider no longer exists. Refresh the list and choose another one."},
+	CodeVideoModelNotFound:            {HTTPStatus: http.StatusNotFound, Detail: "This video model no longer exists. Refresh the list and choose another one."},
+	CodeUserNotFound:                  {HTTPStatus: http.StatusNotFound, Detail: "This user no longer exists. Refresh the member list and try again."},
+	CodeUserRuntimeNotFound:           {HTTPStatus: http.StatusNotFound, Detail: "This runtime is no longer registered to your account. Refresh the list and try again."},
+	CodeWorkdirNotFound:               {HTTPStatus: http.StatusNotFound, Detail: "This working directory no longer exists. Refresh the list and choose another one."},
+	CodeWorkspaceTargetNotFound:       {HTTPStatus: http.StatusNotFound, Detail: "This workspace target is no longer available. Refresh and choose another one."},
+	CodeSupermarketNotFound:           {HTTPStatus: http.StatusNotFound, Detail: "This item is no longer in the Supermarket. Refresh the list and try again."},
 	CodeMCPEndpointInvalid: {
 		HTTPStatus:  http.StatusBadRequest,
 		Detail:      "Specify either a command or a URL for the MCP server, not both and not neither.",

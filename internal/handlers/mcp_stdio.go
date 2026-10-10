@@ -24,6 +24,7 @@ import (
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
 	mcptools "github.com/felinics/memoh/internal/mcp"
+	"github.com/felinics/memoh/internal/workspace"
 	pb "github.com/felinics/memoh/internal/workspace/bridgepb"
 )
 
@@ -444,7 +445,10 @@ func (h *ContainerdHandler) CreateMCPStdio(c echo.Context) error {
 	}
 	containerID, err := h.manager.ContainerID(ctx, botID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "workspace runtime not found for bot")
+		if errors.Is(err, workspace.ErrContainerNotFound) {
+			return apperror.Wrap(apperror.CodeWorkspaceNotFound, err, nil)
+		}
+		return errs.Wrap(err, "resolve workspace container")
 	}
 
 	connectionID := uuid.NewString()
@@ -532,7 +536,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	record := h.mcpStdioSess[connectionID]
 	h.mcpStdioMu.Unlock()
 	if record == nil || record.botID != botID {
-		return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+		return apperror.New(apperror.CodeMCPConnectionNotFound, nil)
 	}
 
 	var req mcptools.JSONRPCRequest
@@ -552,7 +556,7 @@ func (h *ContainerdHandler) HandleMCPStdio(c echo.Context) error {
 	}
 	select {
 	case <-sess.done:
-		return echo.NewHTTPError(http.StatusNotFound, "mcp connection closed")
+		return apperror.New(apperror.CodeMCPConnectionNotFound, nil)
 	default:
 	}
 

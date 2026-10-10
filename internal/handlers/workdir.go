@@ -257,10 +257,11 @@ func workdirHTTPError(err error) error {
 		errors.Is(err, workdir.ErrPathNotFound),
 		errors.Is(err, workdir.ErrPathNotDirectory):
 		return apperror.FieldInvalid("path", err)
+	case errors.Is(err, workspace.ErrWorkspaceTargetNotFound):
+		return apperror.Wrap(apperror.CodeWorkspaceTargetNotFound, err, nil)
 	case errors.Is(err, workdir.ErrWorkdirNotFound),
-		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, "workdir not found")
+		return apperror.Wrap(apperror.CodeWorkdirNotFound, err, nil)
 	case errors.Is(err, workdir.ErrDuplicatePath),
 		errors.Is(err, workdir.ErrWorkdirArchived),
 		errors.Is(err, workspace.ErrRemoteRuntimeOffline),

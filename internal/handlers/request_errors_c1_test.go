@@ -185,9 +185,8 @@ func TestSendChannelMessageErrors(t *testing.T) {
 	if got := apperror.CodeOf(sendChannelMessageHTTPError(channel.ErrChannelBindingRequired, true)); got != apperror.CodeChannelBindingRequired {
 		t.Fatalf("binding code = %q", got)
 	}
-	var httpErr *echo.HTTPError
-	if err := sendChannelMessageHTTPError(channel.ErrChannelConfigNotFound, true); !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("missing config = %v, want 404", err)
+	if err := sendChannelMessageHTTPError(channel.ErrChannelConfigNotFound, true); apperror.CodeOf(err) != apperror.CodeChannelConfigNotFound {
+		t.Fatalf("missing config = %v, want channel.config_not_found", err)
 	}
 	// A route-supplied target is never the caller's field.
 	fromRoute := sendChannelMessageHTTPError(channel.ErrSendTargetRequired, false)
@@ -195,6 +194,7 @@ func TestSendChannelMessageErrors(t *testing.T) {
 		t.Fatalf("route target answered as a request field: %v", fromRoute)
 	}
 	delivery := sendChannelMessageHTTPError(errors.New("telegram: chat not found"), true)
+	var httpErr *echo.HTTPError
 	if errors.As(delivery, &httpErr) || errs.FaultOf(delivery) != apperror.FaultDependency {
 		t.Fatalf("delivery failure = %v, want a dependency fault", delivery)
 	}

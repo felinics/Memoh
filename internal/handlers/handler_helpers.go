@@ -7,11 +7,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 
 	"github.com/felinics/memoh/internal/accounts"
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/auth"
 	"github.com/felinics/memoh/internal/bots"
+	"github.com/felinics/memoh/internal/db"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/identity"
 )
@@ -47,7 +50,7 @@ func AuthorizeBotAccessWithPermission(ctx context.Context, botService *bots.Serv
 	bot, err := botService.AuthorizeAccessWithPermission(ctx, channelIdentityID, botID, isAdmin, requiredPermission)
 	if err != nil {
 		if errors.Is(err, bots.ErrBotNotFound) {
-			return bots.Bot{}, echo.NewHTTPError(http.StatusNotFound, "bot not found")
+			return bots.Bot{}, apperror.Wrap(apperror.CodeBotNotFound, err, nil)
 		}
 		if errors.Is(err, bots.ErrBotAccessDenied) {
 			return bots.Bot{}, echo.NewHTTPError(http.StatusForbidden, "bot access denied")
@@ -55,6 +58,22 @@ func AuthorizeBotAccessWithPermission(ctx context.Context, botService *bots.Serv
 		return bots.Bot{}, errs.Wrap(err, "authorize bot access")
 	}
 	return bot, nil
+}
+
+// resourceLookupError answers a failed lookup by resource id. A malformed id
+// is the caller's mistake, a row that is not there is that resource's
+// not_found, and every other failure — a database that is down, a query that
+// did not compile — stays a server fault. Collapsing them into not_found
+// reports an outage as a client mistake and hides the cause.
+func resourceLookupError(err error, field string, code apperror.Code, op string) error {
+	switch {
+	case errors.Is(err, db.ErrInvalidUUID):
+		return apperror.FieldInvalid(field, err)
+	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, db.ErrNotFound):
+		return apperror.Wrap(code, err, nil)
+	default:
+		return errs.Wrap(err, op)
+	}
 }
 
 // parseOffsetLimit extracts limit and offset query parameters with defaults.

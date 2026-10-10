@@ -257,7 +257,7 @@ func fsFileInfoFromEntry(containerPath, name string, isDir bool, size int64, mod
 func fsHTTPError(err error) error {
 	switch {
 	case errors.Is(err, bridge.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return apperror.Wrap(apperror.CodeWorkspaceFileNotFound, err, nil)
 	case errors.Is(err, bridge.ErrBadRequest):
 		return echo.NewHTTPError(http.StatusBadRequest).WithInternal(err)
 	case errors.Is(err, bridge.ErrForbidden):

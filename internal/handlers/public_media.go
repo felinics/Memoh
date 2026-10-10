@@ -16,6 +16,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/attachment"
 	"github.com/felinics/memoh/internal/channel/publicmedia"
 	"github.com/felinics/memoh/internal/config"
@@ -138,7 +139,7 @@ func (h *PublicMediaHandler) openImage(c echo.Context, botID, contentHash string
 	reader, asset, err := h.media.Open(c.Request().Context(), botID, contentHash)
 	if err != nil {
 		if errors.Is(err, media.ErrAssetNotFound) {
-			return nil, media.Asset{}, echo.NewHTTPError(http.StatusNotFound, "media not found")
+			return nil, media.Asset{}, apperror.Wrap(apperror.CodeMediaAssetNotFound, err, nil)
 		}
 		return nil, media.Asset{}, echo.NewHTTPError(http.StatusInternalServerError).WithInternal(err)
 	}

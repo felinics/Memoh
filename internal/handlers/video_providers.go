@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/errs"
 	"github.com/felinics/memoh/internal/httpx"
 	"github.com/felinics/memoh/internal/models"
@@ -84,7 +85,7 @@ func (h *VideoHandler) GetProvider(c echo.Context) error {
 	}
 	item, err := h.service.GetProvider(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return resourceLookupError(err, "id", apperror.CodeVideoProviderNotFound, "get video provider")
 	}
 	return c.JSON(http.StatusOK, item)
 }
@@ -188,7 +189,7 @@ func (h *VideoHandler) GetModel(c echo.Context) error {
 	}
 	resp, err := h.service.GetModel(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return resourceLookupError(err, "id", apperror.CodeVideoModelNotFound, "get video model")
 	}
 	return c.JSON(http.StatusOK, resp)
 }

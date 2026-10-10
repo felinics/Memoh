@@ -226,7 +226,7 @@ func (h *ContainerdHandler) KeepAliveBrowserSession(c echo.Context) error {
 	}
 	session, ok := h.browserSessions.touchForBot(c.Param("session_id"), botID, time.Now())
 	if !ok {
-		return echo.NewHTTPError(http.StatusNotFound, "browser session expired")
+		return apperror.New(apperror.CodeBrowserSessionNotFound, nil)
 	}
 	return c.JSON(http.StatusOK, browserSessionKeepAliveResponse{
 		ID:        session.ID,
@@ -264,11 +264,11 @@ func (h *ContainerdHandler) handleBrowserProxyPre(next echo.HandlerFunc) echo.Ha
 func (h *ContainerdHandler) HandleBrowserProxy(c echo.Context) error {
 	sessionID, ok := browserSessionIDFromHost(c.Request().Host)
 	if !ok {
-		return echo.NewHTTPError(http.StatusNotFound, "browser session not found")
+		return apperror.New(apperror.CodeBrowserSessionNotFound, nil)
 	}
 	session, ok := h.browserSessions.touch(sessionID, time.Now())
 	if !ok {
-		return echo.NewHTTPError(http.StatusNotFound, "browser session expired")
+		return apperror.New(apperror.CodeBrowserSessionNotFound, nil)
 	}
 	if h.manager == nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "manager not configured")

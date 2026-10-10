@@ -177,7 +177,7 @@ func (h *ModelsHandler) GetByID(c echo.Context) error {
 
 	resp, err := h.service.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return resourceLookupError(err, "id", apperror.CodeModelNotFound, "get model")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -208,10 +208,7 @@ func (h *ModelsHandler) GetByModelID(c echo.Context) error {
 		if errors.Is(err, models.ErrModelIDAmbiguous) {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
-		}
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return resourceLookupError(err, "modelId", apperror.CodeModelNotFound, "get model by model id")
 	}
 	return c.JSON(http.StatusOK, h.withReasoningOne(c.Request().Context(), resp))
 }
@@ -284,7 +281,7 @@ func (h *ModelsHandler) UpdateByModelID(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+			return apperror.Wrap(apperror.CodeModelNotFound, err, nil)
 		}
 		return modelWriteError(err, "update model by model id")
 	}
@@ -339,7 +336,7 @@ func (h *ModelsHandler) DeleteByModelID(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "model_id is duplicated across providers; use /models/{id} instead")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+			return apperror.Wrap(apperror.CodeModelNotFound, err, nil)
 		}
 		return errs.Wrap(err, "delete model by model id")
 	}
@@ -375,7 +372,7 @@ func (h *ModelsHandler) Test(c echo.Context) error {
 			return apperror.FieldInvalid("id", err)
 		}
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, db.ErrNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound, "model not found").WithInternal(err)
+			return apperror.Wrap(apperror.CodeModelNotFound, err, nil)
 		}
 		return errs.Wrap(err, "test model")
 	}

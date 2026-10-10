@@ -564,7 +564,11 @@
     },
     "bot": {
       "name_invalid": "名称需为 2-63 个小写字母、数字或连字符，并以字母或数字开头；部分名称为保留名。",
-      "name_taken": "该名称已被占用。"
+      "name_taken": "该名称已被占用。",
+      "not_found": "这个 Bot 已不存在，请返回 Bot 列表重新选择。"
+    },
+    "bot_access": {
+      "grant_not_found": "这条访问授权已不存在，请刷新成员列表后重试。"
     },
     "bot_agent": {
       "default_in_use": "请先选择其他默认 Agent，再停用或删除这个 Agent。",
@@ -579,6 +583,9 @@
       "bundle_invalid": "备份文件已损坏，或版本不受支持。"
     },
     "bot_ready_update_failed": "工作区已创建，但未能加载 Bot，请刷新页面。",
+    "browser": {
+      "session_not_found": "这个浏览器会话已过期或被关闭，请重新打开一个。"
+    },
     "canceled": "请求已取消。",
     "capability": {
       "access_denied": "需要此 Bot 的管理权限才能管理其能力。",
@@ -589,10 +596,15 @@
     },
     "channel": {
       "binding_required": "接收方尚未绑定该渠道。",
+      "config_not_found": "这个 Bot 还没有配置该渠道，请先完成配置再重试。",
       "enable_failed": "渠道启用失败，请检查凭据后重试。",
+      "identity_config_not_found": "你还没有配置该渠道，请先完成配置再重试。",
       "runtime_unavailable": "暂时无法连接 Channel 服务，请稍后重试。",
       "verification_failed": "无法验证平台配置，请检查凭据后重试。",
       "webhook_endpoint_invalid": "请使用公网 HTTPS 地址，不带端口、凭据、查询串或片段，路径须为该渠道显示的 webhook 路径。"
+    },
+    "channel_route": {
+      "not_found": "这条会话路由已不存在，请从渠道重新发起会话。"
     },
     "chat": {
       "message_empty": "请输入消息或添加附件。"
@@ -622,6 +634,9 @@
       "not_found": "未找到该会话。",
       "request_invalid": "上下文生命周期请求无效，请检查后重试。"
     },
+    "display": {
+      "session_not_found": "这个显示会话已结束，请重新打开一个。"
+    },
     "elicitation_declined": "工具请求的交互未能展示，此次请求已拒绝。",
     "external_agent": {
       "account_unbound": "你的 IM 账号还没关联到 Memoh 账号，暂时无法使用该 Bot 的工作区。如果你是它的所有者，请在 Memoh 网页端「个人资料 → 关联账号」获取关联码，再在这里发送 {link} <关联码>。",
@@ -640,7 +655,8 @@
       "usage_limited": "外部 Agent 账号的使用额度已用完。请等额度重置后再试，或检查该账号的套餐与账单。"
     },
     "fetch_provider": {
-      "native_managed": "内置抓取服务由 Memoh 管理，无法这样修改。"
+      "native_managed": "内置抓取服务由 Memoh 管理，无法这样修改。",
+      "not_found": "这个抓取服务已不存在，请刷新列表后重新选择。"
     },
     "group_chat_acp_unsupported": "群聊不能创建对话模式的外部 Agent 会话。请使用 /new codex 或 /new discuss codex。",
     "history": {
@@ -669,14 +685,24 @@
     "internal": "服务器出错了，请重试。",
     "invalid_chat_runtime": "选择的对话运行时无效。",
     "mcp": {
+      "connection_not_found": "这个 MCP 连接已不存在或已关闭，请刷新列表后重新连接。",
       "endpoint_invalid": "请填写命令（本地服务器）或 URL（远程服务器），二选一，不能同时填写或都不填。",
       "name_taken": "已存在同名的 MCP 连接。",
       "oauth_client_id_required": "该服务器无法自动注册客户端。请填写你在该服务器上注册的 OAuth 应用的 Client ID。",
       "oauth_discovery_failed": "无法从该 MCP 服务器发现 OAuth 配置。请确认 URL 正确且服务器支持 OAuth。",
       "oauth_not_discovered": "请先对该连接执行 OAuth 发现。"
     },
+    "media": {
+      "asset_not_found": "这个文件已不存在，如仍需要请重新上传。"
+    },
     "memory": {
       "compact_unsupported": "当前记忆提供方不支持记忆压缩，请在 Bot 的记忆设置中换用支持压缩的提供方。"
+    },
+    "message": {
+      "not_found": "这条消息已不存在，请刷新会话后重试。"
+    },
+    "model": {
+      "not_found": "这个模型已不存在，请刷新列表后重新选择。"
     },
     "native_history_lost": "Agent 无法恢复此前的对话上下文，已重新开始。上方消息仅保留作历史记录；继续前，请重新提供所需信息。",
     "network": {
@@ -692,7 +718,8 @@
       "update_failed": "个人资料更新失败。"
     },
     "provider": {
-      "name_taken": "已存在同名提供方。"
+      "name_taken": "已存在同名提供方。",
+      "not_found": "这个服务商已不存在，请刷新列表后重新选择。"
     },
     "provider_template": {
       "domain_invalid": "提供方模板类型无效。",
@@ -752,11 +779,13 @@
       "model_conflict": "模型设置与该定时任务的运行时不匹配，请改用与运行时对应的模型字段。",
       "model_required": "该机器人没有默认模型，定时任务需要明确指定模型。请选择模型，或先设置默认模型。",
       "model_unusable": "该模型无法用于定时任务，请选择已启用的对话模型。",
+      "not_found": "这个定时任务已不存在，请刷新列表后重新选择。",
       "run_target_conflict": "该定时任务的运行目标、运行时、Agent 与会话设置互相冲突，请调整后重试。",
       "session_mode_unsupported": "定时任务只能接续对话会话或定时任务会话，请选择其他目标会话。"
     },
     "search_provider": {
       "invalid_provider": "不支持该搜索提供方。",
+      "not_found": "这个搜索服务已不存在，请刷新列表后重新选择。",
       "type_conflict": "该搜索提供方已完成配置。"
     },
     "session": {
@@ -803,6 +832,9 @@
       "unknown_command": "未知的 slash 命令，发送 /help 可查看可用命令。",
       "unsupported_in_web": "该 slash 命令不能在 Web 对话中使用。"
     },
+    "supermarket": {
+      "not_found": "这个条目已不在应用市场中，请刷新列表后重试。"
+    },
     "tool_approval": {
       "ambiguous": "匹配到多条审批请求。",
       "expired": "这条审批请求已过期或已被处理。",
@@ -812,26 +844,46 @@
       "request_invalid": "审批响应格式无效，请刷新后重试。"
     },
     "tools_unavailable": "此会话的 Memoh 工具不可用，请新建会话后重试。",
+    "transcription_model": {
+      "not_found": "这个语音转写模型已不存在，请刷新列表后重新选择。"
+    },
     "tts": {
       "model_not_configured": "此 Bot 尚未配置语音合成模型，请先在 Bot 设置中选择。",
       "text_too_long": "文本过长，最多 {max} 个字符。"
     },
+    "tts_model": {
+      "not_found": "这个语音合成模型已不存在，请刷新列表后重新选择。"
+    },
+    "tts_provider": {
+      "not_found": "这个语音服务商已不存在，请刷新列表后重新选择。"
+    },
     "user": {
-      "cannot_remove_self": "不能移除自己，请让其他管理员操作。"
+      "cannot_remove_self": "不能移除自己，请让其他管理员操作。",
+      "not_found": "这个用户已不存在，请刷新成员列表后重试。"
     },
     "user_input": {
       "expired": "这个问题已过期或已被回答。",
       "forbidden": "你没有权限回答这个问题。",
       "operation_failed": "答案处理失败。"
     },
+    "user_runtime": {
+      "not_found": "这个运行环境已不在你的账号下，请刷新列表后重试。"
+    },
     "video": {
       "job_outcome_unknown": "无法确认视频任务状态，请先检查已保存的任务，再决定是否重新生成。"
+    },
+    "video_model": {
+      "not_found": "这个视频模型已不存在，请刷新列表后重新选择。"
+    },
+    "video_provider": {
+      "not_found": "这个视频服务商已不存在，请刷新列表后重新选择。"
     },
     "workdir": {
       "git_branch_unavailable": "该本地分支已不可用，请刷新后选择已有分支。",
       "git_busy": "有 Agent 正在使用此工作目录，请等待执行结束后再切换分支。",
       "git_switch_failed": "Git 无法切换分支，请检查未提交的修改，以及目标分支是否被其他 Worktree 使用。",
       "git_unavailable": "无法读取 Git 工作目录，请检查工作区后重试。",
+      "not_found": "这个工作目录已不存在，请刷新列表后重新选择。",
       "remote_unsupported_for_agent": "外部智能体会话不能使用远程电脑，请改选原生工作区中的工作目录。"
     },
     "workspace": {
@@ -863,6 +915,9 @@
     },
     "workspace_dependency_operation_unknown": "操作结果尚未确认，请刷新依赖列表查看状态。",
     "workspace_display_disabled": "工作区桌面未启用。",
+    "workspace_file": {
+      "not_found": "工作区里已没有这个文件或文件夹，请刷新后重试。"
+    },
     "workspace_load_failed": "加载工作区信息失败，请重试。",
     "workspace_manager_unavailable": "服务器未配置工作区管理。",
     "workspace_metrics_load_failed": "加载资源状态失败，请重试。",
@@ -885,7 +940,10 @@
     "workspace_snapshots_unsupported": "当前工作区运行后端不支持快照。",
     "workspace_snapshotter_mismatch": "快照器与工作区运行后端不匹配。",
     "workspace_start_failed": "启动工作区失败，请重试。",
-    "workspace_stop_failed": "停止工作区失败，请重试。"
+    "workspace_stop_failed": "停止工作区失败，请重试。",
+    "workspace_target": {
+      "not_found": "这个工作区目标已不可用，请刷新后重新选择。"
+    }
   },
   "runtime": {
     "claudeCode": {

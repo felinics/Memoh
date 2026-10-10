@@ -67,8 +67,8 @@ func TestScheduleServiceErrorKeepsInternalErrorsInternal(t *testing.T) {
 
 func TestScheduleLookupErrorAnswersAnUnknownScheduleWith404(t *testing.T) {
 	err := scheduleLookupError(fmt.Errorf("get: %w", schedule.ErrScheduleNotFound))
-	if apperror.CodeOf(err) != apperror.CodeHTTPNotFound || !errors.Is(apperror.CauseOf(err), schedule.ErrScheduleNotFound) {
-		t.Fatalf("error = %v, want http.not_found caused by ErrScheduleNotFound", err)
+	if apperror.CodeOf(err) != apperror.CodeScheduleNotFound || !errors.Is(apperror.CauseOf(err), schedule.ErrScheduleNotFound) {
+		t.Fatalf("error = %v, want schedule.not_found caused by ErrScheduleNotFound", err)
 	}
 }
 

@@ -101,12 +101,12 @@ func TestCatalogCodeSurvivesEnvelope(t *testing.T) {
 // A status the transport does not recognize is left for the handler group's
 // client, with its ErrorInfo intact.
 func TestUnrecognizedEnvelopePassesThrough(t *testing.T) {
-	sent := rpc.Reason{Reason: "channel.config_not_found", Code: codes.NotFound, Message: "channel config not found"}.Status("")
+	sent := rpc.Reason{Reason: "test.unregistered_reason", Code: codes.NotFound, Message: "unregistered reason"}.Status("")
 	err := callOverWire(t, sent)
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("code = %v", status.Code(err))
 	}
-	if reason, ok := rpc.ReasonOf(err); !ok || reason != "channel.config_not_found" {
+	if reason, ok := rpc.ReasonOf(err); !ok || reason != "test.unregistered_reason" {
 		t.Fatalf("reason = %q, %v", reason, ok)
 	}
 }

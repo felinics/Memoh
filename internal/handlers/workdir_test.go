@@ -15,14 +15,34 @@ import (
 	"github.com/felinics/memoh/internal/workspace/bridge"
 )
 
+func TestWorkdirNotFoundAnswers(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		code apperror.Code
+	}{
+		"workdir not found": {workdir.ErrWorkdirNotFound, apperror.CodeWorkdirNotFound},
+		"db not found":      {db.ErrNotFound, apperror.CodeWorkdirNotFound},
+		"target not found":  {workspace.ErrWorkspaceTargetNotFound, apperror.CodeWorkspaceTargetNotFound},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, translate := range []func(error) error{workdirHTTPError, workdirDirectoriesHTTPError} {
+				err := translate(tc.err)
+				if apperror.CodeOf(err) != tc.code || !errors.Is(apperror.CauseOf(err), tc.err) {
+					t.Fatalf("error = %v, want %s caused by %v", err, tc.code, tc.err)
+				}
+				if def, _ := apperror.Lookup(tc.code); def.HTTPStatus != http.StatusNotFound {
+					t.Fatalf("%s status = %d, want 404", tc.code, def.HTTPStatus)
+				}
+			}
+		})
+	}
+}
+
 func TestWorkdirHTTPError(t *testing.T) {
 	for name, tc := range map[string]struct {
 		err  error
 		code int
 	}{
-		"workdir not found":  {workdir.ErrWorkdirNotFound, http.StatusNotFound},
-		"target not found":   {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
-		"db not found":       {db.ErrNotFound, http.StatusNotFound},
 		"duplicate path":     {workdir.ErrDuplicatePath, http.StatusConflict},
 		"archived":           {workdir.ErrWorkdirArchived, http.StatusConflict},
 		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, http.StatusConflict},
@@ -54,7 +74,6 @@ func TestWorkdirDirectoriesHTTPError(t *testing.T) {
 		"runtime offline":    {workspace.ErrRemoteRuntimeOffline, http.StatusServiceUnavailable},
 		"bridge unavailable": {fmt.Errorf("list: %w", bridge.ErrUnavailable), http.StatusServiceUnavailable},
 		"path forbidden":     {workdir.ErrPathForbidden, http.StatusForbidden},
-		"target not found":   {workspace.ErrWorkspaceTargetNotFound, http.StatusNotFound},
 		"runtime revoked":    {workspace.ErrRemoteRuntimeRevoked, http.StatusConflict},
 	} {
 		t.Run(name, func(t *testing.T) {

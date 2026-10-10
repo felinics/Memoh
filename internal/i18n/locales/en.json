@@ -564,7 +564,11 @@
     },
     "bot": {
       "name_invalid": "Use 2-63 lowercase letters, digits or hyphens, starting with a letter or digit. Some names are reserved.",
-      "name_taken": "This name is already taken."
+      "name_taken": "This name is already taken.",
+      "not_found": "This bot no longer exists. Go back to the bot list and pick another one."
+    },
+    "bot_access": {
+      "grant_not_found": "This access grant no longer exists. Refresh the member list and try again."
     },
     "bot_agent": {
       "default_in_use": "Choose another default Agent before disabling or deleting this one.",
@@ -579,6 +583,9 @@
       "bundle_invalid": "The backup file is damaged or from an unsupported version."
     },
     "bot_ready_update_failed": "The bot could not be loaded after its workspace was set up. Refresh the page.",
+    "browser": {
+      "session_not_found": "This browser session has expired or was closed. Open a new one."
+    },
     "canceled": "The request was canceled.",
     "capability": {
       "access_denied": "You need Manage permission on this bot to manage its capabilities.",
@@ -589,10 +596,15 @@
     },
     "channel": {
       "binding_required": "The recipient has not linked this channel yet.",
+      "config_not_found": "This channel is not configured for the bot. Set it up first, then try again.",
       "enable_failed": "The channel could not be enabled. Check its credentials, then try again.",
+      "identity_config_not_found": "You have not set up this channel yet. Set it up first, then try again.",
       "runtime_unavailable": "The channel service could not be reached. Please try again shortly.",
       "verification_failed": "The channel configuration could not be verified. Check the credentials, then try again.",
       "webhook_endpoint_invalid": "Use a public HTTPS URL without a port, credentials, query or fragment. Its path must be the webhook path shown for this channel."
+    },
+    "channel_route": {
+      "not_found": "This conversation route no longer exists. Start a new conversation from the channel."
     },
     "chat": {
       "message_empty": "Enter a message or attach a file."
@@ -622,6 +634,9 @@
       "not_found": "The conversation was not found.",
       "request_invalid": "The context lifecycle request is invalid."
     },
+    "display": {
+      "session_not_found": "This display session has ended. Open a new one."
+    },
     "elicitation_declined": "A tool requested an interaction that could not be shown. The request was declined.",
     "external_agent": {
       "account_unbound": "Your IM account isn't linked to a Memoh account yet, so you can't use this bot's workspace. If you're its owner, open Profile → Connected Accounts in Memoh on the web, get a link code, and send {link} <code> here.",
@@ -640,7 +655,8 @@
       "usage_limited": "The external Agent's account has no usage left. Try again after the limit resets, or check the account's plan and billing."
     },
     "fetch_provider": {
-      "native_managed": "The built-in fetch provider is managed by Memoh and cannot be changed this way."
+      "native_managed": "The built-in fetch provider is managed by Memoh and cannot be changed this way.",
+      "not_found": "This fetch provider no longer exists. Refresh the list and choose another one."
     },
     "group_chat_acp_unsupported": "Group chats cannot create a chat-mode external-agent session. Use /new codex or /new discuss codex.",
     "history": {
@@ -669,14 +685,24 @@
     "internal": "Something went wrong on the server. Please try again.",
     "invalid_chat_runtime": "The selected chat runtime is invalid.",
     "mcp": {
+      "connection_not_found": "This MCP connection no longer exists or has closed. Refresh the list and reconnect.",
       "endpoint_invalid": "Enter either a command (local server) or a URL (remote server), not both.",
       "name_taken": "An MCP connection with this name already exists.",
       "oauth_client_id_required": "Automatic client registration is unavailable for this server. Enter a client ID from an OAuth app you registered with it.",
       "oauth_discovery_failed": "Could not discover OAuth settings from this MCP server. Check that the URL is correct and that the server supports OAuth.",
       "oauth_not_discovered": "Run OAuth discovery for this connection first."
     },
+    "media": {
+      "asset_not_found": "This file no longer exists. Upload it again if you still need it."
+    },
     "memory": {
       "compact_unsupported": "The selected memory provider does not support memory compaction. Choose a provider that supports it in the bot's memory settings."
+    },
+    "message": {
+      "not_found": "This message no longer exists. Refresh the conversation and try again."
+    },
+    "model": {
+      "not_found": "This model no longer exists. Refresh the list and choose another one."
     },
     "native_history_lost": "The agent could not restore its previous context and started over. Earlier messages remain as history only. Provide any context needed to continue.",
     "network": {
@@ -692,7 +718,8 @@
       "update_failed": "The profile could not be updated."
     },
     "provider": {
-      "name_taken": "A provider with this name already exists."
+      "name_taken": "A provider with this name already exists.",
+      "not_found": "This provider no longer exists. Refresh the list and choose another one."
     },
     "provider_template": {
       "domain_invalid": "This provider template type is invalid.",
@@ -752,11 +779,13 @@
       "model_conflict": "The model setting does not fit this schedule's runtime. Choose the model field that matches the runtime.",
       "model_required": "This bot has no default model, so the schedule needs an explicit model. Choose a model or set a default one.",
       "model_unusable": "This model cannot run a schedule. Choose an enabled chat model.",
+      "not_found": "This scheduled task no longer exists. Refresh the list and choose another one.",
       "run_target_conflict": "The run target, runtime, Agent and session settings of this schedule cannot be combined. Adjust them and try again.",
       "session_mode_unsupported": "Scheduled runs can only continue chat or schedule sessions. Choose another target session."
     },
     "search_provider": {
       "invalid_provider": "This web search provider is not supported.",
+      "not_found": "This search provider no longer exists. Refresh the list and choose another one.",
       "type_conflict": "This web search provider has already been configured."
     },
     "session": {
@@ -803,6 +832,9 @@
       "unknown_command": "Unknown slash command. Send /help to see the available commands.",
       "unsupported_in_web": "This slash command is not available in Web chat."
     },
+    "supermarket": {
+      "not_found": "This item is no longer in the Supermarket. Refresh the list and try again."
+    },
     "tool_approval": {
       "ambiguous": "More than one approval request matches this response.",
       "expired": "This approval request has expired or was already answered.",
@@ -812,26 +844,46 @@
       "request_invalid": "The approval response is invalid."
     },
     "tools_unavailable": "Memoh tools are unavailable for this conversation. Start a new session to restore them.",
+    "transcription_model": {
+      "not_found": "This transcription model no longer exists. Refresh the list and choose another one."
+    },
     "tts": {
       "model_not_configured": "This bot has no text-to-speech model. Choose one in the bot settings.",
       "text_too_long": "Text is too long. The limit is {max} characters."
     },
+    "tts_model": {
+      "not_found": "This speech model no longer exists. Refresh the list and choose another one."
+    },
+    "tts_provider": {
+      "not_found": "This speech provider no longer exists. Refresh the list and choose another one."
+    },
     "user": {
-      "cannot_remove_self": "You cannot remove yourself. Ask another admin to remove you."
+      "cannot_remove_self": "You cannot remove yourself. Ask another admin to remove you.",
+      "not_found": "This user no longer exists. Refresh the member list and try again."
     },
     "user_input": {
       "expired": "This question has expired or was already answered.",
       "forbidden": "You do not have permission to answer this question.",
       "operation_failed": "The answer could not be processed."
     },
+    "user_runtime": {
+      "not_found": "This runtime is no longer registered to your account. Refresh the list and try again."
+    },
     "video": {
       "job_outcome_unknown": "The video job status could not be confirmed. Check the saved job before creating another video."
+    },
+    "video_model": {
+      "not_found": "This video model no longer exists. Refresh the list and choose another one."
+    },
+    "video_provider": {
+      "not_found": "This video provider no longer exists. Refresh the list and choose another one."
     },
     "workdir": {
       "git_branch_unavailable": "This local branch is unavailable. Refresh and select an existing branch.",
       "git_busy": "An agent is using this working directory. Wait for it to finish before switching branches.",
       "git_switch_failed": "Git could not switch branches. Check uncommitted changes and whether the branch is used by another worktree.",
       "git_unavailable": "The Git working directory could not be read. Check the workspace and try again.",
+      "not_found": "This working directory no longer exists. Refresh the list and choose another one.",
       "remote_unsupported_for_agent": "External agent sessions cannot use a remote computer. Choose a workdir on the native workspace instead."
     },
     "workspace": {
@@ -863,6 +915,9 @@
     },
     "workspace_dependency_operation_unknown": "The operation result is not yet confirmed. Refresh dependencies to check its status.",
     "workspace_display_disabled": "Workspace desktop is not enabled.",
+    "workspace_file": {
+      "not_found": "This file or folder no longer exists in the workspace. Refresh and try again."
+    },
     "workspace_load_failed": "Failed to load workspace info. Please try again.",
     "workspace_manager_unavailable": "Workspace manager is not configured.",
     "workspace_metrics_load_failed": "Failed to load workspace metrics. Please try again.",
@@ -885,7 +940,10 @@
     "workspace_snapshots_unsupported": "Snapshots are not supported by this workspace runtime.",
     "workspace_snapshotter_mismatch": "The snapshotter does not match the workspace runtime.",
     "workspace_start_failed": "Failed to start the workspace. Please try again.",
-    "workspace_stop_failed": "Failed to stop the workspace. Please try again."
+    "workspace_stop_failed": "Failed to stop the workspace. Please try again.",
+    "workspace_target": {
+      "not_found": "This workspace target is no longer available. Refresh and choose another one."
+    }
   },
   "runtime": {
     "claudeCode": {

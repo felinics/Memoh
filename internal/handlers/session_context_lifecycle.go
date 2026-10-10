@@ -167,6 +167,9 @@ func mapContextLifecycleError(err error) error {
 	if err == nil {
 		return nil
 	}
+	if isBotOrSessionNotFound(err) {
+		return apperror.New(apperror.CodeContextLifecycleNotFound, nil)
+	}
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) {
 		return apperror.Wrap(apperror.CodeContextLifecycleLoadFailed, err, nil)

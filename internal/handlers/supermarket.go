@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/config"
 	"github.com/felinics/memoh/internal/errs"
 	supermarketclient "github.com/felinics/memoh/internal/supermarket"
@@ -67,8 +68,7 @@ func (h *SupermarketHandler) proxy(c echo.Context, upstreamPath string) error {
 func upstreamStatusError(status int, upstreamPath string) error {
 	attrs := []slog.Attr{slog.Int("upstream_status", status), slog.String("path", upstreamPath)}
 	if status == http.StatusNotFound {
-		return echo.NewHTTPError(http.StatusNotFound, "supermarket resource not found").
-			WithInternal(errs.New("supermarket resource not found", attrs...))
+		return apperror.Wrap(apperror.CodeSupermarketNotFound, errs.New("supermarket resource not found", attrs...), nil)
 	}
 	return echo.NewHTTPError(http.StatusBadGateway, "supermarket request failed").
 		WithInternal(errs.NewDependency("supermarket answered with an error status", attrs...))

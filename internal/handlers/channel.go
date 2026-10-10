@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/felinics/memoh/internal/apperror"
 	"github.com/felinics/memoh/internal/channel"
 	"github.com/felinics/memoh/internal/errs"
 )
@@ -52,7 +53,7 @@ func (h *ChannelHandler) GetChannelIdentityConfig(c echo.Context) error {
 	resp, err := h.store.GetChannelIdentityConfig(c.Request().Context(), channelIdentityID, channelType)
 	if err != nil {
 		if errors.Is(err, channel.ErrChannelIdentityConfigNotFound) {
-			return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+			return apperror.Wrap(apperror.CodeChannelIdentityConfigNotFound, err, nil)
 		}
 		return errs.Wrap(err, "get channel identity config")
 	}
@@ -147,7 +148,8 @@ func (h *ChannelHandler) GetChannel(c echo.Context) error {
 	}
 	desc, ok := h.registry.GetDescriptor(channelType)
 	if !ok {
-		return echo.NewHTTPError(http.StatusNotFound, "channel not found")
+		// ParseChannelType succeeded, so the adapter is registered.
+		return errs.New("channel descriptor missing for a registered adapter")
 	}
 	resp := ChannelMeta{
 		Type:             desc.Type.String(),

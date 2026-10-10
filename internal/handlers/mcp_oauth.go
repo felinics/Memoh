@@ -81,7 +81,7 @@ func (h *MCPOAuthHandler) Discover(c echo.Context) error {
 	conn, err := h.connService.Get(c.Request().Context(), botID, connID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "mcp connection not found")
+			return apperror.Wrap(apperror.CodeMCPConnectionNotFound, err, nil)
 		}
 		return errs.Wrap(err, "get mcp connection")
 	}

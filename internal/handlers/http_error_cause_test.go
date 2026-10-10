@@ -21,11 +21,9 @@ func TestStatusOnlyHTTPErrorsKeepCause(t *testing.T) {
 		cause  error
 		status int
 	}{
-		{"fs not found", fsHTTPError(bridge.ErrNotFound), bridge.ErrNotFound, http.StatusNotFound},
 		{"fs forbidden", fsHTTPError(bridge.ErrForbidden), bridge.ErrForbidden, http.StatusForbidden},
 		{"workdir picker forbidden", workdirDirectoriesHTTPError(workdir.ErrPathForbidden), workdir.ErrPathForbidden, http.StatusForbidden},
 		{"workdir duplicate", workdirHTTPError(workdir.ErrDuplicatePath), workdir.ErrDuplicatePath, http.StatusConflict},
-		{"grant not found", (*BotUserAccessHandler)(nil).mapGrantError(bots.ErrGrantNotFound), bots.ErrGrantNotFound, http.StatusNotFound},
 		{"grant exists", (*BotUserAccessHandler)(nil).mapGrantError(bots.ErrGrantExists), bots.ErrGrantExists, http.StatusConflict},
 	}
 	for _, tc := range cases {

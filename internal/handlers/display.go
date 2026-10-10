@@ -225,7 +225,7 @@ func (h *ContainerdHandler) CloseDisplaySession(c echo.Context) error {
 		return err
 	}
 	if h.displayService == nil || !h.displayService.CloseSession(botID, sessionID) {
-		return echo.NewHTTPError(http.StatusNotFound, "display session not found")
+		return apperror.New(apperror.CodeDisplaySessionNotFound, nil)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

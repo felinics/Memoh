@@ -1162,10 +1162,10 @@ func (h *SessionHandler) authorizeSession(c echo.Context, channelIdentityID, bot
 	}
 	sess, err := h.sessionService.Get(c.Request().Context(), sessionID)
 	if err != nil || sess.BotID != bot.ID {
-		return bots.Bot{}, nil, session.Thread{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return bots.Bot{}, nil, session.Thread{}, apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	if !canAccessSession(sess, channelIdentityID, perms) {
-		return bots.Bot{}, nil, session.Thread{}, echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return bots.Bot{}, nil, session.Thread{}, apperror.New(apperror.CodeSessionNotFound, nil)
 	}
 	return bot, perms, sess, nil
 }
@@ -1368,7 +1368,7 @@ func sessionServiceError(err error) error {
 func sessionForkError(err error) error {
 	switch {
 	case errors.Is(err, session.ErrForkSourceNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, "session not found")
+		return apperror.Wrap(apperror.CodeSessionNotFound, err, nil)
 	case errors.Is(err, session.ErrForkSourceNotReply):
 		return echo.NewHTTPError(http.StatusConflict, "fork source is not a visible assistant reply")
 	case errors.Is(err, session.ErrForkSourceNotChat):

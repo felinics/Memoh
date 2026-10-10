@@ -335,7 +335,7 @@ func (h *ScheduleHandler) authorizeBotAccess(ctx context.Context, userID, botID 
 // 404, a malformed one a field problem, anything else is internal.
 func scheduleLookupError(err error) error {
 	if errors.Is(err, schedule.ErrScheduleNotFound) {
-		return apperror.Wrap(apperror.CodeHTTPNotFound, err, nil)
+		return apperror.Wrap(apperror.CodeScheduleNotFound, err, nil)
 	}
 	return scheduleServiceError(err)
 }

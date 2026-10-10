@@ -92,9 +92,8 @@ func TestFSMkdirInvalidExplicitTargetDoesNotFallBackToPrimary(t *testing.T) {
 	_, err := native.callFileManager(t, http.MethodPost, "/bots/:bot_id/container/fs/mkdir", map[string]string{
 		"path": "/data/new-folder", "workspace_target_id": "unknown-target",
 	}, native.handler.FSMkdir)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("FSMkdir error = %v, want HTTP 404", err)
+	if apperror.CodeOf(err) != apperror.CodeWorkspaceTargetNotFound {
+		t.Fatalf("FSMkdir error = %v, want workspace_target.not_found", err)
 	}
 	for _, env := range []*skillsTestEnv{native, primary} {
 		if _, err := os.Stat(env.localPath("/data/new-folder")); !errors.Is(err, os.ErrNotExist) {

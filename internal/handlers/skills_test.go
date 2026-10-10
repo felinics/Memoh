@@ -73,9 +73,8 @@ func TestListSkillsMapsMissingWorkspaceTargetToNotFound(t *testing.T) {
 	}
 
 	_, err := env.callJSON(t, http.MethodGet, "/bots/:bot_id/container/skills", nil, env.handler.ListSkills)
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.Code != http.StatusNotFound {
-		t.Fatalf("ListSkills() error = %v, want HTTP 404", err)
+	if apperror.CodeOf(err) != apperror.CodeWorkspaceTargetNotFound {
+		t.Fatalf("ListSkills() error = %v, want workspace_target.not_found", err)
 	}
 }
 
@@ -263,12 +262,8 @@ func TestDeleteSkillsAPIReportsMissingManagedSkill(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected deleting a skill that was never adopted to fail")
 	}
-	var httpErr *echo.HTTPError
-	if !errors.As(err, &httpErr) {
-		t.Fatalf("expected echo.HTTPError, got %T", err)
-	}
-	if httpErr.Code != http.StatusNotFound {
-		t.Fatalf("delete missing managed status = %d, want 404", httpErr.Code)
+	if apperror.CodeOf(err) != apperror.CodeWorkspaceFileNotFound {
+		t.Fatalf("delete missing managed error = %v, want workspace_file.not_found", err)
 	}
 }
 

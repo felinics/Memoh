@@ -190,7 +190,7 @@ func (h *SupermarketHandler) GetRegistryAppRelease(c echo.Context) error {
 	pkg, err := h.upstream.FetchAppRelease(c.Request().Context(), registryID, appID, revision)
 	if err != nil {
 		if supermarketclient.ErrorKindOf(err) == supermarketclient.ErrorNotFound {
-			return echo.NewHTTPError(http.StatusNotFound, "Skill App release not found")
+			return apperror.Wrap(apperror.CodeSupermarketNotFound, err, nil)
 		}
 		return echo.NewHTTPError(http.StatusBadGateway, "supermarket unreachable")
 	}

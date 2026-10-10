@@ -248,7 +248,7 @@ func (h *BotUserAccessHandler) requireManageAccess(c echo.Context) (string, stri
 func (*BotUserAccessHandler) mapGrantError(err error) error {
 	switch {
 	case errors.Is(err, bots.ErrGrantNotFound):
-		return echo.NewHTTPError(http.StatusNotFound).WithInternal(err)
+		return apperror.Wrap(apperror.CodeBotAccessGrantNotFound, err, nil)
 	case errors.Is(err, bots.ErrOwnerUserNotFound):
 		return apperror.FieldInvalid("user_id", err)
 	case errors.Is(err, bots.ErrInvalidPermission):
@@ -262,7 +262,7 @@ func (*BotUserAccessHandler) mapGrantError(err error) error {
 	case errors.Is(err, bots.ErrGrantExists):
 		return echo.NewHTTPError(http.StatusConflict).WithInternal(err)
 	case errors.Is(err, bots.ErrBotNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, "bot not found")
+		return apperror.Wrap(apperror.CodeBotNotFound, err, nil)
 	default:
 		return errs.Wrap(err, "grant bot access")
 	}

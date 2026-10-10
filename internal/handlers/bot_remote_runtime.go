@@ -297,7 +297,7 @@ func workspaceTargetHTTPError(err error) error {
 	case errors.Is(err, workspace.ErrRemoteRuntimeNotUsable),
 		errors.Is(err, workspace.ErrWorkspaceTargetNotFound),
 		errors.Is(err, db.ErrNotFound):
-		return echo.NewHTTPError(http.StatusNotFound, "workspace target not found")
+		return apperror.Wrap(apperror.CodeWorkspaceTargetNotFound, err, nil)
 	case errors.Is(err, workspace.ErrRemoteRuntimeRevoked),
 		errors.Is(err, workspace.ErrRemoteRuntimeOwnerMismatch),
 		errors.Is(err, workspace.ErrRemoteRuntimeClientUpdateNeeded):

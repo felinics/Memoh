@@ -186,7 +186,7 @@ func providerOAuthError(err error, op string) error {
 	case errors.Is(err, db.ErrInvalidUUID):
 		return apperror.FieldInvalid("id", err)
 	case errors.Is(err, providers.ErrProviderNotFound):
-		return apperror.Wrap(apperror.CodeHTTPNotFound, err, nil)
+		return apperror.Wrap(apperror.CodeProviderNotFound, err, nil)
 	case errors.Is(err, providers.ErrOAuthUnsupported):
 		return apperror.Wrap(apperror.CodeHTTPBadRequest, err, nil)
 	default:
