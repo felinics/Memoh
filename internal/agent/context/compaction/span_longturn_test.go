@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -766,4 +767,93 @@ func TestCompactionTurnStartingTheHistoryLeavesNoStepAloneBeforeABarrier(t *test
 		t.Fatal("the small step in front of the barrier was left alone behind the claim")
 	}
 	assertClaimsContiguous(t, q)
+}
+
+// refusedFusionSession is a session whose frontier is large enough to fuse
+// and whose oldest span the summarizer refuses.
+func refusedFusionSession(t *testing.T, stub *stubModel, later int) (*sessionStore, TriggerConfig) {
+	t.Helper()
+	cfg := machineryConfig(stub, 50)
+	cfg.AllowFrontierFusion = true
+	cfg.MaxCompactTokens = 4000
+	q := newSessionStore()
+	q.append(prose(t, "user", "POISON question", 300, 100), prose(t, "assistant", "POISON answer", 300, 100), reasoningOnlyRow(t))
+	for i := 0; i < later; i++ {
+		q.append(prose(t, "user", fmt.Sprintf("LATER%d question", i), 300, 100), prose(t, "assistant", fmt.Sprintf("LATER%d answer", i), 300, 100), reasoningOnlyRow(t))
+	}
+	q.append(prose(t, "user", "CURRENT", 10, 10))
+	setFusionRowScopeAndTimes(t, cfg, q.history)
+	q.priorLogs = fusionParentLogs(t, cfg, strings.Repeat("a", 2400), strings.Repeat("b", 2400))
+	return q, cfg
+}
+
+func TestCompactionRefusedRollupDoesNotStallLaterHistory(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "rolled up", refuse: "POISON"}
+	q, cfg := refusedFusionSession(t, stub, 6)
+	cfg.HardPressure = true
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	refused := 0
+	for minute := 0; minute < 6*60; minute += 5 {
+		calls := stub.calls
+		_, _ = svc.RunCompactionSync(context.Background(), cfg)
+		if stub.calls > calls && strings.Contains(stub.prompt, "POISON") {
+			refused++
+		}
+		clock = clock.Add(5 * time.Minute)
+	}
+	later := 0
+	for _, row := range q.history[3 : len(q.history)-1] {
+		if q.logStatuses[q.claims[row.ID]] == "ok" {
+			later++
+		}
+	}
+	if later == 0 || refused > 6 {
+		t.Fatalf("after six hours: %d later rows compacted, %d calls carried the refused span; want the history behind it compacted and the span held", later, refused)
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestManualCompactionMovesPastARefusedRollup(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: "rolled up", refuse: "POISON"}
+	q, cfg := refusedFusionSession(t, stub, 3)
+	cfg.Manual = true
+	svc := newMachineryService(q)
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil || res.Reason != ReasonSummaryUnusable {
+		t.Fatalf("first manual pass = %+v, %v; want the refusal reported as an unusable summary", res, err)
+	}
+	if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK || strings.Contains(stub.prompt, "POISON") {
+		t.Fatalf("second manual pass = %+v, %v; want later history committed past the refused span", res, err)
+	}
+	assertClaimsContiguous(t, q)
+}
+
+func TestCompactionIneffectiveRollupFallsBackToOrdinaryPasses(t *testing.T) {
+	t.Parallel()
+
+	stub := &stubModel{summary: summaryOfTokens(t, 100), verbose: "<absorbed_context>"}
+	cfg := machineryConfig(stub, 200)
+	cfg.AllowFrontierFusion = true
+	cfg.MaxCompactTokens = 4000
+	q := newSessionStore(fusionQualityRows(t, cfg)...)
+	q.priorLogs = fusionParentLogs(t, cfg, strings.Repeat("a", 2400), strings.Repeat("b", 2400))
+	svc := newMachineryService(q)
+	clock := time.Unix(1_800_000_000, 0)
+	svc.nowFn = func() time.Time { return clock }
+	q.now = func() time.Time { return clock }
+	if _, err := svc.RunCompactionSync(context.Background(), cfg); !errors.Is(err, errIneffectiveRollup) {
+		t.Fatalf("rollup = %v, want it rejected as ineffective", err)
+	}
+	clock = clock.Add(compactionFailureCooldown)
+	res, err := svc.RunCompactionSync(context.Background(), cfg)
+	if err != nil || res.Status != StatusOK || strings.Contains(stub.prompt, "<absorbed_context>") {
+		t.Fatalf("pass after the cooldown = %+v, %v; want an ordinary summary of the history, not the same rollup again", res, err)
+	}
 }

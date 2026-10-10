@@ -90,6 +90,10 @@ type Service struct {
 	// ineffective records when a session's last pass ended in an ineffective
 	// summary; a second one in a row, within the cooldown, arms it.
 	ineffective map[string]time.Time
+	// fusionFailures tracks sessions whose latest rollups failed: while it
+	// backs off, their passes compact history without fusing, so a frontier
+	// the model cannot roll up never holds back the history behind it.
+	fusionFailures map[string]compactionFailure
 }
 
 // compactionFailure tracks one session's most recent failure and how many
@@ -102,12 +106,13 @@ type compactionFailure struct {
 // NewService creates a new compaction Service.
 func NewService(log *slog.Logger, queries dbstore.Queries) *Service {
 	return &Service{
-		queries:     queries,
-		logger:      log,
-		nowFn:       time.Now,
-		inflight:    make(map[string]*inflightRun),
-		failedAt:    make(map[string]compactionFailure),
-		ineffective: make(map[string]time.Time),
+		queries:        queries,
+		logger:         log,
+		nowFn:          time.Now,
+		inflight:       make(map[string]*inflightRun),
+		failedAt:       make(map[string]compactionFailure),
+		ineffective:    make(map[string]time.Time),
+		fusionFailures: make(map[string]compactionFailure),
 	}
 }
 
@@ -212,6 +217,37 @@ func (s *Service) recordIneffective(sessionID string) bool {
 	last, repeated := s.ineffective[sessionID]
 	s.ineffective[sessionID] = now
 	return repeated && now.Sub(last) < compactionFailureCooldown
+}
+
+// fusionBackedOff reports a session whose latest rollup failed recently:
+// within unusableSummaryHold, four times as long after each further failure
+// in a row, up to maxUnusableSummaryHold.
+func (s *Service) fusionBackedOff(sessionID string) bool {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	entry, ok := s.fusionFailures[sessionID]
+	if !ok {
+		return false
+	}
+	backoff := unusableSummaryHold
+	for i := 1; i < min(entry.attempts, 8); i++ {
+		backoff *= 4
+	}
+	return s.nowFn().Sub(entry.at) < min(backoff, maxUnusableSummaryHold)
+}
+
+// noteFusion records a rollup's outcome: a committed one ends the backoff.
+func (s *Service) noteFusion(sessionID string, failed bool) {
+	s.inflightMu.Lock()
+	defer s.inflightMu.Unlock()
+	if !failed {
+		delete(s.fusionFailures, sessionID)
+		return
+	}
+	entry := s.fusionFailures[sessionID]
+	entry.at = s.nowFn()
+	entry.attempts++
+	s.fusionFailures[sessionID] = entry
 }
 
 func (s *Service) SetHookService(h *hooks.Service) {

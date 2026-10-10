@@ -17,7 +17,7 @@ import (
 	"github.com/felinics/memoh/internal/models/modelretry"
 )
 
-func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (Result, error) {
+func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, sessionUUID pgtype.UUID, cfg TriggerConfig) (res Result, err error) {
 	measure, err := s.queries.MeasureUncompactedMessagesBySession(ctx, sessionUUID)
 	if err != nil {
 		return Result{}, err
@@ -55,13 +55,20 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 	for _, issue := range frontier.Issues {
 		s.logger.WarnContext(ctx, "compaction: ignored invalid artifact lineage", slog.String("issue", issue.Error()))
 	}
-	fusing := shouldFuseFrontier(cfg, frontier.Artifacts, maxCompactTokens)
+	fusing := shouldFuseFrontier(cfg, frontier.Artifacts, maxCompactTokens) && !s.fusionBackedOff(cfg.SessionID)
 	if fusing && !frontierHasPersistedCoverage(frontier.Artifacts) {
 		s.logger.WarnContext(ctx, "compaction: frontier fusion skipped",
 			slog.String("reason", "legacy_parent_missing_coverage"),
 			slog.String("session_id", cfg.SessionID),
 		)
 		fusing = false
+	}
+	if fusing {
+		defer func() {
+			if err != nil || res.Status == StatusOK {
+				s.noteFusion(cfg.SessionID, err != nil)
+			}
+		}()
 	}
 	selectedSystemPrompt := systemPrompt
 	// Every span the floor admits must fit the smallest entries budget.
@@ -275,9 +282,10 @@ func (s *Service) doCompaction(ctx context.Context, botUUID pgtype.UUID, session
 		err = fmt.Errorf("summary does not reduce replay tokens: summary_tokens=%d raw_tokens=%d", summaryTokens, replacementTokens)
 	}
 	if err != nil {
-		// A rollup fails with the summaries it absorbs, which says nothing
-		// about the new rows on their own.
-		if !fusing {
+		// A rollup no shorter than everything it replaces says nothing about
+		// the new rows on their own; any other summary that cannot replace
+		// them is recorded against them.
+		if !errors.Is(err, errIneffectiveRollup) {
 			err = fmt.Errorf("%w: %w", ErrIneffectiveSummary, err)
 		}
 		s.failLog(persistCtx, logID, err, attempts)
