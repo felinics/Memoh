@@ -2409,7 +2409,7 @@
     "aclPreset": "IM App Policy",
     "aclPresetDescription": "Start with a standard ACL preset. You can tweak it later in Channel Access.",
     "aclPresetHint": "Tip: use 'Private Only' for personal bots, 'Group Only' or 'Group and Thread' for community bots, and 'Allow All' to stay completely open.",
-    "aclPresetHelp": "This sets up your default ACL effect and initial rules. You can adjust them anytime from the Channel Access page.",
+    "aclPresetHelp": "This sets up your default ACL effect and initial rules. You can change them after creation under Access Control › Channel Members.",
     "aclPresets": {
       "allowAll": {
         "title": "Allow All",
@@ -2429,7 +2429,7 @@
       },
       "denyAll": {
         "title": "Deny All",
-        "description": "Defaults to deny and adds no rules, so you can configure access manually later."
+        "description": "Defaults to deny and adds no rules. After creation, add allowed members or groups in Access Control before the bot replies on IM."
       }
     },
     "editAvatar": "Edit Avatar",
@@ -3330,10 +3330,12 @@
         "updated": "Updated",
         "updateFailed": "Failed to update",
         "removed": "Member removed",
-        "removeFailed": "Failed to remove member"
+        "removeFailed": "Failed to remove member",
+        "emptyWithRules": "The list is empty, but {count} advanced rule is in effect — see In Effect above. | The list is empty, but {count} advanced rules are in effect — see In Effect above."
       },
       "advanced": {
-        "entryTitle": "Advanced rules"
+        "entryTitle": "Advanced rules",
+        "activeCount": "{count} rule in effect | {count} rules in effect"
       },
       "defaultEffectTitle": "Default Effect",
       "defaultEffectDescription": "Applied when no rule matches an inbound message.",
@@ -3446,7 +3448,20 @@
       "threadId": "Thread ID",
       "threadIdPlaceholder": "Enter thread ID",
       "clearSpecificConversation": "Clear Selection",
-      "lastObserved": "Last seen"
+      "lastObserved": "Last seen",
+      "effective": {
+        "title": "In Effect",
+        "item": "{scope}: {access}",
+        "separator": " · ",
+        "listJoiner": ", ",
+        "everyone": "everyone",
+        "listed": "listed only",
+        "exceptListed": "everyone not listed",
+        "nobody": "no one",
+        "scopeNote": "Applies to IM channels only; web chat is not affected.",
+        "scopeNoteWithExempt": "Applies to IM channels only; web chat and {channels} are not affected.",
+        "modeWithScope": "{mode} {scope}"
+      }
     },
     "channels": {
       "title": "Platforms",

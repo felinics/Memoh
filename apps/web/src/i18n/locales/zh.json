@@ -2409,7 +2409,7 @@
     "aclPreset": "IM 应用策略",
     "aclPresetDescription": "选择初始的访问控制预设，后续可随时调整。",
     "aclPresetHint": "建议：个人助手用“仅私聊”，群机器人用“仅群聊”或“群聊和话题”，不确定时保留“允许全部”。",
-    "aclPresetHelp": "这会配置默认的访问规则。你可以随时在“渠道访问”面板中修改。",
+    "aclPresetHelp": "这会配置默认的访问规则。创建后可在“访问控制 › 渠道成员”中修改。",
     "aclPresets": {
       "allowAll": {
         "title": "允许全部",
@@ -2429,7 +2429,7 @@
       },
       "denyAll": {
         "title": "全部拒绝",
-        "description": "默认拒绝且不添加规则，需要后续手动配置。"
+        "description": "默认拒绝且不添加规则。创建后需在访问控制中添加允许的成员或群聊，Bot 才会在 IM 中回复。"
       }
     },
     "editAvatar": "编辑头像",
@@ -3330,10 +3330,12 @@
         "updated": "已更新",
         "updateFailed": "更新失败",
         "removed": "已移除成员",
-        "removeFailed": "移除成员失败"
+        "removeFailed": "移除成员失败",
+        "emptyWithRules": "名单为空，另有 {count} 条高级规则在生效，见“当前生效”。"
       },
       "advanced": {
-        "entryTitle": "高级规则"
+        "entryTitle": "高级规则",
+        "activeCount": "{count} 条规则生效"
       },
       "defaultEffectTitle": "默认行为",
       "defaultEffectDescription": "当没有规则匹配入站消息时应用此策略。",
@@ -3446,7 +3448,20 @@
       "threadId": "话题 ID",
       "threadIdPlaceholder": "输入话题 ID",
       "clearSpecificConversation": "清空选择",
-      "lastObserved": "最近出现"
+      "lastObserved": "最近出现",
+      "effective": {
+        "title": "当前生效",
+        "item": "{scope}：{access}",
+        "separator": " · ",
+        "listJoiner": "、",
+        "everyone": "所有人可用",
+        "listed": "仅名单内",
+        "exceptListed": "名单外可用",
+        "nobody": "不回复任何人",
+        "scopeNote": "仅作用于 IM 渠道，Web 端聊天不受影响。",
+        "scopeNoteWithExempt": "仅作用于 IM 渠道，Web 端聊天和{channels}不受影响。",
+        "modeWithScope": "{mode}{scope}"
+      }
     },
     "channels": {
       "title": "平台",

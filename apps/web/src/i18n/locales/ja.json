@@ -2407,7 +2407,7 @@
     "aclPreset": "IM アプリポリシー",
     "aclPresetDescription": "標準から始めるACLプリセット。後でChannel アクセスで調整できます。",
     "aclPresetHint": "ヒント: 個人Botには「プライベートのみ」を使用し、コミュニティBotには「グループのみ」または「グループとスレッド」を使用し、完全にオープンなままにする場合は「すべてを許可」を使用します。",
-    "aclPresetHelp": "これでデフォルトが設定されますACL効果と初期ルール。これらは、[Channel アクセス] ページでいつでも調整できます。",
+    "aclPresetHelp": "デフォルトのアクセスルールを設定します。作成後は「アクセス制御 › Channelメンバー」で変更できます。",
     "aclPresets": {
       "allowAll": {
         "title": "すべて許可",
@@ -2427,7 +2427,7 @@
       },
       "denyAll": {
         "title": "すべて拒否",
-        "description": "デフォルトでは拒否され、ルールは追加されないため、後で手動でアクセスを構成できます。"
+        "description": "デフォルトで拒否し、ルールは追加しません。作成後、アクセス制御で許可するメンバーまたはグループを追加するまで、Bot は IM で応答しません。"
       }
     },
     "editAvatar": "アバターの編集",
@@ -3335,10 +3335,12 @@
         "updated": "更新されました",
         "updateFailed": "更新に失敗しました",
         "removed": "メンバーが削除されました",
-        "removeFailed": "メンバーの削除に失敗しました"
+        "removeFailed": "メンバーの削除に失敗しました",
+        "emptyWithRules": "リストは空ですが、{count} 件の詳細ルールが有効です。上の「現在の適用状況」を参照してください。"
       },
       "advanced": {
-        "entryTitle": "詳細ルール"
+        "entryTitle": "詳細ルール",
+        "activeCount": "{count} 件のルールが有効"
       },
       "defaultEffectTitle": "デフォルトの効果",
       "defaultEffectDescription": "受信メッセージに一致するルールがない場合に適用されます。",
@@ -3451,7 +3453,20 @@
       "threadId": "Thread ID",
       "threadIdPlaceholder": "スレッドを入力してくださいID",
       "clearSpecificConversation": "選択をクリア",
-      "lastObserved": "最後に見た"
+      "lastObserved": "最後に見た",
+      "effective": {
+        "title": "現在の適用状況",
+        "item": "{scope}：{access}",
+        "separator": " · ",
+        "listJoiner": "、",
+        "everyone": "全員",
+        "listed": "リストのみ",
+        "exceptListed": "リスト外の全員",
+        "nobody": "誰にも応答しない",
+        "scopeNote": "IM チャネルにのみ適用されます。Web チャットには影響しません。",
+        "scopeNoteWithExempt": "IM チャネルにのみ適用されます。Web チャットと{channels}には影響しません。",
+        "modeWithScope": "{mode}{scope}"
+      }
     },
     "channels": {
       "advancedTitle": "詳細設定",
