@@ -150,13 +150,14 @@
     </div>
 
     <!-- Usage-example entry on the sidebar floor, directly above the account
-         row, so it stays reachable whichever panel is active. Same solid
-         surface as the footer so list rows fade out behind it. -->
+         row, so it stays reachable whichever panel is active. It copies the
+         footer's px-2.5 inset and surface, so its row, tile and label line up
+         with the account row's. -->
     <div
-      class="relative z-1 shrink-0 bg-sidebar px-2 pt-1"
+      class="relative z-1 shrink-0 bg-sidebar px-2.5 pt-1"
       data-native-sidebar-surface
     >
-      <SidebarExamplesEntry />
+      <SidebarExamplesEntry beside-account />
     </div>
 
     <!-- Footer: account menu + update chip, pinned below the scrollable panel.
