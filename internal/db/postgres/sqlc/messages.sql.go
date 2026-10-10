@@ -5341,7 +5341,7 @@ WITH scan_anchor AS MATERIALIZED (
     m.turn_position,
     m.turn_message_seq,
     m.created_at,
-    m.role,
+    m.role = 'user' AND m.metadata->>'message_source' IS DISTINCT FROM 'internal_feedback' AS starts_turn,
     held.status AS held_by
   FROM bot_visible_history_messages m
   JOIN bot_sessions candidate_session
@@ -5378,7 +5378,7 @@ WITH scan_anchor AS MATERIALIZED (
   -- held rows share the sequence number of the candidate in front of them,
   -- so each gap is one group keyed by that number.
   SELECT
-    session_rows.id, session_rows.turn_position, session_rows.turn_message_seq, session_rows.created_at, session_rows.role, session_rows.held_by,
+    session_rows.id, session_rows.turn_position, session_rows.turn_message_seq, session_rows.created_at, session_rows.starts_turn, session_rows.held_by,
     COUNT(*) FILTER (WHERE held_by IS NULL) OVER (
       ORDER BY turn_position ASC, turn_message_seq ASC, created_at ASC, id ASC
     ) AS candidate_seq
@@ -5390,7 +5390,7 @@ WITH scan_anchor AS MATERIALIZED (
   GROUP BY candidate_seq
 ), ordered_rows AS MATERIALIZED (
   SELECT
-    sequenced_rows.id, sequenced_rows.turn_position, sequenced_rows.turn_message_seq, sequenced_rows.created_at, sequenced_rows.role, sequenced_rows.held_by, sequenced_rows.candidate_seq,
+    sequenced_rows.id, sequenced_rows.turn_position, sequenced_rows.turn_message_seq, sequenced_rows.created_at, sequenced_rows.starts_turn, sequenced_rows.held_by, sequenced_rows.candidate_seq,
     (gap.candidate_seq IS NOT NULL)::boolean AS gap_before,
     COALESCE(gap.pending, false)::boolean AS pending_before
   FROM sequenced_rows
@@ -5409,7 +5409,7 @@ WITH scan_anchor AS MATERIALIZED (
       SELECT latest.id
       FROM ordered_rows latest
       WHERE latest.held_by IS NULL
-        AND latest.role = 'user'
+        AND latest.starts_turn
       ORDER BY latest.turn_position DESC, latest.turn_message_seq DESC, latest.created_at DESC, latest.id DESC
       LIMIT 1
     ), false) AS latest_user,
@@ -5561,7 +5561,9 @@ type ListUncompactedMessagesBySessionWithinBytesRow struct {
 // return as candidates once it lapses. IneffectiveClaim
 // marks a row whose claim in this epoch failed because the summary was not
 // shorter than the rows. LatestUser marks the session's newest user message
-// among the candidates: the task the current turn is working on.
+// among the candidates: the task the current turn is working on. Input the
+// runtime feeds back within a turn is stored as a user message too, but
+// starts no turn.
 func (q *Queries) ListUncompactedMessagesBySessionWithinBytes(ctx context.Context, arg ListUncompactedMessagesBySessionWithinBytesParams) ([]ListUncompactedMessagesBySessionWithinBytesRow, error) {
 	rows, err := q.db.Query(ctx, listUncompactedMessagesBySessionWithinBytes,
 		arg.IneffectiveFailureReason,

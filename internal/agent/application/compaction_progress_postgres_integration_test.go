@@ -787,3 +787,37 @@ func TestPostgresCompactionRefusedSpanIsHeldThenRetried(t *testing.T) {
 		t.Fatalf("replay = %s, want both summaries in place", got)
 	}
 }
+
+func TestPostgresCompactionScreenshotFeedbackIsNotTheLatestUser(t *testing.T) {
+	f, store := newProgressFixture(t)
+	f.text("user", "OLD question")
+	f.text("assistant", "OLD answer")
+	task := f.text("user", "TASK open the settings page")
+	f.exec(1)
+	raw, err := json.Marshal(map[string]any{"role": "user", "content": []map[string]any{{"type": "image", "image": "data:image/png;base64,iVBORw0KGgo="}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback, err := f.messages.Persist(f.ctx, messagepkg.PersistInput{
+		BotID: f.botID, SessionID: f.sessionID, Role: "user", Content: raw, TurnRequestMessageID: task.ID,
+		Metadata: map[string]any{messagepkg.MessageSourceMetadataKey: messagepkg.MessageSourceInternalFeedback},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.exec(2)
+	rows, err := store.ListUncompactedMessagesBySessionWithinBytes(f.ctx, dbsqlc.ListUncompactedMessagesBySessionWithinBytesParams{
+		SessionID: f.uuid(f.sessionID),
+		MaxBytes:  1 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := map[string]bool{}
+	for _, row := range rows {
+		latest[formatPGUUID(row.ID)] = row.LatestUser
+	}
+	if !latest[task.ID] || latest[feedback.ID] {
+		t.Fatalf("latest user: task=%v feedback=%v; a screenshot read back in the turn starts no turn", latest[task.ID], latest[feedback.ID])
+	}
+}

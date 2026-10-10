@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -624,4 +625,78 @@ func TestCompactionTasksOfRunningTurnsCompactAfterTheirTurn(t *testing.T) {
 			assertClaimsContiguous(t, q)
 		})
 	}
+}
+
+// screenshotFeedback is the row the native runtime stores when a step reads a
+// screenshot: role user, but runtime input rather than a new task.
+func screenshotFeedback(t *testing.T) sqlc.ListUncompactedMessagesBySessionRow {
+	t.Helper()
+	row := mkRow(t, "user", `[{"type":"image","image":"data:image/png;base64,`+strings.Repeat("iVBORw0KGgoAAAANSUhEUgAA", 2048)+`"}]`, 0)
+	row.Metadata = []byte(`{"message_source":"internal_feedback"}`)
+	return row
+}
+
+func TestCompactionScreenshotFeedbackIsNotTheCurrentTask(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range []int{2000, 8000} {
+		t.Run(strconv.Itoa(target), func(t *testing.T) {
+			t.Parallel()
+			q := newSessionStore()
+			for turn := 0; turn < 4; turn++ {
+				q.append(prose(t, "user", fmt.Sprintf("OLDU%d", turn), 200, 100), prose(t, "assistant", fmt.Sprintf("OLDA%d", turn), 400, 200))
+			}
+			task := prose(t, "user", "TASK open the settings page and enable dark mode", 60, 30)
+			q.append(task)
+			stub := &stubModel{summary: summaryOfTokens(t, 100)}
+			svc := newMachineryService(q)
+			cfg := machineryConfig(stub, target)
+			cfg.HardPressure = true
+			for s := 1; s <= 12; s++ {
+				q.append(execExchange(t, s)...)
+				if s%3 == 0 {
+					q.append(screenshotFeedback(t))
+				}
+				for pass := 0; pass < 3; pass++ {
+					if res, err := svc.RunCompactionSync(context.Background(), cfg); err != nil || res.Status != StatusOK {
+						break
+					}
+				}
+				if q.logStatuses[q.claims[task.ID]] == "ok" {
+					t.Fatalf("step %d: the running turn's task was claimed; a screenshot read back in the turn is not a new task", s)
+				}
+			}
+			if stub.calls == 0 {
+				t.Fatal("no summary committed; the older turns should compact")
+			}
+			assertClaimsContiguous(t, q)
+		})
+	}
+}
+
+func TestCompactionTruncatedWindowKeepsTheTaskBehindAScreenshot(t *testing.T) {
+	t.Parallel()
+
+	q := newSessionStore()
+	var filled int64
+	for i := 0; filled < minCompactionReadBytes-16_384; i++ {
+		rows := fillerExchange(t, i, 4096)
+		q.append(rows...)
+		filled += payloadBytes(rows[0]) + payloadBytes(rows[1])
+	}
+	task, steps := longTurn(t, q, 6)
+	huge := execExchange(t, 9999)
+	huge[1].Content = []byte(`[{"type":"tool-result","toolCallId":"exec-9999","toolName":"exec","output":{"type":"text","value":` + jsonStr(strings.Repeat("line ok; ", 45_000)) + `}}]`)
+	q.append(huge...)
+	q.append(screenshotFeedback(t))
+
+	stub := &stubModel{summary: "steps condensed"}
+	if _, err := newMachineryService(q).RunCompactionSync(context.Background(), machineryConfig(stub, 2000)); err != nil {
+		t.Fatal(err)
+	}
+	marked := markedSet(q)
+	if marked[task.ID] || marked[steps[0].ID] {
+		t.Fatalf("claimed task=%v first step=%v: a screenshot read back in the turn must not displace its task", marked[task.ID], marked[steps[0].ID])
+	}
+	assertClaimsContiguous(t, q)
 }

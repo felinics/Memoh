@@ -3010,7 +3010,9 @@ WHERE message.team_id = public.memoh_current_team_id()
 -- return as candidates once it lapses. IneffectiveClaim
 -- marks a row whose claim in this epoch failed because the summary was not
 -- shorter than the rows. LatestUser marks the session's newest user message
--- among the candidates: the task the current turn is working on.
+-- among the candidates: the task the current turn is working on. Input the
+-- runtime feeds back within a turn is stored as a user message too, but
+-- starts no turn.
 WITH scan_anchor AS MATERIALIZED (
   SELECT anchor.turn_position, anchor.turn_message_seq, anchor.created_at, anchor.id
   FROM bot_visible_history_messages anchor
@@ -3032,7 +3034,7 @@ WITH scan_anchor AS MATERIALIZED (
     m.turn_position,
     m.turn_message_seq,
     m.created_at,
-    m.role,
+    m.role = 'user' AND m.metadata->>'message_source' IS DISTINCT FROM 'internal_feedback' AS starts_turn,
     held.status AS held_by
   FROM bot_visible_history_messages m
   JOIN bot_sessions candidate_session
@@ -3100,7 +3102,7 @@ WITH scan_anchor AS MATERIALIZED (
       SELECT latest.id
       FROM ordered_rows latest
       WHERE latest.held_by IS NULL
-        AND latest.role = 'user'
+        AND latest.starts_turn
       ORDER BY latest.turn_position DESC, latest.turn_message_seq DESC, latest.created_at DESC, latest.id DESC
       LIMIT 1
     ), false) AS latest_user,

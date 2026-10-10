@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,7 +131,7 @@ func (q *sessionStore) ListUncompactedMessagesBySessionWithinBytes(_ context.Con
 	q.windows++
 	latestUser := -1
 	for i, c := range candidates {
-		if c.row.Role == "user" {
+		if c.row.Role == "user" && !strings.Contains(string(c.row.Metadata), `"message_source":"internal_feedback"`) {
 			latestUser = i
 		}
 	}

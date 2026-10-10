@@ -8,6 +8,7 @@ import (
 
 	historyfrag "github.com/felinics/memoh/internal/agent/context/history"
 	userinput "github.com/felinics/memoh/internal/agent/decision/input"
+	messagepkg "github.com/felinics/memoh/internal/chat/message"
 )
 
 type CompactPolicy string
@@ -125,9 +126,13 @@ func recentProtectedStart(items []CompactionCandidate) int {
 	return recentTailProtectedStart(items, 0)
 }
 
+// latestUserIndex returns the newest user message that starts a turn. Input
+// the runtime feeds back within a turn, such as a screenshot it read, is
+// stored as a user message too but belongs to the turn in front of it.
 func latestUserIndex(items []CompactionCandidate) int {
 	for i := len(items) - 1; i >= 0; i-- {
-		if strings.EqualFold(strings.TrimSpace(items[i].Record.ModelMessage.Role), "user") {
+		if strings.EqualFold(strings.TrimSpace(items[i].Record.ModelMessage.Role), "user") &&
+			items[i].Record.Metadata[messagepkg.MessageSourceMetadataKey] != messagepkg.MessageSourceInternalFeedback {
 			return i
 		}
 	}
