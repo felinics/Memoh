@@ -2317,6 +2317,8 @@
       "enabledDescription": "Hooks are enabled for matching events.",
       "disabledDescription": "The hooks file exists but is disabled.",
       "invalidDescription": "The JSON file is not valid yet.",
+      "invalidJson": "The hooks file has a syntax error. Check commas, quotes and brackets.",
+      "testPayloadInvalid": "The payload is not valid JSON.",
       "rules": "Rules",
       "rulesDescription": "Enabled rules over total rules.",
       "actions": "Actions",
@@ -3513,6 +3515,7 @@
       "deleteTitle": "Delete platform",
       "deleteWarning": "Deleting this connection cannot be undone. Proceed with caution.",
       "weixinQr": {
+        "startFailed": "Couldn't get the QR code. Try again.",
         "title": "QR Code Login",
         "description": "Scan the QR code with WeChat to connect your account.",
         "startScan": "Get QR Code",

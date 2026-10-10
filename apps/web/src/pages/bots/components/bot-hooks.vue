@@ -108,7 +108,10 @@
               <div class="text-sm font-medium text-foreground">
                 {{ $t('bots.hooks.jsonConfig') }}
               </div>
-              <p class="mt-0.5 text-xs text-muted-foreground">
+              <p
+                class="mt-0.5 text-xs"
+                :class="parseError ? 'text-destructive' : 'text-muted-foreground'"
+              >
                 {{ editorHint }}
               </p>
             </div>
@@ -124,6 +127,7 @@
           </div>
           <Textarea
             v-model="editor"
+            :aria-invalid="!!parseError"
             class="min-h-[24rem] resize-y font-mono text-xs leading-5"
             spellcheck="false"
           />
@@ -340,8 +344,8 @@ watch(testEvent, (event) => {
 const parseState = computed(() => {
   try {
     return { value: JSON.parse(editor.value) as HooksConfig, error: '' }
-  } catch (error) {
-    return { value: null, error: error instanceof Error ? error.message : String(error) }
+  } catch {
+    return { value: null, error: t('bots.hooks.invalidJson') }
   }
 })
 
@@ -371,8 +375,8 @@ const testPayloadError = computed(() => {
   try {
     JSON.parse(testPayload.value)
     return ''
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error)
+  } catch {
+    return t('bots.hooks.testPayloadInvalid')
   }
 })
 

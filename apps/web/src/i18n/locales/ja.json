@@ -2316,6 +2316,8 @@
       "enabledDescription": "一致したイベントでHooksが実行されます。",
       "disabledDescription": "hooksファイルはありますが、現在は無効です。",
       "invalidDescription": "JSONファイルがまだ有効ではありません。",
+      "invalidJson": "hooks ファイルに構文エラーがあります。カンマ、引用符、括弧を確認してください。",
+      "testPayloadInvalid": "ペイロードが有効な JSON ではありません。",
       "rules": "ルール",
       "rulesDescription": "有効なルール数 / すべてのルール数。",
       "actions": "アクション",
@@ -3512,6 +3514,7 @@
       "noAvailableTypes": "すべてのプラットフォーム タイプが設定されました",
       "platformKey": "プラットフォームID: {key}",
       "weixinQr": {
+        "startFailed": "QRコードを取得できませんでした。もう一度お試しください。",
         "title": "QRコードログイン",
         "description": "スキャンしてくださいQRWeChat でコードを作成してアカウントに接続します。",
         "startScan": "得るQRコード",

@@ -132,15 +132,13 @@ async function applyGrants(
         throwOnError: true,
       })
     } catch (error) {
-      onError?.(resolveApiErrorMessage(error, toMessage(error)))
+      onError?.(resolveApiErrorMessage(error, localFailureMessage()))
     }
   }
 }
 
-function toMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string' && error.trim()) return error
-  return 'Bot create failed'
+function localFailureMessage(): string {
+  return renderI18nMessage('errors.internal')
 }
 
 // Polls the Bot until the server has settled its workspace one way or the
@@ -246,7 +244,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
   }
 
   function failWithoutBot(error: unknown) {
-    const message = resolveApiErrorMessage(error, toMessage(error))
+    const message = resolveApiErrorMessage(error, localFailureMessage())
     setupError.value = message
     errorCode.value = parseMemohError(error)?.code ?? (apiErrorStatus(error) === 409 ? 'bot.name_taken' : null)
     progress.value = { phase: 'error', error: message }
@@ -333,7 +331,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       if (!setupError.value) lines.value = pushBotCreateTerminalLine(lines.value, { kind: 'ready', status: 'done' })
       status.value = 'ready'
     } catch (error) {
-      setupError.value = resolveApiErrorMessage(error, toMessage(error))
+      setupError.value = resolveApiErrorMessage(error, localFailureMessage())
       errorCode.value = parseMemohError(error)?.code ?? null
       lines.value = finalizeBotCreateTerminalLines(lines.value, 'error')
       ensureErrorLine(setupError.value)
@@ -415,7 +413,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
         failWithoutBot(error)
         return NOTHING_APPLIED
       }
-      failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+      failWorkspace(resolveApiErrorMessage(error, localFailureMessage()), parseMemohError(error)?.code ?? null)
       return NOTHING_APPLIED
     }
   }
@@ -438,7 +436,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       lines.value = finalizeBotCreateTerminalLines(lines.value)
       return await finishSetup()
     } catch (error) {
-      failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+      failWorkspace(resolveApiErrorMessage(error, localFailureMessage()), parseMemohError(error)?.code ?? null)
       return NOTHING_APPLIED
     }
   }
@@ -470,7 +468,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       if (!bot.value) {
         setupError.value = result.setupError ?? null
         errorCode.value = result.errorCode ?? null
-        ensureErrorLine(result.setupError ?? toMessage(undefined))
+        ensureErrorLine(result.setupError ?? localFailureMessage())
         status.value = 'error'
         return NOTHING_APPLIED
       }
@@ -484,7 +482,7 @@ export const useBotCreateProgressStore = defineStore('bot-create-progress', () =
       return await finishSetup()
     } catch (error) {
       if (bot.value) {
-        failWorkspace(resolveApiErrorMessage(error, toMessage(error)), parseMemohError(error)?.code ?? null)
+        failWorkspace(resolveApiErrorMessage(error, localFailureMessage()), parseMemohError(error)?.code ?? null)
         return NOTHING_APPLIED
       }
       failWithoutBot(error)

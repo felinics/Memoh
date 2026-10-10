@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { BotCreateStreamEvent } from '@/composables/api/useBotCreateStream'
+import { renderI18nMessage } from '@/utils/api-error'
 import { readCreatedBotSession } from '@/pages/bots/created-bot-session'
 
 const postBotsStream = vi.fn()
@@ -229,7 +230,8 @@ describe('useBotCreateProgressStore', () => {
 
     expect(store.status).toBe('error')
     expect(store.bot).toBeNull()
-    expect(store.setupError).toBe('connection reset')
+    expect(store.setupError).toBe(renderI18nMessage('errors.internal'))
+    expect(store.setupError).not.toContain('connection reset')
     expect(store.lines.at(-1)).toMatchObject({ kind: 'error', status: 'error' })
   })
 
@@ -391,7 +393,7 @@ describe('useBotCreateProgressStore', () => {
     expect(store.authorizationId).toBe('staged-1')
     expect(store.createdAgent?.id).toBe('agent-1')
     expect(store.createdAgent?.agent_credential_id).toBe(failClaim ? undefined : 'credential-1')
-    expect(store.setupError).toBe(failClaim ? 'claim unavailable' : null)
+    expect(store.setupError).toBe(failClaim ? renderI18nMessage('errors.internal') : null)
     if (failClaim) {
       expect(installAgent).not.toHaveBeenCalled()
       expect(putBotsByBotIdSettings).not.toHaveBeenCalled()
@@ -433,7 +435,7 @@ describe('useBotCreateProgressStore', () => {
 
     expect(result.agentApplied).toBe(false)
     expect(store.status).toBe('setup-error')
-    expect(store.setupError).toBe('agent boom')
+    expect(store.setupError).toBe(renderI18nMessage('errors.internal'))
     expect(store.lines.some(l => l.kind === 'applying-settings' && l.status === 'error')).toBe(true)
   })
 

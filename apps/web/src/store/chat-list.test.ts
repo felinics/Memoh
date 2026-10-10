@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia'
 import type { ChatAssistantTurn } from './chat/types'
+import { sendFailedMessage } from './chat/messages'
 import type {
   BotSessionActivityEvent,
   RuntimeCurrentRunView,
@@ -2874,7 +2875,7 @@ describe('chat-list store', () => {
       const result = await retry
       await flushPromises()
 
-      expect(result).toMatchObject({ ok: false, stage: 'startup', error: 'model failed' })
+      expect(result).toMatchObject({ ok: false, stage: 'startup', error: sendFailedMessage() })
       expect(store.sessionId).toBe('session-b')
       expect(store.messages.map(message => message.id)).toEqual(['user-b'])
     })
@@ -3065,7 +3066,7 @@ describe('chat-list store', () => {
       expect(result).toMatchObject({
         ok: false,
         stage: 'startup',
-        error: 'model failed',
+        error: sendFailedMessage(),
         restoreInput: 'new prompt',
       })
       expect(store.sessionId).toBe('session-b')
@@ -3599,7 +3600,7 @@ describe('chat-list store', () => {
         ok: false,
         stage: 'startup',
         restoreInput: '/wat',
-        error: 'model failed',
+        error: sendFailedMessage(),
       })
       expect(h.sentWSMessages[0]).toMatchObject({
         type: 'message',

@@ -2317,6 +2317,8 @@
       "enabledDescription": "Hooks 会在匹配事件时运行。",
       "disabledDescription": "hooks 文件已存在，但当前关闭。",
       "invalidDescription": "JSON 文件暂时无效。",
+      "invalidJson": "hooks 文件存在语法错误，请检查逗号、引号和括号。",
+      "testPayloadInvalid": "载荷不是有效的 JSON。",
       "rules": "规则",
       "rulesDescription": "启用规则数 / 全部规则数。",
       "actions": "动作",
@@ -3513,6 +3515,7 @@
       "deleteTitle": "删除平台",
       "deleteWarning": "删除此连接后无法恢复，请谨慎操作。",
       "weixinQr": {
+        "startFailed": "无法获取二维码，请重试。",
         "title": "扫码登录",
         "description": "使用微信扫描二维码以连接微信账号。",
         "startScan": "获取二维码",

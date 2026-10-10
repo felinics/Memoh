@@ -226,7 +226,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       if (!rejected) return
       const message = resolveApiErrorMessage(
         event,
-        event.message || deps.sendFailedMessage(),
+        deps.sendFailedMessage(),
       )
       const stage = failureStage(
         rejected.assistantTurn,
@@ -269,7 +269,7 @@ export function createRuntimeIntegration(deps: RuntimeIntegrationDeps) {
       const pending = deps.assistantStreams.getAssistantStream(invocationId)
       const message = resolveApiErrorMessage(
         event,
-        event.message || deps.sendFailedMessage(),
+        deps.sendFailedMessage(),
       )
       if (!pending) {
         const sessionId = event.session_id?.trim() ?? ''

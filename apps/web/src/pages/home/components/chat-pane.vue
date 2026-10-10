@@ -4157,7 +4157,7 @@ async function handleSend() {
     inputText.value = text
     pendingFiles.value = files
     requestedSkills.value = skills
-    composerError.value = error instanceof Error ? error.message : t('chat.sendFailed')
+    composerError.value = resolveApiErrorMessage(error, t('chat.sendFailed'))
     return
   }
 

@@ -1,5 +1,5 @@
 import { client } from '@memohai/sdk/client'
-import { parseMemohError, resolveApiErrorMessage } from '@/utils/api-error'
+import { parseMemohError, renderI18nMessage, resolveApiErrorMessage } from '@/utils/api-error'
 
 export interface SSEErrorEvent {
   type: 'error'
@@ -24,7 +24,7 @@ export function isSSEErrorEvent(value: unknown): value is SSEErrorEvent {
 export function localizeSSEErrorEvent<T extends SSEErrorEvent>(event: T): T {
   return {
     ...event,
-    message: resolveApiErrorMessage(event, event.message),
+    message: resolveApiErrorMessage(event, renderI18nMessage('errors.internal')),
   }
 }
 

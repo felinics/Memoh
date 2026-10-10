@@ -243,7 +243,7 @@ async function startLogin() {
 
     startPolling()
   } catch (err) {
-    errorMessage.value = resolveApiErrorMessage(err, err instanceof Error ? err.message : String(err))
+    errorMessage.value = resolveApiErrorMessage(err, t('bots.channels.weixinQr.startFailed'))
     qrState.value = 'error'
   } finally {
     isStarting.value = false
